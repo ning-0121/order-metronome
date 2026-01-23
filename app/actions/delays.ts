@@ -508,6 +508,118 @@ async function recalculateSchedule(
   }
 }
 
+/**
+ * Get impacted downstream milestones for a delay request
+ */
+export async function getImpactedMilestones(delayRequestId: string) {
+  const supabase = await createClient();
+  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: 'Unauthorized', data: null };
+  }
+  
+  // Get delay request with milestone and order info
+  const { data: delayRequest } = await (supabase
+    .from('delay_requests') as any)
+    .select('*, milestones!inner(id, order_id, due_at, step_key, name), orders!inner(id, incoterm, etd, warehouse_due_date, created_at)')
+    .eq('id', delayRequestId)
+    .single();
+  
+  if (!delayRequest) {
+    return { error: 'Delay request not found', data: null };
+  }
+  
+  const delayRequestData = delayRequest as any;
+  const milestoneData = delayRequestData.milestones;
+  const orderData = delayRequestData.orders;
+  
+  const impactedMilestones: Array<{
+    id: string;
+    name: string;
+    step_key: string;
+    current_due_at: string;
+    new_due_at: string;
+    delta_days: number;
+  }> = [];
+  
+  // If anchor date change, all milestones are impacted
+  if (delayRequestData.proposed_new_anchor_date) {
+    const createdAt = new Date(orderData.created_at);
+    const { calcDueDates } = await import('@/lib/schedule');
+    const dueMap = calcDueDates({
+      createdAt,
+      incoterm: orderData.incoterm as 'FOB' | 'DDP',
+      etd: orderData.incoterm === 'FOB' ? delayRequestData.proposed_new_anchor_date : orderData.etd,
+      warehouseDueDate: orderData.incoterm === 'DDP' ? delayRequestData.proposed_new_anchor_date : orderData.warehouse_due_date,
+    });
+    
+    // Get all milestones
+    const { data: allMilestones } = await supabase
+      .from('milestones')
+      .select('id, name, step_key, due_at')
+      .eq('order_id', orderData.id);
+    
+    if (allMilestones) {
+      allMilestones.forEach((m: any) => {
+        const newDue = dueMap[m.step_key as keyof typeof dueMap];
+        if (newDue) {
+          const currentDue = new Date(m.due_at);
+          const deltaDays = Math.round((newDue.getTime() - currentDue.getTime()) / (1000 * 60 * 60 * 24));
+          impactedMilestones.push({
+            id: m.id,
+            name: m.name,
+            step_key: m.step_key,
+            current_due_at: m.due_at,
+            new_due_at: newDue.toISOString(),
+            delta_days: deltaDays,
+          });
+        }
+      });
+    }
+  } else if (delayRequestData.proposed_new_due_at) {
+    // Single milestone change - get downstream milestones
+    const oldDueAt = new Date(milestoneData.due_at);
+    const newDueAt = new Date(delayRequestData.proposed_new_due_at);
+    const deltaDays = Math.round((newDueAt.getTime() - oldDueAt.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Add the current milestone
+    impactedMilestones.push({
+      id: milestoneData.id,
+      name: milestoneData.name,
+      step_key: milestoneData.step_key,
+      current_due_at: milestoneData.due_at,
+      new_due_at: delayRequestData.proposed_new_due_at,
+      delta_days: deltaDays,
+    });
+    
+    // Get downstream milestones
+    const { data: downstreamMilestones } = await supabase
+      .from('milestones')
+      .select('id, name, step_key, due_at')
+      .eq('order_id', orderData.id)
+      .gte('due_at', milestoneData.due_at)
+      .neq('id', milestoneData.id);
+    
+    if (downstreamMilestones) {
+      downstreamMilestones.forEach((m: any) => {
+        const currentDue = new Date(m.due_at);
+        const newDue = new Date(currentDue.getTime() + deltaDays * 24 * 60 * 60 * 1000);
+        impactedMilestones.push({
+          id: m.id,
+          name: m.name,
+          step_key: m.step_key,
+          current_due_at: m.due_at,
+          new_due_at: newDue.toISOString(),
+          delta_days: deltaDays,
+        });
+      });
+    }
+  }
+  
+  return { data: impactedMilestones, error: null };
+}
+
 export async function getDelayRequestsByOrder(orderId: string) {
   const supabase = await createClient();
 
@@ -518,7 +630,14 @@ export async function getDelayRequestsByOrder(orderId: string) {
 
   const { data: requests, error } = await (supabase
     .from('delay_requests') as any)
-    .select('*')
+    .select(`
+      *,
+      milestones!inner(
+        id,
+        name,
+        due_at
+      )
+    `)
     .eq('order_id', orderId)
     .order('created_at', { ascending: false });
 

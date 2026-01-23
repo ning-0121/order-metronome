@@ -4,9 +4,11 @@ import { formatDate, isOverdue } from '@/lib/utils/date';
 import { MilestoneActions } from './MilestoneActions';
 import { DelayRequestForm } from './DelayRequestForm';
 import { EvidenceUpload } from './EvidenceUpload';
+import { OwnerAssignment } from './OwnerAssignment';
 import { getMilestoneLogs } from '@/app/actions/milestones';
 import { useState, useEffect } from 'react';
 import type { Milestone } from '@/lib/types';
+import { getRoleLabel } from '@/lib/utils/i18n';
 
 interface OrderTimelineProps {
   milestones: Milestone[];
@@ -172,8 +174,24 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                         {/* Milestone Details */}
                         <div className="grid grid-cols-2 gap-2 text-sm text-gray-700 mt-3">
                           <div>
-                            <span className="font-medium text-gray-600">Owner:</span>{' '}
-                            <span className="text-gray-900">{milestone.owner_role}</span>
+                            <span className="font-medium text-gray-600">责任角色:</span>{' '}
+                            <span className="text-gray-900">{getRoleLabel(milestone.owner_role)}</span>
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-600">负责人:</span>{' '}
+                            <span className="text-gray-900">
+                              {milestone.owner_user_id ? (
+                                (milestone as any).owner_user ? (
+                                  <>
+                                    {(milestone as any).owner_user.full_name || (milestone as any).owner_user.email}
+                                  </>
+                                ) : (
+                                  '加载中...'
+                                )
+                              ) : (
+                                <span className="text-gray-500 italic">未分配</span>
+                              )}
+                            </span>
                           </div>
                           {milestone.due_at && (
                             <div>
@@ -229,6 +247,13 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
 
                     {isExpanded && (
                       <div className="mt-4 space-y-4 border-t border-gray-200 pt-4">
+                        {/* Owner Assignment (Admin only) */}
+                        <OwnerAssignment
+                          milestoneId={milestone.id}
+                          currentOwnerUserId={milestone.owner_user_id}
+                          isAdmin={isAdmin}
+                        />
+
                         {/* Evidence Upload Section */}
                         <EvidenceUpload
                           milestoneId={milestone.id}

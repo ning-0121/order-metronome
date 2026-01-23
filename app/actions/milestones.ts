@@ -21,7 +21,8 @@ type MilestoneLogAction =
   | 'approve_delay'
   | 'reject_delay'
   | 'recalc_schedule'
-  | 'upload_evidence';
+  | 'upload_evidence'
+  | 'update';
 
 async function logMilestoneAction(
   supabase: any,
@@ -52,8 +53,9 @@ export async function getMilestonesByOrder(orderId: string) {
     return { error: 'Unauthorized' };
   }
   
-  const { data: milestones, error } = await supabase
-    .from('milestones')
+  // Get milestones
+  const { data: milestones, error } = await (supabase
+    .from('milestones') as any)
     .select('*')
     .eq('order_id', orderId)
     .order('due_at', { ascending: true });
@@ -62,7 +64,34 @@ export async function getMilestonesByOrder(orderId: string) {
     return { error: error.message };
   }
   
-  return { data: milestones };
+  // Get owner user IDs
+  const ownerUserIds = (milestones || [])
+    .map((m: any) => m.owner_user_id)
+    .filter((id: string | null) => id !== null) as string[];
+  
+  // Get user profiles if there are any owner_user_ids
+  let userMap: Record<string, any> = {};
+  if (ownerUserIds.length > 0) {
+    const { data: profiles } = await (supabase
+      .from('profiles') as any)
+      .select('user_id, email, full_name, role')
+      .in('user_id', ownerUserIds);
+    
+    if (profiles) {
+      userMap = profiles.reduce((acc: Record<string, any>, profile: any) => {
+        acc[profile.user_id] = profile;
+        return acc;
+      }, {});
+    }
+  }
+  
+  // Attach user info to milestones
+  const milestonesWithUsers = (milestones || []).map((m: any) => ({
+    ...m,
+    owner_user: m.owner_user_id ? userMap[m.owner_user_id] || null : null,
+  }));
+  
+  return { data: milestonesWithUsers };
 }
 
 export async function getUserMilestones(userId: string) {
@@ -354,4 +383,69 @@ export async function getMilestoneLogs(milestoneId: string) {
 export async function logEvidenceUpload(milestoneId: string, orderId: string, fileName: string) {
   const supabase = await createClient();
   await logMilestoneAction(supabase, milestoneId, orderId, 'upload_evidence', `Uploaded evidence: ${fileName}`);
+}
+
+/**
+ * Update milestone owner_user_id (admin only)
+ */
+export async function updateMilestoneOwner(
+  milestoneId: string,
+  ownerUserId: string | null
+): Promise<{ data?: any; error?: string }> {
+  const supabase = await createClient();
+  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user || !user.email) {
+    return { error: 'Unauthorized' };
+  }
+  
+  // Check if user is admin
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+  
+  const isAdmin = profile && (profile as any).role === 'admin';
+  if (!isAdmin) {
+    return { error: 'Only admin can assign milestone owners' };
+  }
+  
+  // Get milestone to get order_id for logging
+  const { data: milestone, error: getError } = await (supabase
+    .from('milestones') as any)
+    .select('order_id, name')
+    .eq('id', milestoneId)
+    .single();
+  
+  if (getError || !milestone) {
+    return { error: getError?.message || 'Milestone not found' };
+  }
+  
+  // Update owner_user_id
+  const { data: updated, error: updateError } = await (supabase
+    .from('milestones') as any)
+    .update({ owner_user_id: ownerUserId })
+    .eq('id', milestoneId)
+    .select()
+    .single();
+  
+  if (updateError) {
+    return { error: updateError.message };
+  }
+  
+  // Log the action
+  const ownerInfo = ownerUserId ? `Assigned to user: ${ownerUserId}` : 'Unassigned';
+  await logMilestoneAction(
+    supabase,
+    milestoneId,
+    milestone.order_id,
+    'update',
+    `Owner assignment: ${ownerInfo}`
+  );
+  
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${milestone.order_id}`);
+  
+  return { data: updated };
 }

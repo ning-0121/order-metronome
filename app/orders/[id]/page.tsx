@@ -133,7 +133,7 @@ export default async function OrderDetailPage({
 
       {delayRequests && delayRequests.length > 0 && (
         <div className="bg-white">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-900">延迟申请</h2>
+          <h2 className="text-2xl font-semibold mb-4 text-gray-900">延期申请</h2>
           <DelayRequestsList delayRequests={delayRequests} orderId={id} isAdmin={isAdmin} isOrderOwner={isOrderOwner} />
         </div>
       )}

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { approveDelayRequest, rejectDelayRequest } from '@/app/actions/delays';
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
+import { DelayRequestDetail } from './DelayRequestDetail';
 
 interface DelayRequest {
   id: string;
@@ -18,6 +19,11 @@ interface DelayRequest {
   created_at: string;
   approved_at: string | null;
   decision_note: string | null;
+  milestone?: {
+    id: string;
+    name: string;
+    due_at: string;
+  };
 }
 
 interface DelayRequestsListProps {
@@ -70,103 +76,20 @@ export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isO
     <div className="space-y-4 bg-white">
       {pendingRequests.length > 0 && (
         <div>
-          <h3 className="text-lg font-semibold mb-2 text-gray-900">Pending Requests</h3>
+          <h3 className="text-lg font-semibold mb-4 text-gray-900">待审批延期申请</h3>
           {pendingRequests.map((request) => (
-            <div key={request.id} className="border border-yellow-200 bg-yellow-50 rounded-lg p-4 mb-4">
-              <div className="flex justify-between items-start mb-2">
-                <div className="flex-1">
-                  <p className="font-semibold text-gray-900">Reason Type: <span className="text-gray-700">{request.reason_type}</span></p>
-                  <p className="text-sm text-gray-700 mt-1"><strong>Reason Detail:</strong> {request.reason_detail}</p>
-                  {request.proposed_new_anchor_date && (
-                    <p className="text-sm text-gray-700 mt-1"><strong>Proposed New Anchor Date:</strong> <span className="text-gray-900">{formatDate(request.proposed_new_anchor_date)}</span></p>
-                  )}
-                  {request.proposed_new_due_at && (
-                    <p className="text-sm text-gray-700 mt-1"><strong>Proposed New Due Date:</strong> <span className="text-gray-900">{formatDate(request.proposed_new_due_at)}</span></p>
-                  )}
-                  {request.requires_customer_approval && (
-                    <div className="text-sm mt-2">
-                      <strong className="text-orange-700">Requires Customer Approval:</strong> Yes
-                      {request.customer_approval_evidence_url ? (
-                        <span className="ml-2 text-green-700">✓ Evidence provided</span>
-                      ) : (
-                        <span className="ml-2 text-red-700">⚠ No evidence</span>
-                      )}
-                    </div>
-                  )}
-                  {request.customer_approval_evidence_url && (
-                    <div className="text-sm text-gray-600 mt-1">
-                      <a
-                        href={request.customer_approval_evidence_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-700"
-                      >
-                        View Customer Approval Evidence
-                      </a>
-                    </div>
-                  )}
-                  <p className="text-xs text-gray-600 mt-2">Created: {formatDate(request.created_at)}</p>
-                </div>
-                <div className="flex gap-2 ml-4">
-                  {!showDecisionForm[request.id] && isAdmin && (
-                    <button
-                      onClick={() => setShowDecisionForm((prev) => ({ ...prev, [request.id]: true }))}
-                      className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                    >
-                      Review
-                    </button>
-                  )}
-                </div>
-              </div>
-              {showDecisionForm[request.id] && (
-                <div className="mt-4 space-y-2 border-t border-yellow-300 pt-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Decision Note
-                    </label>
-                    <textarea
-                      value={decisionNote[request.id] || ''}
-                      onChange={(e) => setDecisionNote((prev) => ({ ...prev, [request.id]: e.target.value }))}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 bg-white text-gray-900 placeholder-gray-400"
-                      rows={2}
-                      placeholder="Optional note..."
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleApprove(request.id)}
-                      disabled={processingId === request.id}
-                      className="rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:opacity-50"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => handleReject(request.id)}
-                      disabled={processingId === request.id}
-                      className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:opacity-50"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowDecisionForm((prev) => ({ ...prev, [request.id]: false }));
-                        setDecisionNote((prev) => ({ ...prev, [request.id]: '' }));
-                      }}
-                      className="rounded-md border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <DelayRequestDetail
+              key={request.id}
+              delayRequest={request}
+              isAdmin={isAdmin}
+            />
           ))}
         </div>
       )}
 
       {processedRequests.length > 0 && (
         <div>
-          <h3 className="text-lg font-semibold mb-2 text-gray-900">Processed Requests</h3>
+          <h3 className="text-lg font-semibold mb-2 text-gray-900">已处理延期申请</h3>
           {processedRequests.map((request) => (
             <div
               key={request.id}
@@ -177,16 +100,16 @@ export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isO
               }`}
             >
               <p className="font-semibold text-gray-900">
-                {request.status === 'approved' ? '✓ Approved' : '✗ Rejected'}
+                {request.status === 'approved' ? '✓ 已批准' : '✗ 已拒绝'}
               </p>
               <p className="text-sm text-gray-700 mt-1">{request.reason_detail}</p>
               {request.decision_note && (
-                <p className="text-sm mt-1 text-gray-700">Note: <span className="text-gray-900">{request.decision_note}</span></p>
+                <p className="text-sm mt-1 text-gray-700">审批意见: <span className="text-gray-900">{request.decision_note}</span></p>
               )}
               {request.approved_at && (
                 <p className="text-xs text-gray-600 mt-1">
-                  {request.status === 'approved' ? 'Approved' : 'Rejected'} at:{' '}
-                  {formatDate(request.approved_at)}
+                  {request.status === 'approved' ? '批准' : '拒绝'}时间:{' '}
+                  {formatDate(request.approved_at, 'yyyy-MM-dd HH:mm')}
                 </p>
               )}
             </div>
@@ -195,7 +118,7 @@ export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isO
       )}
 
       {delayRequests.length === 0 && (
-        <p className="text-gray-500 bg-gray-50 p-4 rounded">No delay requests</p>
+        <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无延期申请</p>
       )}
     </div>
   );

@@ -4,6 +4,7 @@ import { formatDate, isOverdue } from '@/lib/utils/date';
 import { computeOrderStatus } from '@/lib/utils/order-status';
 import Link from 'next/link';
 import { BackfillButton } from '@/components/BackfillButton';
+import { TodayMustHandle } from '@/components/TodayMustHandle';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { getRoleLabel } from '@/lib/utils/i18n';
 
@@ -74,12 +75,121 @@ export default async function AdminPage() {
     return status.color === 'RED' || riskOrderIds.has(o.id);
   }) || [];
 
+  // Get "Today Must Handle" milestones
+  // Conditions:
+  // 1. status = '卡住' (blocked)
+  // 2. OR (status = '进行中' AND due_at <= now() + 24 hours)
+  // 3. OR (status != '已完成' AND due_at < now()) (overdue)
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  
+  // Get all milestones with orders
+  const { data: allMilestonesWithOrders } = await (supabase
+    .from('milestones') as any)
+    .select(`
+      id,
+      order_id,
+      name,
+      owner_role,
+      owner_user_id,
+      due_at,
+      status,
+      orders!inner(
+        id,
+        order_no,
+        customer_name
+      )
+    `)
+    .order('due_at', { ascending: true });
+  
+  // Filter milestones based on conditions
+  const todayMustHandleMilestones = (allMilestonesWithOrders || []).filter((m: any) => {
+    // Condition 1: Blocked
+    if (m.status === '卡住') {
+      return true;
+    }
+    
+    // Condition 2: In progress and due within 24 hours
+    if (m.status === '进行中' && m.due_at) {
+      const dueDate = new Date(m.due_at);
+      if (dueDate <= tomorrow) {
+        return true;
+      }
+    }
+    
+    // Condition 3: Overdue (not completed and due_at < now)
+    if (m.status !== '已完成' && m.due_at) {
+      const dueDate = new Date(m.due_at);
+      if (dueDate < now) {
+        return true;
+      }
+    }
+    
+    return false;
+  });
+
+  // Get owner user info for milestones
+  const milestoneIds = (todayMustHandleMilestones || []).map((m: any) => m.id);
+  const ownerUserIds = (todayMustHandleMilestones || [])
+    .map((m: any) => m.owner_user_id)
+    .filter((id: string | null) => id !== null) as string[];
+  
+  let userMap: Record<string, any> = {};
+  if (ownerUserIds.length > 0) {
+    const { data: profiles } = await (supabase
+      .from('profiles') as any)
+      .select('user_id, email, full_name, role')
+      .in('user_id', ownerUserIds);
+    
+    if (profiles) {
+      userMap = profiles.reduce((acc: Record<string, any>, profile: any) => {
+        acc[profile.user_id] = profile;
+        return acc;
+      }, {});
+    }
+  }
+
+  // Get pending delay requests for these milestones
+  let delayRequestMap: Record<string, boolean> = {};
+  if (milestoneIds.length > 0) {
+    const { data: delayRequests } = await (supabase
+      .from('delay_requests') as any)
+      .select('milestone_id')
+      .in('milestone_id', milestoneIds)
+      .eq('status', 'pending');
+    
+    if (delayRequests) {
+      delayRequestMap = delayRequests.reduce((acc: Record<string, boolean>, dr: any) => {
+        acc[dr.milestone_id] = true;
+        return acc;
+      }, {});
+    }
+  }
+
+  // Format milestones with user info and delay request status
+  const formattedTodayMilestones = (todayMustHandleMilestones || []).map((m: any) => ({
+    id: m.id,
+    order_id: m.order_id,
+    name: m.name,
+    owner_role: m.owner_role,
+    owner_user_id: m.owner_user_id,
+    owner_user: m.owner_user_id ? userMap[m.owner_user_id] || null : null,
+    due_at: m.due_at,
+    status: m.status,
+    order_no: m.orders?.order_no || '',
+    customer_name: m.orders?.customer_name || '',
+    has_pending_delay: delayRequestMap[m.id] || false,
+  }));
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">管理后台</h1>
         <p className="text-gray-600 mt-2">全局概览与风险分析</p>
       </div>
+
+      {/* Today Must Handle Section */}
+      <TodayMustHandle milestones={formattedTodayMilestones} />
 
       <BackfillButton />
 
