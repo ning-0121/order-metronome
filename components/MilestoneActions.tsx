@@ -34,7 +34,7 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
 
   async function handleBlock() {
     if (!blockReason || blockReason.trim() === '') {
-      alert('Blocked reason is required');
+      alert('请填写阻塞原因');
       return;
     }
 
@@ -70,13 +70,13 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
       const data = await response.json();
       
       if (!response.ok) {
-        alert(data.error || 'Failed to send nudge');
+        alert(data.error || '发送提醒失败');
       } else {
-        alert('Nudge sent successfully');
+        alert('提醒已发送');
         router.refresh();
       }
     } catch (error: any) {
-      alert('Error sending nudge: ' + error.message);
+      alert('发送提醒出错: ' + error.message);
     } finally {
       setNudging(false);
     }
@@ -94,7 +94,7 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
       {/* Blocked reason (admin only) */}
       {showBlockedReason && (
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-          <p className="text-sm font-semibold text-orange-900">Blocked Reason (Admin View):</p>
+          <p className="text-sm font-semibold text-orange-900">阻塞原因（管理员视图）:</p>
           <p className="text-sm text-orange-800 mt-1">{milestone.notes}</p>
         </div>
       )}
@@ -109,14 +109,14 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
                 disabled={loading}
                 className="rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:opacity-50"
               >
-                ✅ Done
+                ✅ 完成
               </button>
               <button
                 onClick={() => setShowBlockForm(!showBlockForm)}
                 disabled={loading}
                 className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:opacity-50"
               >
-                ❌ Blocked
+                ❌ 阻塞
               </button>
             </>
           )}
@@ -131,7 +131,7 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
             disabled={nudging}
             className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {nudging ? 'Sending...' : '📧 Nudge Owner'}
+            {nudging ? '发送中...' : '📧 提醒负责人'}
           </button>
         </div>
       )}
@@ -140,14 +140,14 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Blocked Reason <span className="text-red-500">*</span>
+              阻塞原因 <span className="text-red-500">*</span>
             </label>
             <textarea
               value={blockReason}
               onChange={(e) => setBlockReason(e.target.value)}
               className="w-full rounded-md border border-gray-300 px-3 py-2 bg-white text-gray-900 placeholder-gray-400"
               rows={3}
-              placeholder="Explain why this milestone is blocked..."
+              placeholder="请说明此节点被阻塞的原因..."
               required
             />
           </div>
@@ -157,7 +157,7 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
               disabled={loading || !blockReason || blockReason.trim() === ''}
               className="rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:opacity-50"
             >
-              Confirm Block
+              确认阻塞
             </button>
             <button
               onClick={() => {
@@ -166,7 +166,7 @@ export function MilestoneActions({ milestone, currentRole, isAdmin = false }: Mi
               }}
               className="rounded-md border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
             >
-              Cancel
+              取消
             </button>
           </div>
         </div>

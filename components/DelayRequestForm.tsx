@@ -38,19 +38,19 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
     setError(null);
 
     if (!reasonDetail.trim()) {
-      setError('Reason detail is required');
+      setError('请填写详细原因');
       setLoading(false);
       return;
     }
 
     if (delayType === 'anchor' && !proposedNewAnchorDate) {
-      setError('New anchor date is required');
+      setError('请选择新的锚点日期');
       setLoading(false);
       return;
     }
 
     if (delayType === 'milestone' && !proposedNewDueAt) {
-      setError('New due date is required');
+      setError('请选择新的到期日期');
       setLoading(false);
       return;
     }
@@ -89,7 +89,7 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Reason Type <span className="text-red-500">*</span>
+          原因类型 <span className="text-red-500">*</span>
         </label>
         <select
           value={reasonType}
@@ -97,18 +97,18 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
           className="w-full rounded-md border border-gray-300 px-3 py-2 bg-white text-gray-900"
           required
         >
-          <option value="customer_confirmation">Customer Confirmation</option>
-          <option value="supplier_delay">Supplier Delay</option>
-          <option value="internal_delay">Internal Delay</option>
-          <option value="logistics">Logistics</option>
-          <option value="force_majeure">Force Majeure</option>
-          <option value="other">Other</option>
+          <option value="customer_confirmation">客户确认</option>
+          <option value="supplier_delay">供应商延迟</option>
+          <option value="internal_delay">内部延迟</option>
+          <option value="logistics">物流原因</option>
+          <option value="force_majeure">不可抗力</option>
+          <option value="other">其他</option>
         </select>
       </div>
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Reason Detail <span className="text-red-500">*</span>
+          详细原因 <span className="text-red-500">*</span>
         </label>
         <textarea
           value={reasonDetail}
@@ -116,13 +116,13 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
           className="w-full rounded-md border border-gray-300 px-3 py-2 bg-white text-gray-900 placeholder-gray-400"
           rows={3}
           required
-          placeholder="Explain why this delay is needed..."
+          placeholder="请说明需要延期的原因..."
         />
       </div>
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Delay Type <span className="text-red-500">*</span>
+          延期类型 <span className="text-red-500">*</span>
         </label>
         <select
           value={delayType}
@@ -130,15 +130,15 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
           className="w-full rounded-md border border-gray-300 px-3 py-2 bg-white text-gray-900"
           required
         >
-          <option value="anchor">Change Anchor Date ({orderIncoterm === 'FOB' ? 'ETD' : 'Warehouse Due Date'})</option>
-          <option value="milestone">Change This Milestone Due Date Only</option>
+          <option value="anchor">修改锚点日期（{orderIncoterm === 'FOB' ? 'ETD' : '入仓日'}）</option>
+          <option value="milestone">仅修改此节点到期日</option>
         </select>
       </div>
 
       {delayType === 'anchor' && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            New {orderIncoterm === 'FOB' ? 'ETD' : 'Warehouse Due Date'} <span className="text-red-500">*</span>
+            新{orderIncoterm === 'FOB' ? 'ETD' : '入仓日'} <span className="text-red-500">*</span>
           </label>
           <input
             type="date"
@@ -153,7 +153,7 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
       {delayType === 'milestone' && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            New Due Date <span className="text-red-500">*</span>
+            新到期日期 <span className="text-red-500">*</span>
           </label>
           <input
             type="datetime-local"
@@ -176,14 +176,14 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
                 className="rounded"
               />
               <span className="text-sm font-medium text-gray-700">
-                Requires Customer Approval
+                需要客户确认
               </span>
             </label>
           </div>
           {requiresCustomerApproval && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Customer Approval Evidence URL
+                客户确认证据链接
               </label>
               <input
                 type="url"
@@ -202,7 +202,7 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
         disabled={loading}
         className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
       >
-        {loading ? 'Submitting...' : 'Submit Delay Request'}
+        {loading ? '提交中...' : '提交延期申请'}
       </button>
     </form>
   );

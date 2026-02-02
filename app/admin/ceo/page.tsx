@@ -104,26 +104,26 @@ export default async function CEODashboardPage() {
   return (
     <div className="space-y-6 bg-white min-h-screen p-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">CEO Dashboard</h1>
-        <p className="text-gray-600 mt-2">Executive overview and control</p>
+        <h1 className="text-3xl font-bold text-gray-900">CEO 管理面板</h1>
+        <p className="text-gray-600 mt-2">全局概览与控制中心</p>
       </div>
 
       {/* Summary Cards */}
       <div className="grid gap-6 md:grid-cols-4">
         <div className="rounded-lg border border-gray-200 bg-white p-6 text-gray-900">
-          <h3 className="text-lg font-semibold mb-2 text-gray-700">Overdue (In Progress)</h3>
+          <h3 className="text-lg font-semibold mb-2 text-gray-700">已超期（进行中）</h3>
           <p className="text-3xl font-bold text-red-600">{overdueMilestones.length}</p>
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-6 text-gray-900">
-          <h3 className="text-lg font-semibold mb-2 text-gray-700">Blocked</h3>
+          <h3 className="text-lg font-semibold mb-2 text-gray-700">已阻塞</h3>
           <p className="text-3xl font-bold text-orange-600">{blockedMilestones.length}</p>
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-6 text-gray-900">
-          <h3 className="text-lg font-semibold mb-2 text-gray-700">Pending Delays</h3>
+          <h3 className="text-lg font-semibold mb-2 text-gray-700">待审批延期</h3>
           <p className="text-3xl font-bold text-yellow-600">{pendingDelayRequests?.length || 0}</p>
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-6 text-gray-900">
-          <h3 className="text-lg font-semibold mb-2 text-gray-700">Total Bottlenecks</h3>
+          <h3 className="text-lg font-semibold mb-2 text-gray-700">总瓶颈数</h3>
           <p className="text-3xl font-bold text-purple-600">
             {Object.values(bottlenecksByRole).reduce((sum, count) => sum + count, 0)}
           </p>
@@ -132,9 +132,9 @@ export default async function CEODashboardPage() {
 
       {/* Overdue Milestones */}
       <div>
-        <h2 className="text-2xl font-semibold mb-4 text-gray-900">Overdue Milestones (In Progress)</h2>
+        <h2 className="text-2xl font-semibold mb-4 text-gray-900">超期节点（进行中）</h2>
         {overdueMilestones.length === 0 ? (
-          <p className="text-gray-500 bg-gray-50 p-4 rounded">No overdue milestones</p>
+          <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无超期节点</p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {overdueMilestones.map((milestone: any) => (
@@ -147,13 +147,13 @@ export default async function CEODashboardPage() {
                   <div className="flex-1">
                     <div className="font-semibold text-gray-900">{milestone.name}</div>
                     <div className="text-sm text-gray-700 mt-1">
-                      Order: {milestone.orders?.order_no} | Customer: {milestone.orders?.customer_name}
+                      订单: {milestone.orders?.order_no} | 客户: {milestone.orders?.customer_name}
                     </div>
                     <div className="text-sm text-gray-600 mt-1">
-                      Due: {formatDate(milestone.due_at)} | Owner: {milestone.owner_role}
+                      到期: {formatDate(milestone.due_at)} | 负责人: {milestone.owner_role}
                     </div>
                   </div>
-                  <div className="ml-4 text-red-700 font-semibold">Overdue</div>
+                  <div className="ml-4 text-red-700 font-semibold">超期</div>
                 </div>
               </Link>
             ))}
@@ -163,9 +163,9 @@ export default async function CEODashboardPage() {
 
       {/* Blocked Milestones */}
       <div>
-        <h2 className="text-2xl font-semibold mb-4 text-gray-900">Blocked Milestones</h2>
+        <h2 className="text-2xl font-semibold mb-4 text-gray-900">阻塞节点</h2>
         {blockedMilestones.length === 0 ? (
-          <p className="text-gray-500 bg-gray-50 p-4 rounded">No blocked milestones</p>
+          <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无阻塞节点</p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {blockedMilestones.map((milestone: any) => (
@@ -178,16 +178,16 @@ export default async function CEODashboardPage() {
                   <div className="flex-1">
                     <div className="font-semibold text-gray-900">{milestone.name}</div>
                     <div className="text-sm text-gray-700 mt-1">
-                      Order: {milestone.orders?.order_no} | Customer: {milestone.orders?.customer_name}
+                      订单: {milestone.orders?.order_no} | 客户: {milestone.orders?.customer_name}
                     </div>
                     <div className="text-sm text-gray-600 mt-1">
-                      Owner: {milestone.owner_role}
+                      负责人: {milestone.owner_role}
                       {milestone.notes && (
-                        <span className="ml-2 text-orange-700">Reason: {milestone.notes.substring(0, 100)}</span>
+                        <span className="ml-2 text-orange-700">原因: {milestone.notes.substring(0, 100)}</span>
                       )}
                     </div>
                   </div>
-                  <div className="ml-4 text-orange-700 font-semibold">Blocked</div>
+                  <div className="ml-4 text-orange-700 font-semibold">阻塞</div>
                 </div>
               </Link>
             ))}
@@ -197,9 +197,9 @@ export default async function CEODashboardPage() {
 
       {/* Pending Delay Requests */}
       <div>
-        <h2 className="text-2xl font-semibold mb-4 text-gray-900">Pending Delay Requests</h2>
+        <h2 className="text-2xl font-semibold mb-4 text-gray-900">待审批延期申请</h2>
         {!pendingDelayRequests || pendingDelayRequests.length === 0 ? (
-          <p className="text-gray-500 bg-gray-50 p-4 rounded">No pending delay requests</p>
+          <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无待审批延期申请</p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {pendingDelayRequests.map((request: any) => (
@@ -210,37 +210,37 @@ export default async function CEODashboardPage() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="font-semibold text-gray-900">
-                      {request.milestones?.name || 'Unknown Milestone'}
+                      {request.milestones?.name || '未知节点'}
                     </div>
                     <div className="text-sm text-gray-700 mt-1">
-                      Order: <Link href={`/orders/${request.milestones?.order_id}`} className="text-blue-600 hover:text-blue-700">{request.milestones?.orders?.order_no}</Link> | 
-                      Customer: {request.milestones?.orders?.customer_name}
+                      订单: <Link href={`/orders/${request.milestones?.order_id}`} className="text-blue-600 hover:text-blue-700">{request.milestones?.orders?.order_no}</Link> |
+                      客户: {request.milestones?.orders?.customer_name}
                     </div>
                     <div className="text-sm text-gray-600 mt-1">
-                      <strong>Reason Type:</strong> {request.reason_type}
+                      <strong>原因类型:</strong> {request.reason_type}
                     </div>
                     {request.reason_detail && (
                       <div className="text-sm text-gray-600 mt-1">
-                        <strong>Reason Detail:</strong> {request.reason_detail}
+                        <strong>详细原因:</strong> {request.reason_detail}
                       </div>
                     )}
                     {request.proposed_new_anchor_date && (
                       <div className="text-sm text-gray-600 mt-1">
-                        <strong>Proposed New Anchor Date:</strong> {formatDate(request.proposed_new_anchor_date)}
+                        <strong>新锚点日期:</strong> {formatDate(request.proposed_new_anchor_date)}
                       </div>
                     )}
                     {request.proposed_new_due_at && (
                       <div className="text-sm text-gray-600 mt-1">
-                        <strong>Proposed New Due Date:</strong> {formatDate(request.proposed_new_due_at)}
+                        <strong>新到期日期:</strong> {formatDate(request.proposed_new_due_at)}
                       </div>
                     )}
                     {request.requires_customer_approval && (
                       <div className="text-sm mt-2">
-                        <strong className="text-orange-700">Requires Customer Approval:</strong> Yes
+                        <strong className="text-orange-700">需要客户确认:</strong> 是
                         {request.customer_approval_evidence_url ? (
-                          <span className="ml-2 text-green-700">✓ Evidence provided</span>
+                          <span className="ml-2 text-green-700">✓ 已提供证据</span>
                         ) : (
-                          <span className="ml-2 text-red-700">⚠ No evidence</span>
+                          <span className="ml-2 text-red-700">⚠ 未提供证据</span>
                         )}
                       </div>
                     )}
@@ -252,12 +252,12 @@ export default async function CEODashboardPage() {
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:text-blue-700"
                         >
-                          View Customer Approval Evidence
+                          查看客户确认证据
                         </a>
                       </div>
                     )}
                     <div className="text-xs text-gray-500 mt-2">
-                      Created: {formatDate(request.created_at)}
+                      创建时间: {formatDate(request.created_at)}
                     </div>
                   </div>
                   <div className="ml-4">
@@ -272,16 +272,16 @@ export default async function CEODashboardPage() {
 
       {/* Bottleneck Summary by Role */}
       <div>
-        <h2 className="text-2xl font-semibold mb-4 text-gray-900">Bottleneck Summary by Role</h2>
+        <h2 className="text-2xl font-semibold mb-4 text-gray-900">角色瓶颈分析</h2>
         {Object.keys(bottlenecksByRole).length === 0 ? (
-          <p className="text-gray-500 bg-gray-50 p-4 rounded">No bottlenecks by role</p>
+          <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无瓶颈</p>
         ) : (
           <div className="rounded-lg border border-gray-200 bg-white p-6">
             <table className="w-full text-gray-900">
               <thead>
                 <tr className="border-b">
-                  <th className="text-left py-2 font-semibold">Role</th>
-                  <th className="text-left py-2 font-semibold">Overdue/Blocked Count</th>
+                  <th className="text-left py-2 font-semibold">责任角色</th>
+                  <th className="text-left py-2 font-semibold">超期/阻塞数量</th>
                 </tr>
               </thead>
               <tbody>
@@ -301,17 +301,17 @@ export default async function CEODashboardPage() {
 
       {/* Bottleneck Summary by User */}
       <div>
-        <h2 className="text-2xl font-semibold mb-4 text-gray-900">Bottleneck Summary by User</h2>
+        <h2 className="text-2xl font-semibold mb-4 text-gray-900">用户瓶颈分析</h2>
         {Object.keys(bottlenecksByUser).length === 0 ? (
-          <p className="text-gray-500 bg-gray-50 p-4 rounded">No bottlenecks by user</p>
+          <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无瓶颈</p>
         ) : (
           <div className="rounded-lg border border-gray-200 bg-white p-6">
             <table className="w-full text-gray-900">
               <thead>
                 <tr className="border-b">
-                  <th className="text-left py-2 font-semibold">User</th>
-                  <th className="text-left py-2 font-semibold">Overdue/Blocked Count</th>
-                  <th className="text-left py-2 font-semibold">Actions</th>
+                  <th className="text-left py-2 font-semibold">用户</th>
+                  <th className="text-left py-2 font-semibold">超期/阻塞数量</th>
+                  <th className="text-left py-2 font-semibold">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -322,9 +322,9 @@ export default async function CEODashboardPage() {
                     const displayName = profile
                       ? profile.full_name || profile.email || userId
                       : userId === 'unassigned'
-                      ? 'Unassigned'
+                      ? '未分配'
                       : userId;
-                    
+
                     return (
                       <tr key={userId} className="border-b">
                         <td className="py-2 font-medium">{displayName}</td>
@@ -334,7 +334,7 @@ export default async function CEODashboardPage() {
                             href={`/orders/${data.milestones[0]?.order_id || '#'}`}
                             className="text-blue-600 hover:text-blue-700 text-sm"
                           >
-                            View Order
+                            查看订单
                           </Link>
                         </td>
                       </tr>

@@ -21,14 +21,14 @@ export default async function OrderDetailPage({
   if (orderError || !order) {
     return (
       <div className="p-6 space-y-4">
-        <h1 className="text-2xl font-bold text-red-600">Debug: Order Not Found</h1>
+        <h1 className="text-2xl font-bold text-red-600">调试：订单未找到</h1>
         <div className="bg-gray-100 p-4 rounded">
-          <p><strong>params.id:</strong> {id}</p>
-          <p><strong>orderError:</strong> {orderError || 'null'}</p>
-          <p><strong>order:</strong> {order ? JSON.stringify(order, null, 2) : 'null'}</p>
+          <p><strong>订单ID:</strong> {id}</p>
+          <p><strong>错误信息:</strong> {orderError || '无'}</p>
+          <p><strong>订单数据:</strong> {order ? JSON.stringify(order, null, 2) : '无'}</p>
         </div>
         <p className="text-sm text-gray-600">
-          If this order should exist, check: 1) RLS policies, 2) Order ID format (must be UUID), 3) Database connection
+          如果此订单应该存在，请检查：1) RLS策略 2) 订单ID格式（必须是UUID） 3) 数据库连接
         </p>
       </div>
     );
@@ -70,7 +70,7 @@ export default async function OrderDetailPage({
 
       <div className="grid gap-6 md:grid-cols-2">
         <div className="rounded-lg border border-gray-200 bg-white p-6 text-gray-900">
-          <h2 className="text-xl font-semibold mb-4 text-gray-900">Order Details</h2>
+          <h2 className="text-xl font-semibold mb-4 text-gray-900">订单详情</h2>
           <dl className="space-y-2">
             <div>
               <dt className="text-sm font-medium text-gray-600">订单号</dt>
@@ -86,7 +86,7 @@ export default async function OrderDetailPage({
             </div>
             <div>
               <dt className="text-sm font-medium text-gray-600">
-                {orderData.incoterm === 'FOB' ? 'ETD' : 'Warehouse Due Date'}
+                {orderData.incoterm === 'FOB' ? 'ETD' : '入仓日期'}
               </dt>
               <dd className="text-sm text-gray-900">
                 {orderData.incoterm === 'FOB'
@@ -117,7 +117,7 @@ export default async function OrderDetailPage({
       <div className="bg-white">
         <h2 className="text-2xl font-semibold mb-4 text-gray-900">执行时间线</h2>
         {milestonesError ? (
-          <div className="text-red-600 bg-red-50 p-3 rounded">Error loading milestones: {milestonesError}</div>
+          <div className="text-red-600 bg-red-50 p-3 rounded">加载里程碑失败: {milestonesError}</div>
         ) : milestones && milestones.length > 0 ? (
           <OrderTimeline 
             milestones={milestones} 
@@ -127,7 +127,7 @@ export default async function OrderDetailPage({
             isAdmin={isAdmin}
           />
         ) : (
-          <p className="text-gray-500 bg-gray-50 p-4 rounded">No milestones found</p>
+          <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无里程碑</p>
         )}
       </div>
 

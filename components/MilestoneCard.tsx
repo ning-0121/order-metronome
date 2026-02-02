@@ -30,14 +30,14 @@ export function MilestoneCard({ milestone }: MilestoneCardProps) {
           <h3 className="font-semibold text-lg">{milestone.name}</h3>
           {milestone.is_critical && (
             <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">
-              Critical
+              关键
             </span>
           )}
         </div>
         
         {order && (
           <p className="text-sm text-gray-600 mb-2">
-            Order: {order.order_no}
+            订单: {order.order_no}
           </p>
         )}
         
@@ -48,8 +48,8 @@ export function MilestoneCard({ milestone }: MilestoneCardProps) {
         </div>
         
         <div className="text-sm text-gray-600 space-y-1">
-          {milestone.due_at && <p>Due: {formatDate(milestone.due_at)}</p>}
-          <p>Owner: {milestone.owner_role}</p>
+          {milestone.due_at && <p>到期: {formatDate(milestone.due_at)}</p>}
+          <p>负责人: {milestone.owner_role}</p>
           {milestone.status === '卡住' && milestone.notes && (
             <p className="text-orange-600">
               卡住原因: {extractBlockedReason(milestone.notes) || milestone.notes}

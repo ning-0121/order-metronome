@@ -154,19 +154,19 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {/* Critical Badge */}
                           {isCritical && (
                             <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded font-medium">
-                              Critical
+                              关键
                             </span>
                           )}
                           {/* Overdue Badge */}
                           {overdue && isInProgress && (
                             <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded font-medium">
-                              Overdue
+                              超期
                             </span>
                           )}
                           {/* Blocked Badge */}
                           {isBlocked && (
                             <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded font-medium">
-                              Blocked
+                              阻塞
                             </span>
                           )}
                         </div>
@@ -195,7 +195,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           </div>
                           {milestone.due_at && (
                             <div>
-                              <span className="font-medium text-gray-600">Due:</span>{' '}
+                              <span className="font-medium text-gray-600">到期日:</span>{' '}
                               <span
                                 className={`text-gray-900 ${
                                   overdue && isInProgress ? 'text-red-700 font-semibold' : ''
@@ -207,7 +207,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           )}
                           {milestone.planned_at && (
                             <div>
-                              <span className="font-medium text-gray-600">Planned:</span>{' '}
+                              <span className="font-medium text-gray-600">计划日:</span>{' '}
                               <span className="text-gray-900">
                                 {formatDate(milestone.planned_at)}
                               </span>
@@ -215,7 +215,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           )}
                           {milestone.evidence_required && (
                             <div className="col-span-2">
-                              <span className="text-blue-700 font-medium">📎 Evidence required</span>
+                              <span className="text-blue-700 font-medium">📎 需要上传证据</span>
                             </div>
                           )}
                         </div>
@@ -240,7 +240,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           }
                           className="text-blue-600 hover:text-blue-700 text-sm font-medium"
                         >
-                          {isExpanded ? 'Hide' : 'View'} Details
+                          {isExpanded ? '收起' : '查看'}详情
                         </button>
                       </div>
                     </div>
@@ -269,7 +269,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
 
                         {milestone.status !== '已完成' && (isAdmin || (currentRole && currentRole.toLowerCase() === milestone.owner_role?.toLowerCase())) && (
                           <div className="bg-gray-50 p-4 rounded">
-                            <h4 className="font-semibold mb-2 text-gray-900">Request Delay</h4>
+                            <h4 className="font-semibold mb-2 text-gray-900">申请延期</h4>
                             <DelayRequestForm
                               milestoneId={milestone.id}
                               milestone={milestone}
@@ -280,7 +280,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                         )}
 
                         <div className="bg-gray-50 p-4 rounded">
-                          <h4 className="font-semibold mb-2 text-gray-900">Activity Log</h4>
+                          <h4 className="font-semibold mb-2 text-gray-900">操作日志</h4>
                           {milestoneLogs.length > 0 ? (
                             <div className="space-y-2">
                               {milestoneLogs.map((log: any) => (
@@ -297,7 +297,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                               ))}
                             </div>
                           ) : (
-                            <p className="text-gray-500 text-sm">No activity log</p>
+                            <p className="text-gray-500 text-sm">暂无操作日志</p>
                           )}
                         </div>
                       </div>
@@ -307,7 +307,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
               })}
             </div>
           ) : (
-            <p className="text-gray-500 text-sm italic">No milestones in this section</p>
+            <p className="text-gray-500 text-sm italic">此分组暂无节点</p>
           )}
         </div>
       ))}
