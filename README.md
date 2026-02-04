@@ -1,180 +1,191 @@
-# Order Metronome (V1)
+# 订单节拍器 Order Metronome
 
-A comprehensive Next.js + Supabase web application for tracking and managing orders with automated milestone management, delay handling, and notifications.
+> 外贸订单执行追踪系统 | Foreign Trade Order Tracking System
+>
+> **核心理念：卡风险，而不是走流程**
 
-## Features
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/ning-0121/order-metronome)
 
-- **Authentication**: Email/password authentication with @qimoclothing.com domain restriction
-- **Orders Management**: Create and manage orders with FOB/DDP incoterms, ETD/Warehouse Due Date tracking
-- **Automated Milestones**: Auto-generated milestone templates based on order type with backward scheduling
-- **Time Decomposition Engine**: Intelligent backward scheduling from ETD or Warehouse Due Date with business day handling
-- **Status Machine**: Milestone status management (Done → next, Blocked, Overdue detection)
-- **Delay Management**: Delay request system with approval workflow and automatic downstream recalculation
-- **Notifications**: Email notifications via SMTP (Tencent enterprise mail) + in-app notifications with reminders and escalation
-- **Dashboard**: My Beats page for user-specific milestones, Orders list, Order detail with timeline/logs, Admin dashboard with risk analysis
+## 产品文档
 
-## Tech Stack
+- **[完整产品手册](./docs/PRODUCT_MANUAL.md)** - 详细功能说明、操作指南、常见问题
 
-- **Framework**: Next.js 16 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Database**: Supabase (PostgreSQL)
-- **Authentication**: Supabase Auth
-- **Email**: Nodemailer with SMTP (Tencent enterprise mail)
+## 功能概览
 
-## Getting Started
+### 核心功能
 
-### 1. Prerequisites
+| 功能 | 说明 |
+|------|------|
+| **18关卡系统** | 覆盖订单全生命周期的关键控制点 |
+| **智能排期** | 基于ETD/入仓日自动倒推计算里程碑日期 |
+| **风险预警** | 红黄绿灯状态，超期/阻塞实时告警 |
+| **延期管理** | 延期申请-审批流程，自动级联更新 |
+| **邮件提醒** | 到期前7天/3天/当天自动提醒 |
+| **复盘沉淀** | 订单完成后强制复盘，沉淀经验 |
 
-- Node.js 18+ and npm
-- Supabase account and project
-- SMTP credentials (Tencent enterprise mail)
+### 页面结构
 
-### 2. Installation
+```
+/dashboard     - 我的工作台（超期、今日到期、阻塞、待复盘）
+/orders        - 订单列表
+/orders/new    - 新建订单（4步向导）
+/orders/[id]   - 订单详情（里程碑时间线）
+/admin         - 管理后台（风险订单、瓶颈分析）
+/admin/ceo     - CEO控制台（今日必须处理、延期审批）
+```
+
+### 用户角色
+
+| 角色 | 英文 | 职责 |
+|------|------|------|
+| 业务 | sales | 客户沟通、PO确认 |
+| 财务 | finance | 预算审批、付款 |
+| 采购 | procurement | 原料采购 |
+| 生产 | production | 大货生产 |
+| 品控 | qc | 质量检验 |
+| 物流 | logistics | 订舱出运 |
+| 管理员 | admin | 系统管理 |
+
+## 技术栈
+
+- **前端**: Next.js 16 + React 19 + TailwindCSS 4
+- **后端**: Next.js Server Actions + API Routes
+- **数据库**: Supabase (PostgreSQL)
+- **认证**: Supabase Auth
+- **邮件**: Nodemailer + SMTP (腾讯企业邮箱)
+
+## 快速开始
+
+### 1. 环境要求
+
+- Node.js 18+
+- Supabase 账号
+- SMTP 邮箱配置
+
+### 2. 安装
 
 ```bash
 npm install
 ```
 
-### 3. Environment Variables
+### 3. 环境变量
 
-Create a `.env.local` file in the root directory:
+创建 `.env.local` 文件：
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 
-# SMTP Configuration (Tencent enterprise mail)
+# SMTP 配置
 SMTP_HOST=smtp.exmail.qq.com
 SMTP_PORT=465
-SMTP_USER=your_smtp_user@qimoclothing.com
-SMTP_PASSWORD=your_smtp_password
+SMTP_USER=your_email@qimoclothing.com
+SMTP_PASSWORD=your_password
 SMTP_FROM=noreply@qimoclothing.com
 ```
 
-### 4. Database Setup
+### 4. 数据库初始化
 
-Run the migration SQL in your Supabase SQL Editor:
+在 Supabase SQL Editor 中执行 `supabase/migration.sql`
 
-```bash
-# The migration file is located at:
-supabase/migration.sql
-```
-
-Copy the contents of `supabase/migration.sql` and run it in the Supabase SQL Editor.
-
-### 5. Run Development Server
+### 5. 启动开发服务器
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+访问 http://localhost:3000
 
-## Project Structure
+## 项目结构
 
 ```
 order-metronome/
 ├── app/
-│   ├── actions/           # Server actions (orders, milestones, delays, auth)
-│   ├── admin/             # Admin dashboard
-│   ├── dashboard/         # My Beats (user dashboard)
-│   ├── login/             # Login/signup page
-│   ├── orders/            # Orders pages (list, new, detail)
-│   ├── layout.tsx         # Root layout
-│   └── page.tsx           # Home page (redirects to dashboard)
-├── components/            # React components
-│   ├── Navbar.tsx
-│   ├── MilestoneCard.tsx
-│   ├── OrderTimeline.tsx
-│   ├── MilestoneActions.tsx
-│   └── DelayRequestForm.tsx
+│   ├── actions/          # Server Actions
+│   ├── api/              # API Routes (nudge, cron)
+│   ├── admin/            # 管理后台
+│   │   └── ceo/          # CEO控制台
+│   ├── dashboard/        # 我的工作台
+│   ├── orders/           # 订单管理
+│   │   ├── new/          # 新建订单
+│   │   └── [id]/         # 订单详情
+│   │       └── retrospective/  # 订单复盘
+│   └── login/            # 登录页
+├── components/           # React 组件
 ├── lib/
-│   ├── supabase/          # Supabase client setup
-│   ├── types.ts           # TypeScript type definitions
-│   └── utils/             # Utility functions
-│       ├── auth.ts        # Email validation
-│       ├── date.ts        # Date utilities
-│       ├── notifications.ts  # Email and notification system
-│       └── time-decomposition.ts  # Milestone scheduling engine
-├── supabase/
-│   └── migration.sql      # Database migration
-├── middleware.ts          # Next.js middleware (auth protection)
-└── README.md
+│   ├── domain/           # 业务逻辑 (gates, requirements)
+│   ├── supabase/         # 数据库客户端
+│   └── utils/            # 工具函数
+├── docs/
+│   └── PRODUCT_MANUAL.md # 产品手册
+└── supabase/
+    └── migration.sql     # 数据库迁移
 ```
 
-## Key Features Explained
+## 核心模块
 
-### Time Decomposition Engine
+### 18关卡系统
 
-The time decomposition engine automatically calculates milestone dates by backward scheduling from the target date (ETD for FOB, Warehouse Due Date for DDP). It:
+```
+阶段A: 订单启动 (7关)
+├── PO确认 → 财务审批 → 订单资料 → 采购单 → 采购审批 → 采购下单 → 原料检验
 
-- Handles business days (excludes weekends)
-- Adjusts packaging materials timing based on packaging type (standard vs custom)
-- Calculates planned_at and due_at for each milestone
-- Respects internal controls (PO+2 workdays for procurement/finance, PO+3 workdays for order/production/packaging)
+阶段B: 产前样 (4关)
+├── 产前样完成 → 产前样寄出 → 产前样确认 → 大货启动
 
-### Status Machine
+阶段C: 生产出货 (5关)
+├── 中期验货 → 尾期验货 → 包装到位 → QC预约 → QC完成
 
-- **Done**: Automatically advances to the next milestone
-- **Blocked**: Requires reason and note; prevents progression
-- **Overdue**: Automatically detected based on due date
-- **In Progress**: Milestone is actively being worked on
-- **Pending**: Milestone is waiting to start
+阶段D: 出运 (2关)
+└── 订舱完成 → 出运完成
+```
 
-### Delay Management
+### 订单状态机
 
-- Users can request delays for milestones with reason
-- Delay requests require approval from milestone owner or admin
-- On approval, downstream milestones are automatically recalculated
-- All delay requests are logged for audit trail
+```
+草稿 → 已生效 → 执行中 → 已完成/已取消 → 待复盘 → 已复盘
+```
 
-### Notifications
+### 里程碑状态
 
-- **Email**: Sent via SMTP (Tencent enterprise mail)
-- **In-app**: Stored in notifications table
-- **Reminders**: 48/24/12 hours before due date
-- **Escalation**: Overdue/blocked milestones escalate to su@qimoclothing.com and alex@qimoclothing.com
+- ⚪ **未开始**: 等待前置条件
+- 🔵 **进行中**: 正在处理
+- 🟠 **卡住**: 遇到阻塞
+- 🟢 **已完成**: 完成（终态）
 
-## Pages
+## 部署
 
-- `/login` - Login/Signup page
-- `/dashboard` - My Beats (user's assigned milestones)
-- `/orders` - Orders list
-- `/orders/new` - Create new order
-- `/orders/[id]` - Order detail with timeline, logs, and attachments
-- `/admin` - Admin dashboard (risk/overdue list, bottleneck analysis)
+### Vercel（推荐）
 
-## Development
+1. Fork 本仓库
+2. 在 Vercel 导入项目
+3. 配置环境变量
+4. 部署完成
+
+### 其他平台
+
+支持所有 Next.js 部署平台，确保环境变量配置正确。
+
+## 开发命令
 
 ```bash
-# Development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Start production server
-npm start
-
-# Lint
-npm run lint
+npm run dev      # 开发服务器
+npm run build    # 构建
+npm run start    # 生产服务器
+npm run lint     # 代码检查
 ```
 
-## Deployment
+## 访问限制
 
-### Vercel (Recommended)
-
-1. Push code to GitHub
-2. Import project in Vercel
-3. Add environment variables
-4. Deploy
-
-### Other Platforms
-
-The app can be deployed to any platform supporting Next.js. Ensure all environment variables are set correctly.
+- 仅限 `@qimoclothing.com` 邮箱域名登录
+- 管理员：alex@qimoclothing.com, su@qimoclothing.com
 
 ## License
 
 MIT
+
+---
+
+**版本**: v1.0
+**维护**: Qimo Technology
