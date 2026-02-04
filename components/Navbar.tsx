@@ -4,7 +4,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
 
-export function Navbar() {
+interface NavbarProps {
+  isAdmin?: boolean;
+}
+
+export function Navbar({ isAdmin }: NavbarProps) {
   const pathname = usePathname();
 
   // Don't show navbar on login page
