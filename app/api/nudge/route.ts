@@ -67,27 +67,24 @@ export async function POST(request: NextRequest) {
     if (milestoneData.owner_user_id) {
       const { data: ownerProfile } = await supabase
         .from('profiles')
-        .select('email, full_name')
+        .select('email, name')
         .eq('user_id', milestoneData.owner_user_id)
         .single();
-      
       if (ownerProfile) {
         recipientEmail = (ownerProfile as any).email || '';
-        recipientName = (ownerProfile as any).full_name || '';
+        recipientName = (ownerProfile as any).name ?? (ownerProfile as any).email ?? '';
       }
     }
 
-    // Fallback to order creator
     if (!recipientEmail && orderData.created_by) {
       const { data: creatorProfile } = await supabase
         .from('profiles')
-        .select('email, full_name')
+        .select('email, name')
         .eq('user_id', orderData.created_by)
         .single();
-      
       if (creatorProfile) {
         recipientEmail = (creatorProfile as any).email || '';
-        recipientName = (creatorProfile as any).full_name || '';
+        recipientName = (creatorProfile as any).name ?? (creatorProfile as any).email ?? '';
       }
     }
 

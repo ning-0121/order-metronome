@@ -47,7 +47,7 @@ export const GATE_TEMPLATE_V2: GateTemplate[] = [
     depends_on: [],
     days_before_target: 0, // 订单创建时
     is_critical: true,
-    evidence_required: false,
+    evidence_required: true,
   },
   {
     gate_key: 'finance_approval',
@@ -69,7 +69,7 @@ export const GATE_TEMPLATE_V2: GateTemplate[] = [
     depends_on: ['po_confirmed'],
     days_before_target: -3, // PO确认后3个工作日
     is_critical: true,
-    evidence_required: false,
+    evidence_required: true,
   },
 
   // =========================

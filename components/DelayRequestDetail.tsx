@@ -284,7 +284,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
         </div>
       )}
 
-      <div className="text-xs text-gray-500 mt-4">
+      <div className="text-xs text-gray-600 mt-4">
         申请时间: {formatDate(delayRequest.created_at, 'yyyy-MM-dd HH:mm')}
       </div>
     </div>

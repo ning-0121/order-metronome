@@ -27,14 +27,15 @@ function LoginForm() {
         if (result.error) {
           setErrorMessage(result.error);
         } else {
-          router.push('/dashboard');
+          router.push('/');
+          router.refresh();
         }
       } else {
         const result = await signIn(email, password);
         if (result.error) {
           setErrorMessage(result.error);
         } else {
-          router.push('/dashboard');
+          router.push('/');
           router.refresh();
         }
       }
@@ -55,7 +56,7 @@ function LoginForm() {
           <p className="mt-2 text-center text-sm text-gray-600">
             {isSignUp ? '创建账户' : '登录账户'}
           </p>
-          <p className="mt-1 text-center text-xs text-gray-500">
+          <p className="mt-1 text-center text-xs text-gray-600">
             仅允许 @qimoclothing.com 邮箱
           </p>
         </div>

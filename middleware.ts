@@ -39,9 +39,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
   
-  // Redirect to dashboard if logged in and on login page
+  // Redirect to home if logged in and on login page (home then sends admin->/ceo, staff->/dashboard)
   if (user && isLoginPage) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    return NextResponse.redirect(new URL('/', request.url));
   }
   
   // Validate email domain for authenticated users

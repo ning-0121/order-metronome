@@ -61,7 +61,7 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <h2 className="text-2xl font-semibold mb-4 text-gray-900">今日必须处理</h2>
-        <p className="text-gray-500">暂无需要今日处理的节点</p>
+        <p className="text-gray-600">暂无需要今日处理的节点</p>
       </div>
     );
   }
@@ -135,12 +135,12 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
                       <span className="text-gray-900">
                         {milestone.owner_user_id ? (
                           milestone.owner_user ? (
-                            milestone.owner_user.full_name || milestone.owner_user.email
+                            (milestone.owner_user as any).name ?? (milestone.owner_user as any).full_name ?? milestone.owner_user.email
                           ) : (
                             '加载中...'
                           )
                         ) : (
-                          <span className="text-gray-500 italic">未分配</span>
+                          <span className="text-gray-600 italic">未分配</span>
                         )}
                       </span>
                     </div>

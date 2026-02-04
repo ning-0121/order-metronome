@@ -22,9 +22,9 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   evidence_required: boolean;
 }> = [
   // A. Order Setup Chain (7)
-  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: false },
+  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true },
   { step_key: "finance_approval", name: "财务审核", owner_role: "finance", is_critical: true, evidence_required: false },
-  { step_key: "order_docs_complete", name: "订单资料齐全", owner_role: "sales", is_critical: true, evidence_required: false },
+  { step_key: "order_docs_complete", name: "订单资料齐全", owner_role: "sales", is_critical: true, evidence_required: true },
   { step_key: "rm_purchase_sheet_submit", name: "原辅料采购单提交", owner_role: "sales", is_critical: true, evidence_required: false },
   { step_key: "finance_purchase_approval", name: "财务采购审核", owner_role: "finance", is_critical: true, evidence_required: false },
   { step_key: "procurement_order_placed", name: "采购订单下达", owner_role: "procurement", is_critical: true, evidence_required: false },

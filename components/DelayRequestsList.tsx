@@ -118,7 +118,7 @@ export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isO
       )}
 
       {delayRequests.length === 0 && (
-        <p className="text-gray-500 bg-gray-50 p-4 rounded">暂无延期申请</p>
+        <p className="text-gray-600 bg-gray-50 p-4 rounded">暂无延期申请</p>
       )}
     </div>
   );

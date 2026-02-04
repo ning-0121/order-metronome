@@ -10,6 +10,7 @@ import {
 } from '@/lib/repositories/milestonesRepo';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
+import { classifyRequirement } from '@/lib/domain/requirements';
 
 type MilestoneLogAction =
   | 'mark_done'
@@ -22,7 +23,8 @@ type MilestoneLogAction =
   | 'reject_delay'
   | 'recalc_schedule'
   | 'upload_evidence'
-  | 'update';
+  | 'update'
+  | 'execution_note';
 
 async function logMilestoneAction(
   supabase: any,
@@ -72,14 +74,12 @@ export async function getMilestonesByOrder(orderId: string) {
   // Get user profiles if there are any owner_user_ids
   let userMap: Record<string, any> = {};
   if (ownerUserIds.length > 0) {
-    const { data: profiles } = await (supabase
-      .from('profiles') as any)
-      .select('user_id, email, full_name, role')
+    const { data: profiles } = await (supabase.from('profiles') as any)
+      .select('user_id, email, name, role')
       .in('user_id', ownerUserIds);
-    
     if (profiles) {
-      userMap = profiles.reduce((acc: Record<string, any>, profile: any) => {
-        acc[profile.user_id] = profile;
+      userMap = (profiles as any[]).reduce((acc: Record<string, any>, p: any) => {
+        acc[p.user_id] = { ...p, full_name: p.name ?? p.email };
         return acc;
       }, {});
     }
@@ -203,6 +203,36 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
   
   const updatedMilestone = result.data;
   const milestoneData = milestone as any;
+
+  // Customer Memory V1: repeated_blocked — count blocked milestones for this customer
+  const { data: orderRow } = await (supabase.from('orders') as any)
+    .select('customer_name')
+    .eq('id', milestoneData.order_id)
+    .single();
+  const customerName = (orderRow?.customer_name as string) || '';
+  if (customerName) {
+    const { data: ordersOfCustomer } = await (supabase.from('orders') as any)
+      .select('id')
+      .eq('customer_name', customerName);
+    const orderIds = (ordersOfCustomer || []).map((o: any) => o.id);
+    if (orderIds.length > 0) {
+      const { count } = await (supabase.from('milestones') as any)
+        .select('*', { count: 'exact', head: true })
+        .in('order_id', orderIds)
+        .eq('status', '卡住');
+      if (count != null && count >= 2) {
+        await (supabase.from('customer_memory') as any).insert({
+          customer_id: customerName,
+          order_id: milestoneData.order_id,
+          source_type: 'repeated_blocked',
+          content: `该客户已有 ${count} 个控制点处于卡住状态。本次: ${blockedReason}`.slice(0, 2000),
+          category: 'general',
+          risk_level: 'high',
+          created_by: user.id,
+        });
+      }
+    }
+  }
   
   // Send blocked notification
   const { sendBlockedNotification } = await import('@/app/actions/notifications');
@@ -375,6 +405,64 @@ export async function getMilestoneLogs(milestoneId: string) {
   }
   
   return { data: logs };
+}
+
+/** Customer memory category/risk for manual execution notes (V1.1 includes trade-domain categories) */
+type MemCategory = 'delay' | 'quality' | 'logistics' | 'general' | 'fabric_quality' | 'packaging' | 'plus_size_stretch';
+type MemRisk = 'low' | 'medium' | 'high';
+
+/**
+ * Add execution note (milestone_log). Optionally save as customer memory.
+ */
+export async function addExecutionNote(
+  milestoneId: string,
+  note: string,
+  saveAsCustomerMemory: boolean,
+  category?: MemCategory,
+  riskLevel?: MemRisk
+): Promise<{ data?: unknown; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!note || !note.trim()) return { error: '备注不能为空' };
+
+  const { data: milestone } = await (supabase.from('milestones') as any)
+    .select('order_id')
+    .eq('id', milestoneId)
+    .single();
+  if (!milestone) return { error: 'Milestone not found' };
+  const orderId = (milestone as any).order_id;
+
+  await logMilestoneAction(supabase, milestoneId, orderId, 'execution_note', note.trim());
+
+  if (saveAsCustomerMemory) {
+    const { data: orderRow } = await (supabase.from('orders') as any)
+      .select('customer_name')
+      .eq('id', orderId)
+      .single();
+    const customerName = (orderRow?.customer_name as string) || '';
+    if (customerName) {
+      const { createCustomerMemory } = await import('@/app/actions/customer-memory');
+      const req = classifyRequirement(note.trim());
+      await createCustomerMemory({
+        customer_id: customerName,
+        order_id: orderId,
+        source_type: 'manual',
+        content: note.trim().slice(0, 2000),
+        category: category ?? 'general',
+        risk_level: riskLevel ?? 'medium',
+        content_json: {
+          requirement_type: req.type,
+          keywords_hit: req.keywordsHit,
+          excerpt: req.excerpt,
+          milestone_id: milestoneId,
+        },
+      });
+    }
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { data: {} };
 }
 
 /**

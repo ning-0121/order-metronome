@@ -124,6 +124,20 @@ export async function createDelayRequest(
     reasonDetail,
     { delay_request_id: (delayRequest as any).id }
   );
+
+  // Customer Memory V1: auto-create on delay request
+  const customerName = (orderData.customer_name as string) || '';
+  if (customerName) {
+    await (supabase.from('customer_memory') as any).insert({
+      customer_id: customerName,
+      order_id: orderData.id,
+      source_type: 'delay_request',
+      content: `[${reasonType}] ${reasonDetail}`.slice(0, 2000),
+      category: 'delay',
+      risk_level: 'medium',
+      created_by: user.id,
+    });
+  }
   
   // Send email notification
   let recipientEmail = user.email || '';
@@ -250,6 +264,20 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
     decisionNote || 'Delay approved',
     { delay_request_id: delayRequestId }
   );
+
+  // Customer Memory V1: auto-create on delay approval
+  const customerName = (orderData.customer_name as string) || '';
+  if (customerName) {
+    await (supabase.from('customer_memory') as any).insert({
+      customer_id: customerName,
+      order_id: orderData.id,
+      source_type: 'delay_approval',
+      content: `延期已批准: ${milestoneData.name}. ${(decisionNote || '').slice(0, 500)}`.trim().slice(0, 2000),
+      category: 'delay',
+      risk_level: 'low',
+      created_by: user.id,
+    });
+  }
 
   // Recalculate schedule
   await recalculateSchedule(supabase, orderData, milestoneData, delayRequestData);

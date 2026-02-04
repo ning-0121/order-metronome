@@ -127,7 +127,7 @@ export function EvidenceUpload({ milestoneId, orderId, evidenceRequired }: Evide
                   >
                     {attachment.file_name || 'Unnamed file'}
                   </a>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-600 mt-1">
                     Uploaded {formatDate(attachment.created_at)}
                     {attachment.file_type && ` • ${attachment.file_type}`}
                   </p>

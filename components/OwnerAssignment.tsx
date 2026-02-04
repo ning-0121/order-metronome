@@ -84,7 +84,7 @@ export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin }: Ow
               <option value="">未分配</option>
               {users.map((user) => (
                 <option key={user.user_id} value={user.user_id}>
-                  {user.full_name || user.email}
+                  {(user as any).full_name ?? user.email}
                   {user.role && ` (${getRoleLabel(user.role)})`}
                 </option>
               ))}

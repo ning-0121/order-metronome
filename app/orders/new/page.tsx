@@ -380,7 +380,7 @@ function NewOrderWizard() {
                               </div>
                               <div className="flex-1">
                                 <div className="font-medium text-gray-900">{milestone.name}</div>
-                                <div className="text-sm text-gray-500 mt-1">
+                                <div className="text-sm text-gray-600 mt-1">
                                   <span className="mr-3">负责人：{milestone.owner_role}</span>
                                   <span className="mr-3">
                                     截止：{milestone.due_at ? new Date(milestone.due_at).toLocaleDateString('zh-CN') : '未设置'}
@@ -412,7 +412,7 @@ function NewOrderWizard() {
               })()}
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-gray-600">
               正在加载执行节拍...
             </div>
           )}
