@@ -259,6 +259,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           milestoneId={milestone.id}
                           orderId={orderId}
                           evidenceRequired={milestone.evidence_required || false}
+                          stepKey={milestone.step_key}
                         />
 
                         <MilestoneActions 

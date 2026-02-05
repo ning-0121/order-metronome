@@ -117,57 +117,74 @@ export async function getUserMilestones(userId: string) {
 
 export async function markMilestoneDone(milestoneId: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: 'Unauthorized' };
   }
-  
-  // Get current milestone (for order_id and evidence_required)
+
+  // Get current milestone (for order_id, evidence_required, and step_key)
   const { data: milestone, error: getError } = await (supabase
     .from('milestones') as any)
-    .select('order_id, evidence_required')
+    .select('order_id, evidence_required, step_key')
     .eq('id', milestoneId)
     .single();
-  
+
   if (getError || !milestone) {
     return { error: getError?.message || 'Milestone not found' };
   }
-  
-  // Check if evidence is required and exists
-  if (milestone.evidence_required) {
+
+  // V1 Evidence Gate: Check required documents by step_key
+  const { checkRequiredDocuments } = await import('@/app/actions/attachments');
+  const { getDocTypeLabel } = await import('@/lib/domain/required-documents');
+
+  const docCheck = await checkRequiredDocuments(milestoneId);
+
+  if (docCheck.error) {
+    return { error: `无法验证必要文件: ${docCheck.error}` };
+  }
+
+  if (!docCheck.isValid && docCheck.missingDocs.length > 0) {
+    const missingLabels = docCheck.missingDocs.map(dt => getDocTypeLabel(dt)).join('、');
+    return {
+      error: `缺少必要文件: ${missingLabels}。请上传所有必要文件后再标记为完成。`
+    };
+  }
+
+  // Legacy check: if evidence_required flag is true but no required docs defined
+  if (milestone.evidence_required && docCheck.missingDocs.length === 0) {
     const { data: attachments, error: attachmentsError } = await supabase
       .from('attachments')
       .select('id')
       .eq('milestone_id', milestoneId)
       .limit(1);
-    
+
     if (attachmentsError) {
-      return { error: `Failed to check evidence: ${attachmentsError.message}` };
+      return { error: `无法检查证据文件: ${attachmentsError.message}` };
     }
-    
+
     if (!attachments || attachments.length === 0) {
-      return { error: 'Evidence is required. Please upload at least one file before marking this milestone as done.' };
+      return { error: '此里程碑需要上传证据文件。请至少上传一个文件后再标记为完成。' };
     }
   }
-  
+
   // 使用状态机转换（带校验）
   const result = await transitionMilestoneStatus(milestoneId, '已完成', null);
-  
+
   if (result.error || !result.data) {
     return { error: result.error || 'Failed to update milestone' };
   }
-  
+
   const updatedMilestone = result.data;
   const milestoneData = milestone as any;
-  
+
   // Auto-advance to next milestone
   await autoAdvanceNextMilestone(supabase, milestoneData.order_id);
-  
+
   revalidatePath(`/orders/${milestoneData.order_id}`);
   revalidatePath('/dashboard');
   revalidatePath('/orders');
-  
+
   return { data: updatedMilestone };
 }
 
