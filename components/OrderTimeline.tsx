@@ -18,7 +18,7 @@ interface OrderTimelineProps {
   isAdmin?: boolean;
 }
 
-// Define milestone groups (V1 托底闭环)
+// Define milestone groups (V1.1 托底闭环 - 20 milestones)
 const MILESTONE_GROUPS = [
   {
     key: 'setup',
@@ -49,6 +49,9 @@ const MILESTONE_GROUPS = [
       'final_qc_check',
       'packaging_materials_ready',
       'packing_labeling_done',
+      // Ship Sample Gates (V1.1)
+      'ship_sample_sent',
+      'ship_sample_approved',
       'booking_done',
     ],
   },

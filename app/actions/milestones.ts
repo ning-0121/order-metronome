@@ -134,6 +134,41 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: getError?.message || 'Milestone not found' };
   }
 
+  // V1.1 Hard Dependency Check: Ensure dependent milestones are completed
+  const { getDependenciesForStep } = await import('@/lib/domain/milestone-dependencies');
+  const dependencies = getDependenciesForStep(milestone.step_key);
+
+  for (const dep of dependencies) {
+    // Get the dependency milestone for this order
+    const { data: depMilestone, error: depError } = await (supabase
+      .from('milestones') as any)
+      .select('id, status, step_key')
+      .eq('order_id', milestone.order_id)
+      .eq('step_key', dep.dependsOn)
+      .single();
+
+    if (depError || !depMilestone) {
+      // Dependency milestone not found - this shouldn't happen, but allow proceeding
+      console.warn(`Dependency milestone ${dep.dependsOn} not found for order ${milestone.order_id}`);
+      continue;
+    }
+
+    // Check if dependency milestone is completed
+    if (depMilestone.status !== '已完成') {
+      return { error: dep.errorMessage };
+    }
+
+    // If evidence is required, check if dependency has required docs
+    if (dep.requiresEvidence) {
+      const { checkRequiredDocuments } = await import('@/app/actions/attachments');
+      const depDocCheck = await checkRequiredDocuments(depMilestone.id);
+
+      if (!depDocCheck.isValid && depDocCheck.missingDocs.length > 0) {
+        return { error: dep.errorMessage };
+      }
+    }
+  }
+
   // V1 Evidence Gate: Check required documents by step_key
   const { checkRequiredDocuments } = await import('@/app/actions/attachments');
   const { getDocTypeLabel } = await import('@/lib/domain/required-documents');

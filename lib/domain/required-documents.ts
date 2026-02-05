@@ -92,10 +92,13 @@ export const REQUIRED_DOCS_BY_STEP: Record<string, DocumentType[]> = {
   pps_sent: ['COURIER_RECEIPT'],
   pps_customer_approved: ['CUSTOMER_APPROVAL'],
 
-  // C. Production → Shipping
+  // C. Production → Shipping (includes ship sample gates)
   final_qc_check: ['QA_REPORT'],
   packaging_materials_ready: ['PACKING_MATERIAL_RECEIPT'],
   packing_labeling_done: ['LABEL_PHOTO'],
+  // Ship Sample Gates (V1.1)
+  ship_sample_sent: ['COURIER_RECEIPT'],
+  ship_sample_approved: ['CUSTOMER_APPROVAL'],
   booking_done: ['BOOKING_CONFIRMATION'],
 
   // D. Ship & Payment
