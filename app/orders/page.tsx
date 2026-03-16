@@ -56,6 +56,7 @@ export default async function OrdersPage() {
               <tr>
                 <th>订单号</th>
                 <th>客户</th>
+                <th>款号/PO</th>
                 <th>贸易条款</th>
                 <th>ETD/入仓日</th>
                 <th>类型</th>
@@ -81,6 +82,10 @@ export default async function OrdersPage() {
                     <td>
                       <span className="text-gray-700">{order.customer_name}</span>
                     </td>
+                <td>
+                  <div className="text-sm text-gray-900">{(order as any).style_no || '-'}</div>
+                  {(order as any).po_number && <div className="text-xs text-gray-500">{(order as any).po_number}</div>}
+                </td>
                     <td>
                       <span className="badge badge-neutral">{order.incoterm}</span>
                     </td>
