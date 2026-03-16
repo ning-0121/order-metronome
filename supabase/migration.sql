@@ -326,3 +326,107 @@ $$ language plpgsql security definer;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+
+-- ===== 2026-03-16 P0修复：补建缺失表 + 修复字段不一致 =====
+
+-- 补建 order_logs 表（订单主表变更审计）
+CREATE TABLE IF NOT EXISTS public.order_logs (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  actor_id uuid REFERENCES auth.users(id),
+  action text NOT NULL,
+  field_name text,
+  old_value text,
+  new_value text,
+  note text,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_order_logs_order_id ON public.order_logs(order_id);
+ALTER TABLE public.order_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "order_logs_select" ON public.order_logs FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "order_logs_insert" ON public.order_logs FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+-- 补建 cancel_requests 表（取消申请审批）
+CREATE TABLE IF NOT EXISTS public.cancel_requests (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  requested_by uuid REFERENCES auth.users(id) NOT NULL,
+  reason_type text NOT NULL,
+  reason_detail text,
+  status text DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  decided_by uuid REFERENCES auth.users(id),
+  decision_note text,
+  decided_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_cancel_requests_order_id ON public.cancel_requests(order_id);
+ALTER TABLE public.cancel_requests ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "cancel_requests_select" ON public.cancel_requests FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "cancel_requests_insert" ON public.cancel_requests FOR INSERT WITH CHECK (auth.uid() = requested_by);
+CREATE POLICY "cancel_requests_update" ON public.cancel_requests FOR UPDATE USING (
+  EXISTS (SELECT 1 FROM public.profiles WHERE user_id = auth.uid() AND role = 'admin')
+);
+
+-- 补建 order_retrospectives 表（订单复盘）
+CREATE TABLE IF NOT EXISTS public.order_retrospectives (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  submitted_by uuid REFERENCES auth.users(id),
+  on_time_delivery boolean,
+  major_delay_reason text,
+  key_issue text NOT NULL,
+  root_cause text NOT NULL,
+  what_worked text NOT NULL,
+  improvement_actions jsonb DEFAULT '[]',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+ALTER TABLE public.order_retrospectives ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "retrospectives_select" ON public.order_retrospectives FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "retrospectives_insert" ON public.order_retrospectives FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "retrospectives_update" ON public.order_retrospectives FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+-- 修复 profiles：补充 full_name 字段
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name text;
+UPDATE public.profiles SET full_name = name WHERE full_name IS NULL;
+
+-- 修复 orders RLS：管理员可读所有订单
+DROP POLICY IF EXISTS "orders_select_own" ON public.orders;
+CREATE POLICY "orders_select_all" ON public.orders
+  FOR SELECT USING (
+    auth.uid() = created_by
+    OR EXISTS (SELECT 1 FROM public.profiles WHERE user_id = auth.uid() AND role = 'admin')
+  );
+
+-- 保护 order_no 不可修改
+CREATE OR REPLACE FUNCTION public.protect_order_no()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.order_no IS DISTINCT FROM OLD.order_no THEN
+    RAISE EXCEPTION 'order_no cannot be modified after creation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_protect_order_no ON public.orders;
+CREATE TRIGGER trg_protect_order_no
+  BEFORE UPDATE ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public.protect_order_no();
+
+-- 补充 orders 表外贸核心字段
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS style_no text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS po_number text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS quantity integer;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cancel_date date;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS colors jsonb DEFAULT '[]';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sizes jsonb DEFAULT '[]';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS unit_price numeric(10,2);
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS currency text DEFAULT 'USD';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS total_amount numeric(12,2);
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_terms text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS shipment_qty integer;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS lifecycle_status text DEFAULT 'draft';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS retrospective_required boolean DEFAULT false;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS retrospective_completed_at timestamptz;
