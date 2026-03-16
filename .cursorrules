@@ -1,0 +1,207 @@
+# .cursorrules — Cursor AI 编码规范
+
+## 项目信息
+
+你正在开发「订单节拍器 Order Metronome」——一个外贸订单执行追踪系统。
+核心理念：**卡风险，而不是走流程**。
+
+- 线上地址：https://order-metronome.vercel.app
+- GitHub：https://github.com/ning-0121/order-metronome
+
+---
+
+## 分工说明
+
+- **你（Cursor）**：负责功能开发、代码实现、bug 修复
+- **Claude**：负责架构审核、代码审查、整条链路的更新与发布
+
+写完代码后，由 Claude 审核再发布。
+
+---
+
+## 技术栈（严格遵守）
+
+- **框架**：Next.js 16（App Router）+ React 19
+- **样式**：TailwindCSS 4（不引入其他 CSS 框架）
+- **数据库**：Supabase（PostgreSQL）
+- **认证**：Supabase Auth
+- **语言**：TypeScript（严格模式，不用 any）
+- **后端**：Next.js Server Actions + API Routes（不引入 Express）
+- **邮件**：Nodemailer（已配置好，不替换）
+
+---
+
+## 目录结构
+
+```
+app/
+  actions/          # Server Actions（数据库操作放这里）
+  api/              # API Routes（cron job、webhook 等）
+  admin/            # 管理后台
+    ceo/            # CEO 控制台
+  dashboard/        # 我的工作台
+  orders/           # 订单管理
+    new/            # 新建订单向导
+    [id]/           # 订单详情
+      retrospective/ # 复盘
+  login/            # 登录页
+components/         # 共用 React 组件
+lib/
+  domain/           # 业务逻辑（关卡、权限判断）
+  supabase/         # 数据库客户端
+  utils/            # 工具函数
+docs/               # 产品文档
+supabase/
+  migration.sql     # 数据库迁移（每次改表必须同步更新）
+```
+
+---
+
+## 数据库规范
+
+### 现有表（不要随意删改已有字段）
+
+- `profiles` — 用户档案
+- `orders` — 订单主表
+- `milestones` — 里程碑（18关卡）
+- `milestone_logs` — 操作日志
+- `delay_requests` — 延期申请
+- `notifications` — 通知
+- `order_attachments` — 附件
+- `order_sequences` — 订单号序列
+
+### 新增表/字段规范
+
+1. 先在 `supabase/migration.sql` 末尾追加 SQL
+2. 必须为新表配置 RLS 策略
+3. 使用 `IF NOT EXISTS` 保证幂等性
+4. 格式：
+```sql
+-- ===== YYYY-MM-DD: 功能描述 =====
+CREATE TABLE IF NOT EXISTS public.new_table (...);
+ALTER TABLE new_table ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
+## 编码规范
+
+### TypeScript
+
+```typescript
+// ✅ 正确：明确类型
+interface MilestoneUpdate {
+  id: string
+  status: 'pending' | 'in_progress' | 'done' | 'blocked'
+  note?: string
+}
+
+// ❌ 错误：不用 any
+const data: any = await fetchData()
+```
+
+### Server Actions 权限校验（必须）
+
+```typescript
+// ✅ 每个 Server Action 必须先验证用户
+export async function updateMilestone(data: MilestoneUpdate) {
+  const supabase = createServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('未授权')
+  
+  // 再做业务逻辑
+}
+```
+
+### 组件规范
+
+- 页面组件放 `app/` 目录
+- 复用组件放 `components/` 目录
+- 业务逻辑放 `lib/domain/` 目录，不要直接写在组件里
+- 使用 TailwindCSS 类名，不写内联 style（除非动态值）
+
+### 错误处理
+
+```typescript
+// ✅ 使用 try-catch，给用户有意义的错误提示
+try {
+  await updateMilestone(data)
+} catch (error) {
+  console.error('更新里程碑失败:', error)
+  throw new Error('操作失败，请稍后重试')
+}
+
+// ❌ 不要吞掉错误
+try { ... } catch {}
+```
+
+---
+
+## 18 关卡系统（核心业务逻辑，谨慎修改）
+
+```
+阶段A（订单启动）: po_confirm → finance_approve → order_docs → purchase_order
+                   → purchase_approve → purchase_placed → material_inspection
+阶段B（产前样）:   pre_sample_done → pre_sample_sent → pre_sample_confirmed → bulk_start
+阶段C（生产出货）: mid_inspection → final_inspection → packaging_ready → qc_appointment → qc_done
+阶段D（出运）:     booking_done → shipment_done
+```
+
+修改关卡逻辑前，必须同步更新 `lib/domain/gates.ts`。
+
+---
+
+## 用户角色（不要硬编码角色名）
+
+```typescript
+// ✅ 使用类型
+type UserRole = 'sales' | 'finance' | 'procurement' | 'production' | 'quality' | 'admin'
+
+// 管理员判断
+const ADMIN_EMAILS = ['alex@qimoclothing.com', 'su@qimoclothing.com']
+const isAdmin = ADMIN_EMAILS.includes(user.email) || user.role === 'admin'
+```
+
+---
+
+## 禁止事项
+
+- ❌ 不要在客户端组件中直接操作数据库（必须通过 Server Actions 或 API Routes）
+- ❌ 不要把 Supabase service role key 暴露到前端
+- ❌ 不要删除或修改已有的 RLS 策略（除非 Claude 审核后确认）
+- ❌ 不要引入新的 npm 包而不在 PR 中说明原因
+- ❌ 生产代码中不留 console.log（调试用 console 提交前删除）
+- ❌ 不要修改 `supabase/migration.sql` 的历史记录（只能追加）
+
+---
+
+## 提交规范（Conventional Commits）
+
+```
+feat:     新功能
+fix:      bug 修复
+style:    UI 样式调整
+refactor: 重构（不影响功能）
+docs:     文档更新
+chore:    构建/工具配置
+db:       数据库结构变更
+```
+
+示例：
+```
+feat: 添加订单延期自动通知功能
+fix: 修复里程碑状态更新时权限校验缺失
+db: 添加 order_sequences 表支持自动订单号
+```
+
+---
+
+## 发布流程
+
+1. 在本地完成开发，确认 `npm run build` 无报错
+2. `git push origin main`
+3. **通知 Claude 进行审核**（说明改动内容）
+4. Claude 审核通过后，验证 Vercel 部署成功
+5. Claude 确认线上功能正常
+
+**不要绕过审核直接上线重要功能。**
