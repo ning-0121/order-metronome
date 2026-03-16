@@ -280,7 +280,37 @@ function NewOrderWizard() {
               </select>
             </div>
 
-            <div className="flex justify-end gap-4 pt-4">
+            
+                {/* 选填信息 */}
+                <div className="border-t border-gray-100 pt-6">
+                  <p className="text-sm font-medium text-gray-500 mb-4">选填信息（可创建后补录）</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="style_no" className="block text-sm font-medium text-gray-700">款号</label>
+                      <input type="text" id="style_no" name="style_no"
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none"
+                        placeholder="如：SS2026-001" />
+                    </div>
+                    <div>
+                      <label htmlFor="po_number" className="block text-sm font-medium text-gray-700">客户PO号</label>
+                      <input type="text" id="po_number" name="po_number"
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none"
+                        placeholder="客户采购单号" />
+                    </div>
+                    <div>
+                      <label htmlFor="quantity" className="block text-sm font-medium text-gray-700">数量（件）</label>
+                      <input type="number" id="quantity" name="quantity" min="1"
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none"
+                        placeholder="总件数" />
+                    </div>
+                    <div>
+                      <label htmlFor="cancel_date" className="block text-sm font-medium text-gray-700">Cancel Date</label>
+                      <input type="date" id="cancel_date" name="cancel_date"
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none" />
+                    </div>
+                  </div>
+                </div>
+<div className="flex justify-end gap-4 pt-4">
               <button
                 type="button"
                 onClick={() => router.back()}
