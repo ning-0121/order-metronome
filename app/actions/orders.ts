@@ -80,6 +80,10 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
   const warehouse_due_date = formData.get('warehouse_due_date') as string | null;
   const order_type = formData.get('order_type') as OrderType;
   const packaging_type = formData.get('packaging_type') as PackagingType;
+  const style_no = formData.get('style_no') as string | null;
+  const po_number = formData.get('po_number') as string | null;
+  const quantity = formData.get('quantity') ? parseInt(formData.get('quantity') as string, 10) : null;
+  const cancel_date = formData.get('cancel_date') as string | null;
   
   // Validate incoterm-specific dates
   if (incoterm === 'FOB' && !etd) {
@@ -98,6 +102,10 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     warehouse_due_date: warehouse_due_date || null,
     order_type,
     packaging_type,
+    style_no: style_no || null,
+    po_number: po_number || null,
+    quantity: quantity || null,
+    cancel_date: cancel_date || null,
     created_by: user.id,
   };
   
@@ -178,7 +186,7 @@ export async function getOrders() {
   
   const { data: orders, error } = await supabase
     .from('orders')
-    .select('id, order_no, customer_name, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at')
+    .select('id, order_no, customer_name, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, quantity, cancel_date')
     .order('created_at', { ascending: false });
   
   if (error) {
