@@ -430,3 +430,22 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS shipment_qty integer;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS lifecycle_status text DEFAULT 'draft';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS retrospective_required boolean DEFAULT false;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS retrospective_completed_at timestamptz;
+
+
+-- ===== 2026-03-16 P0验收修复：字段对齐 =====
+
+-- order_logs 补充 actor_user_id（代码写入字段）及生命周期字段
+ALTER TABLE public.order_logs ADD COLUMN IF NOT EXISTS actor_user_id uuid REFERENCES auth.users(id);
+ALTER TABLE public.order_logs ADD COLUMN IF NOT EXISTS from_status text;
+ALTER TABLE public.order_logs ADD COLUMN IF NOT EXISTS to_status text;
+ALTER TABLE public.order_logs ADD COLUMN IF NOT EXISTS payload text;
+
+-- orders 表补充订单终结字段（decideCancel/completeOrder 写入）
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS termination_type text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS termination_reason text;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS termination_approved_by uuid REFERENCES auth.users(id);
+
+-- order_retrospectives 补充代码写入字段
+ALTER TABLE public.order_retrospectives ADD COLUMN IF NOT EXISTS owner_user_id uuid REFERENCES auth.users(id);
+ALTER TABLE public.order_retrospectives ADD COLUMN IF NOT EXISTS blocked_count integer DEFAULT 0;
+ALTER TABLE public.order_retrospectives ADD COLUMN IF NOT EXISTS delay_request_count integer DEFAULT 0;
