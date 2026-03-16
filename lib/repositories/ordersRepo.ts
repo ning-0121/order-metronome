@@ -22,6 +22,17 @@ const INSERT_WHITELIST = [
   'packaging_type',
   'created_by',
   'notes',
+  'style_no',
+  'po_number',
+  'quantity',
+  'cancel_date',
+  'colors',
+  'sizes',
+  'unit_price',
+  'currency',
+  'total_amount',
+  'payment_terms',
+  'shipment_qty',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -32,6 +43,17 @@ const UPDATE_WHITELIST = [
   'order_type',
   'packaging_type',
   'notes',
+  'style_no',
+  'po_number',
+  'quantity',
+  'cancel_date',
+  'colors',
+  'sizes',
+  'unit_price',
+  'currency',
+  'total_amount',
+  'payment_terms',
+  'shipment_qty',
 ] as const;
 
 // ⚠️ 系统级约束：order_no 一旦生成，永不修改
