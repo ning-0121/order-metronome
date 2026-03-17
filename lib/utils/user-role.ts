@@ -149,13 +149,13 @@ export const ROLE_LABEL: Record<string, string> = {
 
 /** 角色对应的工作台描述 */
 export const ROLE_DASHBOARD_DESC: Record<string, string> = {
-  admin:       '全局视图：所有超期节点、风险订单、系统状态',
+  admin:       '全局视图：逾期节点、风险订单、系统运行状态',
   ceo:         '经营总览：在途订单、出货进度、异常趋势',
-  sales:       '我的订单：待处理节点、延期申请、船样确认',
-  finance:     '财务看板：待审核节点、收款跟进、成本复盘',
+  sales:       '我的订单：待处理执行节点、延期申请、船样确认',
+  finance:     '财务看板：待审核节点、收款跟进、成本核算',
   procurement: '采购看板：待确认原辅料、采购订单进度',
   production:  '生产看板：开裁计划、产前会安排、进度跟踪',
-  qc:          'QC看板：待检验订单、中查/尾查计划',
-  logistics:   '仓库看板：待发料、待装箱、待签核出货',
+  qc:          'QC看板：待检验订单、中查 / 尾查计划',
+  logistics:   '仓库看板：待发料、待装箱、出货签核',
   quality:     'QC看板：待检验订单、检验报告',
 };
