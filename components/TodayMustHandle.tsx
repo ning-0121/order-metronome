@@ -112,7 +112,7 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
                   
                   <div className="grid grid-cols-2 gap-2 text-sm text-gray-700 mb-2">
                     <div>
-                      <span className="font-medium text-gray-600">订单:</span>{' '}
+                      <span className="font-medium text-gray-600">订单：</span>{' '}
                       <Link
                         href={`/orders/${milestone.order_id}`}
                         className="text-blue-600 hover:text-blue-700"
@@ -121,17 +121,17 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
                       </Link>
                     </div>
                     <div>
-                      <span className="font-medium text-gray-600">到期时间:</span>{' '}
+                      <span className="font-medium text-gray-600">截止日期：</span>{' '}
                       <span className={isOverdue ? 'text-red-700 font-semibold' : ''}>
                         {formatDate(milestone.due_at, 'yyyy-MM-dd HH:mm')}
                       </span>
                     </div>
                     <div>
-                      <span className="font-medium text-gray-600">责任角色:</span>{' '}
+                      <span className="font-medium text-gray-600">责任人：</span>{' '}
                       <span className="text-gray-900">{getRoleLabel(milestone.owner_role)}</span>
                     </div>
                     <div>
-                      <span className="font-medium text-gray-600">负责人:</span>{' '}
+                      <span className="font-medium text-gray-600">执行人：</span>{' '}
                       <span className="text-gray-900">
                         {milestone.owner_user_id ? (
                           milestone.owner_user ? (
