@@ -4,7 +4,7 @@
  */
 
 // 里程碑状态（只使用中文，统一标准）
-export type MilestoneStatus = '未开始' | '进行中' | '卡住' | '已完成';
+export type MilestoneStatus = '未开始' | '进行中' | '阻塞' | '已完成';
 
 // 订单生命周期状态（只使用中文，统一标准）
 export type OrderLifecycleStatus = '草稿' | '已生效' | '执行中' | '已完成' | '已取消' | '待复盘' | '已复盘';
@@ -16,12 +16,13 @@ export type OwnerRole = 'sales' | 'finance' | 'procurement' | 'production' | 'qc
 export const STATUS_MAP: Record<string, MilestoneStatus> = {
   'not_started': '未开始',
   'in_progress': '进行中',
-  'blocked': '卡住',
+  'blocked': '阻塞',
+  '卡住': '阻塞',
   'done': '已完成',
   // 中文状态直接映射
   '未开始': '未开始',
   '进行中': '进行中',
-  '卡住': '卡住',
+  '阻塞': '阻塞',
   '已完成': '已完成',
 };
 
@@ -52,9 +53,9 @@ export function normalizeMilestoneStatus(status: string | null | undefined): Mil
  * 状态转换规则定义
  */
 export const STATUS_TRANSITIONS: Record<MilestoneStatus, MilestoneStatus[]> = {
-  '未开始': ['进行中', '卡住'],
-  '进行中': ['卡住', '已完成'],
-  '卡住': ['进行中'],
+  '未开始': ['进行中', '阻塞'],
+  '进行中': ['阻塞', '已完成'],
+  '阻塞': ['进行中'],
   '已完成': [], // 已完成状态不允许转换
 };
 
