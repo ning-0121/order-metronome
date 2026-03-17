@@ -449,3 +449,209 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS termination_approved_by uuid 
 ALTER TABLE public.order_retrospectives ADD COLUMN IF NOT EXISTS owner_user_id uuid REFERENCES auth.users(id);
 ALTER TABLE public.order_retrospectives ADD COLUMN IF NOT EXISTS blocked_count integer DEFAULT 0;
 ALTER TABLE public.order_retrospectives ADD COLUMN IF NOT EXISTS delay_request_count integer DEFAULT 0;
+
+
+-- ===== 2026-03-16 V2.0 新增表（出货闭环+三方签核+外发物料+异常中心）=====
+
+-- qc_inspections
+CREATE TABLE IF NOT EXISTS public.qc_inspections (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  milestone_id uuid REFERENCES public.milestones(id) ON DELETE SET NULL,
+  inspection_type text NOT NULL CHECK (inspection_type IN ('mid','final','inline','re-inspection')),
+  inspector_id uuid REFERENCES auth.users(id),
+  inspection_date date NOT NULL DEFAULT CURRENT_DATE,
+  qty_inspected integer NOT NULL DEFAULT 0,
+  qty_pass integer NOT NULL DEFAULT 0,
+  qty_fail integer NOT NULL DEFAULT 0,
+  defect_details jsonb DEFAULT '[]',
+  aql_level text DEFAULT 'II',
+  result text NOT NULL DEFAULT 'pending' CHECK (result IN ('pending','pass','fail','conditional')),
+  notes text,
+  evidence_urls jsonb DEFAULT '[]',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- packing_lists
+CREATE TABLE IF NOT EXISTS public.packing_lists (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  created_by uuid REFERENCES auth.users(id),
+  pl_number text UNIQUE,
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','confirmed','locked')),
+  total_cartons integer DEFAULT 0,
+  total_qty integer DEFAULT 0,
+  total_net_weight numeric(10,2),
+  total_gross_weight numeric(10,2),
+  total_volume numeric(10,3),
+  notes text,
+  confirmed_at timestamptz,
+  confirmed_by uuid REFERENCES auth.users(id),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- packing_list_lines
+CREATE TABLE IF NOT EXISTS public.packing_list_lines (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  packing_list_id uuid REFERENCES public.packing_lists(id) ON DELETE CASCADE NOT NULL,
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  style_no text, color text,
+  size_breakdown jsonb DEFAULT '{}',
+  qty_per_carton integer,
+  carton_count integer NOT NULL DEFAULT 0,
+  total_qty integer NOT NULL DEFAULT 0,
+  net_weight_per_carton numeric(8,2),
+  gross_weight_per_carton numeric(8,2),
+  carton_dims_cm jsonb,
+  sequence_no integer DEFAULT 1,
+  created_at timestamptz DEFAULT now()
+);
+
+-- shipment_confirmations（三方签核）
+CREATE TABLE IF NOT EXISTS public.shipment_confirmations (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  packing_list_id uuid REFERENCES public.packing_lists(id),
+  shipment_qty integer NOT NULL,
+  order_qty integer NOT NULL,
+  qty_variance integer GENERATED ALWAYS AS (shipment_qty - order_qty) STORED,
+  variance_reason text,
+  variance_approved_by uuid REFERENCES auth.users(id),
+  qc_pass_qty integer,
+  qc_inspection_id uuid REFERENCES public.qc_inspections(id),
+  sales_sign_id uuid REFERENCES auth.users(id),
+  sales_signed_at timestamptz, sales_note text,
+  warehouse_sign_id uuid REFERENCES auth.users(id),
+  warehouse_signed_at timestamptz, warehouse_note text,
+  finance_sign_id uuid REFERENCES auth.users(id),
+  finance_signed_at timestamptz, finance_note text,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sales_signed','warehouse_signed','fully_signed','locked')),
+  locked_at timestamptz, bl_number text, vessel_name text,
+  etd_actual date, eta_actual date, notes text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- materials_bom
+CREATE TABLE IF NOT EXISTS public.materials_bom (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  material_code text NOT NULL, material_name text NOT NULL,
+  material_type text NOT NULL CHECK (material_type IN ('fabric','trim','lining','label','packing','other')),
+  unit text NOT NULL DEFAULT 'meter',
+  qty_per_piece numeric(10,4) NOT NULL,
+  total_qty numeric(12,4), unit_cost numeric(10,4),
+  supplier text, notes text,
+  created_by uuid REFERENCES auth.users(id),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- outsource_jobs
+CREATE TABLE IF NOT EXISTS public.outsource_jobs (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  job_type text NOT NULL CHECK (job_type IN ('sewing','embroidery','printing','washing','other')),
+  factory_name text NOT NULL, factory_contact text,
+  qty_sent integer NOT NULL DEFAULT 0,
+  qty_returned integer DEFAULT 0, qty_pass integer DEFAULT 0,
+  qty_defect integer DEFAULT 0, qty_scrap integer DEFAULT 0,
+  qty_wip integer GENERATED ALWAYS AS (qty_sent - COALESCE(qty_pass,0) - COALESCE(qty_defect,0) - COALESCE(qty_returned,0) - COALESCE(qty_scrap,0)) STORED,
+  sent_date date, expected_return_date date, actual_return_date date,
+  unit_price numeric(10,4),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','returned','closed','exception')),
+  notes text,
+  created_by uuid REFERENCES auth.users(id),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- issue_slips + lines
+CREATE TABLE IF NOT EXISTS public.issue_slips (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  outsource_job_id uuid REFERENCES public.outsource_jobs(id) ON DELETE SET NULL,
+  slip_type text NOT NULL DEFAULT 'issue' CHECK (slip_type IN ('issue','return','scrap','adjust')),
+  slip_number text UNIQUE, issued_to text,
+  issued_by uuid REFERENCES auth.users(id),
+  received_by uuid REFERENCES auth.users(id),
+  slip_date date NOT NULL DEFAULT CURRENT_DATE,
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','confirmed','void')),
+  notes text, confirmed_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.issue_slip_lines (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  issue_slip_id uuid REFERENCES public.issue_slips(id) ON DELETE CASCADE NOT NULL,
+  bom_id uuid REFERENCES public.materials_bom(id) ON DELETE SET NULL,
+  material_code text NOT NULL, material_name text NOT NULL, unit text NOT NULL,
+  qty_requested numeric(12,4), qty_issued numeric(12,4) NOT NULL DEFAULT 0,
+  qty_returned numeric(12,4) DEFAULT 0, unit_cost numeric(10,4), notes text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- production_reports
+CREATE TABLE IF NOT EXISTS public.production_reports (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  report_date date NOT NULL DEFAULT CURRENT_DATE,
+  reported_by uuid REFERENCES auth.users(id),
+  qty_produced integer NOT NULL DEFAULT 0,
+  qty_cumulative integer DEFAULT 0,
+  qty_defect integer DEFAULT 0,
+  defect_rate numeric(5,2) GENERATED ALWAYS AS (
+    CASE WHEN qty_produced > 0 THEN ROUND((qty_defect::numeric / qty_produced) * 100, 2) ELSE 0 END
+  ) STORED,
+  workers_count integer, efficiency_rate numeric(5,2),
+  issues text, notes text,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(order_id, report_date)
+);
+
+-- exceptions（异常中心）
+CREATE TABLE IF NOT EXISTS public.exceptions (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
+  milestone_id uuid REFERENCES public.milestones(id) ON DELETE SET NULL,
+  exception_type text NOT NULL CHECK (exception_type IN ('quality','material_delay','production_delay','shipment','customer_change','qty_variance','cost_overrun','supplier','other')),
+  severity text NOT NULL DEFAULT 'medium' CHECK (severity IN ('low','medium','high','critical')),
+  title text NOT NULL, description text, root_cause text,
+  owner_id uuid REFERENCES auth.users(id),
+  reported_by uuid REFERENCES auth.users(id),
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','resolved','closed','escalated')),
+  escalated_to uuid REFERENCES auth.users(id), escalated_at timestamptz,
+  resolution text,
+  resolved_by uuid REFERENCES auth.users(id), resolved_at timestamptz,
+  closed_by uuid REFERENCES auth.users(id), closed_at timestamptz,
+  due_date date, auto_generated boolean DEFAULT false, source_ref jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- cost_reconciliations
+CREATE TABLE IF NOT EXISTS public.cost_reconciliations (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  created_by uuid REFERENCES auth.users(id),
+  budgeted_material_cost numeric(12,2) DEFAULT 0,
+  budgeted_labor_cost numeric(12,2) DEFAULT 0,
+  budgeted_outsource_cost numeric(12,2) DEFAULT 0,
+  budgeted_shipping_cost numeric(12,2) DEFAULT 0,
+  budgeted_other_cost numeric(12,2) DEFAULT 0,
+  actual_material_cost numeric(12,2) DEFAULT 0,
+  actual_labor_cost numeric(12,2) DEFAULT 0,
+  actual_outsource_cost numeric(12,2) DEFAULT 0,
+  actual_shipping_cost numeric(12,2) DEFAULT 0,
+  actual_other_cost numeric(12,2) DEFAULT 0,
+  invoice_amount numeric(12,2), currency text DEFAULT 'USD',
+  exchange_rate numeric(8,4) DEFAULT 1,
+  variance_notes text,
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','locked')),
+  submitted_by uuid REFERENCES auth.users(id), submitted_at timestamptz,
+  approved_by uuid REFERENCES auth.users(id), approved_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
