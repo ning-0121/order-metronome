@@ -198,6 +198,43 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     return { error: `Failed to initialize milestones: ${rpcError.message}` };
   }
   
+  // ── 文件上传到 Supabase Storage ──
+  const fileFields: Array<{ formKey: string; fileType: string; required: boolean }> = [
+    { formKey: 'customer_po_file', fileType: 'customer_po', required: true },
+    { formKey: 'production_order_file', fileType: 'production_order', required: true },
+    { formKey: 'trims_sheet_file', fileType: 'trims_sheet', required: false },
+    { formKey: 'packing_requirement_file', fileType: 'packing_requirement', required: false },
+    { formKey: 'tech_pack_file', fileType: 'tech_pack', required: false },
+  ];
+
+  for (const { formKey, fileType, required } of fileFields) {
+    const file = formData.get(formKey) as File | null;
+    if (!file || file.size === 0) {
+      if (required) {
+        await deleteOrder(orderData.id);
+        return { error: fileType === 'customer_po' ? '请上传客户 PO 文件' : '请上传生产制单文件' };
+      }
+      continue;
+    }
+    const ext = file.name.split('.').pop() || 'bin';
+    const storagePath = orderData.id + '/' + fileType + '_' + Date.now() + '.' + ext;
+    const { error: uploadError } = await supabase.storage
+      .from('order-docs')
+      .upload(storagePath, file, { contentType: file.type, upsert: false });
+    if (uploadError) {
+      console.error('[createOrder] file upload error:', uploadError.message);
+      continue;
+    }
+    await supabase.from('order_files').insert({
+      order_id: orderData.id,
+      file_type: fileType,
+      storage_path: storagePath,
+      original_filename: file.name,
+      file_size_bytes: file.size,
+      uploaded_by: user.id,
+    });
+  }
+
   revalidatePath('/orders');
   revalidatePath('/dashboard');
   
