@@ -176,7 +176,7 @@ export default async function OrderDetailPage({
               </dl>
             </div>
 
-            {/* 里程碑快速概览 */}
+            {/* 执行进度概览 */}
             <div className="md:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide">进度概览</h2>
@@ -186,7 +186,7 @@ export default async function OrderDetailPage({
                 {[
                   { label: '总节点', value: milestones?.length || 0, color: 'text-gray-700' },
                   { label: '已完成', value: (milestones || []).filter((m: any) => normalizeMilestoneStatus(m.status) === '已完成').length, color: 'text-green-600' },
-                  { label: '已超期', value: overdueCount, color: overdueCount > 0 ? 'text-red-600' : 'text-gray-400' },
+                  { label: '逾期', value: overdueCount, color: overdueCount > 0 ? 'text-red-600' : 'text-gray-400' },
                   { label: '已阻塞', value: blockedCount, color: blockedCount > 0 ? 'text-orange-600' : 'text-gray-400' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="text-center p-3 rounded-lg bg-gray-50">
@@ -212,7 +212,7 @@ export default async function OrderDetailPage({
                 isAdmin={isAdmin}
               />
             ) : (
-              <p className="text-gray-400 text-center py-8">暂无里程碑数据</p>
+              <p className="text-gray-400 text-center py-8">暂无执行节点数据</p>
             )}
           </div>
         )}
