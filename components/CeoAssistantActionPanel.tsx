@@ -21,8 +21,8 @@ interface CeoAssistantActionPanelProps {
 }
 
 const KIND_LABELS: Record<CEOActionItem['kind'], string> = {
-  overdue: '超期',
-  blocked_24h: '卡住>24h',
+  overdue: '逾期',
+  blocked_24h: '阻塞超24小时',
   pending_delay: '延期待批',
   red_risk_soon: '即将红色风险',
 };
@@ -66,7 +66,7 @@ export function CeoAssistantActionPanel({
         <div>
           <h2 className="text-2xl font-semibold text-gray-900">CEO 助手 · 今日行动建议</h2>
           <p className="text-sm text-gray-700 mt-1">
-            基于里程碑、延期申请与订单风险，筛选出最值得你现在处理的事项。
+            基于执行节点、延期申请与订单风险，筛选出最值得你现在处理的事项。
           </p>
         </div>
       </div>
