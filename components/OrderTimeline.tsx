@@ -167,7 +167,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
                           )}
                           {overdue && isActive && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 超期未结</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 逾期未结</span>
                           )}
                         </div>
 
@@ -197,10 +197,10 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           </div>
                         )}
 
-                        {/* 阻塞原因 */}
+                        {/* 阻塞说明 */}
                         {isBlocked && m.notes && (
                           <div className="mt-2 text-xs text-orange-700 bg-orange-100 rounded-lg px-3 py-2">
-                            🚧 阻塞原因：{m.notes.startsWith('卡单原因：') ? m.notes.substring(5) : m.notes}
+                            🚧 阻塞说明：{m.notes.startsWith('卡单原因：') ? m.notes.substring(5) : m.notes}
                           </div>
                         )}
                       </div>
