@@ -38,37 +38,20 @@ export default async function OrdersPage() {
       </div>
 
         {/* 搜索框 */}
-        <div className="flex gap-3 mb-4">
+        <form method="GET" className="flex gap-3 mb-4">
           <input
             type="text"
-            id="order-search"
+            name="q"
             placeholder="搜索订单号、客户名、款号..."
             className="flex-1 rounded-xl border border-gray-200 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            onInput={(e: any) => {
-              const q = e.target.value.toLowerCase();
-              document.querySelectorAll('tbody tr').forEach((row: any) => {
-                row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
-              });
-            }}
           />
-          <select
-            className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none"
-            onChange={(e: any) => {
-              const v = e.target.value;
-              document.querySelectorAll('tbody tr').forEach((row: any) => {
-                if (!v) { row.style.display = ''; return; }
-                const badge = row.querySelector('.badge');
-                row.style.display = badge?.textContent === v ? '' : 'none';
-              });
-            }}
+          <button
+            type="submit"
+            className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700"
           >
-            <option value="">全部状态</option>
-            <option value="正常">正常</option>
-            <option value="注意">注意</option>
-            <option value="风险">风险</option>
-          </select>
-        </div>
-
+            搜索
+          </button>
+        </form>
       {!orders || orders.length === 0 ? (
         <div className="empty-state rounded-2xl bg-white border border-gray-200">
           <div className="empty-state-icon">📦</div>
