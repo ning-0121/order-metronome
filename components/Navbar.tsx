@@ -13,6 +13,7 @@ const NAV_BY_ROLE: Record<string, { href: string; label: string; icon: string }[
   admin: [
     { href: '/dashboard', label: '工作台', icon: '📋' },
     { href: '/orders', label: '订单列表', icon: '📦' },
+    { href: '/ceo', label: 'CEO总览', icon: '📊' },
     { href: '/admin', label: '管理后台', icon: '⚙️' },
     { href: '/admin/users', label: '用户管理', icon: '👥' },
     { href: '/warehouse', label: '仓库工作台', icon: '🏭' },
