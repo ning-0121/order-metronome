@@ -9,17 +9,16 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
-import { OrderDetailTabs } from '@/components/OrderDetailTabs';
 
 export default async function OrderDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams?: { tab?: string };
 }) {
   const { id } = await params;
-  const { tab = 'overview' } = await searchParams;
+  const tab = searchParams?.tab || 'overview';
 
   const { data: order, error: orderError } = await getOrder(id);
   if (orderError || !order) { notFound(); }
