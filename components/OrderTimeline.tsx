@@ -1,5 +1,4 @@
 'use client';
-
 import { formatDate, isOverdue } from '@/lib/utils/date';
 import { MilestoneActions } from './MilestoneActions';
 import { DelayRequestForm } from './DelayRequestForm';
@@ -18,286 +17,263 @@ interface OrderTimelineProps {
   isAdmin?: boolean;
 }
 
-// Define milestone groups (V1 托底闭环)
+// V1 最终分组（对齐 20 节点表）
 const MILESTONE_GROUPS = [
   {
-    key: 'setup',
-    title: 'A. Order Setup Chain',
-    titleCn: '订单启动链',
-    stepKeys: [
-      'po_confirmed',
-      'finance_approval',
-      'order_docs_complete',
-      'rm_purchase_sheet_submit',
-      'finance_purchase_approval',
-      'procurement_order_placed',
-      'materials_received_inspected',
-    ],
+    key: 'stage1', emoji: '🟦',
+    titleCn: '阶段 1：订单启动',
+    stepKeys: ['po_confirmed', 'finance_approval', 'production_resources_confirmed'],
   },
   {
-    key: 'pps',
-    title: 'B. PPS & Start Production',
-    titleCn: '产前样与生产启动',
-    stepKeys: ['pps_ready', 'pps_sent', 'pps_customer_approved', 'production_start'],
+    key: 'stage2', emoji: '🟨',
+    titleCn: '阶段 2：订单转化',
+    stepKeys: ['order_docs_bom_complete', 'bulk_materials_confirmed'],
   },
   {
-    key: 'production',
-    title: 'C. Production → Shipping',
-    titleCn: '生产与出货准备',
-    stepKeys: [
-      'mid_qc_check',
-      'final_qc_check',
-      'packaging_materials_ready',
-      'packing_labeling_done',
-      'booking_done',
-    ],
+    key: 'stage3', emoji: '🟧',
+    titleCn: '阶段 3：产前样',
+    stepKeys: ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
   },
   {
-    key: 'ship',
-    title: 'D. Ship & Payment',
-    titleCn: '出货与收款',
-    stepKeys: ['shipment_done', 'payment_received'],
+    key: 'stage4', emoji: '🟩',
+    titleCn: '阶段 4：采购与生产',
+    stepKeys: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'],
+  },
+  {
+    key: 'stage5', emoji: '🟪',
+    titleCn: '阶段 5：过程控制',
+    stepKeys: ['mid_qc_check', 'final_qc_check'],
+  },
+  {
+    key: 'stage6', emoji: '🟥',
+    titleCn: '阶段 6：出货控制',
+    stepKeys: ['packing_method_confirmed', 'inspection_release', 'shipping_sample_send'],
+  },
+  {
+    key: 'stage7', emoji: '🟫',
+    titleCn: '阶段 7：物流收款',
+    stepKeys: ['booking_done', 'customs_export', 'payment_received'],
   },
 ];
 
+const STATUS_STYLE: Record<string, string> = {
+  '未开始': 'bg-gray-100 text-gray-600',
+  '进行中': 'bg-blue-100 text-blue-700',
+  '已完成': 'bg-green-100 text-green-700',
+  '卡住':   'bg-orange-100 text-orange-700',
+};
+
 export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, isAdmin = false }: OrderTimelineProps) {
-  const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
-    // Load logs for expanded milestone
-    if (expandedMilestone) {
-      getMilestoneLogs(expandedMilestone).then((result) => {
-        if (result.data) {
-          setLogs((prev) => ({ ...prev, [expandedMilestone]: result.data }));
-        }
+    if (expandedId) {
+      getMilestoneLogs(expandedId).then(r => {
+        if (r.data) setLogs(prev => ({ ...prev, [expandedId]: r.data }));
       });
     }
-  }, [expandedMilestone]);
+  }, [expandedId]);
 
-  // 状态颜色映射（只使用中文状态）
-  const getStatusColor = (status: string): string => {
-    if (status === '未开始') return 'bg-gray-100 text-gray-800';
-    if (status === '进行中') return 'bg-blue-100 text-blue-800';
-    if (status === '已完成') return 'bg-green-100 text-green-800';
-    if (status === '卡住') return 'bg-orange-100 text-orange-800';
-    return 'bg-gray-100 text-gray-800';
-  };
-
-  // Group milestones by section
-  const groupedMilestones = MILESTONE_GROUPS.map((group) => {
-    const groupMilestones = milestones
-      .filter((m) => group.stepKeys.includes(m.step_key))
-      .sort((a, b) => {
-        // Sort by due_at within each group
-        if (!a.due_at && !b.due_at) return 0;
-        if (!a.due_at) return 1;
-        if (!b.due_at) return -1;
-        return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
-      });
-    return { ...group, milestones: groupMilestones };
+  // 按 sequence_number 全局排序（兼容旧数据用 due_at 兜底）
+  const sorted = [...milestones].sort((a, b) => {
+    const aN = (a as any).sequence_number ?? 99;
+    const bN = (b as any).sequence_number ?? 99;
+    if (aN !== bN) return aN - bN;
+    if (!a.due_at || !b.due_at) return 0;
+    return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
   });
+
+  const grouped = MILESTONE_GROUPS.map(g => ({
+    ...g,
+    items: sorted.filter(m => g.stepKeys.includes((m as any).step_key)),
+  }));
 
   return (
     <div className="space-y-6">
-      {groupedMilestones.map((group) => (
-        <div key={group.key} className="space-y-3">
-          {/* Section Header */}
-          <div className="border-b-2 border-gray-300 pb-2">
-            <h3 className="text-xl font-bold text-gray-900">{group.titleCn}</h3>
-            <p className="text-sm text-gray-600">{group.title}</p>
-          </div>
+      {grouped.map(group => {
+        // 跳过没有节点的分组（如 shipping_sample_send 被过滤掉时）
+        if (group.items.length === 0) return null;
 
-          {/* Milestones in this group */}
-          {group.milestones.length > 0 ? (
-            <div className="space-y-3">
-              {group.milestones.map((milestone) => {
-                const overdue = milestone.due_at ? isOverdue(milestone.due_at) : false;
-                const isBlocked = milestone.status === '卡住';
-                const isExpanded = expandedMilestone === milestone.id;
-                const milestoneLogs = logs[milestone.id] || [];
-                const isCritical = milestone.is_critical;
-                const isInProgress = milestone.status === '进行中';
+        // 分组进度统计
+        const done = group.items.filter(m => m.status === '已完成').length;
+        const total = group.items.length;
+        const pct = total > 0 ? Math.round(done / total * 100) : 0;
 
-                // Visual emphasis: border color based on status
-                let borderColor = 'border-gray-200';
-                if (isBlocked) {
-                  borderColor = 'border-orange-400 border-2';
-                } else if (overdue && isInProgress) {
-                  borderColor = 'border-red-400 border-2';
-                } else if (isCritical) {
-                  borderColor = 'border-red-200';
-                }
+        return (
+          <div key={group.key} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            {/* 分组标题 */}
+            <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900 text-sm">
+                {group.emoji} {group.titleCn}
+              </h3>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500">{done}/{total}</span>
+                <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className={'h-full rounded-full ' + (pct === 100 ? 'bg-green-500' : 'bg-indigo-500')}
+                    style={{ width: pct + '%' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 节点列表 */}
+            <div className="divide-y divide-gray-100">
+              {group.items.map(milestone => {
+                const m = milestone as any;
+                const overdue = m.due_at ? isOverdue(m.due_at) : false;
+                const isActive = m.status === '进行中';
+                const isDone = m.status === '已完成';
+                const isBlocked = m.status === '卡住';
+                const isExpanded = expandedId === m.id;
+
+                // 前置阻断检查（显示用）
+                const blockedBy = sorted.filter(other => {
+                  const otherBlocks: string[] = (other as any).blocks || [];
+                  const otherDone = other.status === '已完成';
+                  return otherBlocks.includes(m.step_key) && !otherDone;
+                }).map(o => (o as any).name || (o as any).step_key);
+
+                const isHardBlocked = blockedBy.length > 0 && !isDone;
 
                 return (
-                  <div
-                    key={milestone.id}
-                    id={`milestone-${milestone.id}`}
-                    className={`rounded-lg border ${borderColor} bg-white p-4 text-gray-900 ${
-                      isBlocked || (overdue && isInProgress) ? 'bg-orange-50' : ''
-                    }`}
+                  <div key={m.id}
+                    className={'px-5 py-4 ' + (
+                      isDone ? 'bg-green-50/30' :
+                      isBlocked ? 'bg-orange-50' :
+                      isHardBlocked ? 'bg-red-50/30' :
+                      isActive ? 'bg-blue-50/20' : ''
+                    )}
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2 flex-wrap">
-                          <span className="font-semibold text-lg text-gray-900">
-                            {milestone.name}
+                    <div className="flex items-start justify-between gap-4">
+                      {/* 左侧：节点信息 */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          {/* 状态圆点 */}
+                          <span className={'inline-block w-2 h-2 rounded-full flex-shrink-0 ' + (
+                            isDone ? 'bg-green-500' :
+                            isBlocked ? 'bg-orange-500' :
+                            isActive ? 'bg-blue-500 animate-pulse' :
+                            'bg-gray-300'
+                          )} />
+                          <span className={'font-medium text-sm ' + (isDone ? 'text-gray-500 line-through' : 'text-gray-900')}>
+                            {m.name}
                           </span>
-                          {/* Status Badge */}
-                          <span
-                            className={`text-xs px-2 py-1 rounded font-medium ${getStatusColor(
-                              milestone.status
-                            )}`}
-                          >
-                            {milestone.status}
+                          <span className={'text-xs px-2 py-0.5 rounded-full font-medium ' + (STATUS_STYLE[m.status] || STATUS_STYLE['未开始'])}>
+                            {m.status}
                           </span>
-                          {/* Critical Badge */}
-                          {isCritical && (
-                            <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded font-medium">
-                              关键
-                            </span>
+                          {m.is_critical && !isDone && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
                           )}
-                          {/* Overdue Badge */}
-                          {overdue && isInProgress && (
-                            <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded font-medium">
-                              超期
-                            </span>
+                          {overdue && isActive && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 超期</span>
                           )}
-                          {/* Blocked Badge */}
-                          {isBlocked && (
-                            <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded font-medium">
-                              阻塞
+                        </div>
+
+                        {/* 元信息行 */}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                          <span>负责：{getRoleLabel(m.owner_role)}</span>
+                          {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
+                          {m.due_at && (
+                            <span className={overdue && isActive ? 'text-red-600 font-semibold' : ''}>
+                              截止：{formatDate(m.due_at)}
                             </span>
                           )}
                         </div>
 
-                        {/* Milestone Details */}
-                        <div className="grid grid-cols-2 gap-2 text-sm text-gray-700 mt-3">
-                          <div>
-                            <span className="font-medium text-gray-600">责任角色:</span>{' '}
-                            <span className="text-gray-900">{getRoleLabel(milestone.owner_role)}</span>
+                        {/* evidence_note 提示（进行中且未展开时显示） */}
+                        {isActive && m.evidence_note && !isExpanded && (
+                          <div className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                            <span className="flex-shrink-0">📋</span>
+                            <span>{m.evidence_note}</span>
                           </div>
-                          <div>
-                            <span className="font-medium text-gray-600">负责人:</span>{' '}
-                            <span className="text-gray-900">
-                              {milestone.owner_user_id ? (
-                                (milestone as any).owner_user ? (
-                                  <>
-                                    {(milestone as any).owner_user.full_name || (milestone as any).owner_user.email}
-                                  </>
-                                ) : (
-                                  '加载中...'
-                                )
-                              ) : (
-                                <span className="text-gray-500 italic">未分配</span>
-                              )}
-                            </span>
-                          </div>
-                          {milestone.due_at && (
-                            <div>
-                              <span className="font-medium text-gray-600">到期日:</span>{' '}
-                              <span
-                                className={`text-gray-900 ${
-                                  overdue && isInProgress ? 'text-red-700 font-semibold' : ''
-                                }`}
-                              >
-                                {formatDate(milestone.due_at)}
-                              </span>
-                            </div>
-                          )}
-                          {milestone.planned_at && (
-                            <div>
-                              <span className="font-medium text-gray-600">计划日:</span>{' '}
-                              <span className="text-gray-900">
-                                {formatDate(milestone.planned_at)}
-                              </span>
-                            </div>
-                          )}
-                          {milestone.evidence_required && (
-                            <div className="col-span-2">
-                              <span className="text-blue-700 font-medium">📎 需要上传证据</span>
-                            </div>
-                          )}
-                        </div>
+                        )}
 
-                        {/* Blocked reason */}
-                        {isBlocked && milestone.notes && (
-                          <div className="mt-2 p-2 bg-orange-100 rounded">
-                            <p className="text-orange-800 text-sm font-medium">
-                              <span className="font-semibold">卡住原因:</span>{' '}
-                              {milestone.notes.startsWith('卡住原因：')
-                                ? milestone.notes.substring(5)
-                                : milestone.notes}
-                            </p>
+                        {/* 硬阻断提示 */}
+                        {isHardBlocked && !isDone && (
+                          <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                            ⛔ 前置节点未完成：{blockedBy.join('、')}
+                          </div>
+                        )}
+
+                        {/* 阻塞原因 */}
+                        {isBlocked && m.notes && (
+                          <div className="mt-2 text-xs text-orange-700 bg-orange-100 rounded-lg px-3 py-2">
+                            🚧 阻塞原因：{m.notes.startsWith('卡住原因：') ? m.notes.substring(5) : m.notes}
                           </div>
                         )}
                       </div>
 
-                      <div className="ml-4">
-                        <button
-                          onClick={() =>
-                            setExpandedMilestone(isExpanded ? null : milestone.id)
-                          }
-                          className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                        >
-                          {isExpanded ? '收起' : '查看'}详情
-                        </button>
-                      </div>
+                      {/* 右侧：展开按钮 */}
+                      <button
+                        onClick={() => setExpandedId(isExpanded ? null : m.id)}
+                        className="flex-shrink-0 text-xs text-indigo-600 hover:text-indigo-700 font-medium px-3 py-1.5 rounded-lg hover:bg-indigo-50"
+                      >
+                        {isExpanded ? '收起' : '处理 →'}
+                      </button>
                     </div>
 
+                    {/* 展开区 */}
                     {isExpanded && (
-                      <div className="mt-4 space-y-4 border-t border-gray-200 pt-4">
-                        {/* Owner Assignment (Admin only) */}
+                      <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
                         <OwnerAssignment
-                          milestoneId={milestone.id}
-                          currentOwnerUserId={milestone.owner_user_id}
+                          milestoneId={m.id}
+                          currentOwnerUserId={m.owner_user_id}
                           isAdmin={isAdmin}
                         />
 
-                        {/* Evidence Upload Section */}
-                        <EvidenceUpload
-                          milestoneId={milestone.id}
-                          orderId={orderId}
-                          evidenceRequired={milestone.evidence_required || false}
-                        />
+                        {/* evidence_note 完整提示 */}
+                        {m.evidence_note && (
+                          <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
+                            <p className="text-xs font-semibold text-amber-800 mb-1">📋 需要提交的凭证：</p>
+                            <p className="text-xs text-amber-700">{m.evidence_note}</p>
+                          </div>
+                        )}
 
-                        <MilestoneActions 
-                          milestone={milestone} 
+                        {/* 核心操作区：MilestoneActions（去处理 + 申请延期） */}
+                        <MilestoneActions
+                          milestone={m}
+                          allMilestones={sorted}
                           currentRole={currentRole}
                           isAdmin={isAdmin}
+                          orderId={orderId}
                         />
 
-                        {milestone.status !== '已完成' && (isAdmin || (currentRole && currentRole.toLowerCase() === milestone.owner_role?.toLowerCase())) && (
-                          <div className="bg-gray-50 p-4 rounded">
-                            <h4 className="font-semibold mb-2 text-gray-900">申请延期</h4>
+                        <EvidenceUpload
+                          milestoneId={m.id}
+                          orderId={orderId}
+                          evidenceRequired={m.evidence_required || false}
+                        />
+
+                        {m.status !== '已完成' &&
+                          (isAdmin || (currentRole && currentRole.toLowerCase() === m.owner_role?.toLowerCase())) && (
+                          <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">申请正式延期</h4>
                             <DelayRequestForm
-                              milestoneId={milestone.id}
-                              milestone={milestone}
+                              milestoneId={m.id}
+                              milestone={m}
                               orderIncoterm={orderIncoterm}
-                              milestoneDueAt={milestone.due_at || null}
+                              milestoneDueAt={m.due_at || null}
                             />
                           </div>
                         )}
 
-                        <div className="bg-gray-50 p-4 rounded">
-                          <h4 className="font-semibold mb-2 text-gray-900">操作日志</h4>
-                          {milestoneLogs.length > 0 ? (
+                        {/* 操作日志 */}
+                        <div className="bg-gray-50 rounded-lg p-4">
+                          <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">操作日志</h4>
+                          {(logs[m.id] || []).length > 0 ? (
                             <div className="space-y-2">
-                              {milestoneLogs.map((log: any) => (
-                                <div
-                                  key={log.id}
-                                  className="text-sm border-l-2 border-gray-300 pl-4 bg-white p-2 rounded"
-                                >
+                              {(logs[m.id] || []).map((log: any) => (
+                                <div key={log.id} className="text-xs border-l-2 border-indigo-200 pl-3 py-1">
                                   <p className="font-medium text-gray-900">{log.action}</p>
-                                  {log.note && <p className="text-gray-700 mt-1">{log.note}</p>}
-                                  <p className="text-gray-500 text-xs mt-1">
-                                    {formatDate(log.created_at, 'yyyy-MM-dd HH:mm')}
-                                  </p>
+                                  {log.note && <p className="text-gray-600 mt-0.5">{log.note}</p>}
+                                  <p className="text-gray-400 mt-0.5">{formatDate(log.created_at)}</p>
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            <p className="text-gray-500 text-sm">暂无操作日志</p>
+                            <p className="text-xs text-gray-400">暂无操作日志</p>
                           )}
                         </div>
                       </div>
@@ -306,11 +282,9 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                 );
               })}
             </div>
-          ) : (
-            <p className="text-gray-500 text-sm italic">此分组暂无节点</p>
-          )}
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
