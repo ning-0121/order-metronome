@@ -9,6 +9,11 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
+import { BomTab } from '@/components/tabs/BomTab';
+import { OutsourceTab } from '@/components/tabs/OutsourceTab';
+import { QcTab } from '@/components/tabs/QcTab';
+import { PackingTab } from '@/components/tabs/PackingTab';
+import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 
 export default async function OrderDetailPage({
   params,
@@ -96,6 +101,11 @@ export default async function OrderDetailPage({
               { key: 'timeline', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
+          { key: 'bom', label: 'BOM/物料' },
+          { key: 'outsource', label: '外发任务' },
+          { key: 'qc', label: 'QC检验' },
+          { key: 'packing', label: '装箱' },
+          { key: 'shipment', label: '出货&签核' },
             ].map(t => (
               <Link
                 key={t.key}
@@ -253,6 +263,52 @@ export default async function OrderDetailPage({
             )}
           </div>
         )}
+        {/* Tab: BOM/物料 */}
+        {tab === 'bom' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">物料 BOM</h2>
+            <BomTab orderId={id} />
+          </div>
+        )}
+
+        {/* Tab: 外发任务 */}
+        {tab === 'outsource' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">外发任务</h2>
+            <OutsourceTab orderId={id} isAdmin={isAdmin} />
+          </div>
+        )}
+
+        {/* Tab: QC检验 */}
+        {tab === 'qc' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">QC 检验记录</h2>
+            <QcTab orderId={id} isAdmin={isAdmin} currentRole={currentRole} />
+          </div>
+        )}
+
+        {/* Tab: 装箱 */}
+        {tab === 'packing' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">装箱单</h2>
+            <PackingTab orderId={id} isAdmin={isAdmin} />
+          </div>
+        )}
+
+        {/* Tab: 出货&签核 */}
+        {tab === 'shipment' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">出货确认 & 三方签核</h2>
+            <ShipmentTab
+              orderId={id}
+              orderQty={orderData.quantity}
+              currentRole={currentRole}
+              isAdmin={isAdmin}
+              userId={user?.id}
+            />
+          </div>
+        )}
+
 
       </div>
     </div>
