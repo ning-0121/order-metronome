@@ -80,6 +80,21 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
   const warehouse_due_date = formData.get('warehouse_due_date') as string | null;
   const order_type = formData.get('order_type') as OrderType;
   const packaging_type = formData.get('packaging_type') as PackagingType;
+  // PO 容器模型新增字段
+  const customer_po_number = formData.get('customer_po_number') as string | null;
+  const order_date = formData.get('order_date') as string | null;
+  const total_quantity = formData.get('total_quantity') ? parseInt(formData.get('total_quantity') as string, 10) : null;
+  const style_count = formData.get('style_count') ? parseInt(formData.get('style_count') as string, 10) : null;
+  const eta = formData.get('eta') as string | null;
+  const shipping_sample_required = formData.get('shipping_sample_required') === 'true';
+  const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
+  const shipment_basis = incoterm === 'FOB' ? 'shipment' : 'arrival';
+  // 风险标记
+  const has_plus_size = formData.get('has_plus_size') === 'true';
+  const high_stretch = formData.get('high_stretch') === 'true';
+  const light_color_risk = formData.get('light_color_risk') === 'true';
+  const complex_print = formData.get('complex_print') === 'true';
+  const new_customer = formData.get('new_customer') === 'true';
   const style_no = formData.get('style_no') as string | null;
   const po_number = formData.get('po_number') as string | null;
   const quantity = formData.get('quantity') ? parseInt(formData.get('quantity') as string, 10) : null;
@@ -106,6 +121,19 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     po_number: po_number || null,
     quantity: quantity || null,
     cancel_date: cancel_date || null,
+    customer_po_number: customer_po_number || null,
+    order_date: order_date || null,
+    total_quantity: total_quantity || null,
+    style_count: style_count || null,
+    eta: eta || null,
+    shipment_basis,
+    shipping_sample_required,
+    shipping_sample_deadline: shipping_sample_deadline || null,
+    has_plus_size,
+    high_stretch,
+    light_color_risk,
+    complex_print,
+    new_customer,
     created_by: user.id,
   };
   
