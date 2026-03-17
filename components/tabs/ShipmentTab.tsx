@@ -1,22 +1,36 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export function ShipmentTab({ orderId, orderQty, currentRole, isAdmin, userId }: {
-  orderId: string; orderQty?: number; currentRole: string; isAdmin: boolean; userId?: string;
+  orderId: string;
+  orderQty?: number;
+  currentRole: string;
+  isAdmin: boolean;
+  userId?: string;
 }) {
   const [conf, setConf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [signing, setSigning] = useState(false);
 
-  const load = () => {
-    createClient().from('shipment_confirmations').select('*')
-      .eq('order_id', orderId).order('created_at', { ascending: false }).limit(1)
-      .then(({ data }) => { setConf(data?.[0] || null); setLoading(false); });
-  };
-  useEffect(() => { load(); }, [orderId]);
+  const load = useCallback(() => {
+    createClient()
+      .from('shipment_confirmations')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        setConf(data?.[0] || null);
+        setLoading(false);
+      });
+  }, [orderId]);
 
-  const canSign = (field: string) => {
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const canSign = (field: string): boolean => {
     if (!conf || conf.status === 'locked' || conf[field]) return false;
     if (field === 'sales_sign_id') return currentRole === 'sales' || isAdmin;
     if (field === 'warehouse_sign_id') return currentRole === 'logistics' || isAdmin;
@@ -28,39 +42,47 @@ export function ShipmentTab({ orderId, orderQty, currentRole, isAdmin, userId }:
     if (!conf || !userId) return;
     setSigning(true);
     const atField = field.replace('_sign_id', '_signed_at');
-    await createClient().from('shipment_confirmations').update({
-      [field]: userId, [atField]: new Date().toISOString(),
-    }).eq('id', conf.id);
-    load(); setSigning(false);
+    await createClient()
+      .from('shipment_confirmations')
+      .update({ [field]: userId, [atField]: new Date().toISOString() })
+      .eq('id', conf.id);
+    load();
+    setSigning(false);
   };
 
   const signers = [
-    { role: '业务确认', field: 'sales_sign_id', at: 'sales_signed_at' },
-    { role: '仓库确认', field: 'warehouse_sign_id', at: 'warehouse_signed_at' },
-    { role: '财务确认', field: 'finance_sign_id', at: 'finance_signed_at' },
+    { role: '业务确认', field: 'sales_sign_id', signedAt: 'sales_signed_at' },
+    { role: '仓库确认', field: 'warehouse_sign_id', signedAt: 'warehouse_signed_at' },
+    { role: '财务确认', field: 'finance_sign_id', signedAt: 'finance_signed_at' },
   ];
 
-  if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
-  if (!conf) return (
-    <div className="text-center py-12 text-gray-400">
-      <p className="mb-2">暂无出货确认记录</p>
-      <p className="text-sm">装箱确认后，由业务创建出货确认单</p>
-    </div>
-  );
+  if (loading) {
+    return <div className="text-center py-8 text-gray-400">加载中...</div>;
+  }
+
+  if (!conf) {
+    return (
+      <div className="text-center py-12 text-gray-400">
+        <p className="mb-2">暂无出货确认记录</p>
+        <p className="text-sm">装箱确认后，由业务创建出货确认单</p>
+      </div>
+    );
+  }
 
   const variance = conf.shipment_qty - (conf.order_qty || 0);
-  const variancePct = conf.order_qty > 0 ? Math.round(Math.abs(variance) / conf.order_qty * 100) : 0;
+  const variancePct = conf.order_qty > 0
+    ? Math.round((Math.abs(variance) / conf.order_qty) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
-      {/* 数量核对 */}
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: '订单数量', value: conf.order_qty, color: 'text-gray-700' },
           { label: '出货数量', value: conf.shipment_qty, color: 'text-gray-900' },
           {
             label: '差异',
-            value: (variance >= 0 ? '+' : '') + variance + ' (' + variancePct + '%)',
+            value: (variance >= 0 ? '+' : '') + String(variance) + ' (' + String(variancePct) + '%)',
             color: variance === 0 ? 'text-green-600' : Math.abs(variancePct) > 5 ? 'text-red-600' : 'text-yellow-600',
           },
         ].map(({ label, value, color }) => (
@@ -77,28 +99,41 @@ export function ShipmentTab({ orderId, orderQty, currentRole, isAdmin, userId }:
         </div>
       )}
 
-      {/* 三方签核 */}
       <div>
         <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">三方签核</h3>
         <div className="space-y-3">
-          {signers.map(({ role, field, at }) => {
+          {signers.map(({ role, field, signedAt }) => {
             const signed = !!conf[field];
             return (
-              <div key={field} className={`flex items-center justify-between p-4 rounded-xl border ${signed ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'}`}>
+              <div
+                key={field}
+                className={`flex items-center justify-between p-4 rounded-xl border ${
+                  signed ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'
+                }`}
+              >
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${signed ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}`}>
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                      signed ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'
+                    }`}
+                  >
                     {signed ? '✓' : '?'}
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">{role}</p>
-                    {signed && conf[at] && (
-                      <p className="text-xs text-gray-400">{new Date(conf[at]).toLocaleString('zh-CN')}</p>
+                    {signed && conf[signedAt] && (
+                      <p className="text-xs text-gray-400">
+                        {new Date(conf[signedAt] as string).toLocaleString('zh-CN')}
+                      </p>
                     )}
                   </div>
                 </div>
                 {canSign(field) && (
-                  <button onClick={() => handleSign(field)} disabled={signing}
-                    className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  <button
+                    onClick={() => handleSign(field)}
+                    disabled={signing}
+                    className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  >
                     {signing ? '签核中...' : '我来签核'}
                   </button>
                 )}
@@ -110,7 +145,7 @@ export function ShipmentTab({ orderId, orderQty, currentRole, isAdmin, userId }:
 
       {conf.status === 'fully_signed' && (
         <div className="p-4 bg-green-50 rounded-xl border border-green-200 text-center">
-          <p className="text-green-700 font-medium">✅ 三方签核已完成，出货已锁定</p>
+          <p className="text-green-700 font-medium">三方签核已完成，出货已锁定</p>
         </div>
       )}
     </div>
