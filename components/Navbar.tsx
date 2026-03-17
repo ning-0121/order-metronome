@@ -54,6 +54,18 @@ export function Navbar({ isAdmin }: NavbarProps) {
                     <span className="text-base">{link.icon}</span>
                     {link.label}
                   </Link>
+          <Link
+            href="/warehouse"
+            className={pathname === '/warehouse' ? 'text-indigo-600 font-semibold' : 'text-gray-600 hover:text-gray-900'}
+          >
+            仓库工作台
+          </Link>
+          <Link
+            href="/exceptions"
+            className={pathname === '/exceptions' ? 'text-indigo-600 font-semibold' : 'text-gray-600 hover:text-gray-900'}
+          >
+            异常中心
+          </Link>
                 );
               })}
             </div>
