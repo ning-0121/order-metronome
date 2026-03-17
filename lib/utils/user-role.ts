@@ -48,16 +48,31 @@ export function isAdmin(email: string | null | undefined): boolean {
  */
 export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRole; isAdmin: boolean }> {
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user || !user.email) {
     return { role: 'sales', isAdmin: false };
   }
-  
+
+  // 优先从 profiles.role 读取（由 Admin 在用户管理页授权）
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, is_active')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  // 账号已停用
+  if (profile && profile.is_active === false) {
+    return { role: 'sales', isAdmin: false };
+  }
+
+  // 有明确授权角色则使用
+  if (profile?.role) {
+    const role = profile.role as UserRole;
+    return { role, isAdmin: role === 'admin' || role === 'ceo' };
+  }
+
+  // 兜底：admin allowlist（确保 alex 和 su 无论如何都能访问）
   const role = getUserRoleFromEmail(user.email);
-  return {
-    role,
-    isAdmin: role === 'admin',
-  };
+  return { role, isAdmin: role === 'admin' };
 }
 
 /**
