@@ -14,6 +14,7 @@ const NAV_BY_ROLE: Record<string, { href: string; label: string; icon: string }[
     { href: '/dashboard', label: '工作台', icon: '📋' },
     { href: '/orders', label: '订单列表', icon: '📦' },
     { href: '/ceo', label: 'CEO总览', icon: '📊' },
+    { href: '/ceo-war-room', label: 'War Room', icon: '⚔️' },
     { href: '/admin', label: '管理后台', icon: '⚙️' },
     { href: '/admin/users', label: '用户管理', icon: '👥' },
     { href: '/warehouse', label: '仓库工作台', icon: '🏭' },
@@ -23,6 +24,7 @@ const NAV_BY_ROLE: Record<string, { href: string; label: string; icon: string }[
     { href: '/dashboard', label: '工作台', icon: '📋' },
     { href: '/orders', label: '订单列表', icon: '📦' },
     { href: '/ceo', label: 'CEO总览', icon: '📊' },
+    { href: '/ceo-war-room', label: 'War Room', icon: '⚔️' },
     { href: '/exceptions', label: '异常中心', icon: '⚠️' },
   ],
   sales: [
