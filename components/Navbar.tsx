@@ -1,5 +1,4 @@
 'use client';
-
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
@@ -11,16 +10,20 @@ interface NavbarProps {
 export function Navbar({ isAdmin }: NavbarProps) {
   const pathname = usePathname();
 
-  // Don't show navbar on login page
-  if (pathname === '/login') {
-    return null;
-  }
+  if (pathname === '/login') return null;
 
   const navLinks = [
     { href: '/dashboard', label: '我的工作台', icon: '📋' },
     { href: '/orders', label: '订单列表', icon: '📦' },
     { href: '/admin', label: '管理后台', icon: '⚙️' },
   ];
+
+  const extraLinks = [
+    { href: '/warehouse', label: '仓库工作台', icon: '🏭' },
+    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
+  ];
+
+  const allLinks = isAdmin ? [...navLinks, ...extraLinks] : navLinks;
 
   return (
     <nav className="sticky top-0 z-50 border-b border-gray-200/80 bg-white/80 backdrop-blur-md">
@@ -39,7 +42,7 @@ export function Navbar({ isAdmin }: NavbarProps) {
 
             {/* Nav Links */}
             <div className="flex items-center gap-1">
-              {navLinks.map((link) => {
+              {allLinks.map((link) => {
                 const isActive = pathname === link.href || pathname.startsWith(link.href + '/');
                 return (
                   <Link
@@ -54,18 +57,6 @@ export function Navbar({ isAdmin }: NavbarProps) {
                     <span className="text-base">{link.icon}</span>
                     {link.label}
                   </Link>
-          <Link
-            href="/warehouse"
-            className={pathname === '/warehouse' ? 'text-indigo-600 font-semibold' : 'text-gray-600 hover:text-gray-900'}
-          >
-            仓库工作台
-          </Link>
-          <Link
-            href="/exceptions"
-            className={pathname === '/exceptions' ? 'text-indigo-600 font-semibold' : 'text-gray-600 hover:text-gray-900'}
-          >
-            异常中心
-          </Link>
                 );
               })}
             </div>
