@@ -106,7 +106,7 @@ export function MilestoneActions({
   async function handleBlock() {
     setBlockError('');
     if (!blockReason.trim()) {
-      setBlockError('请填写阻塞原因');
+      setBlockError('请填写阻塞说明');
       return;
     }
     setLoading(true);
@@ -243,13 +243,13 @@ export function MilestoneActions({
           <p className="text-sm font-semibold text-orange-900">申请延期 / 标记阻塞</p>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
-              阻塞原因 <span className="text-red-500">*</span>
+              阻塞说明 <span className="text-red-500">*</span>
             </label>
             <textarea
               value={blockReason}
               onChange={e => setBlockReason(e.target.value)}
               rows={3}
-              placeholder="说明阻塞原因、需要哪些帮助..."
+              placeholder="说明阻塞说明、需要哪些帮助..."
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-orange-400"
             />
           </div>
