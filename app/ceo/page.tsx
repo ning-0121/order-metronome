@@ -195,7 +195,7 @@ export default async function CEODashboardPage() {
           order_id: o.id,
           order_no: o.order_no,
           milestone_id: m.id,
-          reason: `${m.name} 已超期${daysOver}天`,
+          reason: `${m.name} 已逾期 ${daysOver} 天`,
           suggestion: '建议立即催办负责人，并确认新的完成时间或调整交期。',
         });
       }
@@ -618,7 +618,7 @@ export default async function CEODashboardPage() {
           <section>
             <h3 className="text-sm font-semibold text-gray-800 mb-2">今日新增风险</h3>
             {newRiskOrders.length === 0 ? (
-              <p className="text-sm text-gray-600">今日无新增进入超期或阻塞的订单。</p>
+              <p className="text-sm text-gray-600">今日无新增逾期或阻塞订单。</p>
             ) : (
               <ul className="space-y-1 text-sm">
                 {newRiskOrders.slice(0, 10).map((o: any) => (
