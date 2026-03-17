@@ -52,7 +52,7 @@ export async function getMilestonesByOrder(orderId: string) {
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   // Get milestones
@@ -99,7 +99,7 @@ export async function getUserMilestones(userId: string) {
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   const { data: milestones, error } = await supabase
@@ -120,7 +120,7 @@ export async function markMilestoneDone(milestoneId: string) {
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   // Get current milestone (for order_id and evidence_required)
@@ -131,7 +131,7 @@ export async function markMilestoneDone(milestoneId: string) {
     .single();
   
   if (getError || !milestone) {
-    return { error: getError?.message || 'Milestone not found' };
+    return { error: getError?.message || '找不到该执行节点' };
   }
   
   // Check if evidence is required and exists
@@ -143,11 +143,11 @@ export async function markMilestoneDone(milestoneId: string) {
       .limit(1);
     
     if (attachmentsError) {
-      return { error: `Failed to check evidence: ${attachmentsError.message}` };
+      return { error: `凭证检查失败：${attachmentsError.message}` };
     }
     
     if (!attachments || attachments.length === 0) {
-      return { error: 'Evidence is required. Please upload at least one file before marking this milestone as done.' };
+      return { error: '此节点需要上传凭证后才能标记完成，请先在「去处理」中上传文件' };
     }
   }
   
@@ -155,7 +155,7 @@ export async function markMilestoneDone(milestoneId: string) {
   const result = await transitionMilestoneStatus(milestoneId, '已完成', null);
   
   if (result.error || !result.data) {
-    return { error: result.error || 'Failed to update milestone' };
+    return { error: result.error || '节点状态更新失败，请重试' };
   }
   
   const updatedMilestone = result.data;
@@ -176,11 +176,11 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   if (!blockedReason || blockedReason.trim() === '') {
-    return { error: 'Blocked reason is required' };
+    return { error: '请填写阻塞说明' };
   }
   
   // Get current milestone (for order_id)
@@ -191,14 +191,14 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
     .single();
   
   if (getError || !milestone) {
-    return { error: getError?.message || 'Milestone not found' };
+    return { error: getError?.message || '找不到该执行节点' };
   }
   
   // 使用状态机转换（带校验，blockedReason 会自动格式化为 notes）
-  const result = await transitionMilestoneStatus(milestoneId, '卡住', blockedReason);
+  const result = await transitionMilestoneStatus(milestoneId, '阻塞', blockedReason);
   
   if (result.error || !result.data) {
-    return { error: result.error || 'Failed to update milestone' };
+    return { error: result.error || '节点状态更新失败，请重试' };
   }
   
   const updatedMilestone = result.data;
@@ -219,13 +219,13 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
       const { count } = await (supabase.from('milestones') as any)
         .select('*', { count: 'exact', head: true })
         .in('order_id', orderIds)
-        .eq('status', '卡住');
+        .eq('status', '阻塞');
       if (count != null && count >= 2) {
         await (supabase.from('customer_memory') as any).insert({
           customer_id: customerName,
           order_id: milestoneData.order_id,
           source_type: 'repeated_blocked',
-          content: `该客户已有 ${count} 个控制点处于卡住状态。本次: ${blockedReason}`.slice(0, 2000),
+          content: `该客户已有 ${count} 个控制点处于阻塞状态。本次: ${blockedReason}`.slice(0, 2000),
           category: 'general',
           risk_level: 'high',
           created_by: user.id,
@@ -261,7 +261,7 @@ async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
     await transitionMilestoneStatus(
       nextMilestone.id,
       '进行中',
-      '自动推进：上一个里程碑已完成'
+      '自动推进：上一节点已完成'
     );
   }
 }
@@ -277,9 +277,9 @@ export async function updateMilestoneStatus(
   // 重定向到专用函数
   if (normalizedStatus === '已完成') {
     return markMilestoneDone(milestoneId);
-  } else if (normalizedStatus === '卡住') {
+  } else if (normalizedStatus === '阻塞') {
     if (!note) {
-      return { error: '卡住原因不能为空' };
+      return { error: '请填写阻塞说明' };
     }
     return markMilestoneBlocked(milestoneId, note);
   }
@@ -288,7 +288,7 @@ export async function updateMilestoneStatus(
   const result = await transitionMilestoneStatus(milestoneId, normalizedStatus, note || null);
   
   if (result.error || !result.data) {
-    return { error: result.error || 'Failed to update milestone' };
+    return { error: result.error || '节点状态更新失败，请重试' };
   }
   
   const supabase = await createClient();
@@ -317,14 +317,14 @@ export async function blockMilestone(milestoneId: string, reason: string, note: 
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   if (!reason || !note) {
-    return { error: 'Reason and note are required when blocking a milestone' };
+    return { error: '请填写阻塞原因和说明' };
   }
   
-  return updateMilestoneStatus(milestoneId, '卡住', `${reason}: ${note}`);
+  return updateMilestoneStatus(milestoneId, '阻塞', `${reason}: ${note}`);
 }
 
 export async function assignMilestoneOwner(milestoneId: string, userId: string) {
@@ -332,7 +332,7 @@ export async function assignMilestoneOwner(milestoneId: string, userId: string) 
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   // Check if user is admin
@@ -343,14 +343,14 @@ export async function assignMilestoneOwner(milestoneId: string, userId: string) 
     .single();
   
   if (!profile || (profile as any).role !== 'admin') {
-    return { error: 'Only admins can assign milestone owners' };
+    return { error: '只有管理员可以指定执行人' };
   }
   
   // 使用 repository 更新
   const result = await updateMilestone(milestoneId, { owner_user_id: userId });
   
   if (result.error || !result.data) {
-    return { error: result.error || 'Failed to update milestone' };
+    return { error: result.error || '节点状态更新失败，请重试' };
   }
   
   const milestone = result.data;
@@ -367,11 +367,11 @@ export async function markMilestoneUnblocked(milestoneId: string) {
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   // 使用状态机转换（卡住 -> 进行中）
-  const result = await transitionMilestoneStatus(milestoneId, '进行中', '已解除卡住状态');
+  const result = await transitionMilestoneStatus(milestoneId, '进行中', '已解除阻塞');
   
   if (result.error || !result.data) {
     return { error: result.error || 'Failed to unblock milestone' };
@@ -391,7 +391,7 @@ export async function getMilestoneLogs(milestoneId: string) {
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   const { data: logs, error } = await supabase
@@ -423,14 +423,14 @@ export async function addExecutionNote(
 ): Promise<{ data?: unknown; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: 'Unauthorized' };
+  if (!user) return { error: '请先登录' };
   if (!note || !note.trim()) return { error: '备注不能为空' };
 
   const { data: milestone } = await (supabase.from('milestones') as any)
     .select('order_id')
     .eq('id', milestoneId)
     .single();
-  if (!milestone) return { error: 'Milestone not found' };
+  if (!milestone) return { error: '找不到该执行节点' };
   const orderId = (milestone as any).order_id;
 
   await logMilestoneAction(supabase, milestoneId, orderId, 'execution_note', note.trim());
@@ -470,7 +470,7 @@ export async function addExecutionNote(
  */
 export async function logEvidenceUpload(milestoneId: string, orderId: string, fileName: string) {
   const supabase = await createClient();
-  await logMilestoneAction(supabase, milestoneId, orderId, 'upload_evidence', `Uploaded evidence: ${fileName}`);
+  await logMilestoneAction(supabase, milestoneId, orderId, 'upload_evidence', `已上传凭证：${fileName}`);
 }
 
 /**
@@ -484,7 +484,7 @@ export async function updateMilestoneOwner(
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user || !user.email) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
   
   // Check if user is admin
@@ -496,7 +496,7 @@ export async function updateMilestoneOwner(
   
   const isAdmin = profile && (profile as any).role === 'admin';
   if (!isAdmin) {
-    return { error: 'Only admin can assign milestone owners' };
+    return { error: '只有管理员可以指定执行人' };
   }
   
   // Get milestone to get order_id for logging
@@ -507,7 +507,7 @@ export async function updateMilestoneOwner(
     .single();
   
   if (getError || !milestone) {
-    return { error: getError?.message || 'Milestone not found' };
+    return { error: getError?.message || '找不到该执行节点' };
   }
   
   // Update owner_user_id
@@ -523,13 +523,13 @@ export async function updateMilestoneOwner(
   }
   
   // Log the action
-  const ownerInfo = ownerUserId ? `Assigned to user: ${ownerUserId}` : 'Unassigned';
+  const ownerInfo = ownerUserId ? `已指派至：${ownerUserId}` : '已取消指派';
   await logMilestoneAction(
     supabase,
     milestoneId,
     milestone.order_id,
     'update',
-    `Owner assignment: ${ownerInfo}`
+    `执行人变更：${ownerInfo}`
   );
   
   revalidatePath('/orders');
