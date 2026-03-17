@@ -110,7 +110,32 @@ export default async function OrderDetailPage({
                 <dd className="text-sm text-gray-900">{orderData.notes}</dd>
               </div>
             )}
-          </dl>
+          
+              {orderData.style_no && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-600">款号</dt>
+                  <dd className="text-sm text-gray-900">{orderData.style_no}</dd>
+                </div>
+              )}
+              {orderData.po_number && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-600">客户PO号</dt>
+                  <dd className="text-sm text-gray-900">{orderData.po_number}</dd>
+                </div>
+              )}
+              {orderData.quantity && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-600">数量</dt>
+                  <dd className="text-sm text-gray-900">{orderData.quantity} 件</dd>
+                </div>
+              )}
+              {orderData.cancel_date && (
+                <div>
+                  <dt className="text-sm font-medium text-gray-600">Cancel Date</dt>
+                  <dd className="text-sm text-gray-900">{formatDate(orderData.cancel_date)}</dd>
+                </div>
+              )}
+</dl>
         </div>
       </div>
 
