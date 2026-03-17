@@ -17,21 +17,8 @@ export default async function OrderDetailPage({
   const { id } = await params;
   const { data: order, error: orderError } = await getOrder(id);
 
-  // Debug: Show what we received instead of immediately calling notFound()
   if (orderError || !order) {
-    return (
-      <div className="p-6 space-y-4">
-        <h1 className="text-2xl font-bold text-red-600">调试：订单未找到</h1>
-        <div className="bg-gray-100 p-4 rounded">
-          <p><strong>订单ID:</strong> {id}</p>
-          <p><strong>错误信息:</strong> {orderError || '无'}</p>
-          <p><strong>订单数据:</strong> {order ? JSON.stringify(order, null, 2) : '无'}</p>
-        </div>
-        <p className="text-sm text-gray-600">
-          如果此订单应该存在，请检查：1) RLS策略 2) 订单ID格式（必须是UUID） 3) 数据库连接
-        </p>
-      </div>
-    );
+    notFound();
   }
 
   const orderData = order as any;
