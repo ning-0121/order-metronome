@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
+import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
 import { calcDueDates } from '@/lib/schedule';
 import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
 import { 
@@ -151,15 +151,20 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
   
   // 计算所有里程碑的 due_at
   const dueDates = calcDueDates({
-    createdAt,
-    incoterm: orderData.incoterm as "FOB" | "DDP",
+    orderDate: order_date,
+    createdAt: new Date(orderData.created_at),
+    incoterm: orderData.incoterm as 'FOB' | 'DDP',
     etd: orderData.etd,
     warehouseDueDate: orderData.warehouse_due_date,
-    packagingType: orderData.packaging_type as "standard" | "custom",
-  });
+    eta: orderData.eta,
+    packagingType: orderData.packaging_type as 'standard' | 'custom',
+    orderType: (orderData.order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
+    shippingSampleRequired: orderData.shipping_sample_required || false,
+    shippingSampleDeadline: orderData.shipping_sample_deadline,
+  })
   
   // 生成里程碑数据：使用 milestoneTemplate 和 calcDueDates
-  const milestonesData = MILESTONE_TEMPLATE_V1.map((template, index) => {
+  const milestonesData = getApplicableMilestones(orderData.order_type, orderData.shipping_sample_required).map((template, index) => {
     const dueAt = dueDates[template.step_key as keyof typeof dueDates];
     if (!dueAt) {
       throw new Error(`Missing due date calculation for step_key: ${template.step_key}`);
