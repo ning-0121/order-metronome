@@ -100,7 +100,7 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
                     )}
                     {isOverdue && (
                       <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded font-medium">
-                        已超期
+                        逾期
                       </span>
                     )}
                     {!isOverdue && isDueToday && (
