@@ -37,6 +37,38 @@ export default async function OrdersPage() {
         </Link>
       </div>
 
+        {/* 搜索框 */}
+        <div className="flex gap-3 mb-4">
+          <input
+            type="text"
+            id="order-search"
+            placeholder="搜索订单号、客户名、款号..."
+            className="flex-1 rounded-xl border border-gray-200 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            onInput={(e: any) => {
+              const q = e.target.value.toLowerCase();
+              document.querySelectorAll('tbody tr').forEach((row: any) => {
+                row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+              });
+            }}
+          />
+          <select
+            className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none"
+            onChange={(e: any) => {
+              const v = e.target.value;
+              document.querySelectorAll('tbody tr').forEach((row: any) => {
+                if (!v) { row.style.display = ''; return; }
+                const badge = row.querySelector('.badge');
+                row.style.display = badge?.textContent === v ? '' : 'none';
+              });
+            }}
+          >
+            <option value="">全部状态</option>
+            <option value="正常">正常</option>
+            <option value="注意">注意</option>
+            <option value="风险">风险</option>
+          </select>
+        </div>
+
       {!orders || orders.length === 0 ? (
         <div className="empty-state rounded-2xl bg-white border border-gray-200">
           <div className="empty-state-icon">📦</div>
@@ -61,6 +93,7 @@ export default async function OrdersPage() {
                 <th>ETD/入仓日</th>
                 <th>类型</th>
                 <th>状态</th>
+                <th>Cancel Date</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -106,6 +139,15 @@ export default async function OrdersPage() {
                         {statusConfig.label}
                       </span>
                     </td>
+                <td>
+                  {(order as any).cancel_date ? (
+                    <span className={`text-sm font-medium ${new Date((order as any).cancel_date) < new Date() ? 'text-red-600' : 'text-gray-700'}`}>
+                      {formatDate((order as any).cancel_date)}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400 text-sm">—</span>
+                  )}
+                </td>
                     <td>
                       {order.id ? (
                         <Link
