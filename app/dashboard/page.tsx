@@ -58,7 +58,7 @@ export default async function DashboardPage() {
   const { data: blockedMilestones } = await (supabase
     .from('milestones') as any)
     .select(`*, orders!inner (id, order_no, customer_name)`)
-    .eq('status', '卡住')
+    .eq('status', '阻塞')
     .order('created_at', { ascending: false });
 
   const totalIssues =
@@ -83,7 +83,7 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="stat-card">
           <div className="stat-value text-red-600">{overdueMilestones?.length || 0}</div>
-          <div className="stat-label">已超期</div>
+          <div className="stat-label">逾期</div>
         </div>
         <div className="stat-card">
           <div className="stat-value text-blue-600">{todayDueMilestones?.length || 0}</div>
@@ -91,7 +91,7 @@ export default async function DashboardPage() {
         </div>
         <div className="stat-card">
           <div className="stat-value text-orange-600">{blockedMilestones?.length || 0}</div>
-          <div className="stat-label">已阻塞</div>
+          <div className="stat-label">阻塞中</div>
         </div>
         <div className="stat-card">
           <div className="stat-value text-purple-600">{pendingRetroOrders?.length || 0}</div>
@@ -122,7 +122,7 @@ export default async function DashboardPage() {
               <span className="text-red-600">⚠️</span>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">已超期</h2>
+              <h2 className="text-lg font-semibold text-gray-900">逾期</h2>
               <p className="text-sm text-gray-500">{overdueMilestones.length} 个节点需要立即处理</p>
             </div>
           </div>
@@ -177,7 +177,7 @@ export default async function DashboardPage() {
               <span className="text-orange-600">🚫</span>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">已阻塞</h2>
+              <h2 className="text-lg font-semibold text-gray-900">阻塞中</h2>
               <p className="text-sm text-gray-500">{blockedMilestones.length} 个节点被阻塞</p>
             </div>
           </div>
@@ -258,7 +258,7 @@ function MilestoneCard({ milestone, variant, badge }: { milestone: any; variant:
 
 function BlockedMilestoneCard({ milestone }: { milestone: any }) {
   const order = milestone.orders;
-  const blockedReason = milestone.notes?.startsWith('卡住原因：')
+  const blockedReason = milestone.notes?.startsWith('阻塞说明：')
     ? milestone.notes.substring(5)
     : milestone.notes || '未填写原因';
 
