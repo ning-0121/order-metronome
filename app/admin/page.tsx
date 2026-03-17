@@ -225,7 +225,7 @@ export default async function AdminPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <span className="text-sm font-medium text-gray-500">已超期节点</span>
+            <span className="text-sm font-medium text-gray-500">逾期节点</span>
           </div>
           <div className="stat-value text-red-600">{overdueMilestones.length}</div>
         </div>
@@ -236,7 +236,7 @@ export default async function AdminPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
               </svg>
             </div>
-            <span className="text-sm font-medium text-gray-500">已阻塞节点</span>
+            <span className="text-sm font-medium text-gray-500">阻塞节点</span>
           </div>
           <div className="stat-value text-yellow-600">{blockedMilestones.length}</div>
         </div>
@@ -295,14 +295,14 @@ export default async function AdminPage() {
               <span className="text-red-600">🕐</span>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">超期节点</h2>
-              <p className="text-sm text-gray-500">{overdueMilestones.length} 个节点已超期</p>
+              <h2 className="text-lg font-semibold text-gray-900">逾期节点</h2>
+              <p className="text-sm text-gray-500">{overdueMilestones.length} 个节点逾期</p>
             </div>
           </div>
           {overdueMilestones.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <div className="text-3xl mb-2">✓</div>
-              <p>暂无超期节点</p>
+              <p>暂无逾期节点</p>
             </div>
           ) : (
             <div className="space-y-3 max-h-80 overflow-y-auto">
@@ -316,7 +316,7 @@ export default async function AdminPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-gray-900 truncate">{(milestone.orders as any)?.order_no}</span>
-                        <span className="badge badge-danger">超期</span>
+                        <span className="badge badge-danger">逾期</span>
                       </div>
                       <p className="text-sm text-gray-700 mb-1">{milestone.name}</p>
                       <div className="flex items-center gap-4 text-xs text-gray-500">
@@ -332,7 +332,7 @@ export default async function AdminPage() {
               ))}
               {overdueMilestones.length > 5 && (
                 <p className="text-center text-sm text-indigo-600 font-medium py-2">
-                  还有 {overdueMilestones.length - 5} 个超期节点...
+                  还有 {overdueMilestones.length - 5} 个逾期节点...
                 </p>
               )}
             </div>
@@ -362,7 +362,7 @@ export default async function AdminPage() {
               <thead>
                 <tr>
                   <th>责任角色</th>
-                  <th>超期/阻塞数量</th>
+                  <th>逾期 / 阻塞数量</th>
                   <th>占比</th>
                 </tr>
               </thead>
