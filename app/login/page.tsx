@@ -53,6 +53,9 @@ function LoginForm() {
           <h2 className="text-center text-3xl font-bold">
             订单节拍器
           </h2>
+          <p className="mt-1 text-center text-sm text-gray-500">
+            卡风险，而不是走流程 — 外贸订单执行追踪系统
+          </p>
           <p className="mt-2 text-center text-sm text-gray-600">
             {isSignUp ? '创建账户' : '登录账户'}
           </p>
@@ -97,6 +100,7 @@ function LoginForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="your.name@qimoclothing.com"
               className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
             />
           </div>
@@ -113,6 +117,7 @@ function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="请输入登录密码"
               className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
             />
           </div>
