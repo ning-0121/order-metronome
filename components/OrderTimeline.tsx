@@ -60,7 +60,7 @@ const STATUS_STYLE: Record<string, string> = {
   '未开始': 'bg-gray-100 text-gray-600',
   '进行中': 'bg-blue-100 text-blue-700',
   '已完成': 'bg-green-100 text-green-700',
-  '卡住':   'bg-orange-100 text-orange-700',
+  '卡单':   'bg-orange-100 text-orange-700',
 };
 
 export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, isAdmin = false }: OrderTimelineProps) {
@@ -125,7 +125,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                 const overdue = m.due_at ? isOverdue(m.due_at) : false;
                 const isActive = m.status === '进行中';
                 const isDone = m.status === '已完成';
-                const isBlocked = m.status === '卡住';
+                const isBlocked = m.status === '卡单';
                 const isExpanded = expandedId === m.id;
 
                 // 前置阻断检查（显示用）
@@ -167,13 +167,13 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
                           )}
                           {overdue && isActive && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 超期</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 超期未结</span>
                           )}
                         </div>
 
                         {/* 元信息行 */}
                         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                          <span>负责：{getRoleLabel(m.owner_role)}</span>
+                          <span>责任人：{getRoleLabel(m.owner_role)}</span>
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (
                             <span className={overdue && isActive ? 'text-red-600 font-semibold' : ''}>
@@ -193,14 +193,14 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                         {/* 硬阻断提示 */}
                         {isHardBlocked && !isDone && (
                           <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                            ⛔ 前置节点未完成：{blockedBy.join('、')}
+                            ⛔ 前置控制点未完成：{blockedBy.join('、')}
                           </div>
                         )}
 
                         {/* 阻塞原因 */}
                         {isBlocked && m.notes && (
                           <div className="mt-2 text-xs text-orange-700 bg-orange-100 rounded-lg px-3 py-2">
-                            🚧 阻塞原因：{m.notes.startsWith('卡住原因：') ? m.notes.substring(5) : m.notes}
+                            🚧 阻塞原因：{m.notes.startsWith('卡单原因：') ? m.notes.substring(5) : m.notes}
                           </div>
                         )}
                       </div>
@@ -249,7 +249,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                         {m.status !== '已完成' &&
                           (isAdmin || (currentRole && currentRole.toLowerCase() === m.owner_role?.toLowerCase())) && (
                           <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">申请正式延期</h4>
+                            <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">申请顺延</h4>
                             <DelayRequestForm
                               milestoneId={m.id}
                               milestone={m}
@@ -259,9 +259,9 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           </div>
                         )}
 
-                        {/* 操作日志 */}
+                        {/* 执行记录 */}
                         <div className="bg-gray-50 rounded-lg p-4">
-                          <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">操作日志</h4>
+                          <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">执行记录</h4>
                           {(logs[m.id] || []).length > 0 ? (
                             <div className="space-y-2">
                               {(logs[m.id] || []).map((log: any) => (
@@ -273,7 +273,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                               ))}
                             </div>
                           ) : (
-                            <p className="text-xs text-gray-400">暂无操作日志</p>
+                            <p className="text-xs text-gray-400">暂无执行记录</p>
                           )}
                         </div>
                       </div>
