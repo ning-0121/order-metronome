@@ -186,6 +186,8 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
       status: status,
       is_critical: template.is_critical,
       evidence_required: template.evidence_required,
+      evidence_note: (template as any).evidence_note || null,
+      blocks: (template as any).blocks || [],
       notes: null,
       sequence_number: index + 1,
     };
