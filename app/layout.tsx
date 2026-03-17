@@ -27,14 +27,14 @@ export default async function RootLayout({
 }>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const isAdmin = user ? (await getCurrentUserRole(supabase)).isAdmin : false;
+  const { role, isAdmin } = user ? await getCurrentUserRole(supabase) : { role: undefined, isAdmin: false };
 
   return (
     <html lang="zh-CN">
       <body
         className={`${geistSans.variable} ${geistMono.variable} bg-white text-gray-900 antialiased`}
       >
-        <Navbar isAdmin={isAdmin} />
+        <Navbar isAdmin={isAdmin} userRole={role} />
         <main className="container mx-auto bg-white px-4 py-8">
           {children}
         </main>
