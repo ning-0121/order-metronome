@@ -1,151 +1,193 @@
 'use client';
-
 import { useState, Suspense } from 'react';
 import { signIn, signUp } from '@/app/actions/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+
+type Mode = 'login' | 'register' | 'forgot';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const error = searchParams.get('error');
-  
-  const [isSignUp, setIsSignUp] = useState(false);
+
+  const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(error);
+  const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(
+    error ? { type: 'error', text: '邮箱域名不在允许范围内，请使用 @qimoclothing.com 邮箱' } : null
+  );
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    setErrorMessage(null);
+    setMessage(null);
 
     try {
-      if (isSignUp) {
+      if (mode === 'register') {
         const result = await signUp(email, password, name);
         if (result.error) {
-          setErrorMessage(result.error);
+          setMessage({ type: 'error', text: result.error });
         } else {
-          router.push('/');
-          router.refresh();
+          setMessage({ type: 'success', text: '注册成功！请等待管理员授权角色后登录。' });
+          setMode('login');
         }
       } else {
         const result = await signIn(email, password);
         if (result.error) {
-          setErrorMessage(result.error);
+          setMessage({ type: 'error', text: result.error });
         } else {
           router.push('/');
           router.refresh();
         }
       }
-    } catch (err) {
-      setErrorMessage('发生错误，请重试。');
+    } catch {
+      setMessage({ type: 'error', text: '发生错误，请重试' });
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleForgotPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage(null);
+
+    if (!email) {
+      setMessage({ type: 'error', text: '请先输入邮箱地址' });
+      setLoading(false);
+      return;
+    }
+    if (!email.endsWith('@qimoclothing.com')) {
+      setMessage({ type: 'error', text: '仅允许 @qimoclothing.com 邮箱' });
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+      if (error) {
+        setMessage({ type: 'error', text: '发送失败：' + error.message });
+      } else {
+        setMessage({
+          type: 'success',
+          text: '重置邮件已发送到 ' + email + '，请查收邮件并点击链接重置密码。',
+        });
+      }
+    } catch {
+      setMessage({ type: 'error', text: '发送失败，请重试' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const titles = {
+    login: '登录账户',
+    register: '注册账户',
+    forgot: '重置密码',
   };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow-md">
-        <div>
-          <h2 className="text-center text-3xl font-bold">
-            订单节拍器
-          </h2>
-          <p className="mt-1 text-center text-sm text-gray-500">
-            卡风险，而不是走流程 — 外贸订单执行追踪系统
-          </p>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            {isSignUp ? '创建账户' : '登录账户'}
-          </p>
-          <p className="mt-1 text-center text-xs text-gray-600">
-            仅允许 @qimoclothing.com 邮箱
-          </p>
+      <div className="w-full max-w-md space-y-6 rounded-2xl bg-white p-8 shadow-sm border border-gray-200">
+        {/* Logo */}
+        <div className="text-center">
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xl">⏱</div>
+            <span className="text-xl font-bold text-gray-900">订单节拍器</span>
+          </div>
+          <p className="text-xs text-gray-400 mb-1">卡风险，而不是走流程</p>
+          <p className="text-sm font-medium text-gray-600">{titles[mode]}</p>
+          <p className="text-xs text-gray-400 mt-1">仅限 @qimoclothing.com 邮箱</p>
         </div>
-        
-        {errorMessage && (
-          <div className="rounded-md bg-red-50 p-4 text-sm text-red-800">
-            {errorMessage}
+
+        {/* 消息提示 */}
+        {message && (
+          <div className={`rounded-xl px-4 py-3 text-sm ${
+            message.type === 'error'
+              ? 'bg-red-50 text-red-700 border border-red-200'
+              : 'bg-green-50 text-green-700 border border-green-200'
+          }`}>
+            {message.text}
           </div>
         )}
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {isSignUp && (
+        {/* 表单 */}
+        <form onSubmit={mode === 'forgot' ? handleForgotPassword : handleSubmit} className="space-y-4">
+          {mode === 'register' && (
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                姓名
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">姓名</label>
               <input
-                id="name"
-                name="name"
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                type="text" required value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="你的姓名"
+                className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
           )}
-          
+
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              邮箱地址
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">邮箱地址</label>
             <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="email" required value={email}
+              onChange={e => setEmail(e.target.value)}
               placeholder="your.name@qimoclothing.com"
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-              密码
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="请输入登录密码"
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+              autoComplete="email"
+              className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-            >
-              {loading ? '请稍候...' : isSignUp ? '注册' : '登录'}
-            </button>
-          </div>
+          {mode !== 'forgot' && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-gray-700">密码</label>
+                {mode === 'login' && (
+                  <button
+                    type="button"
+                    onClick={() => { setMode('forgot'); setMessage(null); }}
+                    className="text-xs text-indigo-600 hover:text-indigo-700 hover:underline"
+                  >
+                    忘记密码？
+                  </button>
+                )}
+              </div>
+              <input
+                type="password" required value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder={mode === 'register' ? '至少 8 位密码' : '请输入密码'}
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+          )}
+
+          <button
+            type="submit" disabled={loading}
+            className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {loading ? '处理中...' : mode === 'login' ? '登录' : mode === 'register' ? '注册' : '发送重置邮件'}
+          </button>
         </form>
 
-        <div className="text-center">
-          <button
-            type="button"
-            onClick={() => {
-              setIsSignUp(!isSignUp);
-              setErrorMessage(null);
-            }}
-            className="text-sm text-blue-600 hover:text-blue-500"
-          >
-            {isSignUp
-              ? '已有账户？登录'
-              : "还没有账户？注册"}
-          </button>
+        {/* 切换模式 */}
+        <div className="text-center space-y-2">
+          {mode !== 'login' && (
+            <button onClick={() => { setMode('login'); setMessage(null); }}
+              className="text-sm text-indigo-600 hover:underline block w-full">
+              已有账户？登录
+            </button>
+          )}
+          {mode !== 'register' && (
+            <button onClick={() => { setMode('register'); setMessage(null); }}
+              className="text-sm text-gray-500 hover:text-gray-700 hover:underline block w-full">
+              还没有账户？注册
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -154,7 +196,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-gray-50">Loading...</div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-400">加载中...</div>}>
       <LoginForm />
     </Suspense>
   );
