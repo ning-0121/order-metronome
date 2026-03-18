@@ -206,12 +206,12 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
   }
   
   // ── 文件上传到 Supabase Storage ──
+  // 创建订单时只需上传客户PO（必传）
+  // 生产单：由财务审核后节点凭证上传（order_docs_bom_complete 节点）
+  // 包装资料：后期在包装前上传（可选）
   const fileFields: Array<{ formKey: string; fileType: string; required: boolean }> = [
     { formKey: 'customer_po_file', fileType: 'customer_po', required: true },
-    { formKey: 'production_order_file', fileType: 'production_order', required: true },
-    { formKey: 'trims_sheet_file', fileType: 'trims_sheet', required: false },
-    { formKey: 'packing_requirement_file', fileType: 'packing_requirement', required: false },
-    { formKey: 'tech_pack_file', fileType: 'tech_pack', required: false },
+    { formKey: 'packaging_material_file', fileType: 'packaging_material', required: false },
   ];
 
   for (const { formKey, fileType, required } of fileFields) {
@@ -219,7 +219,7 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     if (!file || file.size === 0) {
       if (required) {
         await deleteOrder(orderData.id);
-        return { error: fileType === 'customer_po' ? '请上传客户 PO 文件' : '请上传生产制单文件' };
+        return { error: '请上传客户 PO 文件' };
       }
       continue;
     }
