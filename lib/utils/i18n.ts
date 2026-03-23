@@ -11,7 +11,7 @@
 
 export function getRoleLabel(role: string): string {
   const map: Record<string, string> = {
-    sales: '业务',
+    sales: '理单',
     finance: '财务',
     procurement: '采购',
     production: '生产',

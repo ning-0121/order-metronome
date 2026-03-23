@@ -142,7 +142,7 @@ export function getShipmentSignRole(role?: string | null): 'sales' | 'warehouse'
 
 /** 角色中文标签 */
 export const ROLE_LABEL: Record<string, string> = {
-  admin: '管理员', ceo: 'CEO', sales: '业务', finance: '财务',
+  admin: '管理员', ceo: 'CEO', sales: '理单', finance: '财务',
   procurement: '采购', production: '生产', qc: '质检',
   logistics: '物流/仓库', quality: '品控',
 };

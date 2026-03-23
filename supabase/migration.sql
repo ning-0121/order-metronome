@@ -810,3 +810,61 @@ USING (
   auth.uid() = created_by
   OR public.is_admin_user(auth.uid())
 );
+
+-- ===== 2026-03-23: 客户主数据系统 =====
+
+CREATE TABLE IF NOT EXISTS public.customers (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  customer_name text NOT NULL,
+  company_name text,
+  contact_name text,
+  email text,
+  phone text,
+  country text,
+  notes text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_name
+  ON public.customers(customer_name);
+
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "customers_select_authenticated" ON public.customers
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "customers_insert_authenticated" ON public.customers
+  FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "customers_update_admin" ON public.customers
+  FOR UPDATE USING (public.is_admin_user(auth.uid()));
+
+-- orders 表新增 customer_id
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS customer_id uuid REFERENCES public.customers(id);
+
+-- 迁移历史数据：为已有 customer_name 创建 customer 记录并回填
+INSERT INTO public.customers (customer_name)
+SELECT DISTINCT customer_name FROM public.orders
+WHERE customer_name IS NOT NULL
+ON CONFLICT (customer_name) DO NOTHING;
+
+UPDATE public.orders o
+SET customer_id = c.id
+FROM public.customers c
+WHERE o.customer_name = c.customer_name
+  AND o.customer_id IS NULL;
+
+-- ===== 2026-03-23: 理单负责制 + 报价审批 =====
+
+-- 订单负责人（理单）
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS owner_user_id uuid REFERENCES auth.users(id);
+
+-- 回填：现有订单的 owner = created_by
+UPDATE public.orders SET owner_user_id = created_by WHERE owner_user_id IS NULL;
+
+-- 报价审批字段
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS quote_status text DEFAULT 'pending'
+    CHECK (quote_status IN ('pending', 'approved', 'rejected')),
+  ADD COLUMN IF NOT EXISTS quote_approved_by uuid REFERENCES auth.users(id),
+  ADD COLUMN IF NOT EXISTS quote_approved_at timestamptz;

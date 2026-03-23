@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createOrder, preGenerateOrderNo } from '@/app/actions/orders';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
+import { CustomerSelect } from '@/components/CustomerSelect';
 import Link from 'next/link';
 
 type Step = 1 | 2 | 3 | 4;
@@ -137,12 +138,7 @@ function NewOrderWizard() {
               </h3>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    客户名称 <span className="text-red-500">*</span>
-                  </label>
-                  <input type="text" name="customer_name" required
-                    placeholder="如：H&M / ZARA / Target"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <CustomerSelect />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

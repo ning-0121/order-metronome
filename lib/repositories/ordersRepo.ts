@@ -15,6 +15,8 @@ import { createMilestone, transitionMilestoneStatus } from './milestonesRepo';
 // 注意：order_no 不在白名单中，由系统自动生成
 const INSERT_WHITELIST = [
   'customer_name',
+  'customer_id',
+  'owner_user_id',
   'incoterm',
   'etd',
   'warehouse_due_date',

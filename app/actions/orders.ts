@@ -76,6 +76,10 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
   
   // ⚠️ 系统级约束：禁止从 formData 读取 order_no（即使存在也会被忽略）
   const customer_name = formData.get('customer_name') as string;
+  const customer_id = formData.get('customer_id') as string;
+  if (!customer_id) {
+    return { error: '请选择客户' };
+  }
   const incoterm = formData.get('incoterm') as IncotermType;
   const etd = formData.get('etd') as string | null;
   const warehouse_due_date = formData.get('warehouse_due_date') as string | null;
@@ -113,6 +117,8 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
   const insertPayload: any = {
     // ⚠️ 系统级约束：order_no 不在 payload 中，由 repository 层自动生成
     customer_name,
+    customer_id,
+    owner_user_id: user.id,
     incoterm,
     etd: etd || null,
     warehouse_due_date: warehouse_due_date || null,

@@ -9,6 +9,7 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
+import { QuoteApproval } from '@/components/QuoteApproval';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OutsourceTab } from '@/components/tabs/OutsourceTab';
 import { QcTab } from '@/components/tabs/QcTab';
@@ -37,6 +38,27 @@ export default async function OrderDetailPage({
   const { data: milestones } = await getMilestonesByOrder(id);
   const { data: delayRequests } = await getDelayRequestsByOrder(id);
   const { data: logs } = await getOrderLogs(id);
+
+  // 负责理单
+  let ownerName = '—';
+  if (orderData.owner_user_id) {
+    const { data: ownerProfile } = await (supabase.from('profiles') as any)
+      .select('name, email')
+      .eq('user_id', orderData.owner_user_id)
+      .single();
+    ownerName = ownerProfile?.name || ownerProfile?.email || '—';
+  }
+  const canApproveQuote = isAdmin;
+
+  // 报价审批人
+  let quoteApproverName = '';
+  if (orderData.quote_approved_by) {
+    const { data: approverProfile } = await (supabase.from('profiles') as any)
+      .select('name, email')
+      .eq('user_id', orderData.quote_approved_by)
+      .single();
+    quoteApproverName = approverProfile?.name || approverProfile?.email || '';
+  }
 
   const allMilestonesCompleted = milestones
     ? milestones.every((m: any) => normalizeMilestoneStatus(m.status) === '已完成')
@@ -135,6 +157,7 @@ export default async function OrderDetailPage({
                 {[
                   { label: '订单号', value: orderData.order_no },
                   { label: '客户', value: orderData.customer_name },
+                  { label: '负责理单', value: ownerName },
                   { label: '贸易条款', value: orderData.incoterm },
                   { label: orderData.incoterm === 'FOB' ? 'ETD' : '入仓日期', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
                   { label: '订单类型', value: orderData.order_type === 'sample' ? '样品' : '批量' },
@@ -145,6 +168,12 @@ export default async function OrderDetailPage({
                     <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
                   </div>
                 ))}
+                <div className="flex justify-between items-center">
+                  <dt className="text-sm text-gray-500">报价状态</dt>
+                  <dd>
+                    <QuoteApproval orderId={orderData.id} quoteStatus={orderData.quote_status} canApprove={canApproveQuote} approverName={quoteApproverName} approvedAt={orderData.quote_approved_at} />
+                  </dd>
+                </div>
               </dl>
             </div>
 
