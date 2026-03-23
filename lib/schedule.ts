@@ -92,7 +92,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
     // 阶段1：订单启动
     po_confirmed:                  shiftWeekendToFriday(T0),
     finance_approval:              shiftWeekendToFriday(addWorkdays(T0, 1)),
-    production_resources_confirmed: shiftWeekendToFriday(addWorkdays(T0, 2)),
+    production_order_upload:       shiftWeekendToFriday(addWorkdays(T0, 3)),
+    production_resources_confirmed: shiftWeekendToFriday(addWorkdays(T0, 4)),
     // 阶段2：订单转化
     order_docs_bom_complete:       shiftWeekendToFriday(addWorkdays(T0, 2)),
     bulk_materials_confirmed:      shiftWeekendToFriday(bulkMaterialsConfirmed),

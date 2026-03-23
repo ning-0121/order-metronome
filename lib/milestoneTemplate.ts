@@ -51,8 +51,18 @@ export const MILESTONE_TEMPLATE_FINAL: MilestoneTemplate[] = [
     is_critical: true,
     evidence_required: true,
     evidence_note: '财务审批记录截图',
-    blocks: ['production_resources_confirmed'],
+    blocks: ['production_order_upload'],
     can_delay: true,
+  },
+  {
+    step_key: 'production_order_upload',
+    name: '生产单上传',
+    owner_role: 'sales',
+    deadline_hint: '财务审核完成 + 2天',
+    is_critical: true,
+    evidence_required: true,
+    evidence_note: '上传生产单文件（PDF/Excel）',
+    blocks: ['production_resources_confirmed'],
   },
   {
     step_key: 'production_resources_confirmed',
@@ -68,12 +78,12 @@ export const MILESTONE_TEMPLATE_FINAL: MilestoneTemplate[] = [
   // ══ 阶段2：订单转化（2）══════════════════════════════════════
   {
     step_key: 'order_docs_bom_complete',
-    name: '生产单 + BOM + 包装要求',
+    name: 'BOM + 包装要求',
     owner_role: 'sales',
     deadline_hint: 'T0 + 2天',
     is_critical: true,
     evidence_required: true,
-    evidence_note: '上传生产制单、BOM表、包装要求文件（三份必传）',
+    evidence_note: '上传BOM表、包装要求文件',
     blocks: ['bulk_materials_confirmed'],
   },
   {

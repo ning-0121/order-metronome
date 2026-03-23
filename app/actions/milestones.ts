@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { isOverdue } from '@/lib/utils/date';
+import { isOverdue, addWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
 import {
   updateMilestone,
   createMilestone,
@@ -123,10 +123,10 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: '请先登录' };
   }
 
-  // Get current milestone (for order_id, evidence_required, and owner_role)
+  // Get current milestone (for order_id, evidence_required, owner_role, step_key)
   const { data: milestone, error: getError } = await (supabase
     .from('milestones') as any)
-    .select('order_id, evidence_required, owner_role, owner_user_id')
+    .select('order_id, evidence_required, owner_role, owner_user_id, step_key')
     .eq('id', milestoneId)
     .single();
   
@@ -147,6 +147,17 @@ export async function markMilestoneDone(milestoneId: string) {
     userRole.toLowerCase() === (milestone.owner_role as string).toLowerCase();
   if (!isAdminUser && !isAssignedUser && !roleMatches) {
     return { error: '无权操作：只有管理员或负责人可以标记完成' };
+  }
+
+  // 报价审批阻断：财务审核节点必须报价已通过
+  if (milestoneData.step_key === 'finance_approval') {
+    const { data: order } = await (supabase.from('orders') as any)
+      .select('quote_status')
+      .eq('id', milestoneData.order_id)
+      .single();
+    if (!order || order.quote_status !== 'approved') {
+      return { error: '报价尚未审批通过，无法完成财务审核。请先联系管理员审批报价。' };
+    }
   }
 
   // Check if evidence is required and exists
@@ -175,7 +186,16 @@ export async function markMilestoneDone(milestoneId: string) {
   
   const updatedMilestone = result.data;
   const milestoneData = milestone as any;
-  
+
+  // 财务审核完成 → 动态更新"生产单上传"截止日为 now + 2 工作日
+  if (milestoneData.step_key === 'finance_approval') {
+    const newDue = ensureBusinessDay(addWorkingDays(new Date(), 2));
+    await (supabase.from('milestones') as any)
+      .update({ due_at: newDue.toISOString() })
+      .eq('order_id', milestoneData.order_id)
+      .eq('step_key', 'production_order_upload');
+  }
+
   // Auto-advance to next milestone
   await autoAdvanceNextMilestone(supabase, milestoneData.order_id);
   
