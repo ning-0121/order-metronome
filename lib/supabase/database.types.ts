@@ -33,7 +33,7 @@ export type Database = {
         Insert: any;
         Update: any;
       };
-      order_attachments: {
+      attachments: {
         Row: any;
         Insert: any;
         Update: any;

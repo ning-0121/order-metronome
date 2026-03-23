@@ -117,23 +117,38 @@ export async function getUserMilestones(userId: string) {
 
 export async function markMilestoneDone(milestoneId: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
-  // Get current milestone (for order_id and evidence_required)
+
+  // Get current milestone (for order_id, evidence_required, and owner_role)
   const { data: milestone, error: getError } = await (supabase
     .from('milestones') as any)
-    .select('order_id, evidence_required')
+    .select('order_id, evidence_required, owner_role, owner_user_id')
     .eq('id', milestoneId)
     .single();
   
   if (getError || !milestone) {
     return { error: getError?.message || '找不到该执行节点' };
   }
-  
+
+  // Check role: must be admin, assigned user, or matching owner_role
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+  const userRole = (profile as any)?.role as string | undefined;
+  const isAdminUser = userRole === 'admin';
+  const isAssignedUser = milestone.owner_user_id === user.id;
+  const roleMatches = userRole && milestone.owner_role &&
+    userRole.toLowerCase() === (milestone.owner_role as string).toLowerCase();
+  if (!isAdminUser && !isAssignedUser && !roleMatches) {
+    return { error: '无权操作：只有管理员或负责人可以标记完成' };
+  }
+
   // Check if evidence is required and exists
   if (milestone.evidence_required) {
     const { data: attachments, error: attachmentsError } = await supabase
@@ -182,18 +197,33 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
   if (!blockedReason || blockedReason.trim() === '') {
     return { error: '请填写阻塞说明' };
   }
-  
-  // Get current milestone (for order_id)
+
+  // Get current milestone (for order_id and role check)
   const { data: milestone, error: getError } = await (supabase
     .from('milestones') as any)
-    .select('order_id')
+    .select('order_id, owner_role, owner_user_id')
     .eq('id', milestoneId)
     .single();
-  
+
   if (getError || !milestone) {
     return { error: getError?.message || '找不到该执行节点' };
   }
-  
+
+  // Check role: must be admin, assigned user, or matching owner_role
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+  const userRole = (profile as any)?.role as string | undefined;
+  const isAdminUser = userRole === 'admin';
+  const isAssignedUser = milestone.owner_user_id === user.id;
+  const roleMatches = userRole && milestone.owner_role &&
+    userRole.toLowerCase() === (milestone.owner_role as string).toLowerCase();
+  if (!isAdminUser && !isAssignedUser && !roleMatches) {
+    return { error: '无权操作：只有管理员或负责人可以标记卡住' };
+  }
+
   // 使用状态机转换（带校验，blockedReason 会自动格式化为 notes）
   const result = await transitionMilestoneStatus(milestoneId, '阻塞', blockedReason);
   
@@ -364,12 +394,22 @@ export async function assignMilestoneOwner(milestoneId: string, userId: string) 
 
 export async function markMilestoneUnblocked(milestoneId: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
+  // Only admin can unblock milestones
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+  if (!profile || (profile as any).role !== 'admin') {
+    return { error: '无权操作：只有管理员可以解除卡住状态' };
+  }
+
   // 使用状态机转换（卡住 -> 进行中）
   const result = await transitionMilestoneStatus(milestoneId, '进行中', '已解除阻塞');
   

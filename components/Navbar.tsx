@@ -7,95 +7,15 @@ interface NavbarProps {
   isAdmin?: boolean;
   userRole?: string;
 }
-
-// 每个角色可见的导航项
-const NAV_BY_ROLE: Record<string, { href: string; label: string; icon: string }[]> = {
-  admin: [
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/ceo', label: 'CEO总览', icon: '📊' },
-    { href: '/ceo-war-room', label: 'War Room', icon: '⚔️' },
-    { href: '/admin', label: '管理后台', icon: '⚙️' },
-    { href: '/admin/users', label: '用户管理', icon: '👥' },
-    { href: '/warehouse', label: '仓库工作台', icon: '🏭' },
-    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
-  ],
-  ceo: [
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/ceo', label: 'CEO总览', icon: '📊' },
-    { href: '/ceo-war-room', label: 'War Room', icon: '⚔️' },
-    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
-  ],
-  sales: [
-    { href: '/my-today', label: '我的今日', icon: '✅' },
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '我的订单', icon: '📦' },
-    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
-  ],
-  finance: [
-    { href: '/my-today', label: '我的今日', icon: '✅' },
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
-  ],
-  procurement: [
-    { href: '/my-today', label: '我的今日', icon: '✅' },
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-  ],
-  production: [
-    { href: '/my-today', label: '我的今日', icon: '✅' },
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-  ],
-  qc: [
-    { href: '/my-today', label: '我的今日', icon: '✅' },
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
-  ],
-  quality: [
-    { href: '/dashboard', label: '我的工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
-  ],
-  logistics: [
-    { href: '/my-today', label: '我的今日', icon: '✅' },
-    { href: '/dashboard', label: '工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/warehouse', label: '仓库工作台', icon: '🏭' },
-    { href: '/exceptions', label: '异常中心', icon: '⚠️' },
-  ],
-};
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: '管理员', ceo: 'CEO', sales: '业务', finance: '财务',
-  procurement: '采购', production: '生产', qc: '质检',
-  logistics: '物流/仓库', quality: '品控',
-};
-
-const ROLE_COLORS: Record<string, string> = {
-  admin: 'bg-purple-100 text-purple-700',
-  ceo: 'bg-indigo-100 text-indigo-700',
-  sales: 'bg-blue-100 text-blue-700',
-  finance: 'bg-amber-100 text-amber-700',
-  procurement: 'bg-teal-100 text-teal-700',
-  production: 'bg-red-100 text-red-700',
-  qc: 'bg-pink-100 text-pink-700',
-  logistics: 'bg-green-100 text-green-700',
-  quality: 'bg-orange-100 text-orange-700',
-};
-
-export function Navbar({ isAdmin, userRole }: NavbarProps) {
+export function Navbar({ isAdmin = false }: NavbarProps) {
   const pathname = usePathname();
   if (pathname === '/login') return null;
 
-  // 根据角色获取导航项，兜底显示基础导航
-  const role = userRole || (isAdmin ? 'admin' : '');
-  const navLinks = NAV_BY_ROLE[role] || [
-    { href: '/dashboard', label: '工作台', icon: '📋' },
+  const navLinks = [
+    { href: '/dashboard', label: '我的节拍', icon: '📋' },
     { href: '/orders', label: '订单列表', icon: '📦' },
+    { href: '/new', label: '新建订单', icon: '➕' },
+    ...(isAdmin ? [{ href: '/admin', label: '管理看板', icon: '⚙️' }] : []),
   ];
 
   return (
@@ -113,7 +33,7 @@ export function Navbar({ isAdmin, userRole }: NavbarProps) {
               </span>
             </Link>
 
-            {/* 动态导航 */}
+            {/* 导航 */}
             <div className="flex items-center gap-1">
               {navLinks.map((link) => {
                 const isActive = pathname === link.href || pathname.startsWith(link.href + '/');
@@ -135,13 +55,7 @@ export function Navbar({ isAdmin, userRole }: NavbarProps) {
             </div>
           </div>
 
-          {/* 右侧：角色标签 + 退出 */}
           <div className="flex items-center gap-3">
-            {role && (
-              <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${ROLE_COLORS[role] || 'bg-gray-100 text-gray-600'}`}>
-                {ROLE_LABELS[role] || role}
-              </span>
-            )}
             <form action={signOut}>
               <button
                 type="submit"

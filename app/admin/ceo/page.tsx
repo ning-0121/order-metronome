@@ -93,12 +93,12 @@ export default async function CEODashboardPage() {
   const { data: userProfiles } = userIds.length > 0
     ? await supabase
         .from('profiles')
-        .select('user_id, full_name, email')
+        .select('user_id, name, email')
         .in('user_id', userIds)
     : { data: [] };
 
   const userProfileMap = new Map(
-    (userProfiles || []).map((p: any) => [p.user_id, p])
+    (userProfiles || []).map((p: any) => [p.user_id, { ...p, full_name: p.name ?? p.email }])
   );
 
   return (
