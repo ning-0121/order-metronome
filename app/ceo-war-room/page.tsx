@@ -241,7 +241,7 @@ export default async function WarRoomPage() {
                 const cfg = RISK_CONFIG[wr.riskLevel];
                 const anchor = wr.order.etd || wr.order.eta || wr.order.warehouse_due_date;
                 return (
-                  <Link key={wr.order.id} href={`/orders/${wr.order.id}?tab=timeline`}
+                  <Link key={wr.order.id} href={`/orders/${wr.order.id}?tab=progress`}
                     className="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800 transition-colors group">
                     <div className="flex items-center gap-3">
                       <span className={`text-xs font-bold px-2 py-0.5 rounded ${cfg.badge}`}>{cfg.label}</span>

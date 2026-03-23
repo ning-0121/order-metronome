@@ -5,7 +5,7 @@ import { formatDate } from '@/lib/utils/date';
 import { OrderTimeline } from '@/components/OrderTimeline';
 import { DelayRequestsList } from '@/components/DelayRequestsList';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
@@ -21,10 +21,19 @@ export default async function OrderDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: { tab?: string };
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
-  const tab = searchParams?.tab || 'overview';
+  const resolvedSearchParams = await searchParams;
+  const rawTab = resolvedSearchParams?.tab ?? '';
+  if (rawTab === 'timeline') {
+    redirect(`/orders/${id}?tab=progress`);
+  }
+  if (rawTab === 'overview') {
+    redirect(`/orders/${id}?tab=basic`);
+  }
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'outsource', 'qc', 'packing', 'shipment'];
+  const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
   if (orderError || !order) { notFound(); }
@@ -119,8 +128,8 @@ export default async function OrderDetailPage({
           {/* Tab 导航 */}
           <div className="flex gap-1 mt-4 -mb-px">
             {[
-              { key: 'overview', label: '基本信息' },
-              { key: 'timeline', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
+              { key: 'basic', label: '基本信息' },
+              { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: 'BOM/物料' },
@@ -133,7 +142,7 @@ export default async function OrderDetailPage({
                 key={t.key}
                 href={`/orders/${id}?tab=${t.key}`}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  tab === t.key
+                  activeTab === t.key
                     ? 'border-indigo-600 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
@@ -149,7 +158,7 @@ export default async function OrderDetailPage({
       <div className="max-w-7xl mx-auto px-6 py-6">
 
         {/* Tab: 基本信息 */}
-        {tab === 'overview' && (
+        {activeTab === 'basic' && (
           <div className="grid gap-6 md:grid-cols-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">基础信息</h2>
@@ -209,7 +218,7 @@ export default async function OrderDetailPage({
             <div className="md:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide">进度概览</h2>
-                <Link href={`/orders/${id}?tab=timeline`} className="text-sm text-indigo-600 hover:text-indigo-700">查看详情 →</Link>
+                <Link href={`/orders/${id}?tab=progress`} className="text-sm text-indigo-600 hover:text-indigo-700">查看详情 →</Link>
               </div>
               <div className="grid grid-cols-4 gap-4">
                 {[
@@ -229,7 +238,7 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: 执行进度 */}
-        {tab === 'timeline' && (
+        {activeTab === 'progress' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">执行时间线</h2>
             {milestones && milestones.length > 0 ? (
@@ -247,7 +256,7 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: 延期申请 */}
-        {tab === 'delays' && (
+        {activeTab === 'delays' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">延期申请记录</h2>
             {delayRequests && delayRequests.length > 0 ? (
@@ -264,7 +273,7 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: 操作日志 */}
-        {tab === 'logs' && (
+        {activeTab === 'logs' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">操作日志</h2>
             {logs && logs.length > 0 ? (
@@ -293,7 +302,7 @@ export default async function OrderDetailPage({
           </div>
         )}
         {/* Tab: BOM/物料 */}
-        {tab === 'bom' && (
+        {activeTab === 'bom' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">物料 BOM</h2>
             <BomTab orderId={id} />
@@ -301,7 +310,7 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: 外发任务 */}
-        {tab === 'outsource' && (
+        {activeTab === 'outsource' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">外发任务</h2>
             <OutsourceTab orderId={id} isAdmin={isAdmin} />
@@ -309,7 +318,7 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: QC检验 */}
-        {tab === 'qc' && (
+        {activeTab === 'qc' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">QC 检验记录</h2>
             <QcTab orderId={id} isAdmin={isAdmin} currentRole={currentRole} />
@@ -317,7 +326,7 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: 装箱 */}
-        {tab === 'packing' && (
+        {activeTab === 'packing' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">装箱单</h2>
             <PackingTab orderId={id} isAdmin={isAdmin} />
@@ -325,7 +334,7 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: 出货&签核 */}
-        {tab === 'shipment' && (
+        {activeTab === 'shipment' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">出货确认 & 三方签核</h2>
             <ShipmentTab

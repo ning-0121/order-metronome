@@ -51,7 +51,7 @@ function buildActionsForOrder(wr: WarRoomOrder): SuggestedAction[] {
   const actions: SuggestedAction[] = [];
   const { order, rootCauses, riskLevel, daysToAnchor,
           blockedCount, unassignedCriticalCount, chainDelay } = wr;
-  const href = (tab = 'timeline') => `/orders/${order.id}?tab=${tab}`;
+  const href = (tab: string = 'progress') => `/orders/${order.id}?tab=${tab}`;
 
   // ── IMMEDIATE：最紧急的一件事 ──────────────────────────────
 
@@ -78,7 +78,7 @@ function buildActionsForOrder(wr: WarRoomOrder): SuggestedAction[] {
       description: `出货日 ${daysStr}，需立即与客户沟通交期风险，确认是否需要调整`,
       targetRole: '业务',
       orderId: order.id, orderNo: order.order_no,
-      ctaLabel: '进入订单', ctaHref: href('overview'),
+      ctaLabel: '进入订单', ctaHref: href('basic'),
     });
   } else if (hasChain && chainDelay!.chainLen >= 4) {
     // 链式延误：升级上报
@@ -170,7 +170,7 @@ function buildActionsForOrder(wr: WarRoomOrder): SuggestedAction[] {
         description: '建议为该客户订单设置 ETD-7 天预警规则，提前触发业务和物流协同确认，避免临门再处理',
         targetRole: '业务',
         orderId: order.id, orderNo: order.order_no,
-        ctaLabel: '查看订单', ctaHref: href('overview'),
+        ctaLabel: '查看订单', ctaHref: href('basic'),
       });
     }
   }

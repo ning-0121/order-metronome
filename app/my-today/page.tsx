@@ -174,7 +174,7 @@ export default async function MyTodayPage() {
             </div>
             <div className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100 overflow-hidden">
               {myOrderList.map(([orderId, order]) => (
-                <Link key={orderId} href={`/orders/${orderId}?tab=timeline`}
+                <Link key={orderId} href={`/orders/${orderId}?tab=progress`}
                   className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors group">
                   <div>
                     <span className="text-sm font-medium text-gray-900">{order.order_no}</span>
@@ -194,7 +194,7 @@ export default async function MyTodayPage() {
 
 function TaskCard({ task }: { task: any }) {
   const style = URGENCY_STYLE[task.urgency as keyof typeof URGENCY_STYLE];
-  const orderHref = `/orders/${task.orderId}?tab=timeline`;
+  const orderHref = `/orders/${task.orderId}?tab=progress`;
 
   return (
     <div className={`rounded-xl border ${style.ring} p-4`}>
