@@ -245,7 +245,7 @@ export default async function AdminPage() {
             </svg>
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">管理看板</h1>
+            <h1 className="text-2xl font-bold text-gray-900">CEO 助手</h1>
             <p className="text-sm text-gray-500">全局概览 · 风险分析 · 行动决策</p>
           </div>
         </div>
