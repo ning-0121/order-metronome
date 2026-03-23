@@ -868,3 +868,45 @@ ALTER TABLE public.orders
     CHECK (quote_status IN ('pending', 'approved', 'rejected')),
   ADD COLUMN IF NOT EXISTS quote_approved_by uuid REFERENCES auth.users(id),
   ADD COLUMN IF NOT EXISTS quote_approved_at timestamptz;
+
+-- ===== 2026-03-23: RLS for operation tables =====
+
+-- materials_bom
+ALTER TABLE public.materials_bom ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "bom_select_auth" ON public.materials_bom FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "bom_insert_auth" ON public.materials_bom FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "bom_update_auth" ON public.materials_bom FOR UPDATE USING (auth.uid() IS NOT NULL);
+CREATE POLICY "bom_delete_auth" ON public.materials_bom FOR DELETE USING (auth.uid() IS NOT NULL);
+
+-- outsource_jobs
+ALTER TABLE public.outsource_jobs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "outsource_select_auth" ON public.outsource_jobs FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "outsource_insert_auth" ON public.outsource_jobs FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "outsource_update_auth" ON public.outsource_jobs FOR UPDATE USING (auth.uid() IS NOT NULL);
+CREATE POLICY "outsource_delete_auth" ON public.outsource_jobs FOR DELETE USING (auth.uid() IS NOT NULL);
+
+-- qc_inspections
+ALTER TABLE public.qc_inspections ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "qc_select_auth" ON public.qc_inspections FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "qc_insert_auth" ON public.qc_inspections FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "qc_update_auth" ON public.qc_inspections FOR UPDATE USING (auth.uid() IS NOT NULL);
+CREATE POLICY "qc_delete_auth" ON public.qc_inspections FOR DELETE USING (auth.uid() IS NOT NULL);
+
+-- packing_lists
+ALTER TABLE public.packing_lists ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "packing_select_auth" ON public.packing_lists FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "packing_insert_auth" ON public.packing_lists FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "packing_update_auth" ON public.packing_lists FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+-- packing_list_lines
+ALTER TABLE public.packing_list_lines ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "packing_lines_select_auth" ON public.packing_list_lines FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "packing_lines_insert_auth" ON public.packing_list_lines FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "packing_lines_update_auth" ON public.packing_list_lines FOR UPDATE USING (auth.uid() IS NOT NULL);
+CREATE POLICY "packing_lines_delete_auth" ON public.packing_list_lines FOR DELETE USING (auth.uid() IS NOT NULL);
+
+-- shipment_confirmations
+ALTER TABLE public.shipment_confirmations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "shipment_select_auth" ON public.shipment_confirmations FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "shipment_insert_auth" ON public.shipment_confirmations FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "shipment_update_auth" ON public.shipment_confirmations FOR UPDATE USING (auth.uid() IS NOT NULL);
