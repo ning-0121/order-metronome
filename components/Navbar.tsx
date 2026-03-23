@@ -15,15 +15,10 @@ export function Navbar({ isAdmin = false, userRole }: NavbarProps) {
 
   const navLinks = [
     { href: '/dashboard', label: '我的节拍', icon: '📋' },
-    ...(isAdmin || isCeo ? [
-      { href: '/admin', label: 'CEO 助手', icon: '🧠' },
-    ] : []),
     { href: '/orders', label: '订单列表', icon: '📦' },
-    ...(isAdmin ? [
+    ...(isAdmin || isCeo ? [
+      { href: '/admin', label: '管理看板', icon: '⚙️' },
       { href: '/admin/users', label: '用户管理', icon: '👥' },
-    ] : []),
-    ...(!isAdmin && !isCeo ? [
-      { href: '/my-assistant', label: '我的助手', icon: '💬' },
     ] : []),
   ];
 
