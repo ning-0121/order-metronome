@@ -39,3 +39,55 @@ export async function getAllUsers(): Promise<{ data: User[] | null; error: strin
     error: null,
   };
 }
+
+interface UpdateUserRoleInput {
+  userId: string;
+  role?: string | null;
+  department?: string | null;
+  isActive?: boolean;
+}
+
+/**
+ * Admin-only: update target user's role/department/status.
+ */
+export async function updateUserRoleByAdmin(
+  input: UpdateUserRoleInput
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: '未登录' };
+  }
+
+  const { data: me, error: meErr } = await (supabase.from('profiles') as any)
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+
+  if (meErr || !me || me.role !== 'admin') {
+    return { error: '无权限' };
+  }
+
+  const patch: Record<string, unknown> = {
+    role: input.role ?? null,
+    department: input.department ?? null,
+    last_role_changed_at: new Date().toISOString(),
+  };
+
+  if (typeof input.isActive === 'boolean') {
+    patch.is_active = input.isActive;
+  }
+
+  const { error } = await (supabase.from('profiles') as any)
+    .update(patch)
+    .eq('user_id', input.userId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return {};
+}

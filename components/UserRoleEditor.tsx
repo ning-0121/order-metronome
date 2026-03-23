@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import { updateUserRoleByAdmin } from '@/app/actions/users';
 
 const ROLES = [
   { value: 'admin',       label: '管理员',     desc: '全权限' },
@@ -36,18 +36,14 @@ export function UserRoleEditor({ userId, currentRole, currentDepartment, isActiv
 
   const handleSave = async () => {
     setSaving(true); setError(''); setSaved(false);
-    const supabase = createClient();
-    const { error: err } = await supabase
-      .from('profiles')
-      .update({
-        role: role || null,
-        department: dept || null,
-        is_active: active,
-        last_role_changed_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId);
+    const result = await updateUserRoleByAdmin({
+      userId,
+      role: role || null,
+      department: dept || null,
+      isActive: active,
+    });
 
-    if (err) { setError(err.message); }
+    if (result.error) { setError(result.error); }
     else { setSaved(true); setTimeout(() => { setOpen(false); setSaved(false); router.refresh(); }, 800); }
     setSaving(false);
   };

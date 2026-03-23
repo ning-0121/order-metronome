@@ -17,6 +17,7 @@ import {
   submitRetrospective,
 } from '@/lib/repositories/ordersRepo';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
+import { getCurrentUserRole } from '@/lib/utils/user-role';
 import type { IncotermType, OrderType, PackagingType } from '@/lib/types';
 
 /**
@@ -306,12 +307,25 @@ export async function getOrder(id: string) {
 
 export async function updateOrder(id: string, formData: FormData) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
+  // 权限检查：只有订单创建者或 admin 可以修改
+  const { data: existingOrder } = await (supabase.from('orders') as any)
+    .select('created_by')
+    .eq('id', id)
+    .single();
+  if (!existingOrder) {
+    return { error: '订单不存在' };
+  }
+  const { isAdmin: isAdminUser } = await getCurrentUserRole(supabase);
+  if (existingOrder.created_by !== user.id && !isAdminUser) {
+    return { error: '无权修改此订单' };
+  }
+
   const updates: Record<string, any> = {};
   const fields = ['customer_name', 'order_no', 'order_type', 'packaging_type'];
   
@@ -360,12 +374,25 @@ export async function updateOrder(id: string, formData: FormData) {
  */
 export async function activateOrderAction(orderId: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
+  // 权限检查：只有订单创建者或 admin 可以激活
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by')
+    .eq('id', orderId)
+    .single();
+  if (!order) {
+    return { error: '订单不存在' };
+  }
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (order.created_by !== user.id && !isAdmin) {
+    return { error: '无权操作此订单' };
+  }
+
   const result = await activateOrder(orderId);
   
   if (result.error) {
@@ -415,12 +442,18 @@ export async function decideCancelAction(
   decisionNote: string | null = null
 ) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
+  // 权限检查：只有 admin 可以审批取消申请
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) {
+    return { error: '无权审批：只有管理员可以审批取消申请' };
+  }
+
   const result = await decideCancel(cancelRequestId, decision, decisionNote);
   
   if (result.error) {
@@ -458,12 +491,25 @@ export async function decideCancelAction(
  */
 export async function completeOrderAction(orderId: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
+  // 权限检查：只有订单创建者或 admin 可以完成订单
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by')
+    .eq('id', orderId)
+    .single();
+  if (!order) {
+    return { error: '订单不存在' };
+  }
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (order.created_by !== user.id && !isAdmin) {
+    return { error: '无权操作此订单' };
+  }
+
   const result = await completeOrder(orderId);
   
   if (result.error) {

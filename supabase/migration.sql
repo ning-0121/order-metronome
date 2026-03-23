@@ -655,3 +655,158 @@ CREATE TABLE IF NOT EXISTS public.cost_reconciliations (
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+
+-- ===== 2026-03-23: P0 安全加固（RLS + 角色授权 + notifications 对齐） =====
+
+-- 1) profiles: 强化 RLS 与角色修改保护
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- 管理员判定函数（SECURITY DEFINER，避免 profiles RLS 递归）
+CREATE OR REPLACE FUNCTION public.is_admin_user(uid uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.profiles p
+    WHERE p.user_id = uid
+      AND p.role = 'admin'
+  );
+$$;
+
+-- 非管理员不得修改 role（含自我提权）
+CREATE OR REPLACE FUNCTION public.guard_profiles_role_update()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.role IS DISTINCT FROM OLD.role THEN
+    IF NOT public.is_admin_user(auth.uid()) THEN
+      RAISE EXCEPTION 'only admin can update role';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_profiles_role_update ON public.profiles;
+CREATE TRIGGER trg_guard_profiles_role_update
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.guard_profiles_role_update();
+
+DROP POLICY IF EXISTS "profiles_select" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_update" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_select_authenticated" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_insert_own" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_update_own_basic" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_update_admin_all" ON public.profiles;
+
+-- authenticated 用户可读
+CREATE POLICY "profiles_select_authenticated"
+ON public.profiles
+FOR SELECT
+USING (auth.uid() IS NOT NULL);
+
+-- 用户只能插入自己的 profile
+CREATE POLICY "profiles_insert_own"
+ON public.profiles
+FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+-- 用户只能更新自己的基本信息（role 变更由 trigger + admin 限制）
+CREATE POLICY "profiles_update_own_basic"
+ON public.profiles
+FOR UPDATE
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+-- 只有 admin 可更新任意用户（含 role）
+CREATE POLICY "profiles_update_admin_all"
+ON public.profiles
+FOR UPDATE
+USING (public.is_admin_user(auth.uid()))
+WITH CHECK (public.is_admin_user(auth.uid()));
+
+-- 2) orders/milestones: 确保启用 RLS，并校验已有 policy 存在
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  orders_policy_count int;
+  milestones_policy_count int;
+BEGIN
+  SELECT COUNT(*) INTO orders_policy_count
+  FROM pg_policies
+  WHERE schemaname = 'public' AND tablename = 'orders';
+
+  SELECT COUNT(*) INTO milestones_policy_count
+  FROM pg_policies
+  WHERE schemaname = 'public' AND tablename = 'milestones';
+
+  IF orders_policy_count = 0 THEN
+    RAISE EXCEPTION 'orders has RLS enabled but no policy';
+  END IF;
+  IF milestones_policy_count = 0 THEN
+    RAISE EXCEPTION 'milestones has RLS enabled but no policy';
+  END IF;
+END $$;
+
+-- 4) notifications: 双 schema 兼容（最小修复，避免线上读写不一致）
+DO $$
+BEGIN
+  CREATE TYPE notification_status AS ENUM ('unread', 'read');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER TABLE public.notifications
+  ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS type text,
+  ADD COLUMN IF NOT EXISTS title text,
+  ADD COLUMN IF NOT EXISTS message text,
+  ADD COLUMN IF NOT EXISTS related_order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS related_milestone_id uuid REFERENCES public.milestones(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS status notification_status DEFAULT 'unread',
+  ADD COLUMN IF NOT EXISTS email_sent boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS milestone_id uuid REFERENCES public.milestones(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS kind text,
+  ADD COLUMN IF NOT EXISTS sent_to text,
+  ADD COLUMN IF NOT EXISTS sent_at timestamptz DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS payload jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id_v2 ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_related_order_id_v2 ON public.notifications(related_order_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_order_id_v2 ON public.notifications(order_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_kind_v2 ON public.notifications(kind);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_unique_milestone_kind_sent_to_v2
+  ON public.notifications(milestone_id, kind, sent_to)
+  WHERE milestone_id IS NOT NULL AND kind IS NOT NULL AND sent_to IS NOT NULL;
+
+-- 3) orders: 修复 update/delete RLS — admin 可操作所有订单
+DROP POLICY IF EXISTS "orders_update_own" ON public.orders;
+CREATE POLICY "orders_update_own_or_admin"
+ON public.orders FOR UPDATE
+USING (
+  auth.uid() = created_by
+  OR public.is_admin_user(auth.uid())
+)
+WITH CHECK (
+  auth.uid() = created_by
+  OR public.is_admin_user(auth.uid())
+);
+
+DROP POLICY IF EXISTS "orders_delete_own" ON public.orders;
+CREATE POLICY "orders_delete_own_or_admin"
+ON public.orders FOR DELETE
+USING (
+  auth.uid() = created_by
+  OR public.is_admin_user(auth.uid())
+);
