@@ -11,6 +11,10 @@ import { CeoAssistantActionPanel } from '@/components/CeoAssistantActionPanel';
 import { inferRolesFromCategoryAndRequirement } from '@/lib/domain/requirements';
 
 export default async function CEODashboardPage() {
+  // V1 收敛：CEO 看板已合并至 /admin 管理看板
+  redirect('/admin');
+
+  // ── 以下代码保留但不再可达 ──
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 

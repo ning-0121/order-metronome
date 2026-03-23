@@ -13,6 +13,10 @@ const RISK_CONFIG = {
 };
 
 export default async function WarRoomPage() {
+  // V1 收敛：War Room 已合并至 /admin 管理看板「问题中心」Tab
+  redirect('/admin');
+
+  // ── 以下代码保留但不再可达 ──
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');

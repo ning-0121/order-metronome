@@ -14,8 +14,10 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
   const navLinks = [
     { href: '/dashboard', label: '我的节拍', icon: '📋' },
     { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/new', label: '新建订单', icon: '➕' },
-    ...(isAdmin ? [{ href: '/admin', label: '管理看板', icon: '⚙️' }] : []),
+    ...(isAdmin ? [
+      { href: '/admin', label: '管理看板', icon: '⚙️' },
+      { href: '/admin/users', label: '用户管理', icon: '👥' },
+    ] : []),
   ];
 
   return (

@@ -4,6 +4,10 @@ import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
 
 export default async function WarehousePage() {
+  // V1 收敛：仓库工作台暂时隐藏，员工统一使用 /dashboard
+  redirect('/dashboard');
+
+  // ── 以下代码保留但不再可达 ──
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
