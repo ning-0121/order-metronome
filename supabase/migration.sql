@@ -907,6 +907,10 @@ CREATE POLICY "packing_lines_delete_auth" ON public.packing_list_lines FOR DELET
 
 -- shipment_confirmations
 ALTER TABLE public.shipment_confirmations ENABLE ROW LEVEL SECURITY;
+
+-- ── 2026-03-23: 订单基础业务字段补充 ──
+-- order_date 已存在（由之前 migration 添加），仅补 factory_name
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS factory_name text;
 CREATE POLICY "shipment_select_auth" ON public.shipment_confirmations FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY "shipment_insert_auth" ON public.shipment_confirmations FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 CREATE POLICY "shipment_update_auth" ON public.shipment_confirmations FOR UPDATE USING (auth.uid() IS NOT NULL);

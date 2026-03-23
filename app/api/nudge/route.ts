@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       <p><strong>Due Date:</strong> ${milestoneData.due_at ? new Date(milestoneData.due_at).toLocaleDateString() : 'N/A'}</p>
       <p><strong>Status:</strong> ${milestoneData.status}</p>
       <p>Please take action on this milestone as soon as possible.</p>
-      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/orders/${orderData.id}#milestone-${milestone_id}">View Milestone</a></p>
+      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/orders/${orderData.id}?tab=progress#milestone-${milestone_id}">查看节点</a></p>
     `;
 
     await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);

@@ -191,7 +191,7 @@ export default async function CEODashboardPage() {
               {overdueMilestones.slice(0, 5).map((milestone: any) => (
                 <Link
                   key={milestone.id}
-                  href={`/orders/${milestone.order_id}#milestone-${milestone.id}`}
+                  href={`/orders/${milestone.order_id}?tab=progress#milestone-${milestone.id}`}
                   className="block p-4 rounded-xl border border-red-200 hover:border-red-300 bg-red-50/50 transition-all hover:shadow-sm"
                 >
                   <div className="flex items-start justify-between">
@@ -242,7 +242,7 @@ export default async function CEODashboardPage() {
               {blockedMilestones.slice(0, 5).map((milestone: any) => (
                 <Link
                   key={milestone.id}
-                  href={`/orders/${milestone.order_id}#milestone-${milestone.id}`}
+                  href={`/orders/${milestone.order_id}?tab=progress#milestone-${milestone.id}`}
                   className="block p-4 rounded-xl border border-orange-200 hover:border-orange-300 bg-orange-50/50 transition-all hover:shadow-sm"
                 >
                   <div className="flex items-start justify-between">

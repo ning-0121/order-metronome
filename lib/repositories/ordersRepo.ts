@@ -35,6 +35,8 @@ const INSERT_WHITELIST = [
   'total_amount',
   'payment_terms',
   'shipment_qty',
+  'order_date',
+  'factory_name',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -56,6 +58,8 @@ const UPDATE_WHITELIST = [
   'total_amount',
   'payment_terms',
   'shipment_qty',
+  'order_date',
+  'factory_name',
 ] as const;
 
 // ⚠️ 系统级约束：order_no 一旦生成，永不修改

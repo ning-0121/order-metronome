@@ -677,7 +677,7 @@ function ActionsTab({ actionItems, todaySummary, allWarRoomActions, actionSummar
         ) : (
           <div className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-50">
             {(tomorrowRiskMilestones as any[]).slice(0, 10).map((m: any) => (
-              <Link key={m.id} href={`/orders/${m.order_id}#milestone-${m.id}`}
+              <Link key={m.id} href={`/orders/${m.order_id}?tab=progress#milestone-${m.id}`}
                 className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
                 <div>
                   <span className="text-sm font-medium text-gray-900">{m.orders?.order_no}</span>

@@ -667,7 +667,7 @@ export default async function CEODashboardPage() {
                 {(tomorrowRiskMilestones as any[]).slice(0, 10).map((m: any) => (
                   <li key={m.id}>
                     <Link
-                      href={`/orders/${m.order_id}#milestone-${m.id}`}
+                      href={`/orders/${m.order_id}?tab=progress#milestone-${m.id}`}
                       className="text-blue-600 hover:text-blue-700"
                     >
                       {m.orders?.order_no}

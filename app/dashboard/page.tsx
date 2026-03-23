@@ -233,7 +233,7 @@ function MilestoneCard({ milestone, variant, badge }: { milestone: any; variant:
 
   return (
     <Link
-      href={`/orders/${order?.id}#milestone-${milestone.id}`}
+      href={`/orders/${order?.id}?tab=progress#milestone-${milestone.id}`}
       className={`block p-4 rounded-xl border ${borderClass} transition-all hover:shadow-sm`}
     >
       <div className="flex items-start justify-between">
@@ -278,7 +278,7 @@ function BlockedMilestoneCard({ milestone }: { milestone: any }) {
         <div className="flex flex-col gap-2 ml-4">
           <UnblockButton milestoneId={milestone.id} />
           <Link
-            href={`/orders/${order?.id}#milestone-${milestone.id}`}
+            href={`/orders/${order?.id}?tab=progress#milestone-${milestone.id}`}
             className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
           >
             查看 →

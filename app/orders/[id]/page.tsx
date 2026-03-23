@@ -187,30 +187,19 @@ export default async function OrderDetailPage({
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">商务信息</h2>
+              <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">订单详情</h2>
               <dl className="space-y-3">
-                {orderData.style_no && <div className="flex justify-between"><dt className="text-sm text-gray-500">款号</dt><dd className="text-sm font-medium text-gray-900">{orderData.style_no}</dd></div>}
-                {orderData.po_number && <div className="flex justify-between"><dt className="text-sm text-gray-500">客户PO号</dt><dd className="text-sm font-medium text-gray-900">{orderData.po_number}</dd></div>}
-                {orderData.quantity && <div className="flex justify-between"><dt className="text-sm text-gray-500">数量</dt><dd className="text-sm font-medium text-gray-900">{orderData.quantity} 件</dd></div>}
-                {orderData.cancel_date && (
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-gray-500">Cancel Date</dt>
-                    <dd className={`text-sm font-medium ${new Date(orderData.cancel_date) < new Date() ? 'text-red-600' : 'text-gray-900'}`}>
-                      {formatDate(orderData.cancel_date)}
-                    </dd>
+                {[
+                  { label: '订单数量', value: orderData.quantity ? `${orderData.quantity} 件` : null },
+                  { label: '下单日期', value: orderData.order_date ? formatDate(orderData.order_date) : null },
+                  { label: '工厂', value: orderData.factory_name },
+                  { label: '备注', value: orderData.notes },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between">
+                    <dt className="text-sm text-gray-500">{label}</dt>
+                    <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
                   </div>
-                )}
-                {orderData.currency && orderData.total_amount && (
-                  <div className="flex justify-between">
-                    <dt className="text-sm text-gray-500">合同金额</dt>
-                    <dd className="text-sm font-medium text-gray-900">{orderData.currency} {orderData.total_amount?.toLocaleString()}</dd>
-                  </div>
-                )}
-                {orderData.payment_terms && <div className="flex justify-between"><dt className="text-sm text-gray-500">付款条件</dt><dd className="text-sm font-medium text-gray-900">{orderData.payment_terms}</dd></div>}
-                {orderData.notes && <div className="flex justify-between"><dt className="text-sm text-gray-500">备注</dt><dd className="text-sm font-medium text-gray-900">{orderData.notes}</dd></div>}
-                {!orderData.style_no && !orderData.po_number && !orderData.quantity && (
-                  <p className="text-sm text-gray-400 text-center py-4">暂无商务信息，可在编辑订单时补充</p>
-                )}
+                ))}
               </dl>
             </div>
 

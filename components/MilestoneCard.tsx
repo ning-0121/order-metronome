@@ -24,7 +24,7 @@ export function MilestoneCard({ milestone }: MilestoneCardProps) {
   const overdue = isMilestoneOverdue(milestone);
 
   return (
-    <Link href={`/orders/${order?.id}#milestone-${milestone.id}`}>
+    <Link href={`/orders/${order?.id}?tab=progress#milestone-${milestone.id}`}>
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
         <div className="flex items-start justify-between mb-2">
           <h3 className="font-semibold text-lg">{milestone.name}</h3>

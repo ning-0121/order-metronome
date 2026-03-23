@@ -88,7 +88,7 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
                     <Link
-                      href={`/orders/${milestone.order_id}#milestone-${milestone.id}`}
+                      href={`/orders/${milestone.order_id}?tab=progress#milestone-${milestone.id}`}
                       className="font-semibold text-gray-900 hover:text-blue-600"
                     >
                       {milestone.name}
@@ -155,7 +155,7 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
                 
                 <div className="ml-4 flex flex-col gap-2">
                   <Link
-                    href={`/orders/${milestone.order_id}#milestone-${milestone.id}`}
+                    href={`/orders/${milestone.order_id}?tab=progress#milestone-${milestone.id}`}
                     className="text-sm text-blue-600 hover:text-blue-700 font-medium whitespace-nowrap"
                   >
                     查看详情

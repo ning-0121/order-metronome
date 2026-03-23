@@ -110,7 +110,7 @@ export function CeoAssistantActionPanel({
                 </div>
                 <div className="flex flex-row md:flex-col gap-2 md:items-end">
                   <Link
-                    href={`/orders/${item.order_id}#milestone-${item.milestone_id}`}
+                    href={`/orders/${item.order_id}?tab=progress#milestone-${item.milestone_id}`}
                     className="inline-flex items-center justify-center rounded-md border border-blue-500 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50"
                   >
                     查看
