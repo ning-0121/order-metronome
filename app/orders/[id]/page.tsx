@@ -9,7 +9,6 @@ import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
-import { QuoteApproval } from '@/components/QuoteApproval';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OutsourceTab } from '@/components/tabs/OutsourceTab';
 import { QcTab } from '@/components/tabs/QcTab';
@@ -56,17 +55,6 @@ export default async function OrderDetailPage({
       .eq('user_id', orderData.owner_user_id)
       .single();
     ownerName = ownerProfile?.name || ownerProfile?.email || '—';
-  }
-  const canApproveQuote = isAdmin;
-
-  // 报价审批人
-  let quoteApproverName = '';
-  if (orderData.quote_approved_by) {
-    const { data: approverProfile } = await (supabase.from('profiles') as any)
-      .select('name, email')
-      .eq('user_id', orderData.quote_approved_by)
-      .single();
-    quoteApproverName = approverProfile?.name || approverProfile?.email || '';
   }
 
   const allMilestonesCompleted = milestones
@@ -177,12 +165,6 @@ export default async function OrderDetailPage({
                     <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
                   </div>
                 ))}
-                <div className="flex justify-between items-center">
-                  <dt className="text-sm text-gray-500">报价状态</dt>
-                  <dd>
-                    <QuoteApproval orderId={orderData.id} quoteStatus={orderData.quote_status} canApprove={canApproveQuote} approverName={quoteApproverName} approvedAt={orderData.quote_approved_at} />
-                  </dd>
-                </div>
               </dl>
             </div>
 
