@@ -10,6 +10,15 @@ import { getMilestoneLogs } from '@/app/actions/milestones';
 import { useState, useEffect } from 'react';
 import type { Milestone } from '@/lib/types';
 import { getRoleLabel } from '@/lib/utils/i18n';
+import { computeDeliveryAlert, computeDelayDays } from '@/lib/domain/milestone-helpers';
+import { updateMilestoneActualDate } from '@/app/actions/milestones';
+
+/** 允许填写实际日期的节点 */
+const ACTUAL_DATE_EDITABLE_KEYS = [
+  'materials_received_inspected',
+  'production_kickoff',
+  'factory_completion',
+];
 
 interface OrderTimelineProps {
   milestones: Milestone[];
@@ -19,7 +28,7 @@ interface OrderTimelineProps {
   isAdmin?: boolean;
 }
 
-// V1 最终分组（对齐 20 节点表）
+// V1 最终分组（对齐 21 节点表）
 const MILESTONE_GROUPS = [
   {
     key: 'stage1', emoji: '🟦',
@@ -49,7 +58,7 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage6', emoji: '🟥',
     titleCn: '阶段 6：出货控制',
-    stepKeys: ['packing_method_confirmed', 'inspection_release', 'shipping_sample_send'],
+    stepKeys: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'],
   },
   {
     key: 'stage7', emoji: '🟫',
@@ -64,6 +73,79 @@ const STATUS_STYLE: Record<string, string> = {
   '已完成': 'bg-green-100 text-green-700',
   '卡单':   'bg-orange-100 text-orange-700',
 };
+
+/** 实际/预计日期输入组件 */
+function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
+  milestoneId: string;
+  currentActualAt: string | null;
+  dueAt: string | null;
+}) {
+  const [value, setValue] = useState(currentActualAt ? currentActualAt.substring(0, 10) : '');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const alert = computeDeliveryAlert(value || null, dueAt);
+  const alertColor = alert === 'RED' ? 'border-red-300 bg-red-50' :
+    alert === 'YELLOW' ? 'border-yellow-300 bg-yellow-50' :
+    value ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-white';
+
+  async function handleSave() {
+    setSaving(true);
+    setMsg('');
+    const result = await updateMilestoneActualDate(milestoneId, value ? value + 'T00:00:00Z' : null);
+    setSaving(false);
+    if (result.error) {
+      setMsg(result.error);
+    } else {
+      setMsg(value ? '已保存' : '已清除');
+      setTimeout(() => setMsg(''), 2000);
+    }
+  }
+
+  return (
+    <div className={`rounded-lg border p-3 ${alertColor}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex-1">
+          <label className="text-xs font-semibold text-gray-700 block mb-1">
+            📅 实际/预计完成日期
+            {dueAt && <span className="text-gray-400 font-normal ml-2">（系统截止：{formatDate(dueAt)}）</span>}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+            {value && (
+              <button
+                onClick={() => { setValue(''); }}
+                className="text-xs px-2 py-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50"
+              >
+                清除
+              </button>
+            )}
+          </div>
+        </div>
+        {alert !== 'GREEN' && (
+          <div className={`text-xs font-semibold px-2 py-1 rounded ${
+            alert === 'RED' ? 'text-red-700' : 'text-yellow-700'
+          }`}>
+            {alert === 'RED' ? '🚨 交期风险' : '⚠ 进度偏差'}
+          </div>
+        )}
+      </div>
+      {msg && <p className={`text-xs mt-1 ${msg.includes('失败') || msg.includes('error') ? 'text-red-600' : 'text-green-600'}`}>{msg}</p>}
+    </div>
+  );
+}
 
 export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, isAdmin = false }: OrderTimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -171,6 +253,19 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {overdue && isActive && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 逾期未结</span>
                           )}
+                          {/* 交期预警徽章 */}
+                          {(() => {
+                            const alert = computeDeliveryAlert(m.actual_at, m.due_at);
+                            if (alert === 'RED') {
+                              const days = computeDelayDays(m.actual_at, m.due_at);
+                              return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">🚨 交期风险 +{days}天</span>;
+                            }
+                            if (alert === 'YELLOW') {
+                              const days = computeDelayDays(m.actual_at, m.due_at);
+                              return <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium">⚠ 进度偏差 +{days}天</span>;
+                            }
+                            return null;
+                          })()}
                           {/* SOP 按钮 */}
                           {(() => {
                             const sop = getSOPForStep(m.step_key);
@@ -185,6 +280,15 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {m.due_at && (
                             <span className={overdue && isActive ? 'text-red-600 font-semibold' : ''}>
                               截止：{formatDate(m.due_at)}
+                            </span>
+                          )}
+                          {m.actual_at && (
+                            <span className={
+                              computeDeliveryAlert(m.actual_at, m.due_at) === 'RED' ? 'text-red-600 font-semibold' :
+                              computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW' ? 'text-yellow-600 font-semibold' :
+                              'text-green-600'
+                            }>
+                              实际：{formatDate(m.actual_at)}
                             </span>
                           )}
                         </div>
@@ -224,6 +328,15 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                     {/* 展开区 */}
                     {isExpanded && (
                       <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
+                        {/* 实际/预计日期输入（仅关键生产节点） */}
+                        {ACTUAL_DATE_EDITABLE_KEYS.includes(m.step_key) && m.status !== '已完成' && (
+                          <ActualDateInput
+                            milestoneId={m.id}
+                            currentActualAt={m.actual_at}
+                            dueAt={m.due_at}
+                          />
+                        )}
+
                         <OwnerAssignment
                           milestoneId={m.id}
                           currentOwnerUserId={m.owner_user_id}

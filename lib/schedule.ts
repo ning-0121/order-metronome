@@ -42,7 +42,7 @@ export interface CalcDueDatesParams {
 }
 
 /**
- * 最终 V1 排期计算（20节点）
+ * 最终 V1 排期计算（21节点）
  * T0 = order_date
  * Anchor = FOB→ETD / DDP→ETA or warehouseDueDate
  */
@@ -66,6 +66,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
   const ppsSampleApproved = offset(anchor, -18);
   const finalQc           = offset(anchor, -7);
   const packingConfirm    = shiftWeekendToFriday(addWorkdays(finalQc, 1));
+  const factoryCompletion = offset(anchor, -8);
   const inspectionRelease = offset(anchor, -7);
   const shippingSample    = shippingSampleRequired && shippingSampleDeadline
     ? shiftWeekendToFriday(parseDate(shippingSampleDeadline)!)
@@ -111,6 +112,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
     final_qc_check:                shiftWeekendToFriday(finalQc),
     // 阶段6：出货控制
     packing_method_confirmed:      shiftWeekendToFriday(packingConfirm),
+    factory_completion:            shiftWeekendToFriday(factoryCompletion),
     inspection_release:            shiftWeekendToFriday(inspectionRelease),
     shipping_sample_send:          shiftWeekendToFriday(shippingSample),
     // 阶段7：物流收款

@@ -537,6 +537,77 @@ export async function logEvidenceUpload(milestoneId: string, orderId: string, fi
   await logMilestoneAction(supabase, milestoneId, orderId, 'upload_evidence', `已上传凭证：${fileName}`);
 }
 
+/** 允许用户填写 actual_at 的节点 */
+const ACTUAL_DATE_EDITABLE_KEYS = [
+  'materials_received_inspected',
+  'production_kickoff',
+  'factory_completion',
+];
+
+/**
+ * 更新里程碑实际/预计完成日期（actual_at）
+ * 仅限关键生产节点，用于交期预警
+ */
+export async function updateMilestoneActualDate(
+  milestoneId: string,
+  actualAt: string | null
+): Promise<{ data?: any; error?: string }> {
+  const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  // 查询节点信息
+  const { data: milestone, error: getErr } = await (supabase
+    .from('milestones') as any)
+    .select('id, order_id, step_key, name, due_at, owner_role')
+    .eq('id', milestoneId)
+    .single();
+  if (getErr || !milestone) return { error: '找不到该节点' };
+
+  // 校验：只有指定节点允许填写
+  if (!ACTUAL_DATE_EDITABLE_KEYS.includes(milestone.step_key)) {
+    return { error: `「${milestone.name}」不允许填写实际日期` };
+  }
+
+  // 更新 actual_at
+  const { data: updated, error: updateErr } = await (supabase
+    .from('milestones') as any)
+    .update({ actual_at: actualAt })
+    .eq('id', milestoneId)
+    .select()
+    .single();
+  if (updateErr) return { error: `更新失败：${updateErr.message}` };
+
+  // 记录日志
+  const dateStr = actualAt ? new Date(actualAt).toLocaleDateString('zh-CN') : '已清除';
+  await logMilestoneAction(
+    supabase, milestoneId, milestone.order_id, 'update',
+    `实际/预计日期更新为：${dateStr}`
+  );
+
+  // 交期预警：actual_at 超 due_at 3天以上触发 RED 邮件
+  if (actualAt && milestone.due_at) {
+    const diffMs = new Date(actualAt).getTime() - new Date(milestone.due_at).getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays > 3) {
+      // 异步发送预警邮件（不阻塞主流程）
+      try {
+        const { sendDeliveryDelayAlert } = await import('@/app/actions/notifications');
+        await sendDeliveryDelayAlert(milestoneId, milestone.order_id, diffDays);
+      } catch (e) {
+        console.warn('[actual_at] 预警邮件发送失败:', e);
+      }
+    }
+  }
+
+  revalidatePath(`/orders/${milestone.order_id}`);
+  revalidatePath('/orders');
+  revalidatePath('/dashboard');
+
+  return { data: updated };
+}
+
 /**
  * Update milestone owner_user_id (admin only)
  */

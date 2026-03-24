@@ -43,6 +43,7 @@ export interface Milestone {
   owner_user_id: string | null;
   planned_at: string | null;
   due_at: string | null;
+  actual_at: string | null;  // 用户填入的实际/预计完成日期
   status: MilestoneStatus;
   is_critical: boolean;
   evidence_required: boolean;

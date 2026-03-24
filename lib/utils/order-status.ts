@@ -1,5 +1,6 @@
 import { isAfter, isBefore, differenceInHours, startOfDay } from 'date-fns';
 import type { Milestone } from '@/lib/types';
+import { computeDeliveryAlert } from '@/lib/domain/milestone-helpers';
 
 export type OrderStatusColor = 'GREEN' | 'YELLOW' | 'RED';
 
@@ -46,6 +47,22 @@ export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
     };
   }
 
+  // Check for actual_at delivery alerts (RED)
+  const actualAtRedAlerts = milestones.filter(m =>
+    m.status !== '已完成' && m.actual_at && computeDeliveryAlert(m.actual_at, m.due_at) === 'RED'
+  );
+  if (actualAtRedAlerts.length > 0) {
+    return {
+      color: 'RED',
+      reason: `交期风险：${actualAtRedAlerts.map(m => m.name).join(', ')} 实际日期严重滞后`,
+    };
+  }
+
+  // Check for actual_at delivery alerts (YELLOW)
+  const actualAtYellowAlerts = milestones.filter(m =>
+    m.status !== '已完成' && m.actual_at && computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW'
+  );
+
   // Check for YELLOW conditions
   const yellowConditions = inProgressMilestones.filter(m => {
     if (!m.due_at) return false;
@@ -68,10 +85,12 @@ export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
     return false;
   });
 
-  if (yellowConditions.length > 0) {
+  if (yellowConditions.length > 0 || actualAtYellowAlerts.length > 0) {
+    const names = [...yellowConditions, ...actualAtYellowAlerts].map(m => m.name);
+    const unique = [...new Set(names)];
     return {
       color: 'YELLOW',
-      reason: `${yellowConditions.length} milestone(s) approaching deadline: ${yellowConditions.map(m => m.name).join(', ')}`,
+      reason: `进度偏差：${unique.join(', ')}`,
     };
   }
 

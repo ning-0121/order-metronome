@@ -10,7 +10,36 @@ export interface MilestoneData {
   status: MilestoneStatus;
   due_at: string | null;
   planned_at: string | null;
+  actual_at: string | null;
   notes: string | null;
+}
+
+/** 交期预警等级 */
+export type DeliveryAlertLevel = 'GREEN' | 'YELLOW' | 'RED';
+
+/**
+ * 计算交期预警等级
+ * GREEN: actual_at <= due_at 或未填
+ * YELLOW: actual_at 超 due_at 1-3 天
+ * RED: actual_at 超 due_at >3 天（交期风险）
+ */
+export function computeDeliveryAlert(actualAt: string | null, dueAt: string | null): DeliveryAlertLevel {
+  if (!actualAt || !dueAt) return 'GREEN';
+  const diffMs = new Date(actualAt).getTime() - new Date(dueAt).getTime();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays <= 0) return 'GREEN';
+  if (diffDays <= 3) return 'YELLOW';
+  return 'RED';
+}
+
+/**
+ * 计算实际日期与截止日期的偏差天数
+ * 正数=延迟，负数=提前
+ */
+export function computeDelayDays(actualAt: string | null, dueAt: string | null): number {
+  if (!actualAt || !dueAt) return 0;
+  const diffMs = new Date(actualAt).getTime() - new Date(dueAt).getTime();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 }
 
 /**

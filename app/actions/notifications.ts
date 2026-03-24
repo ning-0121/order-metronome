@@ -296,3 +296,109 @@ export async function sendBlockedNotification(
 
   return { data: { sent: true } };
 }
+
+/**
+ * 交期预警邮件：actual_at 超 due_at 超过 3 天时发送
+ */
+export async function sendDeliveryDelayAlert(
+  milestoneId: string,
+  orderId: string,
+  delayDays: number
+) {
+  const supabase = await createClient();
+
+  const { data: milestone } = await supabase
+    .from('milestones').select('*').eq('id', milestoneId).single();
+  if (!milestone) return { error: 'Milestone not found' };
+  const m = milestone as any;
+
+  const { data: order } = await supabase
+    .from('orders').select('*').eq('id', orderId).single();
+  if (!order) return { error: 'Order not found' };
+  const o = order as any;
+
+  // 获取订单创建者邮箱
+  let recipientEmail = '';
+  try {
+    const { data: profile } = await supabase
+      .from('profiles').select('email').eq('user_id', o.created_by).single();
+    recipientEmail = (profile as any)?.email || '';
+  } catch { /* ignore */ }
+
+  const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+  const kind = `delivery_delay_red`;
+
+  // 去重：同一节点只发一次 RED 预警
+  const { data: existing } = await supabase
+    .from('notifications').select('id')
+    .eq('milestone_id', milestoneId).eq('kind', kind)
+    .eq('sent_to', recipientEmail || ccEmails[0]).single();
+  if (existing) return { data: { already_sent: true } };
+
+  // 写入通知记录
+  await supabase.from('notifications').insert({
+    milestone_id: milestoneId,
+    order_id: orderId,
+    kind,
+    sent_to: recipientEmail || ccEmails[0],
+    sent_at: new Date().toISOString(),
+    payload: {
+      order_no: o.order_no,
+      milestone_name: m.name,
+      delay_days: delayDays,
+      actual_at: m.actual_at,
+      due_at: m.due_at,
+    },
+  });
+
+  // 发送邮件
+  const subject = `[紧急] 订单 ${o.order_no} — ${m.name} 延迟 ${delayDays} 天，交期存在风险`;
+  const body = `
+    <h2 style="color: #dc2626;">交期风险预警</h2>
+    <table style="border-collapse:collapse;margin:16px 0;">
+      <tr><td style="padding:4px 12px;font-weight:bold;">订单号</td><td style="padding:4px 12px;">${o.order_no}</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold;">客户</td><td style="padding:4px 12px;">${o.customer_name}</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold;">节点</td><td style="padding:4px 12px;">${m.name}</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold;">系统截止</td><td style="padding:4px 12px;">${m.due_at ? new Date(m.due_at).toLocaleDateString('zh-CN') : '-'}</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold;">实际/预计</td><td style="padding:4px 12px;color:#dc2626;font-weight:bold;">${m.actual_at ? new Date(m.actual_at).toLocaleDateString('zh-CN') : '-'}</td></tr>
+      <tr><td style="padding:4px 12px;font-weight:bold;">延迟天数</td><td style="padding:4px 12px;color:#dc2626;font-weight:bold;">${delayDays} 天</td></tr>
+    </table>
+    <p>请立即采取措施，避免影响最终交货日期。</p>
+    <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order-metronome.vercel.app'}/orders/${orderId}">查看订单详情</a></p>
+  `;
+
+  const allRecipients = recipientEmail ? [recipientEmail, ...ccEmails] : ccEmails;
+  await sendEmailNotification(allRecipients, subject, body);
+
+  return { data: { sent: true, delay_days: delayDays } };
+}
+
+/**
+ * 定期扫描：检查所有已填 actual_at 的节点，触发交期预警
+ * 供 cron job 调用
+ */
+export async function checkDeliveryDeadlines() {
+  const supabase = await createClient();
+
+  // 获取所有有 actual_at 且未完成的里程碑
+  const { data: milestones, error } = await supabase
+    .from('milestones')
+    .select('id, order_id, step_key, name, due_at, actual_at, status')
+    .not('actual_at', 'is', null)
+    .not('status', 'eq', 'done');
+
+  if (error || !milestones) return { error: error?.message };
+
+  let alertsSent = 0;
+  for (const m of milestones as any[]) {
+    if (!m.actual_at || !m.due_at) continue;
+    const diffMs = new Date(m.actual_at).getTime() - new Date(m.due_at).getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays > 3) {
+      const result = await sendDeliveryDelayAlert(m.id, m.order_id, diffDays);
+      if (result.data && !('already_sent' in result.data)) alertsSent++;
+    }
+  }
+
+  return { data: { checked: milestones.length, alerts_sent: alertsSent } };
+}

@@ -944,3 +944,7 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_date date;
 
 -- 确保 customer_id 列存在
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_id uuid;
+
+-- ===== 2026-03-24: 双日期机制 — 新增 actual_at + 工厂完成节点 =====
+-- actual_at: 用户手动填入的实际/预计完成日期，用于交期预警
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS actual_at timestamptz DEFAULT NULL;
