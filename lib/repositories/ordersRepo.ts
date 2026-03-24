@@ -239,8 +239,9 @@ export async function createOrder(
   if (!sanitized.order_type) {
     return { error: 'order_type is required' };
   }
+  // packaging_type 默认值（表单可能不传此字段）
   if (!sanitized.packaging_type) {
-    return { error: 'packaging_type is required' };
+    sanitized.packaging_type = 'standard';
   }
   
   // Incoterm 特定验证

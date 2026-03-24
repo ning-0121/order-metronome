@@ -56,66 +56,49 @@ export async function preGenerateOrderNo() {
  * - 禁止从 formData 读取 order_no
  */
 export async function createOrder(formData: FormData, preGeneratedOrderNo?: string) {
+  console.log('[createOrder] ====== START ======');
+
+  // ── STEP 1: 验证用户身份 ──
+  console.log('[createOrder] STEP 1: 验证用户身份');
   const supabase = await createClient();
-  
-  // Get current user
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: '请先登录' };
-  }
-  
-  // Validate email domain
+  if (!user) return { error: '请先登录' };
   if (!user.email?.endsWith('@qimoclothing.com')) {
     return { error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
   }
-  
-  // ⚠️ 系统级约束：order_no 必须由系统预生成
   if (!preGeneratedOrderNo) {
     return { error: '订单号需由系统预生成，请刷新页面重试' };
   }
-  
-  // ⚠️ 系统级约束：禁止从 formData 读取 order_no（即使存在也会被忽略）
+  console.log('[createOrder] STEP 1: OK — user:', user.email);
+
+  // ── STEP 2: 提取表单字段 ──
+  console.log('[createOrder] STEP 2: 提取表单字段');
   const customer_name = formData.get('customer_name') as string;
   const customer_id = formData.get('customer_id') as string;
-  if (!customer_id) {
-    return { error: '请选择客户' };
-  }
+  if (!customer_id) return { error: '请选择客户' };
+
   const incoterm = formData.get('incoterm') as IncotermType;
   const etd = formData.get('etd') as string | null;
   const warehouse_due_date = formData.get('warehouse_due_date') as string | null;
   const order_type = formData.get('order_type') as OrderType;
-  const packaging_type = formData.get('packaging_type') as PackagingType;
-  // PO 容器模型新增字段
-  const customer_po_number = formData.get('customer_po_number') as string | null;
   const order_date = formData.get('order_date') as string | null;
-  const total_quantity = formData.get('total_quantity') ? parseInt(formData.get('total_quantity') as string, 10) : null;
-  const style_count = formData.get('style_count') ? parseInt(formData.get('style_count') as string, 10) : null;
+  const cancel_date = formData.get('cancel_date') as string | null;
   const eta = formData.get('eta') as string | null;
   const shipping_sample_required = formData.get('shipping_sample_required') === 'true';
   const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
-  const shipment_basis = incoterm === 'FOB' ? 'shipment' : 'arrival';
-  // 风险标记
-  const has_plus_size = formData.get('has_plus_size') === 'true';
-  const high_stretch = formData.get('high_stretch') === 'true';
-  const light_color_risk = formData.get('light_color_risk') === 'true';
-  const complex_print = formData.get('complex_print') === 'true';
-  const new_customer = formData.get('new_customer') === 'true';
-  const style_no = formData.get('style_no') as string | null;
-  const po_number = formData.get('po_number') as string | null;
-  const quantity = formData.get('quantity') ? parseInt(formData.get('quantity') as string, 10) : null;
-  const cancel_date = formData.get('cancel_date') as string | null;
-  
-  // Validate incoterm-specific dates
+  const factory_name = formData.get('factory_name') as string | null;
+
   if (incoterm === 'FOB' && !etd) {
     return { error: 'FOB 贸易条款需填写预计离港日期（ETD）' };
   }
   if (incoterm === 'DDP' && !warehouse_due_date) {
     return { error: 'DDP 贸易条款需填写仓库截止日期' };
   }
-  
-  // Create order (使用 repository，传入预生成的订单号)
-  const insertPayload: any = {
-    // ⚠️ 系统级约束：order_no 不在 payload 中，由 repository 层自动生成
+  console.log('[createOrder] STEP 2: OK — customer:', customer_name, 'incoterm:', incoterm);
+
+  // ── STEP 3: 插入订单 ──
+  console.log('[createOrder] STEP 3: 插入订单');
+  const insertPayload: Record<string, any> = {
     customer_name,
     customer_id,
     owner_user_id: user.id,
@@ -123,134 +106,129 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     etd: etd || null,
     warehouse_due_date: warehouse_due_date || null,
     order_type,
-    packaging_type,
-    style_no: style_no || null,
-    po_number: po_number || null,
-    quantity: quantity || null,
+    packaging_type: 'standard' as PackagingType,
     cancel_date: cancel_date || null,
-    customer_po_number: customer_po_number || null,
     order_date: order_date || null,
-    total_quantity: total_quantity || null,
-    style_count: style_count || null,
-    eta: eta || null,
-    shipment_basis,
-    shipping_sample_required,
-    shipping_sample_deadline: shipping_sample_deadline || null,
-    has_plus_size,
-    high_stretch,
-    light_color_risk,
-    complex_print,
-    new_customer,
+    factory_name: factory_name || null,
     created_by: user.id,
   };
-  
-  // ⚠️ 系统级约束：使用预生成的订单号创建订单
+
   const { data: order, error: orderError } = await createOrderRepo(insertPayload, preGeneratedOrderNo);
-  
   if (orderError || !order) {
+    console.error('[createOrder] STEP 3: FAIL —', orderError);
     return { error: orderError || '订单创建失败，请重试' };
   }
-  
   const orderData = order as any;
-  
-  // ⚠️ 使用 V1 托底闭环里程碑模板生成所有18个里程碑
-  const createdAt = new Date(orderData.created_at);
-  
-  // 计算所有里程碑的 due_at
-  const dueDates = calcDueDates({
-    orderDate: order_date,
-    createdAt: new Date(orderData.created_at),
-    incoterm: orderData.incoterm as 'FOB' | 'DDP',
-    etd: orderData.etd,
-    warehouseDueDate: orderData.warehouse_due_date,
-    eta: orderData.eta,
-    orderType: (orderData.order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
-    shippingSampleRequired: orderData.shipping_sample_required || false,
-    shippingSampleDeadline: orderData.shipping_sample_deadline,
-  })
-  
-  // 生成里程碑数据：使用 milestoneTemplate 和 calcDueDates
-  const milestonesData = getApplicableMilestones(orderData.order_type, orderData.shipping_sample_required).map((template, index) => {
+  console.log('[createOrder] STEP 3: OK — order_id:', orderData.id, 'order_no:', orderData.order_no);
+
+  // ── STEP 4: 计算排期 + 创建里程碑 ──
+  console.log('[createOrder] STEP 4: 计算排期 + 创建里程碑');
+  let dueDates: ReturnType<typeof calcDueDates>;
+  try {
+    dueDates = calcDueDates({
+      orderDate: order_date,
+      createdAt: new Date(orderData.created_at),
+      incoterm: incoterm as 'FOB' | 'DDP',
+      etd: etd,
+      warehouseDueDate: warehouse_due_date,
+      eta: eta,
+      orderType: (order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
+      shippingSampleRequired: shipping_sample_required,
+      shippingSampleDeadline: shipping_sample_deadline,
+    });
+  } catch (scheduleErr: any) {
+    console.error('[createOrder] STEP 4: calcDueDates FAIL —', scheduleErr.message);
+    await deleteOrder(orderData.id);
+    return { error: `排期计算失败：${scheduleErr.message}` };
+  }
+
+  const templates = getApplicableMilestones(order_type, shipping_sample_required);
+  const milestonesData = [];
+  for (let index = 0; index < templates.length; index++) {
+    const template = templates[index];
     const dueAt = dueDates[template.step_key as keyof typeof dueDates];
     if (!dueAt) {
-      throw new Error(`Missing due date calculation for step_key: ${template.step_key}`);
+      console.error('[createOrder] STEP 4: 缺少排期 step_key:', template.step_key);
+      await deleteOrder(orderData.id);
+      return { error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
     }
-    
-    // planned_at can equal due_at for V1 (per user requirement)
-    const plannedAt = dueAt;
-    
-    // 状态：第一个里程碑（po_confirmed）为 in_progress，其他为 pending (not_started)
-    const status = index === 0 ? '进行中' : '未开始';
-    
-    return {
+    milestonesData.push({
       step_key: template.step_key,
       name: template.name,
       owner_role: template.owner_role,
       owner_user_id: null,
-      planned_at: ensureBusinessDay(plannedAt).toISOString(),
+      planned_at: ensureBusinessDay(dueAt).toISOString(),
       due_at: ensureBusinessDay(dueAt).toISOString(),
-      status: status,
+      status: index === 0 ? 'in_progress' : 'pending',
       is_critical: template.is_critical,
       evidence_required: template.evidence_required,
       evidence_note: (template as any).evidence_note || null,
       blocks: (template as any).blocks || [],
       notes: null,
       sequence_number: index + 1,
-    };
-  });
-  
-  // ⚠️ 系统级初始化：通过 RPC 调用数据库函数（SECURITY DEFINER 绕过 RLS）
+    });
+  }
+  console.log('[createOrder] STEP 4: OK — milestones count:', milestonesData.length);
+
+  // ── STEP 5: 写入里程碑到数据库 ──
+  console.log('[createOrder] STEP 5: RPC init_order_milestones');
   const { error: rpcError } = await (supabase.rpc as any)('init_order_milestones', {
     _order_id: orderData.id,
     _milestones_data: milestonesData,
   });
-  
   if (rpcError) {
-    // Rollback order creation (使用 repository)
+    console.error('[createOrder] STEP 5: FAIL —', rpcError.message);
     await deleteOrder(orderData.id);
     return { error: `执行节点初始化失败：${rpcError.message}` };
   }
-  
-  // ── 文件上传到 Supabase Storage ──
-  // 创建订单时只需上传客户PO（必传）
-  // 生产单：由财务审核后节点凭证上传（order_docs_bom_complete 节点）
-  // 包装资料：后期在包装前上传（可选）
-  const fileFields: Array<{ formKey: string; fileType: string; required: boolean }> = [
-    { formKey: 'customer_po_file', fileType: 'customer_po', required: true },
-    { formKey: 'packaging_material_file', fileType: 'packaging_material', required: false },
+  console.log('[createOrder] STEP 5: OK');
+
+  // ── STEP 6: 上传附件（不阻塞主流程） ──
+  // 客户 PO 文件：尝试上传，失败不回滚订单（可稍后补传）
+  // 其他文件：可选，失败静默
+  console.log('[createOrder] STEP 6: 上传附件（非阻塞）');
+  const uploadResults: string[] = [];
+  const fileFields = [
+    { formKey: 'customer_po_file', fileType: 'customer_po' },
+    { formKey: 'production_order_file', fileType: 'production_order' },
+    { formKey: 'trims_sheet_file', fileType: 'trims_sheet' },
+    { formKey: 'packing_requirement_file', fileType: 'packing_requirement' },
+    { formKey: 'tech_pack_file', fileType: 'tech_pack' },
   ];
 
-  for (const { formKey, fileType, required } of fileFields) {
+  for (const { formKey, fileType } of fileFields) {
     const file = formData.get(formKey) as File | null;
-    if (!file || file.size === 0) {
-      if (required) {
-        await deleteOrder(orderData.id);
-        return { error: '请上传客户 PO 文件' };
+    if (!file || file.size === 0) continue;
+    try {
+      const ext = file.name.split('.').pop() || 'bin';
+      const storagePath = `${orderData.id}/${fileType}_${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('order-docs')
+        .upload(storagePath, file, { contentType: file.type, upsert: false });
+      if (uploadError) {
+        console.warn('[createOrder] 附件上传失败:', formKey, uploadError.message);
+        uploadResults.push(`${formKey}: 上传失败`);
+        continue;
       }
-      continue;
+      await supabase.from('order_files').insert({
+        order_id: orderData.id,
+        file_type: fileType,
+        storage_path: storagePath,
+        original_filename: file.name,
+        file_size_bytes: file.size,
+        uploaded_by: user.id,
+      });
+      uploadResults.push(`${formKey}: OK`);
+    } catch (fileErr: any) {
+      console.warn('[createOrder] 附件处理异常:', formKey, fileErr.message);
+      uploadResults.push(`${formKey}: 异常`);
     }
-    const ext = file.name.split('.').pop() || 'bin';
-    const storagePath = orderData.id + '/' + fileType + '_' + Date.now() + '.' + ext;
-    const { error: uploadError } = await supabase.storage
-      .from('order-docs')
-      .upload(storagePath, file, { contentType: file.type, upsert: false });
-    if (uploadError) {
-      console.error('[createOrder] file upload error:', uploadError.message);
-      continue;
-    }
-    await supabase.from('order_files').insert({
-      order_id: orderData.id,
-      file_type: fileType,
-      storage_path: storagePath,
-      original_filename: file.name,
-      file_size_bytes: file.size,
-      uploaded_by: user.id,
-    });
   }
+  console.log('[createOrder] STEP 6: 附件结果:', uploadResults.join(', ') || '无附件');
 
+  console.log('[createOrder] ====== SUCCESS ======');
   revalidatePath('/orders');
   revalidatePath('/dashboard');
-  
   return { data: order };
 }
 

@@ -52,20 +52,24 @@ function NewOrderWizard() {
       setLoading(false);
       return;
     }
-    const formData = new FormData(e.currentTarget);
-    const result = await createOrder(formData, preGeneratedOrderNo);
-    if (result.error) {
-      setError(result.error);
-      setLoading(false);
-    } else {
-      const newOrderId = result.data?.id;
-      setOrderId(newOrderId);
-      if (newOrderId) {
-        const milestonesResult = await getMilestonesByOrder(newOrderId);
-        if (milestonesResult.data) setMilestones(milestonesResult.data);
+    try {
+      const formData = new FormData(e.currentTarget);
+      const result = await createOrder(formData, preGeneratedOrderNo);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        const newOrderId = result.data?.id;
+        setOrderId(newOrderId);
+        if (newOrderId) {
+          const milestonesResult = await getMilestonesByOrder(newOrderId);
+          if (milestonesResult.data) setMilestones(milestonesResult.data);
+        }
+        router.push('/orders/new?step=2&order_id=' + newOrderId);
+        setCurrentStep(2);
       }
-      router.push('/orders/new?step=2&order_id=' + newOrderId);
-      setCurrentStep(2);
+    } catch (err: any) {
+      setError(err?.message || '创建订单时发生意外错误，请重试');
+    } finally {
       setLoading(false);
     }
   }
@@ -294,15 +298,20 @@ function NewOrderWizard() {
               <div className="space-y-3">
                 {[
                   { name: 'customer_po_file', label: '客户 PO', required: true },
-                  { name: 'production_order_file', label: '生产制单', required: true },
+                  { name: 'production_order_file', label: '生产制单', required: false, hint: '财务审核后2日内上传' },
                   { name: 'trims_sheet_file', label: '辅料表', required: false },
                   { name: 'packing_requirement_file', label: '装箱要求', required: false },
                   { name: 'tech_pack_file', label: '工艺单 Tech Pack', required: false },
-                ].map(({ name, label, required }) => (
+                ].map(({ name, label, required, hint }) => (
                   <div key={name} className="flex items-center gap-4 p-3 rounded-lg border border-gray-200">
-                    <div className="w-32 flex-shrink-0">
+                    <div className="w-36 flex-shrink-0">
                       <span className="text-sm font-medium text-gray-700">{label}</span>
-                      {required && <span className="text-red-500 ml-1 text-xs">必传</span>}
+                      {required ? (
+                        <span className="text-red-500 ml-1 text-xs">必传</span>
+                      ) : (
+                        <span className="text-gray-400 ml-1 text-xs">可选</span>
+                      )}
+                      {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
                     </div>
                     <input type="file" name={name}
                       accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
