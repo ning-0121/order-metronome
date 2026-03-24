@@ -81,7 +81,8 @@ export function computeKPI(milestones: MilestoneKPIInput[]): KPIResult {
   }
 
   const total = milestones.length;
-  const onTimeRate = completed > 0 ? Math.round((onTime / completed) * 100) : 100;
+  // -1 表示"无数据"（没有完成节点时无法计算准时率）
+  const onTimeRate = completed > 0 ? Math.round((onTime / completed) * 100) : -1;
   const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return { total, completed, onTime, lateCompleted, overdue, blocked, onTimeRate, completionRate };

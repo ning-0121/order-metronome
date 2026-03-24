@@ -60,8 +60,9 @@ export function KPIOverview({ milestones }: KPIOverviewProps) {
 }
 
 function KPIRow({ role, kpi }: { role: string; kpi: KPIResult }) {
-  const rateColor = kpi.onTimeRate >= 80 ? 'text-green-600' : kpi.onTimeRate >= 60 ? 'text-yellow-600' : 'text-red-600';
-  const rateBg = kpi.onTimeRate >= 80 ? 'bg-green-500' : kpi.onTimeRate >= 60 ? 'bg-yellow-500' : 'bg-red-500';
+  const hasRate = kpi.onTimeRate >= 0;
+  const rateColor = !hasRate ? 'text-gray-400' : kpi.onTimeRate >= 80 ? 'text-green-600' : kpi.onTimeRate >= 60 ? 'text-yellow-600' : 'text-red-600';
+  const rateBg = !hasRate ? 'bg-gray-300' : kpi.onTimeRate >= 80 ? 'bg-green-500' : kpi.onTimeRate >= 60 ? 'bg-yellow-500' : 'bg-red-500';
 
   return (
     <tr>
@@ -69,7 +70,7 @@ function KPIRow({ role, kpi }: { role: string; kpi: KPIResult }) {
         <span className="font-medium text-gray-900">{ROLE_LABEL[role] || role}</span>
       </td>
       <td>
-        <span className={`font-bold ${rateColor}`}>{kpi.onTimeRate}%</span>
+        <span className={`font-bold ${rateColor}`}>{hasRate ? `${kpi.onTimeRate}%` : '—'}</span>
       </td>
       <td>
         <span className="text-indigo-600 font-medium">{kpi.completed}</span>

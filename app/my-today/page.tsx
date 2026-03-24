@@ -170,8 +170,8 @@ export default async function MyTodayPage() {
           </div>
           <div className="grid grid-cols-4 gap-3">
             <div className="text-center">
-              <p className={`text-xl font-black ${myKPI.onTimeRate >= 80 ? 'text-green-600' : myKPI.onTimeRate >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
-                {myKPI.onTimeRate}%
+              <p className={`text-xl font-black ${myKPI.onTimeRate < 0 ? 'text-gray-400' : myKPI.onTimeRate >= 80 ? 'text-green-600' : myKPI.onTimeRate >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                {myKPI.onTimeRate >= 0 ? `${myKPI.onTimeRate}%` : '—'}
               </p>
               <p className="text-xs text-gray-500 mt-0.5">准时率</p>
             </div>
