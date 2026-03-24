@@ -134,17 +134,19 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: getError?.message || '找不到该执行节点' };
   }
 
-  // Check role: must be admin, assigned user, or matching owner_role
+  // Check role: must be admin, assigned user, or matching owner_role (V2: multi-role)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  const userRole = (profile as any)?.role as string | undefined;
-  const isAdminUser = userRole === 'admin';
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdminUser = userRoles.includes('admin');
   const isAssignedUser = milestone.owner_user_id === user.id;
-  const roleMatches = userRole && milestone.owner_role &&
-    userRole.toLowerCase() === (milestone.owner_role as string).toLowerCase();
+  const roleMatches = milestone.owner_role && userRoles.some(
+    (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
+      || (milestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
+  );
   if (!isAdminUser && !isAssignedUser && !roleMatches) {
     return { error: '无权操作：只有管理员或负责人可以标记完成' };
   }
@@ -229,17 +231,19 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
     return { error: getError?.message || '找不到该执行节点' };
   }
 
-  // Check role: must be admin, assigned user, or matching owner_role
+  // Check role: must be admin, assigned user, or matching owner_role (V2: multi-role)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  const userRole = (profile as any)?.role as string | undefined;
-  const isAdminUser = userRole === 'admin';
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdminUser = userRoles.includes('admin');
   const isAssignedUser = milestone.owner_user_id === user.id;
-  const roleMatches = userRole && milestone.owner_role &&
-    userRole.toLowerCase() === (milestone.owner_role as string).toLowerCase();
+  const roleMatches = milestone.owner_role && userRoles.some(
+    (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
+      || (milestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
+  );
   if (!isAdminUser && !isAssignedUser && !roleMatches) {
     return { error: '无权操作：只有管理员或负责人可以标记卡住' };
   }

@@ -19,26 +19,36 @@ const DEPARTMENTS = ['业务部', '财务部', '采购部', '生产部', '质检
 interface Props {
   userId: string;
   currentRole?: string | null;
+  currentRoles?: string[];
   currentDepartment?: string | null;
   isActive?: boolean;
   userName?: string;
 }
 
-export function UserRoleEditor({ userId, currentRole, currentDepartment, isActive = true, userName }: Props) {
+export function UserRoleEditor({ userId, currentRole, currentRoles, currentDepartment, isActive = true, userName }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [role, setRole] = useState(currentRole || '');
+  // V2: 多角色选择
+  const initialRoles = currentRoles && currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(initialRoles);
   const [dept, setDept] = useState(currentDepartment || '');
   const [active, setActive] = useState(isActive);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
+  const toggleRole = (value: string) => {
+    setSelectedRoles(prev =>
+      prev.includes(value) ? prev.filter(r => r !== value) : [...prev, value]
+    );
+  };
+
   const handleSave = async () => {
     setSaving(true); setError(''); setSaved(false);
     const result = await updateUserRoleByAdmin({
       userId,
-      role: role || null,
+      roles: selectedRoles,
+      role: selectedRoles[0] || null,
       department: dept || null,
       isActive: active,
     });
@@ -58,36 +68,41 @@ export function UserRoleEditor({ userId, currentRole, currentDepartment, isActiv
       </button>
 
       {open && (
-        <div className="absolute right-0 top-8 z-50 bg-white border border-gray-200 rounded-xl shadow-lg p-4 w-72">
+        <div className="absolute right-0 top-8 z-50 bg-white border border-gray-200 rounded-xl shadow-lg p-4 w-80">
           <p className="text-sm font-semibold text-gray-900 mb-3">{userName} 的权限设置</p>
 
-          {/* 角色选择 */}
+          {/* 多角色选择 */}
           <div className="mb-3">
-            <label className="text-xs font-medium text-gray-500 mb-1.5 block">角色</label>
-            <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-              {ROLES.map(r => (
-                <label key={r.value}
-                  className={'flex items-center gap-2 p-2 rounded-lg cursor-pointer border ' +
-                    (role === r.value ? 'border-indigo-400 bg-indigo-50' : 'border-transparent hover:bg-gray-50')}>
-                  <input type="radio" name={'role_' + userId} value={r.value}
-                    checked={role === r.value}
-                    onChange={() => setRole(r.value)}
-                    className="w-3.5 h-3.5 accent-indigo-600" />
-                  <div>
-                    <span className="text-xs font-medium text-gray-900">{r.label}</span>
-                    <span className="text-xs text-gray-400 ml-1.5">{r.desc}</span>
-                  </div>
-                </label>
-              ))}
-              <label className={'flex items-center gap-2 p-2 rounded-lg cursor-pointer border ' +
-                (!role ? 'border-red-300 bg-red-50' : 'border-transparent hover:bg-gray-50')}>
-                <input type="radio" name={'role_' + userId} value=""
-                  checked={!role}
-                  onChange={() => setRole('')}
-                  className="w-3.5 h-3.5 accent-red-500" />
-                <span className="text-xs font-medium text-red-600">移除权限（无法登录使用）</span>
-              </label>
+            <label className="text-xs font-medium text-gray-500 mb-1.5 block">
+              角色（可多选）
+              {selectedRoles.length > 0 && (
+                <span className="ml-2 text-indigo-600">已选 {selectedRoles.length} 个</span>
+              )}
+            </label>
+            <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+              {ROLES.map(r => {
+                const isSelected = selectedRoles.includes(r.value);
+                return (
+                  <label key={r.value}
+                    className={'flex items-center gap-2 p-2 rounded-lg cursor-pointer border ' +
+                      (isSelected ? 'border-indigo-400 bg-indigo-50' : 'border-transparent hover:bg-gray-50')}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleRole(r.value)}
+                      className="w-3.5 h-3.5 accent-indigo-600 rounded"
+                    />
+                    <div>
+                      <span className="text-xs font-medium text-gray-900">{r.label}</span>
+                      <span className="text-xs text-gray-400 ml-1.5">{r.desc}</span>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
+            {selectedRoles.length === 0 && (
+              <p className="text-xs text-red-500 mt-1">未选择角色 = 无法使用系统</p>
+            )}
           </div>
 
           {/* 部门 */}

@@ -1,14 +1,13 @@
 /**
- * V1 Minimal Role Permissions
- * 
- * Role determination:
- * - Admin allowlist: alex@qimoclothing.com, su@qimoclothing.com => role=admin
- * - Others: default role=sales (V1)
- * 
- * TODO: Later add user_roles table for proper role management
+ * V2 Multi-Role Permission System
+ *
+ * 一个用户可以拥有多个角色（如 Helen = 理单 + 采购）
+ *
+ * 数据来源：profiles.roles text[]
+ * 兼容：profiles.role 旧字段仍保留，getCurrentUserRole 会合并两者
  */
 
-export type UserRole = 'admin' | 'sales' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics';
+export type UserRole = 'admin' | 'ceo' | 'sales' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics';
 
 const ADMIN_ALLOWLIST = [
   'alex@qimoclothing.com',
@@ -16,128 +15,185 @@ const ADMIN_ALLOWLIST = [
 ];
 
 /**
- * Determine user role from email
- * V1: Simple allowlist for admin, default to sales
+ * Determine user role from email (legacy V1, 兜底用)
  */
 export function getUserRoleFromEmail(email: string | null | undefined): UserRole {
-  if (!email) {
-    return 'sales';
-  }
-  
-  const normalizedEmail = email.toLowerCase().trim();
-  
-  if (ADMIN_ALLOWLIST.includes(normalizedEmail)) {
-    return 'admin';
-  }
-  
-  // V1: Default to sales for all other users
-  // TODO: Later query user_roles table for actual role
+  if (!email) return 'sales';
+  if (ADMIN_ALLOWLIST.includes(email.toLowerCase().trim())) return 'admin';
   return 'sales';
 }
 
 /**
- * Check if user is admin
+ * Check if user is admin (legacy)
  */
 export function isAdmin(email: string | null | undefined): boolean {
   return getUserRoleFromEmail(email) === 'admin';
 }
 
 /**
- * Get current user role (server-side)
- * Returns { role, isAdmin }
+ * Get current user roles (server-side)
+ * Returns { roles, role (primary/compat), isAdmin }
  */
-export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRole; isAdmin: boolean }> {
+export async function getCurrentUserRole(supabase: any): Promise<{
+  role: UserRole;
+  roles: string[];
+  isAdmin: boolean;
+}> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user || !user.email) {
-    return { role: 'sales', isAdmin: false };
+    return { role: 'sales', roles: ['sales'], isAdmin: false };
   }
 
-  // 优先从 profiles.role 读取（由 Admin 在用户管理页授权）
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, is_active')
+    .select('role, roles, is_active')
     .eq('user_id', user.id)
     .maybeSingle();
 
   // 账号已停用
   if (profile && profile.is_active === false) {
-    return { role: 'sales', isAdmin: false };
+    return { role: 'sales', roles: ['sales'], isAdmin: false };
   }
 
-  // 有明确授权角色则使用
-  if (profile?.role) {
-    const role = profile.role as UserRole;
-    return { role, isAdmin: role === 'admin' || role === 'ceo' };
+  // 构建 roles 数组：优先用 profiles.roles，兜底用 profiles.role
+  let roles: string[] = [];
+  if (profile?.roles && Array.isArray(profile.roles) && profile.roles.length > 0) {
+    roles = profile.roles;
+  } else if (profile?.role) {
+    roles = [profile.role];
   }
 
-  // 兜底：admin allowlist（确保 alex 和 su 无论如何都能访问）
-  const role = getUserRoleFromEmail(user.email);
-  return { role, isAdmin: role === 'admin' };
+  // 兜底：admin allowlist
+  if (roles.length === 0) {
+    const fallback = getUserRoleFromEmail(user.email);
+    roles = [fallback];
+  }
+
+  const hasAdmin = roles.includes('admin') || roles.includes('ceo');
+  // primary role = 第一个角色（兼容旧代码）
+  const primaryRole = (roles[0] || 'sales') as UserRole;
+
+  return { role: primaryRole, roles, isAdmin: hasAdmin };
+}
+
+// ══ 多角色权限辅助函数 ══════════════════════════════════
+
+/** 检查用户是否拥有某个角色 */
+export function hasRole(roles: string[], target: string): boolean {
+  if (!roles || roles.length === 0) return false;
+  return roles.some(r => r.toLowerCase() === target.toLowerCase());
+}
+
+/** 检查用户是否拥有任一角色 */
+export function hasAnyRole(roles: string[], targets: string[]): boolean {
+  if (!roles || roles.length === 0) return false;
+  return targets.some(t => hasRole(roles, t));
 }
 
 /**
  * Check if user can modify milestone
- * V1: admin OR milestone.owner_role matches currentRole
+ * V2: admin OR any of user's roles matches milestone owner_role
  */
 export function canModifyMilestone(
   currentRole: UserRole,
   isAdmin: boolean,
-  milestoneOwnerRole: string
+  milestoneOwnerRole: string,
+  roles?: string[]
 ): boolean {
-  if (isAdmin) {
-    return true;
+  if (isAdmin) return true;
+
+  // V2: 多角色匹配
+  if (roles && roles.length > 0) {
+    const ownerNorm = milestoneOwnerRole.toLowerCase().trim();
+    return roles.some(r => {
+      const rNorm = r.toLowerCase().trim();
+      if (rNorm === ownerNorm) return true;
+      // qc/quality 互通
+      if (ownerNorm === 'qc' && (rNorm === 'qc' || rNorm === 'quality')) return true;
+      if (ownerNorm === 'quality' && (rNorm === 'qc' || rNorm === 'quality')) return true;
+      return false;
+    });
   }
-  
-  // Normalize milestone owner role for comparison
-  const normalizedOwnerRole = milestoneOwnerRole.toLowerCase().trim();
-  const normalizedCurrentRole = currentRole.toLowerCase().trim();
-  
-  return normalizedOwnerRole === normalizedCurrentRole;
+
+  // V1 fallback
+  return currentRole.toLowerCase().trim() === milestoneOwnerRole.toLowerCase().trim();
 }
-
-
-// ══ 角色权限辅助函数 ══════════════════════════════════════════
 
 /** 可以新建/编辑订单的角色 */
-export function canCreateOrder(role?: string | null): boolean {
-  return ['admin', 'ceo', 'sales'].includes(role || '');
+export function canCreateOrder(role?: string | null, roles?: string[]): boolean {
+  const allowed = ['admin', 'ceo', 'sales'];
+  if (roles && roles.length > 0) return hasAnyRole(roles, allowed);
+  return allowed.includes(role || '');
 }
 
-/** 可以查看全部订单（不只自己的） */
-export function canViewAllOrders(role?: string | null): boolean {
-  return ['admin', 'ceo', 'finance', 'procurement', 'production', 'qc', 'logistics', 'quality'].includes(role || '');
+/** 可以查看全部订单 */
+export function canViewAllOrders(role?: string | null, roles?: string[]): boolean {
+  const allowed = ['admin', 'ceo', 'finance', 'procurement', 'production', 'qc', 'logistics', 'quality'];
+  if (roles && roles.length > 0) return hasAnyRole(roles, allowed);
+  return allowed.includes(role || '');
 }
 
 /** 可以处理指定角色的里程碑节点 */
-export function canHandleMilestone(userRole?: string | null, milestoneOwnerRole?: string | null, isAdmin = false): boolean {
+export function canHandleMilestone(userRole?: string | null, milestoneOwnerRole?: string | null, isAdmin = false, roles?: string[]): boolean {
   if (isAdmin) return true;
-  if (!userRole || !milestoneOwnerRole) return false;
-  // qc 和 quality 都能处理 qc 节点
+  if (!milestoneOwnerRole) return false;
+
+  // V2 多角色
+  if (roles && roles.length > 0) {
+    const ownerNorm = milestoneOwnerRole.toLowerCase();
+    return roles.some(r => {
+      const rNorm = r.toLowerCase();
+      if (rNorm === ownerNorm) return true;
+      if (ownerNorm === 'qc' && (rNorm === 'qc' || rNorm === 'quality')) return true;
+      return false;
+    });
+  }
+
+  // V1 fallback
+  if (!userRole) return false;
   if (milestoneOwnerRole === 'qc' && (userRole === 'qc' || userRole === 'quality')) return true;
   return userRole.toLowerCase() === milestoneOwnerRole.toLowerCase();
 }
 
 /** 可以访问管理后台 */
-export function canAccessAdmin(role?: string | null): boolean {
-  return ['admin', 'ceo'].includes(role || '');
+export function canAccessAdmin(role?: string | null, roles?: string[]): boolean {
+  const allowed = ['admin', 'ceo'];
+  if (roles && roles.length > 0) return hasAnyRole(roles, allowed);
+  return allowed.includes(role || '');
 }
 
 /** 可以访问仓库工作台 */
-export function canAccessWarehouse(role?: string | null): boolean {
-  return ['admin', 'logistics'].includes(role || '');
+export function canAccessWarehouse(role?: string | null, roles?: string[]): boolean {
+  const allowed = ['admin', 'logistics'];
+  if (roles && roles.length > 0) return hasAnyRole(roles, allowed);
+  return allowed.includes(role || '');
 }
 
-/** 可以查看财务数据（成本复盘） */
-export function canViewFinancials(role?: string | null): boolean {
-  return ['admin', 'ceo', 'finance'].includes(role || '');
+/** 可以查看财务数据 */
+export function canViewFinancials(role?: string | null, roles?: string[]): boolean {
+  const allowed = ['admin', 'ceo', 'finance'];
+  if (roles && roles.length > 0) return hasAnyRole(roles, allowed);
+  return allowed.includes(role || '');
 }
 
 /** 出货三方签核权限 */
-export function getShipmentSignRole(role?: string | null): 'sales' | 'warehouse' | 'finance' | null {
-  if (role === 'sales') return 'sales';
-  if (role === 'logistics') return 'warehouse';
-  if (role === 'finance') return 'finance';
-  return null;
+export function getShipmentSignRole(role?: string | null, roles?: string[]): 'sales' | 'warehouse' | 'finance' | null {
+  const check = (r: string) => {
+    if (r === 'sales') return 'sales' as const;
+    if (r === 'logistics') return 'warehouse' as const;
+    if (r === 'finance') return 'finance' as const;
+    return null;
+  };
+
+  if (roles && roles.length > 0) {
+    for (const r of roles) {
+      const result = check(r);
+      if (result) return result;
+    }
+    return null;
+  }
+
+  return check(role || '');
 }
 
 /** 角色中文标签 */
@@ -146,6 +202,12 @@ export const ROLE_LABEL: Record<string, string> = {
   procurement: '采购', production: '生产', qc: '质检',
   logistics: '物流/仓库', quality: '品控',
 };
+
+/** 将 roles 数组格式化为显示文本，如 "理单 / 采购" */
+export function formatRolesLabel(roles: string[] | null | undefined): string {
+  if (!roles || roles.length === 0) return '未授权';
+  return roles.map(r => ROLE_LABEL[r] || r).join(' / ');
+}
 
 /** 角色对应的工作台描述 */
 export const ROLE_DASHBOARD_DESC: Record<string, string> = {

@@ -29,7 +29,7 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
 
   async function handleReject() {
     if (!decisionNote || decisionNote.trim() === '') {
-      alert('Decision note is required when rejecting');
+      alert('驳回时必须填写原因');
       return;
     }
     setLoading(true);
@@ -48,9 +48,9 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
     return (
       <button
         onClick={() => setShowForm(true)}
-        className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+        className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
       >
-        Review
+        审批
       </button>
     );
   }
@@ -62,7 +62,7 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
         onChange={(e) => setDecisionNote(e.target.value)}
         className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm bg-white text-gray-900 placeholder-gray-400"
         rows={2}
-        placeholder="Decision note (required for reject)..."
+        placeholder="审批意见（驳回时必填）..."
       />
       <div className="flex gap-2">
         <button
@@ -70,14 +70,14 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
           disabled={loading}
           className="flex-1 rounded-md bg-green-600 px-3 py-1.5 text-sm text-white hover:bg-green-700 disabled:opacity-50"
         >
-          Approve
+          批准
         </button>
         <button
           onClick={handleReject}
           disabled={loading || !decisionNote.trim()}
           className="flex-1 rounded-md bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700 disabled:opacity-50"
         >
-          Reject
+          驳回
         </button>
       </div>
       <button
@@ -87,7 +87,7 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
         }}
         className="w-full text-xs text-gray-600 hover:text-gray-800"
       >
-        Cancel
+        取消
       </button>
     </div>
   );

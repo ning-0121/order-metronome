@@ -8,17 +8,17 @@ export default async function UserManagementPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { role, isAdmin } = await getCurrentUserRole(supabase);
+  const { isAdmin } = await getCurrentUserRole(supabase);
   if (!isAdmin) redirect('/dashboard');
 
-  // 获取所有用户资料
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('user_id, email, full_name, name, role, department, is_active, created_at')
+  // 获取所有用户资料（V2: 包含 roles 数组）
+  const { data: profiles } = await (supabase
+    .from('profiles') as any)
+    .select('user_id, email, full_name, name, role, roles, department, is_active, created_at')
     .order('created_at', { ascending: false });
 
   const ROLE_LABELS: Record<string, string> = {
-    admin: '管理员', ceo: 'CEO', sales: '业务', finance: '财务',
+    admin: '管理员', ceo: 'CEO', sales: '理单', finance: '财务',
     procurement: '采购', production: '生产', qc: '质检',
     logistics: '物流/仓库', quality: '品控',
   };
@@ -35,6 +35,14 @@ export default async function UserManagementPage() {
     quality: 'bg-orange-100 text-orange-700',
   };
 
+  // 构建每个用户的 roles
+  function getUserRoles(profile: any): string[] {
+    if (profile.roles && Array.isArray(profile.roles) && profile.roles.length > 0) {
+      return profile.roles;
+    }
+    return profile.role ? [profile.role] : [];
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -42,7 +50,7 @@ export default async function UserManagementPage() {
           <div>
             <h1 className="text-xl font-bold text-gray-900">用户管理 & 权限授权</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              共 {profiles?.length || 0} 个账号 · 只有 Admin 可以修改角色
+              共 {profiles?.length || 0} 个账号 · 支持一人多角色
             </p>
           </div>
         </div>
@@ -78,48 +86,59 @@ export default async function UserManagementPage() {
             {!profiles?.length ? (
               <div className="text-center py-12 text-gray-400">暂无用户</div>
             ) : (
-              (profiles as any[]).map((profile: any) => (
-                <div key={profile.user_id} className="flex items-center justify-between px-5 py-4 hover:bg-gray-50">
-                  <div className="flex items-center gap-4">
-                    {/* 头像 */}
-                    <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-sm font-semibold text-indigo-700 flex-shrink-0">
-                      {(profile.full_name || profile.name || profile.email || '?').charAt(0).toUpperCase()}
+              (profiles as any[]).map((profile: any) => {
+                const roles = getUserRoles(profile);
+                return (
+                  <div key={profile.user_id} className="flex items-center justify-between px-5 py-4 hover:bg-gray-50">
+                    <div className="flex items-center gap-4">
+                      {/* 头像 */}
+                      <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-sm font-semibold text-indigo-700 flex-shrink-0">
+                        {(profile.full_name || profile.name || profile.email || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {profile.full_name || profile.name || '（未设置姓名）'}
+                        </p>
+                        <p className="text-xs text-gray-400">{profile.email}</p>
+                        {profile.department && (
+                          <p className="text-xs text-gray-400">{profile.department}</p>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {profile.full_name || profile.name || '（未设置姓名）'}
-                      </p>
-                      <p className="text-xs text-gray-400">{profile.email}</p>
-                      {profile.department && (
-                        <p className="text-xs text-gray-400">{profile.department}</p>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-3">
-                    {/* 状态 */}
-                    {profile.is_active === false && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">已停用</span>
-                    )}
-                    {/* 当前角色 */}
-                    {profile.role ? (
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${ROLE_COLORS[profile.role] || 'bg-gray-100 text-gray-600'}`}>
-                        {ROLE_LABELS[profile.role] || profile.role}
-                      </span>
-                    ) : (
-                      <span className="text-xs px-2.5 py-1 rounded-full bg-red-50 text-red-600 font-medium">未授权</span>
-                    )}
-                    {/* 编辑按钮 */}
-                    <UserRoleEditor
-                      userId={profile.user_id}
-                      currentRole={profile.role}
-                      currentDepartment={profile.department}
-                      isActive={profile.is_active !== false}
-                      userName={profile.full_name || profile.name || profile.email}
-                    />
+                    <div className="flex items-center gap-3">
+                      {/* 状态 */}
+                      {profile.is_active === false && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">已停用</span>
+                      )}
+                      {/* 角色标签（多角色） */}
+                      {roles.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {roles.map((r: string) => (
+                            <span
+                              key={r}
+                              className={`text-xs font-medium px-2.5 py-1 rounded-full ${ROLE_COLORS[r] || 'bg-gray-100 text-gray-600'}`}
+                            >
+                              {ROLE_LABELS[r] || r}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs px-2.5 py-1 rounded-full bg-red-50 text-red-600 font-medium">未授权</span>
+                      )}
+                      {/* 编辑按钮 */}
+                      <UserRoleEditor
+                        userId={profile.user_id}
+                        currentRole={profile.role}
+                        currentRoles={roles}
+                        currentDepartment={profile.department}
+                        isActive={profile.is_active !== false}
+                        userName={profile.full_name || profile.name || profile.email}
+                      />
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

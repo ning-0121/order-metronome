@@ -5,14 +5,13 @@ import { createClient } from '@/lib/supabase/server';
 export interface User {
   user_id: string;
   email: string;
-  /** Display name: profiles.name or email (avoid full_name) */
   full_name: string | null;
   role: string | null;
+  roles: string[];
 }
 
 /**
- * Get all users from profiles table.
- * Uses profiles.name or email; avoids full_name. If profiles missing, returns empty (caller may use auth users).
+ * Get all users from profiles table (V2: includes roles array).
  */
 export async function getAllUsers(): Promise<{ data: User[] | null; error: string | null }> {
   const supabase = await createClient();
@@ -22,7 +21,7 @@ export async function getAllUsers(): Promise<{ data: User[] | null; error: strin
   }
 
   const { data: profiles, error } = await (supabase.from('profiles') as any)
-    .select('user_id, email, name, role')
+    .select('user_id, email, name, role, roles')
     .order('email', { ascending: true });
 
   if (error) {
@@ -35,6 +34,7 @@ export async function getAllUsers(): Promise<{ data: User[] | null; error: strin
       email: p.email || '',
       full_name: p.name ?? p.email ?? null,
       role: p.role || null,
+      roles: Array.isArray(p.roles) && p.roles.length > 0 ? p.roles : (p.role ? [p.role] : []),
     })),
     error: null,
   };
@@ -42,37 +42,44 @@ export async function getAllUsers(): Promise<{ data: User[] | null; error: strin
 
 interface UpdateUserRoleInput {
   userId: string;
+  /** 旧字段，兼容 */
   role?: string | null;
+  /** V2: 多角色数组 */
+  roles?: string[];
   department?: string | null;
   isActive?: boolean;
 }
 
 /**
- * Admin-only: update target user's role/department/status.
+ * Admin-only: update target user's roles/department/status (V2: multi-role).
  */
 export async function updateUserRoleByAdmin(
   input: UpdateUserRoleInput
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return { error: '未登录' };
   }
 
   const { data: me, error: meErr } = await (supabase.from('profiles') as any)
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
 
-  if (meErr || !me || me.role !== 'admin') {
+  const meRoles: string[] = me?.roles?.length > 0 ? me.roles : [me?.role].filter(Boolean);
+  if (meErr || !me || !meRoles.includes('admin')) {
     return { error: '无权限' };
   }
 
+  // V2: roles 数组优先，同时写入 role（兼容旧逻辑，取 roles[0]）
+  const roles = input.roles && input.roles.length > 0 ? input.roles : (input.role ? [input.role] : []);
+  const primaryRole = roles[0] || null;
+
   const patch: Record<string, unknown> = {
-    role: input.role ?? null,
+    role: primaryRole,
+    roles: roles,
     department: input.department ?? null,
     last_role_changed_at: new Date().toISOString(),
   };
