@@ -1,83 +1,45 @@
 /**
- * 外贸行业专用措辞规范
- * 
- * 替换原则：
- * 里程碑 → 执行节点 / 控制节点
- * 控制点 → 执行节点
- * 阻塞 → 卡单 / 风险上报
- * 完成 → 放行 / 结案（视节点类型）
- * 延期 → 顺延 / 延期申请
+ * Internationalization utilities for UI labels
+ * Only for display text, NOT database values
  */
 
+/**
+ * Map role to Chinese label
+ */
 export function getRoleLabel(role: string): string {
-  const map: Record<string, string> = {
-    sales: '理单',
-    finance: '财务',
-    procurement: '采购',
-    production: '生产',
-    qc: 'QC',
-    logistics: '货运/物流',
-    admin: '管理员',
+  const roleMap: Record<string, string> = {
+    'sales': '业务',
+    'merchandiser': '跟单',
+    'finance': '财务',
+    'procurement': '采购',
+    'production': '生产',
+    'qc': '质检',
+    'logistics': '物流/仓库',
+    'admin': '管理员',
   };
-  return map[role?.toLowerCase()] ?? role ?? '—';
+  
+  return roleMap[role.toLowerCase()] || role;
 }
 
+/**
+ * Map status to Chinese label (for display only)
+ */
 export function getStatusLabel(status: string): string {
-  const map: Record<string, string> = {
-    pending: '待执行',
-    in_progress: '执行中',
-    done: '已完成',
-    blocked: '卡单',
-    overdue: '超期未结',
-    // 兼容中文旧值
-    '未开始': '待执行',
-    '进行中': '执行中',
+  const statusMap: Record<string, string> = {
+    'in_progress': '进行中',
+    'pending': '待处理',
+    'blocked': '已阻塞',
+    'overdue': '已超期',
+    'done': '已完成',
+    'critical': '关键节点',
+    // Chinese statuses (already in Chinese)
+    '进行中': '进行中',
+    '待处理': '待处理',
+    '已阻塞': '已阻塞',
+    '已超期': '已超期',
     '已完成': '已完成',
-    '卡住': '卡单',
-    '超期': '超期未结',
+    '关键节点': '关键节点',
   };
-  return map[status] ?? status ?? '—';
-}
-
-export function getOrderTypeLabel(type: string): string {
-  const map: Record<string, string> = {
-    sample: '样品单',
-    bulk: '大货单',
-    repeat: '翻单',
-  };
-  return map[type] ?? type ?? '—';
-}
-
-export function getIncotermLabel(incoterm: string): string {
-  const map: Record<string, string> = {
-    FOB: 'FOB（船上交货）',
-    DDP: 'DDP（完税后交货）',
-  };
-  return map[incoterm] ?? incoterm ?? '—';
-}
-
-export function getFileTypeLabel(fileType: string): string {
-  const map: Record<string, string> = {
-    customer_po: '客户PO',
-    production_order: '生产制单',
-    trims_sheet: '辅料表',
-    packing_requirement: '装箱要求',
-    tech_pack: '工艺单（Tech Pack）',
-  };
-  return map[fileType] ?? fileType ?? '—';
-}
-
-export function getExceptionTypeLabel(type: string): string {
-  const map: Record<string, string> = {
-    quality: 'QC质量异常',
-    material_delay: '物料延误',
-    production_delay: '生产延期',
-    shipment: '出货异常',
-    customer_change: '客户改单',
-    qty_variance: '数量差异',
-    cost_overrun: '成本超支',
-    supplier: '供应商异常',
-    other: '其他',
-  };
-  return map[type] ?? type ?? '—';
+  
+  return statusMap[status.toLowerCase()] || status;
 }
