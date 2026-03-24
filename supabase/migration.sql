@@ -949,6 +949,13 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_id uuid;
 -- actual_at: 用户手动填入的实际/预计完成日期，用于交期预警
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS actual_at timestamptz DEFAULT NULL;
 
+-- ===== 2026-03-24: 修复 order_attachments 字段不匹配 =====
+-- 上传代码写入 file_type / storage_path，但原表缺少这两列
+ALTER TABLE public.order_attachments ADD COLUMN IF NOT EXISTS file_type text;
+ALTER TABLE public.order_attachments ADD COLUMN IF NOT EXISTS storage_path text;
+-- 放宽 uploaded_by NOT NULL（客户端上传时可能拿不到 user）
+ALTER TABLE public.order_attachments ALTER COLUMN uploaded_by DROP NOT NULL;
+
 -- ===== 2026-03-24: 客户主数据 + 工厂主数据 =====
 
 -- 1. 客户表字段补齐（表已存在，补新列）

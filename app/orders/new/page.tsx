@@ -29,13 +29,23 @@ async function uploadFilesToStorage(
         warnings.push(`${label}上传失败，可稍后在订单详情页补传`);
         continue;
       }
+      // 获取 Storage 公开 URL
+      const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(storagePath);
+      const publicUrl = urlData?.publicUrl || storagePath;
+
+      // 获取当前用户 ID
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+
       // 写入 order_attachments 记录
       const { error: dbError } = await (supabase.from('order_attachments') as any).insert({
         order_id: orderId,
         file_type: fileType,
         storage_path: storagePath,
-        original_filename: file.name,
-        file_size_bytes: file.size,
+        file_name: file.name,
+        file_url: publicUrl,
+        file_size: file.size,
+        mime_type: file.type || null,
+        uploaded_by: currentUser?.id || null,
       });
       if (dbError) {
         console.warn('[upload]', label, '记录写入失败:', dbError.message);

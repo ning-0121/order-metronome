@@ -47,6 +47,13 @@ export default async function OrderDetailPage({
   const { data: delayRequests } = await getDelayRequestsByOrder(id);
   const { data: logs } = await getOrderLogs(id);
 
+  // 获取订单附件
+  const { data: attachmentsRaw } = await (supabase.from('order_attachments') as any)
+    .select('id, file_type, file_name, file_url, storage_path, file_size, mime_type, uploaded_by, created_at')
+    .eq('order_id', id)
+    .order('created_at', { ascending: true });
+  const attachments = (attachmentsRaw || []) as any[];
+
   // 负责理单
   let ownerName = '—';
   if (orderData.owner_user_id) {
@@ -183,6 +190,59 @@ export default async function OrderDetailPage({
                   </div>
                 ))}
               </dl>
+            </div>
+
+            {/* 订单资料 */}
+            <div className="md:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
+              <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">📎 订单资料</h2>
+              {attachments.length > 0 ? (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {attachments.map((att: any) => {
+                    const typeLabels: Record<string, string> = {
+                      customer_po: '客户PO',
+                      production_order: '生产制单',
+                      trims_sheet: '辅料表',
+                      packing_requirement: '装箱要求',
+                      tech_pack: 'Tech Pack',
+                      qc_report: 'QC报告',
+                      packing_list: '装箱单',
+                    };
+                    const label = typeLabels[att.file_type] || att.file_type || '附件';
+                    const sizeKB = att.file_size ? Math.round(att.file_size / 1024) : null;
+                    const downloadUrl = att.file_url || (att.storage_path
+                      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/order-docs/${att.storage_path}`
+                      : null);
+
+                    return (
+                      <div key={att.id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors">
+                        <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-bold">
+                          {label.charAt(0)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-indigo-700">{label}</p>
+                          <p className="text-xs text-gray-500 truncate">{att.file_name || '未命名'}</p>
+                          <p className="text-xs text-gray-400">
+                            {formatDate(att.created_at)}
+                            {sizeKB !== null && <span className="ml-2">{sizeKB}KB</span>}
+                          </p>
+                        </div>
+                        {downloadUrl && (
+                          <a
+                            href={downloadUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-shrink-0 text-xs px-2.5 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                          >
+                            查看
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 text-center py-4">暂无上传资料</p>
+              )}
             </div>
 
             {/* 执行进度概览 */}
