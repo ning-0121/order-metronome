@@ -55,32 +55,51 @@ export async function preGenerateOrderNo() {
  * - order_no 必须由系统生成（通过 preGenerateOrderNo 预生成）
  * - 禁止从 formData 读取 order_no
  */
-export async function createOrder(formData: FormData, preGeneratedOrderNo?: string) {
+export async function createOrder(
+  formData: FormData,
+  preGeneratedOrderNo?: string
+): Promise<{ ok: boolean; orderId?: string; error?: string; warning?: string }> {
   console.log('[createOrder] ====== START ======');
 
-  // ── STEP 1: 验证用户身份 ──
-  console.log('[createOrder] STEP 1: 验证用户身份');
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
+  // ── STEP 1: validate — 验证用户身份 ──
+  console.log('[createOrder] STEP 1: validate — 验证用户身份');
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (e: any) {
+    console.error('[createOrder] STEP 1 FAIL: Supabase 客户端初始化失败 —', e.message);
+    return { ok: false, error: '系统初始化失败，请刷新页面重试' };
+  }
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    console.error('[createOrder] STEP 1 FAIL: 未登录 —', authError?.message);
+    return { ok: false, error: '请先登录后再创建订单' };
+  }
   if (!user.email?.endsWith('@qimoclothing.com')) {
-    return { error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
+    return { ok: false, error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
   }
   if (!preGeneratedOrderNo) {
-    return { error: '订单号需由系统预生成，请刷新页面重试' };
+    return { ok: false, error: '订单号未生成，请刷新页面重试' };
   }
-  console.log('[createOrder] STEP 1: OK — user:', user.email);
+  console.log('[createOrder] STEP 1 OK — user:', user.email, 'orderNo:', preGeneratedOrderNo);
 
-  // ── STEP 2: 提取表单字段 ──
-  console.log('[createOrder] STEP 2: 提取表单字段');
+  // ── STEP 2: validate — 提取并校验表单字段 ──
+  console.log('[createOrder] STEP 2: validate — 提取表单字段');
   const customer_name = formData.get('customer_name') as string;
   const customer_id = formData.get('customer_id') as string;
-  if (!customer_id) return { error: '请选择客户' };
+  if (!customer_name || !customer_id) {
+    return { ok: false, error: '请选择客户（customer_name 或 customer_id 为空）' };
+  }
 
   const incoterm = formData.get('incoterm') as IncotermType;
+  if (!incoterm) return { ok: false, error: '请选择贸易条款（FOB / DDP）' };
+
+  const order_type = formData.get('order_type') as OrderType;
+  if (!order_type) return { ok: false, error: '请选择订单类型' };
+
   const etd = formData.get('etd') as string | null;
   const warehouse_due_date = formData.get('warehouse_due_date') as string | null;
-  const order_type = formData.get('order_type') as OrderType;
   const order_date = formData.get('order_date') as string | null;
   const cancel_date = formData.get('cancel_date') as string | null;
   const eta = formData.get('eta') as string | null;
@@ -89,15 +108,18 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
   const factory_name = formData.get('factory_name') as string | null;
 
   if (incoterm === 'FOB' && !etd) {
-    return { error: 'FOB 贸易条款需填写预计离港日期（ETD）' };
+    return { ok: false, error: 'FOB 条款必须填写 ETD（预计离港日）' };
   }
   if (incoterm === 'DDP' && !warehouse_due_date) {
-    return { error: 'DDP 贸易条款需填写仓库截止日期' };
+    return { ok: false, error: 'DDP 条款必须填写仓库截止日期' };
   }
-  console.log('[createOrder] STEP 2: OK — customer:', customer_name, 'incoterm:', incoterm);
+  console.log('[createOrder] STEP 2 OK — customer:', customer_name, 'incoterm:', incoterm, 'type:', order_type);
 
-  // ── STEP 3: 插入订单 ──
-  console.log('[createOrder] STEP 3: 插入订单');
+  // ── STEP 3: insert order — 写入订单到数据库 ──
+  console.log('[createOrder] STEP 3: insert order');
+  // order_type 容错：DB CHECK 只允许 sample/bulk，repeat 映射为 bulk
+  const dbOrderType = (order_type === 'repeat') ? 'bulk' : order_type;
+
   const insertPayload: Record<string, any> = {
     customer_name,
     customer_id,
@@ -105,24 +127,31 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     incoterm,
     etd: etd || null,
     warehouse_due_date: warehouse_due_date || null,
-    order_type,
+    order_type: dbOrderType,
     packaging_type: 'standard' as PackagingType,
     cancel_date: cancel_date || null,
     order_date: order_date || null,
     factory_name: factory_name || null,
     created_by: user.id,
   };
+  console.log('[createOrder] STEP 3: insert payload keys:', Object.keys(insertPayload).join(', '));
 
-  const { data: order, error: orderError } = await createOrderRepo(insertPayload, preGeneratedOrderNo);
-  if (orderError || !order) {
-    console.error('[createOrder] STEP 3: FAIL —', orderError);
-    return { error: orderError || '订单创建失败，请重试' };
+  let orderData: any;
+  try {
+    const { data: order, error: orderError } = await createOrderRepo(insertPayload, preGeneratedOrderNo);
+    if (orderError || !order) {
+      console.error('[createOrder] STEP 3 FAIL: 订单写入失败 —', orderError);
+      return { ok: false, error: `订单写入数据库失败：${orderError || '未知错误'}` };
+    }
+    orderData = order;
+    console.log('[createOrder] STEP 3 OK — order_id:', orderData.id, 'order_no:', orderData.order_no);
+  } catch (e: any) {
+    console.error('[createOrder] STEP 3 EXCEPTION:', e.message);
+    return { ok: false, error: `订单写入异常：${e.message}` };
   }
-  const orderData = order as any;
-  console.log('[createOrder] STEP 3: OK — order_id:', orderData.id, 'order_no:', orderData.order_no);
 
-  // ── STEP 4: 计算排期 + 创建里程碑 ──
-  console.log('[createOrder] STEP 4: 计算排期 + 创建里程碑');
+  // ── STEP 4: create milestones — 计算排期 ──
+  console.log('[createOrder] STEP 4: create milestones — 计算排期');
   let dueDates: ReturnType<typeof calcDueDates>;
   try {
     dueDates = calcDueDates({
@@ -137,9 +166,9 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
       shippingSampleDeadline: shipping_sample_deadline,
     });
   } catch (scheduleErr: any) {
-    console.error('[createOrder] STEP 4: calcDueDates FAIL —', scheduleErr.message);
+    console.error('[createOrder] STEP 4 FAIL: calcDueDates —', scheduleErr.message);
     await deleteOrder(orderData.id);
-    return { error: `排期计算失败：${scheduleErr.message}` };
+    return { ok: false, error: `排期计算失败：${scheduleErr.message}` };
   }
 
   const templates = getApplicableMilestones(order_type, shipping_sample_required);
@@ -148,9 +177,9 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     const template = templates[index];
     const dueAt = dueDates[template.step_key as keyof typeof dueDates];
     if (!dueAt) {
-      console.error('[createOrder] STEP 4: 缺少排期 step_key:', template.step_key);
+      console.error('[createOrder] STEP 4 FAIL: 缺少排期 step_key:', template.step_key);
       await deleteOrder(orderData.id);
-      return { error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
+      return { ok: false, error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
     }
     milestonesData.push({
       step_key: template.step_key,
@@ -168,35 +197,39 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
       sequence_number: index + 1,
     });
   }
-  console.log('[createOrder] STEP 4: OK — milestones count:', milestonesData.length);
+  console.log('[createOrder] STEP 4 OK — milestones count:', milestonesData.length);
 
-  // ── STEP 5: 写入里程碑到数据库 ──
-  console.log('[createOrder] STEP 5: RPC init_order_milestones');
-  const { error: rpcError } = await (supabase.rpc as any)('init_order_milestones', {
-    _order_id: orderData.id,
-    _milestones_data: milestonesData,
-  });
-  if (rpcError) {
-    console.error('[createOrder] STEP 5: FAIL —', rpcError.message);
+  // ── STEP 5: create milestones — RPC 写入里程碑 ──
+  console.log('[createOrder] STEP 5: create milestones — RPC init_order_milestones');
+  try {
+    const { error: rpcError } = await (supabase.rpc as any)('init_order_milestones', {
+      _order_id: orderData.id,
+      _milestones_data: milestonesData,
+    });
+    if (rpcError) {
+      console.error('[createOrder] STEP 5 FAIL: RPC —', rpcError.message);
+      await deleteOrder(orderData.id);
+      return { ok: false, error: `里程碑初始化失败：${rpcError.message}` };
+    }
+  } catch (rpcEx: any) {
+    console.error('[createOrder] STEP 5 EXCEPTION:', rpcEx.message);
     await deleteOrder(orderData.id);
-    return { error: `执行节点初始化失败：${rpcError.message}` };
+    return { ok: false, error: `里程碑初始化异常：${rpcEx.message}` };
   }
-  console.log('[createOrder] STEP 5: OK');
+  console.log('[createOrder] STEP 5 OK');
 
-  // ── STEP 6: 上传附件（不阻塞主流程） ──
-  // 客户 PO 文件：尝试上传，失败不回滚订单（可稍后补传）
-  // 其他文件：可选，失败静默
-  console.log('[createOrder] STEP 6: 上传附件（非阻塞）');
-  const uploadResults: string[] = [];
+  // ── STEP 6: upload files — 上传附件（非阻塞，失败不回滚订单） ──
+  console.log('[createOrder] STEP 6: upload files — 附件上传（非阻塞）');
+  const uploadWarnings: string[] = [];
   const fileFields = [
-    { formKey: 'customer_po_file', fileType: 'customer_po' },
-    { formKey: 'production_order_file', fileType: 'production_order' },
-    { formKey: 'trims_sheet_file', fileType: 'trims_sheet' },
-    { formKey: 'packing_requirement_file', fileType: 'packing_requirement' },
-    { formKey: 'tech_pack_file', fileType: 'tech_pack' },
+    { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
+    { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
+    { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
+    { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
+    { formKey: 'tech_pack_file', fileType: 'tech_pack', label: 'Tech Pack' },
   ];
 
-  for (const { formKey, fileType } of fileFields) {
+  for (const { formKey, fileType, label } of fileFields) {
     const file = formData.get(formKey) as File | null;
     if (!file || file.size === 0) continue;
     try {
@@ -206,11 +239,12 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
         .from('order-docs')
         .upload(storagePath, file, { contentType: file.type, upsert: false });
       if (uploadError) {
-        console.warn('[createOrder] 附件上传失败:', formKey, uploadError.message);
-        uploadResults.push(`${formKey}: 上传失败`);
+        console.warn('[createOrder] STEP 6: 附件上传失败:', label, uploadError.message);
+        uploadWarnings.push(`${label}上传失败，请稍后补传`);
         continue;
       }
-      await supabase.from('order_files').insert({
+      // 写入 order_attachments 表（非阻塞）
+      const { error: dbError } = await supabase.from('order_attachments').insert({
         order_id: orderData.id,
         file_type: fileType,
         storage_path: storagePath,
@@ -218,18 +252,24 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
         file_size_bytes: file.size,
         uploaded_by: user.id,
       });
-      uploadResults.push(`${formKey}: OK`);
+      if (dbError) {
+        console.warn('[createOrder] STEP 6: 附件记录写入失败:', label, dbError.message);
+        uploadWarnings.push(`${label}文件已上传但记录保存失败`);
+      }
     } catch (fileErr: any) {
-      console.warn('[createOrder] 附件处理异常:', formKey, fileErr.message);
-      uploadResults.push(`${formKey}: 异常`);
+      console.warn('[createOrder] STEP 6: 附件处理异常:', label, fileErr.message);
+      uploadWarnings.push(`${label}处理异常，请稍后补传`);
     }
   }
-  console.log('[createOrder] STEP 6: 附件结果:', uploadResults.join(', ') || '无附件');
+  console.log('[createOrder] STEP 6 done — warnings:', uploadWarnings.join('; ') || '无');
 
-  console.log('[createOrder] ====== SUCCESS ======');
+  // ── DONE ──
+  console.log('[createOrder] ====== SUCCESS — orderId:', orderData.id, '======');
   revalidatePath('/orders');
   revalidatePath('/dashboard');
-  return { data: order };
+
+  const warning = uploadWarnings.length > 0 ? uploadWarnings.join('；') : undefined;
+  return { ok: true, orderId: orderData.id, warning };
 }
 
 export async function getOrders() {

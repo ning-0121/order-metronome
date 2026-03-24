@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createOrder, preGenerateOrderNo } from '@/app/actions/orders';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
@@ -43,23 +43,41 @@ function NewOrderWizard() {
     }
   }, [currentStep, preGeneratedOrderNo]);
 
+  const errorRef = React.useRef<HTMLDivElement>(null);
+  const bottomErrorRef = React.useRef<HTMLDivElement>(null);
+
+  function showError(msg: string) {
+    setError(msg);
+    // 滚动到底部错误框（离按钮近），确保用户看到
+    setTimeout(() => {
+      bottomErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  }
+
   async function handleStep1Submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
     setError(null);
     if (!preGeneratedOrderNo) {
-      setError('订单号未生成，请刷新页面重试');
+      showError('订单号未生成，请刷新页面重试');
       setLoading(false);
       return;
     }
     try {
       const formData = new FormData(e.currentTarget);
+      console.log('[前端] 调用 createOrder...');
       const result = await createOrder(formData, preGeneratedOrderNo);
-      if (result.error) {
-        setError(result.error);
+      console.log('[前端] createOrder 返回:', JSON.stringify({ ok: result.ok, error: result.error, orderId: result.orderId }));
+
+      if (!result.ok) {
+        showError(result.error || '创建订单失败（服务端未返回错误详情）');
       } else {
-        const newOrderId = result.data?.id;
-        setOrderId(newOrderId);
+        // 成功
+        const newOrderId = result.orderId;
+        setOrderId(newOrderId || null);
+        if (result.warning) {
+          console.warn('[前端] 订单已创建，但有附件警告:', result.warning);
+        }
         if (newOrderId) {
           const milestonesResult = await getMilestonesByOrder(newOrderId);
           if (milestonesResult.data) setMilestones(milestonesResult.data);
@@ -68,7 +86,8 @@ function NewOrderWizard() {
         setCurrentStep(2);
       }
     } catch (err: any) {
-      setError(err?.message || '创建订单时发生意外错误，请重试');
+      console.error('[前端] createOrder 异常:', err);
+      showError(err?.message || '创建订单时发生意外错误，请重试');
     } finally {
       setLoading(false);
     }
@@ -113,7 +132,9 @@ function NewOrderWizard() {
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-800">{error}</div>
+        <div ref={errorRef} className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-800">
+          <span className="font-medium">⚠ 创建失败：</span>{error}
+        </div>
       )}
 
       {/* ════ STEP 1：创建订单 ════ */}
@@ -321,6 +342,13 @@ function NewOrderWizard() {
               </div>
               <p className="text-xs text-gray-400 mt-2">支持 PDF、Excel、Word、JPG、PNG，单文件 ≤ 20MB</p>
             </div>
+
+            {/* 提交按钮上方的错误提示（确保用户能看到） */}
+            {error && (
+              <div ref={bottomErrorRef} className="rounded-lg bg-red-50 border border-red-300 p-4 text-sm text-red-800 animate-pulse">
+                <span className="font-semibold">⚠ 创建失败：</span>{error}
+              </div>
+            )}
 
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => router.back()}

@@ -932,3 +932,15 @@ CREATE POLICY "memo_delete_own" ON public.user_memos FOR DELETE USING (auth.uid(
 CREATE POLICY "shipment_select_auth" ON public.shipment_confirmations FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY "shipment_insert_auth" ON public.shipment_confirmations FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 CREATE POLICY "shipment_update_auth" ON public.shipment_confirmations FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+-- ===== 2026-03-24: 修复创建订单失败 — order_type CHECK 约束 + 缺失列 =====
+-- 问题：order_type CHECK 只允许 sample/bulk，但表单有 repeat 选项
+ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS orders_order_type_check;
+ALTER TABLE public.orders ADD CONSTRAINT orders_order_type_check
+  CHECK (order_type IN ('sample', 'bulk', 'repeat'));
+
+-- 确保 order_date 列存在
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_date date;
+
+-- 确保 customer_id 列存在
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_id uuid;
