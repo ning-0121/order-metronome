@@ -1,6 +1,6 @@
-import { MILESTONE_TEMPLATE_FINAL } from '@/lib/milestoneTemplate';
+import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
 import { SOP_MAP } from '@/lib/domain/sop';
-import { ROLE_LABEL } from '@/lib/utils/user-role';
+import { getRoleLabel } from '@/lib/utils/i18n';
 
 const STAGE_NAMES: Record<string, string> = {
   stage1: '阶段 1：订单启动',
@@ -74,7 +74,7 @@ export default function GuidePage() {
                 { role: 'logistics', desc: '物料验收，订舱，报关出运', nodes: '物料到位验收、订舱、报关+出运' },
               ].map(item => (
                 <tr key={item.role}>
-                  <td><span className="font-medium text-gray-900">{ROLE_LABEL[item.role] || item.role}</span></td>
+                  <td><span className="font-medium text-gray-900">{getRoleLabel(item.role) || item.role}</span></td>
                   <td><span className="text-sm text-gray-600">{item.desc}</span></td>
                   <td><span className="text-xs text-gray-500">{item.nodes}</span></td>
                 </tr>
@@ -139,8 +139,8 @@ export default function GuidePage() {
         <div className="space-y-4">
           {Object.entries(STAGE_KEYS).map(([stageKey, stepKeys]) => {
             const stageNodes = stepKeys
-              .map(sk => MILESTONE_TEMPLATE_FINAL.find(m => m.step_key === sk))
-              .filter(Boolean) as typeof MILESTONE_TEMPLATE_FINAL;
+              .map(sk => MILESTONE_TEMPLATE_V1.find(m => m.step_key === sk))
+              .filter(Boolean) as typeof MILESTONE_TEMPLATE_V1;
 
             return (
               <details key={stageKey} className="rounded-xl border border-gray-200 overflow-hidden">
@@ -154,7 +154,7 @@ export default function GuidePage() {
                       <div key={node.step_key} className="px-5 py-4">
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-sm font-medium text-gray-900">{node.name}</span>
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{ROLE_LABEL[node.owner_role] || node.owner_role}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{getRoleLabel(node.owner_role) || node.owner_role}</span>
                           {node.is_critical && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600">关键</span>}
                         </div>
                         <p className="text-xs text-gray-500 mb-2">时限：{node.deadline_hint} · 凭证：{node.evidence_note}</p>

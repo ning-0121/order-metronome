@@ -48,3 +48,10 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "shipment_done", name: "出货完成", owner_role: "logistics", is_critical: true, evidence_required: true },
   { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false },
 ];
+
+/**
+ * 根据订单类型返回适用的里程碑模板（V1 返回全部）
+ */
+export function getApplicableMilestones(_orderType?: string) {
+  return MILESTONE_TEMPLATE_V1;
+}
