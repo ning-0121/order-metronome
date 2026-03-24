@@ -948,3 +948,89 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_id uuid;
 -- ===== 2026-03-24: 双日期机制 — 新增 actual_at + 工厂完成节点 =====
 -- actual_at: 用户手动填入的实际/预计完成日期，用于交期预警
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS actual_at timestamptz DEFAULT NULL;
+
+-- ===== 2026-03-24: 客户主数据 + 工厂主数据 =====
+
+-- 1. 客户表字段补齐（表已存在，补新列）
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS customer_code text;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS city text;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS customer_type text DEFAULT 'regular'
+  CHECK (customer_type IN ('regular', 'vip', 'trial', 'inactive'));
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS deleted_at timestamptz DEFAULT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_code
+  ON public.customers(customer_code) WHERE customer_code IS NOT NULL AND deleted_at IS NULL;
+
+-- 2. 工厂主数据表
+CREATE TABLE IF NOT EXISTS public.factories (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  factory_code text,
+  factory_name text NOT NULL,
+  contact_name text,
+  phone text,
+  country text,
+  city text,
+  address text,
+  category text DEFAULT 'garment'
+    CHECK (category IN ('garment', 'fabric', 'trim', 'printing', 'washing', 'embroidery', 'other')),
+  cooperation_status text DEFAULT 'active'
+    CHECK (cooperation_status IN ('active', 'trial', 'suspended', 'blacklisted')),
+  notes text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  deleted_at timestamptz DEFAULT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_factories_name
+  ON public.factories(factory_name) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_factories_code
+  ON public.factories(factory_code) WHERE factory_code IS NOT NULL AND deleted_at IS NULL;
+
+ALTER TABLE public.factories ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "factories_select_auth" ON public.factories FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "factories_insert_auth" ON public.factories FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "factories_update_auth" ON public.factories FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+-- updated_at trigger
+DROP TRIGGER IF EXISTS trg_factories_updated_at ON public.factories;
+CREATE TRIGGER trg_factories_updated_at
+  BEFORE UPDATE ON public.factories
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_customers_updated_at ON public.customers;
+CREATE TRIGGER trg_customers_updated_at
+  BEFORE UPDATE ON public.customers
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- 3. orders 表增加 factory_id
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS factory_id uuid REFERENCES public.factories(id);
+
+-- 4. outsource_jobs 表增加 factory_id
+ALTER TABLE public.outsource_jobs ADD COLUMN IF NOT EXISTS factory_id uuid REFERENCES public.factories(id);
+
+-- 5. 历史数据迁移：已有 factory_name 自动创建 factory 记录并回填
+INSERT INTO public.factories (factory_name)
+SELECT DISTINCT factory_name FROM public.orders
+WHERE factory_name IS NOT NULL AND factory_name != ''
+ON CONFLICT (factory_name) DO NOTHING;
+
+INSERT INTO public.factories (factory_name)
+SELECT DISTINCT factory_name FROM public.outsource_jobs
+WHERE factory_name IS NOT NULL AND factory_name != ''
+  AND factory_name NOT IN (SELECT factory_name FROM public.factories WHERE deleted_at IS NULL)
+ON CONFLICT (factory_name) DO NOTHING;
+
+UPDATE public.orders o
+SET factory_id = f.id
+FROM public.factories f
+WHERE o.factory_name = f.factory_name
+  AND o.factory_id IS NULL
+  AND f.deleted_at IS NULL;
+
+UPDATE public.outsource_jobs oj
+SET factory_id = f.id
+FROM public.factories f
+WHERE oj.factory_name = f.factory_name
+  AND oj.factory_id IS NULL
+  AND f.deleted_at IS NULL;

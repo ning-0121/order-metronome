@@ -36,6 +36,7 @@ const INSERT_WHITELIST = [
   'payment_terms',
   'shipment_qty',
   'order_date',
+  'factory_id',
   'factory_name',
 ] as const;
 
@@ -59,6 +60,7 @@ const UPDATE_WHITELIST = [
   'payment_terms',
   'shipment_qty',
   'order_date',
+  'factory_id',
   'factory_name',
 ] as const;
 

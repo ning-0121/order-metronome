@@ -4,11 +4,20 @@ import { createClient } from '@/lib/supabase/server';
 
 export interface Customer {
   id: string;
+  customer_code: string | null;
   customer_name: string;
+  company_name: string | null;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  country: string | null;
+  city: string | null;
+  customer_type: string | null;
+  notes: string | null;
 }
 
 /**
- * 获取所有客户（按名称排序）
+ * 获取所有客户（按名称排序，排除已软删除）
  */
 export async function getCustomers(): Promise<{ data: Customer[] | null; error: string | null }> {
   const supabase = await createClient();
@@ -16,7 +25,8 @@ export async function getCustomers(): Promise<{ data: Customer[] | null; error: 
   if (!user) return { data: null, error: '请先登录' };
 
   const { data, error } = await (supabase.from('customers') as any)
-    .select('id, customer_name')
+    .select('id, customer_code, customer_name, company_name, contact_name, email, phone, country, city, customer_type, notes')
+    .is('deleted_at', null)
     .order('customer_name', { ascending: true });
 
   if (error) return { data: null, error: error.message };
@@ -38,7 +48,7 @@ export async function createCustomer(
 
   const { data, error } = await (supabase.from('customers') as any)
     .insert({ customer_name: trimmed })
-    .select('id, customer_name')
+    .select('id, customer_code, customer_name, company_name, contact_name, email, phone, country, city, customer_type, notes')
     .single();
 
   if (error) {

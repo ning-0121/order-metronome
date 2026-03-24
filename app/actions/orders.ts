@@ -106,6 +106,7 @@ export async function createOrder(
   const shipping_sample_required = formData.get('shipping_sample_required') === 'true';
   const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
   const factory_name = formData.get('factory_name') as string | null;
+  const factory_id = formData.get('factory_id') as string | null;
 
   if (incoterm === 'FOB' && !etd) {
     return { ok: false, error: 'FOB 条款必须填写 ETD（预计离港日）' };
@@ -131,6 +132,7 @@ export async function createOrder(
     packaging_type: 'standard' as PackagingType,
     cancel_date: cancel_date || null,
     order_date: order_date || null,
+    factory_id: factory_id || null,
     factory_name: factory_name || null,
     created_by: user.id,
   };
