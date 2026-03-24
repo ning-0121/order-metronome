@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getCurrentUserRole, ROLE_LABEL } from '@/lib/utils/user-role';
+import { getCurrentUserRole, ROLE_LABEL, formatRolesLabel } from '@/lib/utils/user-role';
 import { buildExecutionTasks, summarizeExecutionTasks } from '@/lib/warRoom/executionBridge';
 import { analyzeWarRoom } from '@/lib/warRoom/rootCauseEngine';
+import { computeKPI } from '@/lib/utils/kpi';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 
@@ -17,7 +18,7 @@ export default async function MyTodayPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { role, isAdmin } = await getCurrentUserRole(supabase);
+  const { role, roles, isAdmin } = await getCurrentUserRole(supabase);
 
   // Admin 跳转到 War Room
   if (isAdmin) redirect('/ceo-war-room');
@@ -30,18 +31,30 @@ export default async function MyTodayPage() {
     .maybeSingle();
 
   const displayName = (profile as any)?.full_name || (profile as any)?.name || user.email?.split('@')[0] || '你';
+  const userRoles = roles && roles.length > 0 ? roles : [role];
 
-  // ── 获取该用户角色相关的里程碑 ──────────────────────────────
-  const { data: myMilestones } = await supabase
-    .from('milestones')
+  // ── 获取该用户所有角色相关的里程碑（V2: 多角色） ──────────────
+  const { data: myMilestones } = await (supabase
+    .from('milestones') as any)
     .select(`
       id, step_key, name, owner_role, owner_user_id,
       due_at, status, is_critical, evidence_required, evidence_note,
-      order_id, sequence_number
+      order_id, sequence_number, completed_at
     `)
-    .eq('owner_role', role)
+    .in('owner_role', userRoles)
     .neq('status', '已完成')
     .order('due_at', { ascending: true });
+
+  // ── KPI 数据：获取所有角色的全量里程碑（含已完成）──────────────
+  const { data: allMyMilestones } = await (supabase
+    .from('milestones') as any)
+    .select('id, status, due_at, completed_at, owner_role, owner_user_id, order_id')
+    .in('owner_role', userRoles);
+
+  const myKPI = computeKPI((allMyMilestones || []).map((m: any) => ({
+    id: m.id, status: m.status, due_at: m.due_at, completed_at: m.completed_at,
+    owner_role: m.owner_role, owner_user_id: m.owner_user_id, order_id: m.order_id,
+  })));
 
   // 获取相关订单信息
   const orderIds = [...new Set((myMilestones || []).map((m: any) => m.order_id))];
@@ -101,7 +114,7 @@ export default async function MyTodayPage() {
     .gte('due_at', tomorrow.toISOString())
     .lt('due_at', twoDaysLater.toISOString())
     .neq('status', '已完成')
-    .eq('owner_role', role)
+    .in('owner_role', userRoles)
     .order('due_at', { ascending: true });
 
   // ── 备忘摘要 ──────────────────────────────────────────────
@@ -124,7 +137,7 @@ export default async function MyTodayPage() {
           <div>
             <h1 className="text-xl font-bold text-gray-900">你好，{displayName} 👋</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              {ROLE_LABEL[role] || role} ·{' '}
+              {formatRolesLabel(userRoles)} ·{' '}
               {new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })}
             </p>
           </div>
@@ -148,6 +161,45 @@ export default async function MyTodayPage() {
             </div>
           ))}
         </div>
+
+        {/* 我的 KPI */}
+        <section className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-semibold text-gray-700">📊 我的执行 KPI</span>
+            <span className="text-xs text-gray-400">基于所有分配节点</span>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            <div className="text-center">
+              <p className={`text-xl font-black ${myKPI.onTimeRate >= 80 ? 'text-green-600' : myKPI.onTimeRate >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                {myKPI.onTimeRate}%
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">准时率</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-black text-indigo-600">{myKPI.completed}</p>
+              <p className="text-xs text-gray-500 mt-0.5">已完成</p>
+            </div>
+            <div className="text-center">
+              <p className={`text-xl font-black ${myKPI.overdue > 0 ? 'text-red-600' : 'text-gray-400'}`}>{myKPI.overdue}</p>
+              <p className="text-xs text-gray-500 mt-0.5">超期中</p>
+            </div>
+            <div className="text-center">
+              <p className={`text-xl font-black ${myKPI.blocked > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{myKPI.blocked}</p>
+              <p className="text-xs text-gray-500 mt-0.5">阻塞中</p>
+            </div>
+          </div>
+          {myKPI.total > 0 && (
+            <div className="mt-3">
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <span>完成进度</span>
+                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all" style={{ width: `${myKPI.completionRate}%` }} />
+                </div>
+                <span>{myKPI.completionRate}%</span>
+              </div>
+            </div>
+          )}
+        </section>
 
         {/* 全部完成状态 */}
         {tasks.length === 0 && (

@@ -13,6 +13,7 @@ import { getRoleLabel } from '@/lib/utils/i18n';
 import { inferRolesFromCategoryAndRequirement } from '@/lib/domain/requirements';
 import { analyzeWarRoom } from '@/lib/warRoom/rootCauseEngine';
 import { suggestActions, summarizeActions, CATEGORY_CONFIG } from '@/lib/warRoom/actionEngine';
+import { KPIOverview } from '@/components/KPIOverview';
 
 const RISK_CONFIG = {
   CRITICAL: { label: 'CRITICAL', badge: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500' },
@@ -259,6 +260,7 @@ export default async function AdminPage() {
             overdueMilestones={overdueMilestones} blockedMilestones={blockedMilestones}
             formattedTodayMilestones={formattedTodayMilestones}
             bottlenecksByRole={bottlenecksByRole}
+            allMilestones={allMilestones}
           />
         }
         issuesContent={
@@ -286,7 +288,13 @@ export default async function AdminPage() {
 // Tab 1: 概览
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function OverviewTab({ riskRed, riskYellow, riskGreen, overdueMilestones, blockedMilestones, formattedTodayMilestones, bottlenecksByRole }: any) {
+function OverviewTab({ riskRed, riskYellow, riskGreen, overdueMilestones, blockedMilestones, formattedTodayMilestones, bottlenecksByRole, allMilestones }: any) {
+  // KPI 数据
+  const kpiMilestones = (allMilestones || []).map((m: any) => ({
+    id: m.id, status: m.status, due_at: m.due_at, completed_at: m.completed_at,
+    owner_role: m.owner_role, owner_user_id: m.owner_user_id, order_id: m.order_id,
+  }));
+
   return (
     <div className="space-y-6">
       {/* Stats */}
@@ -311,6 +319,9 @@ function OverviewTab({ riskRed, riskYellow, riskGreen, overdueMilestones, blocke
       </div>
 
       {/* Bottleneck */}
+      {/* KPI 概览 */}
+      <KPIOverview milestones={kpiMilestones} />
+
       {Object.keys(bottlenecksByRole).length > 0 && (
         <div className="section">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">角色瓶颈分析</h2>

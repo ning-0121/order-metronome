@@ -462,12 +462,18 @@ export async function transitionMilestoneStatus(
   }
   
   // 更新状态：将中文状态转换为数据库枚举值
+  const updatePayload: Record<string, any> = {
+    status: mapStatusToDbEnum(normalizedNextStatus),
+    notes: updatedNotes,
+  };
+  // KPI: 记录完成时间
+  if (normalizedNextStatus === '已完成') {
+    updatePayload.completed_at = new Date().toISOString();
+  }
+
   const { data: updated, error: updateError } = await (supabase
     .from('milestones') as any)
-    .update({
-      status: mapStatusToDbEnum(normalizedNextStatus),
-      notes: updatedNotes,
-    })
+    .update(updatePayload)
     .eq('id', milestoneId)
     .select()
     .single();
