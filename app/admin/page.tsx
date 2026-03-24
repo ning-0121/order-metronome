@@ -198,6 +198,38 @@ export default async function AdminPage() {
         </div>
       </div>
 
+      {/* 快捷入口 */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+        <Link
+          href="/admin/users"
+          className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all"
+        >
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100">
+            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+            </svg>
+          </div>
+          <div>
+            <div className="text-sm font-medium text-gray-900">用户管理</div>
+            <div className="text-xs text-gray-500">分配员工角色</div>
+          </div>
+        </Link>
+        <Link
+          href="/ceo"
+          className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 hover:border-amber-300 hover:bg-amber-50/50 transition-all"
+        >
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100">
+            <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+          </div>
+          <div>
+            <div className="text-sm font-medium text-gray-900">CEO 助手</div>
+            <div className="text-xs text-gray-500">风险预警与审批</div>
+          </div>
+        </Link>
+      </div>
+
       {/* Today Must Handle Section */}
       <TodayMustHandle milestones={formattedTodayMilestones} />
 
