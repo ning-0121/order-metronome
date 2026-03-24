@@ -11,10 +11,6 @@ import { CeoAssistantActionPanel } from '@/components/CeoAssistantActionPanel';
 import { inferRolesFromCategoryAndRequirement } from '@/lib/domain/requirements';
 
 export default async function CEODashboardPage() {
-  // V1 收敛：CEO 看板已合并至 /admin 管理看板
-  redirect('/admin');
-
-  // ── 以下代码保留但不再可达 ──
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -199,7 +195,7 @@ export default async function CEODashboardPage() {
           order_id: o.id,
           order_no: o.order_no,
           milestone_id: m.id,
-          reason: `${m.name} 已逾期 ${daysOver} 天`,
+          reason: `${m.name} 已超期${daysOver}天`,
           suggestion: '建议立即催办负责人，并确认新的完成时间或调整交期。',
         });
       }
@@ -215,7 +211,7 @@ export default async function CEODashboardPage() {
             order_id: o.id,
             order_no: o.order_no,
             milestone_id: m.id,
-            reason: `${m.name} 阻塞超过24小时`,
+            reason: `${m.name} 已卡住超过24小时`,
             suggestion: '建议与负责人沟通解除阻塞，必要时调整资源或优先级。',
           });
         }
@@ -274,7 +270,7 @@ export default async function CEODashboardPage() {
   if (actionItems.length === 0) {
     todaySummary = '今日整体运行平稳，暂无需要你立即决策的事项。';
   } else {
-    todaySummary = `今日共有 ${overdueCount} 个逾期节点、${blockedOver24Count} 个节点阻塞超过24小时、${pendingDelayCount} 个延期申请待你审批、${redRiskSoonCount} 个订单在48小时内可能进入红色风险。建议你优先处理上方的行动建议。`;
+    todaySummary = `今日共有 ${overdueCount} 个超期节点、${blockedOver24Count} 个阻塞超过24小时节点、${pendingDelayCount} 个延期申请待你审批、${redRiskSoonCount} 个订单在48小时内可能进入红色风险。建议你优先处理上方的行动建议。`;
   }
 
   // ===== 日度执行汇总：按人、按订单的 rule-based 统计 =====
@@ -510,7 +506,7 @@ export default async function CEODashboardPage() {
                 <tr className="border-b border-gray-200">
                   <th className="text-left py-2 font-semibold">部门</th>
                   <th className="text-left py-2 font-semibold">风险订单数</th>
-                  <th className="text-left py-2 font-semibold">逾期节点数</th>
+                  <th className="text-left py-2 font-semibold">超期里程碑数</th>
                   <th className="text-left py-2 font-semibold">变更/待澄清需求项</th>
                 </tr>
               </thead>
@@ -549,13 +545,13 @@ export default async function CEODashboardPage() {
             <h3 className="text-sm font-semibold text-gray-800 mb-2">今日执行概览</h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
               <div className="rounded-md bg-gray-50 border border-gray-200 p-3">
-                <div className="text-gray-600">今日处理节点数</div>
+                <div className="text-gray-600">处理里程碑数</div>
                 <div className="mt-1 text-xl font-semibold text-gray-900">
                   {processedMilestoneCount}
                 </div>
               </div>
               <div className="rounded-md bg-red-50 border border-red-100 p-3">
-                <div className="text-gray-600">新增阻塞节点</div>
+                <div className="text-gray-600">新增卡住节点</div>
                 <div className="mt-1 text-xl font-semibold text-red-700">
                   {newBlockedCount}
                 </div>
@@ -609,7 +605,7 @@ export default async function CEODashboardPage() {
                         执行备注 {s.noteCount}
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
-                        阻塞 / 延期 {s.blockedOrDelayedCount}
+                        卡住/延期 {s.blockedOrDelayedCount}
                       </span>
                     </div>
                   </div>
@@ -622,7 +618,7 @@ export default async function CEODashboardPage() {
           <section>
             <h3 className="text-sm font-semibold text-gray-800 mb-2">今日新增风险</h3>
             {newRiskOrders.length === 0 ? (
-              <p className="text-sm text-gray-600">今日无新增逾期或阻塞订单。</p>
+              <p className="text-sm text-gray-600">今日无新增进入超期或阻塞的订单。</p>
             ) : (
               <ul className="space-y-1 text-sm">
                 {newRiskOrders.slice(0, 10).map((o: any) => (
@@ -667,7 +663,7 @@ export default async function CEODashboardPage() {
                 {(tomorrowRiskMilestones as any[]).slice(0, 10).map((m: any) => (
                   <li key={m.id}>
                     <Link
-                      href={`/orders/${m.order_id}?tab=progress#milestone-${m.id}`}
+                      href={`/orders/${m.order_id}#milestone-${m.id}`}
                       className="text-blue-600 hover:text-blue-700"
                     >
                       {m.orders?.order_no}
@@ -748,11 +744,11 @@ export default async function CEODashboardPage() {
                   <div className="flex-1">
                     <div className="font-semibold text-gray-900">{request.milestones?.name || 'Unknown'}</div>
                     <div className="text-sm text-gray-700 mt-1">
-                      订单：<Link href={`/orders/${request.milestones?.order_id}`} className="text-blue-600 hover:text-blue-700">{request.milestones?.orders?.order_no}</Link> | 客户：{request.milestones?.orders?.customer_name}
+                      Order: <Link href={`/orders/${request.milestones?.order_id}`} className="text-blue-600 hover:text-blue-700">{request.milestones?.orders?.order_no}</Link> | Customer: {request.milestones?.orders?.customer_name}
                     </div>
-                    <div className="text-sm text-gray-600 mt-1"><strong>原因：</strong> {request.reason_type}</div>
-                    {request.proposed_new_due_at && <div className="text-sm text-gray-600"><strong>申请新截止日：</strong> {formatDate(request.proposed_new_due_at)}</div>}
-                    <div className="text-xs text-gray-600 mt-2">提交时间：{formatDate(request.created_at)}</div>
+                    <div className="text-sm text-gray-600 mt-1"><strong>Reason:</strong> {request.reason_type}</div>
+                    {request.proposed_new_due_at && <div className="text-sm text-gray-600"><strong>Proposed due:</strong> {formatDate(request.proposed_new_due_at)}</div>}
+                    <div className="text-xs text-gray-600 mt-2">Created: {formatDate(request.created_at)}</div>
                   </div>
                   <div className="ml-4">
                     <DelayRequestActions delayRequestId={request.id} />
@@ -776,7 +772,7 @@ export default async function CEODashboardPage() {
                 <thead>
                   <tr className="border-b border-gray-200">
                     <th className="text-left py-2 font-semibold">角色</th>
-                    <th className="text-left py-2 font-semibold">逾期 / 阻塞节点数</th>
+                    <th className="text-left py-2 font-semibold">超期/阻塞数</th>
                   </tr>
                 </thead>
                 <tbody>
