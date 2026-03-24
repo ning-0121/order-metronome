@@ -3,9 +3,51 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createOrder, preGenerateOrderNo } from '@/app/actions/orders';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
+import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { CustomerSelect } from '@/components/CustomerSelect';
 import { FactorySelect } from '@/components/FactorySelect';
 import Link from 'next/link';
+
+/** 客户端直传文件到 Supabase Storage（绕过 Vercel 4.5MB 限制） */
+async function uploadFilesToStorage(
+  orderId: string,
+  files: { file: File; fileType: string; label: string }[]
+): Promise<string[]> {
+  if (files.length === 0) return [];
+  const supabase = createBrowserClient();
+  const warnings: string[] = [];
+
+  for (const { file, fileType, label } of files) {
+    try {
+      const ext = file.name.split('.').pop() || 'bin';
+      const storagePath = `${orderId}/${fileType}_${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('order-docs')
+        .upload(storagePath, file, { contentType: file.type, upsert: false });
+      if (uploadError) {
+        console.warn('[upload]', label, '上传失败:', uploadError.message);
+        warnings.push(`${label}上传失败，可稍后在订单详情页补传`);
+        continue;
+      }
+      // 写入 order_attachments 记录
+      const { error: dbError } = await (supabase.from('order_attachments') as any).insert({
+        order_id: orderId,
+        file_type: fileType,
+        storage_path: storagePath,
+        original_filename: file.name,
+        file_size_bytes: file.size,
+      });
+      if (dbError) {
+        console.warn('[upload]', label, '记录写入失败:', dbError.message);
+        warnings.push(`${label}文件已上传但记录保存失败`);
+      }
+    } catch (e: any) {
+      console.warn('[upload]', label, '异常:', e.message);
+      warnings.push(`${label}处理异常，可稍后补传`);
+    }
+  }
+  return warnings;
+}
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -64,27 +106,54 @@ function NewOrderWizard() {
       return;
     }
     try {
-      const formData = new FormData(e.currentTarget);
-      console.log('[前端] 调用 createOrder...');
-      const result = await createOrder(formData, preGeneratedOrderNo);
+      const rawFormData = new FormData(e.currentTarget);
+
+      // ── 1. 从 FormData 提取文件并移除（不发到 Server Action） ──
+      const FILE_FIELDS = [
+        { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
+        { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
+        { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
+        { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
+        { formKey: 'tech_pack_file', fileType: 'tech_pack', label: 'Tech Pack' },
+      ];
+      const filesToUpload: { file: File; fileType: string; label: string }[] = [];
+      for (const { formKey, fileType, label } of FILE_FIELDS) {
+        const file = rawFormData.get(formKey) as File | null;
+        if (file && file.size > 0) {
+          filesToUpload.push({ file, fileType, label });
+        }
+        rawFormData.delete(formKey); // 从 FormData 中删除文件，只保留文本
+      }
+
+      // ── 2. Server Action：仅提交文本字段（< 100KB） ──
+      console.log('[前端] 调用 createOrder（纯文本，无文件）...');
+      const result = await createOrder(rawFormData, preGeneratedOrderNo);
       console.log('[前端] createOrder 返回:', JSON.stringify({ ok: result.ok, error: result.error, orderId: result.orderId }));
 
       if (!result.ok) {
         showError(result.error || '创建订单失败（服务端未返回错误详情）');
-      } else {
-        // 成功
-        const newOrderId = result.orderId;
-        setOrderId(newOrderId || null);
-        if (result.warning) {
-          console.warn('[前端] 订单已创建，但有附件警告:', result.warning);
-        }
-        if (newOrderId) {
-          const milestonesResult = await getMilestonesByOrder(newOrderId);
-          if (milestonesResult.data) setMilestones(milestonesResult.data);
-        }
-        router.push('/orders/new?step=2&order_id=' + newOrderId);
-        setCurrentStep(2);
+        return;
       }
+
+      // ── 3. 订单创建成功 → 客户端直传文件到 Supabase Storage ──
+      const newOrderId = result.orderId!;
+      setOrderId(newOrderId);
+
+      if (filesToUpload.length > 0) {
+        console.log('[前端] 开始客户端直传', filesToUpload.length, '个文件...');
+        const uploadWarnings = await uploadFilesToStorage(newOrderId, filesToUpload);
+        if (uploadWarnings.length > 0) {
+          console.warn('[前端] 附件上传警告:', uploadWarnings);
+          // 不阻塞主流程，仅 console 警告
+        }
+      }
+
+      // ── 4. 加载里程碑并进入 Step 2 ──
+      const milestonesResult = await getMilestonesByOrder(newOrderId);
+      if (milestonesResult.data) setMilestones(milestonesResult.data);
+      router.push('/orders/new?step=2&order_id=' + newOrderId);
+      setCurrentStep(2);
+
     } catch (err: any) {
       console.error('[前端] createOrder 异常:', err);
       showError(err?.message || '创建订单时发生意外错误，请重试');
@@ -340,7 +409,7 @@ function NewOrderWizard() {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 mt-2">支持 PDF、Excel、Word、JPG、PNG，单文件 ≤ 20MB</p>
+              <p className="text-xs text-gray-400 mt-2">支持 PDF、Excel、Word、JPG、PNG，单文件 ≤ 20MB（文件直传云存储，不影响订单创建）</p>
             </div>
 
             {/* 提交按钮上方的错误提示（确保用户能看到） */}

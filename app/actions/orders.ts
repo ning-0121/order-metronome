@@ -218,58 +218,12 @@ export async function createOrder(
   }
   console.log('[createOrder] STEP 5 OK');
 
-  // ── STEP 6: upload files — 上传附件（非阻塞，失败不回滚订单） ──
-  console.log('[createOrder] STEP 6: upload files — 附件上传（非阻塞）');
-  const uploadWarnings: string[] = [];
-  const fileFields = [
-    { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
-    { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
-    { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
-    { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
-    { formKey: 'tech_pack_file', fileType: 'tech_pack', label: 'Tech Pack' },
-  ];
-
-  for (const { formKey, fileType, label } of fileFields) {
-    const file = formData.get(formKey) as File | null;
-    if (!file || file.size === 0) continue;
-    try {
-      const ext = file.name.split('.').pop() || 'bin';
-      const storagePath = `${orderData.id}/${fileType}_${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from('order-docs')
-        .upload(storagePath, file, { contentType: file.type, upsert: false });
-      if (uploadError) {
-        console.warn('[createOrder] STEP 6: 附件上传失败:', label, uploadError.message);
-        uploadWarnings.push(`${label}上传失败，请稍后补传`);
-        continue;
-      }
-      // 写入 order_attachments 表（非阻塞）
-      const { error: dbError } = await supabase.from('order_attachments').insert({
-        order_id: orderData.id,
-        file_type: fileType,
-        storage_path: storagePath,
-        original_filename: file.name,
-        file_size_bytes: file.size,
-        uploaded_by: user.id,
-      });
-      if (dbError) {
-        console.warn('[createOrder] STEP 6: 附件记录写入失败:', label, dbError.message);
-        uploadWarnings.push(`${label}文件已上传但记录保存失败`);
-      }
-    } catch (fileErr: any) {
-      console.warn('[createOrder] STEP 6: 附件处理异常:', label, fileErr.message);
-      uploadWarnings.push(`${label}处理异常，请稍后补传`);
-    }
-  }
-  console.log('[createOrder] STEP 6 done — warnings:', uploadWarnings.join('; ') || '无');
-
   // ── DONE ──
+  // 文件上传已移至客户端直传 Supabase Storage（不经过 Server Action）
   console.log('[createOrder] ====== SUCCESS — orderId:', orderData.id, '======');
   revalidatePath('/orders');
   revalidatePath('/dashboard');
-
-  const warning = uploadWarnings.length > 0 ? uploadWarnings.join('；') : undefined;
-  return { ok: true, orderId: orderData.id, warning };
+  return { ok: true, orderId: orderData.id };
 }
 
 export async function getOrders() {
