@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  serverActions: {
+    bodySizeLimit: '20mb',  // 支持文件上传（默认仅 1MB）
+  },
 };
 
 export default nextConfig;
