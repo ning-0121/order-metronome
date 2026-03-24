@@ -8,7 +8,7 @@
  * TODO: Later add user_roles table for proper role management
  */
 
-export type UserRole = 'admin' | 'sales' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics';
+export type UserRole = 'admin' | 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics';
 
 const ADMIN_ALLOWLIST = [
   'alex@qimoclothing.com',

@@ -1,5 +1,6 @@
 export type OwnerRole =
   | "sales"
+  | "merchandiser"
   | "finance"
   | "procurement"
   | "production"

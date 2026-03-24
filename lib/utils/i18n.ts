@@ -9,11 +9,12 @@
 export function getRoleLabel(role: string): string {
   const roleMap: Record<string, string> = {
     'sales': '业务',
+    'merchandiser': '跟单',
     'finance': '财务',
     'procurement': '采购',
     'production': '生产',
     'qc': '质检',
-    'logistics': '物流',
+    'logistics': '物流/仓库',
     'admin': '管理员',
   };
   
