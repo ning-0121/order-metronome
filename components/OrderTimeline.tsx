@@ -4,6 +4,8 @@ import { MilestoneActions } from './MilestoneActions';
 import { DelayRequestForm } from './DelayRequestForm';
 import { EvidenceUpload } from './EvidenceUpload';
 import { OwnerAssignment } from './OwnerAssignment';
+import { SOPButton } from './SOPModal';
+import { getSOPForStep } from '@/lib/domain/sop';
 import { getMilestoneLogs } from '@/app/actions/milestones';
 import { useState, useEffect } from 'react';
 import type { Milestone } from '@/lib/types';
@@ -169,6 +171,11 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {overdue && isActive && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 逾期未结</span>
                           )}
+                          {/* SOP 按钮 */}
+                          {(() => {
+                            const sop = getSOPForStep(m.step_key);
+                            return sop ? <SOPButton stepKey={m.step_key} milestoneName={m.name} sop={sop} /> : null;
+                          })()}
                         </div>
 
                         {/* 元信息行 */}
@@ -230,6 +237,30 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                             <p className="text-xs text-amber-700">{m.evidence_note}</p>
                           </div>
                         )}
+
+                        {/* SOP 操作规程（展开时显示完整内容） */}
+                        {(() => {
+                          const sop = getSOPForStep(m.step_key);
+                          if (!sop) return null;
+                          return (
+                            <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-4">
+                              <h4 className="text-xs font-semibold text-indigo-800 mb-2">📖 {sop.sop_title}</h4>
+                              <div className="space-y-1.5 text-xs text-indigo-700">
+                                {sop.sop_steps.map((step, i) => (
+                                  <p key={i}>{step}</p>
+                                ))}
+                              </div>
+                              <div className="mt-3 pt-2 border-t border-indigo-200">
+                                <p className="text-xs font-semibold text-indigo-800 mb-1">完成标准：</p>
+                                <ul className="space-y-0.5">
+                                  {sop.completion_rules.map((rule, i) => (
+                                    <li key={i} className="text-xs text-indigo-600">☑ {rule}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* 核心操作区：MilestoneActions（去处理 + 申请延期） */}
                         <MilestoneActions
