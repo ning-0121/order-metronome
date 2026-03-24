@@ -164,7 +164,6 @@ export async function createOrder(formData: FormData, preGeneratedOrderNo?: stri
     etd: orderData.etd,
     warehouseDueDate: orderData.warehouse_due_date,
     eta: orderData.eta,
-    packagingType: orderData.packaging_type as 'standard' | 'custom',
     orderType: (orderData.order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
     shippingSampleRequired: orderData.shipping_sample_required || false,
     shippingSampleDeadline: orderData.shipping_sample_deadline,
