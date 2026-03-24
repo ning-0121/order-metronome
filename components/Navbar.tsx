@@ -4,27 +4,40 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
 
-export function Navbar() {
+interface NavbarProps {
+  isAdmin?: boolean;
+}
+
+export function Navbar({ isAdmin = false }: NavbarProps) {
   const pathname = usePathname();
 
-  // Don't show navbar on login page
   if (pathname === '/login') {
     return null;
   }
 
-  const navLinks = [
-    { href: '/dashboard', label: '我的工作台', icon: '📋' },
-    { href: '/orders', label: '订单列表', icon: '📦' },
-    { href: '/admin', label: '管理后台', icon: '⚙️' },
-  ];
+  const navLinks = isAdmin
+    ? [
+        { href: '/ceo', label: '我的节拍', icon: '🎯' },
+        { href: '/orders', label: '订单列表', icon: '📦' },
+        { href: '/memos', label: '备忘录', icon: '📝' },
+        { href: '/admin/users', label: '用户管理', icon: '👥' },
+        { href: '/guide', label: '操作说明', icon: '📖' },
+      ]
+    : [
+        { href: '/dashboard', label: '我的工作台', icon: '📋' },
+        { href: '/orders', label: '订单列表', icon: '📦' },
+        { href: '/memos', label: '备忘录', icon: '📝' },
+        { href: '/guide', label: '操作说明', icon: '📖' },
+      ];
+
+  const logoHref = isAdmin ? '/ceo' : '/dashboard';
 
   return (
     <nav className="sticky top-0 z-50 border-b border-gray-200/80 bg-white/80 backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-10">
-            {/* Logo */}
-            <Link href="/dashboard" className="flex items-center gap-2">
+            <Link href={logoHref} className="flex items-center gap-2">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-lg">
                 ⏱
               </div>
@@ -33,7 +46,6 @@ export function Navbar() {
               </span>
             </Link>
 
-            {/* Nav Links */}
             <div className="flex items-center gap-1">
               {navLinks.map((link) => {
                 const isActive = pathname === link.href || pathname.startsWith(link.href + '/');
@@ -55,7 +67,6 @@ export function Navbar() {
             </div>
           </div>
 
-          {/* User Actions */}
           <form action={signOut}>
             <button
               type="submit"
