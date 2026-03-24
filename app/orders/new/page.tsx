@@ -73,6 +73,7 @@ function NewOrderWizard() {
   const [shippingSampleRequired, setShippingSampleRequired] = useState(false);
   const [preGeneratedOrderNo, setPreGeneratedOrderNo] = useState<string | null>(null);
   const [orderNoLoading, setOrderNoLoading] = useState(true);
+  const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     const stepParam = searchParams.get('step');
@@ -154,7 +155,7 @@ function NewOrderWizard() {
         const uploadWarnings = await uploadFilesToStorage(newOrderId, filesToUpload);
         if (uploadWarnings.length > 0) {
           console.warn('[前端] 附件上传警告:', uploadWarnings);
-          // 不阻塞主流程，仅 console 警告
+          setUploadWarnings(uploadWarnings);
         }
       }
 
@@ -447,6 +448,14 @@ function NewOrderWizard() {
       {currentStep === 2 && (
         <div className="rounded-xl border border-gray-200 bg-white p-8">
           <h2 className="text-xl font-bold text-gray-900 mb-2">系统已生成执行节拍</h2>
+          {uploadWarnings.length > 0 && (
+            <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-4 mb-4">
+              <p className="text-sm font-medium text-yellow-800">⚠ 部分附件上传未成功：</p>
+              <ul className="mt-1 text-sm text-yellow-700 list-disc list-inside">
+                {uploadWarnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+          )}
           <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
             <p className="text-indigo-800 font-medium">✅ 共生成 {milestones.length} 个关键控制点</p>
             <p className="text-indigo-600 text-sm mt-1">卡风险，而不是走流程。每个控制点都是关键风险拦截点。</p>

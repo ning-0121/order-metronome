@@ -1041,3 +1041,12 @@ FROM public.factories f
 WHERE oj.factory_name = f.factory_name
   AND oj.factory_id IS NULL
   AND f.deleted_at IS NULL;
+
+-- ===== 2026-03-24: 修复附件上传 RLS + Storage bucket =====
+
+-- 放宽 order_attachments INSERT 策略：允许已登录用户插入
+DROP POLICY IF EXISTS "order_attachments_insert" ON public.order_attachments;
+CREATE POLICY "order_attachments_insert" ON public.order_attachments
+  FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+-- 确保 Storage bucket 存在（需要在 Supabase Dashboard 手动创建 order-docs bucket）
