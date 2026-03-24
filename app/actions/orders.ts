@@ -171,6 +171,13 @@ export async function createOrder(
     return { ok: false, error: `排期计算失败：${scheduleErr.message}` };
   }
 
+  // 角色映射：确保模板角色值 → DB enum 合法值
+  const ROLE_TO_DB: Record<string, string> = {
+    sales: 'sales', finance: 'finance', procurement: 'procurement',
+    production: 'production', qc: 'qc', logistics: 'logistics',
+    admin: 'admin', merchandiser: 'sales', quality: 'qc',
+  };
+
   const templates = getApplicableMilestones(order_type, shipping_sample_required);
   const milestonesData = [];
   for (let index = 0; index < templates.length; index++) {
@@ -181,10 +188,11 @@ export async function createOrder(
       await deleteOrder(orderData.id);
       return { ok: false, error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
     }
+    const dbRole = ROLE_TO_DB[template.owner_role] || 'sales';
     milestonesData.push({
       step_key: template.step_key,
       name: template.name,
-      owner_role: template.owner_role,
+      owner_role: dbRole,
       owner_user_id: null,
       planned_at: ensureBusinessDay(dueAt).toISOString(),
       due_at: ensureBusinessDay(dueAt).toISOString(),
