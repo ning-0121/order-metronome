@@ -91,6 +91,30 @@ export default async function MyTodayPage() {
   // 我的订单（简洁列表）
   const myOrderList = Object.entries(ordersMap).slice(0, 8);
 
+  // ── 明日提醒：24-48h 内到期的里程碑 ──────────────────────────
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const twoDaysLater = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+
+  const { data: tomorrowMilestones } = await (supabase.from('milestones') as any)
+    .select('id, order_id, name, due_at, status, orders!inner(id, order_no, customer_name)')
+    .gte('due_at', tomorrow.toISOString())
+    .lt('due_at', twoDaysLater.toISOString())
+    .neq('status', '已完成')
+    .eq('owner_role', role)
+    .order('due_at', { ascending: true });
+
+  // ── 备忘摘要 ──────────────────────────────────────────────
+  const { data: myMemos } = await (supabase.from('user_memos') as any)
+    .select('id, content, remind_at, is_done')
+    .eq('user_id', user.id)
+    .eq('is_done', false)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  const activeMemoCount = (myMemos || []).length;
+  const dueReminders = (myMemos || []).filter((m: any) => m.remind_at && new Date(m.remind_at) <= now);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-3xl mx-auto px-4 py-7 space-y-6">
@@ -161,6 +185,61 @@ export default async function MyTodayPage() {
               {upcomingTasks.map(task => (
                 <TaskCard key={task.id} task={task} />
               ))}
+            </div>
+          </section>
+        )}
+
+        {/* 明日提醒 */}
+        {tomorrowMilestones && tomorrowMilestones.length > 0 && (
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm font-semibold text-teal-700">🗓️ 明日提醒</span>
+              <span className="text-xs text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full">{tomorrowMilestones.length} 项</span>
+            </div>
+            <div className="rounded-xl border border-teal-200 bg-teal-50/30 divide-y divide-teal-100 overflow-hidden">
+              {(tomorrowMilestones as any[]).map((m: any) => (
+                <Link
+                  key={m.id}
+                  href={`/orders/${m.order_id}?tab=progress#milestone-${m.id}`}
+                  className="flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors group"
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-900">{m.name}</span>
+                    <span className="text-xs text-gray-400 ml-2">{m.orders?.order_no} · {m.orders?.customer_name}</span>
+                  </div>
+                  <span className="text-xs text-teal-600 flex-shrink-0">
+                    到期: {formatDate(m.due_at)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* 备忘提醒 */}
+        {(dueReminders.length > 0 || activeMemoCount > 0) && (
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">📝 备忘录</span>
+                {dueReminders.length > 0 && (
+                  <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">🔔 {dueReminders.length} 条提醒到期</span>
+                )}
+              </div>
+              <Link href="/memos" className="text-xs text-indigo-600 hover:underline">管理全部 →</Link>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-2">
+              {dueReminders.map((m: any) => (
+                <div key={m.id} className="flex items-center gap-2 text-sm">
+                  <span className="text-amber-500">🔔</span>
+                  <span className="text-gray-900">{m.content}</span>
+                </div>
+              ))}
+              {activeMemoCount > dueReminders.length && (
+                <p className="text-xs text-gray-400">
+                  还有 {activeMemoCount - dueReminders.length} 条待办备忘
+                </p>
+              )}
             </div>
           </section>
         )}

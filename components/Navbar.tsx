@@ -16,6 +16,7 @@ export function Navbar({ isAdmin = false, userRole }: NavbarProps) {
   const navLinks = [
     { href: '/dashboard', label: '我的节拍', icon: '📋' },
     { href: '/orders', label: '订单列表', icon: '📦' },
+    { href: '/memos', label: '备忘录', icon: '📝' },
     ...(isAdmin || isCeo ? [
       { href: '/admin', label: '管理看板', icon: '⚙️' },
       { href: '/admin/users', label: '用户管理', icon: '👥' },

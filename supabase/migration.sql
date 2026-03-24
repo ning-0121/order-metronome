@@ -911,6 +911,24 @@ ALTER TABLE public.shipment_confirmations ENABLE ROW LEVEL SECURITY;
 -- ── 2026-03-23: 订单基础业务字段补充 ──
 -- order_date 已存在（由之前 migration 添加），仅补 factory_name
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS factory_name text;
+
+-- ── 2026-03-23: 个人备忘录 ──
+CREATE TABLE IF NOT EXISTS public.user_memos (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  content text NOT NULL,
+  remind_at timestamptz,
+  is_done boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_memos_user_id ON public.user_memos(user_id);
+
+ALTER TABLE public.user_memos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "memo_select_own" ON public.user_memos FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "memo_insert_own" ON public.user_memos FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "memo_update_own" ON public.user_memos FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "memo_delete_own" ON public.user_memos FOR DELETE USING (auth.uid() = user_id);
 CREATE POLICY "shipment_select_auth" ON public.shipment_confirmations FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY "shipment_insert_auth" ON public.shipment_confirmations FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 CREATE POLICY "shipment_update_auth" ON public.shipment_confirmations FOR UPDATE USING (auth.uid() IS NOT NULL);
