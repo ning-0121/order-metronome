@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createOrder, preGenerateOrderNo } from '@/app/actions/orders';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { CustomerSelect } from '@/components/CustomerSelect';
+import { FactorySelect } from '@/components/FactorySelect';
 import Link from 'next/link';
 
 type Step = 1 | 2 | 3 | 4;
@@ -139,6 +140,9 @@ function NewOrderWizard() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <CustomerSelect />
+                </div>
+                <div>
+                  <FactorySelect />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
