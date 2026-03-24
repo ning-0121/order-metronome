@@ -19,7 +19,7 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '' });
+  const [form, setForm] = useState({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '', expected_workers: '', expected_start_date: '', expected_end_date: '' });
   const [editForm, setEditForm] = useState({ qty_returned: '', qty_pass: '', qty_defect: '', status: '', notes: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -33,9 +33,12 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
       factory_name: form.factory_name, job_type: form.job_type,
       qty_sent: parseInt(form.qty_sent) || 0,
       expected_return_date: form.expected_return_date || undefined,
+      expected_workers: form.expected_workers ? parseInt(form.expected_workers) : undefined,
+      expected_start_date: form.expected_start_date || undefined,
+      expected_end_date: form.expected_end_date || undefined,
     });
     if (result.error) setError(result.error);
-    else { setShowAdd(false); setForm({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '' }); await reload(); }
+    else { setShowAdd(false); setForm({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '', expected_workers: '', expected_start_date: '', expected_end_date: '' }); await reload(); }
     setSaving(false);
   }
 
@@ -70,7 +73,21 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
               {JOB_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
             <input placeholder="发出数量 *" type="number" value={form.qty_sent} onChange={e => setForm(f => ({ ...f, qty_sent: e.target.value }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            <input type="date" value={form.expected_return_date} onChange={e => setForm(f => ({ ...f, expected_return_date: e.target.value }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" title="预计回厂日" />
+            <input placeholder="预计上线人数" type="number" value={form.expected_workers} onChange={e => setForm(f => ({ ...f, expected_workers: e.target.value }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">预计上线时间</label>
+              <input type="date" value={form.expected_start_date} onChange={e => setForm(f => ({ ...f, expected_start_date: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">预计下线时间</label>
+              <input type="date" value={form.expected_end_date} onChange={e => setForm(f => ({ ...f, expected_end_date: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">预计回厂日</label>
+              <input type="date" value={form.expected_return_date} onChange={e => setForm(f => ({ ...f, expected_return_date: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            </div>
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex gap-2">
@@ -101,6 +118,15 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
                     <button onClick={() => deleteOutsourceJob(job.id, orderId).then(reload)} className="text-xs text-red-500 hover:underline">删除</button>
                   </div>
                 </div>
+                {/* 生产计划信息 */}
+                {(job.expected_workers || job.expected_start_date || job.expected_end_date) && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mb-3">
+                    {job.expected_workers && <span>上线人数：<strong className="text-gray-700">{job.expected_workers}人</strong></span>}
+                    {job.expected_start_date && <span>上线：<strong className="text-gray-700">{job.expected_start_date}</strong></span>}
+                    {job.expected_end_date && <span>下线：<strong className="text-gray-700">{job.expected_end_date}</strong></span>}
+                    {job.expected_return_date && <span>回厂：<strong className="text-gray-700">{job.expected_return_date}</strong></span>}
+                  </div>
+                )}
                 <div className="grid grid-cols-5 gap-3 mb-3">
                   {[
                     { label: '发出', value: job.qty_sent, color: 'text-gray-700' },

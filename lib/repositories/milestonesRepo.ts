@@ -466,6 +466,10 @@ export async function transitionMilestoneStatus(
     status: mapStatusToDbEnum(normalizedNextStatus),
     notes: updatedNotes,
   };
+  // KPI: 记录开始时间（首次进入进行中）
+  if (normalizedNextStatus === '进行中' && !milestone.started_at) {
+    updatePayload.started_at = new Date().toISOString();
+  }
   // KPI: 记录完成时间
   if (normalizedNextStatus === '已完成') {
     updatePayload.completed_at = new Date().toISOString();

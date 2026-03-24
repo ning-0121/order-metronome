@@ -14,6 +14,7 @@ export async function getOutsourceJobs(orderId: string) {
 export async function addOutsourceJob(orderId: string, job: {
   factory_name: string; job_type: string; qty_sent: number;
   expected_return_date?: string; factory_contact?: string; unit_price?: number;
+  expected_workers?: number; expected_start_date?: string; expected_end_date?: string;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -27,6 +28,9 @@ export async function addOutsourceJob(orderId: string, job: {
     job_type: job.job_type || 'other',
     qty_sent: job.qty_sent,
     expected_return_date: job.expected_return_date || null,
+    expected_workers: job.expected_workers || null,
+    expected_start_date: job.expected_start_date || null,
+    expected_end_date: job.expected_end_date || null,
     factory_contact: job.factory_contact || null,
     unit_price: job.unit_price || null,
     status: 'pending',
