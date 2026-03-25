@@ -223,18 +223,26 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
   const orderData = order as any;
   const milestoneData = milestone as any;
 
-  // Check authorization (order owner or admin)
+  // Check authorization (multi-role safe: order owner, admin, or matching role)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  
-  const isAdmin = profile && (profile as any).role === 'admin';
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdmin = userRoles.includes('admin');
   const isOrderOwner = orderData.created_by === user.id;
-  
-  if (!isOrderOwner && !isAdmin) {
-    return { error: 'Only order owner or admin can approve delay requests' };
+  const milestoneOwnerRole = (milestoneData.owner_role || '').toLowerCase();
+  const roleMatches = userRoles.some(r => {
+    const nr = r.toLowerCase();
+    return nr === milestoneOwnerRole
+      || (milestoneOwnerRole === 'qc' && (nr === 'qc' || nr === 'quality'))
+      || (milestoneOwnerRole === 'sales' && (nr === 'sales' || nr === 'merchandiser'))
+      || (milestoneOwnerRole === 'merchandiser' && (nr === 'sales' || nr === 'merchandiser'));
+  });
+
+  if (!isOrderOwner && !isAdmin && !roleMatches) {
+    return { error: '无权操作：只有订单创建者、管理员或相关角色可以审批延期' };
   }
 
   // Update delay request
@@ -347,18 +355,18 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
 
   const orderData = order as any;
 
-  // Check authorization (order owner or admin)
+  // Check authorization (multi-role safe)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  
-  const isAdmin = profile && (profile as any).role === 'admin';
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdmin = userRoles.includes('admin');
   const isOrderOwner = orderData.created_by === user.id;
-  
+
   if (!isOrderOwner && !isAdmin) {
-    return { error: 'Only order owner or admin can reject delay requests' };
+    return { error: '无权操作：只有订单创建者或管理员可以驳回延期' };
   }
 
   // Update delay request
