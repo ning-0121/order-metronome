@@ -43,8 +43,16 @@ function LoginForm() {
           router.refresh();
         }
       }
-    } catch {
-      setMessage({ type: 'error', text: '发生错误，请重试' });
+    } catch (err: any) {
+      console.error('[登录] 异常:', err);
+      const msg = err?.message || '';
+      if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
+        setMessage({ type: 'error', text: '邮箱尚未验证。请检查收件箱（或垃圾邮件），点击验证链接后再登录。' });
+      } else if (msg.includes('Invalid login')) {
+        setMessage({ type: 'error', text: '邮箱或密码错误，请重试' });
+      } else {
+        setMessage({ type: 'error', text: '登录失败：' + (msg || '未知错误，请重试') });
+      }
     } finally {
       setLoading(false);
     }
