@@ -9,6 +9,8 @@ interface MilestoneActionsProps {
   /** 同一订单内所有里程碑（用于阻断校验） */
   allMilestones?: any[];
   currentRole?: string;
+  /** 多角色支持 */
+  currentRoles?: string[];
   isAdmin?: boolean;
   orderId?: string;
 }
@@ -17,6 +19,7 @@ export function MilestoneActions({
   milestone,
   allMilestones = [],
   currentRole,
+  currentRoles = [],
   isAdmin = false,
   orderId,
 }: MilestoneActionsProps) {
@@ -30,8 +33,17 @@ export function MilestoneActions({
   const [blockError, setBlockError] = useState('');
   const [submitError, setSubmitError] = useState('');
 
-  const canModify = isAdmin ||
-    (currentRole && currentRole.toLowerCase() === milestone.owner_role?.toLowerCase());
+  // 多角色匹配：用户任一角色匹配节点 owner_role 即可操作
+  const allRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+  const ownerRole = (milestone.owner_role || '').toLowerCase();
+  const canModify = isAdmin || allRoles.some(r => {
+    const nr = r.toLowerCase();
+    return nr === ownerRole
+      || (ownerRole === 'qc' && (nr === 'quality' || nr === 'qc'))
+      || (ownerRole === 'quality' && (nr === 'qc' || nr === 'quality'))
+      || (ownerRole === 'sales' && nr === 'merchandiser')
+      || (ownerRole === 'merchandiser' && nr === 'sales');
+  });
 
   // ── 阻断校验 ──────────────────────────────────────────────────
   function getBlockers(): string[] {
@@ -131,7 +143,11 @@ export function MilestoneActions({
     );
   }
 
-  const isActive = milestone.status === '进行中' || milestone.status === 'in_progress';
+  // 「进行中」or「pending 但已逾期」or「pending 但有操作权限的用户」都可操作
+  const isInProgress = milestone.status === '进行中' || milestone.status === 'in_progress';
+  const isPending = milestone.status === 'pending' || milestone.status === '未开始';
+  const isPendingOverdue = isPending && milestone.due_at && new Date(milestone.due_at) < new Date();
+  const isActive = isInProgress || (isPending && canModify);
   if (!isActive) return null;
 
   const blockers = getBlockers();

@@ -43,6 +43,15 @@ export default async function OrderDetailPage({
   const { data: { user } } = await supabase.auth.getUser();
   const isOrderOwner = user ? orderData.created_by === user.id : false;
 
+  // 获取用户多角色
+  let currentRoles: string[] = currentRole ? [currentRole] : [];
+  if (user) {
+    const { data: profile } = await supabase.from('profiles').select('roles, role').eq('user_id', user.id).single();
+    if ((profile as any)?.roles?.length > 0) {
+      currentRoles = (profile as any).roles;
+    }
+  }
+
   const { data: milestones } = await getMilestonesByOrder(id);
   const { data: delayRequests } = await getDelayRequestsByOrder(id);
   const { data: logs } = await getOrderLogs(id);
@@ -297,6 +306,7 @@ export default async function OrderDetailPage({
                 orderId={id}
                 orderIncoterm={orderData.incoterm as 'FOB' | 'DDP'}
                 currentRole={currentRole}
+                currentRoles={currentRoles}
                 isAdmin={isAdmin}
               />
             ) : (

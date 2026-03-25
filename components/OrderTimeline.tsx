@@ -25,6 +25,7 @@ interface OrderTimelineProps {
   orderId: string;
   orderIncoterm: 'FOB' | 'DDP';
   currentRole?: string;
+  currentRoles?: string[];
   isAdmin?: boolean;
 }
 
@@ -147,7 +148,7 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   );
 }
 
-export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, isAdmin = false }: OrderTimelineProps) {
+export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, currentRoles = [], isAdmin = false }: OrderTimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
 
@@ -252,10 +253,15 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           )}
                           {overdue && isActive && (() => {
                             const ownerRole = (m.owner_role || '').toLowerCase();
-                            const currentRoleLower = (currentRole || '').toLowerCase();
-                            const isMineOverdue = isAdmin || currentRoleLower === ownerRole
-                              || (ownerRole === 'qc' && currentRoleLower === 'quality')
-                              || (ownerRole === 'quality' && currentRoleLower === 'qc');
+                            const allUserRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+                            const isMineOverdue = isAdmin || allUserRoles.some(r => {
+                              const nr = r.toLowerCase();
+                              return nr === ownerRole
+                                || (ownerRole === 'qc' && (nr === 'quality' || nr === 'qc'))
+                                || (ownerRole === 'quality' && (nr === 'qc' || nr === 'quality'))
+                                || (ownerRole === 'sales' && nr === 'merchandiser')
+                                || (ownerRole === 'merchandiser' && nr === 'sales');
+                            });
                             const roleName = getRoleLabel(m.owner_role);
                             return isMineOverdue
                               ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">🔴 我的逾期</span>
@@ -288,10 +294,15 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {m.due_at && (() => {
                             if (!overdue || !isActive) return <span>截止：{formatDate(m.due_at)}</span>;
                             const ownerRole = (m.owner_role || '').toLowerCase();
-                            const currentRoleLower = (currentRole || '').toLowerCase();
-                            const isMineOverdue = isAdmin || currentRoleLower === ownerRole
-                              || (ownerRole === 'qc' && currentRoleLower === 'quality')
-                              || (ownerRole === 'quality' && currentRoleLower === 'qc');
+                            const allUserRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+                            const isMineOverdue = isAdmin || allUserRoles.some(r => {
+                              const nr = r.toLowerCase();
+                              return nr === ownerRole
+                                || (ownerRole === 'qc' && (nr === 'quality' || nr === 'qc'))
+                                || (ownerRole === 'quality' && (nr === 'qc' || nr === 'quality'))
+                                || (ownerRole === 'sales' && nr === 'merchandiser')
+                                || (ownerRole === 'merchandiser' && nr === 'sales');
+                            });
                             return (
                               <span className={isMineOverdue ? 'text-red-600 font-semibold' : 'text-orange-500 font-medium'}>
                                 截止：{formatDate(m.due_at)}
@@ -396,6 +407,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           milestone={m}
                           allMilestones={sorted}
                           currentRole={currentRole}
+                          currentRoles={currentRoles}
                           isAdmin={isAdmin}
                           orderId={orderId}
                         />
@@ -407,7 +419,10 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                         />
 
                         {m.status !== '已完成' &&
-                          (isAdmin || (currentRole && currentRole.toLowerCase() === m.owner_role?.toLowerCase())) && (
+                          (isAdmin || (currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : [])).some(r => {
+                            const nr = r.toLowerCase(); const or2 = (m.owner_role || '').toLowerCase();
+                            return nr === or2 || (or2 === 'qc' && nr === 'quality') || (or2 === 'sales' && nr === 'merchandiser');
+                          })) && (
                           <div className="bg-gray-50 rounded-lg p-4">
                             <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">申请顺延</h4>
                             <DelayRequestForm
