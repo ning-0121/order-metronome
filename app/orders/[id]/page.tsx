@@ -226,16 +226,35 @@ export default async function OrderDetailPage({
                             {sizeKB !== null && <span className="ml-2">{sizeKB}KB</span>}
                           </p>
                         </div>
-                        {downloadUrl && (
-                          <a
-                            href={downloadUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex-shrink-0 text-xs px-2.5 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
-                          >
-                            查看
-                          </a>
-                        )}
+                        {downloadUrl && (() => {
+                          const ext = (att.file_name || '').split('.').pop()?.toLowerCase();
+                          const canPreviewInBrowser = ['pdf','png','jpg','jpeg','gif','svg','webp','txt'].includes(ext || '');
+                          const canPreviewOnline = ['xlsx','xls','doc','docx','ppt','pptx','csv'].includes(ext || '');
+                          const previewUrl = canPreviewOnline
+                            ? `https://docs.google.com/gview?url=${encodeURIComponent(downloadUrl)}&embedded=true`
+                            : downloadUrl;
+                          return (
+                            <div className="flex gap-1.5 flex-shrink-0">
+                              <a
+                                href={previewUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs px-2.5 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                              >
+                                {canPreviewInBrowser || canPreviewOnline ? '预览' : '查看'}
+                              </a>
+                              {(canPreviewOnline || !canPreviewInBrowser) && (
+                                <a
+                                  href={downloadUrl}
+                                  download={att.file_name}
+                                  className="text-xs px-2.5 py-1.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100"
+                                >
+                                  下载
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
