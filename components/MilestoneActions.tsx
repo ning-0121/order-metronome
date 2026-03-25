@@ -85,7 +85,7 @@ export function MilestoneActions({
     setLoading(true);
 
     try {
-      // 上传凭证文件
+      // 上传凭证文件（同时写入 storage + attachments 表）
       if (evidenceFile && orderId) {
         const supabase = createClient();
         const ext = evidenceFile.name.split('.').pop() || 'bin';
@@ -98,6 +98,17 @@ export function MilestoneActions({
           setLoading(false);
           return;
         }
+        // 写入 attachments 表（markMilestoneDone 会检查此表）
+        const { data: { publicUrl } } = supabase.storage.from('order-docs').getPublicUrl(path);
+        const { data: { user } } = await supabase.auth.getUser();
+        await (supabase.from('attachments') as any).insert({
+          milestone_id: milestone.id,
+          order_id: orderId,
+          url: publicUrl,
+          file_name: evidenceFile.name,
+          file_type: evidenceFile.type || ext,
+          uploaded_by: user?.id || null,
+        });
       }
 
       // 标记完成

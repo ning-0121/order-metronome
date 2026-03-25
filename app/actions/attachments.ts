@@ -74,7 +74,7 @@ export async function uploadEvidence(
   
   // Upload to Supabase Storage
   const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('evidence')
+    .from('order-docs')
     .upload(filePath, file, {
       cacheControl: '3600',
       upsert: false,
@@ -86,7 +86,7 @@ export async function uploadEvidence(
   
   // Get public URL
   const { data: { publicUrl } } = supabase.storage
-    .from('evidence')
+    .from('order-docs')
     .getPublicUrl(filePath);
   
   // Create attachment record
@@ -105,7 +105,7 @@ export async function uploadEvidence(
   
   if (insertError) {
     // Clean up uploaded file if insert fails
-    await supabase.storage.from('evidence').remove([filePath]);
+    await supabase.storage.from('order-docs').remove([filePath]);
     return { data: null, error: `Failed to create attachment record: ${insertError.message}` };
   }
   
@@ -138,11 +138,11 @@ export async function deleteAttachment(attachmentId: string, orderId: string) {
   // Extract file path from URL
   const attachmentData = attachment as { url: string };
   const url = new URL(attachmentData.url);
-  const filePath = url.pathname.split('/storage/v1/object/public/evidence/')[1];
+  const filePath = url.pathname.split('/storage/v1/object/public/order-docs/')[1];
   
   // Delete from storage
   if (filePath) {
-    await supabase.storage.from('evidence').remove([filePath]);
+    await supabase.storage.from('order-docs').remove([filePath]);
   }
   
   // Delete attachment record
