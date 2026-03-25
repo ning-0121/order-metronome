@@ -4,10 +4,29 @@ import { formatDate } from '@/lib/utils/date';
 import Link from 'next/link';
 import { UnblockButton } from '@/components/UnblockButton';
 
+/** 角色中文名映射 */
+const ROLE_LABELS: Record<string, string> = {
+  sales: '业务', finance: '财务', procurement: '采购',
+  production: '生产', qc: '品控', quality: '品控',
+  logistics: '物流', admin: '管理员',
+};
+
 function getTodayDateString(): string {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return today.toISOString().split('T')[0];
+}
+
+/** 判断用户角色是否匹配里程碑 owner_role */
+function isMyMilestone(milestone: any, userRoles: string[]): boolean {
+  if (!milestone.owner_role) return false;
+  const ownerRole = milestone.owner_role.toLowerCase();
+  return userRoles.some(r => {
+    const nr = r.toLowerCase();
+    return nr === ownerRole
+      || (ownerRole === 'qc' && nr === 'quality')
+      || (ownerRole === 'quality' && nr === 'qc');
+  });
 }
 
 export default async function DashboardPage() {
@@ -23,6 +42,15 @@ export default async function DashboardPage() {
     .select('*')
     .eq('user_id', user.id)
     .single();
+
+  // 获取用户角色列表
+  const userRoles: string[] = (() => {
+    const p = profile as any;
+    if (p?.roles?.length > 0) return p.roles;
+    if (p?.role) return [p.role];
+    return ['sales'];
+  })();
+  const isAdmin = userRoles.includes('admin');
 
   const today = getTodayDateString();
   const tomorrow = new Date(today);
@@ -46,13 +74,17 @@ export default async function DashboardPage() {
     .neq('status', '已完成')
     .order('due_at', { ascending: true });
 
-  // 已超期
-  const { data: overdueMilestones } = await (supabase
+  // 已超期（全部）
+  const { data: allOverdueMilestones } = await (supabase
     .from('milestones') as any)
     .select(`*, orders!inner (id, order_no, customer_name)`)
     .lt('due_at', `${today}T00:00:00`)
     .neq('status', '已完成')
     .order('due_at', { ascending: true });
+
+  // 区分「我的逾期」和「他人逾期」
+  const myOverdue = (allOverdueMilestones || []).filter((m: any) => isAdmin || isMyMilestone(m, userRoles));
+  const othersOverdue = isAdmin ? [] : (allOverdueMilestones || []).filter((m: any) => !isMyMilestone(m, userRoles));
 
   // 卡住清单
   const { data: blockedMilestones } = await (supabase
@@ -63,7 +95,7 @@ export default async function DashboardPage() {
 
   const totalIssues =
     (pendingRetroOrders?.length || 0) +
-    (overdueMilestones?.length || 0) +
+    (allOverdueMilestones?.length || 0) +
     (todayDueMilestones?.length || 0) +
     (blockedMilestones?.length || 0);
 
@@ -75,15 +107,19 @@ export default async function DashboardPage() {
           欢迎回来，{(profile as any)?.full_name || user.email?.split('@')[0]}
         </h1>
         <p className="mt-1 text-sm text-gray-500">
-          这里显示需要你关注的异常事项
+          这里显示需要你关注的异常事项 · 角色：{userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
         </p>
       </div>
 
       {/* Stats Overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <div className="stat-card">
-          <div className="stat-value text-red-600">{overdueMilestones?.length || 0}</div>
-          <div className="stat-label">逾期</div>
+          <div className="stat-value text-red-600">{myOverdue.length}</div>
+          <div className="stat-label">🔴 我的逾期</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value text-orange-500">{othersOverdue.length}</div>
+          <div className="stat-label">⚠️ 他人逾期</div>
         </div>
         <div className="stat-card">
           <div className="stat-value text-blue-600">{todayDueMilestones?.length || 0}</div>
@@ -114,30 +150,62 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* 已超期 - 最高优先级 */}
-      {overdueMilestones && overdueMilestones.length > 0 && (
+      {/* 🔴 我的逾期 - 最高优先级 */}
+      {myOverdue.length > 0 && (
         <div className="section mb-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-100">
-              <span className="text-red-600">⚠️</span>
+              <span className="text-red-600">🔴</span>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">逾期</h2>
-              <p className="text-sm text-gray-500">{overdueMilestones.length} 个节点需要立即处理</p>
+              <h2 className="text-lg font-semibold text-red-700">我的逾期</h2>
+              <p className="text-sm text-gray-500">{myOverdue.length} 个节点需要你立即处理</p>
             </div>
           </div>
           <div className="space-y-3">
-            {overdueMilestones.slice(0, 5).map((milestone: any) => (
+            {myOverdue.slice(0, 5).map((milestone: any) => (
               <MilestoneCard
                 key={milestone.id}
                 milestone={milestone}
                 variant="danger"
-                badge="超期"
+                badge="我的逾期"
+                isMine={true}
               />
             ))}
-            {overdueMilestones.length > 5 && (
-              <Link href="/admin" className="block text-center text-sm text-indigo-600 hover:text-indigo-700 font-medium py-2">
-                查看全部 {overdueMilestones.length} 个超期节点 →
+            {myOverdue.length > 5 && (
+              <Link href="/orders" className="block text-center text-sm text-red-600 hover:text-red-700 font-medium py-2">
+                查看全部 {myOverdue.length} 个我的逾期节点 →
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ⚠️ 他人逾期 - 可催促 */}
+      {othersOverdue.length > 0 && (
+        <div className="section mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-orange-100">
+              <span className="text-orange-500">⚠️</span>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-orange-700">他人逾期</h2>
+              <p className="text-sm text-gray-500">{othersOverdue.length} 个其他部门节点逾期，可能影响你的后续工作</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {othersOverdue.slice(0, 5).map((milestone: any) => (
+              <MilestoneCard
+                key={milestone.id}
+                milestone={milestone}
+                variant="warning"
+                badge={`${ROLE_LABELS[milestone.owner_role] || milestone.owner_role}逾期`}
+                isMine={false}
+              />
+            ))}
+            {othersOverdue.length > 5 && (
+              <Link href="/orders" className="block text-center text-sm text-orange-600 hover:text-orange-700 font-medium py-2">
+                查看全部 {othersOverdue.length} 个他人逾期节点 →
               </Link>
             )}
           </div>
@@ -226,33 +294,56 @@ export default async function DashboardPage() {
   );
 }
 
-function MilestoneCard({ milestone, variant, badge }: { milestone: any; variant: 'danger' | 'info'; badge: string }) {
+function MilestoneCard({ milestone, variant, badge, isMine }: { milestone: any; variant: 'danger' | 'info' | 'warning'; badge: string; isMine?: boolean }) {
   const order = milestone.orders;
-  const borderClass = variant === 'danger' ? 'border-red-200 hover:border-red-300' : 'border-blue-200 hover:border-blue-300';
-  const badgeClass = variant === 'danger' ? 'badge-danger' : 'badge-info';
+  const borderClass = variant === 'danger' ? 'border-red-200 hover:border-red-300'
+    : variant === 'warning' ? 'border-orange-200 hover:border-orange-300'
+    : 'border-blue-200 hover:border-blue-300';
+  const badgeClass = variant === 'danger' ? 'badge-danger'
+    : variant === 'warning' ? 'bg-orange-100 text-orange-700 text-xs px-2 py-0.5 rounded-full font-medium'
+    : 'badge-info';
+
+  const daysOverdue = milestone.due_at
+    ? Math.max(1, Math.floor((new Date().getTime() - new Date(milestone.due_at).getTime()) / (24 * 60 * 60 * 1000)))
+    : 0;
 
   return (
-    <Link
-      href={`/orders/${order?.id}?tab=progress#milestone-${milestone.id}`}
-      className={`block p-4 rounded-xl border ${borderClass} transition-all hover:shadow-sm`}
-    >
+    <div className={`p-4 rounded-xl border ${borderClass} transition-all hover:shadow-sm`}>
       <div className="flex items-start justify-between">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+        <Link
+          href={`/orders/${order?.id}?tab=progress#milestone-${milestone.id}`}
+          className="flex-1 min-w-0"
+        >
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-medium text-gray-900 truncate">{order?.order_no}</span>
-            <span className={`badge ${badgeClass}`}>{badge}</span>
+            <span className={badgeClass}>{badge}</span>
+            {daysOverdue > 0 && (
+              <span className="text-xs text-gray-500">已超 {daysOverdue} 天</span>
+            )}
           </div>
           <p className="text-sm text-gray-700 mb-1">{milestone.name}</p>
           <div className="flex items-center gap-4 text-xs text-gray-500">
             <span>截止: {milestone.due_at ? formatDate(milestone.due_at) : '-'}</span>
-            <span>负责: {milestone.owner_role}</span>
+            <span>负责: {ROLE_LABELS[milestone.owner_role] || milestone.owner_role}</span>
           </div>
+        </Link>
+        <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+          {isMine === true && (
+            <Link
+              href={`/orders/${order?.id}?tab=progress#milestone-${milestone.id}`}
+              className="text-xs px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 font-medium"
+            >
+              去处理
+            </Link>
+          )}
+          {isMine === false && (
+            <span className="text-xs px-3 py-1.5 rounded-md bg-orange-100 text-orange-700 font-medium cursor-default">
+              催一下
+            </span>
+          )}
         </div>
-        <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
       </div>
-    </Link>
+    </div>
   );
 }
 

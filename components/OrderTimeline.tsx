@@ -250,9 +250,17 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {m.is_critical && !isDone && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
                           )}
-                          {overdue && isActive && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">⚠ 逾期未结</span>
-                          )}
+                          {overdue && isActive && (() => {
+                            const ownerRole = (m.owner_role || '').toLowerCase();
+                            const currentRoleLower = (currentRole || '').toLowerCase();
+                            const isMineOverdue = isAdmin || currentRoleLower === ownerRole
+                              || (ownerRole === 'qc' && currentRoleLower === 'quality')
+                              || (ownerRole === 'quality' && currentRoleLower === 'qc');
+                            const roleName = getRoleLabel(m.owner_role);
+                            return isMineOverdue
+                              ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">🔴 我的逾期</span>
+                              : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">⚠ {roleName}逾期</span>;
+                          })()}
                           {/* 交期预警徽章 */}
                           {(() => {
                             const alert = computeDeliveryAlert(m.actual_at, m.due_at);
@@ -277,11 +285,19 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                           <span>责任人：{getRoleLabel(m.owner_role)}</span>
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
-                          {m.due_at && (
-                            <span className={overdue && isActive ? 'text-red-600 font-semibold' : ''}>
-                              截止：{formatDate(m.due_at)}
-                            </span>
-                          )}
+                          {m.due_at && (() => {
+                            if (!overdue || !isActive) return <span>截止：{formatDate(m.due_at)}</span>;
+                            const ownerRole = (m.owner_role || '').toLowerCase();
+                            const currentRoleLower = (currentRole || '').toLowerCase();
+                            const isMineOverdue = isAdmin || currentRoleLower === ownerRole
+                              || (ownerRole === 'qc' && currentRoleLower === 'quality')
+                              || (ownerRole === 'quality' && currentRoleLower === 'qc');
+                            return (
+                              <span className={isMineOverdue ? 'text-red-600 font-semibold' : 'text-orange-500 font-medium'}>
+                                截止：{formatDate(m.due_at)}
+                              </span>
+                            );
+                          })()}
                           {m.actual_at && (
                             <span className={
                               computeDeliveryAlert(m.actual_at, m.due_at) === 'RED' ? 'text-red-600 font-semibold' :
