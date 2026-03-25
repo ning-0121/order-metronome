@@ -6,9 +6,9 @@ import { UnblockButton } from '@/components/UnblockButton';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
-  sales: '业务', finance: '财务', procurement: '采购',
+  sales: '业务', merchandiser: '跟单', finance: '财务', procurement: '采购',
   production: '生产', qc: '品控', quality: '品控',
-  logistics: '物流', admin: '管理员',
+  logistics: '物流', admin: '管理员', ceo: 'CEO',
 };
 
 function getTodayDateString(): string {
@@ -25,7 +25,9 @@ function isMyMilestone(milestone: any, userRoles: string[]): boolean {
     const nr = r.toLowerCase();
     return nr === ownerRole
       || (ownerRole === 'qc' && nr === 'quality')
-      || (ownerRole === 'quality' && nr === 'qc');
+      || (ownerRole === 'quality' && nr === 'qc')
+      || (ownerRole === 'sales' && nr === 'merchandiser')
+      || (ownerRole === 'merchandiser' && nr === 'sales');
   });
 }
 
@@ -104,7 +106,7 @@ export default async function DashboardPage() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">
-          欢迎回来，{(profile as any)?.full_name || user.email?.split('@')[0]}
+          欢迎回来，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}
         </h1>
         <p className="mt-1 text-sm text-gray-500">
           这里显示需要你关注的异常事项 · 角色：{userRoles.map(r => ROLE_LABELS[r] || r).join('、')}

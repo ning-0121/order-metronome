@@ -152,10 +152,10 @@ export async function markMilestoneDone(milestoneId: string) {
   }
 
   // 报价审批阻断：财务审核节点必须报价已通过
-  if (milestoneData.step_key === 'finance_approval') {
+  if (milestone.step_key === 'finance_approval') {
     const { data: order } = await (supabase.from('orders') as any)
       .select('quote_status')
-      .eq('id', milestoneData.order_id)
+      .eq('id', milestone.order_id)
       .single();
     if (!order || order.quote_status !== 'approved') {
       return { error: '报价尚未审批通过，无法完成财务审核。请先联系管理员审批报价。' };
@@ -383,20 +383,21 @@ export async function blockMilestone(milestoneId: string, reason: string, note: 
 
 export async function assignMilestoneOwner(milestoneId: string, userId: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
-  // Check if user is admin
+
+  // Check if user is admin (multi-role safe)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  
-  if (!profile || (profile as any).role !== 'admin') {
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+
+  if (!userRoles.includes('admin')) {
     return { error: '只有管理员可以指定执行人' };
   }
   
@@ -424,13 +425,14 @@ export async function markMilestoneUnblocked(milestoneId: string) {
     return { error: '请先登录' };
   }
 
-  // Only admin can unblock milestones
+  // Only admin can unblock milestones (multi-role safe)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  if (!profile || (profile as any).role !== 'admin') {
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!userRoles.includes('admin')) {
     return { error: '无权操作：只有管理员可以解除卡住状态' };
   }
 
@@ -622,18 +624,17 @@ export async function updateMilestoneOwner(
     return { error: '请先登录' };
   }
   
-  // Check if user is admin
+  // Check if user is admin (multi-role safe)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  
-  const isAdmin = profile && (profile as any).role === 'admin';
-  if (!isAdmin) {
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!userRoles.includes('admin')) {
     return { error: '只有管理员可以指定执行人' };
   }
-  
+
   // Get milestone to get order_id for logging
   const { data: milestone, error: getError } = await (supabase
     .from('milestones') as any)
