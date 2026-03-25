@@ -16,7 +16,7 @@ export async function checkAndSendReminders() {
   const { data: milestones, error } = await supabase
     .from('milestones')
     .select('*')
-    .in('status', ['in_progress', '进行中']);
+    .in('status', ['in_progress']);
 
   if (error || !milestones) {
     console.error('Error fetching milestones:', error);

@@ -305,7 +305,7 @@ async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
     .from('milestones') as any)
     .select('*')
     .eq('order_id', orderId)
-    .eq('status', '未开始') // 只查找中文状态
+    .eq('status', 'pending') // DB stores English enum
     .order('due_at', { ascending: true })
     .limit(1)
     .single();

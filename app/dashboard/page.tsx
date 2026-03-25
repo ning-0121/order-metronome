@@ -73,7 +73,7 @@ export default async function DashboardPage() {
     .select(`*, orders!inner (id, order_no, customer_name)`)
     .gte('due_at', `${today}T00:00:00`)
     .lt('due_at', `${tomorrowStr}T00:00:00`)
-    .neq('status', '已完成')
+    .neq('status', 'done')
     .order('due_at', { ascending: true });
 
   // 已超期（全部）
@@ -81,7 +81,7 @@ export default async function DashboardPage() {
     .from('milestones') as any)
     .select(`*, orders!inner (id, order_no, customer_name)`)
     .lt('due_at', `${today}T00:00:00`)
-    .neq('status', '已完成')
+    .neq('status', 'done')
     .order('due_at', { ascending: true });
 
   // 区分「我的逾期」和「他人逾期」
@@ -92,7 +92,7 @@ export default async function DashboardPage() {
   const { data: blockedMilestones } = await (supabase
     .from('milestones') as any)
     .select(`*, orders!inner (id, order_no, customer_name)`)
-    .eq('status', '阻塞')
+    .eq('status', 'blocked')
     .order('created_at', { ascending: false });
 
   const totalIssues =

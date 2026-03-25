@@ -156,7 +156,7 @@ export default async function CEODashboardPage() {
     `)
     .gte('due_at', tomorrow.toISOString())
     .lt('due_at', twoDaysLater.toISOString())
-    .neq('status', '已完成');
+    .neq('status', 'done');
 
   // CEO 助手 · 今日行动建议数据
   interface CEOActionItem {
