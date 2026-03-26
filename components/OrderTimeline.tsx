@@ -34,7 +34,7 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage1', emoji: '🟦',
     titleCn: '阶段 1：订单启动',
-    stepKeys: ['po_confirmed', 'finance_approval', 'production_resources_confirmed'],
+    stepKeys: ['po_confirmed', 'finance_approval', 'production_order_upload', 'production_resources_confirmed'],
   },
   {
     key: 'stage2', emoji: '🟨',
@@ -68,11 +68,23 @@ const MILESTONE_GROUPS = [
   },
 ];
 
+// 统一状态判断：兼容中英文
+const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
+const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
+const _isPending = (s: string) => s === 'pending' || s === '未开始';
+const _isBlocked = (s: string) => s === 'blocked' || s === '卡单' || s === '卡住';
+const _statusLabel = (s: string) => _isDone(s) ? '已完成' : _isActive(s) ? '进行中' : _isBlocked(s) ? '卡住' : '未开始';
+
 const STATUS_STYLE: Record<string, string> = {
   '未开始': 'bg-gray-100 text-gray-600',
+  'pending': 'bg-gray-100 text-gray-600',
   '进行中': 'bg-blue-100 text-blue-700',
+  'in_progress': 'bg-blue-100 text-blue-700',
   '已完成': 'bg-green-100 text-green-700',
+  'done': 'bg-green-100 text-green-700',
   '卡单':   'bg-orange-100 text-orange-700',
+  '卡住':   'bg-orange-100 text-orange-700',
+  'blocked': 'bg-orange-100 text-orange-700',
 };
 
 /** 实际/预计日期输入组件 */
@@ -181,7 +193,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
         if (group.items.length === 0) return null;
 
         // 分组进度统计
-        const done = group.items.filter(m => m.status === '已完成').length;
+        const done = group.items.filter(m => _isDone(m.status)).length;
         const total = group.items.length;
         const pct = total > 0 ? Math.round(done / total * 100) : 0;
 
@@ -208,15 +220,15 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
               {group.items.map(milestone => {
                 const m = milestone as any;
                 const overdue = m.due_at ? isOverdue(m.due_at) : false;
-                const isActive = m.status === '进行中';
-                const isDone = m.status === '已完成';
-                const isBlocked = m.status === '卡单';
+                const isActive = _isActive(m.status);
+                const isDone = _isDone(m.status);
+                const isBlocked = _isBlocked(m.status);
                 const isExpanded = expandedId === m.id;
 
                 // 前置阻断检查（显示用）
                 const blockedBy = sorted.filter(other => {
                   const otherBlocks: string[] = (other as any).blocks || [];
-                  const otherDone = other.status === '已完成';
+                  const otherDone = _isDone(other.status);
                   return otherBlocks.includes(m.step_key) && !otherDone;
                 }).map(o => (o as any).name || (o as any).step_key);
 
@@ -246,7 +258,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                             {m.name}
                           </span>
                           <span className={'text-xs px-2 py-0.5 rounded-full font-medium ' + (STATUS_STYLE[m.status] || STATUS_STYLE['未开始'])}>
-                            {m.status}
+                            {_statusLabel(m.status)}
                           </span>
                           {m.is_critical && !isDone && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
@@ -356,7 +368,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                     {isExpanded && (
                       <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
                         {/* 实际/预计日期输入（仅关键生产节点） */}
-                        {ACTUAL_DATE_EDITABLE_KEYS.includes(m.step_key) && m.status !== '已完成' && (
+                        {ACTUAL_DATE_EDITABLE_KEYS.includes(m.step_key) && !_isDone(m.status) && (
                           <ActualDateInput
                             milestoneId={m.id}
                             currentActualAt={m.actual_at}
@@ -418,7 +430,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           evidenceRequired={m.evidence_required || false}
                         />
 
-                        {m.status !== '已完成' &&
+                        {!_isDone(m.status) &&
                           (isAdmin || (currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : [])).some(r => {
                             const nr = r.toLowerCase(); const or2 = (m.owner_role || '').toLowerCase();
                             return nr === or2 || (or2 === 'qc' && nr === 'quality') || (or2 === 'sales' && nr === 'merchandiser');

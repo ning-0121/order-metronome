@@ -198,6 +198,47 @@ export async function markMilestoneDone(milestoneId: string) {
       .eq('step_key', 'production_order_upload');
   }
 
+  // 采购下单完成 → 检查到货日期是否有交期风险
+  if (milestoneData.step_key === 'procurement_order_placed' && milestoneData.actual_at) {
+    const actualDelivery = new Date(milestoneData.actual_at);
+    // 获取订单的 ETD/交期
+    const { data: orderData } = await supabase
+      .from('orders')
+      .select('etd, warehouse_due_date, incoterm, order_no, customer_name')
+      .eq('id', milestoneData.order_id)
+      .single();
+    if (orderData) {
+      const anchor = (orderData as any).incoterm === 'FOB'
+        ? (orderData as any).etd
+        : (orderData as any).warehouse_due_date;
+      if (anchor) {
+        const anchorDate = new Date(anchor + 'T00:00:00');
+        // 安全线 = 交期前21天（需要留够生产时间）
+        const safetyDate = new Date(anchorDate);
+        safetyDate.setDate(safetyDate.getDate() - 21);
+        const delayDays = Math.ceil((actualDelivery.getTime() - safetyDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (delayDays > 0) {
+          // 交期风险！创建通知给管理员
+          const adminEmails = ['alex@qimoclothing.com', 'su@qimoclothing.com'];
+          const { data: adminProfiles } = await (supabase
+            .from('profiles') as any)
+            .select('user_id')
+            .in('email', adminEmails);
+          for (const admin of (adminProfiles || [])) {
+            await (supabase.from('notifications') as any).insert({
+              user_id: admin.user_id,
+              type: 'delivery_risk',
+              title: `🚨 交期风险预警：${(orderData as any).order_no}`,
+              content: `订单 ${(orderData as any).order_no}（${(orderData as any).customer_name}）原料到货日期超出安全线 ${delayDays} 天。需决策：压缩生产赶货 或 与客户推交期。`,
+              order_id: milestoneData.order_id,
+              is_read: false,
+            });
+          }
+        }
+      }
+    }
+  }
+
   // Auto-advance to next milestone
   await autoAdvanceNextMilestone(supabase, milestoneData.order_id);
   
