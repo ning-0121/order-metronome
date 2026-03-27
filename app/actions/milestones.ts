@@ -151,17 +151,6 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: '无权操作：只有管理员或负责人可以标记完成' };
   }
 
-  // 报价审批阻断：财务审核节点必须报价已通过
-  if (milestone.step_key === 'finance_approval') {
-    const { data: order } = await (supabase.from('orders') as any)
-      .select('quote_status')
-      .eq('id', milestone.order_id)
-      .single();
-    if (!order || order.quote_status !== 'approved') {
-      return { error: '报价尚未审批通过，无法完成财务审核。请先联系管理员审批报价。' };
-    }
-  }
-
   // Check if evidence is required and exists
   if (milestone.evidence_required) {
     const { data: attachments, error: attachmentsError } = await supabase

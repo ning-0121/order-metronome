@@ -21,7 +21,7 @@ import {
 } from '@/lib/domain/types';
 import { formatBlockedReasonToNotes, appendToNotes } from '@/lib/domain/milestone-helpers';
 import { normalizeRoleToDb } from '@/lib/domain/roles';
-import { getCurrentUserRole, canModifyMilestone } from '@/lib/utils/user-role';
+// DB profile-based role check is done inline (multi-role aware)
 
 /**
  * 将中文状态映射为数据库枚举值（英文）
@@ -410,19 +410,28 @@ export async function transitionMilestoneStatus(
     return { error: orderError?.message || 'Order not found' };
   }
   
-  // ⚠️ V1 权限检查：只有 admin 或 owner_role 匹配才能修改
+  // ⚠️ 权限检查：admin / assigned user / owner_role 匹配（多角色）
   const { data: { user } } = await supabase.auth.getUser();
   if (!user || !user.email) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
-  
-  const { role: currentRole, isAdmin } = await getCurrentUserRole(supabase);
-  const canModify = canModifyMilestone(currentRole, isAdmin, milestone.owner_role || '');
-  
-  if (!canModify) {
-    return { error: 'Only milestone owner role or admin can modify this milestone' };
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, roles')
+    .eq('user_id', user.id)
+    .single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdminUser = userRoles.includes('admin');
+  const isAssignedUser = milestone.owner_user_id === user.id;
+  const roleMatches = milestone.owner_role && userRoles.some(
+    (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
+      || (milestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
+  );
+  if (!isAdminUser && !isAssignedUser && !roleMatches) {
+    return { error: '无权操作：只有管理员、负责人或对应角色可以修改此节点' };
   }
-  
+
   // 将数据库枚举值转换为中文状态进行比较
   const currentStatus = mapDbEnumToStatus(milestone.status);
   const normalizedNextStatus = normalizeMilestoneStatus(nextStatus);
@@ -524,19 +533,28 @@ export async function updateMilestone(
     return { error: getMilestoneError?.message || 'Milestone not found' };
   }
   
-  // ⚠️ V1 权限检查：只有 admin 或 owner_role 匹配才能修改
+  // ⚠️ 权限检查：admin / assigned user / owner_role 匹配（多角色）
   const { data: { user } } = await supabase.auth.getUser();
   if (!user || !user.email) {
-    return { error: 'Unauthorized' };
+    return { error: '请先登录' };
   }
-  
-  const { role: currentRole, isAdmin } = await getCurrentUserRole(supabase);
-  const canModify = canModifyMilestone(currentRole, isAdmin, currentMilestone.owner_role || '');
-  
-  if (!canModify) {
-    return { error: 'Only milestone owner role or admin can modify this milestone' };
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, roles')
+    .eq('user_id', user.id)
+    .single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdminUser = userRoles.includes('admin');
+  const isAssignedUser = currentMilestone.owner_user_id === user.id;
+  const roleMatches = currentMilestone.owner_role && userRoles.some(
+    (r: string) => r.toLowerCase() === (currentMilestone.owner_role as string).toLowerCase()
+      || (currentMilestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
+  );
+  if (!isAdminUser && !isAssignedUser && !roleMatches) {
+    return { error: '无权操作：只有管理员、负责人或对应角色可以修改此节点' };
   }
-  
+
   // ⚠️ 封死入口：检查订单是否存在
   const { data: order, error: orderError } = await (supabase
     .from('orders') as any)
