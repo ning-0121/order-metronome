@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
+import { NotificationBell } from '@/components/NotificationBell';
 
 interface NavbarProps {
   isAdmin?: boolean;
@@ -68,6 +69,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
             </div>
           </div>
 
+          <NotificationBell />
           <form action={signOut}>
             <button
               type="submit"
