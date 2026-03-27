@@ -271,9 +271,10 @@ function NewOrderWizard() {
                   <select name="order_type" required
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                     <option value="">请选择</option>
-                    <option value="sample">样品单</option>
-                    <option value="bulk">大货单</option>
+                    <option value="trial">新品试单</option>
+                    <option value="bulk">正常批量</option>
                     <option value="repeat">翻单</option>
+                    <option value="urgent">加急订单</option>
                   </select>
                 </div>
                 <div>
@@ -373,11 +374,12 @@ function NewOrderWizard() {
               <p className="text-xs text-gray-400 mb-3">勾选适用项，系统将自动加强对应关卡的管控</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
+                  { name: 'new_customer', label: '新客户首单', desc: '首次合作客户，需格外重视' },
+                  { name: 'new_factory', label: '新工厂首单', desc: '首次合作工厂，需加强跟进' },
                   { name: 'has_plus_size', label: '大码款', desc: '含 XL 以上尺码' },
                   { name: 'high_stretch', label: '高弹面料', desc: '氨纶 / 四面弹' },
                   { name: 'light_color_risk', label: '浅色风险', desc: '白 / 米 / 浅灰' },
                   { name: 'complex_print', label: '复杂印花', desc: '满印 / 精细对位' },
-                  { name: 'new_customer', label: '新客户', desc: '首次合作' },
                 ].map(({ name, label, desc }) => (
                   <label key={name} className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
                     <input type="checkbox" name={name} value="true"
