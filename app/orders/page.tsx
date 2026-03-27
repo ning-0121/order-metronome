@@ -28,8 +28,10 @@ function computePhases(milestones: any[]) {
   });
 }
 
-export default async function OrdersPage() {
-  const { data: orders, error } = await getOrders();
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
+  const params = await searchParams;
+  const statusFilter = params?.status || 'active';
+  const { data: allOrders, error } = await getOrders();
 
   if (error) {
     return (
@@ -41,14 +43,22 @@ export default async function OrdersPage() {
     );
   }
 
+  // 按状态分组
+  const completedOrders = (allOrders || []).filter((o: any) => {
+    const ms = o.milestones || [];
+    return ms.length > 0 && ms.every((m: any) => _isDone(m.status));
+  });
+  const activeOrders = (allOrders || []).filter((o: any) => !completedOrders.includes(o));
+  const orders = statusFilter === 'completed' ? completedOrders : activeOrders;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">订单列表</h1>
           <p className="mt-1 text-sm text-gray-500">
-            共 {orders?.length || 0} 个订单
+            共 {allOrders?.length || 0} 个订单
           </p>
         </div>
         <Link
@@ -61,6 +71,26 @@ export default async function OrdersPage() {
           新建订单
         </Link>
       </div>
+
+        {/* 状态筛选 */}
+        <div className="flex gap-1 mb-4">
+          {[
+            { key: 'active', label: '进行中', count: activeOrders.length },
+            { key: 'completed', label: '已完成', count: completedOrders.length },
+          ].map(tab => (
+            <Link
+              key={tab.key}
+              href={`/orders?status=${tab.key}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                statusFilter === tab.key
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {tab.label} ({tab.count})
+            </Link>
+          ))}
+        </div>
 
         {/* 搜索框 */}
         <form method="GET" className="flex gap-3 mb-4">
