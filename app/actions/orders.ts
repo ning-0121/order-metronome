@@ -118,8 +118,23 @@ export async function createOrder(
 
   // ── STEP 3: insert order — 写入订单到数据库 ──
   console.log('[createOrder] STEP 3: insert order');
-  // order_type 容错：DB CHECK 只允许 sample/bulk，repeat 映射为 bulk
-  const dbOrderType = (order_type === 'repeat') ? 'bulk' : order_type;
+  // order_type: trial/bulk/repeat/urgent（DB CHECK 需更新）
+  const dbOrderType = order_type || 'bulk';
+
+  // 首单自动识别 + 手动覆盖
+  const manualNewCustomer = formData.get('new_customer') === 'true';
+  const manualNewFactory = formData.get('new_factory') === 'true';
+  let isNewCustomer = manualNewCustomer;
+  let isNewFactory = manualNewFactory;
+  // 自动检测：查该客户/工厂历史订单数
+  if (customer_id && !manualNewCustomer) {
+    const { count } = await (supabase.from('orders') as any).select('id', { count: 'exact', head: true }).eq('customer_id', customer_id);
+    if (count === 0) isNewCustomer = true;
+  }
+  if (factory_id && !manualNewFactory) {
+    const { count } = await (supabase.from('orders') as any).select('id', { count: 'exact', head: true }).eq('factory_id', factory_id);
+    if (count === 0) isNewFactory = true;
+  }
 
   const insertPayload: Record<string, any> = {
     customer_name,
@@ -134,6 +149,8 @@ export async function createOrder(
     order_date: order_date || null,
     factory_id: factory_id || null,
     factory_name: factory_name || null,
+    is_new_customer: isNewCustomer,
+    is_new_factory: isNewFactory,
     created_by: user.id,
   };
   console.log('[createOrder] STEP 3: insert payload keys:', Object.keys(insertPayload).join(', '));

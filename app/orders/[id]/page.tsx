@@ -104,6 +104,12 @@ export default async function OrderDetailPage({
                     {orderData.lifecycle_status}
                   </span>
                 )}
+                {orderData.is_new_customer && (
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">新客户首单</span>
+                )}
+                {orderData.is_new_factory && (
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">新工厂首单</span>
+                )}
               </div>
               <p className="text-gray-500 text-sm mt-1">
                 {orderData.customer_name}
@@ -167,7 +173,7 @@ export default async function OrderDetailPage({
                   { label: '负责理单', value: ownerName },
                   { label: '贸易条款', value: orderData.incoterm },
                   { label: orderData.incoterm === 'FOB' ? 'ETD' : '入仓日期', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
-                  { label: '订单类型', value: orderData.order_type === 'sample' ? '样品' : '批量' },
+                  { label: '订单类型', value: ({ trial: '新品试单', bulk: '正常批量', repeat: '翻单', urgent: '加急订单', sample: '样品' } as Record<string,string>)[orderData.order_type] || orderData.order_type },
                   { label: '包装类型', value: orderData.packaging_type === 'standard' ? '标准' : '定制' },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between">

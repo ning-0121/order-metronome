@@ -38,6 +38,8 @@ const INSERT_WHITELIST = [
   'order_date',
   'factory_id',
   'factory_name',
+  'is_new_customer',
+  'is_new_factory',
 ] as const;
 
 const UPDATE_WHITELIST = [
