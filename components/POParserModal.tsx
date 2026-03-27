@@ -40,6 +40,7 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
   const [data, setData] = useState<POParsedData | null>(null);
   const [downloadUrl, setDownloadUrl] = useState('');
   const [downloadName, setDownloadName] = useState('');
+  const [fileName, setFileName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleManualStart = () => {
@@ -177,16 +178,16 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
                       accept=".xlsx,.xls,.csv,.pdf,.jpg,.jpeg,.png,.webp"
                       className="hidden"
                       id="po-file-input"
-                      onChange={() => setError('')}
+                      onChange={(e) => { setError(''); setFileName(e.target.files?.[0]?.name || ''); }}
                     />
                     <label htmlFor="po-file-input" className="cursor-pointer">
                       <div className="text-4xl mb-3">📄</div>
                       <p className="text-sm font-medium text-gray-700">点击上传客户 PO</p>
                       <p className="text-xs text-gray-500 mt-1">支持 Excel、PDF、图片（拍照/扫描）</p>
                     </label>
-                    {fileRef.current?.files?.[0] && (
+                    {fileName && (
                       <p className="mt-3 text-sm text-indigo-600 font-medium">
-                        已选择：{fileRef.current.files[0].name}
+                        已选择：{fileName}
                       </p>
                     )}
                   </div>

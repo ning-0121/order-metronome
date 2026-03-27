@@ -147,6 +147,9 @@ export async function parsePO(formData: FormData): Promise<{ ok: boolean; data?:
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[parsePO] Error:', message);
+    if (message.includes('credit balance') || message.includes('billing')) {
+      return { ok: false, error: 'AI 服务余额不足，请联系管理员充值 Anthropic API 额度。' };
+    }
     return { ok: false, error: `解析失败：${message}` };
   }
 }
