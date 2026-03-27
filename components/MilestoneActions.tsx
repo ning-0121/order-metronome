@@ -221,7 +221,23 @@ export function MilestoneActions({
 
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
-              上传凭证文件
+              {(() => {
+                const labels: Record<string, string> = {
+                  mid_qc_check: '上传中查报告',
+                  final_qc_check: '上传尾查报告',
+                  inspection_release: '上传验货报告 / 放行单',
+                  po_confirmed: '上传客户PO',
+                  production_order_upload: '上传生产单',
+                  order_docs_bom_complete: '上传BOM/订单资料',
+                  bulk_materials_confirmed: '上传原辅料确认单',
+                  procurement_order_placed: '上传采购单',
+                  pre_production_sample_ready: '上传产前样照片',
+                  pre_production_sample_approved: '上传客户确认记录',
+                  booking_done: '上传订舱确认',
+                  customs_export: '上传报关单据',
+                };
+                return labels[milestone.step_key] || '上传凭证文件';
+              })()}
               {milestone.evidence_required && <span className="text-red-500 ml-1">*必传</span>}
             </label>
             <input
