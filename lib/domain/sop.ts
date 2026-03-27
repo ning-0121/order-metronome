@@ -19,7 +19,7 @@ export interface SOPConfig {
  * step_key → SOP 配置映射
  */
 export const SOP_MAP: Record<string, SOPConfig> = {
-  // ── 生产单上传（理单）──────────────────
+  // ── 生产单上传（业务）──────────────────
   production_order_upload: {
     sop_title: '生产单上传 SOP',
     sop_steps: [
@@ -42,7 +42,7 @@ export const SOP_MAP: Record<string, SOPConfig> = {
     ],
   },
 
-  // ── BOM + 包装要求（理单）──────────────────
+  // ── BOM + 包装要求（业务）──────────────────
   order_docs_bom_complete: {
     sop_title: 'BOM + 包装要求上传 SOP',
     sop_steps: [
@@ -82,7 +82,7 @@ export const SOP_MAP: Record<string, SOPConfig> = {
     completion_rules: [
       '所有面辅料已确认可用',
       '供应商交期已确认',
-      '风险项已标注并通知理单',
+      '风险项已标注并通知业务',
     ],
   },
 
@@ -94,7 +94,7 @@ export const SOP_MAP: Record<string, SOPConfig> = {
       '2. 向供应商下单并获取订单确认回执',
       '3. 确认每项物料的预计到货日期（ETA）',
       '4. 将采购订单截图和 ETA 上传至节点凭证区',
-      '5. 如 ETA 晚于生产排期，立即通知理单 + 生产',
+      '5. 如 ETA 晚于生产排期，立即通知业务 + 跟单',
     ],
     required_fields: [
       '采购订单截图',
@@ -133,7 +133,7 @@ export const SOP_MAP: Record<string, SOPConfig> = {
   pre_production_meeting: {
     sop_title: '产前会 SOP',
     sop_steps: [
-      '1. 召集参会人员：生产主管、理单、QC',
+      '1. 召集参会人员：生产主管、跟单、业务',
       '2. 逐项过客户要求：版型、尺寸、面辅料、印花/绣花/洗水',
       '3. 确认关键质量标准和特殊工艺',
       '4. 明确检验节点和抽检比例',
@@ -195,7 +195,7 @@ export const SOP_MAP: Record<string, SOPConfig> = {
     ],
   },
 
-  // ── 包装方式确认（理单）──────────────────
+  // ── 包装方式确认（业务）──────────────────
   packing_method_confirmed: {
     sop_title: '包装方式确认 SOP',
     sop_steps: [
@@ -235,7 +235,7 @@ export const SOP_MAP: Record<string, SOPConfig> = {
     ],
   },
 
-  // ── 装箱（物流/理单）──────────────────
+  // ── 订舱（业务）──────────────────
   booking_done: {
     sop_title: '订舱 SOP',
     sop_steps: [
