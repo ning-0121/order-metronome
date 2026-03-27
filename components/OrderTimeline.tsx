@@ -29,12 +29,12 @@ interface OrderTimelineProps {
   isAdmin?: boolean;
 }
 
-// V1 最终分组（对齐 21 节点表）
+// V1 最终分组（对齐新节点表）
 const MILESTONE_GROUPS = [
   {
     key: 'stage1', emoji: '🟦',
     titleCn: '阶段 1：订单启动',
-    stepKeys: ['po_confirmed', 'finance_approval', 'production_order_upload', 'production_resources_confirmed'],
+    stepKeys: ['po_confirmed', 'finance_approval', 'production_order_upload'],
   },
   {
     key: 'stage2', emoji: '🟨',
@@ -44,7 +44,7 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage3', emoji: '🟧',
     titleCn: '阶段 3：产前样',
-    stepKeys: ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
+    stepKeys: ['processing_fee_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved', 'factory_confirmed'],
   },
   {
     key: 'stage4', emoji: '🟩',

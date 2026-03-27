@@ -232,10 +232,13 @@ export default async function OrderDetailPage({
                         {downloadUrl && (() => {
                           const ext = (att.file_name || '').split('.').pop()?.toLowerCase();
                           const canPreviewInBrowser = ['pdf','png','jpg','jpeg','gif','svg','webp','txt'].includes(ext || '');
-                          const canPreviewOnline = ['xlsx','xls','doc','docx','ppt','pptx','csv'].includes(ext || '');
-                          const previewUrl = canPreviewOnline
-                            ? `https://docs.google.com/gview?url=${encodeURIComponent(downloadUrl)}&embedded=true`
-                            : downloadUrl;
+                          const isOfficeFile = ['xlsx','xls','doc','docx','ppt','pptx'].includes(ext || '');
+                          const canPreviewOnline = isOfficeFile || ['csv'].includes(ext || '');
+                          const previewUrl = isOfficeFile
+                            ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(downloadUrl)}`
+                            : canPreviewOnline
+                              ? `https://docs.google.com/gview?url=${encodeURIComponent(downloadUrl)}&embedded=true`
+                              : downloadUrl;
                           return (
                             <div className="flex gap-1.5 flex-shrink-0">
                               <a
