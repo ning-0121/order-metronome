@@ -19,7 +19,6 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
     ? [
         { href: '/ceo', label: '我的节拍', icon: '🎯' },
         { href: '/orders', label: '订单列表', icon: '📦' },
-        { href: '/analytics', label: '效率分析', icon: '📊' },
         { href: '/memos', label: '备忘录', icon: '📝' },
         { href: '/admin/users', label: '用户管理', icon: '👥' },
         { href: '/guide', label: '操作说明', icon: '📖' },
