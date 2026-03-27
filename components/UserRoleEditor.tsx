@@ -6,7 +6,7 @@ import { updateUserRoleByAdmin } from '@/app/actions/users';
 const ROLES = [
   { value: 'admin',       label: '管理员',     desc: '全权限' },
   { value: 'ceo',         label: 'CEO',        desc: '全览，不操作节点' },
-  { value: 'sales',       label: '理单',        desc: '全流程负责客户订单' },
+  { value: 'sales',       label: '业务/理单',    desc: '全流程负责客户订单' },
   { value: 'finance',     label: '财务',        desc: '审核+复盘+第三签' },
   { value: 'procurement', label: '采购',        desc: '采购下单+原辅料确认' },
   { value: 'production',  label: '生产',        desc: '排期开裁+产前会' },

@@ -65,7 +65,7 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId }: ShipmentT
   }
 
   const signers: SignerConfig[] = [
-    { role: '理单确认', field: 'sales_sign_id', signedAt: 'sales_signed_at', signRole: 'sales' },
+    { role: '业务/理单确认', field: 'sales_sign_id', signedAt: 'sales_signed_at', signRole: 'sales' },
     { role: '仓库确认', field: 'warehouse_sign_id', signedAt: 'warehouse_signed_at', signRole: 'warehouse' },
     { role: '财务确认', field: 'finance_sign_id', signedAt: 'finance_signed_at', signRole: 'finance' },
   ];

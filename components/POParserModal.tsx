@@ -10,14 +10,42 @@ interface POParserModalProps {
 }
 
 type Step = 'upload' | 'parsing' | 'preview' | 'generating' | 'done';
+type InputMode = 'ai' | 'manual';
+
+const EMPTY_DATA: POParsedData = {
+  order_no: '',
+  customer_name: '',
+  delivery_date: '',
+  order_date: new Date().toISOString().slice(0, 10).replace(/-/g, '.'),
+  styles: [{
+    style_no: '',
+    product_name: '',
+    material: '',
+    fabric_weight: '',
+    total_qty: 0,
+    colors: [{ color_cn: '', color_en: '', qty: 0, sizes: { S: 0, M: 0, L: 0 } }],
+    packaging: '',
+    quality_notes: '',
+    sample_requirements: '',
+  }],
+  trims: [],
+  size_labels: ['S', 'M', 'L'],
+  confidence_notes: [],
+};
 
 export function POParserModal({ orderId, onClose }: POParserModalProps) {
   const [step, setStep] = useState<Step>('upload');
+  const [inputMode, setInputMode] = useState<InputMode>('ai');
   const [error, setError] = useState('');
   const [data, setData] = useState<POParsedData | null>(null);
   const [downloadUrl, setDownloadUrl] = useState('');
   const [downloadName, setDownloadName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleManualStart = () => {
+    setData(JSON.parse(JSON.stringify(EMPTY_DATA)));
+    setStep('preview');
+  };
 
   const handleUpload = async () => {
     const file = fileRef.current?.files?.[0];
@@ -121,35 +149,69 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
             <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
           )}
 
-          {/* Step 1: Upload */}
+          {/* Step 1: Upload or Manual */}
           {step === 'upload' && (
             <div className="space-y-4">
-              <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".xlsx,.xls,.csv,.pdf,.jpg,.jpeg,.png,.webp"
-                  className="hidden"
-                  id="po-file-input"
-                  onChange={() => setError('')}
-                />
-                <label htmlFor="po-file-input" className="cursor-pointer">
-                  <div className="text-4xl mb-3">📄</div>
-                  <p className="text-sm font-medium text-gray-700">点击上传客户 PO</p>
-                  <p className="text-xs text-gray-500 mt-1">支持 Excel、PDF、图片（拍照/扫描）</p>
-                </label>
-                {fileRef.current?.files?.[0] && (
-                  <p className="mt-3 text-sm text-indigo-600 font-medium">
-                    已选择：{fileRef.current.files[0].name}
-                  </p>
-                )}
+              {/* Mode tabs */}
+              <div className="flex rounded-lg bg-gray-100 p-1">
+                <button
+                  onClick={() => setInputMode('ai')}
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${inputMode === 'ai' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}
+                >
+                  上传客户 PO（AI 解析）
+                </button>
+                <button
+                  onClick={() => setInputMode('manual')}
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${inputMode === 'manual' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}
+                >
+                  手动填写
+                </button>
               </div>
-              <button
-                onClick={handleUpload}
-                className="w-full py-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
-              >
-                开始解析
-              </button>
+
+              {inputMode === 'ai' ? (
+                <>
+                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept=".xlsx,.xls,.csv,.pdf,.jpg,.jpeg,.png,.webp"
+                      className="hidden"
+                      id="po-file-input"
+                      onChange={() => setError('')}
+                    />
+                    <label htmlFor="po-file-input" className="cursor-pointer">
+                      <div className="text-4xl mb-3">📄</div>
+                      <p className="text-sm font-medium text-gray-700">点击上传客户 PO</p>
+                      <p className="text-xs text-gray-500 mt-1">支持 Excel、PDF、图片（拍照/扫描）</p>
+                    </label>
+                    {fileRef.current?.files?.[0] && (
+                      <p className="mt-3 text-sm text-indigo-600 font-medium">
+                        已选择：{fileRef.current.files[0].name}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleUpload}
+                    className="w-full py-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
+                  >
+                    开始解析
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-xl bg-gray-50 p-6 text-center">
+                    <div className="text-4xl mb-3">✏️</div>
+                    <p className="text-sm font-medium text-gray-700">手动填写生产单信息</p>
+                    <p className="text-xs text-gray-500 mt-1">没有客户 PO 时，直接输入数据生成生产单 Excel</p>
+                  </div>
+                  <button
+                    onClick={handleManualStart}
+                    className="w-full py-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
+                  >
+                    开始填写
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -274,6 +336,19 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
                     </table>
                   </div>
 
+                  {/* Add color button */}
+                  <button
+                    onClick={() => {
+                      const newColor = { color_cn: '', color_en: '', qty: 0, sizes: Object.fromEntries(data.size_labels.map(s => [s, 0])) };
+                      const styles = [...data.styles];
+                      styles[si] = { ...styles[si], colors: [...styles[si].colors, newColor] };
+                      setData({ ...data, styles });
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    + 添加颜色
+                  </button>
+
                   {/* Notes */}
                   <div>
                     <label className="text-xs font-medium text-gray-500">包装要求</label>
@@ -285,6 +360,21 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
                   </div>
                 </div>
               ))}
+
+              {/* Add style button */}
+              <button
+                onClick={() => {
+                  const newStyle: POStyleData = {
+                    style_no: '', product_name: '', material: '', fabric_weight: '',
+                    total_qty: 0, colors: [{ color_cn: '', color_en: '', qty: 0, sizes: Object.fromEntries(data.size_labels.map(s => [s, 0])) }],
+                    packaging: '', quality_notes: '', sample_requirements: '',
+                  };
+                  setData({ ...data, styles: [...data.styles, newStyle] });
+                }}
+                className="w-full py-2 rounded-lg border-2 border-dashed border-gray-300 text-sm text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
+              >
+                + 添加款式
+              </button>
 
               <button
                 onClick={handleGenerate}

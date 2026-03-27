@@ -60,7 +60,7 @@ export default async function OrderDetailPage({
     .order('created_at', { ascending: true });
   const attachments = (attachmentsRaw || []) as any[];
 
-  // 负责理单
+  // 负责业务/理单
   let ownerName = '—';
   if (orderData.owner_user_id) {
     const { data: ownerProfile } = await (supabase.from('profiles') as any)
@@ -170,7 +170,7 @@ export default async function OrderDetailPage({
                 {[
                   { label: '订单号', value: orderData.order_no },
                   { label: '客户', value: orderData.customer_name },
-                  { label: '负责理单', value: ownerName },
+                  { label: '负责业务/理单', value: ownerName },
                   { label: '贸易条款', value: orderData.incoterm },
                   { label: orderData.incoterm === 'FOB' ? 'ETD' : '入仓日期', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
                   { label: '订单类型', value: ({ trial: '新品试单', bulk: '正常批量', repeat: '翻单', urgent: '加急订单', sample: '样品' } as Record<string,string>)[orderData.order_type] || orderData.order_type },
