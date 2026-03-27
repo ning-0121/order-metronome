@@ -89,19 +89,25 @@ export function calcDueDates(params: CalcDueDatesParams) {
   // 样品单用稍短的生产启动时间
   const productionKickoffSample = shiftWeekendToFriday(addWorkdays(ppsSampleApproved, 1));
 
+  // 加工费确认 = 财务审核后2工作日
+  const processingFeeConfirmed = shiftWeekendToFriday(addWorkdays(T0, 3));
+  // 确认工厂 = 产前样客户确认后1工作日
+  const factoryConfirmed = shiftWeekendToFriday(addWorkdays(ppsSampleApproved, 1));
+
   return {
     // 阶段1：订单启动
     po_confirmed:                  shiftWeekendToFriday(T0),
     finance_approval:              shiftWeekendToFriday(addWorkdays(T0, 1)),
     production_order_upload:       shiftWeekendToFriday(addWorkdays(T0, 3)),
-    production_resources_confirmed: shiftWeekendToFriday(addWorkdays(T0, 4)),
     // 阶段2：订单转化
     order_docs_bom_complete:       shiftWeekendToFriday(addWorkdays(T0, 2)),
     bulk_materials_confirmed:      shiftWeekendToFriday(bulkMaterialsConfirmed),
-    // 阶段3：产前样
+    // 阶段3：产前样（加工费→准备→寄出→客户确认→确认工厂）
+    processing_fee_confirmed:      shiftWeekendToFriday(processingFeeConfirmed),
     pre_production_sample_ready:   shiftWeekendToFriday(ppsSampleReady),
     pre_production_sample_sent:    shiftWeekendToFriday(ppsSampleSent),
     pre_production_sample_approved: shiftWeekendToFriday(ppsSampleApproved),
+    factory_confirmed:             shiftWeekendToFriday(factoryConfirmed),
     // 阶段4：采购与生产
     procurement_order_placed:      shiftWeekendToFriday(procurementPlaced),
     materials_received_inspected:  shiftWeekendToFriday(materialsReceived),
