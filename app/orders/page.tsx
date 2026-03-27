@@ -90,7 +90,49 @@ export default async function OrdersPage() {
           </Link>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <>
+        {/* Mobile: card layout */}
+        <div className="md:hidden space-y-3">
+          {orders.map((order: any) => {
+            const milestones = (order as any).milestones || [];
+            const status = computeOrderStatus(milestones);
+            const statusConfig = {
+              GREEN: { label: '正常', class: 'bg-green-100 text-green-700' },
+              YELLOW: { label: '注意', class: 'bg-yellow-100 text-yellow-700' },
+              RED: { label: '风险', class: 'bg-red-100 text-red-700' },
+            }[status.color];
+            const phases = computePhases(milestones);
+            const dateStr = order.incoterm === 'FOB' ? formatDate(order.etd) : formatDate(order.warehouse_due_date);
+
+            return (
+              <Link key={order.id} href={`/orders/${order.id}`} className="block bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow active:bg-gray-50">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <div className="font-semibold text-gray-900 text-sm">{order.order_no}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{order.customer_name}{(order as any).factory_name ? ` · ${(order as any).factory_name}` : ''}</div>
+                  </div>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusConfig.class}`}>{statusConfig.label}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-gray-500 mb-2">
+                  <span>{order.incoterm}</span>
+                  <span>{dateStr}</span>
+                  <span>{order.order_type === 'sample' ? '样品' : '批量'}</span>
+                </div>
+                <div className="flex gap-0.5">
+                  {phases.map((p: any, i: number) => (
+                    <div key={i} className={`h-1.5 flex-1 rounded-sm ${
+                      p.allDone ? 'bg-green-500' : p.blocked ? 'bg-orange-400' : p.active ? 'bg-blue-500' : p.done > 0 ? 'bg-blue-200' : 'bg-gray-200'
+                    }`} />
+                  ))}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Desktop: table layout */}
+        <div className="hidden md:block bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="table-modern">
             <thead>
               <tr>
@@ -195,7 +237,9 @@ export default async function OrdersPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
+        </>
       )}
     </div>
   );
