@@ -598,12 +598,13 @@ export async function updateMilestoneActualDate(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  // 查询节点信息
-  const { data: milestone, error: getErr } = await (supabase
+  // 查询节点信息（用 limit(1) 防止重复行导致 single() 报错）
+  const { data: milestoneArr, error: getErr } = await (supabase
     .from('milestones') as any)
     .select('id, order_id, step_key, name, due_at, owner_role')
     .eq('id', milestoneId)
-    .single();
+    .limit(1);
+  const milestone = milestoneArr?.[0];
   if (getErr || !milestone) return { error: '找不到该节点' };
 
   // 校验：只有指定节点允许填写
