@@ -611,13 +611,11 @@ export async function updateMilestoneActualDate(
     return { error: `「${milestone.name}」不允许填写实际日期` };
   }
 
-  // 更新 actual_at
-  const { data: updated, error: updateErr } = await (supabase
+  // 更新 actual_at（不用 .single() 防止多行报错）
+  const { error: updateErr } = await (supabase
     .from('milestones') as any)
     .update({ actual_at: actualAt })
-    .eq('id', milestoneId)
-    .select()
-    .single();
+    .eq('id', milestoneId);
   if (updateErr) return { error: `更新失败：${updateErr.message}` };
 
   // 记录日志
@@ -627,12 +625,42 @@ export async function updateMilestoneActualDate(
     `实际/预计日期更新为：${dateStr}`
   );
 
+  // ===== 动态调整后续节点排期 =====
+  if (actualAt) {
+    const actualDate = new Date(actualAt + 'T00:00:00');
+    const stepKey = milestone.step_key;
+
+    // 原辅料到货 → 影响生产启动排期（到货后 +1 工作日）
+    if (stepKey === 'materials_received_inspected') {
+      const newKickoff = addWorkingDays(actualDate, 1);
+      await (supabase.from('milestones') as any)
+        .update({ due_at: ensureBusinessDay(newKickoff).toISOString() })
+        .eq('order_id', milestone.order_id)
+        .eq('step_key', 'production_kickoff');
+    }
+    // 生产启动 → 影响中查（+10工作日）、尾查、工厂完成
+    if (stepKey === 'production_kickoff') {
+      const midQc = addWorkingDays(actualDate, 10);
+      await (supabase.from('milestones') as any)
+        .update({ due_at: ensureBusinessDay(midQc).toISOString() })
+        .eq('order_id', milestone.order_id)
+        .eq('step_key', 'mid_qc_check');
+    }
+    // 工厂完成 → 影响验货/放行（+1工作日）
+    if (stepKey === 'factory_completion') {
+      const inspection = addWorkingDays(actualDate, 1);
+      await (supabase.from('milestones') as any)
+        .update({ due_at: ensureBusinessDay(inspection).toISOString() })
+        .eq('order_id', milestone.order_id)
+        .eq('step_key', 'inspection_release');
+    }
+  }
+
   // 交期预警：actual_at 超 due_at 3天以上触发 RED 邮件
   if (actualAt && milestone.due_at) {
     const diffMs = new Date(actualAt).getTime() - new Date(milestone.due_at).getTime();
     const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
     if (diffDays > 3) {
-      // 异步发送预警邮件（不阻塞主流程）
       try {
         const { sendDeliveryDelayAlert } = await import('@/app/actions/notifications');
         await sendDeliveryDelayAlert(milestoneId, milestone.order_id, diffDays);
@@ -646,7 +674,7 @@ export async function updateMilestoneActualDate(
   revalidatePath('/orders');
   revalidatePath('/dashboard');
 
-  return { data: updated };
+  return { data: { id: milestoneId, actual_at: actualAt } };
 }
 
 /**
