@@ -1053,10 +1053,8 @@ CREATE POLICY "order_attachments_insert" ON public.order_attachments
 
 -- ===== 2026-03-27: 调整角色体系 + 节点归属 =====
 
--- 1. 添加 merchandiser 到 owner_role CHECK 约束
-ALTER TABLE public.milestones DROP CONSTRAINT IF EXISTS milestones_owner_role_check;
-ALTER TABLE public.milestones ADD CONSTRAINT milestones_owner_role_check
-  CHECK (owner_role IN ('sales','merchandiser','finance','procurement','production','qc','logistics','admin'));
+-- 1. 添加 merchandiser 到 user_role 枚举
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'merchandiser';
 
 -- 2. 修复历史数据：之前 merchandiser 被映射为 sales 入库
 --    现在跟单节点应该存为 merchandiser
