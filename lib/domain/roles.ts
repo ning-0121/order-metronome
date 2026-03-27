@@ -14,7 +14,7 @@
 export type DbUserRole = 'sales' | 'finance' | 'procurement' | 'production' | 'quality' | 'admin' | 'logistics' | 'qc';
 
 // 代码中使用的角色值（业务层）
-export type AppRole = 'sales' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics' | 'admin';
+export type AppRole = 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics' | 'admin';
 
 /**
  * 角色映射表：代码角色 -> 数据库枚举值（优先值）
@@ -22,6 +22,7 @@ export type AppRole = 'sales' | 'finance' | 'procurement' | 'production' | 'qc' 
  */
 export const ROLE_MAP_TO_DB: Record<AppRole, string> = {
   'sales': 'sales',
+  'merchandiser': 'merchandiser',
   'finance': 'finance',
   'procurement': 'procurement',
   'production': 'production',
@@ -43,6 +44,7 @@ const ROLE_FALLBACK: Record<string, DbUserRole> = {
  */
 export const ROLE_MAP_FROM_DB: Record<string, AppRole> = {
   'sales': 'sales',
+  'merchandiser': 'merchandiser',
   'finance': 'finance',
   'procurement': 'procurement',
   'production': 'production',
@@ -72,7 +74,7 @@ export function normalizeRoleToDb(
   const normalized = input.trim().toLowerCase();
   
   // 如果是已知的数据库枚举值，直接返回
-  const knownDbRoles = ['sales', 'finance', 'procurement', 'production', 'quality', 'admin', 'logistics', 'qc'];
+  const knownDbRoles = ['sales', 'merchandiser', 'finance', 'procurement', 'production', 'quality', 'admin', 'logistics', 'qc'];
   if (knownDbRoles.includes(normalized)) {
     return normalized;
   }

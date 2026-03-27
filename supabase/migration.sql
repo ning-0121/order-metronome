@@ -1050,3 +1050,31 @@ CREATE POLICY "order_attachments_insert" ON public.order_attachments
   FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
 -- 确保 Storage bucket 存在（需要在 Supabase Dashboard 手动创建 order-docs bucket）
+
+-- ===== 2026-03-27: 调整角色体系 + 节点归属 =====
+
+-- 1. 添加 merchandiser 到 owner_role CHECK 约束
+ALTER TABLE public.milestones DROP CONSTRAINT IF EXISTS milestones_owner_role_check;
+ALTER TABLE public.milestones ADD CONSTRAINT milestones_owner_role_check
+  CHECK (owner_role IN ('sales','merchandiser','finance','procurement','production','qc','logistics','admin'));
+
+-- 2. 修复历史数据：之前 merchandiser 被映射为 sales 入库
+--    现在跟单节点应该存为 merchandiser
+UPDATE public.milestones SET owner_role = 'merchandiser'
+WHERE step_key IN (
+  'pre_production_sample_ready',  -- 产前样准备完成
+  'factory_confirmed',            -- 确认工厂
+  'production_kickoff',           -- 生产启动/开裁
+  'pre_production_meeting',       -- 产前会
+  'mid_qc_check',                 -- 中查
+  'final_qc_check',               -- 尾查
+  'factory_completion',           -- 工厂完成
+  'inspection_release'            -- 验货/放行
+) AND owner_role = 'sales';
+
+-- 3. 订舱/报关：logistics → sales（业务负责）
+UPDATE public.milestones SET owner_role = 'sales'
+WHERE step_key = 'booking_done' AND owner_role = 'logistics';
+
+UPDATE public.milestones SET owner_role = 'sales'
+WHERE step_key = 'customs_export' AND owner_role = 'logistics';

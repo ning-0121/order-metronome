@@ -190,11 +190,11 @@ export async function createOrder(
     return { ok: false, error: `排期计算失败：${scheduleErr.message}` };
   }
 
-  // 角色映射：确保模板角色值 → DB enum 合法值
+  // 角色映射：确保模板角色值 → DB 合法值
   const ROLE_TO_DB: Record<string, string> = {
     sales: 'sales', finance: 'finance', procurement: 'procurement',
     production: 'production', qc: 'qc', logistics: 'logistics',
-    admin: 'admin', merchandiser: 'sales', quality: 'qc',
+    admin: 'admin', merchandiser: 'merchandiser', quality: 'qc',
   };
 
   const templates = getApplicableMilestones(order_type, shipping_sample_required);
