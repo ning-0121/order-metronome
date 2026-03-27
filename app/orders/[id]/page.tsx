@@ -335,23 +335,34 @@ export default async function OrderDetailPage({
             <h2 className="text-lg font-semibold text-gray-900 mb-6">操作日志</h2>
             {logs && logs.length > 0 ? (
               <div className="space-y-3">
-                {(logs as any[]).map((log: any) => (
-                  <div key={log.id} className="flex gap-4 p-3 rounded-lg bg-gray-50">
-                    <div className="flex-shrink-0 w-2 h-2 rounded-full bg-indigo-400 mt-2" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-gray-900">{log.action}</span>
-                        <span className="text-xs text-gray-400 flex-shrink-0">{formatDate(log.created_at)}</span>
+                {(logs as any[]).map((log: any) => {
+                  const actionLabels: Record<string, string> = {
+                    mark_done: '✅ 标记完成',
+                    mark_blocked: '🚫 标记阻塞',
+                    unblock: '🔓 解除阻塞',
+                    update: '📝 更新',
+                    create: '➕ 创建',
+                    delay_request: '⏱ 申请延期',
+                    delay_approved: '✅ 延期已批准',
+                    delay_rejected: '❌ 延期已驳回',
+                    schedule_recalc: '📅 排期调整',
+                    evidence_upload: '📎 上传凭证',
+                  };
+                  return (
+                    <div key={log.id} className="flex gap-4 p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="flex-shrink-0 w-2 h-2 rounded-full bg-indigo-400 mt-2" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium text-gray-900">
+                            {actionLabels[log.action] || log.action}
+                          </span>
+                          <span className="text-xs text-gray-400 flex-shrink-0">{formatDate(log.created_at)}</span>
+                        </div>
+                        {log.note && <p className="text-sm text-gray-600 mt-1">{log.note}</p>}
                       </div>
-                      {log.note && <p className="text-sm text-gray-600 mt-1">{log.note}</p>}
-                      {(log.from_status || log.to_status) && (
-                        <p className="text-xs text-gray-400 mt-1">
-                          {log.from_status} → {log.to_status}
-                        </p>
-                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-gray-400 text-center py-8">暂无操作记录</p>
