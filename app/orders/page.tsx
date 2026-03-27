@@ -3,6 +3,31 @@ import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { computeOrderStatus } from '@/lib/utils/order-status';
 
+// 阶段进度计算
+const PHASE_KEYS = [
+  { label: '启动', keys: ['po_confirmed', 'finance_approval', 'production_order_upload', 'production_resources_confirmed'] },
+  { label: '转化', keys: ['order_docs_bom_complete', 'bulk_materials_confirmed'] },
+  { label: '产前样', keys: ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'] },
+  { label: '采购生产', keys: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'] },
+  { label: '过程', keys: ['mid_qc_check', 'final_qc_check'] },
+  { label: '出货', keys: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'] },
+  { label: '物流', keys: ['booking_done', 'customs_export', 'payment_received'] },
+];
+const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
+const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
+const _isBlocked = (s: string) => s === 'blocked' || s === '卡住' || s === '卡单';
+
+function computePhases(milestones: any[]) {
+  return PHASE_KEYS.map(phase => {
+    const items = milestones.filter(m => phase.keys.includes(m.step_key));
+    const done = items.filter(m => _isDone(m.status)).length;
+    const active = items.some(m => _isActive(m.status));
+    const blocked = items.some(m => _isBlocked(m.status));
+    const total = items.length;
+    return { ...phase, done, total, active, blocked, allDone: total > 0 && done === total };
+  });
+}
+
 export default async function OrdersPage() {
   const { data: orders, error } = await getOrders();
 
@@ -76,7 +101,7 @@ export default async function OrdersPage() {
                 <th>ETD/入仓日</th>
                 <th>类型</th>
                 <th>状态</th>
-                <th>Cancel Date</th>
+                <th>阶段进度</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -123,13 +148,28 @@ export default async function OrdersPage() {
                       </span>
                     </td>
                 <td>
-                  {(order as any).cancel_date ? (
-                    <span className={`text-sm font-medium ${new Date((order as any).cancel_date) < new Date() ? 'text-red-600' : 'text-gray-700'}`}>
-                      {formatDate((order as any).cancel_date)}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400 text-sm">—</span>
-                  )}
+                  {(() => {
+                    const phases = computePhases(milestones);
+                    const currentPhase = phases.find(p => p.active);
+                    return (
+                      <div>
+                        <div className="flex gap-0.5 mb-1" title={phases.map(p => `${p.label}: ${p.done}/${p.total}`).join(' | ')}>
+                          {phases.map((p, i) => (
+                            <div key={i} className={`h-2 flex-1 rounded-sm ${
+                              p.allDone ? 'bg-green-500' :
+                              p.blocked ? 'bg-orange-400' :
+                              p.active ? 'bg-blue-500' :
+                              p.done > 0 ? 'bg-blue-200' :
+                              'bg-gray-200'
+                            }`} />
+                          ))}
+                        </div>
+                        {currentPhase && (
+                          <span className="text-xs text-gray-500">{currentPhase.label}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </td>
                     <td>
                       {order.id ? (
