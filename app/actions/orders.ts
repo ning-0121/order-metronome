@@ -568,11 +568,13 @@ export async function getOrderLogs(orderId: string) {
     return { error: '请先登录' };
   }
   
-  const { data: logs, error } = await supabase
-    .from('order_logs')
-    .select('*')
+  // 从 milestone_logs 读取（日志实际写入此表）
+  const { data: logs, error } = await (supabase
+    .from('milestone_logs') as any)
+    .select('id, milestone_id, order_id, action, note, actor_user_id, created_at')
     .eq('order_id', orderId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(100);
   
   if (error) {
     return { error: error.message };
