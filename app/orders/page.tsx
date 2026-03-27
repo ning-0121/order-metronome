@@ -96,6 +96,7 @@ export default async function OrdersPage() {
               <tr>
                 <th>订单号</th>
                 <th>客户</th>
+                <th>工厂</th>
                 <th>款号/PO</th>
                 <th>贸易条款</th>
                 <th>ETD/入仓日</th>
@@ -122,6 +123,9 @@ export default async function OrdersPage() {
                     </td>
                     <td>
                       <span className="text-gray-700">{order.customer_name}</span>
+                    </td>
+                    <td>
+                      <span className="text-gray-600">{(order as any).factory_name || '—'}</span>
                     </td>
                 <td>
                   <div className="text-sm text-gray-900">{(order as any).style_no || '-'}</div>
