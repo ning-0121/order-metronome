@@ -568,19 +568,36 @@ export async function getOrderLogs(orderId: string) {
     return { error: '请先登录' };
   }
   
-  // 从 milestone_logs 读取，JOIN profiles 获取操作人姓名
+  // 从 milestone_logs 读取
   const { data: logs, error } = await (supabase
     .from('milestone_logs') as any)
-    .select('id, milestone_id, order_id, action, note, actor_user_id, created_at, profiles:actor_user_id(full_name)')
+    .select('id, milestone_id, order_id, action, note, actor_user_id, created_at')
     .eq('order_id', orderId)
     .order('created_at', { ascending: false })
     .limit(100);
-  
+
   if (error) {
     return { error: error.message };
   }
-  
-  return { data: logs };
+
+  // 批量查询操作人姓名
+  const actorIds = [...new Set((logs || []).map((l: any) => l.actor_user_id).filter(Boolean))];
+  let profileMap: Record<string, string> = {};
+  if (actorIds.length > 0) {
+    const { data: profiles } = await (supabase
+      .from('profiles') as any)
+      .select('user_id, full_name')
+      .in('user_id', actorIds);
+    profileMap = (profiles || []).reduce((m: any, p: any) => { m[p.user_id] = p.full_name; return m; }, {});
+  }
+
+  // 附加姓名到日志
+  const logsWithNames = (logs || []).map((l: any) => ({
+    ...l,
+    actor_name: profileMap[l.actor_user_id] || null,
+  }));
+
+  return { data: logsWithNames };
 }
 
 /**
