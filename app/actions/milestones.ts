@@ -123,10 +123,10 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: '请先登录' };
   }
 
-  // Get current milestone (for order_id, evidence_required, owner_role, step_key)
+  // Get current milestone (for order_id, evidence_required, owner_role, step_key, status)
   const { data: milestone, error: getError } = await (supabase
     .from('milestones') as any)
-    .select('order_id, evidence_required, owner_role, owner_user_id, step_key')
+    .select('order_id, evidence_required, owner_role, owner_user_id, step_key, status')
     .eq('id', milestoneId)
     .single();
   
@@ -168,6 +168,16 @@ export async function markMilestoneDone(milestoneId: string) {
     }
   }
   
+  // 如果当前是「未开始」，先自动转为「进行中」再转为「已完成」
+  const currentDbStatus = (milestone as any).status;
+  const normalizedCurrentStatus = normalizeMilestoneStatus(currentDbStatus);
+  if (normalizedCurrentStatus === '未开始') {
+    const advanceResult = await transitionMilestoneStatus(milestoneId, '进行中', '自动推进：标记完成时自动启动');
+    if (advanceResult.error) {
+      return { error: advanceResult.error };
+    }
+  }
+
   // 使用状态机转换（带校验）
   const result = await transitionMilestoneStatus(milestoneId, '已完成', null);
   
@@ -330,20 +340,19 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
 }
 
 async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
-  // Find the earliest milestone with status='未开始' for same order
-  const { data: nextMilestone } = await (supabase
+  // 按时间顺序推进：找到所有「未开始」且截止日期 ≤ 当前最早未完成节点的里程碑
+  // 这样各阶段可以并行工作，不会被阶段顺序锁死
+  const { data: pendingMilestones } = await (supabase
     .from('milestones') as any)
     .select('*')
     .eq('order_id', orderId)
     .eq('status', 'pending') // DB stores English enum
-    .order('due_at', { ascending: true })
-    .limit(1)
-    .single();
-  
-  if (nextMilestone) {
-    // 使用状态机转换（带校验）
+    .order('due_at', { ascending: true });
+
+  if (pendingMilestones && pendingMilestones.length > 0) {
+    // 推进第一个（按截止日期最早的）
     await transitionMilestoneStatus(
-      nextMilestone.id,
+      pendingMilestones[0].id,
       '进行中',
       '自动推进：上一节点已完成'
     );
