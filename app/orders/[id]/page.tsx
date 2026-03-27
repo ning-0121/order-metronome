@@ -31,7 +31,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'outsource', 'qc', 'packing', 'shipment'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'outsource'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -136,11 +136,8 @@ export default async function OrderDetailPage({
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
-          { key: 'bom', label: 'BOM/物料' },
+          { key: 'bom', label: '原辅料单' },
           { key: 'outsource', label: '外发任务' },
-          { key: 'qc', label: 'QC检验' },
-          { key: 'packing', label: '装箱' },
-          { key: 'shipment', label: '出货&签核' },
             ].map(t => (
               <Link
                 key={t.key}
