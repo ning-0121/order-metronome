@@ -467,7 +467,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                                 <div key={log.id} className="text-xs border-l-2 border-indigo-200 pl-3 py-1">
                                   <p className="font-medium text-gray-900">{log.action}</p>
                                   {log.note && <p className="text-gray-600 mt-0.5">{log.note}</p>}
-                                  <p className="text-gray-400 mt-0.5">{formatDate(log.created_at)}</p>
+                                  <p className="text-gray-400 mt-0.5">{log.actor_name && <span className="text-gray-500">{log.actor_name} · </span>}{formatDate(log.created_at)}</p>
                                 </div>
                               ))}
                             </div>

@@ -504,11 +504,26 @@ export async function getMilestoneLogs(milestoneId: string) {
     .select('*')
     .eq('milestone_id', milestoneId)
     .order('created_at', { ascending: false });
-  
+
   if (error) {
     return { error: error.message };
   }
-  
+
+  // 关联操作人名称
+  if (logs && logs.length > 0) {
+    const actorIds = [...new Set(logs.map((l: any) => l.actor_user_id).filter(Boolean))];
+    if (actorIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('user_id, name, email')
+        .in('user_id', actorIds);
+      const profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p.name || p.email?.split('@')[0] || '未知']));
+      for (const log of logs as any[]) {
+        log.actor_name = log.actor_user_id ? (profileMap.get(log.actor_user_id) || '未知') : '系统';
+      }
+    }
+  }
+
   return { data: logs };
 }
 
