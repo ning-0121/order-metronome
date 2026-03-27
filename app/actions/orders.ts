@@ -568,10 +568,10 @@ export async function getOrderLogs(orderId: string) {
     return { error: '请先登录' };
   }
   
-  // 从 milestone_logs 读取（日志实际写入此表）
+  // 从 milestone_logs 读取，JOIN profiles 获取操作人姓名
   const { data: logs, error } = await (supabase
     .from('milestone_logs') as any)
-    .select('id, milestone_id, order_id, action, note, actor_user_id, created_at')
+    .select('id, milestone_id, order_id, action, note, actor_user_id, created_at, profiles:actor_user_id(full_name)')
     .eq('order_id', orderId)
     .order('created_at', { ascending: false })
     .limit(100);

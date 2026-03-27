@@ -11,9 +11,6 @@ import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OutsourceTab } from '@/components/tabs/OutsourceTab';
-import { QcTab } from '@/components/tabs/QcTab';
-import { PackingTab } from '@/components/tabs/PackingTab';
-import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 
 export default async function OrderDetailPage({
   params,
@@ -348,6 +345,7 @@ export default async function OrderDetailPage({
                     schedule_recalc: '📅 排期调整',
                     evidence_upload: '📎 上传凭证',
                   };
+                  const actorName = log.profiles?.full_name || '系统';
                   return (
                     <div key={log.id} className="flex gap-4 p-3 rounded-lg bg-gray-50 border border-gray-100">
                       <div className="flex-shrink-0 w-2 h-2 rounded-full bg-indigo-400 mt-2" />
@@ -355,6 +353,7 @@ export default async function OrderDetailPage({
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm font-medium text-gray-900">
                             {actionLabels[log.action] || log.action}
+                            <span className="ml-2 text-xs font-normal text-gray-500">— {actorName}</span>
                           </span>
                           <span className="text-xs text-gray-400 flex-shrink-0">{formatDate(log.created_at)}</span>
                         </div>
@@ -369,10 +368,10 @@ export default async function OrderDetailPage({
             )}
           </div>
         )}
-        {/* Tab: BOM/物料 */}
+        {/* Tab: 原辅料单 */}
         {activeTab === 'bom' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">物料 BOM</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">原辅料单</h2>
             <BomTab orderId={id} />
           </div>
         )}
@@ -385,35 +384,6 @@ export default async function OrderDetailPage({
           </div>
         )}
 
-        {/* Tab: QC检验 */}
-        {activeTab === 'qc' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">QC 检验记录</h2>
-            <QcTab orderId={id} isAdmin={isAdmin} currentRole={currentRole} />
-          </div>
-        )}
-
-        {/* Tab: 装箱 */}
-        {activeTab === 'packing' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">装箱单</h2>
-            <PackingTab orderId={id} isAdmin={isAdmin} />
-          </div>
-        )}
-
-        {/* Tab: 出货&签核 */}
-        {activeTab === 'shipment' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">出货确认 & 三方签核</h2>
-            <ShipmentTab
-              orderId={id}
-              orderQty={orderData.quantity}
-              currentRole={currentRole}
-              isAdmin={isAdmin}
-              userId={user?.id}
-            />
-          </div>
-        )}
 
 
       </div>
