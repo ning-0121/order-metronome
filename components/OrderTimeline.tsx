@@ -10,6 +10,7 @@ import { getMilestoneLogs } from '@/app/actions/milestones';
 import { useState, useEffect } from 'react';
 import type { Milestone } from '@/lib/types';
 import { getRoleLabel } from '@/lib/utils/i18n';
+import { POParserModal } from './POParserModal';
 import { computeDeliveryAlert, computeDelayDays } from '@/lib/domain/milestone-helpers';
 import { updateMilestoneActualDate } from '@/app/actions/milestones';
 
@@ -163,6 +164,7 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
 export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, currentRoles = [], isAdmin = false }: OrderTimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
+  const [showPOParser, setShowPOParser] = useState(false);
 
   useEffect(() => {
     if (expandedId) {
@@ -376,6 +378,16 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           />
                         )}
 
+                        {/* AI 生成生产单按钮（仅生产单上传节点） */}
+                        {m.step_key === 'production_order_upload' && (
+                          <button
+                            onClick={() => setShowPOParser(true)}
+                            className="w-full py-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-sm font-medium transition-all flex items-center justify-center gap-2"
+                          >
+                            <span>✨</span> AI 生成生产单（上传客户 PO 自动填充）
+                          </button>
+                        )}
+
                         <OwnerAssignment
                           milestoneId={m.id}
                           currentOwnerUserId={m.owner_user_id}
@@ -472,6 +484,11 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
           </div>
         );
       })}
+
+      {/* AI 生产单生成弹窗 */}
+      {showPOParser && (
+        <POParserModal orderId={orderId} onClose={() => setShowPOParser(false)} />
+      )}
     </div>
   );
 }
