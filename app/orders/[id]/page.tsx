@@ -348,7 +348,7 @@ export default async function OrderDetailPage({
                     schedule_recalc: '📅 排期调整',
                     evidence_upload: '📎 上传凭证',
                   };
-                  const actorName = log.profiles?.full_name || '系统';
+                  const actorName = log.actor_name || '系统';
                   return (
                     <div key={log.id} className="flex gap-4 p-3 rounded-lg bg-gray-50 border border-gray-100">
                       <div className="flex-shrink-0 w-2 h-2 rounded-full bg-indigo-400 mt-2" />
