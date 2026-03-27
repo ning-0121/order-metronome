@@ -6,7 +6,7 @@ import { getRoleLabel } from '@/lib/utils/i18n';
 const STAGE_NAMES: Record<string, string> = {
   stage1: '阶段 1：订单启动',
   stage2: '阶段 2：订单转化',
-  stage3: '阶段 3：产前样',
+  stage3: '阶段 3：工厂选定 & 产前样',
   stage4: '阶段 4：采购与生产',
   stage5: '阶段 5：过程控制',
   stage6: '阶段 6：出货控制',
@@ -16,7 +16,7 @@ const STAGE_NAMES: Record<string, string> = {
 const STAGE_KEYS: Record<string, string[]> = {
   stage1: ['po_confirmed', 'finance_approval', 'production_order_upload'],
   stage2: ['order_docs_bom_complete', 'bulk_materials_confirmed'],
-  stage3: ['processing_fee_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved', 'factory_confirmed'],
+  stage3: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
   stage4: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'],
   stage5: ['mid_qc_check', 'final_qc_check'],
   stage6: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'],

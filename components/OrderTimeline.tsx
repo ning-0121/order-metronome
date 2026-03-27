@@ -43,8 +43,8 @@ const MILESTONE_GROUPS = [
   },
   {
     key: 'stage3', emoji: '🟧',
-    titleCn: '阶段 3：产前样',
-    stepKeys: ['processing_fee_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved', 'factory_confirmed'],
+    titleCn: '阶段 3：工厂选定 & 产前样',
+    stepKeys: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
   },
   {
     key: 'stage4', emoji: '🟩',
