@@ -8,6 +8,15 @@ function shiftWeekendToFriday(d: Date): Date {
   return r;
 }
 
+// 周末往后挪到下周一（用于起始日期，不能比下单日更早）
+function shiftWeekendToMonday(d: Date): Date {
+  const r = new Date(d);
+  const day = r.getDay();
+  if (day === 6) r.setDate(r.getDate() + 2);
+  if (day === 0) r.setDate(r.getDate() + 1);
+  return r;
+}
+
 function addWorkdays(start: Date, days: number): Date {
   const d = new Date(start);
   let added = 0;
@@ -101,12 +110,12 @@ export function calcDueDates(params: CalcDueDatesParams) {
   };
 
   return {
-    // 阶段1：订单启动（从下单日正推，但不超过交期）
-    po_confirmed:                  cap(shiftWeekendToFriday(T0)),
-    finance_approval:              cap(shiftWeekendToFriday(addWorkdays(T0, 1))),
-    production_order_upload:       cap(shiftWeekendToFriday(addWorkdays(T0, 3))),
+    // 阶段1：订单启动（从下单日正推，周末往后挪不往前，且不超过交期）
+    po_confirmed:                  cap(shiftWeekendToMonday(T0)),
+    finance_approval:              cap(shiftWeekendToMonday(addWorkdays(T0, 1))),
+    production_order_upload:       cap(shiftWeekendToMonday(addWorkdays(T0, 3))),
     // 阶段2：订单转化
-    order_docs_bom_complete:       cap(shiftWeekendToFriday(addWorkdays(T0, 2))),
+    order_docs_bom_complete:       cap(shiftWeekendToMonday(addWorkdays(T0, 2))),
     bulk_materials_confirmed:      cap(shiftWeekendToFriday(bulkMaterialsConfirmed)),
     // 阶段3：工厂选定+产前样（加工费→确认工厂→准备→寄出→客户确认）
     processing_fee_confirmed:      cap(shiftWeekendToFriday(processingFeeConfirmed)),
