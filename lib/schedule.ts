@@ -1,23 +1,22 @@
 /**
- * 订单节拍排期引擎 V3.1
+ * 订单节拍排期引擎 V3.2
  *
- * 标准交期：45天 | 范围：30-60天
+ * 标准交期：45天 | 生产周期：20-22天
  * 全部自然日，不跳周末
  *
- * 45天标准时间线：
+ * 45天时间线：
  *   T+0   PO确认
  *   T+1   财务审核
- *   T+2   生产单上传
- *   T+3   采购下达 + 加工费确认
- *   T+5   辅料单/BOM齐全 + 大货原辅料确认
- *   T+5   确认工厂
- *   T+10  产前样准备完成
- *   T+12  产前样寄出
- *   T+18  产前样客户确认
- *   T+17  原辅料到货（采购后14天）
- *   T+19  产前会
- *   T+20  生产启动
- *   A-15  中查（交期前15天）
+ *   T+2   生产单上传 + 采购下达 + 加工费确认
+ *   T+3   辅料单/BOM齐全 + 大货原辅料确认 + 确认工厂
+ *   T+5   产前样准备完成
+ *   T+6   产前样寄出
+ *   T+10  产前样客户确认
+ *   T+12  原辅料到货
+ *   T+11  产前会
+ *   T+12  生产启动
+ *   ──── 生产期 20-22 天 ────
+ *   A-15  中查（生产约10天后）
  *   A-10  包装确认
  *   A-8   尾查
  *   A-7   工厂完成
@@ -70,27 +69,27 @@ export function calcDueDates(params: CalcDueDatesParams) {
     : addDays(A, -6);
 
   return {
-    // ── 阶段1：订单启动（T+0 ~ T+2）──
+    // ── 阶段1：订单启动（T+0 ~ T+1）──
     po_confirmed:                  cap(T0),
     finance_approval:              cap(addDays(T0, 1)),
     production_order_upload:       cap(addDays(T0, 2)),
 
-    // ── 阶段2：订单转化（T+5）──
-    order_docs_bom_complete:       cap(addDays(T0, 5)),
-    bulk_materials_confirmed:      cap(addDays(T0, 5)),
+    // ── 阶段2：订单转化（T+2 ~ T+3）──
+    order_docs_bom_complete:       cap(addDays(T0, 3)),
+    bulk_materials_confirmed:      cap(addDays(T0, 3)),
 
-    // ── 阶段3：工厂 & 产前样（T+3 ~ T+18）──
-    processing_fee_confirmed:      cap(addDays(T0, 3)),
-    factory_confirmed:             cap(addDays(T0, 5)),
-    pre_production_sample_ready:   cap(addDays(T0, 10)),
-    pre_production_sample_sent:    cap(addDays(T0, 12)),
-    pre_production_sample_approved: cap(addDays(T0, 18)),
+    // ── 阶段3：工厂 & 产前样（T+2 ~ T+10）──
+    processing_fee_confirmed:      cap(addDays(T0, 2)),
+    factory_confirmed:             cap(addDays(T0, 3)),
+    pre_production_sample_ready:   cap(addDays(T0, 5)),
+    pre_production_sample_sent:    cap(addDays(T0, 6)),
+    pre_production_sample_approved: cap(addDays(T0, 10)),
 
-    // ── 阶段4：采购 & 生产（T+3 ~ T+20）──
-    procurement_order_placed:      cap(addDays(T0, 3)),
-    materials_received_inspected:  cap(addDays(T0, 17)),
-    pre_production_meeting:        cap(addDays(T0, 19)),
-    production_kickoff:            cap(addDays(T0, 20)),
+    // ── 阶段4：采购 & 生产（T+2 ~ T+12）──
+    procurement_order_placed:      cap(addDays(T0, 2)),
+    materials_received_inspected:  cap(addDays(T0, 12)),
+    pre_production_meeting:        cap(addDays(T0, 11)),
+    production_kickoff:            cap(addDays(T0, 12)),
 
     // ── 阶段5：过程控制（倒排）──
     mid_qc_check:                  cap(addDays(A, -15)),
