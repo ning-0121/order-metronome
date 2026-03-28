@@ -15,6 +15,7 @@ import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
+import { RecalcButton } from '@/components/RecalcButton';
 import { OutsourceTab } from '@/components/tabs/OutsourceTab';
 
 export default async function OrderDetailPage({
@@ -143,6 +144,7 @@ export default async function OrderDetailPage({
                   isAdmin={isAdmin}
                   isOrderOwner={isOrderOwner}
                 />
+                {isAdmin && <RecalcButton orderId={id} orderNo={orderData.order_no} />}
               </div>
             </div>
             <div className="flex flex-col items-end gap-1.5">

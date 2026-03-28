@@ -7,7 +7,7 @@ import { DelayRequestActions } from '@/components/DelayRequestActions';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
-import { RecalcButton } from '@/components/RecalcButton';
+// RecalcButton removed from global — now per-order only
 
 // 状态兼容函数
 const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
@@ -306,7 +306,6 @@ export default async function CEOWarRoom() {
                   <p className="text-xs text-gray-400">
                     {now.toLocaleDateString('zh-CN', { weekday: 'long' })}
                   </p>
-                  <RecalcButton />
                 </div>
               </div>
             </div>
