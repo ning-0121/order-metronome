@@ -138,12 +138,25 @@ export async function parsePO(formData: FormData): Promise<{ ok: boolean; data?:
       return { ok: false, error: `不支持的文件格式：${file.type}。请上传 Excel、PDF 或图片文件。` };
     }
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages,
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 55000); // 55 秒超时
+
+    let response;
+    try {
+      response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT,
+        messages,
+      });
+    } catch (e: any) {
+      if (e.name === 'AbortError' || e.message?.includes('abort')) {
+        return { ok: false, error: 'AI 解析超时，请尝试上传更小的文件或使用图片格式。' };
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const text = response.content
       .filter(block => block.type === 'text')

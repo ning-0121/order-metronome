@@ -4,10 +4,12 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  eslint: {
-    ignoreDuringBuilds: true,
+  serverExternalPackages: ['exceljs'],
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
   },
-  // Server Action 不再传文件，默认 1MB 足够纯文本表单
 };
 
 export default nextConfig;
