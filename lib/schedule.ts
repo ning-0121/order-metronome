@@ -159,7 +159,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
     customs_export:                cap(calc(TIMELINE.customs_export)),
     finance_shipment_approval:     cap(calc(TIMELINE.finance_shipment_approval)),
     shipment_execute:              cap(calc(TIMELINE.shipment_execute)),
-    payment_received:              addDays(rawAnchor, 30), // 收款基于原始交期+30天
+    // FOB：默认出货前付款（ETD当天）| DDP：到港后10天（ETA+10）
+    payment_received:              incoterm === 'FOB' ? new Date(rawAnchor) : addDays(rawAnchor, 10),
   };
 
   // ══════ 四重校验 ══════
