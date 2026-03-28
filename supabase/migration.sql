@@ -1159,3 +1159,38 @@ WHERE m.order_id = o.id
 
 -- ===== 2026-03-28 订单特殊标记 + 备注 =====
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS special_tags text[] DEFAULT '{}';
+
+-- ===== 2026-03-28 修正排期：产前样移至原辅料到货后，生产启动移至产前样确认后 =====
+-- 变更：production_order_upload Day2→4, pre_production_sample_ready Day5→14,
+--       pre_production_sample_sent Day6→15, pre_production_sample_approved Day10→19,
+--       production_kickoff Day12→20
+-- 原理：用 po_confirmed(Day0) 和 shipment_execute(Day44) 的 due_at 反推缩放比例
+--       new_due_at = t0 + (new_day / 44) * (anchor - t0)
+
+UPDATE public.milestones target
+SET due_at = sub.new_due
+FROM (
+  SELECT
+    m.id,
+    t0.t0_at + (m_day.new_day::double precision / 44.0) * (anchor.anchor_at - t0.t0_at) AS new_due
+  FROM public.milestones m
+  INNER JOIN (
+    SELECT order_id, due_at AS t0_at FROM public.milestones WHERE step_key = 'po_confirmed'
+  ) t0 ON t0.order_id = m.order_id
+  INNER JOIN (
+    SELECT order_id, due_at AS anchor_at FROM public.milestones WHERE step_key = 'shipment_execute'
+  ) anchor ON anchor.order_id = m.order_id
+  INNER JOIN (
+    VALUES
+      ('production_order_upload', 4),
+      ('pre_production_sample_ready', 14),
+      ('pre_production_sample_sent', 15),
+      ('pre_production_sample_approved', 19),
+      ('production_kickoff', 20)
+  ) AS m_day(step_key, new_day) ON m_day.step_key = m.step_key
+  WHERE m.status IN ('pending', 'in_progress')
+    AND t0.t0_at IS NOT NULL
+    AND anchor.anchor_at IS NOT NULL
+    AND anchor.anchor_at > t0.t0_at
+) sub
+WHERE target.id = sub.id;
