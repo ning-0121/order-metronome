@@ -112,7 +112,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
     // 阶段1：订单启动（从下单日正推，周末往后挪不往前，且不超过交期）
     po_confirmed:                  cap(skipSundayForward(T0)),
     finance_approval:              cap(skipSundayForward(addWorkdays(T0, 1))),
-    production_order_upload:       cap(skipSundayForward(addWorkdays(T0, 3))),
+    production_order_upload:       cap(skipSundayForward(addWorkdays(T0, 2))),
     // 阶段2：订单转化
     order_docs_bom_complete:       cap(skipSundayForward(addWorkdays(T0, 2))),
     bulk_materials_confirmed:      cap(skipSundayBack(bulkMaterialsConfirmed)),
