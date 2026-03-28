@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { parsePO, type POParsedData, type POStyleData } from '@/app/actions/po-parser';
+import { parsePO, type POParsedData, type POStyleData, type GarmentCategory } from '@/app/actions/po-parser';
 import { generateProductionOrder } from '@/app/actions/generate-production-order';
+import { MEASUREMENT_TEMPLATES } from '@/lib/domain/measurement-templates';
 
 interface POParserModalProps {
   orderId: string;
@@ -115,6 +116,59 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
     const colors = [...styles[styleIdx].colors];
     colors[colorIdx] = { ...colors[colorIdx], sizes: { ...colors[colorIdx].sizes, [sizeLabel]: value } };
     styles[styleIdx] = { ...styles[styleIdx], colors };
+    setData({ ...data, styles });
+  };
+
+  const handleCategoryChange = (category: GarmentCategory) => {
+    if (!data) return;
+    const template = MEASUREMENT_TEMPLATES[category] || [];
+    const styles = data.styles.map(s => ({
+      ...s,
+      measurements: template.map(label => {
+        // 保留已有数据
+        const existing = s.measurements?.find(m => m.label === label);
+        return existing || { label, values: {} };
+      }),
+    }));
+    setData({ ...data, garment_category: category, styles });
+  };
+
+  const updateMeasurement = (styleIdx: number, measIdx: number, sizeLabel: string, value: string) => {
+    if (!data) return;
+    const styles = [...data.styles];
+    const measurements = [...(styles[styleIdx].measurements || [])];
+    measurements[measIdx] = {
+      ...measurements[measIdx],
+      values: { ...measurements[measIdx].values, [sizeLabel]: value },
+    };
+    styles[styleIdx] = { ...styles[styleIdx], measurements };
+    setData({ ...data, styles });
+  };
+
+  const addMeasurementRow = (styleIdx: number) => {
+    if (!data) return;
+    const styles = [...data.styles];
+    const measurements = [...(styles[styleIdx].measurements || [])];
+    measurements.push({ label: '', values: {} });
+    styles[styleIdx] = { ...styles[styleIdx], measurements };
+    setData({ ...data, styles });
+  };
+
+  const removeMeasurementRow = (styleIdx: number, measIdx: number) => {
+    if (!data) return;
+    const styles = [...data.styles];
+    const measurements = [...(styles[styleIdx].measurements || [])];
+    measurements.splice(measIdx, 1);
+    styles[styleIdx] = { ...styles[styleIdx], measurements };
+    setData({ ...data, styles });
+  };
+
+  const updateMeasurementLabel = (styleIdx: number, measIdx: number, label: string) => {
+    if (!data) return;
+    const styles = [...data.styles];
+    const measurements = [...(styles[styleIdx].measurements || [])];
+    measurements[measIdx] = { ...measurements[measIdx], label };
+    styles[styleIdx] = { ...styles[styleIdx], measurements };
     setData({ ...data, styles });
   };
 
@@ -274,6 +328,22 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
                 </div>
               </div>
 
+              {/* 品类选择 */}
+              <div>
+                <label className="text-xs font-medium text-gray-500">服装品类（用于自动填充尺寸表模板）</label>
+                <select
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  value={data.garment_category || 'other'}
+                  onChange={(e) => handleCategoryChange(e.target.value as GarmentCategory)}
+                >
+                  <option value="pants">裤子</option>
+                  <option value="tops">上衣</option>
+                  <option value="dress">连衣裙</option>
+                  <option value="outerwear">外套</option>
+                  <option value="other">其他（不预填）</option>
+                </select>
+              </div>
+
               {/* Styles */}
               {data.styles.map((style, si) => (
                 <div key={si} className="border border-gray-200 rounded-xl p-4 space-y-3">
@@ -359,6 +429,63 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
                     <label className="text-xs font-medium text-gray-500">款式评语 / 质量要求</label>
                     <textarea className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-xs" rows={3} value={style.quality_notes} onChange={(e) => updateStyle(si, 'quality_notes', e.target.value)} />
                   </div>
+
+                  {/* 尺寸表 */}
+                  {(style.measurements && style.measurements.length > 0) && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700 mb-2">尺寸表（inch）</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-gray-50">
+                              <th className="px-2 py-1.5 text-left border w-40">部位</th>
+                              {data.size_labels.map(s => (
+                                <th key={s} className="px-2 py-1.5 text-center border">{s}</th>
+                              ))}
+                              <th className="px-2 py-1.5 text-center border w-8"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {style.measurements.map((m, mi) => (
+                              <tr key={mi} className={mi % 2 === 1 ? 'bg-gray-50/50' : ''}>
+                                <td className="border px-1">
+                                  <input
+                                    className="w-full px-1 py-1 text-xs border-0 focus:ring-1 focus:ring-indigo-400 rounded bg-transparent"
+                                    value={m.label}
+                                    onChange={(e) => updateMeasurementLabel(si, mi, e.target.value)}
+                                    placeholder="部位名称"
+                                  />
+                                </td>
+                                {data.size_labels.map(s => (
+                                  <td key={s} className="border px-1">
+                                    <input
+                                      className="w-full px-1 py-1 text-xs text-center border-0 focus:ring-1 focus:ring-indigo-400 rounded bg-transparent"
+                                      value={m.values[s] || ''}
+                                      onChange={(e) => updateMeasurement(si, mi, s, e.target.value)}
+                                      placeholder="—"
+                                    />
+                                  </td>
+                                ))}
+                                <td className="border px-1 text-center">
+                                  <button
+                                    onClick={() => removeMeasurementRow(si, mi)}
+                                    className="text-gray-300 hover:text-red-500 text-xs"
+                                    title="删除"
+                                  >x</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <button
+                        onClick={() => addMeasurementRow(si)}
+                        className="text-xs text-indigo-600 hover:text-indigo-700 font-medium mt-1"
+                      >
+                        + 添加测量项
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
 

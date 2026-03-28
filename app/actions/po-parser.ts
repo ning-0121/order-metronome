@@ -2,6 +2,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
+export type GarmentCategory = 'pants' | 'tops' | 'dress' | 'outerwear' | 'other';
+
 export interface POStyleData {
   style_no: string;
   product_name: string;
@@ -17,6 +19,10 @@ export interface POStyleData {
   packaging: string;
   quality_notes: string;
   sample_requirements: string;
+  measurements?: {
+    label: string;
+    values: Record<string, string>;
+  }[];
 }
 
 export interface POParsedData {
@@ -24,6 +30,7 @@ export interface POParsedData {
   customer_name: string;
   delivery_date: string;
   order_date: string;
+  garment_category?: GarmentCategory;
   styles: POStyleData[];
   trims: {
     name: string;
@@ -43,6 +50,8 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
 4. 如果某些字段在PO中找不到，填空字符串或0，并在confidence_notes中说明
 5. packaging、quality_notes、sample_requirements等信息如果PO中没有，留空即可
 6. 数量必须是数字，不要带单位
+7. 判断服装品类（pants/tops/dress/outerwear/other）
+8. 如果PO中包含尺寸表/测量数据（如腰围、臀围、胸围等各尺码的数值），请提取到measurements数组中
 
 返回严格的JSON格式（不要markdown代码块包裹）：
 {
@@ -50,6 +59,7 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
   "customer_name": "客户名称",
   "delivery_date": "交期 YYYY.MM.DD",
   "order_date": "下单日期 YYYY.MM.DD",
+  "garment_category": "pants",
   "styles": [
     {
       "style_no": "款号",
@@ -67,7 +77,11 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
       ],
       "packaging": "包装要求描述",
       "quality_notes": "质量要求/工艺备注",
-      "sample_requirements": "产前样/船样要求"
+      "sample_requirements": "产前样/船样要求",
+      "measurements": [
+        { "label": "腰围", "values": { "S": "12.5", "M": "13.5", "L": "14.5", "XL": "15.5" } },
+        { "label": "臀围", "values": { "S": "17.5", "M": "18.5", "L": "19.5", "XL": "20.5" } }
+      ]
     }
   ],
   "trims": [
