@@ -134,21 +134,23 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: getError?.message || '找不到该执行节点' };
   }
 
-  // Check role: must be admin, assigned user, or matching owner_role (V2: multi-role)
+  // Check role: must be assigned user or matching owner_role
+  // 管理员不能替代执行关卡（管理员负责监督、指派、审批，不替代一线操作）
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, roles')
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdminUser = userRoles.includes('admin');
   const isAssignedUser = milestone.owner_user_id === user.id;
   const roleMatches = milestone.owner_role && userRoles.some(
     (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
       || (milestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
+      || (milestone.owner_role === 'sales' && r === 'merchandiser')
+      || (milestone.owner_role === 'merchandiser' && r === 'sales')
   );
-  if (!isAdminUser && !isAssignedUser && !roleMatches) {
-    return { error: '无权操作：只有管理员或负责人可以标记完成' };
+  if (!isAssignedUser && !roleMatches) {
+    return { error: '无权操作：只有对应角色的负责人可以标记完成' };
   }
 
   // 自动认领：如果该关卡尚未分配具体负责人，且操作者角色匹配，自动认领
@@ -623,11 +625,24 @@ export async function updateMilestoneActualDate(
   // 查询节点信息（用 limit(1) 防止重复行导致 single() 报错）
   const { data: milestoneArr, error: getErr } = await (supabase
     .from('milestones') as any)
-    .select('id, order_id, step_key, name, due_at, owner_role')
+    .select('id, order_id, step_key, name, due_at, owner_role, owner_user_id')
     .eq('id', milestoneId)
     .limit(1);
   const milestone = milestoneArr?.[0];
   if (getErr || !milestone) return { error: '找不到该节点' };
+
+  // 权限：仅关卡对应角色或指定负责人可填写实际日期
+  const { data: dateProfile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const dateUserRoles: string[] = (dateProfile as any)?.roles?.length > 0 ? (dateProfile as any).roles : [(dateProfile as any)?.role].filter(Boolean);
+  const isDateAssigned = milestone.owner_user_id === user.id;
+  const dateRoleMatches = milestone.owner_role && dateUserRoles.some(
+    (r: string) => r.toLowerCase() === milestone.owner_role.toLowerCase()
+      || (milestone.owner_role === 'sales' && r === 'merchandiser')
+      || (milestone.owner_role === 'merchandiser' && r === 'sales')
+  );
+  if (!isDateAssigned && !dateRoleMatches) {
+    return { error: '仅对应角色的负责人可填写实际日期' };
+  }
 
   // 校验：只有指定节点允许填写
   if (!ACTUAL_DATE_EDITABLE_KEYS.includes(milestone.step_key)) {

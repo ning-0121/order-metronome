@@ -11,6 +11,38 @@ const ROLE_LABELS: Record<string, string> = {
   logistics: '物流', admin: '管理员', ceo: 'CEO',
 };
 
+/** 每日鼓励语 */
+const DAILY_QUOTES = [
+  '每一个订单的准时交付，都是团队专业实力的证明。',
+  '细节决定品质，坚持成就卓越。',
+  '今天的每一步执行，都在为客户的信任加分。',
+  '高效协作，让每一个节拍都踩准。',
+  '专注当下，把手头的事情做到最好。',
+  '好的执行力，就是最强的竞争力。',
+  '每一次沟通都是机会，每一次跟进都有价值。',
+  '严谨的流程是品质的保障，你的认真客户看得到。',
+  '团队的力量在于每个人都不掉链子。',
+  '今天又是充满干劲的一天，加油！',
+];
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return '早上好';
+  if (hour < 18) return '下午好';
+  return '晚上好';
+}
+
+function getDailyQuote(): string {
+  const today = new Date();
+  const dayOfYear = Math.floor((today.getTime() - new Date(today.getFullYear(), 0, 0).getTime()) / 86400000);
+  return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
+}
+
+function formatToday(): string {
+  const d = new Date();
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 function getTodayDateString(): string {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -106,10 +138,13 @@ export default async function DashboardPage() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">
-          欢迎回来，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}
+          {getGreeting()}，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}！
         </h1>
         <p className="mt-1 text-sm text-gray-500">
-          这里显示需要你关注的异常事项 · 角色：{userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
+          {formatToday()} · {userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
+        </p>
+        <p className="mt-2 text-sm text-indigo-600 font-medium">
+          {getDailyQuote()}
         </p>
       </div>
 

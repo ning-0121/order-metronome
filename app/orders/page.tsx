@@ -146,7 +146,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <div className="flex items-center gap-3 text-xs text-gray-500 mb-2">
                   <span>{order.incoterm}</span>
                   <span>{dateStr}</span>
-                  <span>{({ trial: '试单', bulk: '批量', repeat: '翻单', urgent: '加急', sample: '样品' }[order.order_type as string] || order.order_type)}</span>
+                  <span>{({ trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' }[order.order_type as string] || order.order_type)}</span>
                 </div>
                 <div className="flex gap-0.5">
                   {phases.map((p: any, i: number) => (
@@ -215,7 +215,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     </td>
                     <td>
                       <span className={`badge ${order.order_type === 'sample' ? 'badge-info' : 'badge-neutral'}`}>
-                        {({ trial: '试单', bulk: '批量', repeat: '翻单', urgent: '加急', sample: '样品' }[order.order_type as string] || order.order_type)}
+                        {({ trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' }[order.order_type as string] || order.order_type)}
                       </span>
                     </td>
                     <td>

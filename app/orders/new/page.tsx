@@ -272,7 +272,7 @@ function NewOrderWizard() {
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                     <option value="">请选择</option>
                     <option value="trial">新品试单</option>
-                    <option value="bulk">正常批量</option>
+                    <option value="bulk">正常</option>
                     <option value="repeat">翻单</option>
                     <option value="urgent">加急订单</option>
                   </select>

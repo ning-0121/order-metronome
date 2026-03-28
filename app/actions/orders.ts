@@ -79,6 +79,15 @@ export async function createOrder(
   if (!user.email?.endsWith('@qimoclothing.com')) {
     return { ok: false, error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
   }
+
+  // 权限：仅业务/理单角色可创建订单
+  const { data: creatorProfile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const creatorRoles: string[] = (creatorProfile as any)?.roles?.length > 0 ? (creatorProfile as any).roles : [(creatorProfile as any)?.role].filter(Boolean);
+  const canCreate = creatorRoles.some(r => ['sales', 'merchandiser'].includes(r));
+  if (!canCreate) {
+    return { ok: false, error: '仅业务/理单角色可以创建订单' };
+  }
+
   if (!preGeneratedOrderNo) {
     return { ok: false, error: '订单号未生成，请刷新页面重试' };
   }
@@ -543,12 +552,23 @@ export async function submitRetrospectiveAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
+  // 权限：仅订单创建者或管理员可提交复盘
+  const { data: retroOrder } = await (supabase.from('orders') as any)
+    .select('created_by')
+    .eq('id', orderId)
+    .single();
+  if (!retroOrder) return { error: '订单不存在' };
+  const { isAdmin: isRetroAdmin } = await getCurrentUserRole(supabase);
+  if (retroOrder.created_by !== user.id && !isRetroAdmin) {
+    return { error: '仅订单创建者或管理员可提交复盘' };
+  }
+
   const payload = {
     on_time_delivery: formData.get('on_time_delivery') === 'true' ? true : 
                      formData.get('on_time_delivery') === 'false' ? false : null,

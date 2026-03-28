@@ -86,7 +86,21 @@ export async function createDelayRequest(
   }
   
   const orderData = order as any;
-  
+  const milestoneData = milestone as any;
+
+  // 权限：仅关卡对应角色或指定负责人可申请延期（管理员不能代替业务申请）
+  const { data: delayProfile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const delayUserRoles: string[] = (delayProfile as any)?.roles?.length > 0 ? (delayProfile as any).roles : [(delayProfile as any)?.role].filter(Boolean);
+  const isDelayAssigned = milestoneData.owner_user_id === user.id;
+  const delayRoleMatch = milestoneData.owner_role && delayUserRoles.some(
+    (r: string) => r.toLowerCase() === milestoneData.owner_role.toLowerCase()
+      || (milestoneData.owner_role === 'sales' && r === 'merchandiser')
+      || (milestoneData.owner_role === 'merchandiser' && r === 'sales')
+  );
+  if (!isDelayAssigned && !delayRoleMatch) {
+    return { error: '仅该关卡对应角色的负责人可申请延期' };
+  }
+
   // Validate: must provide either new anchor date or new due_at
   if (!proposedNewAnchorDate && !proposedNewDueAt) {
     return { error: 'Must provide either new anchor date or new due date' };
@@ -153,7 +167,6 @@ export async function createDelayRequest(
   }
   const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
 
-  const milestoneData = milestone as any;
   const subject = `[Delay Request] Order ${orderData.order_no} - ${milestoneData.name}`;
   const body = `
     <h2>Delay Request Submitted</h2>
@@ -223,7 +236,7 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
   const orderData = order as any;
   const milestoneData = milestone as any;
 
-  // Check authorization (multi-role safe: order owner, admin, or matching role)
+  // 权限：仅管理员可审批延期（审批权集中在管理层，避免自己审批自己）
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, roles')
@@ -231,18 +244,9 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdmin = userRoles.includes('admin');
-  const isOrderOwner = orderData.created_by === user.id;
-  const milestoneOwnerRole = (milestoneData.owner_role || '').toLowerCase();
-  const roleMatches = userRoles.some(r => {
-    const nr = r.toLowerCase();
-    return nr === milestoneOwnerRole
-      || (milestoneOwnerRole === 'qc' && (nr === 'qc' || nr === 'quality'))
-      || (milestoneOwnerRole === 'sales' && (nr === 'sales' || nr === 'merchandiser'))
-      || (milestoneOwnerRole === 'merchandiser' && (nr === 'sales' || nr === 'merchandiser'));
-  });
 
-  if (!isOrderOwner && !isAdmin && !roleMatches) {
-    return { error: '无权操作：只有订单创建者、管理员或相关角色可以审批延期' };
+  if (!isAdmin) {
+    return { error: '无权操作：只有管理员可以审批延期申请' };
   }
 
   // Update delay request
@@ -355,18 +359,17 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
 
   const orderData = order as any;
 
-  // Check authorization (multi-role safe)
-  const { data: profile } = await supabase
+  // 权限：仅管理员可驳回延期（与审批一致，审批权集中在管理层）
+  const { data: rejectProfile } = await supabase
     .from('profiles')
     .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdmin = userRoles.includes('admin');
-  const isOrderOwner = orderData.created_by === user.id;
+  const rejectUserRoles: string[] = (rejectProfile as any)?.roles?.length > 0 ? (rejectProfile as any).roles : [(rejectProfile as any)?.role].filter(Boolean);
+  const isRejectAdmin = rejectUserRoles.includes('admin');
 
-  if (!isOrderOwner && !isAdmin) {
-    return { error: '无权操作：只有订单创建者或管理员可以驳回延期' };
+  if (!isRejectAdmin) {
+    return { error: '无权操作：只有管理员可以驳回延期申请' };
   }
 
   // Update delay request
