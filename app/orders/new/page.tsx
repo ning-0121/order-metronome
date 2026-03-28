@@ -8,6 +8,7 @@ import { CustomerSelect } from '@/components/CustomerSelect';
 import { FactorySelect } from '@/components/FactorySelect';
 import { verifyPOAgainstOrder } from '@/app/actions/po-verify';
 import type { POVerifyResult } from '@/app/actions/po-verify';
+import { SmartInsightsPanel } from '@/components/SmartInsightsPanel';
 import Link from 'next/link';
 
 /** 客户端直传文件到 Supabase Storage（绕过 Vercel 4.5MB 限制） */
@@ -81,6 +82,8 @@ function NewOrderWizard() {
   const [pendingFormData, setPendingFormData] = useState<FormData | null>(null);
   const [pendingFiles, setPendingFiles] = useState<{ file: File; fileType: string; label: string }[]>([]);
   const [verifying, setVerifying] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [selectedFactory, setSelectedFactory] = useState('');
 
   useEffect(() => {
     const stepParam = searchParams.get('step');
@@ -288,7 +291,15 @@ function NewOrderWizard() {
             )}
           </div>
 
-          <form onSubmit={handleStep1Submit} className="space-y-8">
+          <form onSubmit={handleStep1Submit} className="space-y-8"
+            onChange={(e) => {
+              const form = e.currentTarget;
+              const cn = (form.querySelector('input[name="customer_name"]') as HTMLInputElement)?.value || '';
+              const fn = (form.querySelector('input[name="factory_name"]') as HTMLInputElement)?.value || '';
+              if (cn !== selectedCustomer) setSelectedCustomer(cn);
+              if (fn !== selectedFactory) setSelectedFactory(fn);
+            }}
+          >
 
             {/* ── 基本信息 ── */}
             <div>
@@ -409,6 +420,12 @@ function NewOrderWizard() {
                 )}
               </div>
             </div>
+
+            {/* ── AI 智脑提醒 ── */}
+            <SmartInsightsPanel
+              customerName={selectedCustomer}
+              factoryName={selectedFactory}
+            />
 
             {/* ── 风险标记 ── */}
             <div>
