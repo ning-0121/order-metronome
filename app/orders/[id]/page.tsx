@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
 import { RecalcButton } from '@/components/RecalcButton';
-import { OutsourceTab } from '@/components/tabs/OutsourceTab';
+import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 
 export default async function OrderDetailPage({
   params,
@@ -34,7 +34,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'outsource', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -194,7 +194,7 @@ export default async function OrderDetailPage({
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料单' },
-          { key: 'outsource', label: '外发任务' },
+          { key: 'production', label: '生产进度' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
@@ -451,11 +451,15 @@ export default async function OrderDetailPage({
           </div>
         )}
 
-        {/* Tab: 外发任务 */}
-        {activeTab === 'outsource' && (
+        {/* Tab: 生产进度 */}
+        {activeTab === 'production' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">外发任务</h2>
-            <OutsourceTab orderId={id} isAdmin={isAdmin} />
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">生产进度</h2>
+            <ProductionProgressTab
+              orderId={id}
+              isAdmin={isAdmin}
+              canReport={currentRoles.some(r => ['sales', 'merchandiser'].includes(r))}
+            />
           </div>
         )}
 
