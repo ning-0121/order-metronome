@@ -70,44 +70,64 @@ export function calcDueDates(params: CalcDueDatesParams) {
     ? parseDate(shippingSampleDeadline)!
     : addDays(A, -6);
 
-  return {
-    // ── 阶段1：订单启动（T+0 ~ T+1）──
-    po_confirmed:                  cap(T0),
-    finance_approval:              cap(addDays(T0, 1)),
-    production_order_upload:       cap(addDays(T0, 2)),
-
-    // ── 阶段2：订单转化（T+2 ~ T+3）──
-    order_docs_bom_complete:       cap(addDays(T0, 3)),
-    bulk_materials_confirmed:      cap(addDays(T0, 3)),
-
-    // ── 阶段3：工厂 & 产前样（T+2 ~ T+10）──
-    processing_fee_confirmed:      cap(addDays(T0, 2)),
-    factory_confirmed:             cap(addDays(T0, 3)),
-    pre_production_sample_ready:   cap(addDays(T0, 5)),
-    pre_production_sample_sent:    cap(addDays(T0, 6)),
+  // ══════ 排期计算 + 自动校验 ══════
+  const result: Record<string, Date> = {
+    po_confirmed: cap(T0),
+    finance_approval: cap(addDays(T0, 1)),
+    production_order_upload: cap(addDays(T0, 2)),
+    order_docs_bom_complete: cap(addDays(T0, 3)),
+    bulk_materials_confirmed: cap(addDays(T0, 3)),
+    processing_fee_confirmed: cap(addDays(T0, 2)),
+    factory_confirmed: cap(addDays(T0, 3)),
+    pre_production_sample_ready: cap(addDays(T0, 5)),
+    pre_production_sample_sent: cap(addDays(T0, 6)),
     pre_production_sample_approved: cap(addDays(T0, 10)),
-
-    // ── 阶段4：采购 & 生产（T+2 ~ T+12）──
-    procurement_order_placed:      cap(addDays(T0, 2)),
-    materials_received_inspected:  cap(addDays(T0, 12)),
-    pre_production_meeting:        cap(addDays(T0, 11)),
-    production_kickoff:            cap(addDays(T0, 12)),
-
-    // ── 阶段5：过程控制（倒排）──
-    mid_qc_check:                  cap(addDays(A, -15)),
-    final_qc_check:                cap(addDays(A, -8)),
-
-    // ── 阶段6：出货控制（倒排）──
-    packing_method_confirmed:      cap(addDays(A, -10)),
-    factory_completion:            cap(addDays(A, -7)),
-    inspection_release:            cap(addDays(A, -6)),
-    shipping_sample_send:          cap(shippingSample),
-
-    // ── 阶段7：物流收款（倒排）──
-    booking_done:                  cap(addDays(A, incoterm === 'FOB' ? -5 : -18)),
-    customs_export:                cap(addDays(A, -3)),       // A-3 报关安排出运（业务）
-    finance_shipment_approval:     cap(addDays(A, -2)),       // A-2 核准出运（财务）
-    shipment_execute:              cap(addDays(A, -1)),       // A-1 出运（物流）
-    payment_received:              addDays(A, 30),
+    procurement_order_placed: cap(addDays(T0, 2)),
+    materials_received_inspected: cap(addDays(T0, 12)),
+    pre_production_meeting: cap(addDays(T0, 11)),
+    production_kickoff: cap(addDays(T0, 12)),
+    mid_qc_check: cap(addDays(A, -15)),
+    final_qc_check: cap(addDays(A, -8)),
+    packing_method_confirmed: cap(addDays(A, -10)),
+    factory_completion: cap(addDays(A, -7)),
+    inspection_release: cap(addDays(A, -6)),
+    shipping_sample_send: cap(shippingSample),
+    booking_done: cap(addDays(A, incoterm === 'FOB' ? -5 : -18)),
+    customs_export: cap(addDays(A, -3)),
+    finance_shipment_approval: cap(addDays(A, -2)),
+    shipment_execute: cap(addDays(A, -1)),
+    payment_received: addDays(A, 30),
   };
+
+  // 校验1：交期不能早于下单日
+  const totalDays = Math.ceil((A.getTime() - T0.getTime()) / 86400000);
+  if (totalDays < 7) {
+    throw new Error(`交期太近：下单日到交期仅 ${totalDays} 天，最少需要 7 天`);
+  }
+
+  // 校验2：所有日期必须有效（非 NaN）
+  for (const [key, date] of Object.entries(result)) {
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
+      throw new Error(`排期计算异常：节点 ${key} 日期无效`);
+    }
+  }
+
+  // 校验3：除收款外，所有日期不能晚于交期
+  for (const [key, date] of Object.entries(result)) {
+    if (key === 'payment_received') continue;
+    if (date.getTime() > A.getTime() + 86400000) { // 允许1天容差
+      throw new Error(`排期异常：节点 ${key} 的日期 ${date.toISOString().slice(0,10)} 晚于交期 ${A.toISOString().slice(0,10)}`);
+    }
+  }
+
+  // 校验4：所有日期不能早于下单日前一天
+  const T0minus1 = addDays(T0, -1);
+  for (const [key, date] of Object.entries(result)) {
+    if (key === 'payment_received') continue;
+    if (date.getTime() < T0minus1.getTime()) {
+      throw new Error(`排期异常：节点 ${key} 的日期 ${date.toISOString().slice(0,10)} 早于下单日 ${T0.toISOString().slice(0,10)}`);
+    }
+  }
+
+  return result;
 }
