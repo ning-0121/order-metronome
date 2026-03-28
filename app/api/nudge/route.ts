@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
     // 所有登录用户都可以催办（催其他角色逾期的关卡）
     const body = await request.json();
     const milestone_id = body.milestone_id || body.milestoneId;
+    const customMessage = body.message || '';
 
     if (!milestone_id) {
       return NextResponse.json({ error: 'milestone_id is required' }, { status: 400 });
@@ -104,12 +105,16 @@ export async function POST(request: NextRequest) {
     const senderName = (senderProfile as any)?.name || user.email?.split('@')[0] || '同事';
 
     // 写入应用内通知（铃铛 + 浏览器弹窗）给被催的人
+    const notifMsg = customMessage
+      ? `${senderName}：「${customMessage}」\n订单 ${orderData.order_no}（${orderData.customer_name}）· ${milestoneData.name}`
+      : `订单 ${orderData.order_no}（${orderData.customer_name}）的「${milestoneData.name}」已逾期，请尽快处理`;
+
     if (milestoneData.owner_user_id) {
       await (supabase.from('notifications') as any).insert({
         user_id: milestoneData.owner_user_id,
         type: 'nudge',
         title: `${senderName} 催你处理「${milestoneData.name}」`,
-        message: `订单 ${orderData.order_no}（${orderData.customer_name}）的「${milestoneData.name}」已逾期，请尽快处理`,
+        message: notifMsg,
         related_order_id: orderData.id,
         related_milestone_id: milestone_id,
         status: 'unread',
@@ -118,11 +123,15 @@ export async function POST(request: NextRequest) {
 
     // Send email
     const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+    const messageHtml = customMessage
+      ? `<div style="margin:12px 0;padding:12px 16px;background:#fef3c7;border-left:4px solid #d97706;border-radius:4px;"><p style="margin:0;font-size:14px;color:#92400e;"><strong>${senderName} 留言：</strong>${customMessage}</p></div>`
+      : '';
 
     const subject = `[催办] ${orderData.order_no} — ${milestoneData.name} 需要尽快处理`;
     const html = `
       <h2 style="color:#d97706;">有同事在催你啦</h2>
       <p><strong>${senderName}</strong> 提醒你尽快处理以下节点：</p>
+      ${messageHtml}
       <table style="border-collapse:collapse;margin:16px 0;">
         <tr><td style="padding:4px 12px;font-weight:bold;">订单号</td><td style="padding:4px 12px;">${orderData.order_no}</td></tr>
         <tr><td style="padding:4px 12px;font-weight:bold;">客户</td><td style="padding:4px 12px;">${orderData.customer_name}</td></tr>
