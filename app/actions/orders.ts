@@ -59,10 +59,7 @@ export async function createOrder(
   formData: FormData,
   preGeneratedOrderNo?: string
 ): Promise<{ ok: boolean; orderId?: string; error?: string; warning?: string }> {
-  console.log('[createOrder] ====== START ======');
-
   // ── STEP 1: validate — 验证用户身份 ──
-  console.log('[createOrder] STEP 1: validate — 验证用户身份');
   let supabase;
   try {
     supabase = await createClient();
@@ -91,10 +88,7 @@ export async function createOrder(
   if (!preGeneratedOrderNo) {
     return { ok: false, error: '订单号未生成，请刷新页面重试' };
   }
-  console.log('[createOrder] STEP 1 OK — user:', user.email, 'orderNo:', preGeneratedOrderNo);
-
   // ── STEP 2: validate — 提取并校验表单字段 ──
-  console.log('[createOrder] STEP 2: validate — 提取表单字段');
   const customer_name = formData.get('customer_name') as string;
   const customer_id = formData.get('customer_id') as string;
   if (!customer_name || !customer_id) {
@@ -125,10 +119,7 @@ export async function createOrder(
   if (incoterm === 'DDP' && !warehouse_due_date) {
     return { ok: false, error: 'DDP 条款必须填写仓库截止日期' };
   }
-  console.log('[createOrder] STEP 2 OK — customer:', customer_name, 'incoterm:', incoterm, 'type:', order_type);
-
   // ── STEP 3: insert order — 写入订单到数据库 ──
-  console.log('[createOrder] STEP 3: insert order');
   // order_type: trial/bulk/repeat/urgent（DB CHECK 需更新）
   const dbOrderType = order_type || 'bulk';
 
@@ -174,7 +165,6 @@ export async function createOrder(
       formData.get('tight_deadline') === 'true' ? '交期紧急' : '',
     ].filter(Boolean),
   };
-  console.log('[createOrder] STEP 3: insert payload keys:', Object.keys(insertPayload).join(', '));
 
   let orderData: any;
   try {
@@ -184,14 +174,13 @@ export async function createOrder(
       return { ok: false, error: `订单写入数据库失败：${orderError || '未知错误'}` };
     }
     orderData = order;
-    console.log('[createOrder] STEP 3 OK — order_id:', orderData.id, 'order_no:', orderData.order_no);
   } catch (e: any) {
     console.error('[createOrder] STEP 3 EXCEPTION:', e.message);
     return { ok: false, error: `订单写入异常：${e.message}` };
   }
 
   // ── STEP 4: create milestones — 计算排期 ──
-  console.log('[createOrder] STEP 4: create milestones — 计算排期');
+  // ── STEP 4: create milestones — 计算排期 ──
   let dueDates: ReturnType<typeof calcDueDates>;
   try {
     dueDates = calcDueDates({
@@ -247,10 +236,7 @@ export async function createOrder(
       sequence_number: index + 1,
     });
   }
-  console.log('[createOrder] STEP 4 OK — milestones count:', milestonesData.length);
-
   // ── STEP 5: create milestones — RPC 写入里程碑 ──
-  console.log('[createOrder] STEP 5: create milestones — RPC init_order_milestones');
   try {
     const { error: rpcError } = await (supabase.rpc as any)('init_order_milestones', {
       _order_id: orderData.id,
@@ -266,11 +252,7 @@ export async function createOrder(
     await deleteOrder(orderData.id);
     return { ok: false, error: `里程碑初始化异常：${rpcEx.message}` };
   }
-  console.log('[createOrder] STEP 5 OK');
-
   // ── DONE ──
-  // 文件上传已移至客户端直传 Supabase Storage（不经过 Server Action）
-  console.log('[createOrder] ====== SUCCESS — orderId:', orderData.id, '======');
   revalidatePath('/orders');
   revalidatePath('/dashboard');
   return { ok: true, orderId: orderData.id };

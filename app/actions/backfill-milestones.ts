@@ -56,7 +56,6 @@ export async function backfillOrderMilestones(orderId: string) {
       incoterm: orderData.incoterm as "FOB" | "DDP",
       etd: orderData.etd,
       warehouseDueDate: orderData.warehouse_due_date,
-      packagingType: orderData.packaging_type as "standard" | "custom",
     });
   } catch (error: any) {
     return { error: `Failed to calculate due dates: ${error.message}` };

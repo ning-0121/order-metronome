@@ -34,7 +34,7 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} bg-white text-gray-900 antialiased`}
       >
-        <Navbar isAdmin={isAdmin} userRole={role} />
+        <Navbar isAdmin={isAdmin} />
         <main className="container mx-auto bg-white px-4 py-8">
           {children}
         </main>

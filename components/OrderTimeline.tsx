@@ -73,7 +73,7 @@ const MILESTONE_GROUPS = [
 const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
 const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
 const _isPending = (s: string) => s === 'pending' || s === '未开始';
-const _isBlocked = (s: string) => s === 'blocked' || s === '卡单' || s === '卡住';
+const _isBlocked = (s: string) => s === 'blocked' || s === '卡单' || s === '卡住' || s === '阻塞';
 const _statusLabel = (s: string) => _isDone(s) ? '已完成' : _isActive(s) ? '进行中' : _isBlocked(s) ? '卡住' : '未开始';
 
 const STATUS_STYLE: Record<string, string> = {
@@ -85,6 +85,7 @@ const STATUS_STYLE: Record<string, string> = {
   'done': 'bg-green-100 text-green-700',
   '卡单':   'bg-orange-100 text-orange-700',
   '卡住':   'bg-orange-100 text-orange-700',
+  '阻塞':   'bg-orange-100 text-orange-700',
   'blocked': 'bg-orange-100 text-orange-700',
 };
 

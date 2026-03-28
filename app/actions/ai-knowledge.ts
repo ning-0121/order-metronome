@@ -20,11 +20,12 @@ interface CollectResult {
  * 获取公司画像（用于给知识打标签）
  */
 async function getCompanyTags(supabase: any): Promise<{ industry: string; scale: string; markets: string[] }> {
-  const { data } = await (supabase.from('company_profile') as any).select('industry, company_scale, main_markets').limit(1).single();
+  const { data, error } = await (supabase.from('company_profile') as any).select('industry, company_scale, main_markets').limit(1).single();
+  if (error || !data) return { industry: 'apparel', scale: 'small', markets: [] };
   return {
-    industry: data?.industry ?? 'apparel',
-    scale: data?.company_scale ?? 'small',
-    markets: data?.main_markets ?? [],
+    industry: data.industry ?? 'apparel',
+    scale: data.company_scale ?? 'small',
+    markets: data.main_markets ?? [],
   };
 }
 
@@ -388,16 +389,16 @@ export async function runCollectionPipeline(): Promise<{ data?: CollectResult[];
   const startTime = Date.now();
   const results: CollectResult[] = [];
 
-  const collectors = [
-    collectFromRetrospectives,
-    collectFromCustomerMemory,
-    collectFromMilestoneLogs,
-    collectFromDelayRequests,
-    collectFromProductionReports,
-    collectFromMemos,
+  const collectors: Array<{ fn: typeof collectFromRetrospectives; source: KnowledgeSource }> = [
+    { fn: collectFromRetrospectives, source: 'retrospective' },
+    { fn: collectFromCustomerMemory, source: 'customer_memory' },
+    { fn: collectFromMilestoneLogs, source: 'milestone_log' },
+    { fn: collectFromDelayRequests, source: 'delay_request' },
+    { fn: collectFromProductionReports, source: 'production_report' },
+    { fn: collectFromMemos, source: 'memo' },
   ];
 
-  for (const collector of collectors) {
+  for (const { fn: collector, source } of collectors) {
     try {
       const result = await collector(supabase, tags, user.id);
       results.push(result);
@@ -412,7 +413,7 @@ export async function runCollectionPipeline(): Promise<{ data?: CollectResult[];
         duration_ms: Date.now() - startTime,
       });
     } catch (err: any) {
-      results.push({ source: collector.name.replace('collectFrom', '').toLowerCase() as KnowledgeSource, scanned: 0, ingested: 0, skipped: 0, error: err.message });
+      results.push({ source, scanned: 0, ingested: 0, skipped: 0, error: err.message });
     }
   }
 
@@ -527,9 +528,9 @@ export async function updateCompanyProfile(profile: Partial<CompanyProfile>): Pr
   const { isAdmin } = await getCurrentUserRole(supabase);
   if (!isAdmin) return { error: '仅管理员可修改公司画像' };
 
-  const { data: existing } = await (supabase.from('company_profile') as any).select('id').limit(1).single();
+  const { data: existing } = await (supabase.from('company_profile') as any).select('id').limit(1).maybeSingle();
 
-  if (existing) {
+  if (existing?.id) {
     const { error } = await (supabase.from('company_profile') as any)
       .update({ ...profile, updated_at: new Date().toISOString() })
       .eq('id', existing.id);

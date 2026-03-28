@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { updateUserRoleByAdmin } from '@/app/actions/users';
+import { updateUserRoles } from '@/app/actions/users';
 
 const ROLES = [
   { value: 'admin',       label: 'CEO/管理员',  desc: '全览数据，审批延期，指定人员' },
@@ -43,13 +43,7 @@ export function UserRoleEditor({ userId, currentRole, currentRoles, currentDepar
 
   const handleSave = async () => {
     setSaving(true); setError(''); setSaved(false);
-    const result = await updateUserRoleByAdmin({
-      userId,
-      roles: selectedRoles,
-      role: selectedRoles[0] || null,
-      department: dept || null,
-      isActive: active,
-    });
+    const result = await updateUserRoles(userId, selectedRoles);
 
     if (result.error) { setError(result.error); }
     else { setSaved(true); setTimeout(() => { setOpen(false); setSaved(false); router.refresh(); }, 800); }

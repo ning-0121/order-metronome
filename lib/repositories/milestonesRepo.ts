@@ -32,7 +32,8 @@ function mapStatusToDbEnum(status: MilestoneStatus | string): string {
     '未开始': 'pending',
     '进行中': 'in_progress',
     '已完成': 'done',
-    '卡住': 'blocked',
+    '阻塞': 'blocked',
+    '卡住': 'blocked', // 兼容旧代码
     'overdue': 'overdue',
     // 兼容英文状态
     'pending': 'pending',
@@ -53,8 +54,8 @@ function mapDbEnumToStatus(dbStatus: string): MilestoneStatus {
     'pending': '未开始',
     'in_progress': '进行中',
     'done': '已完成',
-    'blocked': '卡住',
-    'overdue': '卡住', // overdue 映射为卡住
+    'blocked': '阻塞',
+    'overdue': '阻塞', // overdue 映射为阻塞
   };
   
   return enumMap[dbStatus] || '未开始';
@@ -464,8 +465,8 @@ export async function transitionMilestoneStatus(
   // 处理 notes
   let updatedNotes = milestone.notes;
   
-  if (normalizedNextStatus === '卡住' && note) {
-    // 卡住状态：格式化原因到 notes
+  if (normalizedNextStatus === '阻塞' && note) {
+    // 阻塞状态：格式化原因到 notes
     updatedNotes = formatBlockedReasonToNotes(note, milestone.notes, false);
   } else if (note) {
     // 其他状态：追加到 notes
