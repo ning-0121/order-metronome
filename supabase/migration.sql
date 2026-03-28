@@ -1076,3 +1076,11 @@ WHERE step_key = 'booking_done' AND owner_role = 'logistics';
 
 UPDATE public.milestones SET owner_role = 'sales'
 WHERE step_key = 'customs_export' AND owner_role = 'logistics';
+
+-- ===== 2026-03-27 备忘录关联订单节拍 =====
+ALTER TABLE public.user_memos ADD COLUMN IF NOT EXISTS order_id uuid REFERENCES public.orders(id);
+ALTER TABLE public.user_memos ADD COLUMN IF NOT EXISTS milestone_id uuid REFERENCES public.milestones(id);
+ALTER TABLE public.user_memos ADD COLUMN IF NOT EXISTS linked_order_no text;
+
+CREATE INDEX IF NOT EXISTS idx_user_memos_order_id ON public.user_memos(order_id) WHERE order_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_memos_milestone_id ON public.user_memos(milestone_id) WHERE milestone_id IS NOT NULL;

@@ -374,6 +374,104 @@ export async function sendDeliveryDelayAlert(
 }
 
 /**
+ * 检查关联了 milestone 的备忘录：
+ * 如果关联的关卡 due_at 在 3 天内且 memo 没有手动设置 remind_at，
+ * 则写入一条系统通知（notifications 表），提醒 memo 所有者。
+ * 只读+创建通知，不修改任何 memo/milestone 数据。
+ */
+export async function checkLinkedMemoReminders() {
+  const supabase = await createClient();
+  const now = new Date();
+  const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+  // 查询：未完成的 memo + 关联了 milestone + milestone 还没完成
+  const { data: memos, error } = await (supabase.from('user_memos') as any)
+    .select('id, user_id, content, remind_at, order_id, milestone_id, linked_order_no')
+    .eq('is_done', false)
+    .not('milestone_id', 'is', null);
+
+  if (error || !memos) return { error: error?.message, reminders_sent: 0 };
+
+  let remindersSent = 0;
+
+  for (const memo of memos as any[]) {
+    // 如果用户手动设了 remind_at，跳过（用户自己管理提醒时间）
+    if (memo.remind_at) continue;
+
+    // 查关联的 milestone
+    const { data: milestone } = await (supabase.from('milestones') as any)
+      .select('id, name, due_at, status, order_id')
+      .eq('id', memo.milestone_id)
+      .single();
+
+    if (!milestone) continue;
+    const ms = milestone as any;
+
+    // 已完成的关卡不提醒
+    if (ms.status === 'done') continue;
+
+    // due_at 在 3 天内才提醒
+    if (!ms.due_at) continue;
+    const dueAt = new Date(ms.due_at);
+    if (dueAt > threeDaysLater || dueAt < now) continue; // 超过3天或已逾期（逾期由其他系统处理）
+
+    // 获取 memo 创建者的邮箱
+    const { data: profile } = await (supabase.from('profiles') as any)
+      .select('email')
+      .eq('user_id', memo.user_id)
+      .single();
+    if (!profile?.email) continue;
+
+    // 去重：同一个 memo + milestone 组合只发一次
+    const notifKind = 'memo_milestone_remind';
+    const { data: existing } = await (supabase.from('notifications') as any)
+      .select('id')
+      .eq('milestone_id', ms.id)
+      .eq('kind', notifKind)
+      .eq('sent_to', profile.email)
+      .single();
+    if (existing) continue;
+
+    // 创建通知
+    const orderNo = memo.linked_order_no || '未知订单';
+    await (supabase.from('notifications') as any).insert({
+      milestone_id: ms.id,
+      order_id: ms.order_id,
+      kind: notifKind,
+      sent_to: profile.email,
+      sent_at: now.toISOString(),
+      payload: {
+        memo_id: memo.id,
+        memo_content: memo.content.slice(0, 100),
+        order_no: orderNo,
+        milestone_name: ms.name,
+        due_at: ms.due_at,
+      },
+    });
+
+    // 发送邮件
+    const daysLeft = Math.ceil((dueAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const subject = `[备忘提醒] ${orderNo} — ${ms.name} 还有 ${daysLeft} 天到期`;
+    const body = `
+      <h2>备忘录关联节拍提醒</h2>
+      <p><strong>您的备忘：</strong>${memo.content.slice(0, 200)}</p>
+      <table style="border-collapse:collapse;margin:16px 0;">
+        <tr><td style="padding:4px 12px;font-weight:bold;">关联订单</td><td style="padding:4px 12px;">${orderNo}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">执行环节</td><td style="padding:4px 12px;">${ms.name}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">截止日期</td><td style="padding:4px 12px;">${dueAt.toLocaleDateString('zh-CN')}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">剩余天数</td><td style="padding:4px 12px;color:#d97706;font-weight:bold;">${daysLeft} 天</td></tr>
+      </table>
+      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order-metronome.vercel.app'}/orders/${ms.order_id}">查看订单详情</a></p>
+    `;
+
+    await sendEmailNotification([profile.email], subject, body);
+    remindersSent++;
+  }
+
+  return { data: { checked: (memos as any[]).length, reminders_sent: remindersSent } };
+}
+
+/**
  * 定期扫描：检查所有已填 actual_at 的节点，触发交期预警
  * 供 cron job 调用
  */

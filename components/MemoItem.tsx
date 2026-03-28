@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { toggleMemoDone, deleteMemo } from '@/app/actions/memos';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 interface MemoItemProps {
   memo: {
@@ -11,6 +12,11 @@ interface MemoItemProps {
     remind_at: string | null;
     is_done: boolean;
     created_at: string;
+    order_id?: string | null;
+    linked_order_no?: string | null;
+    milestone_id?: string | null;
+    milestone_name?: string | null;
+    milestone_due_at?: string | null;
   };
 }
 
@@ -38,6 +44,11 @@ export function MemoItem({ memo }: MemoItemProps) {
   const formatTime = (iso: string) => {
     const d = new Date(iso);
     return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  };
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
   };
 
   return (
@@ -70,7 +81,23 @@ export function MemoItem({ memo }: MemoItemProps) {
         <p className={`text-sm ${memo.is_done ? 'line-through text-gray-400' : 'text-gray-900'}`}>
           {memo.content}
         </p>
-        <div className="flex items-center gap-3 mt-1">
+        <div className="flex items-center gap-3 mt-1 flex-wrap">
+          {/* 关联订单标签 */}
+          {memo.order_id && memo.linked_order_no && (
+            <Link
+              href={`/orders/${memo.order_id}`}
+              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors"
+            >
+              <span>🔗</span>
+              <span className="font-medium">{memo.linked_order_no}</span>
+              {memo.milestone_name && (
+                <span className="text-blue-400">
+                  · {memo.milestone_name}
+                  {memo.milestone_due_at && ` (${formatDate(memo.milestone_due_at)})`}
+                </span>
+              )}
+            </Link>
+          )}
           {memo.remind_at && (
             <span className={`text-xs ${isRemindDue ? 'text-amber-700 font-medium' : 'text-gray-400'}`}>
               {isRemindDue ? '🔔 ' : '⏰ '}

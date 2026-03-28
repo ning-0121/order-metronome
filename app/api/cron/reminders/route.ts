@@ -1,4 +1,4 @@
-import { checkAndSendReminders, checkDeliveryDeadlines } from '@/app/actions/notifications';
+import { checkAndSendReminders, checkDeliveryDeadlines, checkLinkedMemoReminders } from '@/app/actions/notifications';
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
@@ -9,14 +9,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [reminderResult, deliveryResult] = await Promise.all([
+    const [reminderResult, deliveryResult, memoReminderResult] = await Promise.all([
       checkAndSendReminders(),
       checkDeliveryDeadlines(),
+      checkLinkedMemoReminders(),
     ]);
     return NextResponse.json({
       success: true,
       reminders: reminderResult,
       delivery_alerts: deliveryResult,
+      memo_reminders: memoReminderResult,
     });
   } catch (error: any) {
     console.error('Cron job error:', error);

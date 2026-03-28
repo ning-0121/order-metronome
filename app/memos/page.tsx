@@ -8,18 +8,42 @@ export default async function MemosPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
+  // 查询 memo + 关联的 milestone name/due_at
   const { data: memos } = await (supabase.from('user_memos') as any)
-    .select('*')
+    .select('id, content, remind_at, is_done, created_at, order_id, linked_order_no, milestone_id')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
   const allMemos = (memos || []) as any[];
+
+  // 批量查 milestone 信息（避免 N+1）
+  const milestoneIds = allMemos.map((m: any) => m.milestone_id).filter(Boolean);
+  let milestoneMap: Record<string, { name: string; due_at: string | null }> = {};
+  if (milestoneIds.length > 0) {
+    const { data: milestones } = await (supabase.from('milestones') as any)
+      .select('id, name, due_at')
+      .in('id', milestoneIds);
+    for (const ms of milestones || []) {
+      milestoneMap[ms.id] = { name: ms.name, due_at: ms.due_at };
+    }
+  }
+
+  // 合并 milestone 信息到 memo
+  const enrichedMemos = allMemos.map((m: any) => {
+    const ms = m.milestone_id ? milestoneMap[m.milestone_id] : null;
+    return {
+      ...m,
+      milestone_name: ms?.name || null,
+      milestone_due_at: ms?.due_at || null,
+    };
+  });
+
   const now = new Date();
 
   // 分组
-  const dueReminders = allMemos.filter(m => !m.is_done && m.remind_at && new Date(m.remind_at) <= now);
-  const activeMemos = allMemos.filter(m => !m.is_done && !(m.remind_at && new Date(m.remind_at) <= now));
-  const doneMemos = allMemos.filter(m => m.is_done);
+  const dueReminders = enrichedMemos.filter((m: any) => !m.is_done && m.remind_at && new Date(m.remind_at) <= now);
+  const activeMemos = enrichedMemos.filter((m: any) => !m.is_done && !(m.remind_at && new Date(m.remind_at) <= now));
+  const doneMemos = enrichedMemos.filter((m: any) => m.is_done);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
@@ -32,7 +56,7 @@ export default async function MemosPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">备忘录</h1>
             <p className="text-sm text-gray-500">
-              {allMemos.filter(m => !m.is_done).length} 条待办
+              {enrichedMemos.filter((m: any) => !m.is_done).length} 条待办
               {dueReminders.length > 0 && <span className="text-amber-600 ml-2">· {dueReminders.length} 条提醒到期</span>}
             </p>
           </div>
