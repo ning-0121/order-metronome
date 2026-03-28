@@ -1161,11 +1161,25 @@ WHERE m.order_id = o.id
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS special_tags text[] DEFAULT '{}';
 
 -- ===== 2026-03-28 新增节拍：订单启动会（order_kickoff_meeting） =====
--- 为所有现有订单补齐"订单启动会"节点（财务审核后2日内）
+-- 先把原第3位及之后的节点序号+1，给启动会腾出位置
+UPDATE public.milestones
+SET sequence_number = sequence_number + 1
+WHERE sequence_number >= 3
+  AND order_id IN (
+    SELECT DISTINCT order_id FROM public.milestones WHERE step_key = 'finance_approval'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.milestones m2
+    WHERE m2.order_id = milestones.order_id
+      AND m2.step_key = 'order_kickoff_meeting'
+  );
+
+-- 为所有现有订单补齐"订单启动会"节点（财务审核后2日内，序号3）
 INSERT INTO public.milestones (
   id, order_id, step_key, name, owner_role, owner_user_id,
   planned_at, due_at, actual_at, status,
-  is_critical, evidence_required, notes, created_at, updated_at
+  is_critical, evidence_required, notes, sequence_number,
+  created_at, updated_at
 )
 SELECT
   uuid_generate_v4(),
@@ -1174,13 +1188,14 @@ SELECT
   '订单启动会',
   'sales',
   NULL,
-  m_fin.due_at + interval '2 days',   -- 财务审核截止日 + 2天
+  m_fin.due_at + interval '2 days',
   m_fin.due_at + interval '2 days',
   NULL,
   'pending',
   true,
   false,
   NULL,
+  3,
   now(),
   now()
 FROM public.milestones m_fin
