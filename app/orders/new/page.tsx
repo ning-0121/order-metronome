@@ -6,6 +6,8 @@ import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { CustomerSelect } from '@/components/CustomerSelect';
 import { FactorySelect } from '@/components/FactorySelect';
+import { verifyPOAgainstOrder } from '@/app/actions/po-verify';
+import type { POVerifyResult } from '@/app/actions/po-verify';
 import Link from 'next/link';
 
 /** 客户端直传文件到 Supabase Storage（绕过 Vercel 4.5MB 限制） */
@@ -74,6 +76,11 @@ function NewOrderWizard() {
   const [preGeneratedOrderNo, setPreGeneratedOrderNo] = useState<string | null>(null);
   const [orderNoLoading, setOrderNoLoading] = useState(true);
   const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
+  const [poVerifyResult, setPoVerifyResult] = useState<POVerifyResult | null>(null);
+  const [showVerifyDialog, setShowVerifyDialog] = useState(false);
+  const [pendingFormData, setPendingFormData] = useState<FormData | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<{ file: File; fileType: string; label: string }[]>([]);
+  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     const stepParam = searchParams.get('step');
@@ -107,67 +114,108 @@ function NewOrderWizard() {
     }, 50);
   }
 
+  const FILE_FIELDS = [
+    { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
+    { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
+    { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
+    { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
+    { formKey: 'tech_pack_file', fileType: 'tech_pack', label: 'Tech Pack' },
+  ];
+
   async function handleStep1Submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
     if (!preGeneratedOrderNo) {
       showError('订单号未生成，请刷新页面重试');
-      setLoading(false);
       return;
     }
-    try {
-      const rawFormData = new FormData(e.currentTarget);
 
-      // ── 1. 从 FormData 提取文件并移除（不发到 Server Action） ──
-      const FILE_FIELDS = [
-        { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
-        { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
-        { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
-        { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
-        { formKey: 'tech_pack_file', fileType: 'tech_pack', label: 'Tech Pack' },
-      ];
-      const filesToUpload: { file: File; fileType: string; label: string }[] = [];
-      for (const { formKey, fileType, label } of FILE_FIELDS) {
-        const file = rawFormData.get(formKey) as File | null;
-        if (file && file.size > 0) {
-          filesToUpload.push({ file, fileType, label });
-        }
-        rawFormData.delete(formKey); // 从 FormData 中删除文件，只保留文本
+    const rawFormData = new FormData(e.currentTarget);
+
+    // 提取文件
+    const filesToUpload: { file: File; fileType: string; label: string }[] = [];
+    for (const { formKey, fileType, label } of FILE_FIELDS) {
+      const file = rawFormData.get(formKey) as File | null;
+      if (file && file.size > 0) {
+        filesToUpload.push({ file, fileType, label });
       }
+      rawFormData.delete(formKey);
+    }
 
-      // ── 2. Server Action：仅提交文本字段（< 100KB） ──
-      console.log('[前端] 调用 createOrder（纯文本，无文件）...');
-      const result = await createOrder(rawFormData, preGeneratedOrderNo);
-      console.log('[前端] createOrder 返回:', JSON.stringify({ ok: result.ok, error: result.error, orderId: result.orderId }));
+    // 检查是否有客户PO文件 → 自动比对
+    const poFile = filesToUpload.find(f => f.fileType === 'customer_po');
+    if (poFile && (poFile.file.type === 'application/pdf' || poFile.file.type.startsWith('image/'))) {
+      setVerifying(true);
+      try {
+        const buffer = await poFile.file.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+
+        const quantity = rawFormData.get('total_quantity') as string;
+        const incotermVal = rawFormData.get('incoterm') as string;
+        const deliveryDate = incotermVal === 'FOB'
+          ? rawFormData.get('etd') as string
+          : rawFormData.get('warehouse_due_date') as string;
+
+        const verifyRes = await verifyPOAgainstOrder(base64, poFile.file.type, poFile.file.name, {
+          quantity: quantity ? parseInt(quantity) : null,
+          delivery_date: deliveryDate,
+          customer_name: rawFormData.get('customer_name') as string,
+          po_number: rawFormData.get('customer_po_number') as string,
+        });
+
+        if (verifyRes.data && verifyRes.data.differences.length > 0) {
+          // 有差异 → 弹窗让用户选择
+          setPoVerifyResult(verifyRes.data);
+          setPendingFormData(rawFormData);
+          setPendingFiles(filesToUpload);
+          setShowVerifyDialog(true);
+          setVerifying(false);
+          return;
+        }
+      } catch {
+        // 比对失败不阻断创建
+      }
+      setVerifying(false);
+    }
+
+    // 无差异或无PO文件 → 直接创建
+    await doCreateOrder(rawFormData, filesToUpload);
+  }
+
+  /** 忽略差异，继续创建 */
+  async function handleIgnoreAndSubmit() {
+    setShowVerifyDialog(false);
+    if (pendingFormData) {
+      await doCreateOrder(pendingFormData, pendingFiles);
+    }
+  }
+
+  /** 实际创建订单 */
+  async function doCreateOrder(rawFormData: FormData, filesToUpload: { file: File; fileType: string; label: string }[]) {
+    setLoading(true);
+    try {
+      const result = await createOrder(rawFormData, preGeneratedOrderNo!);
 
       if (!result.ok) {
-        showError(result.error || '创建订单失败（服务端未返回错误详情）');
+        showError(result.error || '创建订单失败');
         return;
       }
 
-      // ── 3. 订单创建成功 → 客户端直传文件到 Supabase Storage ──
       const newOrderId = result.orderId!;
       setOrderId(newOrderId);
 
       if (filesToUpload.length > 0) {
-        console.log('[前端] 开始客户端直传', filesToUpload.length, '个文件...');
-        const uploadWarnings = await uploadFilesToStorage(newOrderId, filesToUpload);
-        if (uploadWarnings.length > 0) {
-          console.warn('[前端] 附件上传警告:', uploadWarnings);
-          setUploadWarnings(uploadWarnings);
-        }
+        const uploadWarns = await uploadFilesToStorage(newOrderId, filesToUpload);
+        if (uploadWarns.length > 0) setUploadWarnings(uploadWarns);
       }
 
-      // ── 4. 加载里程碑并进入 Step 2 ──
       const milestonesResult = await getMilestonesByOrder(newOrderId);
       if (milestonesResult.data) setMilestones(milestonesResult.data);
       router.push('/orders/new?step=2&order_id=' + newOrderId);
       setCurrentStep(2);
 
     } catch (err: any) {
-      console.error('[前端] createOrder 异常:', err);
-      showError(err?.message || '创建订单时发生意外错误，请重试');
+      showError(err?.message || '创建订单时发生意外错误');
     } finally {
       setLoading(false);
     }
@@ -428,12 +476,72 @@ function NewOrderWizard() {
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                 取消
               </button>
-              <button type="submit" disabled={loading || !preGeneratedOrderNo || orderNoLoading}
+              <button type="submit" disabled={loading || verifying || !preGeneratedOrderNo || orderNoLoading}
                 className="rounded-lg bg-indigo-600 px-6 py-2 text-sm text-white hover:bg-indigo-700 disabled:opacity-50 font-medium">
-                {loading ? '创建中...' : '创建订单 →'}
+                {verifying ? '正在比对PO...' : loading ? '创建中...' : '创建订单 →'}
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* PO 比对差异弹窗 */}
+      {showVerifyDialog && poVerifyResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowVerifyDialog(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">⚠️</span>
+              <h3 className="text-lg font-bold text-gray-900">PO 信息与填写内容不一致</h3>
+            </div>
+            <p className="text-sm text-gray-500">AI 从客户 PO 中提取的信息与你填写的订单信息有以下差异，请核实：</p>
+
+            <div className="border border-red-200 rounded-lg divide-y divide-red-100">
+              {poVerifyResult.differences.map((d, i) => (
+                <div key={i} className="px-4 py-3 flex items-center gap-3 text-sm">
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    d.severity === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                  }`}>{d.fieldLabel}</span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">PO：</span>
+                      <span className="font-bold text-red-600">{d.poValue}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">你填的：</span>
+                      <span className="font-medium text-gray-700">{d.orderValue}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {poVerifyResult.matched.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {poVerifyResult.matched.map((m, i) => (
+                  <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600">✓ {m}</span>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => { setShowVerifyDialog(false); setPendingFormData(null); }}
+                className="flex-1 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+              >
+                返回修改
+              </button>
+              <button
+                onClick={handleIgnoreAndSubmit}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+              >
+                {loading ? '创建中...' : '我确认无误，继续创建'}
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400 text-center">AI 比对可能有误差，如果你确认填写正确可忽略差异继续创建</p>
+          </div>
         </div>
       )}
 
