@@ -114,7 +114,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
     finance_approval:              cap(skipSundayForward(addWorkdays(T0, 1))),
     production_order_upload:       cap(skipSundayForward(addWorkdays(T0, 2))),
     // 阶段2：订单转化
-    order_docs_bom_complete:       cap(skipSundayBack(offset(packingConfirm, -10))),
+    order_docs_bom_complete:       cap(skipSundayBack(offset(packingConfirm, -20))),
     bulk_materials_confirmed:      cap(skipSundayBack(bulkMaterialsConfirmed)),
     // 阶段3：工厂选定+产前样（加工费→确认工厂→准备→寄出→客户确认）
     processing_fee_confirmed:      cap(skipSundayBack(processingFeeConfirmed)),
