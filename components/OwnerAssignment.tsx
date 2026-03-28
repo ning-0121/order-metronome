@@ -53,7 +53,8 @@ export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin }: Ow
     setSaving(false);
   }
 
-  if (!isAdmin) {
+  // 非管理员不显示；已分配负责人的也不显示（避免干扰）
+  if (!isAdmin || currentOwnerUserId) {
     return null;
   }
 

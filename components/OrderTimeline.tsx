@@ -303,7 +303,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
 
                         {/* 元信息行 */}
                         <div className="flex flex-wrap gap-x-3 md:gap-x-4 gap-y-1 text-[11px] md:text-xs text-gray-500">
-                          <span>责任人：{getRoleLabel(m.owner_role)}</span>
+                          <span>责任人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || `未分配（${getRoleLabel(m.owner_role)}）`}</span>
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (() => {
                             if (!overdue || !isActive) return <span>截止：{formatDate(m.due_at)}</span>;

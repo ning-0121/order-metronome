@@ -217,11 +217,13 @@ export async function createOrder(
       return { ok: false, error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
     }
     const dbRole = ROLE_TO_DB[template.owner_role] || 'sales';
+    // 业务/理单角色的关卡自动分配给订单创建者
+    const autoAssign = (dbRole === 'sales' || dbRole === 'merchandiser') ? user.id : null;
     milestonesData.push({
       step_key: template.step_key,
       name: template.name,
       owner_role: dbRole,
-      owner_user_id: null,
+      owner_user_id: autoAssign,
       planned_at: ensureBusinessDay(dueAt).toISOString(),
       due_at: ensureBusinessDay(dueAt).toISOString(),
       status: index === 0 ? 'in_progress' : 'pending',
