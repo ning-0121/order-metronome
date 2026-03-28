@@ -157,22 +157,31 @@ export default async function DashboardPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
-      <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm mb-8">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-50 to-white border border-slate-100 shadow-sm mb-8">
+        {/* 左侧装饰条 */}
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-300 via-purple-300 to-pink-300" />
+        <div className="p-6 pl-7">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-800">
-              {getGreeting()}，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}
-            </h1>
-            <p className="mt-2 text-gray-400 italic text-sm leading-relaxed max-w-2xl italic">
-              &ldquo;{getDailyQuote()}&rdquo;
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-800">
+                {getGreeting()}，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}
+              </h1>
+              <span className="text-2xl">
+                {new Date().getHours() < 12 ? '🌅' : new Date().getHours() < 18 ? '☀️' : '🌙'}
+              </span>
+            </div>
+            <p className="mt-3 text-sm text-gray-500 italic leading-relaxed max-w-2xl">
+              {getDailyQuote()}
             </p>
-            <p className="mt-3 text-gray-400 text-xs">
+            <p className="mt-4 text-xs text-gray-400">
               {userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
             </p>
           </div>
-          <div className="text-right flex-shrink-0 ml-4">
-            <p className="text-gray-400 text-sm">{formatToday()}</p>
+          <div className="text-right flex-shrink-0 ml-6">
+            <p className="text-sm font-medium text-gray-500">{formatToday()}</p>
           </div>
+        </div>
         </div>
       </div>
 

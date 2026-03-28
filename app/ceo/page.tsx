@@ -274,23 +274,38 @@ export default async function CEOWarRoom() {
         const greeting = now.getHours() < 12 ? '早上好' : now.getHours() < 18 ? '下午好' : '晚上好';
 
         return (
-          <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-            <div className="flex items-start justify-between">
-              <div>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-800">
-                  {greeting}，{ceoName}
-                </h1>
-                <p className="mt-2 text-gray-400 italic text-sm leading-relaxed max-w-2xl italic">
-                  &ldquo;{quote}&rdquo;
-                </p>
-                <p className="mt-3 text-gray-400 text-xs">
-                  {totalOrders} 个订单 · {overdueMilestones.length} 个超期 · {blockedMilestones.length} 个阻塞 · {(pendingDelays || []).length} 个待审批
-                </p>
-              </div>
-              <div className="text-right flex-shrink-0 ml-4">
-                <p className="text-gray-400 text-sm">
-                  {now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}
-                </p>
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-50 to-white border border-slate-100 shadow-sm">
+            {/* 左侧装饰条 */}
+            <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-300 via-purple-300 to-pink-300" />
+            <div className="p-6 pl-7">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-800">
+                      {greeting}，{ceoName}
+                    </h1>
+                    <span className="text-2xl">
+                      {now.getHours() < 12 ? '🌅' : now.getHours() < 18 ? '☀️' : '🌙'}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm text-gray-500 italic leading-relaxed max-w-2xl">
+                    {quote}
+                  </p>
+                  <div className="mt-4 flex items-center gap-4 text-xs text-gray-400">
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-indigo-300" />{totalOrders} 个订单</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-300" />{overdueMilestones.length} 个超期</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-300" />{blockedMilestones.length} 个阻塞</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-300" />{(pendingDelays || []).length} 个待审批</span>
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0 ml-6">
+                  <p className="text-sm font-medium text-gray-500">
+                    {now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {now.toLocaleDateString('zh-CN', { weekday: 'long' })}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
