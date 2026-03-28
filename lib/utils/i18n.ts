@@ -12,8 +12,9 @@ export function getRoleLabel(role: string): string {
     'merchandiser': '跟单',
     'finance': '财务',
     'procurement': '采购',
-    'production': '生产',
-    'qc': '质检',
+    'production': '跟单',     // 生产已合并到跟单
+    'qc': '跟单',             // 质检已合并到跟单
+    'quality': '跟单',        // 质检（旧值）已合并到跟单
     'logistics': '物流/仓库',
     'admin': '管理员',
   };

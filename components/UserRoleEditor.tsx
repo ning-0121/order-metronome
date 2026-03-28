@@ -4,17 +4,15 @@ import { useRouter } from 'next/navigation';
 import { updateUserRoleByAdmin } from '@/app/actions/users';
 
 const ROLES = [
-  { value: 'admin',       label: '管理员',     desc: '全权限' },
-  { value: 'ceo',         label: 'CEO',        desc: '全览，不操作节点' },
-  { value: 'sales',       label: '业务/理单',    desc: '全流程负责客户订单' },
-  { value: 'finance',     label: '财务',        desc: '审核+复盘+第三签' },
-  { value: 'procurement', label: '采购',        desc: '采购下单+原辅料确认' },
-  { value: 'production',  label: '生产',        desc: '排期开裁+产前会' },
-  { value: 'qc',          label: '质检',        desc: '中查/尾查/放行' },
-  { value: 'logistics',   label: '物流/仓库',   desc: '仓库工作台+出货第二签' },
+  { value: 'admin',       label: 'CEO/管理员',  desc: '全览数据，审批延期，指定人员' },
+  { value: 'sales',       label: '业务/理单',    desc: '客户对接、PO确认、生产单、订舱报关' },
+  { value: 'merchandiser', label: '跟单',       desc: '工厂协调、生产跟进、中查尾查、验货放行' },
+  { value: 'finance',     label: '财务',        desc: '订单审核、加工费确认、收款' },
+  { value: 'procurement', label: '采购',        desc: '面辅料采购、供应商跟进' },
+  { value: 'logistics',   label: '物流/仓库',   desc: '出货签核、装箱、物流' },
 ];
 
-const DEPARTMENTS = ['业务部', '财务部', '采购部', '生产部', '质检部', '仓储物流部', '管理层'];
+const DEPARTMENTS = ['业务部', '财务部', '采购部', '跟单部', '仓储物流部', '管理层'];
 
 interface Props {
   userId: string;

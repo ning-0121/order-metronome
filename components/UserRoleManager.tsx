@@ -5,14 +5,12 @@ import { updateUserRoles } from '@/app/actions/users';
 import { useRouter } from 'next/navigation';
 
 const ALL_ROLES = [
-  { value: 'admin', label: 'CEO/管理员', desc: '全览所有数据，审批延期，不操作节点' },
-  { value: 'sales', label: '业务', desc: '客户对接、报价、合同' },
-  { value: 'merchandiser', label: '跟单', desc: '生产单执行、工厂协调、中查尾查、验货放行' },
-  { value: 'finance', label: '财务', desc: '订单审核、成本核算' },
-  { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进' },
-  { value: 'production', label: '生产', desc: '外发任务、生产进度跟踪' },
-  { value: 'qc', label: '质检', desc: 'QC检验、质量报告' },
-  { value: 'logistics', label: '物流/仓库', desc: '出货签核、装箱、物流' },
+  { value: 'admin', label: 'CEO/管理员', desc: '全览所有数据，审批延期，指定人员，不操作节点' },
+  { value: 'sales', label: '业务/理单', desc: '客户对接、PO确认、生产单制作、原辅料验收、订舱报关' },
+  { value: 'merchandiser', label: '跟单', desc: '工厂协调、生产跟进、中查尾查、验货放行、品质管控' },
+  { value: 'finance', label: '财务', desc: '订单审核、加工费确认、成本核算、收款' },
+  { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认' },
+  { value: 'logistics', label: '物流/仓库', desc: '出货签核、装箱、物流协调' },
 ];
 
 interface UserProfile {

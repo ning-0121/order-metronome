@@ -143,11 +143,17 @@ export async function markMilestoneDone(milestoneId: string) {
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAssignedUser = milestone.owner_user_id === user.id;
+  // 角色合并：production/qc/quality 都归入 merchandiser
+  const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
   const roleMatches = milestone.owner_role && userRoles.some(
-    (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
-      || (milestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
-      || (milestone.owner_role === 'sales' && r === 'merchandiser')
-      || (milestone.owner_role === 'merchandiser' && r === 'sales')
+    (r: string) => {
+      const nr = r.toLowerCase();
+      const or = (milestone.owner_role as string).toLowerCase();
+      if (nr === or) return true;
+      if ((or === 'sales' && nr === 'merchandiser') || (or === 'merchandiser' && nr === 'sales')) return true;
+      if (merchGroup.includes(or) && merchGroup.includes(nr)) return true;
+      return false;
+    }
   );
   if (!isAssignedUser && !roleMatches) {
     return { error: '无权操作：只有对应角色的负责人可以标记完成' };

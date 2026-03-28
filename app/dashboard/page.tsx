@@ -6,9 +6,9 @@ import { UnblockButton } from '@/components/UnblockButton';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
-  sales: '业务', merchandiser: '跟单', finance: '财务', procurement: '采购',
-  production: '生产', qc: '品控', quality: '品控',
-  logistics: '物流', admin: '管理员', ceo: 'CEO',
+  sales: '业务/理单', merchandiser: '跟单', finance: '财务', procurement: '采购',
+  production: '跟单', qc: '跟单', quality: '跟单',
+  logistics: '物流/仓库', admin: '管理员',
 };
 
 /** 每日暖心语（31条，一个月不重复，不提工作，只关心人） */

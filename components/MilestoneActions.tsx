@@ -37,13 +37,16 @@ export function MilestoneActions({
   // 管理员不在此列（管理员监督不替代执行，与服务端权限一致）
   const allRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
   const ownerRole = (milestone.owner_role || '').toLowerCase();
+  // 角色合并：production/qc/quality 都归入 merchandiser
   const canModify = allRoles.some(r => {
     const nr = r.toLowerCase();
-    return nr === ownerRole
-      || (ownerRole === 'qc' && (nr === 'quality' || nr === 'qc'))
-      || (ownerRole === 'quality' && (nr === 'qc' || nr === 'quality'))
-      || (ownerRole === 'sales' && nr === 'merchandiser')
-      || (ownerRole === 'merchandiser' && nr === 'sales');
+    if (nr === ownerRole) return true;
+    // 业务/理单互通
+    if ((ownerRole === 'sales' && nr === 'merchandiser') || (ownerRole === 'merchandiser' && nr === 'sales')) return true;
+    // 生产/质检/品控 → 跟单
+    const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
+    if (merchGroup.includes(ownerRole) && merchGroup.includes(nr)) return true;
+    return false;
   });
 
   // ── 阻断校验 ──────────────────────────────────────────────────
