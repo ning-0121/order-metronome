@@ -7,6 +7,7 @@ import { OrderTimeline } from '@/components/OrderTimeline';
 import { DelayRequestsList } from '@/components/DelayRequestsList';
 import { OrderScoreCard } from '@/components/OrderScoreCard';
 import { MerchandiserAssign } from '@/components/MerchandiserAssign';
+import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
@@ -134,17 +135,28 @@ export default async function OrderDetailPage({
                 {orderData.po_number && <span className="ml-3 text-gray-400">PO：{orderData.po_number}</span>}
               </p>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-400">
-                {orderData.incoterm === 'FOB' ? 'ETD' : '入仓日'}：
-                <span className="text-gray-700 font-medium">
-                  {orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date)}
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-400">
+                  {orderData.incoterm === 'FOB' ? 'ETD' : '入仓日'}：
+                  <span className="text-gray-700 font-medium">
+                    {orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date)}
+                  </span>
                 </span>
-              </span>
+                {(orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date) && (
+                  <DeadlineCountdown
+                    targetDate={orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date}
+                    label={orderData.incoterm === 'FOB' ? 'ETD' : '入仓'}
+                  />
+                )}
+              </div>
               {orderData.cancel_date && (
-                <span className={`ml-3 text-xs font-medium px-2 py-1 rounded ${new Date(orderData.cancel_date) < new Date() ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
-                  Cancel: {formatDate(orderData.cancel_date)}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-400">
+                    Cancel：<span className="text-gray-700 font-medium">{formatDate(orderData.cancel_date)}</span>
+                  </span>
+                  <DeadlineCountdown targetDate={orderData.cancel_date} label="Cancel" />
+                </div>
               )}
             </div>
           </div>
