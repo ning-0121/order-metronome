@@ -26,9 +26,11 @@
  *   A+30  收款
  */
 
+/** 解析日期为北京时间 0 点 */
 function parseDate(s?: string | null): Date | null {
   if (!s) return null;
-  return new Date(s + 'T00:00:00');
+  // 固定为北京时间 UTC+8
+  return new Date(s + 'T00:00:00+08:00');
 }
 
 function addDays(base: Date, days: number): Date {
@@ -60,7 +62,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
   const T0 = parseDate(orderDate) ?? createdAt ?? new Date();
   const anchorStr = incoterm === 'FOB' ? etd : (eta || warehouseDueDate);
   if (!anchorStr) throw new Error('Missing anchor: ' + (incoterm === 'FOB' ? 'ETD' : 'ETA/到仓日') + ' required');
-  const A = new Date(anchorStr + 'T00:00:00');
+  const A = new Date(anchorStr + 'T00:00:00+08:00');
 
   const cap = (d: Date): Date => d > A ? new Date(A) : d;
 
