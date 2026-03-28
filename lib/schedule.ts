@@ -11,7 +11,8 @@
  *   Day 0   (0%)    PO确认
  *   Day 1   (2%)    财务审核
  *   Day 3   (7%)    订单启动会（财务审核后2日内，参会：CEO/业务/采购/跟单）
- *   Day 2   (4%)    生产单 + 采购下达 + 加工费确认
+ *   Day 2   (4%)    采购下达 + 加工费确认
+ *   Day 4   (9%)    生产单上传（启动会后）
  *   Day 3   (7%)    辅料单/BOM + 原辅料确认 + 确认工厂
  *   Day 5   (11%)   产前样准备
  *   Day 6   (13%)   产前样寄出
@@ -42,7 +43,7 @@ const TIMELINE = {
   po_confirmed:                  0,
   finance_approval:              1,
   order_kickoff_meeting:         3,
-  production_order_upload:       2,
+  production_order_upload:       4,
   order_docs_bom_complete:       3,
   bulk_materials_confirmed:      3,
   processing_fee_confirmed:      2,
