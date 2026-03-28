@@ -41,7 +41,7 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "pre_production_sample_approved", name: "产前样客户确认", owner_role: "sales", is_critical: true, evidence_required: true },
   // 阶段4：采购与生产
   { step_key: "procurement_order_placed", name: "采购订单下达", owner_role: "procurement", is_critical: true, evidence_required: true },
-  { step_key: "materials_received_inspected", name: "原辅料到货验收", owner_role: "sales", is_critical: true, evidence_required: false },
+  { step_key: "materials_received_inspected", name: "原辅料到货验收", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   { step_key: "production_kickoff", name: "生产启动/开裁", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   { step_key: "pre_production_meeting", name: "产前会", owner_role: "merchandiser", is_critical: false, evidence_required: false },
   // 阶段5：过程控制

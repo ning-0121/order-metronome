@@ -1144,3 +1144,15 @@ WHERE m.order_id = o.id
   AND m.owner_user_id IS NULL
   AND o.owner_user_id IS NOT NULL
   AND m.owner_role IN ('sales', 'merchandiser');
+
+-- ===== 2026-03-28 修正关卡角色：原辅料到货验收归跟单 =====
+UPDATE public.milestones SET owner_role = 'merchandiser'
+WHERE step_key = 'materials_received_inspected' AND owner_role = 'sales';
+
+-- 清除跟单关卡上错误分配的业务人员（跟单由管理员另行指定）
+UPDATE public.milestones m
+SET owner_user_id = NULL
+FROM public.orders o
+WHERE m.order_id = o.id
+  AND m.owner_user_id = o.owner_user_id
+  AND m.owner_role = 'merchandiser';

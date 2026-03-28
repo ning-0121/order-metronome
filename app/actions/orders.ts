@@ -116,6 +116,8 @@ export async function createOrder(
   const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
   const factory_name = formData.get('factory_name') as string | null;
   const factory_id = formData.get('factory_id') as string | null;
+  const totalQuantity = formData.get('total_quantity') as string | null;
+  const quantity = totalQuantity ? parseInt(totalQuantity, 10) : null;
 
   if (incoterm === 'FOB' && !etd) {
     return { ok: false, error: 'FOB 条款必须填写 ETD（预计离港日）' };
@@ -161,6 +163,7 @@ export async function createOrder(
     is_new_customer: isNewCustomer,
     is_new_factory: isNewFactory,
     created_by: user.id,
+    quantity: quantity,
   };
   console.log('[createOrder] STEP 3: insert payload keys:', Object.keys(insertPayload).join(', '));
 
@@ -217,8 +220,8 @@ export async function createOrder(
       return { ok: false, error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
     }
     const dbRole = ROLE_TO_DB[template.owner_role] || 'sales';
-    // 业务/理单角色的关卡自动分配给订单创建者
-    const autoAssign = (dbRole === 'sales' || dbRole === 'merchandiser') ? user.id : null;
+    // 仅业务角色的关卡自动分配给订单创建者（跟单由管理员另行指定）
+    const autoAssign = dbRole === 'sales' ? user.id : null;
     milestonesData.push({
       step_key: template.step_key,
       name: template.name,
