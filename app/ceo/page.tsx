@@ -274,13 +274,13 @@ export default async function CEOWarRoom() {
         const greeting = now.getHours() < 12 ? '早上好' : now.getHours() < 18 ? '下午好' : '晚上好';
 
         return (
-          <div className="bg-gradient-to-br from-pink-50 via-rose-50 to-pink-50 rounded-2xl p-6 border border-pink-100 shadow-sm">
+          <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-800">
                   {greeting}，{ceoName}
                 </h1>
-                <p className="mt-2 text-pink-400 text-sm leading-relaxed max-w-2xl italic">
+                <p className="mt-2 text-gray-400 italic text-sm leading-relaxed max-w-2xl italic">
                   &ldquo;{quote}&rdquo;
                 </p>
                 <p className="mt-3 text-gray-400 text-xs">
