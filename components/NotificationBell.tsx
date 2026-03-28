@@ -39,10 +39,10 @@ export function NotificationBell() {
     }
   }, []);
 
-  // 轮询未读通知（每60秒）
+  // 轮询未读通知（每15秒，保证催办能及时弹出）
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 60000);
+    const interval = setInterval(fetchNotifications, 15000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
 

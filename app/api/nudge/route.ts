@@ -99,11 +99,25 @@ export async function POST(request: NextRequest) {
       payload: { recipient_email: recipientEmail },
     });
 
-    // Send email
-    const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
     // 获取催办人名称
     const { data: senderProfile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
     const senderName = (senderProfile as any)?.name || user.email?.split('@')[0] || '同事';
+
+    // 写入应用内通知（铃铛 + 浏览器弹窗）给被催的人
+    if (milestoneData.owner_user_id) {
+      await (supabase.from('notifications') as any).insert({
+        user_id: milestoneData.owner_user_id,
+        type: 'nudge',
+        title: `${senderName} 催你处理「${milestoneData.name}」`,
+        message: `订单 ${orderData.order_no}（${orderData.customer_name}）的「${milestoneData.name}」已逾期，请尽快处理`,
+        related_order_id: orderData.id,
+        related_milestone_id: milestone_id,
+        status: 'unread',
+      });
+    }
+
+    // Send email
+    const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
 
     const subject = `[催办] ${orderData.order_no} — ${milestoneData.name} 需要尽快处理`;
     const html = `
