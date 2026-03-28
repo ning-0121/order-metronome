@@ -9,6 +9,7 @@ const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'compl
 const PHASE_MAP: Record<string, string> = {
   po_confirmed: '阶段1：订单启动',
   finance_approval: '阶段1：订单启动',
+  order_kickoff_meeting: '阶段1：订单启动',
   production_order_upload: '阶段1：订单启动',
   production_resources_confirmed: '阶段1：订单启动',
   order_docs_bom_complete: '阶段2：订单转化',

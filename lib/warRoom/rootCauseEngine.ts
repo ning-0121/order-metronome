@@ -67,7 +67,7 @@ const ROLE_LABELS: Record<string, string> = {
 // 阶段映射（step_key → 阶段名）
 const STAGE_MAP: Record<string, string> = {
   po_confirmed: '订单启动', finance_approval: '订单启动',
-  production_resources_confirmed: '订单启动',
+  order_kickoff_meeting: '订单启动', production_resources_confirmed: '订单启动',
   order_docs_bom_complete: '订单转化', bulk_materials_confirmed: '订单转化',
   pre_production_sample_ready: '产前样', pre_production_sample_sent: '产前样',
   pre_production_sample_approved: '产前样',

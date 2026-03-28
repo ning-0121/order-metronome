@@ -1205,3 +1205,116 @@ WHERE m_fin.step_key = 'finance_approval'
     WHERE m2.order_id = m_fin.order_id
       AND m2.step_key = 'order_kickoff_meeting'
   );
+
+-- ===== 2026-03-28 AI 知识库数据管道 =====
+
+-- 1. 公司画像表（SaaS 多租户预留）
+CREATE TABLE IF NOT EXISTS public.company_profile (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_name text NOT NULL DEFAULT 'Qimo Technology',
+  industry text NOT NULL DEFAULT 'apparel',        -- apparel / textile / accessories / footwear / home_textile / other
+  industry_sub text,                                -- 细分：casual_wear / sportswear / workwear / underwear / children 等
+  company_scale text NOT NULL DEFAULT 'small',      -- micro(<10人) / small(10-50) / medium(50-200) / large(200+)
+  annual_order_volume text,                         -- yearly order count range: <50 / 50-200 / 200-500 / 500+
+  main_markets text[] DEFAULT '{"US","EU"}',        -- 主要出口市场
+  main_products text[] DEFAULT '{}',                -- 主营品类
+  employee_count int,
+  erp_system text,                                  -- 已用ERP：none / custom / sap / other
+  pain_points text[] DEFAULT '{}',                  -- 核心痛点标签
+  metadata jsonb DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.company_profile ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated can read company_profile"
+  ON public.company_profile FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated can manage company_profile"
+  ON public.company_profile FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- 插入默认公司画像
+INSERT INTO public.company_profile (company_name, industry, industry_sub, company_scale, annual_order_volume, main_markets, main_products)
+VALUES ('齐墨科技', 'apparel', 'casual_wear', 'small', '50-200', '{"US","EU"}', '{"针织","梭织"}')
+ON CONFLICT DO NOTHING;
+
+-- 2. AI 知识库统一表
+CREATE TABLE IF NOT EXISTS public.ai_knowledge_base (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- 知识分类
+  knowledge_type text NOT NULL,                    -- employee / customer / factory / process / industry
+  category text NOT NULL DEFAULT 'general',        -- 细分类别
+  subcategory text,                                -- 三级分类
+
+  -- 知识内容
+  title text NOT NULL,                             -- 知识标题（一句话总结）
+  content text NOT NULL,                           -- 详细内容
+  structured_data jsonb DEFAULT '{}',              -- 结构化数据（指标、统计、KV对）
+
+  -- 来源追溯
+  source_type text NOT NULL,                       -- retrospective / customer_memory / milestone_log / delay_request / production_report / memo / manual
+  source_id text,                                  -- 原始记录ID
+  source_table text,                               -- 来源表名
+
+  -- 关联维度
+  customer_name text,                              -- 关联客户
+  factory_name text,                               -- 关联工厂
+  order_id uuid REFERENCES public.orders(id) ON DELETE SET NULL,
+  employee_role text,                              -- 关联角色
+
+  -- 行业/规模标签（SaaS推广用）
+  industry_tag text DEFAULT 'apparel',             -- 适用行业
+  scale_tag text DEFAULT 'small',                  -- 适用规模
+  market_tags text[] DEFAULT '{}',                 -- 适用市场
+
+  -- 质量与权重
+  confidence text DEFAULT 'medium',                -- high / medium / low
+  frequency int DEFAULT 1,                         -- 出现频次（同类知识聚合）
+  impact_level text DEFAULT 'medium',              -- high / medium / low
+  is_actionable boolean DEFAULT true,              -- 是否可操作（vs 纯信息）
+
+  -- 状态
+  status text DEFAULT 'active',                    -- active / archived / merged
+  reviewed_by uuid,
+  reviewed_at timestamptz,
+
+  -- 元数据
+  created_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_kb_type ON public.ai_knowledge_base(knowledge_type);
+CREATE INDEX IF NOT EXISTS idx_ai_kb_source ON public.ai_knowledge_base(source_type);
+CREATE INDEX IF NOT EXISTS idx_ai_kb_customer ON public.ai_knowledge_base(customer_name);
+CREATE INDEX IF NOT EXISTS idx_ai_kb_factory ON public.ai_knowledge_base(factory_name);
+CREATE INDEX IF NOT EXISTS idx_ai_kb_industry ON public.ai_knowledge_base(industry_tag, scale_tag);
+CREATE INDEX IF NOT EXISTS idx_ai_kb_created ON public.ai_knowledge_base(created_at DESC);
+
+ALTER TABLE public.ai_knowledge_base ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated can read ai_knowledge_base"
+  ON public.ai_knowledge_base FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated can insert ai_knowledge_base"
+  ON public.ai_knowledge_base FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated can update ai_knowledge_base"
+  ON public.ai_knowledge_base FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+-- 3. 数据采集日志（记录每次管道运行）
+CREATE TABLE IF NOT EXISTS public.ai_collection_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_at timestamptz NOT NULL DEFAULT now(),
+  triggered_by uuid REFERENCES auth.users(id),
+  source_type text NOT NULL,
+  records_scanned int DEFAULT 0,
+  records_ingested int DEFAULT 0,
+  records_skipped int DEFAULT 0,
+  duration_ms int,
+  error_message text,
+  metadata jsonb DEFAULT '{}'
+);
+
+ALTER TABLE public.ai_collection_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated can read ai_collection_log"
+  ON public.ai_collection_log FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated can insert ai_collection_log"
+  ON public.ai_collection_log FOR INSERT TO authenticated WITH CHECK (true);
