@@ -369,8 +369,15 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                     {/* 展开区 */}
                     {isExpanded && (
                       <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
-                        {/* 实际/预计日期输入（仅关键生产节点） */}
-                        {ACTUAL_DATE_EDITABLE_KEYS.includes(m.step_key) && !_isDone(m.status) && (
+                        {/* 实际/预计日期输入（仅关键生产节点 + 对应角色） */}
+                        {ACTUAL_DATE_EDITABLE_KEYS.includes(m.step_key) && !_isDone(m.status) && !isAdmin && (() => {
+                          const dateRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+                          const mRole2 = (m.owner_role || '').toLowerCase();
+                          return dateRoles.some(r => {
+                            const nr = r.toLowerCase();
+                            return nr === mRole2 || (mRole2 === 'sales' && nr === 'merchandiser') || (mRole2 === 'merchandiser' && nr === 'sales');
+                          });
+                        })() && (
                           <ActualDateInput
                             milestoneId={m.id}
                             currentActualAt={m.actual_at}
@@ -426,7 +433,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           );
                         })()}
 
-                        {/* 核心操作区：MilestoneActions（去处理 + 申请延期） */}
+                        {/* 核心操作区：MilestoneActions（去处理 + 申请延期）— 仅对应角色可见 */}
                         <MilestoneActions
                           milestone={m}
                           allMilestones={sorted}
@@ -436,17 +443,58 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           orderId={orderId}
                         />
 
-                        <EvidenceUpload
-                          milestoneId={m.id}
-                          orderId={orderId}
-                          evidenceRequired={m.evidence_required || false}
-                        />
+                        {/* 管理员专属：催办提醒按钮（不能执行，但可以提醒） */}
+                        {isAdmin && !_isDone(m.status) && (
+                          <div className="bg-blue-50 rounded-lg p-3 flex items-center justify-between">
+                            <div className="text-xs text-blue-700">
+                              <span className="font-medium">管理员视角</span>
+                              <span className="text-blue-500 ml-2">
+                                负责人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'} · {getRoleLabel(m.owner_role)}
+                              </span>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`确定发送催办提醒给「${m.name}」的负责人？`)) return;
+                                try {
+                                  const res = await fetch('/api/nudge', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ milestoneId: m.id }),
+                                  });
+                                  const json = await res.json();
+                                  if (json.error) alert(json.error);
+                                  else alert('催办邮件已发送');
+                                } catch { alert('发送失败'); }
+                              }}
+                              className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium"
+                            >
+                              📧 催办提醒
+                            </button>
+                          </div>
+                        )}
 
-                        {!_isDone(m.status) &&
-                          (isAdmin || (currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : [])).some(r => {
+                        {/* 凭证上传：仅关卡对应角色可上传（管理员只看不传） */}
+                        {(() => {
+                          const uploadRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+                          const mRole = (m.owner_role || '').toLowerCase();
+                          const canUpload = !isAdmin && uploadRoles.some(r => {
+                            const nr = r.toLowerCase();
+                            return nr === mRole || (mRole === 'qc' && nr === 'quality') || (mRole === 'sales' && nr === 'merchandiser') || (mRole === 'merchandiser' && nr === 'sales');
+                          });
+                          return canUpload ? (
+                            <EvidenceUpload
+                              milestoneId={m.id}
+                              orderId={orderId}
+                              evidenceRequired={m.evidence_required || false}
+                            />
+                          ) : null;
+                        })()}
+
+                        {!_isDone(m.status) && !isAdmin &&
+                          (currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : [])).some(r => {
                             const nr = r.toLowerCase(); const or2 = (m.owner_role || '').toLowerCase();
-                            return nr === or2 || (or2 === 'qc' && nr === 'quality') || (or2 === 'sales' && nr === 'merchandiser');
-                          })) && (
+                            return nr === or2 || (or2 === 'qc' && nr === 'quality') || (or2 === 'sales' && nr === 'merchandiser') || (or2 === 'merchandiser' && nr === 'sales');
+                          }) && (
                           <div className="bg-gray-50 rounded-lg p-4">
                             <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">申请顺延</h4>
                             <DelayRequestForm

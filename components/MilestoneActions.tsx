@@ -34,9 +34,10 @@ export function MilestoneActions({
   const [submitError, setSubmitError] = useState('');
 
   // 多角色匹配：用户任一角色匹配节点 owner_role 即可操作
+  // 管理员不在此列（管理员监督不替代执行，与服务端权限一致）
   const allRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
   const ownerRole = (milestone.owner_role || '').toLowerCase();
-  const canModify = isAdmin || allRoles.some(r => {
+  const canModify = allRoles.some(r => {
     const nr = r.toLowerCase();
     return nr === ownerRole
       || (ownerRole === 'qc' && (nr === 'quality' || nr === 'qc'))
