@@ -1,38 +1,49 @@
-import { addDays, addBusinessDays, subBusinessDays, format, parseISO, isWeekend, isAfter, startOfDay } from 'date-fns';
+import { addDays, format, parseISO, isAfter, startOfDay } from 'date-fns';
+
+// 公司工作制：周一到周六上班，只有周日休息
+const isSunday = (d: Date) => d.getDay() === 0;
 
 /**
- * Add business days (excluding weekends)
+ * Add working days (skip Sundays only — 6-day work week)
  */
 export function addWorkingDays(date: Date, days: number): Date {
-  return addBusinessDays(date, days);
+  const d = new Date(date);
+  let added = 0;
+  while (added < days) {
+    d.setDate(d.getDate() + 1);
+    if (!isSunday(d)) added++;
+  }
+  return d;
 }
 
 /**
- * Subtract business days (excluding weekends)
+ * Subtract working days (skip Sundays only)
  */
 export function subtractWorkingDays(date: Date, days: number): Date {
-  return subBusinessDays(date, days);
+  const d = new Date(date);
+  let removed = 0;
+  while (removed < days) {
+    d.setDate(d.getDate() - 1);
+    if (!isSunday(d)) removed++;
+  }
+  return d;
 }
 
 /**
- * Get the previous business day if the date falls on a weekend
+ * If date falls on Sunday, move to Saturday (previous working day)
  */
 export function ensureBusinessDay(date: Date): Date {
-  let result = new Date(date);
-  while (isWeekend(result)) {
-    result = subtractWorkingDays(result, 1);
-  }
+  const result = new Date(date);
+  if (isSunday(result)) result.setDate(result.getDate() - 1);
   return result;
 }
 
 /**
- * Get the next business day if the date falls on a weekend
+ * If date falls on Sunday, move to Monday (next working day)
  */
 export function ensureBusinessDayForward(date: Date): Date {
-  let result = new Date(date);
-  while (isWeekend(result)) {
-    result = addWorkingDays(result, 1);
-  }
+  const result = new Date(date);
+  if (isSunday(result)) result.setDate(result.getDate() + 1);
   return result;
 }
 

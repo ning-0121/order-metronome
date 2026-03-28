@@ -1,28 +1,27 @@
 import { subtractWorkingDays } from './utils/date';
 
-function shiftWeekendToFriday(d: Date): Date {
+// 公司6天工作制：周一到周六上班，只有周日休息
+// 如果落在周日，往前挪到周六（倒排用）
+function skipSundayBack(d: Date): Date {
   const r = new Date(d);
-  const day = r.getDay();
-  if (day === 6) r.setDate(r.getDate() - 1);
-  if (day === 0) r.setDate(r.getDate() - 2);
+  if (r.getDay() === 0) r.setDate(r.getDate() - 1);
   return r;
 }
 
-// 周末往后挪到下周一（用于起始日期，不能比下单日更早）
-function shiftWeekendToMonday(d: Date): Date {
+// 如果落在周日，往后挪到周一（正推用）
+function skipSundayForward(d: Date): Date {
   const r = new Date(d);
-  const day = r.getDay();
-  if (day === 6) r.setDate(r.getDate() + 2);
-  if (day === 0) r.setDate(r.getDate() + 1);
+  if (r.getDay() === 0) r.setDate(r.getDate() + 1);
   return r;
 }
 
+// 加工作日（只跳周日）
 function addWorkdays(start: Date, days: number): Date {
   const d = new Date(start);
   let added = 0;
   while (added < days) {
     d.setDate(d.getDate() + 1);
-    if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+    if (d.getDay() !== 0) added++;
   }
   return d;
 }
@@ -30,7 +29,7 @@ function addWorkdays(start: Date, days: number): Date {
 function offset(base: Date, days: number): Date {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
-  return shiftWeekendToFriday(d);
+  return skipSundayBack(d);
 }
 
 function parseDate(s?: string | null): Date | null {
@@ -74,32 +73,32 @@ export function calcDueDates(params: CalcDueDatesParams) {
   const ppsSampleSent     = offset(anchor, -21);
   const ppsSampleApproved = offset(anchor, -18);
   const finalQc           = offset(anchor, -7);
-  const packingConfirm    = shiftWeekendToFriday(addWorkdays(finalQc, 1));
+  const packingConfirm    = skipSundayBack(addWorkdays(finalQc, 1));
   const factoryCompletion = offset(anchor, -8);
   const inspectionRelease = offset(anchor, -7);
   const shippingSample    = shippingSampleRequired && shippingSampleDeadline
-    ? shiftWeekendToFriday(parseDate(shippingSampleDeadline)!)
+    ? skipSundayBack(parseDate(shippingSampleDeadline)!)
     : offset(anchor, -7);
   const bookingDone       = offset(anchor, incoterm === 'FOB' ? -5 : -21);
   const customsExport     = offset(anchor, -3);
 
   // 生产启动 = 产前样确认后次日
-  const productionKickoff    = shiftWeekendToFriday(addWorkdays(ppsSampleApproved, 1));
+  const productionKickoff    = skipSundayBack(addWorkdays(ppsSampleApproved, 1));
   const preProductionMeeting = subtractWorkingDays(productionKickoff, 1);
   const midQc                = addWorkdays(productionKickoff, 10);
 
   // 采购 = T0+2工作日；物料到位 = 采购下单后14天
-  const procurementPlaced   = shiftWeekendToFriday(addWorkdays(T0, 2));
+  const procurementPlaced   = skipSundayBack(addWorkdays(T0, 2));
   const materialsReceived   = offset(procurementPlaced, 14);
 
   // 大货原辅料确认 = 采购前3工作日
   const bulkMaterialsConfirmed = subtractWorkingDays(procurementPlaced, 3);
 
   // 样品单用稍短的生产启动时间
-  const productionKickoffSample = shiftWeekendToFriday(addWorkdays(ppsSampleApproved, 1));
+  const productionKickoffSample = skipSundayBack(addWorkdays(ppsSampleApproved, 1));
 
   // 加工费确认 = T0+3工作日
-  const processingFeeConfirmed = shiftWeekendToFriday(addWorkdays(T0, 3));
+  const processingFeeConfirmed = skipSundayBack(addWorkdays(T0, 3));
   // 确认工厂 = 产前样准备前2工作日（先选工厂再做产前样）
   const factoryConfirmed = subtractWorkingDays(ppsSampleReady, 2);
 
@@ -111,34 +110,34 @@ export function calcDueDates(params: CalcDueDatesParams) {
 
   return {
     // 阶段1：订单启动（从下单日正推，周末往后挪不往前，且不超过交期）
-    po_confirmed:                  cap(shiftWeekendToMonday(T0)),
-    finance_approval:              cap(shiftWeekendToMonday(addWorkdays(T0, 1))),
-    production_order_upload:       cap(shiftWeekendToMonday(addWorkdays(T0, 3))),
+    po_confirmed:                  cap(skipSundayForward(T0)),
+    finance_approval:              cap(skipSundayForward(addWorkdays(T0, 1))),
+    production_order_upload:       cap(skipSundayForward(addWorkdays(T0, 3))),
     // 阶段2：订单转化
-    order_docs_bom_complete:       cap(shiftWeekendToMonday(addWorkdays(T0, 2))),
-    bulk_materials_confirmed:      cap(shiftWeekendToFriday(bulkMaterialsConfirmed)),
+    order_docs_bom_complete:       cap(skipSundayForward(addWorkdays(T0, 2))),
+    bulk_materials_confirmed:      cap(skipSundayBack(bulkMaterialsConfirmed)),
     // 阶段3：工厂选定+产前样（加工费→确认工厂→准备→寄出→客户确认）
-    processing_fee_confirmed:      cap(shiftWeekendToFriday(processingFeeConfirmed)),
-    factory_confirmed:             cap(shiftWeekendToFriday(factoryConfirmed)),
-    pre_production_sample_ready:   cap(shiftWeekendToFriday(ppsSampleReady)),
-    pre_production_sample_sent:    cap(shiftWeekendToFriday(ppsSampleSent)),
-    pre_production_sample_approved: cap(shiftWeekendToFriday(ppsSampleApproved)),
+    processing_fee_confirmed:      cap(skipSundayBack(processingFeeConfirmed)),
+    factory_confirmed:             cap(skipSundayBack(factoryConfirmed)),
+    pre_production_sample_ready:   cap(skipSundayBack(ppsSampleReady)),
+    pre_production_sample_sent:    cap(skipSundayBack(ppsSampleSent)),
+    pre_production_sample_approved: cap(skipSundayBack(ppsSampleApproved)),
     // 阶段4：采购与生产
-    procurement_order_placed:      cap(shiftWeekendToFriday(procurementPlaced)),
-    materials_received_inspected:  cap(shiftWeekendToFriday(materialsReceived)),
-    production_kickoff:            cap(orderType === 'sample' ? productionKickoffSample : shiftWeekendToFriday(productionKickoff)),
-    pre_production_meeting:        cap(shiftWeekendToFriday(preProductionMeeting)),
+    procurement_order_placed:      cap(skipSundayBack(procurementPlaced)),
+    materials_received_inspected:  cap(skipSundayBack(materialsReceived)),
+    production_kickoff:            cap(orderType === 'sample' ? productionKickoffSample : skipSundayBack(productionKickoff)),
+    pre_production_meeting:        cap(skipSundayBack(preProductionMeeting)),
     // 阶段5：过程控制
-    mid_qc_check:                  cap(shiftWeekendToFriday(midQc)),
-    final_qc_check:                cap(shiftWeekendToFriday(finalQc)),
+    mid_qc_check:                  cap(skipSundayBack(midQc)),
+    final_qc_check:                cap(skipSundayBack(finalQc)),
     // 阶段6：出货控制
-    packing_method_confirmed:      cap(shiftWeekendToFriday(packingConfirm)),
-    factory_completion:            cap(shiftWeekendToFriday(factoryCompletion)),
-    inspection_release:            cap(shiftWeekendToFriday(inspectionRelease)),
-    shipping_sample_send:          cap(shiftWeekendToFriday(shippingSample)),
+    packing_method_confirmed:      cap(skipSundayBack(packingConfirm)),
+    factory_completion:            cap(skipSundayBack(factoryCompletion)),
+    inspection_release:            cap(skipSundayBack(inspectionRelease)),
+    shipping_sample_send:          cap(skipSundayBack(shippingSample)),
     // 阶段7：物流收款
-    booking_done:                  cap(shiftWeekendToFriday(bookingDone)),
-    customs_export:                cap(shiftWeekendToFriday(customsExport)),
+    booking_done:                  cap(skipSundayBack(bookingDone)),
+    customs_export:                cap(skipSundayBack(customsExport)),
     payment_received:              offset(anchor, 30), // 收款可以在交期后
   };
 }
