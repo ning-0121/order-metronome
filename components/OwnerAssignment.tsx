@@ -10,9 +10,10 @@ interface OwnerAssignmentProps {
   milestoneId: string;
   currentOwnerUserId: string | null;
   isAdmin: boolean;
+  milestoneStatus?: string;
 }
 
-export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin }: OwnerAssignmentProps) {
+export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, milestoneStatus }: OwnerAssignmentProps) {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,10 +54,9 @@ export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin }: Ow
     setSaving(false);
   }
 
-  // 非管理员不显示；已分配负责人的也不显示（避免干扰）
-  if (!isAdmin || currentOwnerUserId) {
-    return null;
-  }
+  // 非管理员不显示；已分配负责人的也不显示；已完成的不显示
+  const isDone = milestoneStatus === 'done' || milestoneStatus === '已完成' || milestoneStatus === 'completed';
+  if (!isAdmin || currentOwnerUserId || isDone) return null;
 
   return (
     <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">

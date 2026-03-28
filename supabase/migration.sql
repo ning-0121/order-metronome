@@ -1135,3 +1135,12 @@ CREATE POLICY "commission_update_admin" ON public.order_commissions
   FOR UPDATE USING (
     EXISTS (SELECT 1 FROM public.profiles WHERE user_id = auth.uid() AND (role = 'admin' OR 'admin' = ANY(roles)))
   );
+
+-- ===== 2026-03-28 回填旧订单：业务/理单关卡自动分配给订单创建者 =====
+UPDATE public.milestones m
+SET owner_user_id = o.owner_user_id
+FROM public.orders o
+WHERE m.order_id = o.id
+  AND m.owner_user_id IS NULL
+  AND o.owner_user_id IS NOT NULL
+  AND m.owner_role IN ('sales', 'merchandiser');

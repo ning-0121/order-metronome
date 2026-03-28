@@ -399,6 +399,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           milestoneId={m.id}
                           currentOwnerUserId={m.owner_user_id}
                           isAdmin={isAdmin}
+                          milestoneStatus={m.status}
                         />
 
                         {/* evidence_note 完整提示 */}
