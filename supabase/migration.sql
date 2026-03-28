@@ -1156,3 +1156,6 @@ FROM public.orders o
 WHERE m.order_id = o.id
   AND m.owner_user_id = o.owner_user_id
   AND m.owner_role = 'merchandiser';
+
+-- ===== 2026-03-28 订单特殊标记 + 备注 =====
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS special_tags text[] DEFAULT '{}';

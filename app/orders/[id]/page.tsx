@@ -119,10 +119,12 @@ export default async function OrderDetailPage({
               </div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-gray-900">{orderData.order_no}</h1>
-                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${riskClass}`}>{riskLabel}</span>
+                {orderData.lifecycle_status !== 'draft' && riskColor !== 'green' && (
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${riskClass}`}>{riskLabel}</span>
+                )}
                 {orderData.lifecycle_status && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
-                    {orderData.lifecycle_status}
+                    {orderData.lifecycle_status === 'draft' ? '草稿' : orderData.lifecycle_status === 'active' ? '执行中' : orderData.lifecycle_status === 'completed' ? '已完成' : orderData.lifecycle_status === 'cancelled' ? '已取消' : orderData.lifecycle_status}
                   </span>
                 )}
                 {orderData.is_new_customer && (
@@ -131,6 +133,9 @@ export default async function OrderDetailPage({
                 {orderData.is_new_factory && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">新工厂首单</span>
                 )}
+                {(orderData.special_tags || []).map((tag: string) => (
+                  <span key={tag} className="text-xs font-medium px-2.5 py-1 rounded-full bg-red-100 text-red-700">{tag}</span>
+                ))}
               </div>
               <div className="flex items-center gap-3 mt-1">
                 <p className="text-gray-500 text-sm">
@@ -226,6 +231,7 @@ export default async function OrderDetailPage({
                 {[
                   { label: '订单号', value: orderData.order_no },
                   { label: '客户', value: orderData.customer_name },
+                  { label: '客户PO号', value: orderData.po_number },
                   { label: '负责业务/理单', value: ownerName },
                   { label: '贸易条款', value: orderData.incoterm },
                   { label: orderData.incoterm === 'FOB' ? 'ETD' : '到仓日期(ETA)', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
@@ -258,13 +264,24 @@ export default async function OrderDetailPage({
                   { label: '订单数量', value: orderData.quantity ? `${orderData.quantity} 件` : null },
                   { label: '下单日期', value: orderData.order_date ? formatDate(orderData.order_date) : null },
                   { label: '工厂', value: orderData.factory_name },
-                  { label: '备注', value: orderData.notes },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between">
                     <dt className="text-sm text-gray-500">{label}</dt>
                     <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
                   </div>
                 ))}
+                {/* 备注高亮显示 */}
+                {orderData.notes ? (
+                  <div className="mt-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                    <dt className="text-xs font-semibold text-amber-700 mb-1">客户备注</dt>
+                    <dd className="text-sm text-amber-900 leading-relaxed whitespace-pre-wrap">{orderData.notes}</dd>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-gray-500">备注</dt>
+                    <dd className="text-sm font-medium text-gray-900">—</dd>
+                  </div>
+                )}
               </dl>
             </div>
 

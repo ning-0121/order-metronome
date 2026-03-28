@@ -417,8 +417,10 @@ function NewOrderWizard() {
                   { name: 'new_factory', label: '新工厂首单', desc: '首次合作工厂，需加强跟进' },
                   { name: 'has_plus_size', label: '大码款', desc: '含 XL 以上尺码' },
                   { name: 'high_stretch', label: '高弹面料', desc: '氨纶 / 四面弹' },
-                  { name: 'light_color_risk', label: '浅色风险', desc: '白 / 米 / 浅灰' },
+                  { name: 'light_color_risk', label: '浅色风险', desc: '白 / 米 / 浅灰容易色差' },
+                  { name: 'color_clash_risk', label: '撞色风险', desc: '深浅色拼接，容易沾色' },
                   { name: 'complex_print', label: '复杂印花', desc: '满印 / 精细对位' },
+                  { name: 'tight_deadline', label: '交期紧急', desc: '交期比标准周期短' },
                 ].map(({ name, label, desc }) => (
                   <label key={name} className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
                     <input type="checkbox" name={name} value="true"
@@ -430,6 +432,16 @@ function NewOrderWizard() {
                   </label>
                 ))}
               </div>
+            </div>
+
+            {/* ── 客户备注 ── */}
+            <div>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4 pb-2 border-b border-gray-100">
+                客户备注
+              </h3>
+              <textarea name="notes" rows={3}
+                placeholder="填写客户的额外需求、特殊要求、注意事项等..."
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
             </div>
 
             {/* ── 文件上传 ── */}

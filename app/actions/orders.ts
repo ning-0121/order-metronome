@@ -164,6 +164,15 @@ export async function createOrder(
     is_new_factory: isNewFactory,
     created_by: user.id,
     quantity: quantity,
+    notes: (formData.get('notes') as string) || null,
+    special_tags: [
+      formData.get('has_plus_size') === 'true' ? '大码款' : '',
+      formData.get('high_stretch') === 'true' ? '高弹面料' : '',
+      formData.get('light_color_risk') === 'true' ? '浅色风险' : '',
+      formData.get('color_clash_risk') === 'true' ? '撞色风险' : '',
+      formData.get('complex_print') === 'true' ? '复杂印花' : '',
+      formData.get('tight_deadline') === 'true' ? '交期紧急' : '',
+    ].filter(Boolean),
   };
   console.log('[createOrder] STEP 3: insert payload keys:', Object.keys(insertPayload).join(', '));
 
@@ -277,7 +286,7 @@ export async function getOrders() {
   
   const { data: orders, error } = await supabase
     .from('orders')
-    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, quantity, cancel_date, order_date')
+    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, quantity, cancel_date, order_date, special_tags')
     .order('created_at', { ascending: false });
   
   if (error) {
