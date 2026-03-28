@@ -138,7 +138,7 @@ export default async function OrderDetailPage({
             <div className="flex flex-col items-end gap-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-400">
-                  {orderData.incoterm === 'FOB' ? 'ETD' : '入仓日'}：
+                  {orderData.incoterm === 'FOB' ? 'ETD' : '到仓日(ETA)'}：
                   <span className="text-gray-700 font-medium">
                     {orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date)}
                   </span>
@@ -146,7 +146,7 @@ export default async function OrderDetailPage({
                 {(orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date) && (
                   <DeadlineCountdown
                     targetDate={orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date}
-                    label={orderData.incoterm === 'FOB' ? 'ETD' : '入仓'}
+                    label={orderData.incoterm === 'FOB' ? 'ETD' : 'ETA'}
                   />
                 )}
               </div>
@@ -202,7 +202,7 @@ export default async function OrderDetailPage({
                   { label: '客户', value: orderData.customer_name },
                   { label: '负责业务/理单', value: ownerName },
                   { label: '贸易条款', value: orderData.incoterm },
-                  { label: orderData.incoterm === 'FOB' ? 'ETD' : '入仓日期', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
+                  { label: orderData.incoterm === 'FOB' ? 'ETD' : '到仓日期(ETA)', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
                   { label: '订单类型', value: ({ trial: '新品试单', bulk: '正常', repeat: '翻单', urgent: '加急订单', sample: '样品' } as Record<string,string>)[orderData.order_type] || orderData.order_type },
                   { label: '包装类型', value: orderData.packaging_type === 'standard' ? '标准' : '定制' },
                 ].map(({ label, value }) => (

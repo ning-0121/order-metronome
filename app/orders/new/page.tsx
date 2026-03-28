@@ -325,22 +325,13 @@ function NewOrderWizard() {
                   </div>
                 )}
                 {incoterm === 'DDP' && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        ETA（到仓日期）<span className="text-red-500">*</span>
-                      </label>
-                      <input type="date" name="eta" required
-                        className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        仓库截止日期 <span className="text-red-500">*</span>
-                      </label>
-                      <input type="date" name="warehouse_due_date" required
-                        className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                    </div>
-                  </>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      到仓日期（ETA）<span className="text-red-500">*</span>
+                    </label>
+                    <input type="date" name="warehouse_due_date" required
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  </div>
                 )}
                 <div className="col-span-2">
                   <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50">

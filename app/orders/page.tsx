@@ -171,7 +171,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <th>工厂</th>
                 <th>款号/PO</th>
                 <th>贸易条款</th>
-                <th>ETD/入仓日</th>
+                <th>ETD/ETA</th>
                 <th>类型</th>
                 <th>状态</th>
                 <th>阶段进度</th>
