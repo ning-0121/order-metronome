@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
 import Link from 'next/link';
 import { UnblockButton } from '@/components/UnblockButton';
+import { NudgeButton } from '@/components/NudgeButton';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -411,9 +412,7 @@ function MilestoneCard({ milestone, variant, badge, isMine }: { milestone: any; 
             </Link>
           )}
           {isMine === false && (
-            <span className="text-xs px-3 py-1.5 rounded-md bg-orange-100 text-orange-700 font-medium cursor-default">
-              催一下
-            </span>
+            <NudgeButton milestoneId={milestone.id} milestoneName={milestone.name} />
           )}
         </div>
       </div>

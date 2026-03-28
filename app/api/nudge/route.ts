@@ -17,13 +17,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if user is admin
-    if (!isAdmin(user.email)) {
-      return NextResponse.json({ error: 'Only admin can nudge' }, { status: 403 });
-    }
-
+    // 所有登录用户都可以催办（催其他角色逾期的关卡）
     const body = await request.json();
-    const { milestone_id } = body;
+    const milestone_id = body.milestone_id || body.milestoneId;
 
     if (!milestone_id) {
       return NextResponse.json({ error: 'milestone_id is required' }, { status: 400 });
@@ -55,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     if (recentNudges && recentNudges.length > 0) {
       return NextResponse.json(
-        { error: 'Nudge already sent in the last hour. Please wait before nudging again.' },
+        { error: '已在1小时内发送过催办，请稍后再试' },
         { status: 429 }
       );
     }
@@ -105,16 +101,22 @@ export async function POST(request: NextRequest) {
 
     // Send email
     const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
-    const subject = `[Nudge] Action Required: ${milestoneData.name} - Order ${orderData.order_no}`;
+    // 获取催办人名称
+    const { data: senderProfile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
+    const senderName = (senderProfile as any)?.name || user.email?.split('@')[0] || '同事';
+
+    const subject = `[催办] ${orderData.order_no} — ${milestoneData.name} 需要尽快处理`;
     const html = `
-      <h2>Action Required</h2>
-      <p><strong>Order:</strong> ${orderData.order_no}</p>
-      <p><strong>Customer:</strong> ${orderData.customer_name}</p>
-      <p><strong>Milestone:</strong> ${milestoneData.name}</p>
-      <p><strong>Due Date:</strong> ${milestoneData.due_at ? new Date(milestoneData.due_at).toLocaleDateString() : 'N/A'}</p>
-      <p><strong>Status:</strong> ${milestoneData.status}</p>
-      <p>Please take action on this milestone as soon as possible.</p>
-      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/orders/${orderData.id}?tab=progress#milestone-${milestone_id}">查看节点</a></p>
+      <h2 style="color:#d97706;">有同事在催你啦</h2>
+      <p><strong>${senderName}</strong> 提醒你尽快处理以下节点：</p>
+      <table style="border-collapse:collapse;margin:16px 0;">
+        <tr><td style="padding:4px 12px;font-weight:bold;">订单号</td><td style="padding:4px 12px;">${orderData.order_no}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">客户</td><td style="padding:4px 12px;">${orderData.customer_name}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">待处理节点</td><td style="padding:4px 12px;font-weight:bold;color:#dc2626;">${milestoneData.name}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">截止日期</td><td style="padding:4px 12px;">${milestoneData.due_at ? new Date(milestoneData.due_at).toLocaleDateString('zh-CN') : '未设定'}</td></tr>
+      </table>
+      <p>请尽快登录系统处理，避免影响后续环节。</p>
+      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order-metronome.vercel.app'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">去处理</a></p>
     `;
 
     await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
