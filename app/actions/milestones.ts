@@ -151,6 +151,13 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: '无权操作：只有管理员或负责人可以标记完成' };
   }
 
+  // 自动认领：如果该关卡尚未分配具体负责人，且操作者角色匹配，自动认领
+  if (!milestone.owner_user_id && roleMatches) {
+    await (supabase.from('milestones') as any)
+      .update({ owner_user_id: user.id })
+      .eq('id', milestoneId);
+  }
+
   // Check if evidence is required and exists
   if (milestone.evidence_required) {
     const { data: attachments, error: attachmentsError } = await supabase
@@ -753,6 +760,74 @@ export async function updateMilestoneOwner(
   
   revalidatePath('/orders');
   revalidatePath(`/orders/${milestone.order_id}`);
-  
+
   return { data: updated };
+}
+
+/**
+ * 批量指定跟单负责人：将订单中所有 owner_role='merchandiser' 的关卡分配给指定用户。
+ * 仅管理员或订单创建者可操作。
+ */
+export async function assignMerchandiser(
+  orderId: string,
+  merchandiserUserId: string
+): Promise<{ data?: { updated: number }; error?: string }> {
+  const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  // 权限：管理员 或 订单创建者
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, roles')
+    .eq('user_id', user.id)
+    .single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdmin = userRoles.includes('admin');
+
+  if (!isAdmin) {
+    const { data: order } = await (supabase.from('orders') as any)
+      .select('owner_user_id')
+      .eq('id', orderId)
+      .single();
+    if (!order || order.owner_user_id !== user.id) {
+      return { error: '只有管理员或订单负责人可以指定跟单' };
+    }
+  }
+
+  // 验证目标用户确实是跟单角色
+  const { data: targetProfile } = await (supabase.from('profiles') as any)
+    .select('name, role, roles')
+    .eq('user_id', merchandiserUserId)
+    .single();
+  if (!targetProfile) return { error: '目标用户不存在' };
+
+  const targetRoles: string[] = targetProfile.roles?.length > 0 ? targetProfile.roles : [targetProfile.role].filter(Boolean);
+  if (!targetRoles.includes('merchandiser') && !targetRoles.includes('admin')) {
+    return { error: '目标用户不是跟单角色' };
+  }
+
+  // 批量更新
+  const { data: updated, error: updateErr } = await (supabase.from('milestones') as any)
+    .update({ owner_user_id: merchandiserUserId })
+    .eq('order_id', orderId)
+    .eq('owner_role', 'merchandiser')
+    .select('id');
+
+  if (updateErr) return { error: updateErr.message };
+
+  // 日志
+  const updatedCount = (updated || []).length;
+  for (const m of updated || []) {
+    await logMilestoneAction(
+      supabase, m.id, orderId, 'update',
+      `跟单负责人指定为：${targetProfile.name || merchandiserUserId}`
+    );
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/dashboard');
+
+  return { data: { updated: updatedCount } };
 }

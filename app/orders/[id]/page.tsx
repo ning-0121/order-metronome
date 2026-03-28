@@ -1,9 +1,12 @@
 import { getOrder, getOrderLogs } from '@/app/actions/orders';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { getDelayRequestsByOrder } from '@/app/actions/delays';
+import { getOrderCommissions } from '@/app/actions/commissions';
 import { formatDate } from '@/lib/utils/date';
 import { OrderTimeline } from '@/components/OrderTimeline';
 import { DelayRequestsList } from '@/components/DelayRequestsList';
+import { OrderScoreCard } from '@/components/OrderScoreCard';
+import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
@@ -28,7 +31,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'outsource'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'outsource', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -69,6 +72,20 @@ export default async function OrderDetailPage({
       .single();
     ownerName = ownerProfile?.name || ownerProfile?.email || '—';
   }
+
+  // 跟单负责人（从 merchandiser 关卡查找已分配的用户）
+  let merchandiserName: string | null = null;
+  if (milestones) {
+    const merchMilestone = (milestones as any[]).find(
+      (m: any) => m.owner_role === 'merchandiser' && m.owner_user_id
+    );
+    if (merchMilestone?.owner_user) {
+      merchandiserName = merchMilestone.owner_user.name || merchMilestone.owner_user.email || null;
+    }
+  }
+
+  // 执行评分
+  const { data: commissions } = await getOrderCommissions(id);
 
   const allMilestonesCompleted = milestones
     ? milestones.every((m: any) => normalizeMilestoneStatus(m.status) === '已完成')
@@ -141,6 +158,7 @@ export default async function OrderDetailPage({
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料单' },
           { key: 'outsource', label: '外发任务' },
+              { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
                 key={t.key}
@@ -181,6 +199,17 @@ export default async function OrderDetailPage({
                     <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
                   </div>
                 ))}
+                {/* 跟单负责人 — 管理员/订单创建者可指定 */}
+                <div className="flex justify-between items-center">
+                  <dt className="text-sm text-gray-500">跟单负责人</dt>
+                  <dd className="text-sm font-medium">
+                    {(isAdmin || isOrderOwner) ? (
+                      <MerchandiserAssign orderId={id} currentMerchandiserName={merchandiserName} />
+                    ) : (
+                      <span className="text-gray-900">{merchandiserName || '未指定'}</span>
+                    )}
+                  </dd>
+                </div>
               </dl>
             </div>
 
@@ -393,7 +422,13 @@ export default async function OrderDetailPage({
           </div>
         )}
 
-
+        {/* Tab: 执行评分 */}
+        {activeTab === 'score' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">执行评分</h2>
+            <OrderScoreCard commissions={commissions || []} />
+          </div>
+        )}
 
       </div>
     </div>

@@ -515,15 +515,23 @@ export async function completeOrderAction(orderId: string) {
   }
 
   const result = await completeOrder(orderId);
-  
+
   if (result.error) {
     return { error: result.error };
   }
-  
+
+  // 订单完成后自动计算执行评分
+  try {
+    const { calculateOrderScore } = await import('@/app/actions/commissions');
+    await calculateOrderScore(orderId);
+  } catch (e) {
+    console.warn('[completeOrder] 评分计算失败（不影响订单完成）:', e);
+  }
+
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/orders');
   revalidatePath('/dashboard');
-  
+
   return { data: result.data };
 }
 

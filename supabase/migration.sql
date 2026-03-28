@@ -1084,3 +1084,54 @@ ALTER TABLE public.user_memos ADD COLUMN IF NOT EXISTS linked_order_no text;
 
 CREATE INDEX IF NOT EXISTS idx_user_memos_order_id ON public.user_memos(order_id) WHERE order_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_memos_milestone_id ON public.user_memos(milestone_id) WHERE milestone_id IS NOT NULL;
+
+-- ===== 2026-03-27 提成评价机制 =====
+CREATE TABLE IF NOT EXISTS public.order_commissions (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role text NOT NULL,
+
+  -- 五维评分明细
+  score_ontime integer NOT NULL DEFAULT 0,
+  score_no_block integer NOT NULL DEFAULT 0,
+  score_no_delay integer NOT NULL DEFAULT 0,
+  score_quality integer NOT NULL DEFAULT 0,
+  score_delivery integer NOT NULL DEFAULT 0,
+
+  total_score integer NOT NULL DEFAULT 0,
+  grade text NOT NULL DEFAULT 'A',
+  commission_rate numeric(4,2) NOT NULL DEFAULT 1.00,
+
+  vetoed boolean NOT NULL DEFAULT false,
+  veto_reason text,
+
+  detail_json jsonb,
+
+  calculated_at timestamptz NOT NULL DEFAULT now(),
+  calculated_by uuid REFERENCES auth.users(id),
+
+  UNIQUE(order_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_commissions_order ON public.order_commissions(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_commissions_user ON public.order_commissions(user_id);
+
+-- RLS: 管理员全权，普通用户只读自己的
+ALTER TABLE public.order_commissions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "commission_select_own_or_admin" ON public.order_commissions
+  FOR SELECT USING (
+    auth.uid() = user_id
+    OR EXISTS (SELECT 1 FROM public.profiles WHERE user_id = auth.uid() AND (role = 'admin' OR 'admin' = ANY(roles)))
+  );
+
+CREATE POLICY "commission_insert_admin" ON public.order_commissions
+  FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM public.profiles WHERE user_id = auth.uid() AND (role = 'admin' OR 'admin' = ANY(roles)))
+  );
+
+CREATE POLICY "commission_update_admin" ON public.order_commissions
+  FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE user_id = auth.uid() AND (role = 'admin' OR 'admin' = ANY(roles)))
+  );
