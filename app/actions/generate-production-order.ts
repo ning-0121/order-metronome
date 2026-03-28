@@ -28,11 +28,33 @@ export async function generateProductionOrder(data: POParsedData): Promise<{ ok:
 
     const sizeLabels = data.size_labels?.length > 0 ? data.size_labels : ['S', 'M', 'L'];
 
+    // 安全取字符串值（防止 [object Object]）
+    const str = (v: any): string => {
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'object') {
+        if (v.text) return String(v.text);
+        if (v.result) return String(v.result);
+        try { return JSON.stringify(v); } catch { return ''; }
+      }
+      return String(v);
+    };
+
+    // Sheet 名去重
+    const usedNames = new Set<string>();
+    const uniqueSheetName = (base: string): string => {
+      let name = str(base).substring(0, 28) || 'Sheet';
+      let final = name;
+      let i = 2;
+      while (usedNames.has(final)) { final = `${name}_${i++}`; }
+      usedNames.add(final);
+      return final;
+    };
+
     // ===== 每个款式生成主表 + 尺寸表 =====
     for (const style of data.styles) {
 
       // ────── 主表（生产单） ──────
-      const sheetName = `${style.style_no}`.substring(0, 31);
+      const sheetName = uniqueSheetName(style.style_no);
       const sheet = workbook.addWorksheet(sheetName);
 
       const sizeStartCol = 5;
@@ -77,16 +99,16 @@ export async function generateProductionOrder(data: POParsedData): Promise<{ ok:
       // Row 2: 订单号
       setLabel(row, 1, '订单号');
       sheet.mergeCells(row, 1, row, 2);
-      setValue(row, 3, data.order_no, true);
+      setValue(row, 3, str(data.order_no), true);
       sheet.mergeCells(row, 3, row, packagingCol);
       row++;
 
       // Row 3: 品名
       setLabel(row, 1, '品名');
       sheet.mergeCells(row, 1, row, 2);
-      setValue(row, 3, style.product_name, true);
+      setValue(row, 3, str(style.product_name), true);
       sheet.mergeCells(row, 3, row, packagingCol - 2);
-      setValue(row, packagingCol - 1, style.material);
+      setValue(row, packagingCol - 1, str(style.material));
       sheet.mergeCells(row, packagingCol - 1, row, packagingCol);
       row++;
 
@@ -94,19 +116,19 @@ export async function generateProductionOrder(data: POParsedData): Promise<{ ok:
       setLabel(row, 1, '交期');
       sheet.mergeCells(row, 1, row, 2);
       const deliveryCell = sheet.getCell(row, 3);
-      deliveryCell.value = `${data.delivery_date}（客户装柜日，不得延期）`;
+      deliveryCell.value = `${str(data.delivery_date)}（客户装柜日，不得延期）`;
       deliveryCell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
       deliveryCell.border = thinBorder;
       deliveryCell.alignment = { vertical: 'middle' };
       sheet.mergeCells(row, 3, row, packagingCol - 2);
-      setValue(row, packagingCol - 1, style.fabric_weight || '');
+      setValue(row, packagingCol - 1, str(style.fabric_weight));
       sheet.mergeCells(row, packagingCol - 1, row, packagingCol);
       row++;
 
       // Row 5: 数量
       setLabel(row, 1, '数量');
       sheet.mergeCells(row, 1, row, 2);
-      setValue(row, 3, style.total_qty, true);
+      setValue(row, 3, Number(style.total_qty) || 0, true);
       sheet.mergeCells(row, 3, row, packagingCol);
       row++;
 
@@ -151,9 +173,9 @@ export async function generateProductionOrder(data: POParsedData): Promise<{ ok:
       // Data rows
       const dataStartRow = row;
       style.colors.forEach((color, ci) => {
-        setValue(row, 1, ci === 0 ? style.style_no : '');
-        setValue(row, 2, `${color.color_en || ''} ${color.color_cn}`.trim());
-        setValue(row, 3, ci === 0 ? style.product_name : '');
+        setValue(row, 1, ci === 0 ? str(style.style_no) : '');
+        setValue(row, 2, `${str(color.color_en)} ${str(color.color_cn)}`.trim());
+        setValue(row, 3, ci === 0 ? str(style.product_name) : '');
         const boxes = Math.ceil(color.qty / 48);
         setValue(row, 4, boxes);
 
@@ -233,7 +255,7 @@ export async function generateProductionOrder(data: POParsedData): Promise<{ ok:
       packNote.font = { name: FONT_NAME, size: 10 };
 
       // ────── 尺寸表 Sheet ──────
-      const sizeSheetName = `${style.style_no}尺寸表`.substring(0, 31);
+      const sizeSheetName = uniqueSheetName(`${str(style.style_no)}尺寸表`);
       const sizeSheet = workbook.addWorksheet(sizeSheetName);
 
       // 确定测量项
