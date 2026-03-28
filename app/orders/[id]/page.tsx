@@ -14,6 +14,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
+import { OrderActions } from '@/components/OrderActions';
 import { OutsourceTab } from '@/components/tabs/OutsourceTab';
 
 export default async function OrderDetailPage({
@@ -129,11 +130,20 @@ export default async function OrderDetailPage({
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">新工厂首单</span>
                 )}
               </div>
-              <p className="text-gray-500 text-sm mt-1">
-                {orderData.customer_name}
-                {orderData.style_no && <span className="ml-3 text-gray-400">款号：{orderData.style_no}</span>}
-                {orderData.po_number && <span className="ml-3 text-gray-400">PO：{orderData.po_number}</span>}
-              </p>
+              <div className="flex items-center gap-3 mt-1">
+                <p className="text-gray-500 text-sm">
+                  {orderData.customer_name}
+                  {orderData.style_no && <span className="ml-3 text-gray-400">款号：{orderData.style_no}</span>}
+                  {orderData.po_number && <span className="ml-3 text-gray-400">PO：{orderData.po_number}</span>}
+                </p>
+                <OrderActions
+                  orderId={id}
+                  orderNo={orderData.order_no}
+                  lifecycleStatus={orderData.lifecycle_status || 'draft'}
+                  isAdmin={isAdmin}
+                  isOrderOwner={isOrderOwner}
+                />
+              </div>
             </div>
             <div className="flex flex-col items-end gap-1.5">
               <div className="flex items-center gap-2">
