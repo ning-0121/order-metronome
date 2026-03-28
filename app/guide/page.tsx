@@ -460,11 +460,56 @@ export default function GuidePage() {
               <div className="space-y-1.5 text-sm text-gray-700">
                 <p>1. 点击导航栏<strong>"备忘录"</strong>进入备忘录页面</p>
                 <p>2. 点击"新建"添加备忘，可设置提醒日期</p>
-                <p>3. 到期的备忘会在工作台底部显示提醒</p>
-                <p>4. 完成后可标记为已完成或删除</p>
+                <p>3. <strong>智能关联订单：</strong>输入内容中包含订单号（如 QM-20260328-001）、PO 号或客户名时，系统会自动识别并提示关联</p>
+                <p>4. 点击"关联此订单"后可选择关联到具体执行环节，关卡到期前 3 天系统自动邮件提醒</p>
+                <p>5. 已关联的备忘会显示订单号标签，点击可直接跳转到订单详情</p>
+                <p>6. 到期的备忘会在工作台底部显示提醒，完成后可标记为已完成或删除</p>
               </div>
               <div className="bg-blue-50 rounded-lg p-3 mt-2">
-                <p className="text-xs text-blue-800 font-medium">建议用备忘录跟踪客户回复、供应商交期等非系统节点事项。</p>
+                <p className="text-xs text-blue-800 font-medium">建议：从微信或邮件中直接复制包含订单号的消息粘贴到备忘录，系统会自动识别并关联。</p>
+              </div>
+            </div>
+          </details>
+
+          {/* 跟单指定 */}
+          <details className="rounded-xl border border-gray-200 overflow-hidden">
+            <summary className="px-5 py-3 bg-white cursor-pointer font-medium text-sm text-gray-900 hover:bg-gray-50">
+              如何指定跟单负责人？
+            </summary>
+            <div className="px-5 py-4 bg-gray-50 border-t border-gray-200 space-y-2">
+              <div className="space-y-1.5 text-sm text-gray-700">
+                <p>1. 进入订单详情页 → "基本信息" Tab</p>
+                <p>2. 找到<strong>"跟单负责人"</strong>一栏，点击"指定"</p>
+                <p>3. 从下拉列表中选择跟单人员，点击"确认"</p>
+                <p>4. 系统会自动将该订单所有跟单相关的关卡分配给此人</p>
+              </div>
+              <div className="bg-amber-50 rounded-lg p-3 mt-2">
+                <p className="text-xs text-amber-800 font-medium">仅管理员和订单创建者可以指定跟单。其他角色（采购、财务等）在首次操作对应关卡时会自动认领。</p>
+              </div>
+            </div>
+          </details>
+
+          {/* 执行评分 */}
+          <details className="rounded-xl border border-gray-200 overflow-hidden">
+            <summary className="px-5 py-3 bg-white cursor-pointer font-medium text-sm text-gray-900 hover:bg-gray-50">
+              执行评分和提成是怎么算的？
+            </summary>
+            <div className="px-5 py-4 bg-gray-50 border-t border-gray-200 space-y-2">
+              <div className="space-y-1.5 text-sm text-gray-700">
+                <p>1. 订单完成后，系统自动为<strong>业务</strong>和<strong>跟单</strong>分别生成执行评分</p>
+                <p>2. 评分从五个维度计算（满分 100 分）：</p>
+                <ul className="ml-4 space-y-1">
+                  <li>- <strong>节拍准时（40分）</strong>：你负责的关卡是否按时完成</li>
+                  <li>- <strong>零阻塞（20分）</strong>：你负责的环节是否出现卡住</li>
+                  <li>- <strong>延期控制（15分）</strong>：是否申请了延期</li>
+                  <li>- <strong>品质达标（15分）</strong>：中查、尾查是否一次通过（业务和跟单共担）</li>
+                  <li>- <strong>准时交付（10分）</strong>：订单是否按时出运（业务和跟单共担）</li>
+                </ul>
+                <p>3. 总分对应提成系数：S 级（95+）110%、A 级（85-94）100%、B 级（75-84）85%、C 级（60-74）70%、D 级（60 以下）50%</p>
+                <p>4. 在订单详情页的<strong>"执行评分"Tab</strong> 可以查看详细评分和规则说明</p>
+              </div>
+              <div className="bg-green-50 rounded-lg p-3 mt-2">
+                <p className="text-xs text-green-800 font-medium">绝大多数正常执行的订单都在 A 级以上。好好做，全额提成就是你的。评分有争议可以找管理员复核。</p>
               </div>
             </div>
           </details>
@@ -544,47 +589,90 @@ export default function GuidePage() {
         </div>
       </section>
 
-      {/* ====== 7. KPI 考核说明 ====== */}
+      {/* ====== 7. 执行评分与提成 ====== */}
       <section id="kpi" className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
           <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">7</span>
-          KPI 考核说明
+          执行评分与提成
         </h2>
+
+        <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 rounded-xl p-4 border border-orange-100 mb-4">
+          <p className="text-sm text-gray-700 leading-relaxed">
+            评分不是为了扣钱，是为了让认真做事的人拿到应得的回报。
+            每个订单完成后系统自动评分，<strong>业务/理单</strong>和<strong>跟单</strong>各一份成绩单。
+          </p>
+        </div>
+
         <div className="rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50">
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">指标</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">计算方式</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">标准</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">维度</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">满分</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">扣分规则</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">说明</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr>
-                <td className="px-4 py-3 font-medium text-gray-900">准时率</td>
-                <td className="px-4 py-3 text-gray-600">准时完成数 / 总完成数 x 100%</td>
-                <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">&ge;80% 优秀</span></td>
+                <td className="px-4 py-3 font-medium text-gray-900">⏱ 节拍准时</td>
+                <td className="px-4 py-3 text-gray-600">40</td>
+                <td className="px-4 py-3 text-gray-600">每个逾期关卡 -8 分</td>
+                <td className="px-4 py-3 text-xs text-gray-500">只算你负责的关卡</td>
               </tr>
               <tr>
-                <td className="px-4 py-3 font-medium text-gray-900">超期节点数</td>
-                <td className="px-4 py-3 text-gray-600">未完成且已过截止日期的节点总数</td>
-                <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">越少越好</span></td>
+                <td className="px-4 py-3 font-medium text-gray-900">🟢 零阻塞</td>
+                <td className="px-4 py-3 text-gray-600">20</td>
+                <td className="px-4 py-3 text-gray-600">每次阻塞 -10 分</td>
+                <td className="px-4 py-3 text-xs text-gray-500">只算你负责的关卡</td>
               </tr>
               <tr>
-                <td className="px-4 py-3 font-medium text-gray-900">阻塞节点数</td>
-                <td className="px-4 py-3 text-gray-600">当前标记为阻塞状态的节点总数</td>
-                <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">及时解决</span></td>
+                <td className="px-4 py-3 font-medium text-gray-900">📅 延期控制</td>
+                <td className="px-4 py-3 text-gray-600">15</td>
+                <td className="px-4 py-3 text-gray-600">每次延期申请 -5 分</td>
+                <td className="px-4 py-3 text-xs text-gray-500">只算你负责的关卡</td>
               </tr>
               <tr>
-                <td className="px-4 py-3 font-medium text-gray-900">凭证完整度</td>
-                <td className="px-4 py-3 text-gray-600">要求凭证的节点中，完成时已上传凭证的比例</td>
-                <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">100% 合规</span></td>
+                <td className="px-4 py-3 font-medium text-gray-900">✅ 品质达标</td>
+                <td className="px-4 py-3 text-gray-600">15</td>
+                <td className="px-4 py-3 text-gray-600">中查不过 -5，尾查不过 -10</td>
+                <td className="px-4 py-3 text-xs text-gray-500">业务和跟单共担</td>
+              </tr>
+              <tr>
+                <td className="px-4 py-3 font-medium text-gray-900">🚢 准时交付</td>
+                <td className="px-4 py-3 text-gray-600">10</td>
+                <td className="px-4 py-3 text-gray-600">迟 1-3 天得 5 分，迟 4-7 天 0 分，超 7 天 -5 分</td>
+                <td className="px-4 py-3 text-xs text-gray-500">业务和跟单共担</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div className="bg-indigo-50 rounded-xl p-4 mt-3">
-          <p className="text-xs text-indigo-800 font-medium">KPI 按角色统计。管理员可以在"我的节拍"页面查看各角色的准时率和完成进度。</p>
+
+        <div className="grid grid-cols-5 gap-2 text-center text-xs mt-4">
+          <div className="rounded-lg bg-purple-50 border border-purple-200 p-2.5">
+            <div className="font-bold text-purple-700">S 级 · 95+</div>
+            <div className="text-purple-500 mt-0.5">提成 110%</div>
+          </div>
+          <div className="rounded-lg bg-green-50 border border-green-200 p-2.5">
+            <div className="font-bold text-green-700">A 级 · 85-94</div>
+            <div className="text-green-500 mt-0.5">提成 100%</div>
+          </div>
+          <div className="rounded-lg bg-blue-50 border border-blue-200 p-2.5">
+            <div className="font-bold text-blue-700">B 级 · 75-84</div>
+            <div className="text-blue-500 mt-0.5">提成 85%</div>
+          </div>
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
+            <div className="font-bold text-amber-700">C 级 · 60-74</div>
+            <div className="text-amber-500 mt-0.5">提成 70%</div>
+          </div>
+          <div className="rounded-lg bg-red-50 border border-red-200 p-2.5">
+            <div className="font-bold text-red-700">D 级 · &lt;60</div>
+            <div className="text-red-500 mt-0.5">提成 50%</div>
+          </div>
+        </div>
+
+        <div className="bg-green-50 rounded-xl p-4 mt-3">
+          <p className="text-xs text-green-800 font-medium">正常执行的订单基本都在 A 级以上，好好做就是全额提成。评分可在订单详情"执行评分"Tab 查看明细，有争议可找管理员复核。</p>
         </div>
       </section>
 
@@ -606,6 +694,10 @@ export default function GuidePage() {
             { q: '手机上可以用吗？', a: '可以。系统支持手机浏览器访问，界面会自动适配手机屏幕。建议将网址添加到手机桌面方便使用。' },
             { q: '收到催办邮件是什么意思？', a: '管理员通过系统对你负责的超期或即将到期的节点发送了催办提醒。请尽快登录系统处理对应节点。' },
             { q: '如何查看操作记录？', a: '进入订单详情 → 切换到"日志"标签页，可以查看该订单所有节点的操作记录（谁、什么时间、做了什么）。' },
+            { q: '管理员可以帮我操作关卡吗？', a: '不可以。管理员只能审批延期、解除阻塞、指定负责人，但不能替任何人标记关卡完成。每个关卡只有对应角色的人才能操作，这是为了保证责任明确。' },
+            { q: '备忘录里输入订单号会怎样？', a: '系统会自动识别并弹出关联提示，你可以选择关联到具体订单和执行环节。关联后关卡到期前 3 天会自动收到邮件提醒。' },
+            { q: '执行评分什么时候出来？', a: '订单完成后自动生成。在订单详情的"执行评分"Tab 可以随时查看评分标准，订单完成后会显示实际得分。' },
+            { q: '评分不满意可以申诉吗？', a: '可以。联系管理员说明情况，管理员可以手动重新计算。我们尊重每个人的付出，客户原因导致的问题不会影响你的评分。' },
           ].map((faq, i) => (
             <details key={i} className="rounded-xl border border-gray-200 overflow-hidden">
               <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-gray-900 hover:bg-gray-50 bg-white">
@@ -619,7 +711,7 @@ export default function GuidePage() {
 
       {/* 页脚 */}
       <div className="text-center py-6 border-t border-gray-200">
-        <p className="text-xs text-gray-400">订单节拍器 v1.0 | 如有问题请联系管理员</p>
+        <p className="text-xs text-gray-400">订单节拍器 v2.0 | 更新于 2026-03-28 | 如有问题请联系管理员</p>
       </div>
     </div>
   );
