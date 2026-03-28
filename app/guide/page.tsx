@@ -20,7 +20,7 @@ const STAGE_KEYS: Record<string, string[]> = {
   stage4: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'],
   stage5: ['mid_qc_check', 'final_qc_check'],
   stage6: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'],
-  stage7: ['booking_done', 'customs_export', 'payment_received'],
+  stage7: ['booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'payment_received'],
 };
 
 /* ── 角色每日 SOP ── */

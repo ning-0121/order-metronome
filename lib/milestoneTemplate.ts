@@ -32,7 +32,7 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "production_order_upload", name: "生产单上传", owner_role: "sales", is_critical: true, evidence_required: true },
   // 阶段2：订单转化
   { step_key: "order_docs_bom_complete", name: "订单资料/BOM齐全", owner_role: "sales", is_critical: true, evidence_required: true },
-  { step_key: "bulk_materials_confirmed", name: "大货原辅料确认", owner_role: "procurement", is_critical: true, evidence_required: true },
+  { step_key: "bulk_materials_confirmed", name: "大货原辅料确认", owner_role: "sales", is_critical: true, evidence_required: true },
   // 阶段3：工厂选定 + 产前样（加工费确认 → 确认工厂 → 产前样准备 → 寄出 → 客户确认）
   { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "finance", is_critical: true, evidence_required: true },
   { step_key: "factory_confirmed", name: "确认工厂", owner_role: "merchandiser", is_critical: true, evidence_required: true },
@@ -54,7 +54,9 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "shipping_sample_send", name: "船样寄送", owner_role: "sales", is_critical: false, evidence_required: false },
   // 阶段7：物流收款
   { step_key: "booking_done", name: "订舱完成", owner_role: "sales", is_critical: true, evidence_required: true },
-  { step_key: "customs_export", name: "报关出运", owner_role: "sales", is_critical: true, evidence_required: true },
+  { step_key: "customs_export", name: "报关安排出运", owner_role: "sales", is_critical: true, evidence_required: true },
+  { step_key: "finance_shipment_approval", name: "核准出运", owner_role: "finance", is_critical: true, evidence_required: false },
+  { step_key: "shipment_execute", name: "出运", owner_role: "logistics", is_critical: true, evidence_required: true },
   { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false },
 ];
 

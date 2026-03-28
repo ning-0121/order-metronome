@@ -65,7 +65,7 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage7', emoji: '🟫',
     titleCn: '阶段 7：物流收款',
-    stepKeys: ['booking_done', 'customs_export', 'payment_received'],
+    stepKeys: ['booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'payment_received'],
   },
 ];
 

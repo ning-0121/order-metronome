@@ -105,7 +105,9 @@ export function calcDueDates(params: CalcDueDatesParams) {
 
     // ── 阶段7：物流收款（倒排）──
     booking_done:                  cap(addDays(A, incoterm === 'FOB' ? -5 : -18)),
-    customs_export:                cap(addDays(A, -2)),
+    customs_export:                cap(addDays(A, -3)),       // A-3 报关安排出运（业务）
+    finance_shipment_approval:     cap(addDays(A, -2)),       // A-2 核准出运（财务）
+    shipment_execute:              cap(addDays(A, -1)),       // A-1 出运（物流）
     payment_received:              addDays(A, 30),
   };
 }
