@@ -163,7 +163,12 @@ function NewOrderWizard() {
           po_number: rawFormData.get('customer_po_number') as string,
         });
 
-        if (verifyRes.data && verifyRes.data.differences.length > 0) {
+        const hasIssues = verifyRes.data && (
+          verifyRes.data.differences.length > 0 ||
+          (verifyRes.data.risks && verifyRes.data.risks.length > 0) ||
+          (verifyRes.data.special_terms && verifyRes.data.special_terms.length > 0)
+        );
+        if (hasIssues) {
           // 有差异 → 弹窗让用户选择
           setPoVerifyResult(verifyRes.data);
           setPendingFormData(rawFormData);
@@ -503,31 +508,70 @@ function NewOrderWizard() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowVerifyDialog(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
-              <span className="text-2xl">⚠️</span>
-              <h3 className="text-lg font-bold text-gray-900">PO 信息与填写内容不一致</h3>
+              <span className="text-2xl">🔍</span>
+              <h3 className="text-lg font-bold text-gray-900">AI 订单审核报告</h3>
             </div>
-            <p className="text-sm text-gray-500">AI 从客户 PO 中提取的信息与你填写的订单信息有以下差异，请核实：</p>
 
-            <div className="border border-red-200 rounded-lg divide-y divide-red-100">
-              {poVerifyResult.differences.map((d, i) => (
-                <div key={i} className="px-4 py-3 flex items-center gap-3 text-sm">
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    d.severity === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                  }`}>{d.fieldLabel}</span>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-500">PO：</span>
-                      <span className="font-bold text-red-600">{d.poValue}</span>
+            {/* 数据差异 */}
+            {poVerifyResult.differences.length > 0 && (
+              <>
+                <p className="text-sm font-medium text-red-700">⚠️ 数据差异</p>
+                <div className="border border-red-200 rounded-lg divide-y divide-red-100">
+                  {poVerifyResult.differences.map((d, i) => (
+                    <div key={i} className="px-4 py-3 flex items-center gap-3 text-sm">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        d.severity === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                      }`}>{d.fieldLabel}</span>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500">PO：</span>
+                          <span className="font-bold text-red-600">{d.poValue}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500">你填的：</span>
+                          <span className="font-medium text-gray-700">{d.orderValue}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-500">你填的：</span>
-                      <span className="font-medium text-gray-700">{d.orderValue}</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            )}
 
+            {/* 风险提醒 */}
+            {poVerifyResult.risks && poVerifyResult.risks.length > 0 && (
+              <>
+                <p className="text-sm font-medium text-orange-700">🚨 生产风险提醒</p>
+                <div className="border border-orange-200 rounded-lg divide-y divide-orange-100">
+                  {poVerifyResult.risks.map((r, i) => (
+                    <div key={i} className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          r.severity === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                        }`}>{r.label}</span>
+                      </div>
+                      <p className="text-gray-600 text-xs">{r.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* 特殊条款 */}
+            {poVerifyResult.special_terms && poVerifyResult.special_terms.length > 0 && (
+              <>
+                <p className="text-sm font-medium text-blue-700">📋 客户特殊条款</p>
+                <div className="border border-blue-200 rounded-lg bg-blue-50 p-3">
+                  <ul className="space-y-1">
+                    {poVerifyResult.special_terms.map((t, i) => (
+                      <li key={i} className="text-xs text-blue-800 flex gap-2"><span>•</span>{t}</li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            )}
+
+            {/* 一致项 */}
             {poVerifyResult.matched.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {poVerifyResult.matched.map((m, i) => (
@@ -548,11 +592,11 @@ function NewOrderWizard() {
                 disabled={loading}
                 className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
               >
-                {loading ? '创建中...' : '我确认无误，继续创建'}
+                {loading ? '创建中...' : '确认无误，继续创建'}
               </button>
             </div>
 
-            <p className="text-xs text-gray-400 text-center">AI 比对可能有误差，如果你确认填写正确可忽略差异继续创建</p>
+            <p className="text-xs text-gray-400 text-center">AI 分析可能有误差，请结合实际情况判断</p>
           </div>
         </div>
       )}

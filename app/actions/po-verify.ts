@@ -15,21 +15,46 @@ export interface POVerifyResult {
     orderValue: string;
     severity: 'error' | 'warning';
   }[];
+  risks: {
+    type: string;
+    label: string;
+    detail: string;
+    severity: 'high' | 'medium';
+  }[];
   matched: string[];
+  special_terms: string[];
   raw_extracted: Record<string, string>;
 }
 
-const VERIFY_PROMPT = `你是一个外贸订单核对专家。请从这个客户PO中提取以下关键信息，返回严格的JSON（不要markdown包裹）：
+const VERIFY_PROMPT = `你是一个资深外贸服装订单风险分析专家。请从这个客户PO中提取关键信息并分析风险，返回严格的JSON（不要markdown包裹）：
 
 {
   "quantity": 总数量（数字，不要单位），
   "delivery_date": "交期/到仓日/ETD（YYYY-MM-DD格式）",
   "customer_name": "客户名称",
   "style_no": "款号",
-  "po_number": "PO号"
+  "po_number": "PO号",
+  "order_date": "下单日期（YYYY-MM-DD格式）",
+  "risks": [
+    {
+      "type": "light_color",
+      "label": "浅色风险",
+      "detail": "具体说明，如：白色/米色面料，注意色牢度"
+    }
+  ],
+  "special_terms": ["客户特殊要求1", "客户特殊要求2"]
 }
 
-如果某个字段找不到，填 null。数量必须是纯数字。日期统一为 YYYY-MM-DD。`;
+risks 风险分析规则（请仔细扫描PO内容）：
+- light_color：如果颜色为白色、米色、浅灰、浅粉、奶油色等浅色，提示色牢度风险
+- color_clash：如果有深浅色拼接（如黑白、深蓝+浅色等），提示撞色沾色风险
+- special_wash：如果有特殊洗水/水洗/砂洗/酵素洗要求，提示工艺风险
+- tight_deadline：如果交期在30天以内，提示交期紧张
+- special_packing：如果有特殊包装要求（不同于标准包装），提示包装风险
+
+special_terms：提取PO中涉及生产和出货的特殊条款/要求（如验货标准、罚款条款、特殊测试要求等）
+
+如果某个字段找不到填 null，risks 和 special_terms 没有就填空数组。`;
 
 /**
  * 从已上传的 PO 附件中提取关键信息，与订单数据比对
@@ -160,6 +185,16 @@ export async function verifyPOAgainstOrder(
       }
     }
 
+    // 风险和特殊条款
+    const risks: POVerifyResult['risks'] = (extracted.risks || []).map((r: any) => ({
+      type: r.type || 'other',
+      label: r.label || '风险提示',
+      detail: r.detail || '',
+      severity: r.type === 'light_color' || r.type === 'color_clash' || r.type === 'tight_deadline' ? 'high' as const : 'medium' as const,
+    }));
+
+    const special_terms: string[] = (extracted.special_terms || []).filter(Boolean);
+
     return {
       data: {
         po_quantity: extracted.quantity,
@@ -168,7 +203,9 @@ export async function verifyPOAgainstOrder(
         po_style_no: extracted.style_no,
         po_po_number: extracted.po_number,
         differences,
+        risks,
         matched,
+        special_terms,
         raw_extracted: extracted,
       },
     };
