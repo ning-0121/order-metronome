@@ -17,6 +17,7 @@ import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
 import { RecalcButton } from '@/components/RecalcButton';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
+import { POVerifyButton } from '@/components/POVerifyButton';
 
 export default async function OrderDetailPage({
   params,
@@ -333,6 +334,21 @@ export default async function OrderDetailPage({
                             </div>
                           );
                         })()}
+                        {/* 客户PO自动比对 */}
+                        {att.file_type === 'customer_po' && downloadUrl && (
+                          <POVerifyButton
+                            fileUrl={downloadUrl}
+                            fileName={att.file_name || ''}
+                            orderData={{
+                              quantity: orderData.quantity,
+                              delivery_date: orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date,
+                              customer_name: orderData.customer_name,
+                              style_no: orderData.style_no,
+                              po_number: orderData.po_number,
+                              order_no: orderData.order_no,
+                            }}
+                          />
+                        )}
                       </div>
                     );
                   })}
