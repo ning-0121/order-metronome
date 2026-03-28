@@ -148,6 +148,19 @@ export default async function OrderDetailPage({
               </div>
             </div>
             <div className="flex flex-col items-end gap-1.5">
+              {/* DDP 额外显示出运倒计时 */}
+              {orderData.incoterm === 'DDP' && (() => {
+                const shipMilestone = (milestones as any[] || []).find((m: any) => m.step_key === 'shipment_execute' || m.step_key === 'customs_export');
+                const shipDate = shipMilestone?.due_at;
+                return shipDate ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-400">
+                      出运：<span className="text-gray-700 font-medium">{formatDate(shipDate)}</span>
+                    </span>
+                    <DeadlineCountdown targetDate={shipDate} label="出运" />
+                  </div>
+                ) : null;
+              })()}
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-400">
                   {orderData.incoterm === 'FOB' ? 'ETD' : '到仓日(ETA)'}：
