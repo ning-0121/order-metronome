@@ -138,9 +138,18 @@ export default async function DashboardPage() {
     .not('status', 'in', '("done","已完成","completed")')
     .order('due_at', { ascending: true });
 
+  // 获取当前用户创建的订单 ID 列表（用于筛选「他人逾期」）
+  const { data: myOrders } = await (supabase.from('orders') as any)
+    .select('id')
+    .eq('owner_user_id', user.id);
+  const myOrderIds = new Set((myOrders || []).map((o: any) => o.id));
+
   // 区分「我的逾期」和「他人逾期」
   const myOverdue = (allOverdueMilestones || []).filter((m: any) => isAdmin || isMyMilestone(m, userRoles));
-  const othersOverdue = isAdmin ? [] : (allOverdueMilestones || []).filter((m: any) => !isMyMilestone(m, userRoles));
+  // 他人逾期：仅显示自己订单中其他角色逾期的关卡（与自己相关才看得到）
+  const othersOverdue = isAdmin ? [] : (allOverdueMilestones || []).filter((m: any) =>
+    !isMyMilestone(m, userRoles) && myOrderIds.has(m.order_id)
+  );
 
   // 卡住清单
   const { data: blockedMilestones } = await (supabase
