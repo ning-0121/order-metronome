@@ -19,7 +19,7 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   const [cancelType, setCancelType] = useState('customer');
 
   const isDraft = lifecycleStatus === 'draft';
-  const canActivate = isDraft && isOrderOwner;
+  const canActivate = isDraft && (isOrderOwner || isAdmin);
   const canDelete = isDraft && (isAdmin || isOrderOwner);
   const canCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && (isAdmin || isOrderOwner);
 

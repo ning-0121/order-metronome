@@ -149,10 +149,12 @@ export default async function DashboardPage() {
   ]);
 
   // 区分「我的逾期」和「他人逾期」
-  const myOverdue = (allOverdueMilestones || []).filter((m: any) => isAdmin || isMyMilestone(m, userRoles));
-  // 他人逾期：仅显示自己订单中其他角色逾期的关卡（与自己相关才看得到）
-  const othersOverdue = isAdmin ? [] : (allOverdueMilestones || []).filter((m: any) =>
-    !isMyMilestone(m, userRoles) && myOrderIds.has(m.order_id)
+  // 管理员不执行关卡，没有「我的逾期」，所有逾期都是「他人逾期」供监督
+  const myOverdue = isAdmin ? [] : (allOverdueMilestones || []).filter((m: any) => isMyMilestone(m, userRoles));
+  // 他人逾期：管理员看所有，普通员工看自己相关订单的
+  const othersOverdue = isAdmin
+    ? (allOverdueMilestones || [])
+    : (allOverdueMilestones || []).filter((m: any) => !isMyMilestone(m, userRoles) && myOrderIds.has(m.order_id)
   );
 
   // 卡住清单

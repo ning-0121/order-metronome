@@ -268,13 +268,14 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {overdue && isActive && (() => {
                             const ownerRole = (m.owner_role || '').toLowerCase();
                             const allUserRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
-                            const isMineOverdue = isAdmin || allUserRoles.some(r => {
+                            // 管理员不执行关卡，不显示「我的逾期」
+                            const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
+                            const isMineOverdue = !isAdmin && allUserRoles.some(r => {
                               const nr = r.toLowerCase();
                               return nr === ownerRole
-                                || (ownerRole === 'qc' && (nr === 'quality' || nr === 'qc'))
-                                || (ownerRole === 'quality' && (nr === 'qc' || nr === 'quality'))
                                 || (ownerRole === 'sales' && nr === 'merchandiser')
-                                || (ownerRole === 'merchandiser' && nr === 'sales');
+                                || (ownerRole === 'merchandiser' && nr === 'sales')
+                                || (merchGroup.includes(ownerRole) && merchGroup.includes(nr));
                             });
                             const roleName = getRoleLabel(m.owner_role);
                             return isMineOverdue
@@ -309,13 +310,13 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                             if (!overdue || !isActive) return <span>截止：{formatDate(m.due_at)}</span>;
                             const ownerRole = (m.owner_role || '').toLowerCase();
                             const allUserRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
-                            const isMineOverdue = isAdmin || allUserRoles.some(r => {
+                            const merchGroup2 = ['merchandiser', 'production', 'qc', 'quality'];
+                            const isMineOverdue = !isAdmin && allUserRoles.some(r => {
                               const nr = r.toLowerCase();
                               return nr === ownerRole
-                                || (ownerRole === 'qc' && (nr === 'quality' || nr === 'qc'))
-                                || (ownerRole === 'quality' && (nr === 'qc' || nr === 'quality'))
                                 || (ownerRole === 'sales' && nr === 'merchandiser')
-                                || (ownerRole === 'merchandiser' && nr === 'sales');
+                                || (ownerRole === 'merchandiser' && nr === 'sales')
+                                || (merchGroup2.includes(ownerRole) && merchGroup2.includes(nr));
                             });
                             return (
                               <span className={isMineOverdue ? 'text-red-600 font-semibold' : 'text-orange-500 font-medium'}>
