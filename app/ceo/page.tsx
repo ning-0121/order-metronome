@@ -274,21 +274,21 @@ export default async function CEOWarRoom() {
         const greeting = now.getHours() < 12 ? '早上好' : now.getHours() < 18 ? '下午好' : '晚上好';
 
         return (
-          <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg">
+          <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 rounded-2xl p-6 border border-orange-100 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-800">
                   {greeting}，{ceoName}
                 </h1>
-                <p className="mt-2 text-indigo-100 text-sm leading-relaxed max-w-2xl italic">
+                <p className="mt-2 text-amber-700/70 text-sm leading-relaxed max-w-2xl italic">
                   &ldquo;{quote}&rdquo;
                 </p>
-                <p className="mt-3 text-indigo-200 text-xs">
+                <p className="mt-3 text-gray-400 text-xs">
                   {totalOrders} 个订单 · {overdueMilestones.length} 个超期 · {blockedMilestones.length} 个阻塞 · {(pendingDelays || []).length} 个待审批
                 </p>
               </div>
               <div className="text-right flex-shrink-0 ml-4">
-                <p className="text-indigo-200 text-sm">
+                <p className="text-gray-400 text-sm">
                   {now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}
                 </p>
               </div>

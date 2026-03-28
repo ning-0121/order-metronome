@@ -157,21 +157,21 @@ export default async function DashboardPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
-      <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg mb-8">
+      <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 rounded-2xl p-6 border border-orange-100 shadow-sm mb-8">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-800">
               {getGreeting()}，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}
             </h1>
-            <p className="mt-2 text-indigo-100 text-sm leading-relaxed max-w-2xl italic">
+            <p className="mt-2 text-amber-700/70 text-sm leading-relaxed max-w-2xl italic">
               &ldquo;{getDailyQuote()}&rdquo;
             </p>
-            <p className="mt-3 text-indigo-200 text-xs">
+            <p className="mt-3 text-gray-400 text-xs">
               {userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
             </p>
           </div>
           <div className="text-right flex-shrink-0 ml-4">
-            <p className="text-indigo-200 text-sm">{formatToday()}</p>
+            <p className="text-gray-400 text-sm">{formatToday()}</p>
           </div>
         </div>
       </div>
