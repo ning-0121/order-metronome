@@ -7,6 +7,7 @@ import { DelayRequestActions } from '@/components/DelayRequestActions';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
+import { RecalcButton } from '@/components/RecalcButton';
 
 // 状态兼容函数
 const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
@@ -298,13 +299,14 @@ export default async function CEOWarRoom() {
                     <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-300" />{(pendingDelays || []).length} 个待审批</span>
                   </div>
                 </div>
-                <div className="text-right flex-shrink-0 ml-6">
+                <div className="text-right flex-shrink-0 ml-6 space-y-2">
                   <p className="text-sm font-medium text-gray-500">
                     {now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}
                   </p>
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <p className="text-xs text-gray-400">
                     {now.toLocaleDateString('zh-CN', { weekday: 'long' })}
                   </p>
+                  <RecalcButton />
                 </div>
               </div>
             </div>
