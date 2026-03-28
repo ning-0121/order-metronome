@@ -14,11 +14,12 @@
  *   Day 2   (4%)    采购下达 + 加工费确认
  *   Day 4   (9%)    生产单上传（启动会后）
  *   Day 3   (7%)    辅料单/BOM + 原辅料确认 + 确认工厂
- *   Day 5   (11%)   产前样准备
- *   Day 6   (13%)   产前样寄出
- *   Day 10  (22%)   客户确认产前样
  *   Day 11  (24%)   产前会
- *   Day 12  (27%)   生产启动 + 原辅料到货
+ *   Day 12  (27%)   原辅料到货验收
+ *   Day 14  (31%)   产前样准备（原辅料到货后）
+ *   Day 15  (33%)   产前样寄出
+ *   Day 19  (42%)   客户确认产前样
+ *   Day 20  (44%)   生产启动（产前样确认后）
  *   Day 30  (67%)   中查
  *   Day 35  (78%)   包装确认
  *   Day 37  (82%)   尾查
@@ -48,13 +49,13 @@ const TIMELINE = {
   bulk_materials_confirmed:      3,
   processing_fee_confirmed:      2,
   factory_confirmed:             3,
-  pre_production_sample_ready:   5,
-  pre_production_sample_sent:    6,
-  pre_production_sample_approved: 10,
+  pre_production_sample_ready:   14,
+  pre_production_sample_sent:    15,
+  pre_production_sample_approved: 19,
   procurement_order_placed:      2,
   materials_received_inspected:  12,
   pre_production_meeting:        11,
-  production_kickoff:            12,
+  production_kickoff:            20,
   mid_qc_check:                  30,
   final_qc_check:                37,
   packing_method_confirmed:      35,
