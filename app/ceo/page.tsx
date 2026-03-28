@@ -21,6 +21,9 @@ export default async function CEOWarRoom() {
   const { isAdmin } = await getCurrentUserRole(supabase);
   if (!isAdmin) redirect('/dashboard');
 
+  const { data: ceoProfile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
+  const ceoName = (ceoProfile as any)?.name || user.email?.split('@')[0];
+
   // 效率分析数据
   const [analyticsSummary, roleEfficiency] = await Promise.all([
     getAnalyticsSummary(),
@@ -234,9 +237,11 @@ export default async function CEOWarRoom() {
       {/* ===== 头部 ===== */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">⚔️ 作战指挥中心</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
+            {now.getHours() < 12 ? '早上好' : now.getHours() < 18 ? '下午好' : '晚上好'}，{ceoName}！
+          </h1>
           <p className="text-gray-500 text-sm mt-1">
-            {totalOrders} 个订单 · {overdueMilestones.length} 个超期 · {blockedMilestones.length} 个阻塞 · {(pendingDelays || []).length} 个待审批
+            ⚔️ 作战指挥中心 · {totalOrders} 个订单 · {overdueMilestones.length} 个超期 · {blockedMilestones.length} 个阻塞 · {(pendingDelays || []).length} 个待审批
           </p>
         </div>
         <div className="text-right text-sm text-gray-500">
