@@ -234,20 +234,68 @@ export default async function CEOWarRoom() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 space-y-6">
-      {/* ===== 头部 ===== */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-            {now.getHours() < 12 ? '早上好' : now.getHours() < 18 ? '下午好' : '晚上好'}，{ceoName}！
-          </h1>
-          <p className="text-gray-500 text-sm mt-1">
-            ⚔️ 作战指挥中心 · {totalOrders} 个订单 · {overdueMilestones.length} 个超期 · {blockedMilestones.length} 个阻塞 · {(pendingDelays || []).length} 个待审批
-          </p>
-        </div>
-        <div className="text-right text-sm text-gray-500">
-          {now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-        </div>
-      </div>
+      {/* ===== 欢迎头部 ===== */}
+      {(() => {
+        const quotes = [
+          '每一份细致的跟进，都是客户选择我们的理由。',
+          '团队的默契，就是最强的交付保障。',
+          '把每个节拍踩准，就是对专业最好的诠释。',
+          '今天的坚持，是明天口碑的基石。',
+          '好的管理不是盯人，是让每个人都能发光。',
+          '信任是最好的效率，而信任来自每一次准时交付。',
+          '困难的订单打磨团队，顺利的订单奖励团队。',
+          '客户的满意，从我们每一个环节的用心开始。',
+          '专注细节、追求极致，这就是我们的竞争力。',
+          '每解决一个问题，团队就更强大一分。',
+          '优秀不是偶然，是日复一日的高标准。',
+          '你的每一次决策，都在守护团队的成果。',
+          '让流程为人服务，而不是让人为流程焦虑。',
+          '今天的每一步推进，都在缩短与目标的距离。',
+          '一个好团队的标志，是每个人都不需要被催。',
+          '品质是做出来的，不是检出来的。',
+          '最好的风控，是把问题消灭在发生之前。',
+          '稳扎稳打，方能行稳致远。',
+          '再复杂的订单，拆成节拍就变得清晰。',
+          '你们的认真，客户看得到，市场也看得到。',
+          '管理的最高境界，是让每个人都有成就感。',
+          '不怕问题多，怕的是问题没人管。',
+          '每一次复盘，都是下一次成功的预演。',
+          '效率来自流程，卓越来自态度。',
+          '做难而正确的事，时间会给出答案。',
+          '今天多走一步，明天就少一个风险。',
+          '用系统的力量，释放每个人的潜力。',
+          '一个订单就是一份承诺，我们从不食言。',
+          '追求准时，不是因为规定，是因为专业。',
+          '最好的团队文化，是彼此成就。',
+          '把标准当底线，把卓越当目标。',
+        ];
+        const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+        const quote = quotes[dayOfYear % quotes.length];
+        const greeting = now.getHours() < 12 ? '早上好' : now.getHours() < 18 ? '下午好' : '晚上好';
+
+        return (
+          <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg">
+            <div className="flex items-start justify-between">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+                  {greeting}，{ceoName}
+                </h1>
+                <p className="mt-2 text-indigo-100 text-sm leading-relaxed max-w-2xl italic">
+                  &ldquo;{quote}&rdquo;
+                </p>
+                <p className="mt-3 text-indigo-200 text-xs">
+                  {totalOrders} 个订单 · {overdueMilestones.length} 个超期 · {blockedMilestones.length} 个阻塞 · {(pendingDelays || []).length} 个待审批
+                </p>
+              </div>
+              <div className="text-right flex-shrink-0 ml-4">
+                <p className="text-indigo-200 text-sm">
+                  {now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ===== 状态概览卡片 ===== */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

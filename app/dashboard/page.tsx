@@ -11,17 +11,38 @@ const ROLE_LABELS: Record<string, string> = {
   logistics: '物流', admin: '管理员', ceo: 'CEO',
 };
 
-/** 每日鼓励语 */
+/** 每日鼓励语（31条，保证一个月不重复） */
 const DAILY_QUOTES = [
-  '每一个订单的准时交付，都是团队专业实力的证明。',
-  '细节决定品质，坚持成就卓越。',
-  '今天的每一步执行，都在为客户的信任加分。',
-  '高效协作，让每一个节拍都踩准。',
-  '专注当下，把手头的事情做到最好。',
-  '好的执行力，就是最强的竞争力。',
+  '每一份细致的跟进，都是客户选择我们的理由。',
+  '团队的默契，就是最强的交付保障。',
+  '把每个节拍踩准，就是对专业最好的诠释。',
+  '今天的坚持，是明天口碑的基石。',
+  '信任是最好的效率，而信任来自每一次准时交付。',
+  '困难的订单打磨团队，顺利的订单奖励团队。',
+  '客户的满意，从我们每一个环节的用心开始。',
+  '专注细节、追求极致，这就是我们的竞争力。',
+  '每解决一个问题，团队就更强大一分。',
+  '优秀不是偶然，是日复一日的高标准。',
+  '你的每一次认真，都在为团队积累信誉。',
+  '让流程为人服务，而不是让人为流程焦虑。',
+  '今天的每一步推进，都在缩短与目标的距离。',
+  '一个好团队的标志，是每个人都不需要被催。',
+  '品质是做出来的，不是检出来的。',
+  '最好的风控，是把问题消灭在发生之前。',
+  '稳扎稳打，方能行稳致远。',
+  '再复杂的订单，拆成节拍就变得清晰。',
+  '你们的认真，客户看得到，市场也看得到。',
+  '不怕问题多，怕的是问题没人管。',
+  '每一次复盘，都是下一次成功的预演。',
+  '效率来自流程，卓越来自态度。',
+  '做难而正确的事，时间会给出答案。',
+  '今天多走一步，明天就少一个风险。',
+  '一个订单就是一份承诺，我们从不食言。',
+  '追求准时，不是因为规定，是因为专业。',
+  '最好的团队文化，是彼此成就。',
+  '把标准当底线，把卓越当目标。',
   '每一次沟通都是机会，每一次跟进都有价值。',
-  '严谨的流程是品质的保障，你的认真客户看得到。',
-  '团队的力量在于每个人都不掉链子。',
+  '细节决定品质，坚持成就卓越。',
   '今天又是充满干劲的一天，加油！',
 ];
 
@@ -136,16 +157,23 @@ export default async function DashboardPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">
-          {getGreeting()}，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}！
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          {formatToday()} · {userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
-        </p>
-        <p className="mt-2 text-sm text-indigo-600 font-medium">
-          {getDailyQuote()}
-        </p>
+      <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg mb-8">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+              {getGreeting()}，{(profile as any)?.name || (profile as any)?.full_name || user.email?.split('@')[0]}
+            </h1>
+            <p className="mt-2 text-indigo-100 text-sm leading-relaxed max-w-2xl italic">
+              &ldquo;{getDailyQuote()}&rdquo;
+            </p>
+            <p className="mt-3 text-indigo-200 text-xs">
+              {userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
+            </p>
+          </div>
+          <div className="text-right flex-shrink-0 ml-4">
+            <p className="text-indigo-200 text-sm">{formatToday()}</p>
+          </div>
+        </div>
       </div>
 
       {/* Stats Overview */}
