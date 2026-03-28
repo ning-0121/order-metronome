@@ -94,36 +94,42 @@ export function calcDueDates(params: CalcDueDatesParams) {
   // 确认工厂 = 产前样准备前2工作日（先选工厂再做产前样）
   const factoryConfirmed = subtractWorkingDays(ppsSampleReady, 2);
 
+  // 安全边界：除了收款，所有关卡截止日不能晚于交期
+  const cap = (d: Date): Date => {
+    if (d > anchor) return new Date(anchor);
+    return d;
+  };
+
   return {
-    // 阶段1：订单启动
-    po_confirmed:                  shiftWeekendToFriday(T0),
-    finance_approval:              shiftWeekendToFriday(addWorkdays(T0, 1)),
-    production_order_upload:       shiftWeekendToFriday(addWorkdays(T0, 3)),
+    // 阶段1：订单启动（从下单日正推，但不超过交期）
+    po_confirmed:                  cap(shiftWeekendToFriday(T0)),
+    finance_approval:              cap(shiftWeekendToFriday(addWorkdays(T0, 1))),
+    production_order_upload:       cap(shiftWeekendToFriday(addWorkdays(T0, 3))),
     // 阶段2：订单转化
-    order_docs_bom_complete:       shiftWeekendToFriday(addWorkdays(T0, 2)),
-    bulk_materials_confirmed:      shiftWeekendToFriday(bulkMaterialsConfirmed),
+    order_docs_bom_complete:       cap(shiftWeekendToFriday(addWorkdays(T0, 2))),
+    bulk_materials_confirmed:      cap(shiftWeekendToFriday(bulkMaterialsConfirmed)),
     // 阶段3：工厂选定+产前样（加工费→确认工厂→准备→寄出→客户确认）
-    processing_fee_confirmed:      shiftWeekendToFriday(processingFeeConfirmed),
-    factory_confirmed:             shiftWeekendToFriday(factoryConfirmed),
-    pre_production_sample_ready:   shiftWeekendToFriday(ppsSampleReady),
-    pre_production_sample_sent:    shiftWeekendToFriday(ppsSampleSent),
-    pre_production_sample_approved: shiftWeekendToFriday(ppsSampleApproved),
+    processing_fee_confirmed:      cap(shiftWeekendToFriday(processingFeeConfirmed)),
+    factory_confirmed:             cap(shiftWeekendToFriday(factoryConfirmed)),
+    pre_production_sample_ready:   cap(shiftWeekendToFriday(ppsSampleReady)),
+    pre_production_sample_sent:    cap(shiftWeekendToFriday(ppsSampleSent)),
+    pre_production_sample_approved: cap(shiftWeekendToFriday(ppsSampleApproved)),
     // 阶段4：采购与生产
-    procurement_order_placed:      shiftWeekendToFriday(procurementPlaced),
-    materials_received_inspected:  shiftWeekendToFriday(materialsReceived),
-    production_kickoff:            orderType === 'sample' ? productionKickoffSample : shiftWeekendToFriday(productionKickoff),
-    pre_production_meeting:        shiftWeekendToFriday(preProductionMeeting),
+    procurement_order_placed:      cap(shiftWeekendToFriday(procurementPlaced)),
+    materials_received_inspected:  cap(shiftWeekendToFriday(materialsReceived)),
+    production_kickoff:            cap(orderType === 'sample' ? productionKickoffSample : shiftWeekendToFriday(productionKickoff)),
+    pre_production_meeting:        cap(shiftWeekendToFriday(preProductionMeeting)),
     // 阶段5：过程控制
-    mid_qc_check:                  shiftWeekendToFriday(midQc),
-    final_qc_check:                shiftWeekendToFriday(finalQc),
+    mid_qc_check:                  cap(shiftWeekendToFriday(midQc)),
+    final_qc_check:                cap(shiftWeekendToFriday(finalQc)),
     // 阶段6：出货控制
-    packing_method_confirmed:      shiftWeekendToFriday(packingConfirm),
-    factory_completion:            shiftWeekendToFriday(factoryCompletion),
-    inspection_release:            shiftWeekendToFriday(inspectionRelease),
-    shipping_sample_send:          shiftWeekendToFriday(shippingSample),
+    packing_method_confirmed:      cap(shiftWeekendToFriday(packingConfirm)),
+    factory_completion:            cap(shiftWeekendToFriday(factoryCompletion)),
+    inspection_release:            cap(shiftWeekendToFriday(inspectionRelease)),
+    shipping_sample_send:          cap(shiftWeekendToFriday(shippingSample)),
     // 阶段7：物流收款
-    booking_done:                  shiftWeekendToFriday(bookingDone),
-    customs_export:                shiftWeekendToFriday(customsExport),
-    payment_received:              offset(anchor, 30),
+    booking_done:                  cap(shiftWeekendToFriday(bookingDone)),
+    customs_export:                cap(shiftWeekendToFriday(customsExport)),
+    payment_received:              offset(anchor, 30), // 收款可以在交期后
   };
 }
