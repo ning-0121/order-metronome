@@ -10,6 +10,7 @@
  * 标准45天时间线（基准比例）：
  *   Day 0   (0%)    PO确认
  *   Day 1   (2%)    财务审核
+ *   Day 3   (7%)    订单启动会（财务审核后2日内，参会：CEO/业务/采购/跟单）
  *   Day 2   (4%)    生产单 + 采购下达 + 加工费确认
  *   Day 3   (7%)    辅料单/BOM + 原辅料确认 + 确认工厂
  *   Day 5   (11%)   产前样准备
@@ -40,6 +41,7 @@ const STANDARD_DAYS = 45;
 const TIMELINE = {
   po_confirmed:                  0,
   finance_approval:              1,
+  order_kickoff_meeting:         3,
   production_order_upload:       2,
   order_docs_bom_complete:       3,
   bulk_materials_confirmed:      3,
@@ -137,6 +139,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
   const result: Record<string, Date> = {
     po_confirmed:                  cap(calc(TIMELINE.po_confirmed)),
     finance_approval:              cap(calc(TIMELINE.finance_approval)),
+    order_kickoff_meeting:         cap(calc(TIMELINE.order_kickoff_meeting)),
     production_order_upload:       cap(calc(TIMELINE.production_order_upload)),
     order_docs_bom_complete:       cap(calc(TIMELINE.order_docs_bom_complete)),
     bulk_materials_confirmed:      cap(calc(TIMELINE.bulk_materials_confirmed)),

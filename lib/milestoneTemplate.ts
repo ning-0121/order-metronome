@@ -29,6 +29,7 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   // 阶段1：订单启动
   { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true },
   { step_key: "finance_approval", name: "财务审核", owner_role: "finance", is_critical: true, evidence_required: false },
+  { step_key: "order_kickoff_meeting", name: "订单启动会", owner_role: "sales", is_critical: true, evidence_required: false },
   { step_key: "production_order_upload", name: "生产单上传", owner_role: "sales", is_critical: true, evidence_required: true },
   // 阶段2：订单转化
   { step_key: "order_docs_bom_complete", name: "订单资料/BOM齐全", owner_role: "sales", is_critical: true, evidence_required: true },

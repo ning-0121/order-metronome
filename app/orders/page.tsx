@@ -5,7 +5,7 @@ import { computeOrderStatus } from '@/lib/utils/order-status';
 
 // 阶段进度计算
 const PHASE_KEYS = [
-  { label: '启动', keys: ['po_confirmed', 'finance_approval', 'production_order_upload'] },
+  { label: '启动', keys: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'] },
   { label: '转化', keys: ['order_docs_bom_complete', 'bulk_materials_confirmed'] },
   { label: '产前样', keys: ['processing_fee_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved', 'factory_confirmed'] },
   { label: '采购生产', keys: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'] },

@@ -42,9 +42,9 @@ export async function backfillOrderMilestones(orderId: string) {
   
   const existingStepKeys = new Set((existingMilestones as any[])?.map((m: any) => m.step_key) || []);
   
-  // Check if all 18 milestones exist
-  if (existingStepKeys.size >= 18) {
-    return { data: { message: 'Order already has all 18 milestones', orderId } };
+  // Check if all milestones exist
+  if (existingStepKeys.size >= MILESTONE_TEMPLATE_V1.length) {
+    return { data: { message: `Order already has all ${MILESTONE_TEMPLATE_V1.length} milestones`, orderId } };
   }
   
   // Calculate due dates for all milestones

@@ -14,7 +14,7 @@ const STAGE_NAMES: Record<string, string> = {
 };
 
 const STAGE_KEYS: Record<string, string[]> = {
-  stage1: ['po_confirmed', 'finance_approval', 'production_order_upload'],
+  stage1: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'],
   stage2: ['order_docs_bom_complete', 'bulk_materials_confirmed'],
   stage3: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
   stage4: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'],

@@ -19,6 +19,29 @@ export interface SOPConfig {
  * step_key → SOP 配置映射
  */
 export const SOP_MAP: Record<string, SOPConfig> = {
+  // ── 订单启动会（业务/理单）──────────────────
+  order_kickoff_meeting: {
+    sop_title: '订单启动会 SOP',
+    sop_steps: [
+      '1. 财务审核通过后 2 日内组织召开订单启动会',
+      '2. 参会人员：CEO、业务/理单、采购、跟单',
+      '3. 逐项过订单关键信息：客户要求、款号、数量、交期、特殊工艺',
+      '4. 明确各环节责任人及关键时间节点',
+      '5. 讨论风险点并制定应对方案',
+      '6. 会议纪要记录并分发至各参会人员',
+    ],
+    required_fields: [
+      '会议纪要（含参会人签到）',
+      '各环节责任人确认',
+      '风险点及应对方案',
+    ],
+    completion_rules: [
+      '启动会已在财务审核后 2 日内召开',
+      'CEO、业务、采购、跟单均已参会',
+      '会议纪要已记录并分发',
+    ],
+  },
+
   // ── 生产单上传（业务）──────────────────
   production_order_upload: {
     sop_title: '生产单上传 SOP',

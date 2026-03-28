@@ -35,7 +35,7 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage1', emoji: '🟦',
     titleCn: '阶段 1：订单启动',
-    stepKeys: ['po_confirmed', 'finance_approval', 'production_order_upload'],
+    stepKeys: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'],
   },
   {
     key: 'stage2', emoji: '🟨',
