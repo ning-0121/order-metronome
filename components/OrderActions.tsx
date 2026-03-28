@@ -19,8 +19,26 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   const [cancelType, setCancelType] = useState('customer');
 
   const isDraft = lifecycleStatus === 'draft';
+  const canActivate = isDraft && isOrderOwner;
   const canDelete = isDraft && (isAdmin || isOrderOwner);
   const canCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && (isAdmin || isOrderOwner);
+
+  async function handleActivate() {
+    if (!confirm(`确认启动订单 ${orderNo}？启动后将进入执行状态。`)) return;
+    setLoading(true);
+    try {
+      const { activateOrderAction } = await import('@/app/actions/orders');
+      const result = await activateOrderAction(orderId);
+      if (result.error) {
+        alert(result.error);
+      } else {
+        router.refresh();
+      }
+    } catch {
+      alert('启动失败');
+    }
+    setLoading(false);
+  }
 
   async function handleDelete() {
     if (!confirm(`确定删除订单 ${orderNo}？此操作不可恢复！`)) return;
@@ -62,10 +80,21 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
     setLoading(false);
   }
 
-  if (!canDelete && !canCancel) return null;
+  if (!canActivate && !canDelete && !canCancel) return null;
 
   return (
     <div className="flex items-center gap-2">
+      {/* 确认启动订单 */}
+      {canActivate && (
+        <button
+          onClick={handleActivate}
+          disabled={loading}
+          className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 font-medium disabled:opacity-50"
+        >
+          确认订单
+        </button>
+      )}
+
       {/* 删除草稿 */}
       {canDelete && (
         <button
