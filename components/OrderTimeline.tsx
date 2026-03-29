@@ -50,7 +50,7 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage4', emoji: '🟩',
     titleCn: '阶段 4：采购与生产',
-    stepKeys: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'],
+    stepKeys: ['procurement_order_placed', 'materials_received_inspected', 'pre_production_meeting', 'production_kickoff'],
   },
   {
     key: 'stage5', emoji: '🟪',
