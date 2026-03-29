@@ -1234,7 +1234,7 @@ CREATE POLICY "Authenticated can manage company_profile"
 
 -- 插入默认公司画像
 INSERT INTO public.company_profile (company_name, industry, industry_sub, company_scale, annual_order_volume, main_markets, main_products)
-VALUES ('齐墨科技', 'apparel', 'casual_wear', 'small', '50-200', '{"US","EU"}', '{"针织","梭织"}')
+VALUES ('绮陌服饰', 'apparel', 'casual_wear', 'small', '50-200', '{"US","EU"}', '{"针织","梭织"}')
 ON CONFLICT DO NOTHING;
 
 -- 2. AI 知识库统一表
