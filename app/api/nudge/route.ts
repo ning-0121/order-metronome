@@ -142,7 +142,14 @@ export async function POST(request: NextRequest) {
       <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">去处理</a></p>
     `;
 
-    await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
+    const emailSent = await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
+
+    if (!emailSent) {
+      return NextResponse.json(
+        { error: '邮件发送失败，请检查 SMTP 配置或稍后重试' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
