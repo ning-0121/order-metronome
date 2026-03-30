@@ -17,7 +17,7 @@ const STAGE_KEYS: Record<string, string[]> = {
   stage1: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'],
   stage2: ['order_docs_bom_complete', 'bulk_materials_confirmed'],
   stage3: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
-  stage4: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'],
+  stage4: ['procurement_order_placed', 'materials_received_inspected', 'pre_production_meeting', 'production_kickoff'],
   stage5: ['mid_qc_check', 'final_qc_check'],
   stage6: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'],
   stage7: ['booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'payment_received'],
@@ -29,8 +29,8 @@ const ROLE_DAILY_SOPS = [
     role: 'sales',
     label: '业务',
     color: 'indigo',
-    responsibilities: '客户沟通、生产单/原辅料单制作、原辅料验收、产前样验收/寄送、品质跟进、包装确认、订舱、报关',
-    milestones: ['PO确认', '生产单上传', '订单资料/BOM齐全', '原辅料到货验收', '产前样寄出', '产前样客户确认', '包装方式业务确认', '船样寄送', '订舱完成', '报关出运'],
+    responsibilities: '客户沟通、PO确认、生产单制作、辅料单/BOM、大货原辅料确认、产前样寄出/客户确认、包装确认、船样、订舱、报关安排出运',
+    milestones: ['PO确认', '订单启动会', '生产单上传', '订单资料/BOM齐全', '大货原辅料确认', '产前样寄出', '产前样客户确认', '包装方式业务确认', '船样寄送', '订舱完成', '报关安排出运'],
     dailySteps: [
       '打开"我的工作台"，查看今日到期和超期节点（业务节点最多，优先处理红色超期）',
       '订单启动阶段 — 上传生产单、整理 BOM/原辅料单',
@@ -51,8 +51,8 @@ const ROLE_DAILY_SOPS = [
     role: 'merchandiser',
     label: '跟单',
     color: 'purple',
-    responsibilities: '生产单执行、工厂报价/产能协调、产前样安排、产前会、生产进度跟进、中查尾查、验货放行',
-    milestones: ['产前样准备完成', '确认工厂', '生产启动/开裁', '产前会', '中查', '尾查', '工厂完成', '验货/放行'],
+    responsibilities: '封样与确认工厂、产前样准备、原辅料到货验收、产前会、生产启动/开裁、中查尾查、工厂完成、验货放行',
+    milestones: ['封样与确认工厂', '产前样准备完成', '原辅料到货验收', '产前会', '生产启动/开裁', '中查', '尾查', '工厂完成', '验货/放行'],
     dailySteps: [
       '打开"我的工作台"，查看今日到期和超期节点',
       '产前样阶段 — 协调工厂安排产前样，跟进制作进度',
@@ -72,8 +72,8 @@ const ROLE_DAILY_SOPS = [
     role: 'finance',
     label: '财务',
     color: 'green',
-    responsibilities: 'PO 审核、原辅料采购成本审核、加工费确认、货代费用审核、客户收款和出货许可',
-    milestones: ['财务审核', '加工费确认', '收款完成'],
+    responsibilities: 'PO 审核、加工费目标价确认、核准出运、收款',
+    milestones: ['财务审核', '加工费目标价确认', '核准出运', '收款完成'],
     dailySteps: [
       '打开"我的工作台"，查看待处理的财务节点',
       '收到 PO 后进行审核 — 确认金额、付款条件、利润空间',
@@ -91,8 +91,8 @@ const ROLE_DAILY_SOPS = [
     role: 'procurement',
     label: '采购',
     color: 'amber',
-    responsibilities: 'PO 与原辅料订单对比审核、价格谈判、采购计划整理、采购单下达、供应商跟进、大货品质确认',
-    milestones: ['大货原辅料确认', '采购订单下达'],
+    responsibilities: '面辅料采购、供应商跟进、采购订单下达',
+    milestones: ['采购订单下达'],
     dailySteps: [
       '打开"我的工作台"，查看待处理的采购节点',
       '对比 PO 和原辅料订单，审核物料规格和数量',
@@ -109,20 +109,20 @@ const ROLE_DAILY_SOPS = [
   },
   {
     role: 'logistics',
-    label: '物流',
+    label: '物流/仓库',
     color: 'sky',
-    responsibilities: '出货装货与运输事宜的安排',
-    milestones: ['配合出货装货运输（无独立系统节点）'],
+    responsibilities: '出货装柜、运输安排、出运执行',
+    milestones: ['出运'],
     dailySteps: [
       '关注业务发起的订舱和报关节点进度',
-      '报关放行后协调安排装柜、装货事宜',
-      '跟进运输过程，确保货物安全送达',
-      '如遇运输异常，及时通知业务和管理员',
+      '财务核准出运后，协调装柜、拍摄装柜照片',
+      '确认柜号、铅封号，获取提单',
+      '上传装柜照片和提单，标记出运完成',
     ],
     tips: [
-      '当前系统中订舱和报关节点由业务负责操作',
-      '物流角色主要配合出货装货的现场执行和运输安排',
-      '如需系统权限操作特定节点，联系管理员分配',
+      '装柜照片需拍摄：空柜、装货过程、满柜、封柜',
+      '出运完成后需上传提单作为凭证',
+      '如遇运输异常，及时通知业务和管理员',
     ],
   },
   {
@@ -711,7 +711,7 @@ export default function GuidePage() {
 
       {/* 页脚 */}
       <div className="text-center py-6 border-t border-gray-200">
-        <p className="text-xs text-gray-400">订单节拍器 v2.0 | 更新于 2026-03-28 | 如有问题请联系管理员</p>
+        <p className="text-xs text-gray-400">订单节拍器 v3.0 | 更新于 2026-03-29 | 访问 order.qimoactivewear.com | 如有问题请联系管理员</p>
       </div>
     </div>
   );

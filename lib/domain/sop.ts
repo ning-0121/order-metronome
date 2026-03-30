@@ -336,6 +336,144 @@ export const SOP_MAP: Record<string, SOPConfig> = {
   },
 };
 
+  // ── 补全缺失的 SOP ──
+
+  po_confirmed: {
+    sop_title: 'PO确认 SOP',
+    sop_steps: [
+      '1. 收到客户 PO 后核对：款号、数量、尺码配比、颜色、交期',
+      '2. 确认贸易条款（FOB/DDP）、付款方式',
+      '3. 检查是否有特殊要求（浅色、撞色、特殊包装等）',
+      '4. 上传客户 PO 原件至凭证区',
+      '5. 系统自动 AI 比对，确认数据无误后标记完成',
+    ],
+    required_fields: ['客户 PO 原件（PDF/图片）'],
+    completion_rules: ['PO 文件已上传', '关键信息（数量、交期）与系统一致'],
+  },
+
+  finance_approval: {
+    sop_title: '财务审核 SOP',
+    sop_steps: [
+      '1. 核对订单金额、利润率是否达标',
+      '2. 确认客户付款方式和信用条件',
+      '3. 检查是否有历史欠款或风险',
+      '4. 审核通过后标记完成，不通过标记阻塞并注明原因',
+    ],
+    required_fields: ['审核意见'],
+    completion_rules: ['财务确认订单可执行', '利润率达标'],
+  },
+
+  pre_production_sample_ready: {
+    sop_title: '产前样准备完成 SOP',
+    sop_steps: [
+      '1. 跟单协调工厂按 PO 要求制作产前样',
+      '2. 核对面料、辅料、工艺是否与确认样一致',
+      '3. 检查尺寸、做工、颜色是否符合客户要求',
+      '4. 拍照留档（正面、背面、细节、吊牌）',
+      '5. 确认无误后标记完成',
+    ],
+    required_fields: ['产前样照片（正/背/细节）'],
+    completion_rules: ['产前样制作完成', '面料/工艺与确认样一致', '照片已上传'],
+  },
+
+  pre_production_sample_sent: {
+    sop_title: '产前样寄出 SOP',
+    sop_steps: [
+      '1. 确认寄送地址和收件人',
+      '2. 安排快递/国际物流寄出',
+      '3. 获取运单号并记录',
+      '4. 通知客户产前样已寄出，提供运单号',
+    ],
+    required_fields: ['运单号'],
+    completion_rules: ['产前样已寄出', '已通知客户'],
+  },
+
+  pre_production_sample_approved: {
+    sop_title: '产前样客户确认 SOP',
+    sop_steps: [
+      '1. 跟进客户收样情况',
+      '2. 获取客户书面确认（邮件/签字）',
+      '3. 如客户提出修改意见，记录并反馈给工厂',
+      '4. 客户确认 OK 后上传确认凭证，标记完成',
+    ],
+    required_fields: ['客户确认邮件或签字文件'],
+    completion_rules: ['客户书面确认产前样合格', '确认凭证已上传'],
+  },
+
+  materials_received_inspected: {
+    sop_title: '原辅料到货验收 SOP',
+    sop_steps: [
+      '1. 核对到货物料与采购订单是否一致（品名、数量、规格）',
+      '2. 检查面料克重、颜色、手感是否达标',
+      '3. 检查辅料（拉链、纽扣、吊牌等）规格和数量',
+      '4. 有问题及时标记阻塞并通知采购和业务',
+      '5. 验收通过后标记完成',
+    ],
+    required_fields: ['验收确认'],
+    completion_rules: ['所有面辅料已到货', '品质验收通过', '数量与采购单一致'],
+  },
+
+  factory_completion: {
+    sop_title: '工厂完成 SOP',
+    sop_steps: [
+      '1. 确认工厂所有生产已完成',
+      '2. 核对总产量与订单数量是否一致',
+      '3. 确认包装已按要求完成',
+      '4. 准备验货/放行',
+    ],
+    required_fields: ['完成确认'],
+    completion_rules: ['生产数量达标', '包装完成', '可以安排验货'],
+  },
+
+  shipping_sample_send: {
+    sop_title: '船样寄送 SOP',
+    sop_steps: [
+      '1. 从大货中抽取船样（按客户要求的数量和尺码）',
+      '2. 船样必须是大货完整包装状态',
+      '3. 寄出并记录运单号',
+      '4. 通知客户船样已寄出',
+    ],
+    required_fields: ['运单号'],
+    completion_rules: ['船样已从大货抽取', '已寄出并通知客户'],
+  },
+
+  finance_shipment_approval: {
+    sop_title: '核准出运 SOP',
+    sop_steps: [
+      '1. 确认客户款项已收到或信用证条件已满足',
+      '2. 核对装箱单、发票金额',
+      '3. 确认无财务风险后核准放行出运',
+    ],
+    required_fields: ['财务核准确认'],
+    completion_rules: ['款项确认或信用证条件满足', '财务核准放行'],
+  },
+
+  shipment_execute: {
+    sop_title: '出运 SOP',
+    sop_steps: [
+      '1. 协调货车装柜',
+      '2. 拍摄装柜照片（空柜、装货过程、满柜、封柜）',
+      '3. 确认柜号、铅封号',
+      '4. 货物离港后获取提单',
+      '5. 上传装柜照片和提单',
+    ],
+    required_fields: ['装柜照片', '提单/运单'],
+    completion_rules: ['货物已装柜出运', '提单已获取并上传'],
+  },
+
+  payment_received: {
+    sop_title: '收款完成 SOP',
+    sop_steps: [
+      '1. 跟踪客户付款进度',
+      '2. 确认款项到账',
+      '3. 核对金额是否与合同一致',
+      '4. 标记收款完成',
+    ],
+    required_fields: ['到账确认'],
+    completion_rules: ['款项已到账', '金额与合同一致'],
+  },
+};
+
 /**
  * 获取节点的 SOP 配置
  */
