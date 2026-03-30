@@ -105,6 +105,7 @@ export async function createOrder(
   const warehouse_due_date = formData.get('warehouse_due_date') as string | null;
   const order_date = formData.get('order_date') as string | null;
   const cancel_date = formData.get('cancel_date') as string | null;
+  const factory_date = formData.get('factory_date') as string | null;
   const eta = formData.get('eta') as string | null;
   const shipping_sample_required = formData.get('shipping_sample_required') === 'true';
   const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
@@ -112,13 +113,15 @@ export async function createOrder(
   const factory_id = formData.get('factory_id') as string | null;
   const totalQuantity = formData.get('total_quantity') as string | null;
   const quantity = totalQuantity ? parseInt(totalQuantity, 10) : null;
+  const styleCount = formData.get('style_count') as string | null;
+  const colorCount = formData.get('color_count') as string | null;
 
-  if (incoterm === 'FOB' && !etd) {
-    return { ok: false, error: 'FOB 条款必须填写 ETD（预计离港日）' };
-  }
-  if (incoterm === 'DDP' && !warehouse_due_date) {
-    return { ok: false, error: 'DDP 条款必须填写仓库截止日期' };
-  }
+  if (!etd) return { ok: false, error: '请填写 ETD（离港日）' };
+  if (!warehouse_due_date) return { ok: false, error: '请填写 ETA（到港/到仓日）' };
+  if (!factory_date) return { ok: false, error: '请填写出厂日期' };
+  if (!quantity) return { ok: false, error: '请填写预估总数量' };
+  if (!styleCount) return { ok: false, error: '请填写款数' };
+  if (!colorCount) return { ok: false, error: '请填写颜色数' };
   // ── STEP 3: insert order — 写入订单到数据库 ──
   // order_type: trial/bulk/repeat/urgent（DB CHECK 需更新）
   const dbOrderType = order_type || 'bulk';
@@ -155,6 +158,10 @@ export async function createOrder(
     is_new_factory: isNewFactory,
     created_by: user.id,
     quantity: quantity,
+    style_count: styleCount ? parseInt(styleCount, 10) : null,
+    color_count: colorCount ? parseInt(colorCount, 10) : null,
+    factory_date: factory_date || null,
+    eta: eta || warehouse_due_date || null,
     notes: (formData.get('notes') as string) || null,
     special_tags: [
       formData.get('has_plus_size') === 'true' ? '大码款' : '',

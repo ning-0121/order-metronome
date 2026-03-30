@@ -1378,6 +1378,11 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- ===== 2026-03-30 订单表新增字段 =====
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS factory_date date DEFAULT NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS style_count integer DEFAULT NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS color_count integer DEFAULT NULL;
+
 -- ===== 2026-03-30 历史订单导入模式 =====
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS imported_at timestamptz DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS import_current_step text DEFAULT NULL;
