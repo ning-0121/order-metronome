@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import Anthropic from '@anthropic-ai/sdk';
 
 export interface SmartInsight {
   type: 'customer' | 'factory' | 'product' | 'general';
@@ -230,5 +231,192 @@ export async function getSmartInsights(params: {
     }
   }
 
+  // ══════ 4. AI 深度洞察（Claude 分析历史模式） ══════
+  if (customerName || factoryName) {
+    try {
+      const aiInsights = await generateAIInsights(supabase, customerName, factoryName, insights);
+      if (aiInsights.length > 0) {
+        insights.push(...aiInsights);
+      }
+    } catch {
+      // AI 分析失败不影响规则引擎结果
+    }
+  }
+
   return { data: insights };
+}
+
+/**
+ * Claude AI 深度洞察：分析历史数据中的复合模式
+ * - 24小时缓存，避免重复调用
+ * - 失败时静默降级
+ */
+async function generateAIInsights(
+  supabase: any,
+  customerName?: string,
+  factoryName?: string,
+  ruleInsights: SmartInsight[] = [],
+): Promise<SmartInsight[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return [];
+
+  // 缓存检查：24小时内同一组合不重复分析
+  const cacheKey = `insight_${customerName || ''}_${factoryName || ''}_${new Date().toISOString().slice(0, 10)}`;
+  const { data: cached } = await (supabase.from('ai_knowledge_base') as any)
+    .select('structured_data')
+    .eq('source_id', cacheKey)
+    .eq('category', 'ai_insight_cache')
+    .maybeSingle();
+
+  if (cached?.structured_data?.insights) {
+    return cached.structured_data.insights as SmartInsight[];
+  }
+
+  // 收集历史数据摘要
+  const summaryParts: string[] = [];
+
+  if (customerName) {
+    // 最近5单概况
+    const { data: recentOrders } = await (supabase.from('orders') as any)
+      .select('id, order_no, lifecycle_status, created_at, quantity')
+      .eq('customer_name', customerName)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (recentOrders?.length > 0) {
+      summaryParts.push(`【客户 ${customerName} 最近${recentOrders.length}单】`);
+      const orderIds = recentOrders.map((o: any) => o.id);
+
+      // 复盘数据
+      const { data: retros } = await (supabase.from('order_retrospectives') as any)
+        .select('key_issue, root_cause, what_worked, on_time_delivery')
+        .in('order_id', orderIds);
+      if (retros?.length > 0) {
+        for (const r of retros) {
+          summaryParts.push(`- 问题：${r.key_issue || '无'}，根因：${r.root_cause || '无'}，成功经验：${r.what_worked || '无'}，准时：${r.on_time_delivery ? '是' : '否'}`);
+        }
+      }
+
+      // 延期记录
+      const { data: delays } = await (supabase.from('delay_requests') as any)
+        .select('reason_type, reason_detail')
+        .in('order_id', orderIds)
+        .limit(5);
+      if (delays?.length > 0) {
+        summaryParts.push(`延期记录：${delays.map((d: any) => `${d.reason_type}: ${d.reason_detail || ''}`).join('；')}`);
+      }
+
+      // 客户记忆
+      const { data: memories } = await (supabase.from('customer_memory') as any)
+        .select('content, category, risk_level')
+        .eq('customer_id', customerName)
+        .eq('risk_level', 'high')
+        .limit(5);
+      if (memories?.length > 0) {
+        summaryParts.push(`高风险记忆：${memories.map((m: any) => m.content).join('；')}`);
+      }
+    }
+  }
+
+  if (factoryName) {
+    const { data: fOrders } = await (supabase.from('orders') as any)
+      .select('id').eq('factory_name', factoryName).limit(10);
+    if (fOrders?.length > 0) {
+      const fIds = fOrders.map((o: any) => o.id);
+      summaryParts.push(`【工厂 ${factoryName}】`);
+
+      // 不良率
+      const { data: reports } = await (supabase.from('production_reports') as any)
+        .select('qty_produced, qty_defect, issues')
+        .in('order_id', fIds);
+      if (reports?.length > 0) {
+        const totalProd = reports.reduce((s: number, r: any) => s + (r.qty_produced || 0), 0);
+        const totalDef = reports.reduce((s: number, r: any) => s + (r.qty_defect || 0), 0);
+        summaryParts.push(`生产统计：总产量${totalProd}件，不良${totalDef}件（${totalProd > 0 ? ((totalDef / totalProd) * 100).toFixed(1) : 0}%）`);
+        const issues = reports.map((r: any) => r.issues).filter(Boolean);
+        if (issues.length > 0) summaryParts.push(`生产问题：${issues.slice(0, 3).join('；')}`);
+      }
+
+      // 阻塞
+      const { data: blocks } = await (supabase.from('milestone_logs') as any)
+        .select('note, step_key').in('order_id', fIds).eq('action', 'mark_blocked').limit(5);
+      if (blocks?.length > 0) {
+        summaryParts.push(`阻塞记录：${blocks.map((b: any) => `${b.step_key}: ${b.note || ''}`).join('；')}`);
+      }
+    }
+  }
+
+  // 数据不够不分析
+  if (summaryParts.length < 2) return [];
+
+  // 规则引擎结果作为参考
+  const rulesSummary = ruleInsights.length > 0
+    ? `\n已有规则分析结果：${ruleInsights.map(r => r.title).join('；')}`
+    : '';
+
+  // 调用 Claude
+  const client = new Anthropic({ apiKey });
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 800,
+    system: `你是服装外贸订单风险分析师。根据历史数据，分析出最关键的风险点和成功经验。
+要求：
+1. 找出数据中的复合模式（如"该客户+浅色面料=高退货风险"）
+2. 给出具体可行的预防建议
+3. 如果有成功经验也要提炼
+4. 返回JSON数组，每个元素: {"title":"标题","detail":"分析详情","severity":"high/medium/low"}
+5. 最多3条，每条detail不超过80字
+6. 只返回JSON，不要其他内容`,
+    messages: [{
+      role: 'user',
+      content: `${summaryParts.join('\n')}\n${rulesSummary}\n\n请分析风险和经验：`,
+    }],
+  });
+
+  const text = response.content
+    .filter(b => b.type === 'text')
+    .map(b => (b as Anthropic.TextBlock).text)
+    .join('');
+
+  let jsonStr = text.trim();
+  if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  }
+
+  let parsed: any[];
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    return [];
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  const aiInsights: SmartInsight[] = parsed.slice(0, 3).map((item: any) => ({
+    type: (customerName ? 'customer' : 'factory') as SmartInsight['type'],
+    icon: '🤖',
+    title: String(item.title || ''),
+    detail: String(item.detail || ''),
+    severity: (['high', 'medium', 'low'].includes(item.severity) ? item.severity : 'medium') as SmartInsight['severity'],
+    source: 'AI 深度分析',
+  }));
+
+  // 写入缓存
+  try {
+    await (supabase.from('ai_knowledge_base') as any).insert({
+      knowledge_type: 'process',
+      category: 'ai_insight_cache',
+      title: `AI洞察缓存: ${customerName || ''} / ${factoryName || ''}`,
+      content: aiInsights.map(i => i.title).join('；'),
+      structured_data: { insights: aiInsights },
+      source_type: 'manual',
+      source_id: cacheKey,
+      confidence: 'high',
+      impact_level: 'medium',
+      is_actionable: true,
+      status: 'active',
+    });
+  } catch {} // 缓存写入失败不影响结果
+
+  return aiInsights;
 }
