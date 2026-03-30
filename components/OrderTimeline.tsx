@@ -170,8 +170,10 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
   useEffect(() => {
     if (expandedId) {
       getMilestoneLogs(expandedId).then(r => {
-        if (r.data) setLogs(prev => ({ ...prev, [expandedId]: r.data }));
+        if (r.data) setLogs({ [expandedId]: r.data });
       });
+    } else {
+      setLogs({});
     }
   }, [expandedId]);
 

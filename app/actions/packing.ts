@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache';
 
 export async function getPackingLists(orderId: string) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: '请先登录' };
   const { data, error } = await (supabase.from('packing_lists') as any)
     .select('*, packing_list_lines(*)').eq('order_id', orderId)
     .order('created_at', { ascending: false });

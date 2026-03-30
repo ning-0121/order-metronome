@@ -19,7 +19,9 @@ export interface Attachment {
  */
 export async function getAttachmentsByMilestone(milestoneId: string) {
   const supabase = await createClient();
-  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: '请先登录' };
+
   const { data, error } = await supabase
     .from('attachments')
     .select('*')
@@ -38,7 +40,9 @@ export async function getAttachmentsByMilestone(milestoneId: string) {
  */
 export async function getAttachmentsByOrder(orderId: string) {
   const supabase = await createClient();
-  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: '请先登录' };
+
   const { data, error } = await supabase
     .from('attachments')
     .select('*')
