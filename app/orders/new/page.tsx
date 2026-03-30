@@ -406,16 +406,28 @@ function NewOrderWizard() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">预估总数量（件）</label>
-                  <input type="number" name="total_quantity" min="1"
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    预估总数量（件）<span className="text-red-500">*</span>
+                  </label>
+                  <input type="number" name="total_quantity" min="1" required
                     placeholder="此 PO 总件数"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">款数</label>
-                  <input type="number" name="style_count" min="1"
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    款数 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="number" name="style_count" min="1" required
                     placeholder="此 PO 涉及款数"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    颜色数 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="number" name="color_count" min="1" required
+                    placeholder="此 PO 共计颜色数"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
               </div>
             </div>
@@ -443,24 +455,27 @@ function NewOrderWizard() {
                   <input type="date" name="cancel_date"
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
                 </div>
-                {incoterm === 'FOB' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      ETD（预计离港日）<span className="text-red-500">*</span>
-                    </label>
-                    <input type="date" name="etd" required
-                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                  </div>
-                )}
-                {incoterm === 'DDP' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      到仓日期（ETA）<span className="text-red-500">*</span>
-                    </label>
-                    <input type="date" name="warehouse_due_date" required
-                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                  </div>
-                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    出厂日期 <span className="text-red-500">*</span>
+                  </label>
+                  <input type="date" name="factory_date" required
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ETD（离港日）<span className="text-red-500">*</span>
+                  </label>
+                  <input type="date" name="etd" required
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ETA（到港/到仓日）<span className="text-red-500">*</span>
+                  </label>
+                  <input type="date" name="warehouse_due_date" required
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                </div>
                 <div className="col-span-2">
                   <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50">
                     <input type="checkbox" name="shipping_sample_required" value="true"
