@@ -334,9 +334,6 @@ export const SOP_MAP: Record<string, SOPConfig> = {
       '工厂已确认接单并上传凭证',
     ],
   },
-};
-
-  // ── 补全缺失的 SOP ──
 
   po_confirmed: {
     sop_title: 'PO确认 SOP',
