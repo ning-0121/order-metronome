@@ -64,18 +64,24 @@ export function SmartInsightsPanel({ customerName, factoryName, orderType }: Pro
 
       {expanded && (
         <div className="px-4 pb-4 space-y-2">
-          {insights.map((insight, i) => (
-            <div key={i} className={`rounded-lg border p-3 ${SEVERITY_STYLES[insight.severity]}`}>
-              <div className="flex items-start gap-2">
-                <span className="text-base flex-shrink-0">{insight.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800">{insight.title}</p>
-                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">{insight.detail}</p>
-                  <p className="text-[10px] text-gray-400 mt-1">来源：{insight.source}</p>
+          {insights.map((insight, i) => {
+            const isAI = insight.source === 'AI 深度分析';
+            return (
+              <div key={i} className={`rounded-lg border p-3 ${isAI ? 'border-indigo-300 bg-gradient-to-r from-indigo-50 to-purple-50' : SEVERITY_STYLES[insight.severity]}`}>
+                <div className="flex items-start gap-2">
+                  <span className="text-base flex-shrink-0">{insight.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium text-gray-800">{insight.title}</p>
+                      {isAI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 font-medium">AI</span>}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">{insight.detail}</p>
+                    <p className="text-[10px] text-gray-400 mt-1">来源：{insight.source}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

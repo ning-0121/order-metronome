@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
+import Anthropic from '@anthropic-ai/sdk';
 import type { KnowledgeType, KnowledgeSource, KnowledgeEntry, KnowledgeStats, CompanyProfile, CollectionLog } from '@/lib/domain/ai-knowledge';
 
 // ══════════════════════════════════════════════
@@ -580,4 +581,270 @@ export async function addManualKnowledge(entry: {
 
   if (error) return { error: error.message };
   return {};
+}
+
+// ══════════════════════════════════════════════
+// AI 分析引擎：Claude 分析趋势、生成画像
+// ══════════════════════════════════════════════
+
+export interface AIAnalysisResult {
+  dimension: 'customer' | 'factory' | 'process';
+  subject: string; // 客户名/工厂名/流程
+  summary: string;
+  keyFindings: string[];
+  riskRating: 'high' | 'medium' | 'low';
+  recommendations: string[];
+  analyzedAt: string;
+}
+
+/**
+ * 运行 AI 分析：用 Claude 分析客户/工厂/流程趋势
+ */
+export async function runAIAnalysis(): Promise<{ data?: AIAnalysisResult[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '未登录' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { error: '仅管理员可运行 AI 分析' };
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { error: 'AI 服务未配置（缺少 ANTHROPIC_API_KEY）' };
+
+  const client = new Anthropic({ apiKey });
+  const results: AIAnalysisResult[] = [];
+  const now = new Date();
+
+  // ── 1. 客户趋势分析 ──
+  const { data: customers } = await (supabase.from('orders') as any)
+    .select('customer_name')
+    .not('customer_name', 'is', null);
+
+  const customerNames = [...new Set((customers || []).map((o: any) => o.customer_name))].filter(Boolean) as string[];
+
+  for (const cName of customerNames.slice(0, 10)) { // 最多分析10个客户
+    // 7天内缓存检查
+    const cacheId = `ai_profile_customer_${cName}`;
+    const { data: cached } = await (supabase.from('ai_knowledge_base') as any)
+      .select('created_at')
+      .eq('source_id', cacheId)
+      .eq('category', 'ai_profile')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (cached && (now.getTime() - new Date(cached.created_at).getTime()) < 7 * 86400000) continue;
+
+    // 聚合该客户的知识条目
+    const { data: entries } = await (supabase.from('ai_knowledge_base') as any)
+      .select('title, content, category, impact_level')
+      .eq('customer_name', cName)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (!entries || entries.length < 2) continue;
+
+    const dataSummary = entries.map((e: any) => `[${e.category}/${e.impact_level}] ${e.title}: ${e.content?.slice(0, 100)}`).join('\n');
+
+    try {
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 600,
+        system: `你是服装外贸行业的客户分析专家。根据历史知识条目分析客户画像。
+返回JSON: {"summary":"一句话总结","key_findings":["发现1","发现2","发现3"],"risk_rating":"high/medium/low","recommendations":["建议1","建议2"]}
+只返回JSON。`,
+        messages: [{ role: 'user', content: `分析客户「${cName}」:\n${dataSummary}` }],
+      });
+
+      const text = response.content.filter(b => b.type === 'text').map(b => (b as Anthropic.TextBlock).text).join('');
+      let jsonStr = text.trim();
+      if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
+      const parsed = JSON.parse(jsonStr);
+      const result: AIAnalysisResult = {
+        dimension: 'customer', subject: cName,
+        summary: parsed.summary || '',
+        keyFindings: parsed.key_findings || [],
+        riskRating: parsed.risk_rating || 'medium',
+        recommendations: parsed.recommendations || [],
+        analyzedAt: now.toISOString(),
+      };
+      results.push(result);
+
+      // 存入知识库
+      await (supabase.from('ai_knowledge_base') as any).insert({
+        knowledge_type: 'customer',
+        category: 'ai_profile',
+        title: `AI客户画像: ${cName}`,
+        content: parsed.summary,
+        structured_data: result,
+        source_type: 'manual',
+        source_id: cacheId,
+        customer_name: cName,
+        confidence: 'high',
+        impact_level: result.riskRating,
+        is_actionable: true,
+        status: 'active',
+      });
+    } catch {} // 单个客户分析失败不影响其他
+  }
+
+  // ── 2. 工厂趋势分析 ──
+  const { data: factories } = await (supabase.from('orders') as any)
+    .select('factory_name')
+    .not('factory_name', 'is', null);
+
+  const factoryNames = [...new Set((factories || []).map((o: any) => o.factory_name))].filter(Boolean) as string[];
+
+  for (const fName of factoryNames.slice(0, 10)) {
+    const cacheId = `ai_profile_factory_${fName}`;
+    const { data: cached } = await (supabase.from('ai_knowledge_base') as any)
+      .select('created_at')
+      .eq('source_id', cacheId)
+      .eq('category', 'ai_profile')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (cached && (now.getTime() - new Date(cached.created_at).getTime()) < 7 * 86400000) continue;
+
+    const { data: entries } = await (supabase.from('ai_knowledge_base') as any)
+      .select('title, content, category, impact_level')
+      .eq('factory_name', fName)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (!entries || entries.length < 2) continue;
+
+    const dataSummary = entries.map((e: any) => `[${e.category}/${e.impact_level}] ${e.title}: ${e.content?.slice(0, 100)}`).join('\n');
+
+    try {
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 600,
+        system: `你是服装外贸行业的工厂评估专家。根据历史知识条目分析工厂表现。
+返回JSON: {"summary":"一句话总结","key_findings":["发现1","发现2","发现3"],"risk_rating":"high/medium/low","recommendations":["建议1","建议2"]}
+只返回JSON。`,
+        messages: [{ role: 'user', content: `分析工厂「${fName}」:\n${dataSummary}` }],
+      });
+
+      const text = response.content.filter(b => b.type === 'text').map(b => (b as Anthropic.TextBlock).text).join('');
+      let jsonStr = text.trim();
+      if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
+      const parsed = JSON.parse(jsonStr);
+      const result: AIAnalysisResult = {
+        dimension: 'factory', subject: fName,
+        summary: parsed.summary || '',
+        keyFindings: parsed.key_findings || [],
+        riskRating: parsed.risk_rating || 'medium',
+        recommendations: parsed.recommendations || [],
+        analyzedAt: now.toISOString(),
+      };
+      results.push(result);
+
+      await (supabase.from('ai_knowledge_base') as any).insert({
+        knowledge_type: 'factory',
+        category: 'ai_profile',
+        title: `AI工厂评估: ${fName}`,
+        content: parsed.summary,
+        structured_data: result,
+        source_type: 'manual',
+        source_id: cacheId,
+        factory_name: fName,
+        confidence: 'high',
+        impact_level: result.riskRating,
+        is_actionable: true,
+        status: 'active',
+      });
+    } catch {}
+  }
+
+  // ── 3. 流程瓶颈分析 ──
+  const processCacheId = `ai_profile_process_bottleneck`;
+  const { data: processCached } = await (supabase.from('ai_knowledge_base') as any)
+    .select('created_at')
+    .eq('source_id', processCacheId)
+    .eq('category', 'ai_bottleneck')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!processCached || (now.getTime() - new Date(processCached.created_at).getTime()) >= 7 * 86400000) {
+    const { data: processEntries } = await (supabase.from('ai_knowledge_base') as any)
+      .select('title, content, category, impact_level')
+      .eq('knowledge_type', 'process')
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    if (processEntries && processEntries.length >= 3) {
+      const dataSummary = processEntries.map((e: any) => `[${e.category}/${e.impact_level}] ${e.title}: ${e.content?.slice(0, 100)}`).join('\n');
+
+      try {
+        const response = await client.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 600,
+          system: `你是服装外贸订单流程优化专家。根据历史阻塞/延期/瓶颈记录，分析系统性流程问题。
+返回JSON: {"summary":"一句话总结","key_findings":["瓶颈1","瓶颈2","瓶颈3"],"risk_rating":"high/medium/low","recommendations":["改进1","改进2"]}
+只返回JSON。`,
+          messages: [{ role: 'user', content: `分析流程瓶颈:\n${dataSummary}` }],
+        });
+
+        const text = response.content.filter(b => b.type === 'text').map(b => (b as Anthropic.TextBlock).text).join('');
+        let jsonStr = text.trim();
+        if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
+        const parsed = JSON.parse(jsonStr);
+        const result: AIAnalysisResult = {
+          dimension: 'process', subject: '全流程',
+          summary: parsed.summary || '',
+          keyFindings: parsed.key_findings || [],
+          riskRating: parsed.risk_rating || 'medium',
+          recommendations: parsed.recommendations || [],
+          analyzedAt: now.toISOString(),
+        };
+        results.push(result);
+
+        await (supabase.from('ai_knowledge_base') as any).insert({
+          knowledge_type: 'process',
+          category: 'ai_bottleneck',
+          title: 'AI流程瓶颈分析',
+          content: parsed.summary,
+          structured_data: result,
+          source_type: 'manual',
+          source_id: processCacheId,
+          confidence: 'high',
+          impact_level: result.riskRating,
+          is_actionable: true,
+          status: 'active',
+        });
+      } catch {}
+    }
+  }
+
+  return { data: results };
+}
+
+/**
+ * 获取已有的 AI 分析结果
+ */
+export async function getAIAnalysisResults(): Promise<{ data: AIAnalysisResult[] }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: [] };
+
+  const { data: entries } = await (supabase.from('ai_knowledge_base') as any)
+    .select('structured_data, created_at')
+    .in('category', ['ai_profile', 'ai_bottleneck'])
+    .not('structured_data', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  const results: AIAnalysisResult[] = [];
+  for (const e of entries || []) {
+    if (e.structured_data?.dimension) {
+      results.push(e.structured_data as AIAnalysisResult);
+    }
+  }
+  return { data: results };
 }

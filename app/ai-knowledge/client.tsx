@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { runCollectionPipeline, searchKnowledge, addManualKnowledge } from '@/app/actions/ai-knowledge';
+import { runCollectionPipeline, searchKnowledge, addManualKnowledge, runAIAnalysis, getAIAnalysisResults, type AIAnalysisResult } from '@/app/actions/ai-knowledge';
 import { KNOWLEDGE_TYPE_LABELS, KNOWLEDGE_SOURCE_LABELS } from '@/lib/domain/ai-knowledge';
 import type { KnowledgeEntry, KnowledgeType, CollectionLog } from '@/lib/domain/ai-knowledge';
 
@@ -18,6 +18,34 @@ export function AIKnowledgeClient({ recentEntries: initialEntries, lastRuns }: P
   const [searchKeyword, setSearchKeyword] = useState('');
   const [filterType, setFilterType] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiResults, setAiResults] = useState<AIAnalysisResult[]>([]);
+  const [aiLoaded, setAiLoaded] = useState(false);
+
+  // 加载已有 AI 分析结果
+  const loadAIResults = () => {
+    if (aiLoaded) return;
+    startTransition(async () => {
+      const res = await getAIAnalysisResults();
+      setAiResults(res.data);
+      setAiLoaded(true);
+    });
+  };
+
+  // 运行 AI 分析
+  const handleAIAnalysis = () => {
+    setAnalyzing(true);
+    startTransition(async () => {
+      const result = await runAIAnalysis();
+      if (result.data) {
+        setAiResults(result.data);
+        setAiLoaded(true);
+      } else {
+        alert(result.error || 'AI 分析失败');
+      }
+      setAnalyzing(false);
+    });
+  };
 
   // 运行采集管道
   const handleCollect = () => {
@@ -98,6 +126,13 @@ export function AIKnowledgeClient({ recentEntries: initialEntries, lastRuns }: P
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-all"
           >
             {collecting ? '⏳ 采集中...' : '🔄 运行数据采集管道'}
+          </button>
+          <button
+            onClick={handleAIAnalysis}
+            disabled={analyzing || isPending}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-all"
+          >
+            {analyzing ? '🧠 AI 分析中...' : '🧠 运行 AI 分析'}
           </button>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
@@ -243,6 +278,56 @@ export function AIKnowledgeClient({ recentEntries: initialEntries, lastRuns }: P
           </div>
         </div>
       )}
+
+      {/* AI 分析结果 */}
+      <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-2xl border border-purple-200 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            🧠 AI 智能分析
+            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-600 font-medium">Claude</span>
+          </h2>
+          {!aiLoaded && (
+            <button onClick={loadAIResults} className="text-xs text-purple-600 hover:text-purple-800 font-medium">
+              加载历史分析 →
+            </button>
+          )}
+        </div>
+
+        {aiResults.length === 0 && aiLoaded && (
+          <p className="text-sm text-gray-500 py-4 text-center">暂无 AI 分析结果。点击"运行 AI 分析"开始（需要先运行数据采集）</p>
+        )}
+
+        {aiResults.length > 0 && (
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {aiResults.map((r, i) => {
+              const dimIcons = { customer: '🤝', factory: '🏭', process: '⚙️' };
+              const dimLabels = { customer: '客户画像', factory: '工厂评估', process: '流程分析' };
+              const riskColors = { high: 'border-red-300 bg-red-50', medium: 'border-amber-300 bg-amber-50', low: 'border-green-300 bg-green-50' };
+              return (
+                <div key={i} className={`rounded-xl border p-4 ${riskColors[r.riskRating] || 'border-gray-200'}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">{dimIcons[r.dimension] || '📊'}</span>
+                    <span className="text-xs text-gray-500">{dimLabels[r.dimension] || r.dimension}</span>
+                    <span className="text-sm font-bold text-gray-900">{r.subject}</span>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-2">{r.summary}</p>
+                  {r.keyFindings?.length > 0 && (
+                    <ul className="text-xs text-gray-600 space-y-0.5 mb-2">
+                      {r.keyFindings.map((f, j) => <li key={j}>· {f}</li>)}
+                    </ul>
+                  )}
+                  {r.recommendations?.length > 0 && (
+                    <div className="text-xs text-indigo-700 bg-indigo-50 rounded-md px-2 py-1.5">
+                      建议：{r.recommendations.join('；')}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-400 mt-2">分析时间：{r.analyzedAt ? new Date(r.analyzedAt).toLocaleDateString('zh-CN') : '-'}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* 知识条目列表 */}
       <div className="bg-white rounded-2xl border border-gray-200 p-5">
