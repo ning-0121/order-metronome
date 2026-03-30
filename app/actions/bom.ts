@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache';
 
 export async function getBomItems(orderId: string) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: '请先登录' };
   const { data, error } = await (supabase.from('materials_bom') as any)
     .select('*').eq('order_id', orderId).order('material_type');
   if (error) return { data: null, error: error.message };

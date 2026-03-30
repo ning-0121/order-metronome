@@ -26,6 +26,19 @@ type MilestoneLogAction =
   | 'update'
   | 'execution_note';
 
+/** 检查订单是否允许修改关卡（已取消/已完成的订单禁止操作） */
+async function checkOrderModifiable(supabase: any, orderId: string): Promise<string | null> {
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('lifecycle_status')
+    .eq('id', orderId)
+    .single();
+  if (!order) return '订单不存在';
+  const status = order.lifecycle_status;
+  if (status === 'completed' || status === '已完成') return '该订单已完成，不能修改关卡';
+  if (status === 'cancelled' || status === '已取消') return '该订单已取消，不能修改关卡';
+  return null; // 可修改
+}
+
 async function logMilestoneAction(
   supabase: any,
   milestoneId: string,
@@ -134,6 +147,10 @@ export async function markMilestoneDone(milestoneId: string) {
     return { error: getError?.message || '找不到该执行节点' };
   }
 
+  // 生命周期校验：已完成/已取消的订单禁止操作
+  const lifecycleError = await checkOrderModifiable(supabase, milestone.order_id);
+  if (lifecycleError) return { error: lifecycleError };
+
   // Check role: must be assigned user or matching owner_role
   // 管理员不能替代执行关卡（管理员负责监督、指派、审批，不替代一线操作）
   const { data: profile } = await supabase
@@ -143,8 +160,8 @@ export async function markMilestoneDone(milestoneId: string) {
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
 
-  // 管理员明确禁止标记完成（即使被误分配为负责人也不行）
-  if (userRoles.includes('admin') && userRoles.length === 1) {
+  // 管理员禁止标记完成（管理员负责监督，不替代一线操作；多角色管理员同样受限）
+  if (userRoles.includes('admin')) {
     return { error: '管理员不能标记关卡完成，请由对应角色的负责人操作' };
   }
 
@@ -292,6 +309,10 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
     return { error: getError?.message || '找不到该执行节点' };
   }
 
+  // 生命周期校验
+  const lifecycleErr = await checkOrderModifiable(supabase, milestone.order_id);
+  if (lifecycleErr) return { error: lifecycleErr };
+
   // Check role: must be admin, assigned user, or matching owner_role (V2: multi-role)
   const { data: profile } = await supabase
     .from('profiles')
@@ -400,17 +421,23 @@ export async function updateMilestoneStatus(
   
   // 其他状态使用状态机转换
   const result = await transitionMilestoneStatus(milestoneId, normalizedStatus, note || null);
-  
+
   if (result.error || !result.data) {
     return { error: result.error || '节点状态更新失败，请重试' };
   }
-  
+
   const supabase = await createClient();
   const { data: milestone } = await (supabase
     .from('milestones') as any)
     .select('order_id')
     .eq('id', milestoneId)
     .single();
+
+  // 生命周期校验
+  if (milestone) {
+    const lcErr = await checkOrderModifiable(supabase, (milestone as any).order_id);
+    if (lcErr) return { error: lcErr };
+  }
   
   if (milestone) {
     revalidatePath(`/orders/${(milestone as any).order_id}`);
@@ -494,6 +521,14 @@ export async function markMilestoneUnblocked(milestoneId: string) {
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   if (!userRoles.includes('admin')) {
     return { error: '无权操作：只有管理员可以解除卡住状态' };
+  }
+
+  // 生命周期校验
+  const { data: msForCheck } = await (supabase.from('milestones') as any)
+    .select('order_id').eq('id', milestoneId).single();
+  if (msForCheck) {
+    const lcErr = await checkOrderModifiable(supabase, msForCheck.order_id);
+    if (lcErr) return { error: lcErr };
   }
 
   // 使用状态机转换（卡住 -> 进行中）
