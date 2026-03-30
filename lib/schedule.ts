@@ -107,21 +107,34 @@ export function recalcRemainingDueDates(
   const currentDay = TIMELINE[currentStepKey as keyof typeof TIMELINE];
   if (currentDay === undefined) throw new Error(`Unknown step_key: ${currentStepKey}`);
 
-  const remainingSpan = STANDARD_DAYS - currentDay; // 标准时间线中剩余跨度
   const daysToAnchor = Math.ceil((anchor.getTime() - today.getTime()) / 86400000);
   const availableDays = Math.max(daysToAnchor, 14); // 最低14天保障
 
   const result: Record<string, Date> = {};
 
-  for (const [key, day] of Object.entries(TIMELINE)) {
-    if (day < currentDay) continue; // 已完成节点跳过
+  // 收集当前及之后的所有节点，按标准天数排序
+  const remainingEntries = Object.entries(TIMELINE)
+    .filter(([, day]) => day >= currentDay)
+    .sort(([, a], [, b]) => a - b);
 
-    if (remainingSpan <= 0) {
-      // 所有剩余节点都在当前天
+  if (remainingEntries.length <= 1) {
+    // 边界：只剩当前节点（或无剩余），当前节点设为今天
+    for (const [key] of remainingEntries) {
       result[key] = new Date(today);
-    } else {
-      const relativeProgress = (day - currentDay) / remainingSpan;
-      result[key] = addDays(today, Math.round(relativeProgress * availableDays));
+    }
+  } else {
+    // 正常计算：当前节点 = today，最后一个节点 = today + availableDays
+    const firstDay = remainingEntries[0][1];
+    const lastDay = remainingEntries[remainingEntries.length - 1][1];
+    const span = lastDay - firstDay;
+
+    for (const [key, day] of remainingEntries) {
+      if (span <= 0) {
+        result[key] = new Date(today);
+      } else {
+        const relativeProgress = (day - firstDay) / span;
+        result[key] = addDays(today, Math.round(relativeProgress * availableDays));
+      }
     }
   }
 

@@ -1353,6 +1353,31 @@ FROM (
 ) sub
 WHERE target.id = sub.id;
 
+-- ===== 2026-03-30 补充 RLS 策略（5张表） =====
+ALTER TABLE IF EXISTS production_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS exceptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS issue_slips ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS issue_slip_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS cost_reconciliations ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'production_reports_auth') THEN
+    CREATE POLICY "production_reports_auth" ON production_reports FOR ALL USING (auth.uid() IS NOT NULL);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'exceptions_auth') THEN
+    CREATE POLICY "exceptions_auth" ON exceptions FOR ALL USING (auth.uid() IS NOT NULL);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'issue_slips_auth') THEN
+    CREATE POLICY "issue_slips_auth" ON issue_slips FOR ALL USING (auth.uid() IS NOT NULL);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'issue_slip_lines_auth') THEN
+    CREATE POLICY "issue_slip_lines_auth" ON issue_slip_lines FOR ALL USING (auth.uid() IS NOT NULL);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'cost_reconciliations_auth') THEN
+    CREATE POLICY "cost_reconciliations_auth" ON cost_reconciliations FOR ALL USING (auth.uid() IS NOT NULL);
+  END IF;
+END $$;
+
 -- ===== 2026-03-30 历史订单导入模式 =====
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS imported_at timestamptz DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS import_current_step text DEFAULT NULL;

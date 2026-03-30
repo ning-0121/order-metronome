@@ -117,7 +117,12 @@ export async function verifyPOAgainstOrder(
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     }
 
-    const extracted = JSON.parse(jsonStr);
+    let extracted: any;
+    try {
+      extracted = JSON.parse(jsonStr);
+    } catch (parseErr: any) {
+      return { error: `AI 返回的数据格式异常，请重试。(${parseErr.message})` };
+    }
     const differences: POVerifyResult['differences'] = [];
     const matched: string[] = [];
 
