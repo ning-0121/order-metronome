@@ -364,7 +364,7 @@ export async function sendDeliveryDelayAlert(
       <tr><td style="padding:4px 12px;font-weight:bold;">延迟天数</td><td style="padding:4px 12px;color:#dc2626;font-weight:bold;">${delayDays} 天</td></tr>
     </table>
     <p>请立即采取措施，避免影响最终交货日期。</p>
-    <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order-metronome.vercel.app'}/orders/${orderId}">查看订单详情</a></p>
+    <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderId}">查看订单详情</a></p>
   `;
 
   const allRecipients = recipientEmail ? [recipientEmail, ...ccEmails] : ccEmails;
@@ -461,7 +461,7 @@ export async function checkLinkedMemoReminders() {
         <tr><td style="padding:4px 12px;font-weight:bold;">截止日期</td><td style="padding:4px 12px;">${dueAt.toLocaleDateString('zh-CN')}</td></tr>
         <tr><td style="padding:4px 12px;font-weight:bold;">剩余天数</td><td style="padding:4px 12px;color:#d97706;font-weight:bold;">${daysLeft} 天</td></tr>
       </table>
-      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order-metronome.vercel.app'}/orders/${ms.order_id}">查看订单详情</a></p>
+      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${ms.order_id}">查看订单详情</a></p>
     `;
 
     await sendEmailNotification([profile.email], subject, body);

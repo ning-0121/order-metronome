@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
         <tr><td style="padding:4px 12px;font-weight:bold;">截止日期</td><td style="padding:4px 12px;">${milestoneData.due_at ? new Date(milestoneData.due_at).toLocaleDateString('zh-CN') : '未设定'}</td></tr>
       </table>
       <p>请尽快登录系统处理，避免影响后续环节。</p>
-      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order-metronome.vercel.app'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">去处理</a></p>
+      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">去处理</a></p>
     `;
 
     await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);

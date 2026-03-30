@@ -23,7 +23,7 @@ export async function signUp(email: string, password: string, name: string) {
         name,
         full_name: name,
       },
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://order-metronome.vercel.app'}/auth/callback`,
+      emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://order.qimoactivewear.com'}/auth/callback`,
     },
   });
 

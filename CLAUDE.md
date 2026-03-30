@@ -13,7 +13,7 @@
 
 - **项目名称**：订单节拍器 Order Metronome
 - **核心理念**：卡风险，而不是走流程
-- **线上地址**：https://order-metronome.vercel.app
+- **线上地址**：https://order.qimoactivewear.com
 - **GitHub**：https://github.com/ning-0121/order-metronome
 - **维护团队**：Qimo Technology
 
