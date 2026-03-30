@@ -252,6 +252,24 @@ export async function createOrder(
     await deleteOrder(orderData.id);
     return { ok: false, error: `里程碑初始化异常：${rpcEx.message}` };
   }
+  // ── 通知管理员：新订单已创建 ──
+  try {
+    const { data: creatorName } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
+    const name = (creatorName as any)?.name || user.email?.split('@')[0] || '业务';
+    const { data: admins } = await (supabase.from('profiles') as any)
+      .select('user_id').or("role.eq.admin,roles.cs.{admin}");
+    for (const admin of admins || []) {
+      await (supabase.from('notifications') as any).insert({
+        user_id: admin.user_id,
+        type: 'new_order',
+        title: `${name} 创建了新订单 ${preGeneratedOrderNo}`,
+        message: `客户：${customer_name}，数量：${quantity || '未填'}`,
+        related_order_id: orderData.id,
+        status: 'unread',
+      }).catch(() => {});
+    }
+  } catch {} // 通知失败不阻断订单创建
+
   // ── DONE ──
   revalidatePath('/orders');
   revalidatePath('/dashboard');

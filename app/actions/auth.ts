@@ -47,6 +47,20 @@ export async function signUp(email: string, password: string, name: string) {
       role: null,
       is_active: true,
     }, { onConflict: 'user_id' });
+
+    // 通知所有管理员：有新员工注册，需要分配角色
+    const { data: admins } = await (supabase.from('profiles') as any)
+      .select('user_id')
+      .or("role.eq.admin,roles.cs.{admin}");
+    for (const admin of admins || []) {
+      await (supabase.from('notifications') as any).insert({
+        user_id: admin.user_id,
+        type: 'new_user',
+        title: `新员工注册：${name}`,
+        message: `${name}（${email}）刚注册了账号，请前往用户管理分配角色`,
+        status: 'unread',
+      }).catch(() => {});
+    }
   }
 
   return { data };

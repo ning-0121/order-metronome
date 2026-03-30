@@ -181,6 +181,23 @@ export async function createDelayRequest(
 
   await sendEmailNotification([recipientEmail, ...ccEmails], subject, body);
 
+  // 通知管理员铃铛：有延期申请待审批
+  const { data: requesterProfile } = await (supabase.from('profiles') as any).select('name').eq('user_id', user.id).single();
+  const requesterName = requesterProfile?.name || user.email?.split('@')[0] || '员工';
+  const { data: admins } = await (supabase.from('profiles') as any)
+    .select('user_id').or("role.eq.admin,roles.cs.{admin}");
+  for (const admin of admins || []) {
+    await (supabase.from('notifications') as any).insert({
+      user_id: admin.user_id,
+      type: 'delay_request',
+      title: `${requesterName} 申请延期：${milestoneData.name}`,
+      message: `订单 ${orderData.order_no} 的「${milestoneData.name}」申请延期，原因：${reasonDetail.slice(0, 100)}`,
+      related_order_id: orderData.id,
+      related_milestone_id: milestoneId,
+      status: 'unread',
+    }).catch(() => {});
+  }
+
   revalidatePath(`/orders/${orderData.id}`);
   revalidatePath('/admin');
 
@@ -319,6 +336,19 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
 
   await sendEmailNotification([recipientEmail, ...ccEmails], subject, body);
 
+  // 通知申请人铃铛：延期已通过
+  if (delayRequestData.requested_by) {
+    await (supabase.from('notifications') as any).insert({
+      user_id: delayRequestData.requested_by,
+      type: 'delay_approved',
+      title: `延期已通过：${milestoneData.name}`,
+      message: `订单 ${orderData.order_no} 的「${milestoneData.name}」延期申请已通过${decisionNote ? '，备注：' + decisionNote : ''}`,
+      related_order_id: orderData.id,
+      related_milestone_id: delayRequestData.milestone_id,
+      status: 'unread',
+    }).catch(() => {});
+  }
+
   revalidatePath(`/orders/${orderData.id}`);
   revalidatePath('/admin');
 
@@ -407,6 +437,33 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
       decisionNote,
       { delay_request_id: delayRequestId }
     );
+  }
+
+  // 通知申请人铃铛+邮件：延期被驳回
+  if (delayRequestData.requested_by) {
+    const milestoneData2 = milestone as any;
+    await (supabase.from('notifications') as any).insert({
+      user_id: delayRequestData.requested_by,
+      type: 'delay_rejected',
+      title: `延期被驳回：${milestoneData2?.name || ''}`,
+      message: `订单 ${orderData.order_no} 的延期申请被驳回${decisionNote ? '，原因：' + decisionNote : ''}`,
+      related_order_id: orderData.id,
+      related_milestone_id: delayRequestData.milestone_id,
+      status: 'unread',
+    }).catch(() => {});
+
+    // 驳回邮件
+    const { data: reqProfile } = await (supabase.from('profiles') as any).select('email').eq('user_id', delayRequestData.requested_by).single();
+    if (reqProfile?.email) {
+      const { sendEmailNotification } = await import('@/lib/utils/notifications');
+      await sendEmailNotification([reqProfile.email], `[驳回] ${orderData.order_no} 延期申请未通过`, `
+        <h2>延期申请被驳回</h2>
+        <p><strong>订单：</strong>${orderData.order_no}</p>
+        <p><strong>节点：</strong>${milestoneData2?.name || ''}</p>
+        <p><strong>驳回原因：</strong>${decisionNote || '未说明'}</p>
+        <p>请根据原计划继续执行。</p>
+      `).catch(() => {});
+    }
   }
 
   revalidatePath(`/orders/${orderData.id}`);
