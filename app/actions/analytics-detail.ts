@@ -302,10 +302,19 @@ export interface EmployeeRanking {
   onTimeRate: number;
 }
 
-export async function getEmployeeRanking(): Promise<{ data: EmployeeRanking[] }> {
+export async function getEmployeeRanking(
+  period: 'month' | 'quarter' | 'year' = 'year'
+): Promise<{ data: EmployeeRanking[] }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: [] };
+
+  // 时间范围
+  const now = new Date();
+  let since: Date;
+  if (period === 'month') { since = new Date(now.getFullYear(), now.getMonth(), 1); }
+  else if (period === 'quarter') { since = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1); }
+  else { since = new Date(now.getFullYear(), 0, 1); }
 
   // 获取所有业务和跟单用户
   const { data: profiles } = await (supabase.from('profiles') as any)
@@ -320,32 +329,44 @@ export async function getEmployeeRanking(): Promise<{ data: EmployeeRanking[] }>
     const role = roles.includes('sales') ? '业务/理单' : '跟单';
     const name = p.name || p.email?.split('@')[0] || '未知';
 
-    // 订单数
+    // 订单数（按时间过滤）
     const { data: owned } = await (supabase.from('orders') as any)
-      .select('id, lifecycle_status').eq('owner_user_id', p.user_id);
+      .select('id, lifecycle_status').eq('owner_user_id', p.user_id)
+      .gte('created_at', since.toISOString());
     const { data: assigned } = await (supabase.from('milestones') as any)
       .select('order_id').eq('owner_user_id', p.user_id);
+    const assignedOrderIds = (assigned || []).map((m: any) => m.order_id);
+    // 过滤被分配关卡的订单也要在时间范围内
+    let assignedInPeriod: string[] = [];
+    if (assignedOrderIds.length > 0) {
+      const { data: assignedOrders } = await (supabase.from('orders') as any)
+        .select('id').in('id', assignedOrderIds)
+        .gte('created_at', since.toISOString());
+      assignedInPeriod = (assignedOrders || []).map((o: any) => o.id);
+    }
     const orderIds = new Set([
       ...(owned || []).map((o: any) => o.id),
-      ...(assigned || []).map((m: any) => m.order_id),
+      ...assignedInPeriod,
     ]);
     const orderCount = orderIds.size;
     const activeCount = (owned || []).filter((o: any) => !['completed', 'cancelled', '已完成', '已取消'].includes(o.lifecycle_status || '')).length;
 
-    // 平均评分
+    // 平均评分（按时间过滤）
     const { data: scores } = await (supabase.from('order_commissions') as any)
-      .select('total_score').eq('user_id', p.user_id);
-    const avgScore = scores && scores.length > 0
-      ? Math.round(scores.reduce((s: number, c: any) => s + c.total_score, 0) / scores.length)
+      .select('total_score, calculated_at').eq('user_id', p.user_id);
+    const periodScores = (scores || []).filter((c: any) => new Date(c.calculated_at) >= since);
+    const avgScore = periodScores.length > 0
+      ? Math.round(periodScores.reduce((s: number, c: any) => s + c.total_score, 0) / periodScores.length)
       : 0;
 
-    // 准时率
+    // 准时率（按时间过滤）
     const { data: myMs } = await (supabase.from('milestones') as any)
-      .select('status, due_at').eq('owner_user_id', p.user_id).eq('status', 'done');
+      .select('status, due_at, actual_at, order_id').eq('owner_user_id', p.user_id).eq('status', 'done');
+    const periodMs = (myMs || []).filter((m: any) => orderIds.has(m.order_id));
     let onTime = 0;
-    const total = (myMs || []).length;
-    for (const m of myMs || []) {
-      if (m.due_at && new Date() <= new Date(m.due_at)) onTime++;
+    const total = periodMs.length;
+    for (const m of periodMs) {
+      if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) onTime++;
     }
     const onTimeRate = total > 0 ? Math.round((onTime / total) * 100) : 0;
 
