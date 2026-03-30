@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
-import { calcDueDates } from '@/lib/schedule';
+import { calcDueDates, recalcRemainingDueDates } from '@/lib/schedule';
 import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
 import { 
   createOrder as createOrderRepo, 
@@ -252,6 +252,79 @@ export async function createOrder(
     await deleteOrder(orderData.id);
     return { ok: false, error: `里程碑初始化异常：${rpcEx.message}` };
   }
+  // ── STEP 6: 历史导入模式处理 ──
+  const isImport = formData.get('is_import') === 'true';
+  const importCurrentStep = formData.get('import_current_step') as string | null;
+
+  if (isImport && importCurrentStep) {
+    try {
+      // 6a. 更新订单标记
+      await (supabase.from('orders') as any)
+        .update({ imported_at: new Date().toISOString(), import_current_step: importCurrentStep })
+        .eq('id', orderData.id);
+
+      // 6b. 找到当前阶段在模板中的 index
+      const currentIndex = templates.findIndex(t => t.step_key === importCurrentStep);
+      if (currentIndex >= 0) {
+        // 获取刚创建的所有里程碑
+        const { data: createdMilestones } = await (supabase.from('milestones') as any)
+          .select('id, step_key, due_at, sequence_number')
+          .eq('order_id', orderData.id)
+          .order('sequence_number', { ascending: true });
+
+        if (createdMilestones && createdMilestones.length > 0) {
+          const currentSeq = currentIndex + 1; // sequence_number 从 1 开始
+
+          // 6c. 已完成节点：status='done', actual_at=due_at
+          const doneIds = createdMilestones
+            .filter((m: any) => m.sequence_number < currentSeq)
+            .map((m: any) => m.id);
+          if (doneIds.length > 0) {
+            for (const mId of doneIds) {
+              const ms = createdMilestones.find((m: any) => m.id === mId);
+              await (supabase.from('milestones') as any)
+                .update({ status: 'done', actual_at: ms.due_at })
+                .eq('id', mId);
+            }
+          }
+
+          // 6d. 当前节点：status='in_progress'
+          const currentMs = createdMilestones.find((m: any) => m.sequence_number === currentSeq);
+          if (currentMs) {
+            await (supabase.from('milestones') as any)
+              .update({ status: 'in_progress' })
+              .eq('id', currentMs.id);
+          }
+
+          // 6e. 重算剩余节点 due_at
+          // 计算锚点（与 calcDueDates 同逻辑）
+          let anchorStr = incoterm === 'FOB' ? etd : (eta || warehouse_due_date);
+          if (anchorStr) {
+            const rawAnchor = new Date(anchorStr + 'T00:00:00+08:00');
+            const anchor = incoterm === 'DDP' ? new Date(rawAnchor.getTime() - 25 * 86400000) : rawAnchor;
+            const today = new Date();
+
+            const newDates = recalcRemainingDueDates(importCurrentStep, anchor, today);
+
+            // 更新当前及之后节点的 due_at 和 planned_at
+            const remainingMs = createdMilestones.filter((m: any) => m.sequence_number >= currentSeq);
+            for (const ms of remainingMs) {
+              const newDate = newDates[ms.step_key];
+              if (newDate) {
+                const dateStr = ensureBusinessDay(newDate).toISOString();
+                await (supabase.from('milestones') as any)
+                  .update({ due_at: dateStr, planned_at: dateStr })
+                  .eq('id', ms.id);
+              }
+            }
+          }
+        }
+      }
+    } catch (importErr: any) {
+      console.warn('[createOrder] 导入模式处理失败（不影响订单创建）:', importErr.message);
+    }
+  }
+
   // ── 通知管理员：新订单已创建 ──
   try {
     const { data: creatorName } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
