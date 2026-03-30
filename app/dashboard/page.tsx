@@ -394,7 +394,7 @@ function MilestoneCard({ milestone, variant, badge, isMine }: { milestone: any; 
     : 'badge-info';
 
   const daysOverdue = milestone.due_at
-    ? Math.max(1, Math.floor((new Date().getTime() - new Date(milestone.due_at).getTime()) / (24 * 60 * 60 * 1000)))
+    ? Math.max(1, Math.ceil((new Date().getTime() - new Date(milestone.due_at).getTime()) / (24 * 60 * 60 * 1000)))
     : 0;
 
   return (
