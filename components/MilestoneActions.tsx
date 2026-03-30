@@ -36,10 +36,13 @@ export function MilestoneActions({
   // 多角色匹配：用户任一角色匹配节点 owner_role 即可操作
   // 管理员不在此列（管理员监督不替代执行，与服务端权限一致）
   const allRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+  const isAdminOnly = allRoles.includes('admin');
   const ownerRole = (milestone.owner_role || '').toLowerCase();
   // 角色合并：production/qc/quality 都归入 merchandiser
-  const canModify = allRoles.some(r => {
+  // 管理员禁止标记完成（与服务端一致）
+  const canModify = !isAdminOnly && allRoles.some(r => {
     const nr = r.toLowerCase();
+    if (nr === 'admin') return false; // 跳过admin角色
     if (nr === ownerRole) return true;
     // 业务/理单互通
     if ((ownerRole === 'sales' && nr === 'merchandiser') || (ownerRole === 'merchandiser' && nr === 'sales')) return true;
