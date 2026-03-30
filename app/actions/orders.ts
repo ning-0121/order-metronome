@@ -80,7 +80,7 @@ export async function createOrder(
   // 权限：仅业务/理单角色可创建订单
   const { data: creatorProfile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const creatorRoles: string[] = (creatorProfile as any)?.roles?.length > 0 ? (creatorProfile as any).roles : [(creatorProfile as any)?.role].filter(Boolean);
-  const canCreate = creatorRoles.some(r => ['sales', 'merchandiser'].includes(r));
+  const canCreate = creatorRoles.some(r => r === 'sales');
   if (!canCreate) {
     return { ok: false, error: '仅业务/理单角色可以创建订单' };
   }

@@ -142,6 +142,12 @@ export async function markMilestoneDone(milestoneId: string) {
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+
+  // 管理员明确禁止标记完成（即使被误分配为负责人也不行）
+  if (userRoles.includes('admin') && userRoles.length === 1) {
+    return { error: '管理员不能标记关卡完成，请由对应角色的负责人操作' };
+  }
+
   const isAssignedUser = milestone.owner_user_id === user.id;
   // 角色合并：production/qc/quality 都归入 merchandiser
   const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
