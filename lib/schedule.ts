@@ -92,6 +92,45 @@ export interface CalcDueDatesParams {
   shippingSampleDeadline?: string | null;
 }
 
+/**
+ * 历史订单导入：重算当前及之后节点的 due_at
+ *
+ * 算法：将剩余节点按标准时间线中的相对位置，
+ * 等比例映射到 [today, anchor] 区间。
+ * 如果 anchor 已过，使用 today + 14天 作为最低保障。
+ */
+export function recalcRemainingDueDates(
+  currentStepKey: string,
+  anchor: Date,
+  today: Date = new Date(),
+): Record<string, Date> {
+  const currentDay = TIMELINE[currentStepKey as keyof typeof TIMELINE];
+  if (currentDay === undefined) throw new Error(`Unknown step_key: ${currentStepKey}`);
+
+  const remainingSpan = STANDARD_DAYS - currentDay; // 标准时间线中剩余跨度
+  const daysToAnchor = Math.ceil((anchor.getTime() - today.getTime()) / 86400000);
+  const availableDays = Math.max(daysToAnchor, 14); // 最低14天保障
+
+  const result: Record<string, Date> = {};
+
+  for (const [key, day] of Object.entries(TIMELINE)) {
+    if (day < currentDay) continue; // 已完成节点跳过
+
+    if (remainingSpan <= 0) {
+      // 所有剩余节点都在当前天
+      result[key] = new Date(today);
+    } else {
+      const relativeProgress = (day - currentDay) / remainingSpan;
+      result[key] = addDays(today, Math.round(relativeProgress * availableDays));
+    }
+  }
+
+  // 收款节点特殊处理：anchor + 30天
+  result['payment_received'] = addDays(anchor, 30);
+
+  return result;
+}
+
 export function calcDueDates(params: CalcDueDatesParams) {
   const {
     orderDate, createdAt, incoterm,

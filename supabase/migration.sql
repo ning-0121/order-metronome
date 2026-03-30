@@ -1352,3 +1352,7 @@ FROM (
     AND anchor.anchor_at > t0.t0_at
 ) sub
 WHERE target.id = sub.id;
+
+-- ===== 2026-03-30 历史订单导入模式 =====
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS imported_at timestamptz DEFAULT NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS import_current_step text DEFAULT NULL;

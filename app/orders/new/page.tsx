@@ -9,6 +9,7 @@ import { FactorySelect } from '@/components/FactorySelect';
 import { verifyPOAgainstOrder } from '@/app/actions/po-verify';
 import type { POVerifyResult } from '@/app/actions/po-verify';
 import { SmartInsightsPanel } from '@/components/SmartInsightsPanel';
+import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
 import Link from 'next/link';
 
 /** 客户端直传文件到 Supabase Storage（绕过 Vercel 4.5MB 限制） */
@@ -84,6 +85,8 @@ function NewOrderWizard() {
   const [verifying, setVerifying] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [selectedFactory, setSelectedFactory] = useState('');
+  const [isImport, setIsImport] = useState(false);
+  const [importCurrentStep, setImportCurrentStep] = useState('');
 
   useEffect(() => {
     const stepParam = searchParams.get('step');
@@ -288,6 +291,67 @@ function NewOrderWizard() {
               <span className="font-mono font-bold text-indigo-900">{preGeneratedOrderNo}</span>
             ) : (
               <span className="text-sm text-red-600">生成失败，请刷新</span>
+            )}
+          </div>
+
+          {/* 历史订单导入开关 */}
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isImport}
+                onChange={(e) => { setIsImport(e.target.checked); if (!e.target.checked) setImportCurrentStep(''); }}
+                className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+              />
+              <div>
+                <span className="text-sm font-semibold text-amber-800">历史订单导入模式</span>
+                <span className="text-xs text-amber-600 ml-2">已在执行的订单，跳过已完成节点</span>
+              </div>
+            </label>
+
+            {isImport && (
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm font-medium text-amber-800">
+                  当前正在执行的阶段 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={importCurrentStep}
+                  onChange={(e) => setImportCurrentStep(e.target.value)}
+                  className="block w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                >
+                  <option value="">请选择当前执行到哪个节点</option>
+                  {[
+                    { label: '订单启动', keys: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'] },
+                    { label: '订单转化', keys: ['order_docs_bom_complete', 'bulk_materials_confirmed'] },
+                    { label: '工厂与产前样', keys: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'] },
+                    { label: '采购与生产', keys: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'] },
+                    { label: '过程控制', keys: ['mid_qc_check', 'final_qc_check'] },
+                    { label: '出货控制', keys: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'] },
+                    { label: '物流收款', keys: ['booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'payment_received'] },
+                  ].map(group => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.keys.map(key => {
+                        const t = MILESTONE_TEMPLATE_V1.find(m => m.step_key === key);
+                        return t ? <option key={key} value={key}>{t.name}</option> : null;
+                      })}
+                    </optgroup>
+                  ))}
+                </select>
+
+                {importCurrentStep && (() => {
+                  const idx = MILESTONE_TEMPLATE_V1.findIndex(m => m.step_key === importCurrentStep);
+                  const doneCount = idx;
+                  const remainCount = MILESTONE_TEMPLATE_V1.length - idx - 1;
+                  const currentName = MILESTONE_TEMPLATE_V1[idx]?.name;
+                  return (
+                    <div className="text-xs text-amber-700 bg-amber-100 rounded-md px-3 py-2">
+                      <span className="font-medium">{currentName}</span> 设为进行中，
+                      前 <span className="font-bold">{doneCount}</span> 个节点标记已完成，
+                      后 <span className="font-bold">{remainCount}</span> 个节点从今天重新排期
+                    </div>
+                  );
+                })()}
+              </div>
             )}
           </div>
 
@@ -505,14 +569,22 @@ function NewOrderWizard() {
               </div>
             )}
 
+            {/* 历史导入隐藏字段 */}
+            {isImport && (
+              <>
+                <input type="hidden" name="is_import" value="true" />
+                <input type="hidden" name="import_current_step" value={importCurrentStep} />
+              </>
+            )}
+
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => router.back()}
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                 取消
               </button>
-              <button type="submit" disabled={loading || verifying || !preGeneratedOrderNo || orderNoLoading}
+              <button type="submit" disabled={loading || verifying || !preGeneratedOrderNo || orderNoLoading || (isImport && !importCurrentStep)}
                 className="rounded-lg bg-indigo-600 px-6 py-2 text-sm text-white hover:bg-indigo-700 disabled:opacity-50 font-medium">
-                {verifying ? '正在比对PO...' : loading ? '创建中...' : '创建订单 →'}
+                {verifying ? '正在比对PO...' : loading ? '创建中...' : isImport ? '导入订单 →' : '创建订单 →'}
               </button>
             </div>
           </form>
@@ -636,19 +708,31 @@ function NewOrderWizard() {
           </div>
           {milestones.length > 0 ? (
             <div className="space-y-2 mb-6 max-h-96 overflow-y-auto">
-              {milestones.map((m: any) => (
-                <div key={m.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
-                  <div>
-                    <span className="text-sm font-medium text-gray-900">{m.name}</span>
-                    <span className="ml-3 text-xs text-gray-500">
-                      截止：{m.due_at ? new Date(m.due_at).toLocaleDateString('zh-CN') : '未设置'}
-                    </span>
+              {milestones.map((m: any) => {
+                const isDone = m.status === 'done' || m.status === '已完成';
+                const isActive = m.status === 'in_progress' || m.status === '进行中';
+                return (
+                  <div key={m.id} className={`flex items-center justify-between p-3 rounded-lg ${
+                    isDone ? 'bg-gray-100 opacity-60' : isActive ? 'bg-indigo-50 border border-indigo-200' : 'bg-gray-50'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      {isDone && <span className="text-green-500 text-sm">✓</span>}
+                      {isActive && <span className="text-indigo-500 text-sm">▶</span>}
+                      <span className={`text-sm font-medium ${isDone ? 'text-gray-500 line-through' : 'text-gray-900'}`}>{m.name}</span>
+                      <span className="text-xs text-gray-500">
+                        截止：{m.due_at ? new Date(m.due_at).toLocaleDateString('zh-CN') : '未设置'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isDone && <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded">已完成</span>}
+                      {isActive && <span className="text-xs text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">进行中</span>}
+                      {m.evidence_required && !isDone && (
+                        <span className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded">需凭证</span>
+                      )}
+                    </div>
                   </div>
-                  {m.evidence_required && (
-                    <span className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded">需凭证</span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="text-center text-gray-400 py-8">节拍加载中...</p>
