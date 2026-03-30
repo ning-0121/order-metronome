@@ -27,11 +27,12 @@ export default function EmployeeAnalyticsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
-    getEmployeeRanking().then(res => {
+    setLoading(true);
+    getEmployeeRanking(period).then(res => {
       setRankings(res.data);
       setLoading(false);
     });
-  }, []);
+  }, [period]);
 
   useEffect(() => {
     if (!selectedUser) { setDetail(null); return; }
@@ -61,8 +62,21 @@ export default function EmployeeAnalyticsPage() {
         <div className="space-y-6">
           {/* 排行榜 */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100">
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700">绩效排行</h3>
+              <div className="flex rounded-lg bg-gray-100 p-0.5">
+                {PERIODS.map(p => (
+                  <button
+                    key={p.value}
+                    onClick={() => setPeriod(p.value)}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                      period === p.value ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <table className="w-full text-sm">
               <thead>
