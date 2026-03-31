@@ -41,7 +41,11 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   }
 
   async function handleDelete() {
-    if (!confirm(`确定删除订单 ${orderNo}？此操作不可恢复！`)) return;
+    const input = prompt(`确定删除订单？此操作不可恢复！\n\n请输入订单号 ${orderNo} 确认删除：`);
+    if (!input || input.trim() !== orderNo) {
+      if (input !== null) alert('订单号输入不正确，删除已取消');
+      return;
+    }
     setLoading(true);
 
     try {
