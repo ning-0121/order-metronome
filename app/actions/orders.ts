@@ -280,8 +280,11 @@ export async function createOrder(
         .update({ imported_at: new Date().toISOString(), import_current_step: importCurrentStep })
         .eq('id', orderData.id);
 
-      // 6b. 找到当前阶段在模板中的 index
+      // 6b. 找到当前阶段在模板中的 index（校验 step_key 合法性）
       const currentIndex = templates.findIndex(t => t.step_key === importCurrentStep);
+      if (currentIndex < 0) {
+        console.warn(`[createOrder] 导入模式：无效的 step_key "${importCurrentStep}"，跳过导入处理`);
+      }
       if (currentIndex >= 0) {
         // 获取刚创建的所有里程碑
         const { data: createdMilestones } = await (supabase.from('milestones') as any)
@@ -369,30 +372,15 @@ export async function getOrders() {
     return { error: '请先登录' };
   }
   
-  const { data: orders, error } = await supabase
-    .from('orders')
-    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, special_tags')
+  const { data: orders, error } = await (supabase
+    .from('orders') as any)
+    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
     .order('created_at', { ascending: false });
-  
+
   if (error) {
     return { error: error.message };
   }
-  
-  // Get milestones for each order to compute status
-  if (orders) {
-    for (const orderItem of orders) {
-      const orderData = orderItem as any;
-      const { data: milestones } = await supabase
-        .from('milestones')
-        .select('*')
-        .eq('order_id', orderData.id);
-      
-      if (milestones) {
-        orderData.milestones = milestones;
-      }
-    }
-  }
-  
+
   return { data: orders };
 }
 

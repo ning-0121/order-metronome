@@ -255,12 +255,11 @@ export async function markMilestoneDone(milestoneId: string) {
         safetyDate.setDate(safetyDate.getDate() - 21);
         const delayDays = Math.ceil((actualDelivery.getTime() - safetyDate.getTime()) / (1000 * 60 * 60 * 24));
         if (delayDays > 0) {
-          // 交期风险！创建通知给管理员
-          const adminEmails = ['alex@qimoclothing.com', 'su@qimoclothing.com'];
+          // 交期风险！创建通知给管理员（从数据库查询，不硬编码）
           const { data: adminProfiles } = await (supabase
             .from('profiles') as any)
             .select('user_id')
-            .in('email', adminEmails);
+            .or('role.eq.admin,roles.cs.{admin}');
           for (const admin of (adminProfiles || [])) {
             await (supabase.from('notifications') as any).insert({
               user_id: admin.user_id,
@@ -445,12 +444,6 @@ export async function updateMilestoneStatus(
   }
   
   return { data: result.data };
-}
-
-// Legacy function - now handled by autoAdvanceNextMilestone
-async function advanceToNextMilestone(orderId: string, currentStepKey: string) {
-  const supabase = await createClient();
-  await autoAdvanceNextMilestone(supabase, orderId);
 }
 
 export async function blockMilestone(milestoneId: string, reason: string, note: string) {
