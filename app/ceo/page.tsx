@@ -57,7 +57,7 @@ export default async function CEOWarRoom() {
     .order('due_at', { ascending: true });
 
   const overdueMilestones = (allMilestonesWithOrders || []).filter((m: any) =>
-    !_isDone(m.status) && m.due_at && isOverdue(m.due_at)
+    _isActive(m.status) && m.due_at && isOverdue(m.due_at)
   );
   const blockedMilestones = (allMilestonesWithOrders || []).filter((m: any) =>
     _isBlocked(m.status)
@@ -185,8 +185,8 @@ export default async function CEOWarRoom() {
   const worstDept = Object.entries(deptOverdue).sort((a, b) => b[1].count - a[1].count)[0];
   // 找出风险最高的订单
   const worstOrder = riskRed.sort((a: any, b: any) => {
-    const aOverdue = (a.milestones || []).filter((m: any) => !_isDone(m.status) && m.due_at && isOverdue(m.due_at)).length;
-    const bOverdue = (b.milestones || []).filter((m: any) => !_isDone(m.status) && m.due_at && isOverdue(m.due_at)).length;
+    const aOverdue = (a.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
+    const bOverdue = (b.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
     return bOverdue - aOverdue;
   })[0];
 
@@ -195,7 +195,7 @@ export default async function CEOWarRoom() {
     aiInsights.push(`📌 ${getRoleLabel(worstDept[0])}部门当前问题最多（${worstDept[1].count} 个超期节点），建议重点关注。`);
   }
   if (worstOrder) {
-    const overdueInOrder = (worstOrder.milestones || []).filter((m: any) => !_isDone(m.status) && m.due_at && isOverdue(m.due_at)).length;
+    const overdueInOrder = (worstOrder.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
     aiInsights.push(`🚨 订单 ${worstOrder.order_no}（${worstOrder.customer_name}）风险最高，有 ${overdueInOrder} 个超期节点，需要 CEO 介入。`);
   }
   if ((pendingDelays || []).length > 2) {
@@ -222,7 +222,7 @@ export default async function CEOWarRoom() {
     return shipKeys.some(key => ms.find((m: any) => m.step_key === key && _isActive(m.status)));
   });
   const delayed = ordersWithMilestones.filter(o => {
-    return (o.milestones || []).some((m: any) => !_isDone(m.status) && m.due_at && isOverdue(m.due_at));
+    return (o.milestones || []).some((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at));
   });
 
   // ===== 页面渲染 =====
