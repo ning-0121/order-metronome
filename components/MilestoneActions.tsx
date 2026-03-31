@@ -76,8 +76,16 @@ export function MilestoneActions({
     e.preventDefault();
     setSubmitError('');
 
-    // 产前样寄出：必须填快递单号
     const form = e.target as HTMLFormElement;
+
+    // 财务审核：必须填内部订单号
+    const internalOrderNo = (form.querySelector('input[name="internal_order_no"]') as HTMLInputElement)?.value?.trim();
+    if (milestone.step_key === 'finance_approval' && !internalOrderNo) {
+      setSubmitError('⚠️ 请填写内部订单号（实体订单册编号）');
+      return;
+    }
+
+    // 产前样寄出：必须填快递单号
     const trackingNumber = (form.querySelector('input[name="tracking_number"]') as HTMLInputElement)?.value?.trim();
     if (milestone.step_key === 'pre_production_sample_sent' && !trackingNumber) {
       setSubmitError('⚠️ 请填写快递单号');
@@ -124,6 +132,14 @@ export function MilestoneActions({
           file_type: evidenceFile.type || ext,
           uploaded_by: user?.id || null,
         });
+      }
+
+      // 保存内部订单号到 orders 表
+      if (internalOrderNo && orderId) {
+        const supabaseForOrder = createClient();
+        await (supabaseForOrder.from('orders') as any)
+          .update({ internal_order_no: internalOrderNo })
+          .eq('id', orderId);
       }
 
       // 保存快递单号到备注
@@ -312,6 +328,23 @@ export function MilestoneActions({
             />
             <p className="text-xs text-gray-400 mt-1">支持 PDF、图片、Excel、Word</p>
           </div>
+
+          {/* 财务审核：内部订单号 */}
+          {milestone.step_key === 'finance_approval' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                内部订单号（订单册编号）<span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="internal_order_no"
+                required
+                placeholder="输入实体订单册上的编号"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-indigo-400"
+              />
+              <p className="text-xs text-gray-400 mt-1">此编号将显示在订单详情中，方便与实体订单册对应</p>
+            </div>
+          )}
 
           {/* 产前样寄出：快递单号 */}
           {milestone.step_key === 'pre_production_sample_sent' && (
