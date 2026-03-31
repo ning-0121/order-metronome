@@ -292,47 +292,42 @@ export async function createOrder(
         if (createdMilestones && createdMilestones.length > 0) {
           const currentSeq = currentIndex + 1; // sequence_number 从 1 开始
 
-          // 6c. 已完成节点：status='done', actual_at=due_at
-          const doneIds = createdMilestones
-            .filter((m: any) => m.sequence_number < currentSeq)
-            .map((m: any) => m.id);
-          if (doneIds.length > 0) {
-            for (const mId of doneIds) {
-              const ms = createdMilestones.find((m: any) => m.id === mId);
-              await (supabase.from('milestones') as any)
-                .update({ status: 'done', actual_at: ms.due_at })
-                .eq('id', mId);
-            }
-          }
-
-          // 6d. 当前节点：status='in_progress'
-          const currentMs = createdMilestones.find((m: any) => m.sequence_number === currentSeq);
-          if (currentMs) {
-            await (supabase.from('milestones') as any)
-              .update({ status: 'in_progress' })
-              .eq('id', currentMs.id);
-          }
-
-          // 6e. 重算剩余节点 due_at
-          // 计算锚点（与 calcDueDates 同逻辑）
+          // 6c-6e: 用 RPC 绕过 RLS 批量更新（业务用户无法更新非自己角色的节点）
           let anchorStr = incoterm === 'FOB' ? etd : (eta || warehouse_due_date);
-          if (anchorStr) {
-            const rawAnchor = new Date(anchorStr + 'T00:00:00+08:00');
-            const anchor = incoterm === 'DDP' ? new Date(rawAnchor.getTime() - 25 * 86400000) : rawAnchor;
-            const today = new Date();
+          const rawAnchor = anchorStr ? new Date(anchorStr + 'T00:00:00+08:00') : null;
+          const anchor = rawAnchor && incoterm === 'DDP' ? new Date(rawAnchor.getTime() - 25 * 86400000) : rawAnchor;
+          const today = new Date();
+          const newDates = anchor ? recalcRemainingDueDates(importCurrentStep, anchor, today) : null;
 
-            const newDates = recalcRemainingDueDates(importCurrentStep, anchor, today);
+          // 构建批量更新数据
+          for (const ms of createdMilestones) {
+            const updates: Record<string, any> = {};
 
-            // 更新当前及之后节点的 due_at 和 planned_at
-            const remainingMs = createdMilestones.filter((m: any) => m.sequence_number >= currentSeq);
-            for (const ms of remainingMs) {
+            if (ms.sequence_number < currentSeq) {
+              // 已完成节点
+              updates.status = 'done';
+              updates.actual_at = ms.due_at;
+            } else if (ms.sequence_number === currentSeq) {
+              // 当前节点
+              updates.status = 'in_progress';
+            }
+
+            // 重算当前及之后节点的排期
+            if (ms.sequence_number >= currentSeq && newDates) {
               const newDate = newDates[ms.step_key];
               if (newDate) {
                 const dateStr = ensureBusinessDay(newDate).toISOString();
-                await (supabase.from('milestones') as any)
-                  .update({ due_at: dateStr, planned_at: dateStr })
-                  .eq('id', ms.id);
+                updates.due_at = dateStr;
+                updates.planned_at = dateStr;
               }
+            }
+
+            if (Object.keys(updates).length > 0) {
+              // 用 RPC 更新（SECURITY DEFINER 绕过 RLS）
+              await (supabase.rpc as any)('admin_update_milestone', {
+                _milestone_id: ms.id,
+                _updates: updates,
+              });
             }
           }
         }
