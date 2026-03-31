@@ -47,11 +47,14 @@ export function computeDelayDays(actualAt: string | null, dueAt: string | null):
  */
 export function isMilestoneOverdue(milestone: MilestoneData): boolean {
   if (!milestone.due_at) return false;
-  if (milestone.status === '已完成') return false;
-  
+  const s = milestone.status;
+  // 已完成和未开始的不算逾期
+  if (s === '已完成' || s === 'done' || s === 'completed') return false;
+  if (s === '未开始' || s === 'pending') return false;
+
   const dueDate = new Date(milestone.due_at);
   const now = new Date();
-  
+
   return now > dueDate;
 }
 
@@ -60,7 +63,8 @@ export function isMilestoneOverdue(milestone: MilestoneData): boolean {
  */
 export function isMilestoneDueSoon(milestone: MilestoneData, hoursThreshold: number = 48): boolean {
   if (!milestone.due_at) return false;
-  if (milestone.status === '已完成') return false;
+  const s = milestone.status;
+  if (s === '已完成' || s === 'done' || s === 'completed') return false;
   
   const dueDate = new Date(milestone.due_at);
   const now = new Date();

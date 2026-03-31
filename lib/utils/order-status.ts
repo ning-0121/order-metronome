@@ -22,8 +22,13 @@ export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
 
   const now = new Date();
 
-  // Check for blocked milestones (RED) - 只使用中文状态
-  const blockedMilestones = milestones.filter(m => m.status === '卡住');
+  // 状态判断辅助（兼容中英文）
+  const _isDone = (s: string) => s === '已完成' || s === 'done' || s === 'completed';
+  const _isBlocked = (s: string) => s === '卡住' || s === 'blocked' || s === '卡单';
+  const _isActive = (s: string) => s === '进行中' || s === 'in_progress';
+
+  // Check for blocked milestones (RED)
+  const blockedMilestones = milestones.filter(m => _isBlocked(m.status));
   if (blockedMilestones.length > 0) {
     return {
       color: 'RED',
@@ -31,10 +36,8 @@ export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
     };
   }
 
-  // Check for overdue in_progress milestones (RED) - 只使用中文状态
-  const inProgressMilestones = milestones.filter(m => 
-    m.status === '进行中'
-  );
+  // Check for overdue in_progress milestones (RED)
+  const inProgressMilestones = milestones.filter(m => _isActive(m.status));
   const overdueInProgress = inProgressMilestones.filter(m => {
     if (!m.due_at) return false;
     return isAfter(now, new Date(m.due_at));
@@ -49,7 +52,7 @@ export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
 
   // Check for actual_at delivery alerts (RED)
   const actualAtRedAlerts = milestones.filter(m =>
-    m.status !== '已完成' && m.actual_at && computeDeliveryAlert(m.actual_at, m.due_at) === 'RED'
+    !_isDone(m.status) && m.actual_at && computeDeliveryAlert(m.actual_at, m.due_at) === 'RED'
   );
   if (actualAtRedAlerts.length > 0) {
     return {
@@ -60,7 +63,7 @@ export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
 
   // Check for actual_at delivery alerts (YELLOW)
   const actualAtYellowAlerts = milestones.filter(m =>
-    m.status !== '已完成' && m.actual_at && computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW'
+    !_isDone(m.status) && m.actual_at && computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW'
   );
 
   // Check for YELLOW conditions
