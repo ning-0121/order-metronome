@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { markMilestoneDone, markMilestoneBlocked } from '@/app/actions/milestones';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { AIAdviceBox } from '@/components/AIAdviceBox';
 
 interface MilestoneActionsProps {
   milestone: any;
@@ -292,6 +293,15 @@ export function MilestoneActions({
         <form onSubmit={handleSubmitEvidence}
           className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 space-y-4">
           <p className="text-sm font-semibold text-indigo-900">提交处理凭证</p>
+
+          {/* AI 操作建议 */}
+          <AIAdviceBox
+            scene="milestone_action"
+            orderId={orderId}
+            milestoneStepKey={milestone.step_key}
+            contextData={`正在处理节点「${milestone.name}」(${milestone.step_key})，负责角色：${milestone.owner_role}，截止日期：${milestone.due_at || '未设'}，当前状态：${milestone.status}`}
+            compact
+          />
 
           {milestone.evidence_note && (
             <div className="text-xs text-indigo-700 bg-white rounded-lg p-2 border border-indigo-200">
