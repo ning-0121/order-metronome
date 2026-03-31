@@ -1383,6 +1383,24 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS factory_date date DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS style_count integer DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS color_count integer DEFAULT NULL;
 
+-- ===== 2026-03-31 导入模式批量更新 RPC（绕过 RLS） =====
+CREATE OR REPLACE FUNCTION admin_update_milestone(
+  _milestone_id uuid,
+  _updates jsonb
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE milestones SET
+    status = COALESCE(_updates->>'status', status),
+    actual_at = CASE WHEN _updates ? 'actual_at' THEN (_updates->>'actual_at')::timestamptz ELSE actual_at END,
+    due_at = CASE WHEN _updates ? 'due_at' THEN (_updates->>'due_at')::timestamptz ELSE due_at END,
+    planned_at = CASE WHEN _updates ? 'planned_at' THEN (_updates->>'planned_at')::timestamptz ELSE planned_at END
+  WHERE id = _milestone_id;
+END;
+$$;
+
 -- ===== 2026-03-31 内部订单号（实体订单册编号） =====
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS internal_order_no text DEFAULT NULL;
 
