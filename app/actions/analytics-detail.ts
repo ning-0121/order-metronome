@@ -53,6 +53,7 @@ export async function getCustomerAnalytics(
   // 评分数据
   let avgScore = 0;
   let onTimeCount = 0;
+  let totalDoneMilestones = 0;
   if (orderIds.length > 0) {
     const { data: commissions } = await (supabase.from('order_commissions') as any)
       .select('total_score').in('order_id', orderIds);
@@ -60,14 +61,21 @@ export async function getCustomerAnalytics(
       avgScore = Math.round(commissions.reduce((s: number, c: any) => s + c.total_score, 0) / commissions.length);
     }
 
-    // 准时率（从复盘数据）
-    const { data: retros } = await (supabase.from('order_retrospectives') as any)
-      .select('on_time_delivery').in('order_id', orderIds);
-    if (retros) {
-      onTimeCount = retros.filter((r: any) => r.on_time_delivery === true).length;
+    // 准时率（基于关卡级别，与员工分析一致）
+    const { data: doneMilestones } = await (supabase.from('milestones') as any)
+      .select('due_at, actual_at')
+      .in('order_id', orderIds)
+      .eq('status', 'done');
+    if (doneMilestones) {
+      totalDoneMilestones = doneMilestones.length;
+      for (const m of doneMilestones) {
+        if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
+          onTimeCount++;
+        }
+      }
     }
   }
-  const onTimeRate = completedCount > 0 ? Math.round((onTimeCount / completedCount) * 100) : 0;
+  const onTimeRate = totalDoneMilestones > 0 ? Math.round((onTimeCount / totalDoneMilestones) * 100) : 0;
 
   // 不良率
   let avgDefectRate = 0;
