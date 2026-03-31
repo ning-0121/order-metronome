@@ -76,6 +76,14 @@ export function MilestoneActions({
     e.preventDefault();
     setSubmitError('');
 
+    // 产前样寄出：必须填快递单号
+    const form = e.target as HTMLFormElement;
+    const trackingNumber = (form.querySelector('input[name="tracking_number"]') as HTMLInputElement)?.value?.trim();
+    if (milestone.step_key === 'pre_production_sample_sent' && !trackingNumber) {
+      setSubmitError('⚠️ 请填写快递单号');
+      return;
+    }
+
     // 必须上传证据
     if (milestone.evidence_required && !evidenceFile) {
       setSubmitError('⚠️ 此节点需要上传凭证才能完成，请选择文件');
@@ -116,6 +124,14 @@ export function MilestoneActions({
           file_type: evidenceFile.type || ext,
           uploaded_by: user?.id || null,
         });
+      }
+
+      // 保存快递单号到备注
+      if (trackingNumber) {
+        const supabaseForNote = createClient();
+        await (supabaseForNote.from('milestones') as any)
+          .update({ notes: `快递单号: ${trackingNumber}${evidenceNote ? '\n' + evidenceNote : ''}` })
+          .eq('id', milestone.id);
       }
 
       // 标记完成
@@ -204,6 +220,47 @@ export function MilestoneActions({
           >
             📤 去处理
           </button>
+          {/* 产前样客户确认：增加"未通过/需返样"按钮 */}
+          {milestone.step_key === 'pre_production_sample_approved' && (
+            <button
+              onClick={async () => {
+                if (!confirm('确认产前样未通过？系统将回退到「产前样准备完成」，开始二次样流程。')) return;
+                setLoading(true);
+                try {
+                  const supabaseClient = createClient();
+                  // 回退：将 pre_production_sample_ready, pre_production_sample_sent 重新设为 pending
+                  // 当前节点（approved）也设为 pending
+                  const resetSteps = ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'];
+                  for (const stepKey of resetSteps) {
+                    const { data: ms } = await (supabaseClient.from('milestones') as any)
+                      .select('id').eq('order_id', orderId).eq('step_key', stepKey).single();
+                    if (ms) {
+                      await (supabaseClient.from('milestones') as any)
+                        .update({ status: stepKey === 'pre_production_sample_ready' ? 'in_progress' : 'pending', actual_at: null })
+                        .eq('id', ms.id);
+                    }
+                  }
+                  // 记录日志
+                  const { data: { user } } = await supabaseClient.auth.getUser();
+                  await (supabaseClient.from('milestone_logs') as any).insert({
+                    milestone_id: milestone.id,
+                    order_id: orderId,
+                    actor_user_id: user?.id,
+                    action: 'mark_blocked',
+                    note: '产前样客户未通过，启动二次样流程',
+                  });
+                  router.refresh();
+                } catch (err: any) {
+                  alert('操作失败：' + err.message);
+                }
+                setLoading(false);
+              }}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-lg border border-red-300 px-4 py-2 text-sm text-red-700 font-medium hover:bg-red-50 disabled:opacity-50"
+            >
+              ❌ 未通过/需返样
+            </button>
+          )}
           <button
             onClick={() => { setShowBlockForm(!showBlockForm); setShowSubmitForm(false); }}
             disabled={loading}
@@ -255,6 +312,22 @@ export function MilestoneActions({
             />
             <p className="text-xs text-gray-400 mt-1">支持 PDF、图片、Excel、Word</p>
           </div>
+
+          {/* 产前样寄出：快递单号 */}
+          {milestone.step_key === 'pre_production_sample_sent' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                快递单号 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="tracking_number"
+                required
+                placeholder="输入快递/物流单号"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-indigo-400"
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">处理备注（选填）</label>

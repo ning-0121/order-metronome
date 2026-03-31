@@ -154,33 +154,33 @@ export default async function OrderDetailPage({
               </div>
             </div>
             <div className="flex flex-col items-end gap-1.5">
-              {/* DDP 额外显示出运倒计时 */}
-              {orderData.incoterm === 'DDP' && (() => {
-                const shipMilestone = (milestones as any[] || []).find((m: any) => m.step_key === 'shipment_execute' || m.step_key === 'customs_export');
-                const shipDate = shipMilestone?.due_at;
-                return shipDate ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-400">
-                      出运：<span className="text-gray-700 font-medium">{formatDate(shipDate)}</span>
-                    </span>
-                    <DeadlineCountdown targetDate={shipDate} label="出运" />
-                  </div>
-                ) : null;
-              })()}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">
-                  {orderData.incoterm === 'FOB' ? 'ETD' : '到仓日(ETA)'}：
-                  <span className="text-gray-700 font-medium">
-                    {orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date)}
+              {/* 出厂日期 */}
+              {orderData.factory_date && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-400">
+                    出厂：<span className="text-gray-700 font-medium">{formatDate(orderData.factory_date)}</span>
                   </span>
-                </span>
-                {(orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date) && (
-                  <DeadlineCountdown
-                    targetDate={orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date}
-                    label={orderData.incoterm === 'FOB' ? 'ETD' : 'ETA'}
-                  />
-                )}
-              </div>
+                  <DeadlineCountdown targetDate={orderData.factory_date} label="出厂" />
+                </div>
+              )}
+              {/* ETD 离港日 */}
+              {orderData.etd && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-400">
+                    ETD：<span className="text-gray-700 font-medium">{formatDate(orderData.etd)}</span>
+                  </span>
+                  <DeadlineCountdown targetDate={orderData.etd} label="ETD" />
+                </div>
+              )}
+              {/* ETA 到仓日 */}
+              {orderData.warehouse_due_date && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-400">
+                    ETA：<span className="text-gray-700 font-medium">{formatDate(orderData.warehouse_due_date)}</span>
+                  </span>
+                  <DeadlineCountdown targetDate={orderData.warehouse_due_date} label="ETA" />
+                </div>
+              )}
               {orderData.cancel_date && (
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-400">
@@ -262,7 +262,10 @@ export default async function OrderDetailPage({
               <dl className="space-y-3">
                 {[
                   { label: '订单数量', value: orderData.quantity ? `${orderData.quantity} 件` : null },
+                  { label: '款数', value: orderData.style_count ? `${orderData.style_count} 款` : null },
+                  { label: '颜色数', value: orderData.color_count ? `${orderData.color_count} 色` : null },
                   { label: '下单日期', value: orderData.order_date ? formatDate(orderData.order_date) : null },
+                  { label: '出厂日期', value: orderData.factory_date ? formatDate(orderData.factory_date) : null },
                   { label: '工厂', value: orderData.factory_name },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between">

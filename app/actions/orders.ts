@@ -127,18 +127,25 @@ export async function createOrder(
   const dbOrderType = order_type || 'bulk';
 
   // 首单自动识别 + 手动覆盖
+  // 翻单(repeat)类型的客户/工厂一定不是首单，跳过自动检测
   const manualNewCustomer = formData.get('new_customer') === 'true';
   const manualNewFactory = formData.get('new_factory') === 'true';
   let isNewCustomer = manualNewCustomer;
   let isNewFactory = manualNewFactory;
-  // 自动检测：查该客户/工厂历史订单数
-  if (customer_id && !manualNewCustomer) {
-    const { count } = await (supabase.from('orders') as any).select('id', { count: 'exact', head: true }).eq('customer_id', customer_id);
-    if (count === 0) isNewCustomer = true;
-  }
-  if (factory_id && !manualNewFactory) {
-    const { count } = await (supabase.from('orders') as any).select('id', { count: 'exact', head: true }).eq('factory_id', factory_id);
-    if (count === 0) isNewFactory = true;
+  if (dbOrderType === 'repeat') {
+    // 翻单 = 老客户老工厂，不标首单
+    isNewCustomer = false;
+    isNewFactory = false;
+  } else {
+    // 自动检测：查该客户/工厂历史订单数（含导入的历史订单）
+    if (customer_id && !manualNewCustomer) {
+      const { count } = await (supabase.from('orders') as any).select('id', { count: 'exact', head: true }).eq('customer_id', customer_id);
+      if (count === 0) isNewCustomer = true;
+    }
+    if (factory_id && !manualNewFactory) {
+      const { count } = await (supabase.from('orders') as any).select('id', { count: 'exact', head: true }).eq('factory_id', factory_id);
+      if (count === 0) isNewFactory = true;
+    }
   }
 
   const insertPayload: Record<string, any> = {
