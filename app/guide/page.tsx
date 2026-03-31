@@ -76,7 +76,7 @@ const ROLE_DAILY_SOPS = [
     milestones: ['财务审核', '加工费目标价确认', '核准出运', '收款完成'],
     dailySteps: [
       '打开"我的工作台"，查看待处理的财务节点',
-      '收到 PO 后进行审核 — 确认金额、付款条件、利润空间',
+      '收到 PO 后进行审核 — 确认金额、付款条件、利润空间（审核通过时必须填写内部订单号）',
       '审核原辅料采购成本和货代费用',
       '加工费到位后核对并上传确认函',
       '出货后跟进客户尾款，收款确认后标记完成并给出出货许可',
@@ -167,6 +167,7 @@ export default function GuidePage() {
             { href: '#operations', label: '常用操作' },
             { href: '#milestones', label: '全部节点 SOP' },
             { href: '#kpi', label: 'KPI 说明' },
+            { href: '#updates', label: 'v3.1 更新' },
             { href: '#faq', label: '常见问题' },
           ].map(item => (
             <a key={item.href} href={item.href} className="px-3 py-2 rounded-lg bg-white border border-gray-200 text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition-all text-center font-medium">
@@ -676,10 +677,76 @@ export default function GuidePage() {
         </div>
       </section>
 
-      {/* ====== 8. 常见问题 ====== */}
+      {/* ====== 8. v3.1 更新说明 (2026-03-31) ====== */}
+      <section id="updates" className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <span className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600 text-sm font-bold">8</span>
+          v3.1 更新说明（2026-03-31）
+        </h2>
+        <div className="space-y-4">
+          {/* 新建订单 */}
+          <div className="rounded-xl border border-purple-200 bg-purple-50/30 p-4">
+            <h3 className="text-sm font-bold text-purple-800 mb-2">📋 新建订单变更</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• <strong>出厂日期、ETD（离港日）、ETA（到港/到仓日）</strong>全部必填，不再按贸易条款隐藏</li>
+              <li>• <strong>款数、颜色数、预估总数量</strong>改为必填</li>
+              <li>• <strong>客户PO文件</strong>必须上传才能提交订单</li>
+              <li>• 订单详情右上角同时显示出厂日期、ETD、ETA 三个倒计时</li>
+              <li>• 翻单类型不再自动标"新客户首单/新工厂首单"</li>
+            </ul>
+          </div>
+
+          {/* 进行中订单导入 */}
+          <div className="rounded-xl border border-amber-200 bg-amber-50/30 p-4">
+            <h3 className="text-sm font-bold text-amber-800 mb-2">📥 进行中订单导入</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• 创建订单页新增<strong>"进行中订单导入"</strong>开关，用于导入已在执行的订单</li>
+              <li>• 开启后选择"当前正在执行的阶段"，之前的节点自动标记为已完成</li>
+              <li>• 剩余节点从今天到交期之间重新等比例排期</li>
+              <li>• 已完成节点不计入超期统计，不影响员工绩效</li>
+              <li>• <strong>注意</strong>：选择的是"正在做"的节点，不是"最后完成"的节点</li>
+            </ul>
+          </div>
+
+          {/* 节点操作 */}
+          <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4">
+            <h3 className="text-sm font-bold text-blue-800 mb-2">⚙️ 节点操作优化</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• <strong>财务审核</strong>：完成时必须填写<strong>内部订单号</strong>（实体订单册编号），方便与纸质订单册对应</li>
+              <li>• <strong>产前样寄出</strong>：完成时必须填写<strong>快递单号</strong></li>
+              <li>• <strong>产前样客户确认</strong>：新增"未通过/需返样"按钮，点击后回退到产前样准备，开始二次样流程</li>
+              <li>• <strong>逾期判断</strong>：只有"进行中"的节点才算逾期，"未开始"的节点不算逾期</li>
+              <li>• <strong>删除订单</strong>：必须输入完整订单号确认，防止误删</li>
+            </ul>
+          </div>
+
+          {/* 权限 */}
+          <div className="rounded-xl border border-red-200 bg-red-50/30 p-4">
+            <h3 className="text-sm font-bold text-red-800 mb-2">🔒 权限与安全</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• 管理员<strong>不能</strong>标记任何关卡完成（即使同时有其他角色），只能监督、催办、审批</li>
+              <li>• 已完成/已取消的订单<strong>禁止</strong>修改关卡状态、申请延期</li>
+              <li>• 催办邮件发送失败时会正确提示，不再误报"已发送"</li>
+            </ul>
+          </div>
+
+          {/* AI 功能 */}
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-4">
+            <h3 className="text-sm font-bold text-indigo-800 mb-2">🧠 AI 智能功能</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• <strong>智能风险预警</strong>：创建订单时 AI 自动分析客户/工厂历史数据，发现复合风险模式并给出预防建议</li>
+              <li>• <strong>知识库自主成长</strong>：AI 分析引擎可生成客户画像、工厂评估、流程瓶颈分析</li>
+              <li>• AI 知识库页面新增"运行 AI 分析"按钮，分析结果以卡片形式展示</li>
+              <li>• 员工分析排行榜支持按<strong>本月/本季/本年</strong>筛选</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* ====== 9. 常见问题 ====== */}
       <section id="faq" className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">8</span>
+          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">9</span>
           常见问题
         </h2>
         <div className="space-y-2">
@@ -698,6 +765,10 @@ export default function GuidePage() {
             { q: '备忘录里输入订单号会怎样？', a: '系统会自动识别并弹出关联提示，你可以选择关联到具体订单和执行环节。关联后关卡到期前 3 天会自动收到邮件提醒。' },
             { q: '执行评分什么时候出来？', a: '订单完成后自动生成。在订单详情的"执行评分"Tab 可以随时查看评分标准，订单完成后会显示实际得分。' },
             { q: '评分不满意可以申诉吗？', a: '可以。联系管理员说明情况，管理员可以手动重新计算。我们尊重每个人的付出，客户原因导致的问题不会影响你的评分。' },
+            { q: '什么是"进行中订单导入"？', a: '用于导入已经在执行的订单。开启后选择当前正在做的节点，之前的节点自动标记完成，之后的节点从今天重新排期。适合系统上线初期批量导入正在执行的订单。' },
+            { q: '内部订单号在哪里填？', a: '在财务审核节点完成时必须填写。这是实体订单册上的编号，方便系统订单与纸质订单册对应。填写后在订单详情"基本信息"区可以看到。' },
+            { q: '产前样客户未通过怎么办？', a: '在"产前样客户确认"节点点击"未通过/需返样"按钮，系统会自动回退到"产前样准备完成"节点，开始二次样流程。' },
+            { q: '为什么有些过期节点没有显示逾期？', a: '只有"进行中"的节点过了截止日期才算逾期。"未开始"的节点即使截止日期已过也不算逾期，避免导入订单时大量误报。' },
           ].map((faq, i) => (
             <details key={i} className="rounded-xl border border-gray-200 overflow-hidden">
               <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-gray-900 hover:bg-gray-50 bg-white">
@@ -711,7 +782,7 @@ export default function GuidePage() {
 
       {/* 页脚 */}
       <div className="text-center py-6 border-t border-gray-200">
-        <p className="text-xs text-gray-400">订单节拍器 v3.0 | 更新于 2026-03-29 | 访问 order.qimoactivewear.com | 如有问题请联系管理员</p>
+        <p className="text-xs text-gray-400">订单节拍器 v3.1 | 更新于 2026-03-31 | 访问 order.qimoactivewear.com | 如有问题请联系管理员</p>
       </div>
     </div>
   );
