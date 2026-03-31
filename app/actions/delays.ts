@@ -73,7 +73,16 @@ export async function createDelayRequest(
   if (!milestone) {
     return { error: 'Milestone not found' };
   }
-  
+
+  // 生命周期校验：已完成/已取消的订单不能申请延期
+  const { data: orderCheck } = await (supabase.from('orders') as any)
+    .select('lifecycle_status').eq('id', (milestone as any).order_id).single();
+  if (orderCheck) {
+    const ls = orderCheck.lifecycle_status;
+    if (ls === 'completed' || ls === '已完成') return { error: '该订单已完成，不能申请延期' };
+    if (ls === 'cancelled' || ls === '已取消') return { error: '该订单已取消，不能申请延期' };
+  }
+
   // Get order separately
   const { data: order } = await supabase
     .from('orders')
