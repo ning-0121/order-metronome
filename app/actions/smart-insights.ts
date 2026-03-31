@@ -420,3 +420,106 @@ async function generateAIInsights(
 
   return aiInsights;
 }
+
+// ══════════════════════════════════════════════
+// 全场景 AI 建议统一入口
+// ══════════════════════════════════════════════
+
+export interface AIAdvice {
+  advice: string;
+  tips: string[];
+  severity: 'high' | 'medium' | 'low';
+}
+
+/**
+ * 全场景 AI 建议：工作台/订单详情/节点操作
+ * 24小时缓存 + 失败降级
+ */
+export async function getContextualAIAdvice(params: {
+  scene: 'dashboard' | 'order_detail' | 'milestone_action';
+  orderId?: string;
+  milestoneStepKey?: string;
+  userId?: string;
+  contextData?: string; // 调用方预组装的上下文摘要
+}): Promise<{ data: AIAdvice | null }> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { data: null };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null };
+
+  // 缓存 key
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const cacheKey = `ai_advice_${params.scene}_${params.orderId || ''}_${params.milestoneStepKey || ''}_${dateStr}`;
+
+  const { data: cached } = await (supabase.from('ai_knowledge_base') as any)
+    .select('structured_data')
+    .eq('source_id', cacheKey)
+    .eq('category', 'ai_advice_cache')
+    .maybeSingle();
+
+  if (cached?.structured_data?.advice) {
+    return { data: cached.structured_data as AIAdvice };
+  }
+
+  // 没有上下文数据就无法分析
+  if (!params.contextData || params.contextData.length < 20) return { data: null };
+
+  const prompts: Record<string, string> = {
+    dashboard: `你是服装外贸订单管理助手。根据以下今日工作概况，给业务员3条最重要的工作建议。
+要求：具体到订单号和节点名称，说明为什么优先处理，给出预防风险的具体行动。
+返回JSON: {"advice":"一句话总结今日重点","tips":["建议1","建议2","建议3"],"severity":"high/medium/low"}
+只返回JSON。`,
+    order_detail: `你是服装外贸订单风险分析师。根据以下订单信息和历史数据，分析该订单的风险和建议。
+要求：指出最关键的风险组合，给出具体的预防措施，如有成功经验也提炼出来。
+返回JSON: {"advice":"一句话风险评估","tips":["风险/建议1","风险/建议2","风险/建议3"],"severity":"high/medium/low"}
+只返回JSON。`,
+    milestone_action: `你是服装外贸订单执行顾问。业务员正在处理一个节点，根据以下信息给出操作建议。
+要求：提醒该节点的常见问题，给出具体操作要点，如有历史教训要警示。简洁实用。
+返回JSON: {"advice":"一句话提醒","tips":["要点1","要点2"],"severity":"high/medium/low"}
+只返回JSON。`,
+  };
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 500,
+      system: prompts[params.scene] || prompts.dashboard,
+      messages: [{ role: 'user', content: params.contextData }],
+    });
+
+    const text = response.content.filter(b => b.type === 'text').map(b => (b as Anthropic.TextBlock).text).join('');
+    let jsonStr = text.trim();
+    if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
+    const parsed = JSON.parse(jsonStr);
+    const result: AIAdvice = {
+      advice: String(parsed.advice || ''),
+      tips: Array.isArray(parsed.tips) ? parsed.tips.map(String) : [],
+      severity: ['high', 'medium', 'low'].includes(parsed.severity) ? parsed.severity : 'medium',
+    };
+
+    // 写入缓存
+    try {
+      await (supabase.from('ai_knowledge_base') as any).insert({
+        knowledge_type: 'process',
+        category: 'ai_advice_cache',
+        title: `AI建议缓存: ${params.scene}`,
+        content: result.advice,
+        structured_data: result,
+        source_type: 'manual',
+        source_id: cacheKey,
+        confidence: 'high',
+        impact_level: result.severity,
+        is_actionable: true,
+        status: 'active',
+      });
+    } catch {}
+
+    return { data: result };
+  } catch {
+    return { data: null };
+  }
+}

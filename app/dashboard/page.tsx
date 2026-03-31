@@ -4,6 +4,7 @@ import { formatDate } from '@/lib/utils/date';
 import Link from 'next/link';
 import { UnblockButton } from '@/components/UnblockButton';
 import { NudgeButton } from '@/components/NudgeButton';
+import { DashboardAIAdvice } from '@/components/DashboardAIAdvice';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -200,6 +201,16 @@ export default async function DashboardPage() {
         </div>
         </div>
       </div>
+
+      {/* AI 今日建议 */}
+      <DashboardAIAdvice contextData={(() => {
+        const parts: string[] = [];
+        if (myOverdue.length > 0) parts.push(`我的逾期(${myOverdue.length}个): ${myOverdue.slice(0, 5).map((m: any) => `${m.orders?.order_no}-${m.name}(超${Math.ceil((new Date().getTime() - new Date(m.due_at).getTime()) / 86400000)}天)`).join('、')}`);
+        if (othersOverdue.length > 0) parts.push(`他人逾期(${othersOverdue.length}个): ${othersOverdue.slice(0, 3).map((m: any) => `${m.orders?.order_no}-${m.name}(${m.owner_role})`).join('、')}`);
+        if ((todayDueMilestones?.length || 0) > 0) parts.push(`今日到期(${todayDueMilestones?.length}个): ${(todayDueMilestones || []).slice(0, 3).map((m: any) => `${m.orders?.order_no}-${m.name}`).join('、')}`);
+        if ((blockedMilestones?.length || 0) > 0) parts.push(`阻塞中(${blockedMilestones?.length}个)`);
+        return parts.length > 0 ? parts.join('\n') : '';
+      })()} />
 
       {/* Stats Overview */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
