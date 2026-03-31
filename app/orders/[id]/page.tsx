@@ -232,6 +232,7 @@ export default async function OrderDetailPage({
                   { label: '订单号', value: orderData.order_no },
                   { label: '客户', value: orderData.customer_name },
                   { label: '客户PO号', value: orderData.po_number },
+                  { label: '内部订单号', value: orderData.internal_order_no },
                   { label: '负责业务/理单', value: ownerName },
                   { label: '贸易条款', value: orderData.incoterm },
                   { label: orderData.incoterm === 'FOB' ? 'ETD' : '到仓日期(ETA)', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
