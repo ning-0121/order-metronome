@@ -61,6 +61,21 @@ export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRol
 }
 
 /**
+ * 获取用户的多角色列表（从 profiles 表）
+ * 统一提取，避免各 action 重复编写同样的查询逻辑
+ */
+export async function getUserRoles(supabase: any, userId: string): Promise<string[]> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, roles')
+    .eq('user_id', userId)
+    .single();
+  if (!profile) return [];
+  const roles: string[] = profile.roles?.length > 0 ? profile.roles : [profile.role].filter(Boolean);
+  return roles;
+}
+
+/**
  * Check if user can modify milestone
  * V1: admin OR milestone.owner_role matches currentRole
  */

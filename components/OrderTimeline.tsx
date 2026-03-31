@@ -7,7 +7,7 @@ import { OwnerAssignment } from './OwnerAssignment';
 import { SOPButton } from './SOPModal';
 import { getSOPForStep } from '@/lib/domain/sop';
 import { getMilestoneLogs } from '@/app/actions/milestones';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Milestone } from '@/lib/types';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { POParserModal } from './POParserModal';
@@ -95,6 +95,8 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   currentActualAt: string | null;
   dueAt: string | null;
 }) {
+  const msgTimerRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => { return () => { if (msgTimerRef.current) clearTimeout(msgTimerRef.current); }; }, []);
   const [value, setValue] = useState(currentActualAt ? currentActualAt.substring(0, 10) : '');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -113,7 +115,8 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
       setMsg(result.error);
     } else {
       setMsg(value ? '已保存' : '已清除');
-      setTimeout(() => setMsg(''), 2000);
+      if (msgTimerRef.current) clearTimeout(msgTimerRef.current);
+      msgTimerRef.current = setTimeout(() => setMsg(''), 2000);
     }
   }
 
@@ -168,13 +171,15 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
   const [showPOParser, setShowPOParser] = useState(false);
 
   useEffect(() => {
+    let stale = false;
     if (expandedId) {
       getMilestoneLogs(expandedId).then(r => {
-        if (r.data) setLogs({ [expandedId]: r.data });
+        if (!stale && r.data) setLogs({ [expandedId]: r.data });
       });
     } else {
       setLogs({});
     }
+    return () => { stale = true; };
   }, [expandedId]);
 
   // 按 sequence_number 全局排序（兼容旧数据用 due_at 兜底）
