@@ -148,8 +148,14 @@ function NewOrderWizard() {
       rawFormData.delete(formKey);
     }
 
-    // 检查是否有客户PO文件 → 自动比对
+    // 校验：客户PO文件必传
     const poFile = filesToUpload.find(f => f.fileType === 'customer_po');
+    if (!poFile) {
+      showError('请上传客户 PO 文件（必传）');
+      return;
+    }
+
+    // 检查是否有客户PO文件 → 自动比对
     if (poFile && (poFile.file.type === 'application/pdf' || poFile.file.type.startsWith('image/'))) {
       setVerifying(true);
       try {
