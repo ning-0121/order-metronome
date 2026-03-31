@@ -130,12 +130,12 @@ export default async function DashboardPage() {
     .not('status', 'in', '("done","已完成","completed")')
     .order('due_at', { ascending: true });
 
-  // 已超期（全部）
+  // 已超期（仅进行中的节点算逾期，未开始的不算）
   const { data: allOverdueMilestones } = await (supabase
     .from('milestones') as any)
     .select(`*, orders!inner (id, order_no, customer_name)`)
     .lt('due_at', `${today}T00:00:00`)
-    .not('status', 'in', '("done","已完成","completed")')
+    .in('status', ['in_progress', '进行中'])
     .order('due_at', { ascending: true });
 
   // 获取当前用户涉及的订单 ID（创建的 + 被分配了关卡的）
