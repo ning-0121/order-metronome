@@ -304,7 +304,7 @@ function NewOrderWizard() {
                 className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
               />
               <div>
-                <span className="text-sm font-semibold text-amber-800">历史订单导入模式</span>
+                <span className="text-sm font-semibold text-amber-800">进行中订单导入</span>
                 <span className="text-xs text-amber-600 ml-2">已在执行的订单，跳过已完成节点</span>
               </div>
             </label>
