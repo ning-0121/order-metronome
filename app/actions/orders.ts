@@ -168,6 +168,10 @@ export async function createOrder(
       return { ok: false, error: `Cancel Date（${cancel_date}）不能早于出厂日期（${factory_date}）` };
     }
   }
+  // 提前提取 PO 号和内部订单号（重复检测需要用到）
+  const po_number = formData.get('customer_po_number') as string | null;
+  const internal_order_no = formData.get('internal_order_no') as string | null;
+
   // ── 重复订单检测：同客户+同PO号+同数量 ──
   if (po_number && quantity && customer_name) {
     const { data: duplicates } = await (supabase.from('orders') as any)
@@ -208,9 +212,6 @@ export async function createOrder(
       if (count === 0) isNewFactory = true;
     }
   }
-
-  const po_number = formData.get('customer_po_number') as string | null;
-  const internal_order_no = formData.get('internal_order_no') as string | null;
 
   const insertPayload: Record<string, any> = {
     customer_name,
@@ -268,6 +269,11 @@ export async function createOrder(
     // DDP: 锚点=ETA-25天海运
     const scheduleIncoterm = incoterm === 'DDP' ? 'DDP' : 'FOB';
     const scheduleEtd = etd || factory_date; // 非DDP用出厂日期作为锚点
+
+    if (!scheduleEtd) {
+      await deleteOrder(orderData.id);
+      return { ok: false, error: '排期计算错误：缺少锚点日期。人民币/FOB订单需填出厂日期，DDP需填ETD。' };
+    }
 
     dueDates = calcDueDates({
       orderDate: order_date,
