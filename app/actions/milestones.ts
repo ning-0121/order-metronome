@@ -288,11 +288,30 @@ export async function markMilestoneDone(milestoneId: string) {
 
   // Auto-advance to next milestone
   await autoAdvanceNextMilestone(supabase, milestoneData.order_id);
-  
+
+  // 阶段1全部完成 → 自动激活订单（草稿→已生效）
+  const stage1Keys = ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'];
+  if (stage1Keys.includes(milestoneData.step_key)) {
+    const { data: stage1Milestones } = await (supabase.from('milestones') as any)
+      .select('step_key, status')
+      .eq('order_id', milestoneData.order_id)
+      .in('step_key', stage1Keys);
+    const allStage1Done = stage1Milestones && stage1Milestones.length === 4 &&
+      stage1Milestones.every((m: any) => m.status === 'done' || m.status === '已完成');
+    if (allStage1Done) {
+      const { data: orderCheck } = await (supabase.from('orders') as any)
+        .select('lifecycle_status').eq('id', milestoneData.order_id).single();
+      if (orderCheck?.lifecycle_status === 'draft') {
+        const { activateOrder } = await import('@/lib/repositories/ordersRepo');
+        await activateOrder(milestoneData.order_id);
+      }
+    }
+  }
+
   revalidatePath(`/orders/${milestoneData.order_id}`);
   revalidatePath('/dashboard');
   revalidatePath('/orders');
-  
+
   return { data: updatedMilestone };
 }
 
