@@ -6,8 +6,8 @@ import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { CustomerSelect } from '@/components/CustomerSelect';
 import { FactorySelect } from '@/components/FactorySelect';
-import { verifyPOAgainstOrder } from '@/app/actions/po-verify';
-import type { POVerifyResult } from '@/app/actions/po-verify';
+import { verifyPOAgainstOrder, verifyThreeDocuments } from '@/app/actions/po-verify';
+import type { POVerifyResult, ThreeDocVerifyResult } from '@/app/actions/po-verify';
 import { SmartInsightsPanel } from '@/components/SmartInsightsPanel';
 import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
 import Link from 'next/link';
@@ -83,6 +83,8 @@ function NewOrderWizard() {
   const [pendingFormData, setPendingFormData] = useState<FormData | null>(null);
   const [pendingFiles, setPendingFiles] = useState<{ file: File; fileType: string; label: string }[]>([]);
   const [verifying, setVerifying] = useState(false);
+  const [threeDocResult, setThreeDocResult] = useState<ThreeDocVerifyResult | null>(null);
+  const [showThreeDocDialog, setShowThreeDocDialog] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [selectedFactory, setSelectedFactory] = useState('');
   const [isImport, setIsImport] = useState(false);
@@ -196,13 +198,43 @@ function NewOrderWizard() {
       setVerifying(false);
     }
 
-    // 无差异或无PO文件 → 直接创建
+    // 三单比对：内部报价 vs 客户报价 vs 客户PO
+    const threeFiles = filesToUpload.filter(f => ['customer_po', 'internal_quote', 'customer_quote'].includes(f.fileType));
+    if (threeFiles.length >= 2) {
+      setVerifying(true);
+      try {
+        const docsForVerify = await Promise.all(threeFiles.map(async f => {
+          const buf = await f.file.arrayBuffer();
+          return {
+            type: f.fileType as 'internal_quote' | 'customer_quote' | 'customer_po',
+            base64: btoa(String.fromCharCode(...new Uint8Array(buf))),
+            fileType: f.file.type,
+            fileName: f.file.name,
+          };
+        }));
+        const threeRes = await verifyThreeDocuments(docsForVerify);
+        if (threeRes.data && !threeRes.data.allMatch && threeRes.data.differences.length > 0) {
+          setThreeDocResult(threeRes.data);
+          setPendingFormData(rawFormData);
+          setPendingFiles(filesToUpload);
+          setShowThreeDocDialog(true);
+          setVerifying(false);
+          return;
+        }
+      } catch {
+        // 三单比对失败不阻断创建
+      }
+      setVerifying(false);
+    }
+
+    // 无差异 → 直接创建
     await doCreateOrder(rawFormData, filesToUpload);
   }
 
   /** 忽略差异，继续创建 */
   async function handleIgnoreAndSubmit() {
     setShowVerifyDialog(false);
+    setShowThreeDocDialog(false);
     if (pendingFormData) {
       await doCreateOrder(pendingFormData, pendingFiles);
     }
@@ -612,6 +644,64 @@ function NewOrderWizard() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* 三单比对差异弹窗 */}
+      {showThreeDocDialog && threeDocResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowThreeDocDialog(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-bold text-red-700 mb-2">⚠️ 三单比对发现差异</h3>
+            <p className="text-sm text-gray-600 mb-4">{threeDocResult.summary}</p>
+
+            {threeDocResult.differences.length > 0 && (
+              <div className="mb-4">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="text-left px-3 py-2 border">字段</th>
+                      <th className="text-left px-3 py-2 border">内部报价</th>
+                      <th className="text-left px-3 py-2 border">客户报价</th>
+                      <th className="text-left px-3 py-2 border">客户PO</th>
+                      <th className="text-left px-3 py-2 border">风险</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {threeDocResult.differences.map((d, i) => (
+                      <tr key={i} className={d.severity === 'error' ? 'bg-red-50' : 'bg-yellow-50'}>
+                        <td className="px-3 py-2 border font-medium">{d.field}</td>
+                        <td className="px-3 py-2 border">{d.internalValue || '—'}</td>
+                        <td className="px-3 py-2 border">{d.customerQuoteValue || '—'}</td>
+                        <td className="px-3 py-2 border">{d.poValue || '—'}</td>
+                        <td className="px-3 py-2 border text-xs text-red-600">{d.note}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {threeDocResult.risks.length > 0 && (
+              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3">
+                <p className="text-sm font-medium text-red-800 mb-1">风险提示：</p>
+                <ul className="text-sm text-red-700 space-y-1">
+                  {threeDocResult.risks.map((r, i) => <li key={i}>· {r}</li>)}
+                </ul>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowThreeDocDialog(false)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">
+                返回修改
+              </button>
+              <button onClick={handleIgnoreAndSubmit}
+                className="px-4 py-2 rounded-lg bg-orange-500 text-sm text-white hover:bg-orange-600">
+                已知晓差异，继续创建
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

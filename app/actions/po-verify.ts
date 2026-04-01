@@ -218,3 +218,115 @@ export async function verifyPOAgainstOrder(
     return { error: `比对失败：${err.message}` };
   }
 }
+
+// ══════════════════════════════════════════════
+// 三单比对：内部报价单 vs 客户报价单 vs 客户PO
+// ══════════════════════════════════════════════
+
+export interface ThreeDocVerifyResult {
+  summary: string;
+  differences: {
+    field: string;
+    internalValue: string;
+    customerQuoteValue: string;
+    poValue: string;
+    severity: 'error' | 'warning';
+    note: string;
+  }[];
+  risks: string[];
+  allMatch: boolean;
+}
+
+/**
+ * 三单比对：用 Claude 同时分析内部报价单、客户报价单、客户PO
+ * 找出款号、价格、数量、交期、工艺等差异
+ */
+export async function verifyThreeDocuments(
+  files: { type: 'internal_quote' | 'customer_quote' | 'customer_po'; base64: string; fileType: string; fileName: string }[]
+): Promise<{ data?: ThreeDocVerifyResult; error?: string }> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { error: 'AI 服务未配置' };
+
+  if (files.length < 2) return { error: '至少需要2个文件进行比对' };
+
+  try {
+    const client = new Anthropic({ apiKey });
+
+    // 构建多文件消息
+    const content: Anthropic.ContentBlockParam[] = [];
+
+    const docLabels: Record<string, string> = {
+      internal_quote: '内部报价单',
+      customer_quote: '客户最终报价单',
+      customer_po: '客户PO',
+    };
+
+    for (const f of files) {
+      content.push({ type: 'text', text: `\n=== ${docLabels[f.type]} (${f.fileName}) ===` });
+
+      if (f.fileType === 'application/pdf') {
+        content.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: f.base64 },
+        } as any);
+      } else if (f.fileType.startsWith('image/')) {
+        content.push({
+          type: 'image',
+          source: { type: 'base64', media_type: f.fileType as any, data: f.base64 },
+        });
+      } else {
+        content.push({ type: 'text', text: `[文件格式 ${f.fileType} 暂不支持AI分析]` });
+      }
+    }
+
+    content.push({
+      type: 'text',
+      text: '\n请比对以上文件，找出差异。',
+    });
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1200,
+      system: `你是服装外贸订单审核专家。请比对内部报价单、客户报价单和客户PO这三份文件，找出以下维度的差异：
+1. 款号/Style Number
+2. 单价/Price（注意币种）
+3. 数量/Quantity
+4. 交期/Delivery Date
+5. 颜色/Color
+6. 尺码配比/Size Ratio
+7. 包装方式/Packing
+8. 工艺要求/Craft Requirements
+9. 其他特殊条款
+
+返回严格JSON格式：
+{
+  "summary": "一句话总结比对结果",
+  "differences": [
+    {"field": "字段名", "internalValue": "内部报价值", "customerQuoteValue": "客户报价值", "poValue": "PO值", "severity": "error或warning", "note": "风险说明"}
+  ],
+  "risks": ["风险点1", "风险点2"],
+  "allMatch": true或false
+}
+如果三单完全一致，differences为空数组，allMatch为true。只返回JSON。`,
+      messages: [{ role: 'user', content }],
+    });
+
+    const text = response.content.filter(b => b.type === 'text').map(b => (b as Anthropic.TextBlock).text).join('');
+    let jsonStr = text.trim();
+    if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
+    let parsed: any;
+    try { parsed = JSON.parse(jsonStr); } catch { return { error: 'AI 返回格式异常，请重试' }; }
+
+    return {
+      data: {
+        summary: parsed.summary || '',
+        differences: Array.isArray(parsed.differences) ? parsed.differences : [],
+        risks: Array.isArray(parsed.risks) ? parsed.risks : [],
+        allMatch: !!parsed.allMatch,
+      },
+    };
+  } catch (err: any) {
+    return { error: `三单比对失败：${err.message}` };
+  }
+}
