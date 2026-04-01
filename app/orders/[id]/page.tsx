@@ -78,14 +78,26 @@ export default async function OrderDetailPage({
     ownerName = ownerProfile?.name || ownerProfile?.email || '—';
   }
 
-  // 跟单负责人（从 merchandiser 关卡查找已分配的用户）
+  // 跟单负责人（从 merchandiser 关卡查找已分配的用户，兼容多种角色值）
   let merchandiserName: string | null = null;
+  let merchandiserUserId: string | null = null;
   if (milestones) {
+    const merchRoles = ['merchandiser', 'production', 'qc'];
     const merchMilestone = (milestones as any[]).find(
-      (m: any) => m.owner_role === 'merchandiser' && m.owner_user_id
+      (m: any) => merchRoles.includes(m.owner_role) && m.owner_user_id
     );
     if (merchMilestone?.owner_user) {
       merchandiserName = merchMilestone.owner_user.name || merchMilestone.owner_user.email || null;
+      merchandiserUserId = merchMilestone.owner_user_id;
+    }
+    // 如果没从 milestone 找到，尝试查订单的 merchandiser_user_id（如果存在）
+    if (!merchandiserName && orderData.merchandiser_user_id) {
+      const { data: merchProfile } = await (supabase.from('profiles') as any)
+        .select('name, email').eq('user_id', orderData.merchandiser_user_id).single();
+      if (merchProfile) {
+        merchandiserName = merchProfile.name || merchProfile.email || null;
+        merchandiserUserId = orderData.merchandiser_user_id;
+      }
     }
   }
 
