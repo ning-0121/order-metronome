@@ -35,6 +35,9 @@ export default function FactoryAnalyticsPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <div className="flex items-center justify-between mb-6">
+        <div className="mb-2">
+          <Link href="/analytics" className="text-sm text-gray-500 hover:text-indigo-600">← 数据分析</Link>
+        </div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">🏭 工厂分析</h1>
           <p className="text-sm text-gray-500 mt-1">各工厂订单量、产能、品质概览</p>

@@ -46,14 +46,18 @@ export default function EmployeeAnalyticsPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       {/* 头部 */}
+      <div className="mb-2">
+        <Link href="/analytics" className="text-sm text-gray-500 hover:text-indigo-600">← 数据分析</Link>
+      </div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">👥 员工分析</h1>
+          <h1 className="text-2xl font-bold text-gray-900">👤 员工分析</h1>
           <p className="text-sm text-gray-500 mt-1">业务/跟单绩效排行与 AI 分析</p>
         </div>
-        <Link href="/analytics/customers" className="text-sm text-indigo-600 hover:text-indigo-700">
-          客户分析 →
-        </Link>
+        <div className="flex gap-3">
+          <Link href="/analytics/customers" className="text-sm text-indigo-600 hover:text-indigo-700">客户分析 →</Link>
+          <Link href="/analytics/factories" className="text-sm text-indigo-600 hover:text-indigo-700">工厂分析 →</Link>
+        </div>
       </div>
 
       {loading && <div className="text-center py-12 text-gray-400">加载中...</div>}

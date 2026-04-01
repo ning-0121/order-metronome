@@ -57,23 +57,42 @@ export default async function AnalyticsPage() {
         <p className="text-gray-500 text-sm mt-1">订单数据总览、客户/员工/工厂三维度分析</p>
       </div>
 
-      {/* ===== 总览统计 ===== */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">总订单数</div>
-          <div className="text-3xl font-bold text-indigo-600 mt-2">{totalOrders}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">总数量</div>
-          <div className="text-3xl font-bold text-blue-600 mt-2">{totalQuantity.toLocaleString()}件</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">客户数</div>
-          <div className="text-3xl font-bold text-green-600 mt-2">{totalCustomers}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">工厂数</div>
-          <div className="text-3xl font-bold text-orange-600 mt-2">{totalFactories}</div>
+      {/* ===== 总览统计 + 风险 ===== */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">订单总览</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-indigo-600">{totalOrders}</div>
+            <div className="text-xs text-gray-500 mt-1">总订单</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">{totalQuantity.toLocaleString()}</div>
+            <div className="text-xs text-gray-500 mt-1">总件数</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-600">{totalCustomers}</div>
+            <div className="text-xs text-gray-500 mt-1">客户数</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-orange-600">{totalFactories}</div>
+            <div className="text-xs text-gray-500 mt-1">工厂数</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-2xl font-bold ${summary.onTimeRate >= 80 ? 'text-green-600' : summary.onTimeRate >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{summary.onTimeRate}%</div>
+            <div className="text-xs text-gray-500 mt-1">准时率</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-600">{summary.completionRate}%</div>
+            <div className="text-xs text-gray-500 mt-1">完成率</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-2xl font-bold ${summary.overdueCount > 0 ? 'text-red-600' : 'text-green-600'}`}>{summary.overdueCount}</div>
+            <div className="text-xs text-gray-500 mt-1">超期节点</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-2xl font-bold ${summary.blockedCount > 0 ? 'text-orange-600' : 'text-green-600'}`}>{summary.blockedCount}</div>
+            <div className="text-xs text-gray-500 mt-1">阻塞节点</div>
+          </div>
         </div>
       </div>
 
@@ -111,48 +130,7 @@ export default async function AnalyticsPage() {
         </Link>
       </div>
 
-      {/* ===== 第二区：实时效率指标 ===== */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">节点准时完成率</div>
-          <div className={`text-3xl font-bold mt-2 ${summary.onTimeRate >= 80 ? 'text-green-600' : summary.onTimeRate >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
-            {summary.onTimeRate}%
-          </div>
-          <div className="text-xs text-gray-400 mt-1">{summary.onTimeCount} / {summary.completedMilestones} 按时完成</div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">整体完成率</div>
-          <div className="text-3xl font-bold text-green-600 mt-2">{summary.completionRate}%</div>
-          <div className="text-xs text-gray-400 mt-1">{summary.completedMilestones} / {summary.totalMilestones} 节点</div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">本周完成节点</div>
-          <div className="flex items-baseline gap-2 mt-2">
-            <span className="text-3xl font-bold text-blue-600">{summary.thisWeekCompleted}</span>
-            <span className={`text-sm font-medium ${weekDeltaColor}`}>
-              {weekDelta >= 0 ? '↑' : '↓'} {weekDeltaStr}
-            </span>
-          </div>
-          <div className="text-xs text-gray-400 mt-1">较上周 {weekDelta >= 0 ? '提升' : '下降'}</div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 uppercase tracking-wide">当前风险</div>
-          <div className="flex items-baseline gap-3 mt-2">
-            <span className={`text-xl font-bold ${summary.overdueCount > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {summary.overdueCount} 超期
-            </span>
-            <span className={`text-xl font-bold ${summary.blockedCount > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-              {summary.blockedCount} 阻塞
-            </span>
-          </div>
-          <div className="text-xs text-gray-400 mt-1">正在监控 {activeNodes} 个活跃节点</div>
-        </div>
-      </div>
-
-      {/* ===== 第三区：各角色效率 ===== */}
+      {/* ===== 各角色效率 ===== */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
           <h2 className="text-lg font-bold text-gray-900">🏅 各角色执行效率</h2>
