@@ -142,19 +142,26 @@ export async function POST(request: NextRequest) {
       <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">去处理</a></p>
     `;
 
-    const emailSent = await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
-
-    if (!emailSent) {
-      return NextResponse.json(
-        { error: '邮件发送失败，请检查 SMTP 配置或稍后重试' },
-        { status: 500 }
-      );
+    // 1. 系统内通知（一定会送达）
+    if (milestoneData.owner_user_id) {
+      await (supabase.from('notifications') as any).insert({
+        user_id: milestoneData.owner_user_id,
+        type: 'nudge',
+        title: `🔔 催办提醒：${milestoneData.name}`,
+        message: `${senderName} 提醒你尽快处理「${orderData.order_no}」的「${milestoneData.name}」节点`,
+        related_order_id: orderData.id,
+        status: 'unread',
+      }).catch(() => {});
     }
+
+    // 2. 邮件通知（可能失败但不阻断）
+    const emailSent = await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
 
     return NextResponse.json({
       success: true,
-      message: 'Nudge sent successfully',
+      message: emailSent ? '催办已发送（系统通知+邮件）' : '催办已发送（系统通知，邮件发送失败）',
       recipient_email: recipientEmail,
+      emailSent,
     });
   } catch (error: any) {
     console.error('Error sending nudge:', error);
