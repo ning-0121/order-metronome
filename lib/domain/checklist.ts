@@ -106,36 +106,47 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
     ],
   },
 
-  // ── 阶段2：采购/生产预评估 ──────────────────
+  // ── 阶段2：原辅料预评估 + 生产预评估 ──────────────────
 
   order_docs_bom_complete: {
-    title: '采购预评估检查清单',
+    title: '原辅料预评估检查清单',
     items: [
-      { key: 'fabric_supplier', label: '面料已有供应商', type: 'select', required: true, role: 'procurement', group: '供应商',
-        options: ['已有', '需要寻找', '客户指定'] },
-      { key: 'trims_supplier', label: '辅料已有供应商', type: 'select', required: true, role: 'procurement', group: '供应商',
-        options: ['已有', '需要寻找', '客户指定'] },
-      { key: 'material_eta', label: '大致到料时间', type: 'text', required: true, role: 'procurement', group: '交期',
+      // 采购填写
+      { key: 'fabric_supplier', label: '面料供应商状态', type: 'select', required: true, role: 'procurement', group: '采购评估',
+        options: ['已有供应商', '需要寻找新供应商', '客户指定供应商'] },
+      { key: 'trims_supplier', label: '辅料供应商状态', type: 'select', required: true, role: 'procurement', group: '采购评估',
+        options: ['已有供应商', '需要寻找新供应商', '客户指定供应商'] },
+      { key: 'material_eta', label: '大致到料时间', type: 'text', required: true, role: 'procurement', group: '采购评估',
         helpText: '如：下单后15天到料' },
-      { key: 'high_risk_material', label: '是否存在高风险材料', type: 'select', required: true, role: 'procurement', group: '风险',
-        options: ['无', '有（已标注业务）'] },
-      { key: 'risk_note', label: '高风险材料说明', type: 'text', required: false, role: 'procurement', group: '风险',
-        helpText: '如有高风险材料，说明具体风险和应对方案' },
-      { key: 'bom_uploaded', label: 'BOM文件已上传', type: 'checkbox', required: true, role: 'procurement', group: '文档' },
+      { key: 'material_price_ok', label: '原辅料价格在预算范围内', type: 'select', required: true, role: 'procurement', group: '采购评估',
+        options: ['在预算内', '略超预算（可接受）', '超预算较多（需协商）'] },
+      { key: 'high_risk_material', label: '是否存在高风险材料', type: 'select', required: true, role: 'procurement', group: '风险评估',
+        options: ['无高风险材料', '有（已标注并通知业务）'] },
+      { key: 'risk_note', label: '风险材料说明及应对', type: 'text', required: false, role: 'procurement', group: '风险评估',
+        helpText: '高弹面料克重偏差、浅色色差风险、特殊工艺面料等' },
+      // 业务确认
+      { key: 'sales_material_reviewed', label: '业务已审阅采购评估', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
+      { key: 'sales_price_feedback', label: '业务对价格的意见', type: 'select', required: true, role: 'sales', group: '业务确认',
+        options: ['价格合适', '需要和客户确认', '需要寻找替代材料'] },
     ],
   },
 
   bulk_materials_confirmed: {
     title: '生产预评估检查清单',
     items: [
-      { key: 'delivery_feasible', label: '是否能满足交期', type: 'select', required: true, role: 'merchandiser', group: '交期评估',
-        options: ['可以', '紧张但可行', '无法满足（需沟通）'] },
+      // 跟单填写
+      { key: 'delivery_feasible', label: '交期是否可行', type: 'select', required: true, role: 'merchandiser', group: '交期评估',
+        options: ['可以按时完成', '紧张但可行', '无法满足（需沟通客户）'] },
       { key: 'delivery_risk_note', label: '交期风险说明', type: 'text', required: false, role: 'merchandiser', group: '交期评估',
-        helpText: '如交期紧张或无法满足，说明原因和建议' },
-      { key: 'craft_difficulty', label: '工艺难点评估', type: 'select', required: true, role: 'merchandiser', group: '工艺评估',
-        options: ['无明显难点', '有难点但可解决', '有重大难点（需沟通）'] },
-      { key: 'craft_note', label: '工艺难点说明', type: 'text', required: false, role: 'merchandiser', group: '工艺评估',
-        helpText: '如有工艺难点，说明具体内容和解决方案' },
+        helpText: '如紧张或无法满足，说明原因和建议方案' },
+      { key: 'craft_difficulty', label: '工艺难点评估', type: 'select', required: true, role: 'merchandiser', group: '工艺品质评估',
+        options: ['无明显难点', '有难点但可解决', '有重大难点（需特别关注）'] },
+      { key: 'craft_note', label: '工艺难点详细说明', type: 'text', required: false, role: 'merchandiser', group: '工艺品质评估',
+        helpText: '特殊工艺、复杂印花、面料处理等难点' },
+      { key: 'quality_focus', label: '品质重点关注项', type: 'text', required: false, role: 'merchandiser', group: '工艺品质评估',
+        helpText: '如：色牢度、缩水率、缝制密度等' },
+      { key: 'processing_fee_estimate', label: '加工费预估范围', type: 'text', required: true, role: 'merchandiser', group: '加工费预估',
+        helpText: '如：12-15元/件' },
     ],
   },
 
