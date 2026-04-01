@@ -40,6 +40,15 @@ const INSERT_WHITELIST = [
   'factory_name',
   'is_new_customer',
   'is_new_factory',
+  'special_tags',
+  'style_count',
+  'color_count',
+  'factory_date',
+  'internal_order_no',
+  'quantity_unit',
+  'eta',
+  'imported_at',
+  'import_current_step',
 ] as const;
 
 const UPDATE_WHITELIST = [
