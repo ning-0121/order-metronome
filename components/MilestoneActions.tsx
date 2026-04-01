@@ -571,6 +571,22 @@ function ChecklistSection({ milestone, orderId, currentRoles }: {
                     </div>
                   )}
 
+                  {item.type === 'number' && (
+                    <div className="flex-1">
+                      <label className="text-sm text-gray-700 mb-1 block">
+                        {item.label} {item.required && <span className="text-red-500">*</span>}
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={val?.value !== null && val?.value !== undefined ? String(val.value) : ''}
+                        onChange={e => handleChange(item.key, e.target.value ? parseFloat(e.target.value) : null)}
+                        placeholder={item.helpText || ''}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                      />
+                    </div>
+                  )}
+
                   {item.type === 'pending_date' && (
                     <div className="flex-1">
                       <label className="text-sm text-gray-700 mb-1 block">
