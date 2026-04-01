@@ -52,106 +52,9 @@ export default async function AnalyticsPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 space-y-6">
       {/* 头部 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">📊 效率分析与系统价值</h1>
-          <p className="text-gray-500 text-sm mt-1">用数据证明系统价值，驱动团队持续改进</p>
-        </div>
-        <Link href="/ceo" className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
-          → 作战指挥中心
-        </Link>
-      </div>
-
-      {/* ===== 第一区：系统带来的业务提升 ===== */}
-      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-6 text-white shadow-lg">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-lg">🚀</span>
-          <h2 className="text-xl font-bold">订单节拍器 · 为企业带来的价值</h2>
-        </div>
-        <p className="text-indigo-200 text-sm mb-5">基于 {summary.totalOrders} 个订单、{summary.totalMilestones} 个控制节点的真实数据</p>
-
-        <div className="grid md:grid-cols-4 gap-4">
-          {/* 效率提升 */}
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="text-4xl font-black">{efficiencyGainPct}%</div>
-            <div className="text-sm font-semibold mt-1">跟单效率提升</div>
-            <div className="text-xs text-indigo-200 mt-2">
-              每单每天从 {manualHoursPerOrderPerDay}h 降至 {systemHoursPerOrderPerDay}h
-            </div>
-            <div className="text-xs text-indigo-200">
-              目前 {summary.totalOrders} 单 · 每天节省 <span className="text-yellow-300 font-bold">{totalSavedHoursPerDay}h</span>
-            </div>
-          </div>
-
-          {/* 风险下降 */}
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="text-4xl font-black">{riskReductionPct}%</div>
-            <div className="text-sm font-semibold mt-1">漏检风险消除</div>
-            <div className="text-xs text-indigo-200 mt-2">
-              人工追踪漏检率约 {manualMissRate}%
-            </div>
-            <div className="text-xs text-indigo-200">
-              系统 {nodesPerOrder} 个节点 · <span className="text-green-300 font-bold">0 遗漏</span>
-            </div>
-          </div>
-
-          {/* 预警速度 */}
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="flex items-baseline gap-1">
-              <span className="text-4xl font-black">实时</span>
-            </div>
-            <div className="text-sm font-semibold mt-1">超期发现速度</div>
-            <div className="text-xs text-indigo-200 mt-2">
-              传统方式发现超期要 {manualDiscoveryDays} 天
-            </div>
-            <div className="text-xs text-indigo-200">
-              系统 <span className="text-green-300 font-bold">秒级预警</span> · 精确到节点
-            </div>
-          </div>
-
-          {/* 损失预防 */}
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="text-4xl font-black">${preventedLoss.toLocaleString()}</div>
-            <div className="text-sm font-semibold mt-1">潜在损失已预警</div>
-            <div className="text-xs text-indigo-200 mt-2">
-              当前 {summary.overdueCount} 个超期节点已被发现
-            </div>
-            <div className="text-xs text-indigo-200">
-              若未及时发现 · 每节点平均影响 <span className="text-yellow-300 font-bold">${avgLossPerMissedNode}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 底部对比 */}
-        <div className="mt-5 bg-white/10 rounded-lg p-4">
-          <div className="text-sm font-semibold mb-3">📋 使用前 vs 使用后</div>
-          <div className="grid md:grid-cols-3 gap-4 text-xs">
-            <div>
-              <div className="text-indigo-300">跟单方式</div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="line-through text-red-300">Excel + 微信催促</span>
-                <span>→</span>
-                <span className="text-green-300 font-bold">系统自动监控 + 预警推送</span>
-              </div>
-            </div>
-            <div>
-              <div className="text-indigo-300">风险发现</div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="line-through text-red-300">客户投诉后才知道</span>
-                <span>→</span>
-                <span className="text-green-300 font-bold">超期前 3 天自动预警</span>
-              </div>
-            </div>
-            <div>
-              <div className="text-indigo-300">责任追溯</div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="line-through text-red-300">扯皮 — 不知道谁延误</span>
-                <span>→</span>
-                <span className="text-green-300 font-bold">每个节点有责任人 + 时间戳</span>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div>
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900">📊 数据分析</h1>
+        <p className="text-gray-500 text-sm mt-1">订单数据总览、客户/员工/工厂三维度分析</p>
       </div>
 
       {/* ===== 总览统计 ===== */}
@@ -312,6 +215,57 @@ export default async function AnalyticsPage() {
         <p className="text-sm text-gray-400">
           卡风险，而不是走流程 — 订单节拍器让交期管理从被动响应转变为主动预防
         </p>
+      </div>
+      {/* ===== 系统价值（底部） ===== */}
+      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-6 text-white shadow-lg">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-lg">🚀</span>
+          <h2 className="text-xl font-bold">订单节拍器 · 为企业带来的价值</h2>
+        </div>
+        <p className="text-indigo-200 text-sm mb-5">基于 {summary.totalOrders} 个订单、{summary.totalMilestones} 个控制节点的真实数据</p>
+        <div className="grid md:grid-cols-4 gap-4">
+          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
+            <div className="text-4xl font-black">{efficiencyGainPct}%</div>
+            <div className="text-sm font-semibold mt-1">跟单效率提升</div>
+            <div className="text-xs text-indigo-200 mt-2">每单每天从 {manualHoursPerOrderPerDay}h 降至 {systemHoursPerOrderPerDay}h</div>
+            <div className="text-xs text-indigo-200">目前 {summary.totalOrders} 单 · 每天节省 <span className="text-yellow-300 font-bold">{totalSavedHoursPerDay}h</span></div>
+          </div>
+          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
+            <div className="text-4xl font-black">{riskReductionPct}%</div>
+            <div className="text-sm font-semibold mt-1">漏检风险消除</div>
+            <div className="text-xs text-indigo-200 mt-2">人工追踪漏检率约 {manualMissRate}%</div>
+            <div className="text-xs text-indigo-200">系统 {nodesPerOrder} 个节点 · <span className="text-green-300 font-bold">0 遗漏</span></div>
+          </div>
+          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
+            <div className="text-4xl font-black">实时</div>
+            <div className="text-sm font-semibold mt-1">超期发现速度</div>
+            <div className="text-xs text-indigo-200 mt-2">传统方式发现超期要 {manualDiscoveryDays} 天</div>
+            <div className="text-xs text-indigo-200">系统 <span className="text-green-300 font-bold">秒级预警</span> · 精确到节点</div>
+          </div>
+          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
+            <div className="text-4xl font-black">${preventedLoss.toLocaleString()}</div>
+            <div className="text-sm font-semibold mt-1">潜在损失已预警</div>
+            <div className="text-xs text-indigo-200 mt-2">当前 {summary.overdueCount} 个超期节点已被发现</div>
+            <div className="text-xs text-indigo-200">若未及时发现 · 每节点平均影响 <span className="text-yellow-300 font-bold">${avgLossPerMissedNode}</span></div>
+          </div>
+        </div>
+        <div className="mt-5 bg-white/10 rounded-lg p-4">
+          <div className="text-sm font-semibold mb-3">📋 使用前 vs 使用后</div>
+          <div className="grid md:grid-cols-3 gap-4 text-xs">
+            <div>
+              <div className="text-indigo-300">跟单方式</div>
+              <div className="flex items-center gap-2 mt-1"><span className="line-through text-red-300">Excel + 微信催促</span><span>→</span><span className="text-green-300 font-bold">系统自动监控 + 预警推送</span></div>
+            </div>
+            <div>
+              <div className="text-indigo-300">风险发现</div>
+              <div className="flex items-center gap-2 mt-1"><span className="line-through text-red-300">客户投诉后才知道</span><span>→</span><span className="text-green-300 font-bold">超期前 3 天自动预警</span></div>
+            </div>
+            <div>
+              <div className="text-indigo-300">责任追溯</div>
+              <div className="flex items-center gap-2 mt-1"><span className="line-through text-red-300">扯皮 — 不知道谁延误</span><span>→</span><span className="text-green-300 font-bold">每个节点有责任人 + 时间戳</span></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
