@@ -125,7 +125,6 @@ export async function createDelayRequest(
     proposed_new_anchor_date: proposedNewAnchorDate || null,
     proposed_new_due_at: proposedNewDueAt || null,
     requires_customer_approval: requiresCustomerApproval,
-    customer_approval_evidence_url: customerApprovalEvidenceUrl || null,
     status: 'pending',
   };
   const { data: delayRequest, error } = await (supabase

@@ -247,8 +247,11 @@ export default async function OrderDetailPage({
                   { label: '客户PO号', value: orderData.po_number },
                   { label: '内部订单号', value: orderData.internal_order_no },
                   { label: '负责业务/理单', value: ownerName },
-                  { label: '贸易条款', value: orderData.incoterm },
-                  { label: orderData.incoterm === 'FOB' ? 'ETD' : '到仓日期(ETA)', value: orderData.incoterm === 'FOB' ? formatDate(orderData.etd) : formatDate(orderData.warehouse_due_date) },
+                  { label: '贸易条款', value: ({ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' } as any)[orderData.incoterm] || orderData.incoterm },
+                  ...(orderData.incoterm === 'DDP' ? [
+                    { label: 'ETD', value: formatDate(orderData.etd) },
+                    { label: '到仓日期(ETA)', value: formatDate(orderData.warehouse_due_date) },
+                  ] : []),
                   { label: '订单类型', value: ({ trial: '新品试单', bulk: '正常', repeat: '翻单', urgent: '加急订单', sample: '样品' } as Record<string,string>)[orderData.order_type] || orderData.order_type },
                   { label: '包装类型', value: orderData.packaging_type === 'standard' ? '标准' : '定制' },
                 ].map(({ label, value }) => (
