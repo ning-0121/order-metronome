@@ -336,11 +336,19 @@ export default async function OrderDetailPage({
             {/* 订单资料 */}
             <div className="md:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">📎 订单资料</h2>
-              {attachments.length > 0 ? (
+              {(() => {
+                const sensitiveTypes = ['customer_po', 'internal_quote', 'customer_quote'];
+                const canSeeSensitive = isAdmin || isOrderOwner || currentRoles.includes('finance');
+                const visibleAttachments = attachments.filter((att: any) =>
+                  !sensitiveTypes.includes(att.file_type) || canSeeSensitive
+                );
+                return visibleAttachments.length > 0 ? (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {attachments.map((att: any) => {
+                  {visibleAttachments.map((att: any) => {
                     const typeLabels: Record<string, string> = {
                       customer_po: '客户PO',
+                      internal_quote: '内部报价单',
+                      customer_quote: '客户报价单',
                       production_order: '生产制单',
                       trims_sheet: '辅料表',
                       packing_requirement: '装箱要求',
@@ -405,7 +413,8 @@ export default async function OrderDetailPage({
                 </div>
               ) : (
                 <p className="text-sm text-gray-400 text-center py-4">暂无上传资料</p>
-              )}
+              );
+              })()}
             </div>
 
             {/* 执行进度概览 */}
