@@ -166,6 +166,52 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
         helpText: '确认实际单耗 ≤ 报价单耗，允许开裁' },
     ],
   },
+
+  // ── 阶段5：中查 ────────────────────────────
+
+  mid_qc_check: {
+    title: '中查检查清单',
+    items: [
+      // 跟单填写
+      { key: 'qc_date', label: '验货日期', type: 'text', required: true, role: 'merchandiser', group: '跟单验货' },
+      { key: 'qc_qty_inspected', label: '抽检数量', type: 'number', required: true, role: 'merchandiser', group: '跟单验货' },
+      { key: 'qc_defect_found', label: '发现不良', type: 'select', required: true, role: 'merchandiser', group: '跟单验货',
+        options: ['无不良', '轻微（可接受）', '一般（需整改）', '严重（需停产整改）'] },
+      { key: 'qc_defect_detail', label: '不良问题描述', type: 'text', required: false, role: 'merchandiser', group: '跟单验货',
+        helpText: '如有不良，说明具体问题' },
+      { key: 'qc_progress_pct', label: '生产完成进度（%）', type: 'number', required: true, role: 'merchandiser', group: '跟单验货',
+        helpText: '如：30、50、70' },
+      { key: 'qc_report_uploaded', label: '中查报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '跟单验货' },
+      // 业务确认
+      { key: 'sales_mid_qc_reviewed', label: '业务已审阅中查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
+      { key: 'sales_mid_qc_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
+        options: ['同意继续生产', '需要整改后继续', '需要与客户沟通'] },
+      { key: 'sales_mid_qc_note', label: '业务备注', type: 'text', required: false, role: 'sales', group: '业务确认' },
+    ],
+  },
+
+  // ── 阶段5：尾查 ────────────────────────────
+
+  final_qc_check: {
+    title: '尾查检查清单',
+    items: [
+      // 跟单填写
+      { key: 'final_qc_date', label: '验货日期', type: 'text', required: true, role: 'merchandiser', group: '跟单验货' },
+      { key: 'final_qc_qty', label: '验货数量', type: 'number', required: true, role: 'merchandiser', group: '跟单验货' },
+      { key: 'final_qc_aql', label: 'AQL标准', type: 'select', required: true, role: 'merchandiser', group: '跟单验货',
+        options: ['AQL 1.5', 'AQL 2.5', 'AQL 4.0', '客户指定标准'] },
+      { key: 'final_qc_result', label: '验货结果', type: 'select', required: true, role: 'merchandiser', group: '跟单验货',
+        options: ['PASS', 'PENDING（待整改复验）', 'FAIL（不通过）'] },
+      { key: 'final_qc_defect_detail', label: '不良问题描述', type: 'text', required: false, role: 'merchandiser', group: '跟单验货' },
+      { key: 'final_qc_report_uploaded', label: '尾查报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '跟单验货' },
+      // 业务确认
+      { key: 'sales_final_qc_reviewed', label: '业务已审阅尾查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
+      { key: 'sales_final_qc_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
+        options: ['同意出货', '需要整改后复验', '需要与客户沟通', '拒绝出货'] },
+      { key: 'sales_final_qc_note', label: '业务备注', type: 'text', required: false, role: 'sales', group: '业务确认',
+        helpText: '如有特殊情况说明' },
+    ],
+  },
 };
 
 // ══════ 工具函数 ══════
