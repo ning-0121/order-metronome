@@ -294,16 +294,22 @@ export async function createOrder(
   };
 
   // 自动分配：查询各角色的默认负责人
-  // 业务=订单创建者，采购/财务/物流=该角色唯一用户（如有多人则不自动分配）
   const roleUserMap: Record<string, string | null> = { sales: user.id };
-  for (const roleToFind of ['procurement', 'finance', 'logistics']) {
-    const { data: roleUsers } = await (supabase.from('profiles') as any)
-      .select('user_id')
-      .or(`role.eq.${roleToFind},roles.cs.{${roleToFind}}`);
-    if (roleUsers && roleUsers.length === 1) {
-      roleUserMap[roleToFind] = roleUsers[0].user_id;
+  try {
+    const { data: allProfiles } = await (supabase.from('profiles') as any)
+      .select('user_id, role, roles');
+    if (allProfiles) {
+      for (const roleToFind of ['procurement', 'finance', 'logistics']) {
+        const matched = allProfiles.filter((p: any) => {
+          const r: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
+          return r.includes(roleToFind);
+        });
+        if (matched.length === 1) {
+          roleUserMap[roleToFind] = matched[0].user_id;
+        }
+      }
     }
-  }
+  } catch {} // 查询失败不影响订单创建
 
   const templates = getApplicableMilestones(order_type, shipping_sample_required);
   const milestonesData = [];
