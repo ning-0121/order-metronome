@@ -48,6 +48,23 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
 
   // ── 阶段1：订单评审 ──────────────────────────
 
+  po_confirmed: {
+    title: 'PO确认检查清单',
+    items: [
+      { key: 'po_uploaded', label: '客户PO已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
+      { key: 'internal_quote_uploaded', label: '内部报价单已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
+      { key: 'customer_quote_uploaded', label: '客户最终报价单已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
+      { key: 'style_no_verified', label: '款号核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
+      { key: 'quantity_verified', label: '数量核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
+      { key: 'size_ratio_verified', label: '尺码配比核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
+      { key: 'color_verified', label: '颜色核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
+      { key: 'delivery_verified', label: '交期核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
+      { key: 'incoterm_payment', label: '贸易条款（FOB/DDP）和付款方式确认', type: 'checkbox', required: true, role: 'sales', group: '条款确认' },
+      { key: 'special_requirements', label: '特殊要求已标注（浅色/撞色/特殊包装等）', type: 'checkbox', required: true, role: 'sales', group: '条款确认' },
+      { key: 'three_doc_ai_verified', label: 'AI三单比对已完成或已确认差异', type: 'checkbox', required: true, role: 'sales', group: 'AI核验' },
+    ],
+  },
+
   finance_approval: {
     title: '财务审核检查清单',
     items: [
