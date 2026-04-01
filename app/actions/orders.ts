@@ -112,12 +112,15 @@ export async function createOrder(
   const factory_name = formData.get('factory_name') as string | null;
   const factory_id = formData.get('factory_id') as string | null;
   const totalQuantity = formData.get('total_quantity') as string | null;
-  const quantity = totalQuantity ? parseInt(totalQuantity, 10) : null;
+  const quantityUnit = formData.get('quantity_unit') as string || '件';
+  // 统一按件数存储：套 = 数量 × 2
+  const rawQty = totalQuantity ? parseInt(totalQuantity, 10) : null;
+  const quantity = rawQty && quantityUnit === '套' ? rawQty * 2 : rawQty;
   const styleCount = formData.get('style_count') as string | null;
   const colorCount = formData.get('color_count') as string | null;
 
-  if (!etd) return { ok: false, error: '请填写 ETD（离港日）' };
-  if (!warehouse_due_date) return { ok: false, error: '请填写 ETA（到港/到仓日）' };
+  if (!etd && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETD（离港日）' };
+  if (!warehouse_due_date && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETA（到港/到仓日）' };
   if (!factory_date) return { ok: false, error: '请填写出厂日期' };
   if (!quantity) return { ok: false, error: '请填写预估总数量' };
   if (!styleCount) return { ok: false, error: '请填写款数' };
@@ -168,6 +171,7 @@ export async function createOrder(
     is_new_factory: isNewFactory,
     created_by: user.id,
     quantity: quantity,
+    quantity_unit: quantityUnit,
     style_count: styleCount ? parseInt(styleCount, 10) : null,
     color_count: colorCount ? parseInt(colorCount, 10) : null,
     factory_date: factory_date || null,
@@ -200,11 +204,16 @@ export async function createOrder(
   // ── STEP 4: create milestones — 计算排期 ──
   let dueDates: ReturnType<typeof calcDueDates>;
   try {
+    // RMB不含税/RMB含税/FOB: 锚点=出厂日期（etd fallback factory_date）
+    // DDP: 锚点=ETA-25天海运
+    const scheduleIncoterm = incoterm === 'DDP' ? 'DDP' : 'FOB';
+    const scheduleEtd = etd || factory_date; // 非DDP用出厂日期作为锚点
+
     dueDates = calcDueDates({
       orderDate: order_date,
       createdAt: new Date(orderData.created_at),
-      incoterm: incoterm as 'FOB' | 'DDP',
-      etd: etd,
+      incoterm: scheduleIncoterm as 'FOB' | 'DDP',
+      etd: scheduleEtd,
       warehouseDueDate: warehouse_due_date,
       eta: eta,
       orderType: (order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
@@ -366,21 +375,46 @@ export async function createOrder(
 
 export async function getOrders() {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
-  const { data: orders, error } = await (supabase
-    .from('orders') as any)
-    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
-    .order('created_at', { ascending: false });
 
-  if (error) {
-    return { error: error.message };
+  // 判断是否管理员
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
+  const isAdmin = roles.includes('admin');
+
+  if (isAdmin) {
+    // 管理员看全部订单
+    const { data: orders, error } = await (supabase.from('orders') as any)
+      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
+      .order('created_at', { ascending: false });
+    if (error) return { error: error.message };
+    return { data: orders };
   }
 
+  // 普通员工：只看自己创建的 + 被分配了关卡的订单
+  const { data: ownedOrders } = await (supabase.from('orders') as any)
+    .select('id').eq('owner_user_id', user.id);
+  const { data: assignedMilestones } = await (supabase.from('milestones') as any)
+    .select('order_id').eq('owner_user_id', user.id);
+
+  const myOrderIds = [...new Set([
+    ...(ownedOrders || []).map((o: any) => o.id),
+    ...(assignedMilestones || []).map((m: any) => m.order_id),
+  ])];
+
+  if (myOrderIds.length === 0) return { data: [] };
+
+  const { data: orders, error } = await (supabase.from('orders') as any)
+    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
+    .in('id', myOrderIds)
+    .order('created_at', { ascending: false });
+
+  if (error) return { error: error.message };
   return { data: orders };
 }
 

@@ -145,9 +145,12 @@ function NewOrderWizard() {
     // 提取文件
     const filesToUpload: { file: File; fileType: string; label: string }[] = [];
     for (const { formKey, fileType, label } of FILE_FIELDS) {
-      const file = rawFormData.get(formKey) as File | null;
-      if (file && file.size > 0) {
-        filesToUpload.push({ file, fileType, label });
+      // 支持多文件（如PO可能有多个）
+      const files = rawFormData.getAll(formKey) as File[];
+      for (const file of files) {
+        if (file && file.size > 0) {
+          filesToUpload.push({ file, fileType, label });
+        }
       }
       rawFormData.delete(formKey);
     }
@@ -446,11 +449,18 @@ function NewOrderWizard() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    预估总数量（件）<span className="text-red-500">*</span>
+                    预估总数量 <span className="text-red-500">*</span>
                   </label>
-                  <input type="number" name="total_quantity" min="1" required
-                    placeholder="此 PO 总件数"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <div className="flex gap-2">
+                    <input type="number" name="total_quantity" min="1" required
+                      placeholder="数量"
+                      className="block flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                    <select name="quantity_unit" required
+                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
+                      <option value="件">件</option>
+                      <option value="套">套（2件）</option>
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -485,6 +495,8 @@ function NewOrderWizard() {
                     onChange={(e) => setIncoterm(e.target.value)}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                     <option value="">请选择</option>
+                    <option value="RMB_EX_TAX">人民币不含税</option>
+                    <option value="RMB_INC_TAX">人民币含税</option>
                     <option value="FOB">FOB（离岸价）</option>
                     <option value="DDP">DDP（完税后交货）</option>
                   </select>
@@ -501,20 +513,25 @@ function NewOrderWizard() {
                   <input type="date" name="factory_date" required
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ETD（离港日）<span className="text-red-500">*</span>
-                  </label>
-                  <input type="date" name="etd" required
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ETA（到港/到仓日）<span className="text-red-500">*</span>
-                  </label>
-                  <input type="date" name="warehouse_due_date" required
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                </div>
+                {/* DDP 才需要 ETD 和 ETA */}
+                {incoterm === 'DDP' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        ETD（离港日）<span className="text-red-500">*</span>
+                      </label>
+                      <input type="date" name="etd" required
+                        className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        ETA（到港/到仓日）<span className="text-red-500">*</span>
+                      </label>
+                      <input type="date" name="warehouse_due_date" required
+                        className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                    </div>
+                  </>
+                )}
                 <div className="col-span-2">
                   <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50">
                     <input type="checkbox" name="shipping_sample_required" value="true"
@@ -591,16 +608,16 @@ function NewOrderWizard() {
               </h3>
               <div className="space-y-3">
                 {[
-                  { name: 'customer_po_file', label: '客户 PO', required: true },
+                  { name: 'customer_po_file', label: '客户 PO（可多个）', required: true, multiple: true },
                   { name: 'internal_quote_file', label: '内部报价单', required: true },
                   { name: 'customer_quote_file', label: '客户最终报价单', required: true },
                   { name: 'production_order_file', label: '生产制单', required: false, hint: '财务审核后2日内上传' },
                   { name: 'trims_sheet_file', label: '辅料表', required: false },
                   { name: 'packing_requirement_file', label: '装箱要求', required: false },
                   { name: 'tech_pack_file', label: '工艺单 Tech Pack', required: false },
-                ].map(({ name, label, required, hint }) => (
+                ].map(({ name, label, required, hint, multiple }: any) => (
                   <div key={name} className="flex items-center gap-4 p-3 rounded-lg border border-gray-200">
-                    <div className="w-36 flex-shrink-0">
+                    <div className="w-44 flex-shrink-0">
                       <span className="text-sm font-medium text-gray-700">{label}</span>
                       {required ? (
                         <span className="text-red-500 ml-1 text-xs">必传</span>
@@ -610,6 +627,7 @@ function NewOrderWizard() {
                       {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
                     </div>
                     <input type="file" name={name}
+                      multiple={!!multiple}
                       accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
                       className="flex-1 text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
                   </div>

@@ -2,7 +2,7 @@
 // Note: MilestoneStatus is now defined in lib/domain/types.ts (只使用中文状态)
 
 export type UserRole = 'sales' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics' | 'admin';
-export type IncotermType = 'FOB' | 'DDP';
+export type IncotermType = 'FOB' | 'DDP' | 'RMB_EX_TAX' | 'RMB_INC_TAX';
 export type OrderType = 'sample' | 'bulk';
 export type PackagingType = 'standard' | 'custom';
 // 状态类型：统一使用中文（兼容旧代码，但推荐使用 lib/domain/types.ts 中的类型）
