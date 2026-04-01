@@ -125,6 +125,49 @@ export async function createOrder(
   if (!quantity) return { ok: false, error: '请填写预估总数量' };
   if (!styleCount) return { ok: false, error: '请填写款数' };
   if (!colorCount) return { ok: false, error: '请填写颜色数' };
+
+  // ── 日期合理性校验 ──
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const orderDt = order_date ? new Date(order_date) : today;
+  const factoryDt = new Date(factory_date);
+
+  // 出厂日期不能是过去的离谱日期
+  if (factoryDt < new Date('2020-01-01')) {
+    return { ok: false, error: `出厂日期 ${factory_date} 明显不对，请检查` };
+  }
+
+  // 出厂日期必须在下单日期之后
+  if (factoryDt < orderDt) {
+    return { ok: false, error: `出厂日期（${factory_date}）不能早于下单日期（${order_date}）` };
+  }
+
+  // 下单到出厂最少7天（面料采购+生产需要时间）
+  const daysToFactory = Math.ceil((factoryDt.getTime() - orderDt.getTime()) / 86400000);
+  if (daysToFactory < 7) {
+    return { ok: false, error: `下单日到出厂日仅 ${daysToFactory} 天，最少需要 7 天（含采购和生产时间）。如确实是加急单请选择"加急订单"类型。` };
+  }
+
+  // DDP: ETD 必须在出厂日期之后
+  if (etd && factory_date) {
+    if (new Date(etd) < factoryDt) {
+      return { ok: false, error: `ETD（${etd}）不能早于出厂日期（${factory_date}）` };
+    }
+  }
+
+  // DDP: ETA 必须在 ETD 之后
+  if (etd && warehouse_due_date) {
+    if (new Date(warehouse_due_date) <= new Date(etd)) {
+      return { ok: false, error: `ETA（${warehouse_due_date}）必须晚于 ETD（${etd}）` };
+    }
+  }
+
+  // Cancel date 必须在出厂日期之后
+  if (cancel_date && factory_date) {
+    if (new Date(cancel_date) < factoryDt) {
+      return { ok: false, error: `Cancel Date（${cancel_date}）不能早于出厂日期（${factory_date}）` };
+    }
+  }
   // ── STEP 3: insert order — 写入订单到数据库 ──
   // order_type: trial/bulk/repeat/urgent（DB CHECK 需更新）
   const dbOrderType = order_type || 'bulk';
