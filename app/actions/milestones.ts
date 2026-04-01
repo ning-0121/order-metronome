@@ -925,6 +925,20 @@ export async function saveChecklistData(
   const lcErr = await checkOrderModifiable(supabase, milestone.order_id);
   if (lcErr) return { error: lcErr };
 
+  // 角色校验：只能编辑自己角色对应的检查项
+  const { getChecklistForStep } = await import('@/lib/domain/checklist');
+  const checklistConfig = getChecklistForStep(milestone.step_key);
+  if (checklistConfig) {
+    const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+    const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+    for (const r of responses) {
+      const itemDef = checklistConfig.items.find((i: any) => i.key === r.key);
+      if (itemDef && !userRoles.some((ur: string) => ur.toLowerCase() === itemDef.role.toLowerCase())) {
+        return { error: `无权编辑「${itemDef.label}」（需要${itemDef.role}角色）` };
+      }
+    }
+  }
+
   // 合并响应（保留其他用户填的项，更新当前用户填的项）
   const existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> = milestone.checklist_data || [];
   const existingMap = new Map(existing.map(r => [r.key, r]));
