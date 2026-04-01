@@ -278,6 +278,18 @@ export async function createOrder(
     admin: 'admin', merchandiser: 'merchandiser', quality: 'qc',
   };
 
+  // 自动分配：查询各角色的默认负责人
+  // 业务=订单创建者，采购/财务/物流=该角色唯一用户（如有多人则不自动分配）
+  const roleUserMap: Record<string, string | null> = { sales: user.id };
+  for (const roleToFind of ['procurement', 'finance', 'logistics']) {
+    const { data: roleUsers } = await (supabase.from('profiles') as any)
+      .select('user_id')
+      .or(`role.eq.${roleToFind},roles.cs.{${roleToFind}}`);
+    if (roleUsers && roleUsers.length === 1) {
+      roleUserMap[roleToFind] = roleUsers[0].user_id;
+    }
+  }
+
   const templates = getApplicableMilestones(order_type, shipping_sample_required);
   const milestonesData = [];
   for (let index = 0; index < templates.length; index++) {
@@ -289,8 +301,8 @@ export async function createOrder(
       return { ok: false, error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
     }
     const dbRole = ROLE_TO_DB[template.owner_role] || 'sales';
-    // 仅业务角色的关卡自动分配给订单创建者（跟单由管理员另行指定）
-    const autoAssign = dbRole === 'sales' ? user.id : null;
+    // 自动分配：业务=创建者，采购/财务/物流=角色唯一用户，跟单=管理员指定
+    const autoAssign = roleUserMap[dbRole] || null;
     milestonesData.push({
       step_key: template.step_key,
       name: template.name,

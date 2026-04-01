@@ -149,26 +149,29 @@ export default async function DashboardPage() {
     ...(assignedMilestones || []).map((m: any) => m.order_id),
   ]);
 
+  // 权限过滤：普通员工只看自己相关订单的节点
+  const filterByMyOrders = (list: any[]) => isAdmin ? list : list.filter((m: any) => myOrderIds.has(m.order_id));
+  const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
+  const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);
+
   // 区分「我的逾期」和「他人逾期」
-  // 管理员不执行关卡，没有「我的逾期」，所有逾期都是「他人逾期」供监督
-  const myOverdue = isAdmin ? [] : (allOverdueMilestones || []).filter((m: any) => isMyMilestone(m, userRoles));
-  // 他人逾期：管理员看所有，普通员工看自己相关订单的
+  const myOverdue = isAdmin ? [] : filteredOverdue.filter((m: any) => isMyMilestone(m, userRoles));
   const othersOverdue = isAdmin
-    ? (allOverdueMilestones || [])
-    : (allOverdueMilestones || []).filter((m: any) => !isMyMilestone(m, userRoles) && myOrderIds.has(m.order_id)
-  );
+    ? filteredOverdue
+    : filteredOverdue.filter((m: any) => !isMyMilestone(m, userRoles));
 
   // 卡住清单
-  const { data: blockedMilestones } = await (supabase
+  const { data: rawBlockedMilestones } = await (supabase
     .from('milestones') as any)
     .select(`*, orders!inner (id, order_no, customer_name)`)
     .in('status', ['blocked', '卡单', '卡住'])
     .order('created_at', { ascending: false });
+  const blockedMilestones = filterByMyOrders(rawBlockedMilestones || []);
 
   const totalIssues =
     (pendingRetroOrders?.length || 0) +
     (allOverdueMilestones?.length || 0) +
-    (todayDueMilestones?.length || 0) +
+    (filteredTodayDue.length || 0) +
     (blockedMilestones?.length || 0);
 
   return (
@@ -207,7 +210,7 @@ export default async function DashboardPage() {
         const parts: string[] = [];
         if (myOverdue.length > 0) parts.push(`我的逾期(${myOverdue.length}个): ${myOverdue.slice(0, 5).map((m: any) => `${m.orders?.order_no}-${m.name}(超${Math.ceil((new Date().getTime() - new Date(m.due_at).getTime()) / 86400000)}天)`).join('、')}`);
         if (othersOverdue.length > 0) parts.push(`他人逾期(${othersOverdue.length}个): ${othersOverdue.slice(0, 3).map((m: any) => `${m.orders?.order_no}-${m.name}(${m.owner_role})`).join('、')}`);
-        if ((todayDueMilestones?.length || 0) > 0) parts.push(`今日到期(${todayDueMilestones?.length}个): ${(todayDueMilestones || []).slice(0, 3).map((m: any) => `${m.orders?.order_no}-${m.name}`).join('、')}`);
+        if ((filteredTodayDue.length || 0) > 0) parts.push(`今日到期(${filteredTodayDue.length}个): ${(todayDueMilestones || []).slice(0, 3).map((m: any) => `${m.orders?.order_no}-${m.name}`).join('、')}`);
         if ((blockedMilestones?.length || 0) > 0) parts.push(`阻塞中(${blockedMilestones?.length}个)`);
         return parts.length > 0 ? parts.join('\n') : '';
       })()} />
@@ -223,7 +226,7 @@ export default async function DashboardPage() {
           <div className="stat-label">⚠️ 他人逾期</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value text-blue-600">{todayDueMilestones?.length || 0}</div>
+          <div className="stat-value text-blue-600">{filteredTodayDue.length || 0}</div>
           <div className="stat-label">今日到期</div>
         </div>
         <div className="stat-card">
@@ -314,7 +317,7 @@ export default async function DashboardPage() {
       )}
 
       {/* 今日到期 */}
-      {todayDueMilestones && todayDueMilestones.length > 0 && (
+      {filteredTodayDue.length > 0 && (
         <div className="section mb-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-100">
@@ -322,11 +325,11 @@ export default async function DashboardPage() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900">今日到期</h2>
-              <p className="text-sm text-gray-500">{todayDueMilestones.length} 个节点今日截止</p>
+              <p className="text-sm text-gray-500">{filteredTodayDue.length} 个节点今日截止</p>
             </div>
           </div>
           <div className="space-y-3">
-            {todayDueMilestones.slice(0, 5).map((milestone: any) => (
+            {filteredTodayDue.slice(0, 5).map((milestone: any) => (
               <MilestoneCard
                 key={milestone.id}
                 milestone={milestone}
