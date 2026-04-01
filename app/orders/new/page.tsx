@@ -250,6 +250,18 @@ function NewOrderWizard() {
       const result = await createOrder(rawFormData, preGeneratedOrderNo!);
 
       if (!result.ok) {
+        // 重复订单检测：弹窗确认后重新提交
+        if ((result as any).warning === 'duplicate') {
+          const confirmDup = confirm(result.error + '\n\n点击"确定"强制创建，点击"取消"返回修改。');
+          if (confirmDup) {
+            rawFormData.set('confirm_duplicate', 'true');
+            setLoading(false);
+            await doCreateOrder(rawFormData, filesToUpload);
+            return;
+          }
+          setLoading(false);
+          return;
+        }
         showError(result.error || '创建订单失败');
         return;
       }

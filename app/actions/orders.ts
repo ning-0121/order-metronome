@@ -168,8 +168,23 @@ export async function createOrder(
       return { ok: false, error: `Cancel Date（${cancel_date}）不能早于出厂日期（${factory_date}）` };
     }
   }
+  // ── 重复订单检测：同客户+同PO号+同数量 ──
+  if (po_number && quantity && customer_name) {
+    const { data: duplicates } = await (supabase.from('orders') as any)
+      .select('id, order_no')
+      .eq('customer_name', customer_name)
+      .eq('po_number', po_number)
+      .eq('quantity', quantity)
+      .limit(1);
+    if (duplicates && duplicates.length > 0) {
+      const skipDupCheck = formData.get('confirm_duplicate') === 'true';
+      if (!skipDupCheck) {
+        return { ok: false, orderId: undefined, error: `⚠️ 疑似重复订单：已存在相同客户（${customer_name}）+ 相同PO号（${po_number}）+ 相同数量（${quantity}件）的订单 ${duplicates[0].order_no}。如确认不是重复，请重新提交。`, warning: 'duplicate' };
+      }
+    }
+  }
+
   // ── STEP 3: insert order — 写入订单到数据库 ──
-  // order_type: trial/bulk/repeat/urgent（DB CHECK 需更新）
   const dbOrderType = order_type || 'bulk';
 
   // 首单自动识别 + 手动覆盖
