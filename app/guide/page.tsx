@@ -705,6 +705,7 @@ export default function GuidePage() {
               <li>• <strong>BOM/采购预评估</strong>：面料/辅料供应商、到料时间、高风险材料标注</li>
               <li>• <strong>生产预评估</strong>：交期可行性、工艺难点评估</li>
               <li>• <strong>工厂匹配确认</strong>：产品类型匹配、价格交期品质匹配、第一候选+备选工厂</li>
+              <li>• <strong>生产开裁</strong>：报价单耗 vs 工厂实际单耗对比，<strong>实际单耗超过报价单耗禁止开裁</strong></li>
               <li>• <strong>规则</strong>：全部必填项勾完才能标记节点完成，各角色只能编辑自己负责的项</li>
               <li>• <strong>排期影响</strong>：未确认项选择预计确认日期后，自动重算下游节点排期</li>
             </ul>
