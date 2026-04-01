@@ -19,8 +19,8 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   const [cancelType, setCancelType] = useState('customer');
 
   const isDraft = lifecycleStatus === 'draft';
-  const canActivate = isDraft && (isOrderOwner || isAdmin);
-  const canDelete = isDraft && (isAdmin || isOrderOwner);
+  const canActivate = false; // 自动激活：阶段1全部完成后系统自动确认，不再手动操作
+  const canDelete = isDraft && isAdmin; // 只有管理员可以删除草稿订单
   const canCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && (isAdmin || isOrderOwner);
 
   async function handleActivate() {
