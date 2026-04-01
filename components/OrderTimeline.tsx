@@ -34,17 +34,17 @@ interface OrderTimelineProps {
 const MILESTONE_GROUPS = [
   {
     key: 'stage1', emoji: '🟦',
-    titleCn: '阶段 1：订单启动',
+    titleCn: '阶段 1：订单评审',
     stepKeys: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'],
   },
   {
     key: 'stage2', emoji: '🟨',
-    titleCn: '阶段 2：订单转化',
+    titleCn: '阶段 2：预评估',
     stepKeys: ['order_docs_bom_complete', 'bulk_materials_confirmed'],
   },
   {
     key: 'stage3', emoji: '🟧',
-    titleCn: '阶段 3：工厂选定 & 产前样',
+    titleCn: '阶段 3：工厂匹配 & 产前样',
     stepKeys: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
   },
   {

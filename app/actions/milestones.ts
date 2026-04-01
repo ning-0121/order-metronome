@@ -189,6 +189,17 @@ export async function markMilestoneDone(milestoneId: string) {
       .eq('id', milestoneId);
   }
 
+  // Check checklist completion (if milestone has a checklist)
+  const { hasChecklistForStep, validateChecklistComplete } = await import('@/lib/domain/checklist');
+  if (hasChecklistForStep(milestone.step_key)) {
+    const { data: msWithChecklist } = await (supabase.from('milestones') as any)
+      .select('checklist_data').eq('id', milestoneId).single();
+    const checkResult = validateChecklistComplete(milestone.step_key, msWithChecklist?.checklist_data || null);
+    if (!checkResult.valid) {
+      return { error: `检查清单未完成，缺少：${checkResult.missing.join('、')}` };
+    }
+  }
+
   // Check if evidence is required and exists
   if (milestone.evidence_required) {
     const { data: attachments, error: attachmentsError } = await supabase
@@ -885,4 +896,123 @@ export async function assignMerchandiser(
   revalidatePath('/dashboard');
 
   return { data: { updated: updatedCount } };
+}
+
+// ══════════════════════════════════════════════
+// 检查清单操作
+// ══════════════════════════════════════════════
+
+/**
+ * 保存节点检查清单数据
+ * 如有影响排期的 pending_date，自动触发下游重算
+ */
+export async function saveChecklistData(
+  milestoneId: string,
+  responses: Array<{ key: string; value: boolean | string | null; pending_date?: string }>
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  // 获取当前 milestone
+  const { data: milestone } = await (supabase.from('milestones') as any)
+    .select('id, order_id, step_key, checklist_data, due_at')
+    .eq('id', milestoneId)
+    .single();
+  if (!milestone) return { error: '节点不存在' };
+
+  // 生命周期校验
+  const lcErr = await checkOrderModifiable(supabase, milestone.order_id);
+  if (lcErr) return { error: lcErr };
+
+  // 合并响应（保留其他用户填的项，更新当前用户填的项）
+  const existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> = milestone.checklist_data || [];
+  const existingMap = new Map(existing.map(r => [r.key, r]));
+  const now = new Date().toISOString();
+
+  for (const r of responses) {
+    existingMap.set(r.key, {
+      key: r.key,
+      value: r.value,
+      pending_date: r.pending_date || undefined,
+      updated_at: now,
+      updated_by: user.id,
+    });
+  }
+
+  const merged = Array.from(existingMap.values());
+
+  // 保存到数据库（用 RPC 绕过 RLS）
+  await (supabase.rpc as any)('admin_update_milestone', {
+    _milestone_id: milestoneId,
+    _updates: { checklist_data: JSON.stringify(merged) },
+  }).catch(async () => {
+    // RPC 不支持 JSONB 时 fallback 到直接更新
+    await (supabase.from('milestones') as any)
+      .update({ checklist_data: merged })
+      .eq('id', milestoneId);
+  });
+
+  // 检查是否有影响排期的项
+  const { getScheduleAffectingItems } = await import('@/lib/domain/checklist');
+  const scheduleItems = getScheduleAffectingItems(milestone.step_key, merged);
+
+  if (scheduleItems.length > 0) {
+    // 找到最晚的预计确认日期
+    const latestDate = scheduleItems.reduce((latest, item) => {
+      const d = new Date(item.pending_date);
+      return d > latest ? d : latest;
+    }, new Date(0));
+
+    // 如果预计日期晚于当前节点 due_at，需要调整下游排期
+    const currentDue = milestone.due_at ? new Date(milestone.due_at) : new Date();
+    if (latestDate > currentDue) {
+      const { recalcRemainingDueDates } = await import('@/lib/schedule');
+      const { ensureBusinessDay } = await import('@/lib/utils/date');
+
+      // 获取订单的锚点
+      const { data: order } = await (supabase.from('orders') as any)
+        .select('etd, warehouse_due_date, incoterm')
+        .eq('id', milestone.order_id)
+        .single();
+
+      if (order) {
+        const anchorStr = order.incoterm === 'FOB' ? order.etd : order.warehouse_due_date;
+        if (anchorStr) {
+          const rawAnchor = new Date(anchorStr + 'T00:00:00+08:00');
+          const anchor = order.incoterm === 'DDP' ? new Date(rawAnchor.getTime() - 25 * 86400000) : rawAnchor;
+
+          const newDates = recalcRemainingDueDates(milestone.step_key, anchor, latestDate);
+
+          // 更新下游未完成节点
+          const { data: downstreamMs } = await (supabase.from('milestones') as any)
+            .select('id, step_key, status, sequence_number')
+            .eq('order_id', milestone.order_id)
+            .in('status', ['pending', 'in_progress', '未开始', '进行中'])
+            .order('sequence_number', { ascending: true });
+
+          const currentMs = (downstreamMs || []).find((m: any) => m.id === milestoneId);
+          const currentSeq = currentMs?.sequence_number || 0;
+
+          for (const ms of (downstreamMs || [])) {
+            if (ms.sequence_number <= currentSeq) continue;
+            const newDate = newDates[ms.step_key];
+            if (newDate) {
+              const dateStr = ensureBusinessDay(newDate).toISOString();
+              await (supabase.rpc as any)('admin_update_milestone', {
+                _milestone_id: ms.id,
+                _updates: { due_at: dateStr, planned_at: dateStr },
+              }).catch(() => {});
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 日志
+  await logMilestoneAction(supabase, milestoneId, milestone.order_id, 'update', '更新检查清单');
+
+  revalidatePath(`/orders/${milestone.order_id}`);
+  return {};
 }

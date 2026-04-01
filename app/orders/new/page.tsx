@@ -327,9 +327,9 @@ function NewOrderWizard() {
                 >
                   <option value="">请选择当前执行到哪个节点</option>
                   {[
-                    { label: '订单启动', keys: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'] },
-                    { label: '订单转化', keys: ['order_docs_bom_complete', 'bulk_materials_confirmed'] },
-                    { label: '工厂与产前样', keys: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'] },
+                    { label: '订单评审', keys: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'] },
+                    { label: '预评估', keys: ['order_docs_bom_complete', 'bulk_materials_confirmed'] },
+                    { label: '工厂匹配与产前样', keys: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'] },
                     { label: '采购与生产', keys: ['procurement_order_placed', 'materials_received_inspected', 'production_kickoff', 'pre_production_meeting'] },
                     { label: '过程控制', keys: ['mid_qc_check', 'final_qc_check'] },
                     { label: '出货控制', keys: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'] },

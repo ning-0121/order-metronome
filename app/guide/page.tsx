@@ -4,9 +4,9 @@ import { getRoleLabel } from '@/lib/utils/i18n';
 
 /* ── 阶段定义（与 milestone template 完全对应） ── */
 const STAGE_NAMES: Record<string, string> = {
-  stage1: '阶段 1：订单启动',
-  stage2: '阶段 2：订单转化',
-  stage3: '阶段 3：工厂选定 & 产前样',
+  stage1: '阶段 1：订单评审',
+  stage2: '阶段 2：预评估',
+  stage3: '阶段 3：工厂匹配 & 产前样',
   stage4: '阶段 4：采购与生产',
   stage5: '阶段 5：过程控制',
   stage6: '阶段 6：出货控制',

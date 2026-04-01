@@ -1,9 +1,10 @@
 'use client';
-import { useState } from 'react';
-import { markMilestoneDone, markMilestoneBlocked } from '@/app/actions/milestones';
+import { useState, useEffect } from 'react';
+import { markMilestoneDone, markMilestoneBlocked, saveChecklistData } from '@/app/actions/milestones';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { AIAdviceBox } from '@/components/AIAdviceBox';
+import { getChecklistForStep, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 
 interface MilestoneActionsProps {
   milestone: any;
@@ -309,6 +310,13 @@ export function MilestoneActions({
             </div>
           )}
 
+          {/* 检查清单 */}
+          <ChecklistSection
+            milestone={milestone}
+            orderId={orderId || ''}
+            currentRoles={allRoles}
+          />
+
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
               {(() => {
@@ -432,6 +440,158 @@ export function MilestoneActions({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ══════ 检查清单子组件 ══════
+
+function ChecklistSection({ milestone, orderId, currentRoles }: {
+  milestone: any;
+  orderId: string;
+  currentRoles: string[];
+}) {
+  const [config] = useState<ChecklistConfig | null>(() => getChecklistForStep(milestone.step_key));
+  const [responses, setResponses] = useState<Record<string, { value: any; pending_date?: string }>>({});
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // 加载已有数据
+  useEffect(() => {
+    if (!config) return;
+    const existing: ChecklistItemResponse[] = milestone.checklist_data || [];
+    const map: Record<string, { value: any; pending_date?: string }> = {};
+    for (const r of existing) {
+      map[r.key] = { value: r.value, pending_date: r.pending_date };
+    }
+    setResponses(map);
+  }, [config, milestone.checklist_data]);
+
+  if (!config) return null;
+
+  const handleChange = (key: string, value: any, pendingDate?: string) => {
+    setResponses(prev => ({
+      ...prev,
+      [key]: { value, pending_date: pendingDate || prev[key]?.pending_date },
+    }));
+    setSaved(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const data = Object.entries(responses).map(([key, r]) => ({
+      key, value: r.value, pending_date: r.pending_date,
+    }));
+    const result = await saveChecklistData(milestone.id, data);
+    if (result.error) {
+      alert(result.error);
+    } else {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
+    setSaving(false);
+  };
+
+  // 按 group 分组
+  const groups: { name: string; items: typeof config.items }[] = [];
+  const seen = new Set<string>();
+  for (const item of config.items) {
+    const g = item.group || '其他';
+    if (!seen.has(g)) {
+      seen.add(g);
+      groups.push({ name: g, items: [] });
+    }
+    groups.find(gr => gr.name === g)!.items.push(item);
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-amber-900">📋 {config.title}</p>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="text-xs px-3 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+        >
+          {saving ? '保存中...' : saved ? '✓ 已保存' : '保存清单'}
+        </button>
+      </div>
+
+      {groups.map(group => (
+        <div key={group.name}>
+          <p className="text-xs font-medium text-amber-700 mb-1.5 mt-2">{group.name}</p>
+          <div className="space-y-2">
+            {group.items.map(item => {
+              const val = responses[item.key];
+              return (
+                <div key={item.key} className="flex items-start gap-2 bg-white rounded-md p-2 border border-amber-100">
+                  {item.type === 'checkbox' && (
+                    <label className="flex items-center gap-2 cursor-pointer flex-1">
+                      <input
+                        type="checkbox"
+                        checked={!!val?.value}
+                        onChange={e => handleChange(item.key, e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-amber-600"
+                      />
+                      <span className="text-sm text-gray-700">{item.label}</span>
+                      {item.required && <span className="text-red-500 text-xs">*</span>}
+                    </label>
+                  )}
+
+                  {item.type === 'select' && (
+                    <div className="flex-1">
+                      <label className="text-sm text-gray-700 mb-1 block">
+                        {item.label} {item.required && <span className="text-red-500">*</span>}
+                      </label>
+                      <select
+                        value={String(val?.value || '')}
+                        onChange={e => handleChange(item.key, e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                      >
+                        <option value="">请选择</option>
+                        {(item.options || []).map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {item.type === 'text' && (
+                    <div className="flex-1">
+                      <label className="text-sm text-gray-700 mb-1 block">
+                        {item.label} {item.required && <span className="text-red-500">*</span>}
+                      </label>
+                      <input
+                        type="text"
+                        value={String(val?.value || '')}
+                        onChange={e => handleChange(item.key, e.target.value)}
+                        placeholder={item.helpText || ''}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                      />
+                    </div>
+                  )}
+
+                  {item.type === 'pending_date' && (
+                    <div className="flex-1">
+                      <label className="text-sm text-gray-700 mb-1 block">
+                        {item.label}
+                        {item.affectsSchedule && <span className="text-orange-500 text-xs ml-1">影响排期</span>}
+                      </label>
+                      <input
+                        type="date"
+                        value={val?.pending_date || ''}
+                        onChange={e => handleChange(item.key, e.target.value ? true : null, e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                      />
+                      {item.helpText && <p className="text-xs text-gray-400 mt-0.5">{item.helpText}</p>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
