@@ -214,7 +214,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       <span className="text-gray-600 text-xs">
                         {order.incoterm === 'DDP'
                           ? `ETD ${order.etd ? formatDate(order.etd) : '—'}`
-                          : `出厂 ${(order as any).factory_date ? formatDate((order as any).factory_date) : '—'}`}
+                          : (order as any).factory_date
+                            ? `出厂 ${formatDate((order as any).factory_date)}`
+                            : order.etd
+                              ? `ETD ${formatDate(order.etd)}`
+                              : '—'}
                       </span>
                     </td>
                     <td>

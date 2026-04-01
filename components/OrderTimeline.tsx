@@ -453,14 +453,12 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           orderId={orderId}
                         />
 
-                        {/* 管理员专属：催办提醒按钮（不能执行，但可以提醒） */}
-                        {isAdmin && !_isDone(m.status) && (
+                        {/* 催办提醒按钮：管理员或任何相关人员都可催办进行中/逾期节点 */}
+                        {!_isDone(m.status) && (m.status === 'in_progress' || m.status === '进行中' || (m.due_at && new Date(m.due_at) < new Date())) && (
                           <div className="bg-blue-50 rounded-lg p-3 flex items-center justify-between">
                             <div className="text-xs text-blue-700">
-                              <span className="font-medium">管理员视角</span>
-                              <span className="text-blue-500 ml-2">
-                                负责人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'} · {getRoleLabel(m.owner_role)}
-                              </span>
+                              <span className="font-medium">负责人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'}</span>
+                              <span className="text-blue-500 ml-2">{getRoleLabel(m.owner_role)}</span>
                             </div>
                             <button
                               onClick={async () => {
