@@ -216,7 +216,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       <span className="text-gray-700 font-medium">{order.quantity ? `${order.quantity}件` : '—'}</span>
                     </td>
                     <td>
-                      <span className="badge badge-neutral">{order.incoterm}</span>
+                      <span className="badge badge-neutral">{{ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' }[order.incoterm as string] || order.incoterm}</span>
                     </td>
                     <td>
                       <span className="text-gray-600 text-xs">
