@@ -77,19 +77,24 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   const completedMilestones = milestones.filter(m => _isDone((m as any).status)).length;
   const completionRate = totalMilestones > 0 ? Math.round(completedMilestones / totalMilestones * 100) : 0;
 
-  // 准时率：完成的里程碑中，actual_at <= due_at 的算准时
+  // 准时率：(准时完成数) / (已完成数 + 进行中逾期数)
+  // 这样正在逾期的节点会拉低准时率，反映真实情况
   let onTimeCount = 0;
+  let overdueInProgressCount = 0;
   milestones.forEach((m: any) => {
-    if (!_isDone(m.status) || !m.due_at) return;
-    // 用 actual_at 比较 due_at（导入的节点 actual_at = due_at，算准时）
-    if (m.actual_at && new Date(m.actual_at) <= new Date(m.due_at)) {
-      onTimeCount++;
-    } else if (!m.actual_at) {
-      // 没有 actual_at 但已完成，也算准时（兼容旧数据）
-      onTimeCount++;
+    if (!m.due_at) return;
+    if (_isDone(m.status)) {
+      if (m.actual_at && new Date(m.actual_at) <= new Date(m.due_at)) {
+        onTimeCount++;
+      } else if (!m.actual_at) {
+        onTimeCount++; // 兼容旧数据
+      }
+    } else if (_isActive(m.status) && new Date(m.due_at) < now) {
+      overdueInProgressCount++; // 正在逾期的算"不准时"
     }
   });
-  const onTimeRate = completedMilestones > 0 ? Math.round(onTimeCount / completedMilestones * 100) : 0;
+  const onTimeBase = completedMilestones + overdueInProgressCount;
+  const onTimeRate = onTimeBase > 0 ? Math.round(onTimeCount / onTimeBase * 100) : 0;
 
   // 超期/阻塞
   const overdueCount = milestones.filter((m: any) =>
@@ -169,7 +174,7 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
       completedCount: data.completed,
       totalCount: data.total,
       onTimeCount: data.onTime,
-      onTimeRate: data.completed > 0 ? Math.round(data.onTime / data.completed * 100) : 0,
+      onTimeRate: (data.completed + data.overdue) > 0 ? Math.round(data.onTime / (data.completed + data.overdue) * 100) : 0,
     }));
 }
 
@@ -205,6 +210,6 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
       completedCount: data.completed,
       overdueCount: data.overdue,
       onTimeCount: data.onTime,
-      onTimeRate: data.completed > 0 ? Math.round(data.onTime / data.completed * 100) : 0,
+      onTimeRate: (data.completed + data.overdue) > 0 ? Math.round(data.onTime / (data.completed + data.overdue) * 100) : 0,
     }));
 }

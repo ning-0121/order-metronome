@@ -54,6 +54,7 @@ export async function getCustomerAnalytics(
   let avgScore = 0;
   let onTimeCount = 0;
   let totalDoneMilestones = 0;
+  let overdueInProgress = 0;
   if (orderIds.length > 0) {
     const { data: commissions } = await (supabase.from('order_commissions') as any)
       .select('total_score').in('order_id', orderIds);
@@ -61,21 +62,27 @@ export async function getCustomerAnalytics(
       avgScore = Math.round(commissions.reduce((s: number, c: any) => s + c.total_score, 0) / commissions.length);
     }
 
-    // 准时率（基于关卡级别，与员工分析一致）
-    const { data: doneMilestones } = await (supabase.from('milestones') as any)
-      .select('due_at, actual_at')
-      .in('order_id', orderIds)
-      .eq('status', 'done');
-    if (doneMilestones) {
-      totalDoneMilestones = doneMilestones.length;
-      for (const m of doneMilestones) {
-        if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
-          onTimeCount++;
+    // 准时率 = 准时完成数 / (完成数 + 进行中逾期数)
+    const { data: allMsForRate } = await (supabase.from('milestones') as any)
+      .select('due_at, actual_at, status')
+      .in('order_id', orderIds);
+    let overdueInProgress = 0;
+    const now = new Date();
+    if (allMsForRate) {
+      for (const m of allMsForRate) {
+        if ((m.status === 'done' || m.status === '已完成')) {
+          totalDoneMilestones++;
+          if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
+            onTimeCount++;
+          }
+        } else if ((m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < now) {
+          overdueInProgress++;
         }
       }
     }
   }
-  const onTimeRate = totalDoneMilestones > 0 ? Math.round((onTimeCount / totalDoneMilestones) * 100) : 0;
+  const onTimeBase = totalDoneMilestones + overdueInProgress;
+  const onTimeRate = onTimeBase > 0 ? Math.round((onTimeCount / onTimeBase) * 100) : 0;
 
   // 不良率
   let avgDefectRate = 0;
@@ -367,16 +374,24 @@ export async function getEmployeeRanking(
       ? Math.round(periodScores.reduce((s: number, c: any) => s + c.total_score, 0) / periodScores.length)
       : 0;
 
-    // 准时率（按时间过滤）
+    // 准时率 = 准时完成数 / (完成数 + 进行中逾期数)
     const { data: myMs } = await (supabase.from('milestones') as any)
-      .select('status, due_at, actual_at, order_id').eq('owner_user_id', p.user_id).eq('status', 'done');
+      .select('status, due_at, actual_at, order_id').eq('owner_user_id', p.user_id)
+      .in('status', ['done', '已完成', 'in_progress', '进行中']);
     const periodMs = (myMs || []).filter((m: any) => orderIds.has(m.order_id));
     let onTime = 0;
-    const total = periodMs.length;
+    let doneCount = 0;
+    let overdueActive = 0;
+    const nowTime = new Date();
     for (const m of periodMs) {
-      if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) onTime++;
+      if (m.status === 'done' || m.status === '已完成') {
+        doneCount++;
+        if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) onTime++;
+      } else if ((m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < nowTime) {
+        overdueActive++;
+      }
     }
-    const onTimeRate = total > 0 ? Math.round((onTime / total) * 100) : 0;
+    const onTimeRate = (doneCount + overdueActive) > 0 ? Math.round((onTime / (doneCount + overdueActive)) * 100) : 0;
 
     if (orderCount > 0) {
       rankings.push({ userId: p.user_id, name, role, orderCount, activeCount, avgScore, onTimeRate });
