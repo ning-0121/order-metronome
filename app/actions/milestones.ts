@@ -939,6 +939,15 @@ export async function saveChecklistData(
     }
   }
 
+  // 业务规则校验：开裁单耗 — 实际单耗必须 ≤ 报价单耗
+  if (milestone.step_key === 'production_kickoff') {
+    const quoteVal = responses.find(r => r.key === 'quote_consumption')?.value;
+    const actualVal = responses.find(r => r.key === 'actual_consumption')?.value;
+    if (quoteVal && actualVal && Number(actualVal) > Number(quoteVal)) {
+      return { error: `实际单耗（${actualVal}）超过报价单耗（${quoteVal}），不允许开裁。请与工厂沟通优化排料方案。` };
+    }
+  }
+
   // 合并响应（保留其他用户填的项，更新当前用户填的项）
   const existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> = milestone.checklist_data || [];
   const existingMap = new Map(existing.map(r => [r.key, r]));

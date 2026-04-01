@@ -12,7 +12,7 @@ import type { OwnerRole } from '@/lib/milestoneTemplate';
 
 // ══════ 类型定义 ══════
 
-export type ChecklistItemType = 'checkbox' | 'select' | 'text' | 'pending_date';
+export type ChecklistItemType = 'checkbox' | 'select' | 'text' | 'number' | 'pending_date';
 
 export interface ChecklistItemDef {
   key: string;
@@ -133,6 +133,20 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'primary_factory', label: '第一候选工厂', type: 'text', required: true, role: 'merchandiser', group: '工厂选择' },
       { key: 'backup_factory', label: '备选工厂', type: 'text', required: false, role: 'merchandiser', group: '工厂选择',
         helpText: '建议准备备选工厂以防产能不足' },
+    ],
+  },
+
+  // ── 阶段4：生产启动/开裁 ────────────────────
+
+  production_kickoff: {
+    title: '开裁前单耗确认',
+    items: [
+      { key: 'quote_consumption', label: '报价单耗（米/件）', type: 'number', required: true, role: 'merchandiser', group: '单耗对比',
+        helpText: '内部报价时的面料单耗' },
+      { key: 'actual_consumption', label: '工厂排料实际单耗（米/件）', type: 'number', required: true, role: 'merchandiser', group: '单耗对比',
+        helpText: '工厂排料后的实际单耗，必须 ≤ 报价单耗才可开裁' },
+      { key: 'consumption_pass', label: '单耗核验通过', type: 'checkbox', required: true, role: 'merchandiser', group: '单耗对比',
+        helpText: '确认实际单耗 ≤ 报价单耗，允许开裁' },
     ],
   },
 };
