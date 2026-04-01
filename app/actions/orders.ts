@@ -368,9 +368,9 @@ export async function createOrder(
 
   if (isImport && importCurrentStep) {
     try {
-      // 6a. 更新订单标记
+      // 6a. 更新订单标记 + 自动激活（导入的订单阶段1已过，直接激活）
       await (supabase.from('orders') as any)
-        .update({ imported_at: new Date().toISOString(), import_current_step: importCurrentStep })
+        .update({ imported_at: new Date().toISOString(), import_current_step: importCurrentStep, lifecycle_status: 'active' })
         .eq('id', orderData.id);
 
       // 6b. 找到当前阶段在模板中的 index（校验 step_key 合法性）
