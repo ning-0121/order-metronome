@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getRoleLabel } from '@/lib/utils/i18n';
 
 const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
+const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
 
 // 阶段映射
 const PHASE_MAP: Record<string, string> = {
@@ -70,31 +71,21 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   const { count: totalOrders } = await supabase.from('orders').select('*', { count: 'exact', head: true });
 
   // 所有里程碑
-  const { data: allMilestones } = await supabase.from('milestones').select('id, status, due_at, step_key');
+  const { data: allMilestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, step_key');
   const milestones = allMilestones || [];
   const totalMilestones = milestones.length;
   const completedMilestones = milestones.filter(m => _isDone((m as any).status)).length;
   const completionRate = totalMilestones > 0 ? Math.round(completedMilestones / totalMilestones * 100) : 0;
 
-  // 准时率：完成的里程碑中，有多少在 due_at 之前完成
-  // 简化：用 milestone_logs 的 mark_done 时间对比 due_at
-  const { data: doneLogs } = await (supabase.from('milestone_logs') as any)
-    .select('milestone_id, created_at')
-    .eq('action', 'mark_done');
-
-  const doneLogMap = new Map<string, string>();
-  (doneLogs || []).forEach((l: any) => {
-    // 取最早的 mark_done 时间
-    if (!doneLogMap.has(l.milestone_id) || l.created_at < doneLogMap.get(l.milestone_id)!) {
-      doneLogMap.set(l.milestone_id, l.created_at);
-    }
-  });
-
+  // 准时率：完成的里程碑中，actual_at <= due_at 的算准时
   let onTimeCount = 0;
   milestones.forEach((m: any) => {
     if (!_isDone(m.status) || !m.due_at) return;
-    const doneAt = doneLogMap.get(m.id);
-    if (doneAt && new Date(doneAt) <= new Date(m.due_at)) {
+    // 用 actual_at 比较 due_at（导入的节点 actual_at = due_at，算准时）
+    if (m.actual_at && new Date(m.actual_at) <= new Date(m.due_at)) {
+      onTimeCount++;
+    } else if (!m.actual_at) {
+      // 没有 actual_at 但已完成，也算准时（兼容旧数据）
       onTimeCount++;
     }
   });
@@ -102,7 +93,7 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
 
   // 超期/阻塞
   const overdueCount = milestones.filter((m: any) =>
-    !_isDone(m.status) && m.due_at && new Date(m.due_at) < now
+    _isActive(m.status) && m.due_at && new Date(m.due_at) < now
   ).length;
   const blockedCount = milestones.filter((m: any) =>
     m.status === 'blocked' || m.status === '卡住' || m.status === '卡单'
@@ -143,7 +134,7 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
 export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
   const supabase = await createClient();
 
-  const { data: milestones } = await supabase.from('milestones').select('id, status, due_at, step_key');
+  const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, step_key');
   const { data: doneLogs } = await (supabase.from('milestone_logs') as any)
     .select('milestone_id, created_at')
     .eq('action', 'mark_done');
@@ -165,8 +156,7 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
 
     if (_isDone(m.status)) {
       phaseData[phase].completed += 1;
-      const doneAt = doneLogMap.get(m.id);
-      if (m.due_at && doneAt && new Date(doneAt) <= new Date(m.due_at)) {
+      if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
         phaseData[phase].onTime += 1;
       }
     }
@@ -187,17 +177,7 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
   const supabase = await createClient();
   const now = new Date();
 
-  const { data: milestones } = await supabase.from('milestones').select('id, status, due_at, owner_role');
-  const { data: doneLogs } = await (supabase.from('milestone_logs') as any)
-    .select('milestone_id, created_at')
-    .eq('action', 'mark_done');
-
-  const doneLogMap = new Map<string, string>();
-  (doneLogs || []).forEach((l: any) => {
-    if (!doneLogMap.has(l.milestone_id) || l.created_at < doneLogMap.get(l.milestone_id)!) {
-      doneLogMap.set(l.milestone_id, l.created_at);
-    }
-  });
+  const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, owner_role');
 
   const roleData: Record<string, { completed: number; overdue: number; onTime: number }> = {};
 
@@ -207,11 +187,12 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
 
     if (_isDone(m.status)) {
       roleData[role].completed += 1;
-      const doneAt = doneLogMap.get(m.id);
-      if (m.due_at && doneAt && new Date(doneAt) <= new Date(m.due_at)) {
+      // 准时：actual_at <= due_at 或 没有 actual_at（兼容旧数据）
+      if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
         roleData[role].onTime += 1;
       }
-    } else if (m.due_at && new Date(m.due_at) < now) {
+    } else if (_isActive(m.status) && m.due_at && new Date(m.due_at) < now) {
+      // 只有进行中的才算超期
       roleData[role].overdue += 1;
     }
   });
