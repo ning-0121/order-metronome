@@ -21,7 +21,9 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   const isDraft = lifecycleStatus === 'draft';
   const canActivate = false; // 自动激活：阶段1全部完成后系统自动确认，不再手动操作
   const canDelete = isDraft && isAdmin; // 只有管理员可以删除草稿订单
-  const canCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && (isAdmin || isOrderOwner);
+  // 取消逻辑：业务员申请取消→管理员审批，管理员直接取消
+  const canRequestCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && isOrderOwner && !isAdmin;
+  const canDirectCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && isAdmin;
 
   async function handleActivate() {
     if (!confirm(`确认启动订单 ${orderNo}？启动后将进入执行状态。`)) return;
@@ -84,7 +86,7 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
     setLoading(false);
   }
 
-  if (!canActivate && !canDelete && !canCancel) return null;
+  if (!canActivate && !canDelete && !canRequestCancel && !canDirectCancel) return null;
 
   return (
     <div className="flex items-center gap-2">
@@ -110,13 +112,23 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
         </button>
       )}
 
-      {/* 申请取消 */}
-      {canCancel && !showCancelForm && (
+      {/* 业务员：申请取消 */}
+      {canRequestCancel && !showCancelForm && (
         <button
           onClick={() => setShowCancelForm(true)}
           className="text-xs px-3 py-1.5 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50"
         >
           申请取消
+        </button>
+      )}
+
+      {/* 管理员/CEO：直接取消 */}
+      {canDirectCancel && !showCancelForm && (
+        <button
+          onClick={() => setShowCancelForm(true)}
+          className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+        >
+          取消订单
         </button>
       )}
 
