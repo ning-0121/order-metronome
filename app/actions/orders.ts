@@ -195,11 +195,13 @@ export async function createOrder(
   }
 
   const po_number = formData.get('customer_po_number') as string | null;
+  const internal_order_no = formData.get('internal_order_no') as string | null;
 
   const insertPayload: Record<string, any> = {
     customer_name,
     customer_id,
     po_number: po_number || null,
+    internal_order_no: internal_order_no || null,
     owner_user_id: user.id,
     incoterm,
     etd: etd || null,
