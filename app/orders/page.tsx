@@ -170,8 +170,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <th>客户</th>
                 <th>工厂</th>
                 <th>款号/PO</th>
+                <th>数量</th>
                 <th>贸易条款</th>
-                <th>ETD/ETA</th>
+                <th>关键日期</th>
                 <th>类型</th>
                 <th>状态</th>
                 <th>阶段进度</th>
@@ -204,13 +205,16 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   {(order as any).po_number && <div className="text-xs text-gray-500">{(order as any).po_number}</div>}
                 </td>
                     <td>
+                      <span className="text-gray-700 font-medium">{order.quantity ? `${order.quantity}件` : '—'}</span>
+                    </td>
+                    <td>
                       <span className="badge badge-neutral">{order.incoterm}</span>
                     </td>
                     <td>
-                      <span className="text-gray-600">
+                      <span className="text-gray-600 text-xs">
                         {order.incoterm === 'FOB'
-                          ? formatDate(order.etd)
-                          : formatDate(order.warehouse_due_date)}
+                          ? `出厂 ${formatDate((order as any).factory_date) || '—'}`
+                          : `ETD ${formatDate(order.etd) || '—'}`}
                       </span>
                     </td>
                     <td>

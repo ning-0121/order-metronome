@@ -13,6 +13,13 @@ export default async function AnalyticsPage() {
     getRoleEfficiency(),
   ]);
 
+  // 总览统计
+  const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity');
+  const totalOrders = (allOrders || []).length;
+  const totalQuantity = (allOrders || []).reduce((s: number, o: any) => s + (o.quantity || 0), 0);
+  const totalCustomers = new Set((allOrders || []).map((o: any) => o.customer_name).filter(Boolean)).size;
+  const totalFactories = new Set((allOrders || []).map((o: any) => o.factory_name).filter(Boolean)).size;
+
   const weekDelta = summary.thisWeekCompleted - summary.lastWeekCompleted;
   const weekDeltaStr = weekDelta > 0 ? `+${weekDelta}` : `${weekDelta}`;
   const weekDeltaColor = weekDelta >= 0 ? 'text-green-600' : 'text-red-600';
@@ -145,6 +152,60 @@ export default async function AnalyticsPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ===== 总览统计 ===== */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">总订单数</div>
+          <div className="text-3xl font-bold text-indigo-600 mt-2">{totalOrders}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">总数量</div>
+          <div className="text-3xl font-bold text-blue-600 mt-2">{totalQuantity.toLocaleString()}件</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">客户数</div>
+          <div className="text-3xl font-bold text-green-600 mt-2">{totalCustomers}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">工厂数</div>
+          <div className="text-3xl font-bold text-orange-600 mt-2">{totalFactories}</div>
+        </div>
+      </div>
+
+      {/* ===== 三维度分析入口 ===== */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Link href="/analytics/customers" className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-2xl">🤝</span>
+            <div>
+              <h3 className="font-bold text-gray-900">客户分析</h3>
+              <p className="text-xs text-gray-500">每个客户的订单、准时率、风险</p>
+            </div>
+          </div>
+          <div className="text-sm text-indigo-600 font-medium">查看详情 →</div>
+        </Link>
+        <Link href="/analytics/employees" className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-2xl">👤</span>
+            <div>
+              <h3 className="font-bold text-gray-900">员工分析</h3>
+              <p className="text-xs text-gray-500">每个业务的订单、绩效、准时率</p>
+            </div>
+          </div>
+          <div className="text-sm text-indigo-600 font-medium">查看详情 →</div>
+        </Link>
+        <Link href="/analytics/factories" className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-2xl">🏭</span>
+            <div>
+              <h3 className="font-bold text-gray-900">工厂分析</h3>
+              <p className="text-xs text-gray-500">每个工厂的订单、产能、品质</p>
+            </div>
+          </div>
+          <div className="text-sm text-indigo-600 font-medium">查看详情 →</div>
+        </Link>
       </div>
 
       {/* ===== 第二区：实时效率指标 ===== */}
