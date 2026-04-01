@@ -248,12 +248,12 @@ export async function createOrder(
     sanitized.packaging_type = 'standard';
   }
   
-  // Incoterm 特定验证
-  if (sanitized.incoterm === 'FOB' && !sanitized.etd) {
-    return { error: 'ETD is required for FOB orders' };
+  // Incoterm 特定验证：DDP需要ETD和ETA，其他只需要出厂日期
+  if (sanitized.incoterm === 'DDP' && !sanitized.etd) {
+    return { error: 'DDP订单必须填写ETD' };
   }
   if (sanitized.incoterm === 'DDP' && !sanitized.warehouse_due_date) {
-    return { error: 'Warehouse Due Date is required for DDP orders' };
+    return { error: 'DDP订单必须填写ETA（到仓日期）' };
   }
   
   // 默认值填充
@@ -301,19 +301,7 @@ export async function updateOrder(
     return { error: 'No valid fields to update' };
   }
   
-  // Incoterm 特定验证（如果更新了 incoterm）
-  if (sanitized.incoterm === 'FOB' && !sanitized.etd) {
-    // 需要检查现有订单的 etd
-    const { data: current } = await (supabase
-      .from('orders') as any)
-      .select('etd')
-      .eq('id', id)
-      .single();
-    
-    if (!current?.etd) {
-      return { error: 'ETD is required for FOB orders' };
-    }
-  }
+  // Incoterm 特定验证（DDP需要ETD，FOB/RMB不需要）
   
   if (sanitized.incoterm === 'DDP' && !sanitized.warehouse_due_date) {
     const { data: current } = await (supabase
