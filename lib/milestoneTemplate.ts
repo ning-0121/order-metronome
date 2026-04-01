@@ -26,17 +26,17 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   is_critical: boolean;
   evidence_required: boolean;
 }> = [
-  // 阶段1：订单启动
+  // 阶段1：订单评审
   { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true },
   { step_key: "finance_approval", name: "财务审核", owner_role: "finance", is_critical: true, evidence_required: false },
-  { step_key: "order_kickoff_meeting", name: "订单启动会", owner_role: "sales", is_critical: true, evidence_required: false },
+  { step_key: "order_kickoff_meeting", name: "订单评审会", owner_role: "sales", is_critical: true, evidence_required: false },
   { step_key: "production_order_upload", name: "生产单上传", owner_role: "sales", is_critical: true, evidence_required: true },
-  // 阶段2：订单转化
-  { step_key: "order_docs_bom_complete", name: "订单资料/BOM齐全", owner_role: "sales", is_critical: true, evidence_required: true },
-  { step_key: "bulk_materials_confirmed", name: "大货原辅料确认", owner_role: "sales", is_critical: true, evidence_required: true },
-  // 阶段3：工厂选定 + 产前样（加工费确认 → 确认工厂 → 产前样准备 → 寄出 → 客户确认）
-  { step_key: "processing_fee_confirmed", name: "加工费目标价确认", owner_role: "finance", is_critical: true, evidence_required: true },
-  { step_key: "factory_confirmed", name: "封样与确认工厂", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  // 阶段2：预评估
+  { step_key: "order_docs_bom_complete", name: "BOM/采购预评估", owner_role: "procurement", is_critical: true, evidence_required: true },
+  { step_key: "bulk_materials_confirmed", name: "生产预评估", owner_role: "merchandiser", is_critical: true, evidence_required: false },
+  // 阶段3：工厂匹配 & 产前样
+  { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "finance", is_critical: true, evidence_required: true },
+  { step_key: "factory_confirmed", name: "工厂匹配确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "pre_production_sample_ready", name: "产前样准备完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "sales", is_critical: true, evidence_required: false },
   { step_key: "pre_production_sample_approved", name: "产前样客户确认", owner_role: "sales", is_critical: true, evidence_required: true },
