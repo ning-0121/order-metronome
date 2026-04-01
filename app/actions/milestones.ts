@@ -411,22 +411,38 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
 }
 
 async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
-  // 按时间顺序推进：找到所有「未开始」且截止日期 ≤ 当前最早未完成节点的里程碑
-  // 这样各阶段可以并行工作，不会被阶段顺序锁死
   const { data: pendingMilestones } = await (supabase
     .from('milestones') as any)
     .select('*')
     .eq('order_id', orderId)
-    .eq('status', 'pending') // DB stores English enum
-    .order('due_at', { ascending: true });
+    .eq('status', 'pending')
+    .order('sequence_number', { ascending: true });
 
   if (pendingMilestones && pendingMilestones.length > 0) {
-    // 推进第一个（按截止日期最早的）
-    await transitionMilestoneStatus(
-      pendingMilestones[0].id,
-      '进行中',
-      '自动推进：上一节点已完成'
-    );
+    const next = pendingMilestones[0];
+
+    // 推进为进行中
+    await transitionMilestoneStatus(next.id, '进行中', '自动推进：上一节点已完成');
+
+    // 如果该节点的 due_at 已过期，自动延后到今天+2个工作日
+    // 避免"一推进就逾期"的问题
+    if (next.due_at) {
+      const now = new Date();
+      const dueAt = new Date(next.due_at);
+      if (dueAt < now) {
+        const { ensureBusinessDay, addWorkingDays } = await import('@/lib/utils/date');
+        const newDue = ensureBusinessDay(addWorkingDays(now, 2));
+        await (supabase.rpc as any)('admin_update_milestone', {
+          _milestone_id: next.id,
+          _updates: { due_at: newDue.toISOString(), planned_at: newDue.toISOString() },
+        }).catch(() => {
+          // fallback
+          (supabase.from('milestones') as any)
+            .update({ due_at: newDue.toISOString(), planned_at: newDue.toISOString() })
+            .eq('id', next.id);
+        });
+      }
+    }
   }
 }
 
