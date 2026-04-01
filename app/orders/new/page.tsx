@@ -122,6 +122,8 @@ function NewOrderWizard() {
 
   const FILE_FIELDS = [
     { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
+    { formKey: 'internal_quote_file', fileType: 'internal_quote', label: '内部报价单' },
+    { formKey: 'customer_quote_file', fileType: 'customer_quote', label: '客户最终报价单' },
     { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
     { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
     { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
@@ -148,12 +150,11 @@ function NewOrderWizard() {
       rawFormData.delete(formKey);
     }
 
-    // 校验：客户PO文件必传
+    // 校验：3个必传文件
     const poFile = filesToUpload.find(f => f.fileType === 'customer_po');
-    if (!poFile) {
-      showError('请上传客户 PO 文件（必传）');
-      return;
-    }
+    if (!poFile) { showError('请上传客户 PO 文件（必传）'); return; }
+    if (!filesToUpload.find(f => f.fileType === 'internal_quote')) { showError('请上传内部报价单（必传）'); return; }
+    if (!filesToUpload.find(f => f.fileType === 'customer_quote')) { showError('请上传客户最终报价单（必传）'); return; }
 
     // 检查是否有客户PO文件 → 自动比对
     if (poFile && (poFile.file.type === 'application/pdf' || poFile.file.type.startsWith('image/'))) {
@@ -559,6 +560,8 @@ function NewOrderWizard() {
               <div className="space-y-3">
                 {[
                   { name: 'customer_po_file', label: '客户 PO', required: true },
+                  { name: 'internal_quote_file', label: '内部报价单', required: true },
+                  { name: 'customer_quote_file', label: '客户最终报价单', required: true },
                   { name: 'production_order_file', label: '生产制单', required: false, hint: '财务审核后2日内上传' },
                   { name: 'trims_sheet_file', label: '辅料表', required: false },
                   { name: 'packing_requirement_file', label: '装箱要求', required: false },
