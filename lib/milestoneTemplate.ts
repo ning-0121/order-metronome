@@ -49,7 +49,7 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "mid_qc_check", name: "中查", owner_role: "merchandiser", is_critical: false, evidence_required: true },
   { step_key: "final_qc_check", name: "尾查", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   // 阶段6：出货控制
-  { step_key: "packing_method_confirmed", name: "包装方式业务确认", owner_role: "sales", is_critical: true, evidence_required: false },
+  { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   { step_key: "factory_completion", name: "工厂完成", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   { step_key: "inspection_release", name: "验货/放行", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "shipping_sample_send", name: "船样寄送", owner_role: "sales", is_critical: false, evidence_required: false },
