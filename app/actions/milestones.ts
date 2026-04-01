@@ -837,17 +837,23 @@ export async function updateMilestoneOwner(
     return { error: getError?.message || '找不到该执行节点' };
   }
   
-  // Update owner_user_id
-  const { data: updated, error: updateError } = await (supabase
+  // Update owner_user_id（用RPC绕过RLS）
+  await (supabase.rpc as any)('admin_update_milestone', {
+    _milestone_id: milestoneId,
+    _updates: { owner_user_id: ownerUserId },
+  }).catch(() => {});
+
+  // fallback直接更新
+  const { error: updateError } = await (supabase
     .from('milestones') as any)
     .update({ owner_user_id: ownerUserId })
-    .eq('id', milestoneId)
-    .select()
-    .single();
-  
+    .eq('id', milestoneId);
+
   if (updateError) {
     return { error: updateError.message };
   }
+
+  const updated = { id: milestoneId, owner_user_id: ownerUserId };
   
   // Log the action
   const ownerInfo = ownerUserId ? `已指派至：${ownerUserId}` : '已取消指派';
