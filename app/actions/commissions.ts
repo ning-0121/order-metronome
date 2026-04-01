@@ -244,7 +244,21 @@ export async function calculateOrderScore(
   }
 
   revalidatePath(`/orders/${orderId}`);
-  return { data: { salesTotal, salesGrade: salesGrade.grade } };
+
+  // 返回完整评分数据（供实时预览和最终结果使用）
+  const result: any = {
+    salesScore: { ...salesPayload, total_score: salesTotal, grade: vetoed ? 'D' : salesGrade.grade, detail_json: salesDetail },
+  };
+  if (merchandiserUserId) {
+    const merchDetail = calcRoleScore(MERCHANDISER_STEPS);
+    const merchTotal = Math.min(110, Math.max(0,
+      merchDetail.ontime.score + merchDetail.noBlock.score +
+      merchDetail.noDelay.score + merchDetail.quality.score + merchDetail.delivery.score
+    ));
+    const merchGrade = calcGrade(merchTotal);
+    result.merchandiserScore = { total_score: merchTotal, grade: vetoed ? 'D' : merchGrade.grade, detail_json: merchDetail };
+  }
+  return { data: result };
 }
 
 /**

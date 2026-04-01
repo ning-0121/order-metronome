@@ -9,6 +9,7 @@ import { OrderScoreCard } from '@/components/OrderScoreCard';
 import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { OrderAIRisk } from '@/components/OrderAIRisk';
+import { LiveScorePreview } from '@/components/LiveScorePreview';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
@@ -542,7 +543,11 @@ export default async function OrderDetailPage({
         {activeTab === 'score' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">执行评分</h2>
-            <OrderScoreCard commissions={commissions || []} />
+            {commissions && commissions.length > 0 ? (
+              <OrderScoreCard commissions={commissions} />
+            ) : (
+              <LiveScorePreview orderId={id} />
+            )}
           </div>
         )}
 
