@@ -189,10 +189,18 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   RED: { label: '风险', class: 'badge-danger' },
                 }[status.color];
 
+                const typeLabels: Record<string, string> = { trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急' };
+                const typeColors: Record<string, string> = { trial: 'bg-blue-100 text-blue-700', bulk: 'bg-gray-100 text-gray-700', repeat: 'bg-green-100 text-green-700', urgent: 'bg-red-100 text-red-700' };
+
                 return (
                   <tr key={order.id}>
                     <td>
-                      <span className="font-medium text-gray-900">{order.order_no}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{order.order_no}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${typeColors[order.order_type] || 'bg-gray-100 text-gray-600'}`}>
+                          {typeLabels[order.order_type] || order.order_type}
+                        </span>
+                      </div>
                     </td>
                     <td>
                       <span className="text-gray-700">{order.customer_name}</span>
