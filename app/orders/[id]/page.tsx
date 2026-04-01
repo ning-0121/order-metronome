@@ -140,6 +140,11 @@ export default async function OrderDetailPage({
                     {orderData.lifecycle_status === 'draft' ? '草稿' : orderData.lifecycle_status === 'active' ? '执行中' : orderData.lifecycle_status === 'completed' ? '已完成' : orderData.lifecycle_status === 'cancelled' ? '已取消' : orderData.lifecycle_status}
                   </span>
                 )}
+                {orderData.order_type && (() => {
+                  const tl: Record<string, string> = { trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急' };
+                  const tc: Record<string, string> = { trial: 'bg-blue-100 text-blue-700', bulk: 'bg-gray-100 text-gray-700', repeat: 'bg-green-100 text-green-700', urgent: 'bg-red-100 text-red-700' };
+                  return <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${tc[orderData.order_type] || 'bg-gray-100'}`}>{tl[orderData.order_type] || orderData.order_type}</span>;
+                })()}
                 {orderData.is_new_customer && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">新客户首单</span>
                 )}
