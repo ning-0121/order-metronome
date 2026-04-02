@@ -73,29 +73,33 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   const { count: totalOrders } = await supabase.from('orders').select('*', { count: 'exact', head: true });
 
   // 所有里程碑
-  const { data: allMilestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, step_key');
+  const { data: allMilestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, updated_at, step_key');
   const milestones = allMilestones || [];
   const totalMilestones = milestones.length;
   const completedMilestones = milestones.filter(m => _isDone((m as any).status)).length;
   const completionRate = totalMilestones > 0 ? Math.round(completedMilestones / totalMilestones * 100) : 0;
 
-  // 准时率：(准时完成数) / (已完成数 + 进行中逾期数)
-  // 这样正在逾期的节点会拉低准时率，反映真实情况
+  // 准时率：(准时数) / (有截止日的已完成数 + 进行中已逾期数)
+  // 准时判定：已完成 + actual_at/updated_at <= due_at
+  // 进行中已逾期 → 计入分母（拉低准时率），不计入分子
   let onTimeCount = 0;
+  let onTimeDoneBase = 0;
   let overdueInProgressCount = 0;
   milestones.forEach((m: any) => {
     if (!m.due_at) return;
     if (_isDone(m.status)) {
-      if (m.actual_at && new Date(m.actual_at) <= new Date(m.due_at)) {
+      onTimeDoneBase++;
+      // 有actual_at用actual_at，否则用updated_at作为完成时间
+      const completedDate = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
+      if (completedDate && completedDate <= new Date(m.due_at)) {
         onTimeCount++;
-      } else if (!m.actual_at) {
-        onTimeCount++; // 兼容旧数据
       }
+      // 无actual_at也无updated_at → 保守不计为准时
     } else if (_isActive(m.status) && new Date(m.due_at) < now) {
-      overdueInProgressCount++; // 正在逾期的算"不准时"
+      overdueInProgressCount++;
     }
   });
-  const onTimeBase = completedMilestones + overdueInProgressCount;
+  const onTimeBase = onTimeDoneBase + overdueInProgressCount;
   const onTimeRate = onTimeBase > 0 ? Math.round(onTimeCount / onTimeBase * 100) : 0;
 
   // 超期/阻塞
@@ -143,7 +147,7 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('请先登录');
 
-  const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, step_key');
+  const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, updated_at, step_key');
   const { data: doneLogs } = await (supabase.from('milestone_logs') as any)
     .select('milestone_id, created_at')
     .eq('action', 'mark_done');
@@ -166,8 +170,11 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
 
     if (_isDone(m.status)) {
       phaseData[phase].completed += 1;
-      if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
-        phaseData[phase].onTime += 1;
+      if (m.due_at) {
+        const completedAt = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
+        if (completedAt && completedAt <= new Date(m.due_at)) {
+          phaseData[phase].onTime += 1;
+        }
       }
     } else if ((m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < now) {
       phaseData[phase].overdue += 1;
@@ -191,22 +198,23 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
   if (!user) throw new Error('请先登录');
   const now = new Date();
 
-  const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, owner_role');
+  const { data: roleMilestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, updated_at, owner_role');
 
   const roleData: Record<string, { completed: number; overdue: number; onTime: number }> = {};
 
-  (milestones || []).forEach((m: any) => {
+  (roleMilestones || []).forEach((m: any) => {
     const role = m.owner_role || 'unknown';
     if (!roleData[role]) roleData[role] = { completed: 0, overdue: 0, onTime: 0 };
 
     if (_isDone(m.status)) {
       roleData[role].completed += 1;
-      // 准时：actual_at <= due_at 或 没有 actual_at（兼容旧数据）
-      if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
-        roleData[role].onTime += 1;
+      if (m.due_at) {
+        const completedAt = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
+        if (completedAt && completedAt <= new Date(m.due_at)) {
+          roleData[role].onTime += 1;
+        }
       }
     } else if (_isActive(m.status) && m.due_at && new Date(m.due_at) < now) {
-      // 只有进行中的才算超期
       roleData[role].overdue += 1;
     }
   });

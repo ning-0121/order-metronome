@@ -62,20 +62,27 @@ export async function getCustomerAnalytics(
       avgScore = Math.round(commissions.reduce((s: number, c: any) => s + c.total_score, 0) / commissions.length);
     }
 
-    // 准时率 = 准时完成数 / (完成数 + 进行中逾期数)
+    // 准时率 = 准时数 / (已完成有截止日的节点 + 进行中已逾期的节点)
+    // 准时判定：已完成且 actual_at <= due_at，或已完成无actual_at但有due_at且due_at>=完成时间
     const { data: allMsForRate } = await (supabase.from('milestones') as any)
-      .select('due_at, actual_at, status')
+      .select('due_at, actual_at, status, updated_at')
       .in('order_id', orderIds);
-    let overdueInProgress = 0;
-    const now = new Date();
+    const rateNow = new Date();
     if (allMsForRate) {
       for (const m of allMsForRate) {
-        if ((m.status === 'done' || m.status === '已完成')) {
+        const isDone = m.status === 'done' || m.status === '已完成' || m.status === 'completed';
+        const isActive = m.status === 'in_progress' || m.status === '进行中';
+
+        if (isDone && m.due_at) {
           totalDoneMilestones++;
-          if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
+          // 判定准时：有actual_at用actual_at比较，没有则用updated_at（完成时间）
+          const completedDate = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
+          if (completedDate && completedDate <= new Date(m.due_at)) {
             onTimeCount++;
           }
-        } else if ((m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < now) {
+          // 如果连updated_at也没有，保守处理：不计为准时（不虚增准时率）
+        } else if (isActive && m.due_at && new Date(m.due_at) < rateNow) {
+          // 进行中且已超期 → 算作不准时（计入分母，不计入分子）
           overdueInProgress++;
         }
       }
@@ -234,21 +241,29 @@ export async function getEmployeeAnalytics(
   // 准时率（从该用户负责的关卡）
   let onTimeMilestones = 0;
   let totalDoneMilestones = 0;
+  let empOverdueInProgress = 0;
+  const empNow = new Date();
   if (orderIdSet.size > 0) {
     const { data: myMilestones } = await (supabase.from('milestones') as any)
-      .select('status, due_at, actual_at')
+      .select('status, due_at, actual_at, updated_at')
       .eq('owner_user_id', targetUserId)
       .in('order_id', [...orderIdSet]);
     for (const m of myMilestones || []) {
-      if (m.status === 'done' || m.status === '已完成') {
+      const isDone = m.status === 'done' || m.status === '已完成' || m.status === 'completed';
+      const isActive = m.status === 'in_progress' || m.status === '进行中';
+      if (isDone && m.due_at) {
         totalDoneMilestones++;
-        if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
+        const completedDate = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
+        if (completedDate && completedDate <= new Date(m.due_at)) {
           onTimeMilestones++;
         }
+      } else if (isActive && m.due_at && new Date(m.due_at) < empNow) {
+        empOverdueInProgress++;
       }
     }
   }
-  const onTimeRate = totalDoneMilestones > 0 ? Math.round((onTimeMilestones / totalDoneMilestones) * 100) : 0;
+  const empOnTimeBase = totalDoneMilestones + empOverdueInProgress;
+  const onTimeRate = empOnTimeBase > 0 ? Math.round((onTimeMilestones / empOnTimeBase) * 100) : 0;
 
   // 延期和阻塞
   let delayCount = 0;
