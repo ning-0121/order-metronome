@@ -85,6 +85,9 @@ function ResetPasswordForm() {
     }
   }
 
+  // 检测微信浏览器
+  const isWechat = typeof navigator !== 'undefined' && /MicroMessenger/i.test(navigator.userAgent);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm border border-gray-200">
@@ -94,6 +97,21 @@ function ResetPasswordForm() {
             <span className="text-xl font-bold text-gray-900">订单节拍器</span>
           </div>
           <p className="text-sm font-medium text-gray-700">设置新密码</p>
+
+          {isWechat && (
+            <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-4 text-left">
+              <p className="text-sm font-bold text-amber-800 mb-2">⚠️ 请用浏览器打开</p>
+              <p className="text-xs text-amber-700 mb-2">微信内无法重置密码，请点击右上角 ··· 选择"在浏览器中打开"</p>
+              <button onClick={() => {
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(window.location.href);
+                  alert('链接已复制！请打开手机浏览器粘贴访问');
+                }
+              }} className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white">
+                复制链接
+              </button>
+            </div>
+          )}
         </div>
 
         {!ready ? (
