@@ -200,6 +200,30 @@ export async function markMilestoneDone(milestoneId: string) {
     }
   }
 
+  // 质量门禁：出运相关节点必须在尾查通过后才能操作
+  const SHIPMENT_GATES = ['inspection_release', 'booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute'];
+  if (SHIPMENT_GATES.includes(milestone.step_key)) {
+    const { data: qcMilestone } = await (supabase.from('milestones') as any)
+      .select('status, checklist_data')
+      .eq('order_id', (milestone as any).order_id)
+      .eq('step_key', 'final_qc_check')
+      .single();
+    if (qcMilestone) {
+      const qcStatus = normalizeMilestoneStatus(qcMilestone.status);
+      if (qcStatus !== '已完成') {
+        return { error: '尾期验货尚未完成，不能操作出运相关节点' };
+      }
+      // 检查尾查结果是否为 FAIL
+      const qcData = qcMilestone.checklist_data;
+      if (qcData && typeof qcData === 'object') {
+        const qcResult = (qcData as any).qc_result || (qcData as any).final_result;
+        if (qcResult === 'FAIL' || qcResult === '不合格') {
+          return { error: '尾期验货结果为不合格，不能出运。请先处理质量问题后重新验货' };
+        }
+      }
+    }
+  }
+
   // Check if evidence is required and exists
   if (milestone.evidence_required) {
     const { data: attachments, error: attachmentsError } = await supabase
