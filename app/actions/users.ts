@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 
 export interface User {
@@ -71,4 +72,45 @@ export async function updateUserRoles(
   }
 
   return { error: null };
+}
+
+/**
+ * 管理员直接重置用户密码（service_role admin API）
+ */
+export async function adminResetPassword(
+  targetUserId: string,
+  newPassword: string
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const { isAdmin } = await getCurrentUserRole(supabase);
+
+  if (!isAdmin) {
+    return { error: '无权限：仅管理员可重置密码' };
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    return { error: '密码至少 6 位' };
+  }
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    return { error: '系统配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY' };
+  }
+
+  try {
+    const adminClient = createSupabaseClient(url, serviceKey);
+    const { error } = await adminClient.auth.admin.updateUserById(targetUserId, {
+      password: newPassword,
+    });
+
+    if (error) {
+      return { error: '重置失败：' + error.message };
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: '操作失败：' + message };
+  }
 }

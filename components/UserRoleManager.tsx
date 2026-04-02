@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { updateUserRoles } from '@/app/actions/users';
+import { updateUserRoles, adminResetPassword } from '@/app/actions/users';
 import { useRouter } from 'next/navigation';
 
 const ALL_ROLES = [
@@ -31,6 +31,9 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
   const [editRoles, setEditRoles] = useState<string[]>([]);
   const [editName, setEditName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   function startEdit(user: UserProfile) {
     setEditingUserId(user.user_id);
@@ -42,6 +45,23 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
     setEditRoles((prev) =>
       prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
     );
+  }
+
+  async function handleResetPassword(userId: string) {
+    if (!resetPassword || resetPassword.length < 6) {
+      alert('密码至少 6 位');
+      return;
+    }
+    setResetting(true);
+    const result = await adminResetPassword(userId, resetPassword);
+    if (result.error) {
+      alert(result.error);
+    } else {
+      alert('密码已重置，请通知员工使用新密码登录');
+      setResetUserId(null);
+      setResetPassword('');
+    }
+    setResetting(false);
   }
 
   async function handleSave(userId: string) {
@@ -179,12 +199,51 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={() => startEdit(user)}
-                  className="px-4 py-2 rounded-xl text-sm font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 transition-all"
-                >
-                  编辑角色
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setResetUserId(user.user_id); setResetPassword(''); }}
+                    className="px-3 py-2 rounded-xl text-sm font-medium text-amber-600 hover:bg-amber-50 border border-amber-200 transition-all"
+                  >
+                    重置密码
+                  </button>
+                  <button
+                    onClick={() => startEdit(user)}
+                    className="px-4 py-2 rounded-xl text-sm font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 transition-all"
+                  >
+                    编辑角色
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 重置密码面板 */}
+            {resetUserId === user.user_id && (
+              <div className="mt-4 pt-4 border-t border-amber-200 bg-amber-50 -mx-5 -mb-5 px-5 pb-5 rounded-b-xl">
+                <p className="text-sm font-medium text-amber-800 mb-3">
+                  为 {user.name || user.email} 设置新密码
+                </p>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    placeholder="输入新密码（至少6位）"
+                    className="flex-1 rounded-lg border border-amber-300 px-3 py-2 text-sm bg-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                  />
+                  <button
+                    onClick={() => handleResetPassword(user.user_id)}
+                    disabled={resetting || resetPassword.length < 6}
+                    className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-all"
+                  >
+                    {resetting ? '重置中...' : '确认重置'}
+                  </button>
+                  <button
+                    onClick={() => setResetUserId(null)}
+                    className="px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-white transition-all"
+                  >
+                    取消
+                  </button>
+                </div>
               </div>
             )}
           </div>
