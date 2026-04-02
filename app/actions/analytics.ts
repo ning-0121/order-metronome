@@ -65,6 +65,8 @@ export interface RoleEfficiency {
 
 export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('请先登录');
   const now = new Date();
 
   // 总订单数
@@ -138,6 +140,8 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
 
 export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('请先登录');
 
   const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, step_key');
   const { data: doneLogs } = await (supabase.from('milestone_logs') as any)
@@ -183,6 +187,8 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
 
 export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('请先登录');
   const now = new Date();
 
   const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, owner_role');

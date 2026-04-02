@@ -42,6 +42,24 @@ export default async function CEODashboardPage() {
     return m.status === '卡住';
   });
 
+  // 查询超期节点的延期申请状态
+  const overdueIds = overdueMilestones.map((m: any) => m.id);
+  let ceoDelayMap: Record<string, string> = {};
+  if (overdueIds.length > 0) {
+    const { data: drs } = await (supabase.from('delay_requests') as any)
+      .select('milestone_id, status')
+      .in('milestone_id', overdueIds)
+      .in('status', ['pending', 'approved', 'rejected']);
+    if (drs) {
+      for (const dr of drs as any[]) {
+        const cur = ceoDelayMap[dr.milestone_id];
+        if (!cur || dr.status === 'approved' || (dr.status === 'pending' && cur === 'rejected')) {
+          ceoDelayMap[dr.milestone_id] = dr.status;
+        }
+      }
+    }
+  }
+
   // 3. Pending delay requests with full details
   const { data: pendingDelayRequests } = await (supabase
     .from('delay_requests') as any)
@@ -196,9 +214,18 @@ export default async function CEODashboardPage() {
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="font-medium text-gray-900 truncate">{milestone.orders?.order_no}</span>
                         <span className="badge badge-danger">超期</span>
+                        {!ceoDelayMap[milestone.id] && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">未申请延期</span>
+                        )}
+                        {ceoDelayMap[milestone.id] === 'pending' && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">延期待审批</span>
+                        )}
+                        {ceoDelayMap[milestone.id] === 'approved' && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">延期已批准</span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-700 mb-1">{milestone.name}</p>
                       <div className="flex items-center gap-4 text-xs text-gray-500">

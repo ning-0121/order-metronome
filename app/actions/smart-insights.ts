@@ -494,7 +494,13 @@ export async function getContextualAIAdvice(params: {
     let jsonStr = text.trim();
     if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
 
-    const parsed = JSON.parse(jsonStr);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      console.error('[AI Advice] JSON parse failed, raw:', jsonStr.slice(0, 200));
+      return { data: null };
+    }
     const result: AIAdvice = {
       advice: String(parsed.advice || ''),
       tips: Array.isArray(parsed.tips) ? parsed.tips.map(String) : [],

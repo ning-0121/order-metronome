@@ -130,6 +130,75 @@ export async function checkAndSendReminders() {
         ccEmails
       );
       if (sent) results.push({ milestone: milestoneData.id, kind: 'overdue' });
+
+      // === 延期申请强制机制 ===
+      // 检查是否已提交延期申请
+      const { data: delayReqs } = await (supabase.from('delay_requests') as any)
+        .select('id, status')
+        .eq('milestone_id', milestoneData.id)
+        .in('status', ['pending', 'approved']);
+
+      const hasDelayRequest = delayReqs && delayReqs.length > 0;
+
+      if (!hasDelayRequest) {
+        const overdueHours = Math.abs(hoursRemaining);
+
+        // 超期即刻：通知责任人提交延期申请
+        await checkAndSendNotification(
+          supabase,
+          milestoneData.id,
+          orderData.id,
+          'delay_request_required' as any,
+          recipientEmail,
+          orderData.order_no,
+          milestoneData.name,
+          dueAt,
+          hoursRemaining,
+          false,
+          []  // 不CC管理员，先给责任人自行处理机会
+        );
+        results.push({ milestone: milestoneData.id, kind: 'delay_request_required' });
+
+        // 超期24h+未申请：升级通知管理员
+        if (overdueHours >= 24) {
+          for (const adminEmail of ccEmails) {
+            await checkAndSendNotification(
+              supabase,
+              milestoneData.id,
+              orderData.id,
+              'delay_no_request_admin' as any,
+              adminEmail,
+              orderData.order_no,
+              milestoneData.name,
+              dueAt,
+              hoursRemaining,
+              false,
+              []
+            );
+          }
+          results.push({ milestone: milestoneData.id, kind: 'delay_no_request_admin' });
+        }
+
+        // 超期48h+未申请：CEO级邮件警报
+        if (overdueHours >= 48) {
+          for (const adminEmail of ccEmails) {
+            await checkAndSendNotification(
+              supabase,
+              milestoneData.id,
+              orderData.id,
+              'delay_no_request_ceo' as any,
+              adminEmail,
+              orderData.order_no,
+              milestoneData.name,
+              dueAt,
+              hoursRemaining,
+              false,
+              []
+            );
+          }
+          results.push({ milestone: milestoneData.id, kind: 'delay_no_request_ceo' });
+        }
+      }
     }
   }
 
@@ -140,7 +209,7 @@ async function checkAndSendNotification(
   supabase: any,
   milestoneId: string,
   orderId: string,
-  kind: 'remind_48' | 'remind_24' | 'remind_12' | 'overdue' | 'blocked',
+  kind: 'remind_48' | 'remind_24' | 'remind_12' | 'overdue' | 'blocked' | 'delay_request_required' | 'delay_no_request_admin' | 'delay_no_request_ceo',
   recipientEmail: string,
   orderNo: string,
   milestoneName: string,
@@ -185,19 +254,67 @@ async function checkAndSendNotification(
     return false;
   }
 
-  // Send email
-  const urgency = kind === 'overdue' ? 'URGENT' : hoursRemaining <= 12 ? 'HIGH' : 'MEDIUM';
-  const subject = `[${urgency}] Order ${orderNo} - ${milestoneName} ${kind === 'overdue' ? 'OVERDUE' : `Due in ${hoursRemaining}h`}`;
-  
-  const body = `
-    <h2>Milestone Reminder</h2>
-    <p><strong>Order:</strong> ${orderNo}</p>
-    <p><strong>Milestone:</strong> ${milestoneName}</p>
-    <p><strong>Due Date:</strong> ${dueAt.toLocaleString()}</p>
-    <p><strong>Time Remaining:</strong> ${hoursRemaining < 0 ? 'OVERDUE' : `${hoursRemaining} hours`}</p>
-    ${evidenceRequired ? '<p><strong>⚠️ Evidence Required</strong></p>' : ''}
-    <p>Please take action to ensure this milestone is completed on time.</p>
-  `;
+  // Send email — 根据通知类型生成不同的邮件内容
+  const overdueDays = hoursRemaining < 0 ? Math.ceil(Math.abs(hoursRemaining) / 24) : 0;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com';
+  let subject: string;
+  let body: string;
+
+  if (kind === 'delay_request_required') {
+    subject = `[请提交延期申请] 订单 ${orderNo} — ${milestoneName} 已超期 ${overdueDays} 天`;
+    body = `
+      <h2 style="color:#d97706;">请提交延期申请</h2>
+      <p>您负责的以下节点已超期，请尽快提交延期申请：</p>
+      <table style="border-collapse:collapse;margin:16px 0;">
+        <tr><td style="padding:4px 12px;font-weight:bold;">订单号</td><td style="padding:4px 12px;">${orderNo}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">节点</td><td style="padding:4px 12px;">${milestoneName}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">截止日期</td><td style="padding:4px 12px;">${dueAt.toLocaleDateString('zh-CN')}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;color:#dc2626;">已超期</td><td style="padding:4px 12px;color:#dc2626;font-weight:bold;">${overdueDays} 天</td></tr>
+      </table>
+      <p style="color:#dc2626;font-weight:bold;">⚠️ 未提交延期申请将无法标记此节点完成，且超期24小时后将自动通知管理层。</p>
+      <p><a href="${appUrl}/orders" style="color:#2563eb;">点击进入系统提交延期申请 →</a></p>
+    `;
+  } else if (kind === 'delay_no_request_admin') {
+    subject = `[管理预警] 订单 ${orderNo} — ${milestoneName} 超期 ${overdueDays} 天无人申请延期`;
+    body = `
+      <h2 style="color:#dc2626;">延期未申报预警</h2>
+      <p>以下节点已超期超过24小时，<strong>责任人未提交延期申请</strong>，请关注：</p>
+      <table style="border-collapse:collapse;margin:16px 0;">
+        <tr><td style="padding:4px 12px;font-weight:bold;">订单号</td><td style="padding:4px 12px;">${orderNo}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">节点</td><td style="padding:4px 12px;">${milestoneName}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">截止日期</td><td style="padding:4px 12px;">${dueAt.toLocaleDateString('zh-CN')}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;color:#dc2626;">已超期</td><td style="padding:4px 12px;color:#dc2626;font-weight:bold;">${overdueDays} 天</td></tr>
+      </table>
+      <p>建议联系相关责任人了解原因并督促提交延期申请。</p>
+      <p><a href="${appUrl}/orders" style="color:#2563eb;">进入系统查看 →</a></p>
+    `;
+  } else if (kind === 'delay_no_request_ceo') {
+    subject = `[CEO警报] 订单 ${orderNo} — ${milestoneName} 超期 ${overdueDays} 天，无延期申请`;
+    body = `
+      <h2 style="color:#dc2626;">🚨 严重超期警报</h2>
+      <p>以下节点已超期超过48小时，<strong>责任人未提交延期申请，可能存在管理盲区</strong>：</p>
+      <table style="border-collapse:collapse;margin:16px 0;">
+        <tr><td style="padding:4px 12px;font-weight:bold;">订单号</td><td style="padding:4px 12px;">${orderNo}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">节点</td><td style="padding:4px 12px;">${milestoneName}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;">截止日期</td><td style="padding:4px 12px;">${dueAt.toLocaleDateString('zh-CN')}</td></tr>
+        <tr><td style="padding:4px 12px;font-weight:bold;color:#dc2626;">已超期</td><td style="padding:4px 12px;color:#dc2626;font-weight:bold;">${overdueDays} 天</td></tr>
+      </table>
+      <p style="color:#dc2626;">此节点已被系统锁定，责任人无法在未提交延期申请的情况下标记完成。</p>
+      <p><a href="${appUrl}/orders" style="color:#2563eb;">进入系统查看 →</a></p>
+    `;
+  } else {
+    const urgency = kind === 'overdue' ? 'URGENT' : hoursRemaining <= 12 ? 'HIGH' : 'MEDIUM';
+    subject = `[${urgency}] Order ${orderNo} - ${milestoneName} ${kind === 'overdue' ? 'OVERDUE' : `Due in ${hoursRemaining}h`}`;
+    body = `
+      <h2>Milestone Reminder</h2>
+      <p><strong>Order:</strong> ${orderNo}</p>
+      <p><strong>Milestone:</strong> ${milestoneName}</p>
+      <p><strong>Due Date:</strong> ${dueAt.toLocaleString()}</p>
+      <p><strong>Time Remaining:</strong> ${hoursRemaining < 0 ? 'OVERDUE' : `${hoursRemaining} hours`}</p>
+      ${evidenceRequired ? '<p><strong>⚠️ Evidence Required</strong></p>' : ''}
+      <p>Please take action to ensure this milestone is completed on time.</p>
+    `;
+  }
 
   const allRecipients = [recipientEmail, ...ccEmails];
   await sendEmailNotification(allRecipients, subject, body);

@@ -104,10 +104,12 @@ export function formatDate(date: string | Date, formatStr: string = 'yyyy-MM-dd'
 }
 
 /**
- * Check if a date is overdue
+ * Check if a date is overdue (day-level comparison, Beijing time)
+ * 使用 startOfDay 比较，确保当天截止的不算超期
  */
 export function isOverdue(dueDate: string | Date): boolean {
   const due = typeof dueDate === 'string' ? parseISO(dueDate) : dueDate;
+  if (isNaN(due.getTime())) return false;
   const today = startOfDay(new Date());
   return isAfter(today, startOfDay(due));
 }

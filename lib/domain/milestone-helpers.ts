@@ -3,6 +3,7 @@
  * 业务逻辑计算函数，不直接操作数据库
  */
 
+import { normalizeMilestoneStatus } from './types';
 import type { MilestoneStatus } from './types';
 
 export interface MilestoneData {
@@ -44,13 +45,13 @@ export function computeDelayDays(actualAt: string | null, dueAt: string | null):
 
 /**
  * 判断里程碑是否超期
+ * 统一使用 normalizeMilestoneStatus 进行状态标准化
  */
 export function isMilestoneOverdue(milestone: MilestoneData): boolean {
   if (!milestone.due_at) return false;
-  const s = milestone.status;
-  // 已完成和未开始的不算逾期
-  if (s === '已完成' || s === 'done' || s === 'completed') return false;
-  if (s === '未开始' || s === 'pending') return false;
+  const normalized = normalizeMilestoneStatus(milestone.status);
+  // 只有「进行中」和「阻塞」才算逾期；未开始/已完成不算
+  if (normalized !== '进行中' && normalized !== '阻塞') return false;
 
   const dueDate = new Date(milestone.due_at);
   const now = new Date();
@@ -63,8 +64,8 @@ export function isMilestoneOverdue(milestone: MilestoneData): boolean {
  */
 export function isMilestoneDueSoon(milestone: MilestoneData, hoursThreshold: number = 48): boolean {
   if (!milestone.due_at) return false;
-  const s = milestone.status;
-  if (s === '已完成' || s === 'done' || s === 'completed') return false;
+  const normalized = normalizeMilestoneStatus(milestone.status);
+  if (normalized === '已完成') return false;
   
   const dueDate = new Date(milestone.due_at);
   const now = new Date();
