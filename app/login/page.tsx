@@ -77,7 +77,7 @@ function LoginForm() {
     try {
       const supabase = createClient();
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
+        redirectTo: 'https://order.qimoactivewear.com/auth/callback?type=recovery',
       });
       if (error) {
         setMessage({ type: 'error', text: '发送失败：' + error.message });
