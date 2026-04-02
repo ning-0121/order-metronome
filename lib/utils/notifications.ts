@@ -1,6 +1,16 @@
 import nodemailer from 'nodemailer';
 import { createClient } from '../supabase/server';
 
+/** HTML转义：防止XSS注入到邮件模板 */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * 管理层抄送邮箱（集中管理，避免硬编码分散各处）
  * 可通过环境变量 MANAGER_CC_EMAILS 覆盖，逗号分隔

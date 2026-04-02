@@ -214,12 +214,39 @@ export async function markMilestoneDone(milestoneId: string) {
         return { error: '尾期验货尚未完成，不能操作出运相关节点' };
       }
       // 检查尾查结果是否为 FAIL
-      const qcData = qcMilestone.checklist_data;
-      if (qcData && typeof qcData === 'object') {
-        const qcResult = (qcData as any).qc_result || (qcData as any).final_result;
-        if (qcResult === 'FAIL' || qcResult === '不合格') {
+      // checklist_data 存储为数组 [{key, value, ...}]，可能是 JSON 字符串
+      let qcItems: any[] = [];
+      const rawQc = qcMilestone.checklist_data;
+      if (Array.isArray(rawQc)) {
+        qcItems = rawQc;
+      } else if (typeof rawQc === 'string') {
+        try { const p = JSON.parse(rawQc); if (Array.isArray(p)) qcItems = p; } catch {}
+      }
+      const qcResultItem = qcItems.find((item: any) => item.key === 'final_qc_result');
+      if (qcResultItem) {
+        const val = String(qcResultItem.value || '');
+        if (val.includes('FAIL') || val.includes('不通过') || val === '不合格') {
           return { error: '尾期验货结果为不合格，不能出运。请先处理质量问题后重新验货' };
         }
+      }
+    }
+  }
+
+  // 延期门禁：超期里程碑必须先提交延期申请才能标记完成
+  const milestoneData_precheck = milestone as any;
+  if (milestoneData_precheck.due_at) {
+    const dueDate = new Date(milestoneData_precheck.due_at);
+    const now = new Date();
+    if (now > dueDate) {
+      // 检查是否已提交延期申请
+      const { data: delayReqs } = await (supabase.from('delay_requests') as any)
+        .select('id, status')
+        .eq('milestone_id', milestoneId)
+        .in('status', ['pending', 'approved']);
+      if (!delayReqs || delayReqs.length === 0) {
+        return {
+          error: '此节点已超期，请先在「延期申请」中提交延期申请后再标记完成。未经审批的超期会影响订单整体评分。'
+        };
       }
     }
   }
@@ -284,7 +311,7 @@ export async function markMilestoneDone(milestoneId: string) {
         ? (orderData as any).etd
         : (orderData as any).warehouse_due_date;
       if (anchor) {
-        const anchorDate = new Date(anchor + 'T00:00:00');
+        const anchorDate = new Date(anchor + 'T00:00:00+08:00');
         // 安全线 = 交期前21天（需要留够生产时间）
         const safetyDate = new Date(anchorDate);
         safetyDate.setDate(safetyDate.getDate() - 21);
@@ -459,9 +486,9 @@ async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
         await (supabase.rpc as any)('admin_update_milestone', {
           _milestone_id: next.id,
           _updates: { due_at: newDue.toISOString(), planned_at: newDue.toISOString() },
-        }).catch(() => {
-          // fallback
-          (supabase.from('milestones') as any)
+        }).catch(async () => {
+          // fallback: RPC不可用时直接更新
+          await (supabase.from('milestones') as any)
             .update({ due_at: newDue.toISOString(), planned_at: newDue.toISOString() })
             .eq('id', next.id);
         });
@@ -1068,7 +1095,8 @@ export async function saveChecklistData(
         const anchorStr = order.incoterm === 'FOB' ? order.etd : order.warehouse_due_date;
         if (anchorStr) {
           const rawAnchor = new Date(anchorStr + 'T00:00:00+08:00');
-          const anchor = order.incoterm === 'DDP' ? new Date(rawAnchor.getTime() - 25 * 86400000) : rawAnchor;
+          const { DDP_TRANSIT_DAYS } = await import('@/lib/schedule');
+          const anchor = order.incoterm === 'DDP' ? new Date(rawAnchor.getTime() - DDP_TRANSIT_DAYS * 86400000) : rawAnchor;
 
           const newDates = recalcRemainingDueDates(milestone.step_key, anchor, latestDate);
 

@@ -160,6 +160,25 @@ export default async function DashboardPage() {
     ? filteredOverdue
     : filteredOverdue.filter((m: any) => !isMyMilestone(m, userRoles));
 
+  // 查询所有超期节点对应的延期申请状态
+  const overdueMilestoneIds = filteredOverdue.map((m: any) => m.id);
+  let delayRequestMap: Record<string, string> = {}; // milestoneId → status
+  if (overdueMilestoneIds.length > 0) {
+    const { data: delayReqs } = await (supabase.from('delay_requests') as any)
+      .select('milestone_id, status')
+      .in('milestone_id', overdueMilestoneIds)
+      .in('status', ['pending', 'approved', 'rejected']);
+    if (delayReqs) {
+      for (const dr of delayReqs as any[]) {
+        // 优先记录 approved > pending > rejected
+        const current = delayRequestMap[dr.milestone_id];
+        if (!current || dr.status === 'approved' || (dr.status === 'pending' && current === 'rejected')) {
+          delayRequestMap[dr.milestone_id] = dr.status;
+        }
+      }
+    }
+  }
+
   // 卡住清单
   const { data: rawBlockedMilestones } = await (supabase
     .from('milestones') as any)
@@ -274,6 +293,7 @@ export default async function DashboardPage() {
                 variant="danger"
                 badge="我的逾期"
                 isMine={true}
+                delayStatus={delayRequestMap[milestone.id]}
               />
             ))}
             {myOverdue.length > 5 && (
@@ -305,6 +325,7 @@ export default async function DashboardPage() {
                 variant="warning"
                 badge={`${ROLE_LABELS[milestone.owner_role] || milestone.owner_role}逾期`}
                 isMine={false}
+                delayStatus={delayRequestMap[milestone.id]}
               />
             ))}
             {othersOverdue.length > 5 && (
@@ -398,7 +419,7 @@ export default async function DashboardPage() {
   );
 }
 
-function MilestoneCard({ milestone, variant, badge, isMine }: { milestone: any; variant: 'danger' | 'info' | 'warning'; badge: string; isMine?: boolean }) {
+function MilestoneCard({ milestone, variant, badge, isMine, delayStatus }: { milestone: any; variant: 'danger' | 'info' | 'warning'; badge: string; isMine?: boolean; delayStatus?: string }) {
   const order = milestone.orders;
   const borderClass = variant === 'danger' ? 'border-red-200 hover:border-red-300'
     : variant === 'warning' ? 'border-orange-200 hover:border-orange-300'
@@ -423,6 +444,16 @@ function MilestoneCard({ milestone, variant, badge, isMine }: { milestone: any; 
             <span className={badgeClass}>{badge}</span>
             {daysOverdue > 0 && (
               <span className="text-xs text-gray-500">已超 {daysOverdue} 天</span>
+            )}
+            {/* 延期申请状态标记 */}
+            {variant !== 'info' && !delayStatus && daysOverdue > 0 && (
+              <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">未申请延期</span>
+            )}
+            {delayStatus === 'pending' && (
+              <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">延期待审批</span>
+            )}
+            {delayStatus === 'approved' && (
+              <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">延期已批准</span>
             )}
           </div>
           <p className="text-sm text-gray-700 mb-1">{milestone.name}</p>

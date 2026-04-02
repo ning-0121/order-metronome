@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { sendEmailNotification, MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
+import { sendEmailNotification, MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 import { getCurrentUserRole, isAdmin } from '@/lib/utils/user-role';
 
 /**
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     // Send email
     const ccEmails = MANAGER_CC_EMAILS;
     const messageHtml = customMessage
-      ? `<div style="margin:12px 0;padding:12px 16px;background:#fef3c7;border-left:4px solid #d97706;border-radius:4px;"><p style="margin:0;font-size:14px;color:#92400e;"><strong>${senderName} 留言：</strong>${customMessage}</p></div>`
+      ? `<div style="margin:12px 0;padding:12px 16px;background:#fef3c7;border-left:4px solid #d97706;border-radius:4px;"><p style="margin:0;font-size:14px;color:#92400e;"><strong>${escapeHtml(senderName)} 留言：</strong>${escapeHtml(customMessage)}</p></div>`
       : '';
 
     const subject = `[催办] ${orderData.order_no} — ${milestoneData.name} 需要尽快处理`;

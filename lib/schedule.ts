@@ -34,7 +34,7 @@
  */
 
 // DDP 海运时间（中国→美国西海岸约25天）
-const DDP_TRANSIT_DAYS = 25;
+export const DDP_TRANSIT_DAYS = 25;
 
 // 标准周期天数
 const STANDARD_DAYS = 45;
