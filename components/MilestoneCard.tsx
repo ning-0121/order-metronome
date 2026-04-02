@@ -38,6 +38,9 @@ export function MilestoneCard({ milestone }: MilestoneCardProps) {
         {order && (
           <p className="text-sm text-gray-600 mb-2">
             订单: {order.order_no}
+            {(order as any).internal_order_no && (
+              <span className="ml-2 text-gray-400">({(order as any).internal_order_no})</span>
+            )}
           </p>
         )}
         

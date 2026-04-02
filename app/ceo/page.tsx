@@ -53,7 +53,7 @@ export default async function CEOWarRoom() {
 
   // 所有超期/卡住里程碑
   const { data: allMilestonesWithOrders } = await (supabase.from('milestones') as any)
-    .select(`id, order_id, name, step_key, owner_role, owner_user_id, due_at, status, orders!inner(id, order_no, customer_name)`)
+    .select(`id, order_id, name, step_key, owner_role, owner_user_id, due_at, status, orders!inner(id, order_no, customer_name, internal_order_no)`)
     .order('due_at', { ascending: true });
 
   const overdueMilestones = (allMilestonesWithOrders || []).filter((m: any) =>
@@ -96,6 +96,7 @@ export default async function CEOWarRoom() {
     typeLabel: string;
     orderId: string;
     orderNo: string;
+    internalOrderNo?: string;
     customerName: string;
     description: string;
     owner: string;
@@ -117,6 +118,7 @@ export default async function CEOWarRoom() {
       typeLabel: '超期',
       orderId: m.order_id,
       orderNo: m.orders?.order_no || '',
+      internalOrderNo: m.orders?.internal_order_no || '',
       customerName: m.orders?.customer_name || '',
       description: m.name,
       owner: ownerProfile?.name || ownerProfile?.email || '未分配',
@@ -135,6 +137,7 @@ export default async function CEOWarRoom() {
       typeLabel: '卡住',
       orderId: m.order_id,
       orderNo: m.orders?.order_no || '',
+      internalOrderNo: m.orders?.internal_order_no || '',
       customerName: m.orders?.customer_name || '',
       description: m.name,
       owner: ownerProfile?.name || ownerProfile?.email || '未分配',
@@ -365,6 +368,9 @@ export default async function CEOWarRoom() {
                         <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
                           {item.orderNo}
                         </Link>
+                        {item.internalOrderNo && (
+                          <span className="text-xs text-gray-400">({item.internalOrderNo})</span>
+                        )}
                         <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
                       </div>
                       <div className="text-sm text-gray-700 mt-1">{item.description}</div>

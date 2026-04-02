@@ -125,7 +125,7 @@ export default async function DashboardPage() {
   // 今日到期
   const { data: todayDueMilestones } = await (supabase
     .from('milestones') as any)
-    .select(`*, orders!inner (id, order_no, customer_name)`)
+    .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
     .gte('due_at', `${today}T00:00:00`)
     .lt('due_at', `${tomorrowStr}T00:00:00`)
     .not('status', 'in', '("done","已完成","completed")')
@@ -134,7 +134,7 @@ export default async function DashboardPage() {
   // 已超期（仅进行中的节点算逾期，未开始的不算）
   const { data: allOverdueMilestones } = await (supabase
     .from('milestones') as any)
-    .select(`*, orders!inner (id, order_no, customer_name)`)
+    .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
     .lt('due_at', `${today}T00:00:00`)
     .in('status', ['in_progress', '进行中'])
     .order('due_at', { ascending: true });
@@ -163,7 +163,7 @@ export default async function DashboardPage() {
   // 卡住清单
   const { data: rawBlockedMilestones } = await (supabase
     .from('milestones') as any)
-    .select(`*, orders!inner (id, order_no, customer_name)`)
+    .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
     .in('status', ['blocked', '卡单', '卡住'])
     .order('created_at', { ascending: false });
   const blockedMilestones = filterByMyOrders(rawBlockedMilestones || []);

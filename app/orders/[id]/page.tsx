@@ -20,6 +20,7 @@ import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
 import { RecalcButton } from '@/components/RecalcButton';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
+import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -245,7 +246,7 @@ export default async function OrderDetailPage({
 
         {/* Tab: 基本信息 */}
         {activeTab === 'basic' && (
-          <div className="grid gap-6 md:grid-cols-2">
+          <><div className="grid gap-6 md:grid-cols-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">基础信息</h2>
               <dl className="space-y-3">
@@ -441,6 +442,12 @@ export default async function OrderDetailPage({
               </div>
             </div>
           </div>
+
+          {/* 订单修改申请 */}
+          <div className="mt-6">
+            <OrderAmendmentPanel orderId={orderData.id} order={orderData} isAdmin={isAdmin} />
+          </div>
+          </>
         )}
 
         {/* Tab: 执行进度 */}
