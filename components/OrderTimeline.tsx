@@ -1,5 +1,6 @@
 'use client';
 import { formatDate, isOverdue } from '@/lib/utils/date';
+import { isDoneStatus, isActiveStatus, isPendingStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import { MilestoneActions } from './MilestoneActions';
 import { DelayRequestForm } from './DelayRequestForm';
 import { EvidenceUpload } from './EvidenceUpload';
@@ -69,12 +70,12 @@ const MILESTONE_GROUPS = [
   },
 ];
 
-// 统一状态判断：兼容中英文
-const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
-const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
-const _isPending = (s: string) => s === 'pending' || s === '未开始';
-const _isBlocked = (s: string) => s === 'blocked' || s === '卡单' || s === '卡住' || s === '阻塞';
-const _statusLabel = (s: string) => _isDone(s) ? '已完成' : _isActive(s) ? '进行中' : _isBlocked(s) ? '卡住' : '未开始';
+// 统一状态判断：使用标准化函数
+const _isDone = (s: string) => isDoneStatus(s);
+const _isActive = (s: string) => isActiveStatus(s);
+const _isPending = (s: string) => isPendingStatus(s);
+const _isBlocked = (s: string) => isBlockedStatus(s);
+const _statusLabel = (s: string) => normalizeMilestoneStatus(s);
 
 const STATUS_STYLE: Record<string, string> = {
   '未开始': 'bg-gray-100 text-gray-600',
@@ -454,7 +455,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                         />
 
                         {/* 催办提醒按钮：管理员或任何相关人员都可催办进行中/逾期节点 */}
-                        {!_isDone(m.status) && (m.status === 'in_progress' || m.status === '进行中' || (m.due_at && new Date(m.due_at) < new Date())) && (
+                        {!_isDone(m.status) && (_isActive(m.status) || (m.due_at && new Date(m.due_at) < new Date())) && (
                           <div className="bg-blue-50 rounded-lg p-3 flex items-center justify-between">
                             <div className="text-xs text-blue-700">
                               <span className="font-medium">负责人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'}</span>

@@ -8,6 +8,8 @@
  * - 无负责人不单独算 CRITICAL，只是加分项
  */
 
+import { isDoneStatus, isBlockedStatus } from '@/lib/domain/types';
+
 export type RiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface MilestoneData {
@@ -141,10 +143,10 @@ function calcRiskScore(order: OrderData): {
   // ── C. 节点级评分（只计 未完成 的节点）──
   let criticalOverdueCount = 0;
   for (const m of milestones) {
-    const done = m.status === '已完成';
+    const done = isDoneStatus(m.status);
     if (done) continue;
 
-    const blocked = m.status === '阻塞';
+    const blocked = isBlockedStatus(m.status);
     const overdue = isOverdue(m.due_at);
     const daysOver = getDaysOverdue(m.due_at);
 
@@ -188,7 +190,7 @@ function detectChainDelay(milestones: MilestoneData[]): {
   impactedStages: string[];
 } | null {
   const active = milestones
-    .filter(m => m.status !== '已完成')
+    .filter(m => !isDoneStatus(m.status))
     .sort((a, b) => a.sequence_number - b.sequence_number);
 
   let bestChain: MilestoneData[] = [];
@@ -234,7 +236,7 @@ function analyzeRootCauses(order: OrderData): RootCause[] {
 
   // ── 2. 阻塞节点（只报最严重的1个）──
   const blocked = milestones
-    .filter(m => m.status === '阻塞')
+    .filter(m => isBlockedStatus(m.status))
     .sort((a, b) => (b.is_critical ? 1 : 0) - (a.is_critical ? 1 : 0));
   if (blocked.length > 0 && !reported.has('BLOCKED')) {
     const top = blocked[0];
@@ -252,7 +254,7 @@ function analyzeRootCauses(order: OrderData): RootCause[] {
   if (!reported.has('CHAIN')) { // 链式延误已涵盖角色问题，不重复
     const roleOverdue: Record<string, number> = {};
     for (const m of milestones) {
-      if (m.status !== '已完成' && isOverdue(m.due_at)) {
+      if (!isDoneStatus(m.status) && isOverdue(m.due_at)) {
         const r = ROLE_LABELS[m.owner_role] || m.owner_role;
         roleOverdue[r] = (roleOverdue[r] || 0) + 1;
       }
@@ -277,7 +279,7 @@ function analyzeRootCauses(order: OrderData): RootCause[] {
   if (anchorStr) {
     const daysToAnchor = daysBetween(new Date(), new Date(anchorStr));
     const incompleteCritical = milestones.filter(
-      m => m.is_critical && m.status !== '已完成'
+      m => m.is_critical && !isDoneStatus(m.status)
     ).length;
     if (daysToAnchor <= 14 && incompleteCritical >= 8) {
       causes.push({

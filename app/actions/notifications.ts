@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { sendEmailNotification, MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
+import { isDoneStatus } from '@/lib/domain/types';
 import { differenceInHours } from 'date-fns';
 
 /**
@@ -525,7 +526,7 @@ export async function checkLinkedMemoReminders() {
     const ms = milestone as any;
 
     // 已完成的关卡不提醒
-    if (ms.status === 'done') continue;
+    if (isDoneStatus(ms.status)) continue;
 
     // due_at 在 3 天内才提醒
     if (!ms.due_at) continue;

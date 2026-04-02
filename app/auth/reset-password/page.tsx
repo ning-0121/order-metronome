@@ -1,6 +1,7 @@
 'use client';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { sendPasswordResetEmail } from '@/app/actions/reset-password';
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -14,12 +15,18 @@ function ResetPasswordForm() {
     !token ? { type: 'error', text: '重置链接无效或已失效，请返回登录页重新发送重置邮件' } : null
   );
 
+  // Resend mode: when token is invalid/expired, allow user to resend from this page
+  const [resendEmail, setResendEmail] = useState('');
+  const [showResend, setShowResend] = useState(false);
+  const [resending, setResending] = useState(false);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
 
     if (!token) {
       setMessage({ type: 'error', text: '重置链接无效，请重新发送重置邮件' });
+      setShowResend(true);
       return;
     }
     if (password.length < 8) {
@@ -44,12 +51,40 @@ function ResetPasswordForm() {
         setMessage({ type: 'success', text: '密码已更新！正在跳转到登录页...' });
         setTimeout(() => router.push('/login'), 1500);
       } else {
+        // If token expired/invalid, show resend option
+        const isTokenError = json.error?.includes('失效') || json.error?.includes('无效');
         setMessage({ type: 'error', text: json.error || '密码更新失败，请重试' });
+        if (isTokenError) {
+          setShowResend(true);
+        }
       }
     } catch {
       setMessage({ type: 'error', text: '网络错误，请重试' });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleResend(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resendEmail || !resendEmail.endsWith('@qimoclothing.com')) {
+      setMessage({ type: 'error', text: '请输入 @qimoclothing.com 邮箱' });
+      return;
+    }
+    setResending(true);
+    setMessage(null);
+    try {
+      const result = await sendPasswordResetEmail(resendEmail);
+      if (result.error) {
+        setMessage({ type: 'error', text: result.error });
+      } else {
+        setMessage({ type: 'success', text: `重置邮件已发送到 ${resendEmail}，请查收邮件并点击新的链接。` });
+        setShowResend(false);
+      }
+    } catch {
+      setMessage({ type: 'error', text: '发送失败，请重试' });
+    } finally {
+      setResending(false);
     }
   }
 
@@ -68,7 +103,7 @@ function ResetPasswordForm() {
 
           {isWechat && (
             <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-4 text-left">
-              <p className="text-sm font-bold text-amber-800 mb-2">⚠️ 请用浏览器打开</p>
+              <p className="text-sm font-bold text-amber-800 mb-2">请用浏览器打开</p>
               <p className="text-xs text-amber-700 mb-2">微信内可能无法正常重置密码，建议点击右上角 ··· 选择"在浏览器中打开"</p>
               <button onClick={() => {
                 if (navigator.clipboard) {
@@ -82,44 +117,88 @@ function ResetPasswordForm() {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {message && (
-            <div className={`rounded-xl px-4 py-3 text-sm ${
-              message.type === 'error'
-                ? 'bg-red-50 text-red-700 border border-red-200'
-                : 'bg-green-50 text-green-700 border border-green-200'
-            }`}>
-              {message.text}
-            </div>
-          )}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">新密码</label>
-            <input
-              type="password" required value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="至少 8 位"
-              className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
+        {/* Message display */}
+        {message && (
+          <div className={`rounded-xl px-4 py-3 text-sm mb-4 ${
+            message.type === 'error'
+              ? 'bg-red-50 text-red-700 border border-red-200'
+              : 'bg-green-50 text-green-700 border border-green-200'
+          }`}>
+            {message.text}
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">确认新密码</label>
-            <input
-              type="password" required value={confirm}
-              onChange={e => setConfirm(e.target.value)}
-              placeholder="再次输入新密码"
-              className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
-          <button
-            type="submit" disabled={loading || !token}
-            className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-          >
-            {loading ? '更新中...' : '确认修改密码'}
-          </button>
-        </form>
+        )}
 
-        <div className="text-center mt-4">
-          <a href="/login" className="text-xs text-gray-400 hover:text-gray-600">← 返回登录</a>
+        {/* Normal reset form */}
+        {!showResend && (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">新密码</label>
+              <input
+                type="password" required value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="至少 8 位"
+                className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">确认新密码</label>
+              <input
+                type="password" required value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                placeholder="再次输入新密码"
+                className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <button
+              type="submit" disabled={loading || !token}
+              className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {loading ? '更新中...' : '确认修改密码'}
+            </button>
+          </form>
+        )}
+
+        {/* Resend reset email form (shown when token is expired/invalid) */}
+        {showResend && (
+          <form onSubmit={handleResend} className="space-y-4">
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+              链接已失效，请重新发送重置邮件
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">邮箱地址</label>
+              <input
+                type="email" required value={resendEmail}
+                onChange={e => setResendEmail(e.target.value)}
+                placeholder="your.name@qimoclothing.com"
+                className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <button
+              type="submit" disabled={resending}
+              className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {resending ? '发送中...' : '重新发送重置邮件'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowResend(false)}
+              className="w-full text-sm text-gray-500 hover:text-gray-700"
+            >
+              返回输入密码
+            </button>
+          </form>
+        )}
+
+        <div className="text-center mt-4 space-y-2">
+          {!showResend && !token && (
+            <button
+              onClick={() => setShowResend(true)}
+              className="text-xs text-indigo-600 hover:text-indigo-700 hover:underline block w-full"
+            >
+              重新发送重置邮件
+            </button>
+          )}
+          <a href="/login" className="text-xs text-gray-400 hover:text-gray-600 block">← 返回登录</a>
         </div>
       </div>
     </div>

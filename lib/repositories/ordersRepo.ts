@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import {
   transitionOrderLifecycle,
   normalizeMilestoneStatus,
+  isDoneStatus,
   type OrderLifecycleStatus,
 } from '@/lib/domain/types';
 import { createMilestone, transitionMilestoneStatus } from './milestonesRepo';
@@ -679,12 +680,9 @@ export async function decideCancel(
     
     if (milestones) {
       for (const milestone of milestones) {
-        const status = milestone.status === 'pending' ? '未开始' : 
-                       milestone.status === 'in_progress' ? '进行中' :
-                       milestone.status === 'done' ? '已完成' :
-                       milestone.status === 'blocked' ? '卡住' : milestone.status;
-        
-        if (status !== '已完成') {
+        const status = normalizeMilestoneStatus(milestone.status);
+
+        if (!isDoneStatus(status)) {
           // 追加notes：订单已取消
           const existingNotes = milestone.notes || '';
           const cancelNote = `\n[订单已取消] ${cancelRequest.reason_detail}`;

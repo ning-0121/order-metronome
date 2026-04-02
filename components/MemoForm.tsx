@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createMemo, matchOrdersFromText } from '@/app/actions/memos';
 import type { OrderMatch } from '@/app/actions/memos';
+import { isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
 import { useRouter } from 'next/navigation';
 
 export function MemoForm() {
@@ -233,9 +234,9 @@ export function MemoForm() {
                       className="sr-only"
                     />
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                      m.status === 'in_progress' ? 'bg-blue-500' :
+                      isActiveStatus(m.status) ? 'bg-blue-500' :
                       m.status === 'overdue' ? 'bg-red-500' :
-                      m.status === 'blocked' ? 'bg-amber-500' :
+                      isBlockedStatus(m.status) ? 'bg-amber-500' :
                       'bg-gray-300'
                     }`} />
                     <span className="font-medium">{m.name}</span>

@@ -31,9 +31,9 @@ function verifyResetToken(token: string): string | null {
 
     const [userId, ts, sig] = parts;
 
-    // Check expiry (1 hour)
+    // Check expiry (24 hours — users may not check email immediately)
     const tokenAge = Date.now() - parseInt(ts);
-    if (tokenAge > 60 * 60 * 1000) return null;
+    if (tokenAge > 24 * 60 * 60 * 1000) return null;
 
     // Verify signature
     const expectedSig = crypto.createHmac('sha256', SECRET).update(`${userId}:${ts}`).digest('hex');
@@ -112,7 +112,7 @@ export async function sendPasswordResetEmail(email: string): Promise<{ error?: s
             重置密码
           </a>
         </div>
-        <p style="color: #999; font-size: 12px;">此链接有效期为 1 小时。如果你没有请求重置密码，请忽略此邮件。</p>
+        <p style="color: #999; font-size: 12px;">此链接有效期为 24 小时。如果你没有请求重置密码，请忽略此邮件。</p>
         <p style="color: #999; font-size: 12px;">如果按钮无法点击，请复制以下链接到浏览器：</p>
         <p style="color: #4f46e5; font-size: 11px; word-break: break-all;">${resetLink}</p>
         <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />

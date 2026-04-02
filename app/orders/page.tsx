@@ -13,9 +13,10 @@ const PHASE_KEYS = [
   { label: '出货', keys: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'] },
   { label: '物流收款', keys: ['booking_done', 'customs_export', 'payment_received'] },
 ];
-const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
-const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
-const _isBlocked = (s: string) => s === 'blocked' || s === '卡住' || s === '卡单';
+import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
+const _isDone = (s: string) => isDoneStatus(s);
+const _isActive = (s: string) => isActiveStatus(s);
+const _isBlocked = (s: string) => isBlockedStatus(s);
 
 function computePhases(milestones: any[]) {
   return PHASE_KEYS.map(phase => {

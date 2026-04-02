@@ -3,7 +3,45 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { DOCUMENT_TYPES, COMPANY_INFO, type DocumentType } from '@/lib/domain/document-templates';
+import { isAdmin as checkIsAdmin } from '@/lib/utils/user-role';
 import Anthropic from '@anthropic-ai/sdk';
+
+// ══════ 价格敏感单据 ══════
+// PI 和 CI 含有客户单价/总价，仅限 CEO/管理员、财务、订单负责业务可见
+const PRICE_SENSITIVE_DOC_TYPES: DocumentType[] = ['pi', 'ci'];
+
+/**
+ * 判断用户是否有权查看价格敏感单据
+ * 允许：admin、finance 角色、订单的 owner/creator/merchandiser
+ */
+async function canViewPriceSensitiveDoc(
+  supabase: any,
+  userId: string,
+  userEmail: string,
+  orderId: string,
+): Promise<boolean> {
+  // 管理员直接放行
+  if (checkIsAdmin(userEmail)) return true;
+
+  // 查询用户角色
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, roles')
+    .eq('user_id', userId)
+    .single();
+
+  const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
+  if (roles.includes('finance') || roles.includes('admin')) return true;
+
+  // 查询订单：是否为此订单的负责人/创建者/跟单员
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by, owner_user_id, merchandiser_user_id')
+    .eq('id', orderId)
+    .single();
+
+  if (!order) return false;
+  return order.created_by === userId || order.owner_user_id === userId || order.merchandiser_user_id === userId;
+}
 
 // ══════ 查询 ══════
 
@@ -20,7 +58,20 @@ export async function getOrderDocuments(orderId: string) {
     .order('version_no', { ascending: false });
 
   if (error) return { data: [], error: error.message };
-  return { data: data || [] };
+
+  // 权限过滤：价格敏感单据（PI/CI）仅限授权人员可见
+  const allDocs = data || [];
+  const hasSensitive = allDocs.some((d: any) => PRICE_SENSITIVE_DOC_TYPES.includes(d.document_type));
+
+  if (hasSensitive) {
+    const canView = await canViewPriceSensitiveDoc(supabase, user.id, user.email || '', orderId);
+    if (!canView) {
+      // 过滤掉价格敏感单据
+      return { data: allDocs.filter((d: any) => !PRICE_SENSITIVE_DOC_TYPES.includes(d.document_type)) };
+    }
+  }
+
+  return { data: allDocs };
 }
 
 // ══════ 创建（人工上传） ══════
@@ -35,6 +86,14 @@ export async function uploadDocument(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+
+  // 价格敏感单据（PI/CI）仅限授权人员上传
+  if (PRICE_SENSITIVE_DOC_TYPES.includes(documentType)) {
+    const canView = await canViewPriceSensitiveDoc(supabase, user.id, user.email || '', orderId);
+    if (!canView) {
+      return { error: '无权操作价格相关单据，请联系管理员' };
+    }
+  }
 
   // 获取当前最大版本号
   const { data: existing } = await (supabase.from('order_documents') as any)
@@ -87,6 +146,14 @@ export async function aiGenerateDocument(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+
+  // 价格敏感单据（PI/CI）仅限授权人员生成
+  if (PRICE_SENSITIVE_DOC_TYPES.includes(documentType)) {
+    const canView = await canViewPriceSensitiveDoc(supabase, user.id, user.email || '', orderId);
+    if (!canView) {
+      return { error: '无权操作价格相关单据，请联系管理员' };
+    }
+  }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { error: 'AI 服务未配置' };
@@ -206,6 +273,20 @@ export async function approveDocument(docId: string): Promise<{ error?: string }
     .select('order_id, document_type, version_no')
     .eq('id', docId).single();
   if (!doc) return { error: '单据不存在' };
+
+  // 权限校验：仅管理员和财务可审批
+  const userIsAdmin = checkIsAdmin(user.email);
+  if (!userIsAdmin) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role, roles')
+      .eq('user_id', user.id)
+      .single();
+    const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
+    if (!roles.includes('finance') && !roles.includes('admin')) {
+      return { error: '仅管理员或财务可以审批单据' };
+    }
+  }
 
   // 将同类型旧版本的 is_official 设为 false
   await (supabase.from('order_documents') as any)

@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { isDoneStatus } from '@/lib/domain/types';
 
 // 业务负责的关卡 step_keys
 const SALES_STEPS = [
@@ -114,7 +115,7 @@ export async function calculateOrderScore(
 
   if (shipmentMilestone && targetDate) {
     // 用关卡的 actual_at 或完成时的时间戳
-    const completedAt = shipmentMilestone.actual_at || (shipmentMilestone.status === 'done' ? shipmentMilestone.due_at : null);
+    const completedAt = shipmentMilestone.actual_at || (isDoneStatus(shipmentMilestone.status) ? shipmentMilestone.due_at : null);
     if (completedAt) {
       const diff = Math.ceil(
         (new Date(completedAt).getTime() - new Date(targetDate).getTime()) / (1000 * 60 * 60 * 24)
@@ -137,7 +138,7 @@ export async function calculateOrderScore(
     // 节拍准时率
     const overdueSteps: string[] = [];
     for (const m of roleMilestones) {
-      if (m.due_at && m.status === 'done') {
+      if (m.due_at && isDoneStatus(m.status)) {
         // 完成日期 > 截止日期 = 逾期
         const completedAt = m.actual_at || m.due_at;
         if (new Date(completedAt) > new Date(m.due_at)) {

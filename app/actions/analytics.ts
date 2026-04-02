@@ -2,9 +2,10 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getRoleLabel } from '@/lib/utils/i18n';
+import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
 
-const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
-const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
+const _isDone = (s: string) => isDoneStatus(s);
+const _isActive = (s: string) => isActiveStatus(s);
 
 // 阶段映射
 const PHASE_MAP: Record<string, string> = {
@@ -106,9 +107,7 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   const overdueCount = milestones.filter((m: any) =>
     _isActive(m.status) && m.due_at && new Date(m.due_at) < now
   ).length;
-  const blockedCount = milestones.filter((m: any) =>
-    m.status === 'blocked' || m.status === '卡住' || m.status === '卡单'
-  ).length;
+  const blockedCount = milestones.filter((m: any) => isBlockedStatus(m.status)).length;
 
   // 本周 vs 上周完成数
   const startOfWeek = new Date(now);

@@ -3,6 +3,8 @@
  * 根因分析 + 行动建议引擎（纯确定性规则）
  */
 
+import { isDoneStatus, isBlockedStatus } from '@/lib/domain/types';
+
 export type RiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM';
 
 export type RootCauseType =
@@ -67,11 +69,11 @@ export function analyzeOrder(order: any, milestones: any[]): OrderWarRoomAnalysi
   const now = Date.now();
 
   const overdue = milestones.filter(m =>
-    m.status !== '已完成' && m.due_at && new Date(m.due_at).getTime() < now
+    !isDoneStatus(m.status) && m.due_at && new Date(m.due_at).getTime() < now
   );
-  const blocked = milestones.filter(m => m.status === '阻塞' || m.status === '卡住');
+  const blocked = milestones.filter(m => isBlockedStatus(m.status));
   const unownedCritical = milestones.filter(m =>
-    m.is_critical && !m.owner_user_id && m.status !== '已完成'
+    m.is_critical && !m.owner_user_id && !isDoneStatus(m.status)
   );
   const daysToEtd = daysUntil(order.etd || order.warehouse_due_date);
 
@@ -131,7 +133,7 @@ export function analyzeOrder(order: any, milestones: any[]): OrderWarRoomAnalysi
 
   // 5. ETD 风险
   if (daysToEtd !== null && daysToEtd <= 14 && daysToEtd >= 0) {
-    const incompleteCritical = milestones.filter((m: any) => m.is_critical && m.status !== '已完成').length;
+    const incompleteCritical = milestones.filter((m: any) => m.is_critical && !isDoneStatus(m.status)).length;
     if (incompleteCritical > 0) {
       rootCauses.push({
         type: 'etd_at_risk',
