@@ -1,8 +1,8 @@
 'use client';
 import { useState, Suspense } from 'react';
 import { signIn, signUp } from '@/app/actions/auth';
+import { sendPasswordResetEmail } from '@/app/actions/reset-password';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 
 type Mode = 'login' | 'register' | 'forgot';
 
@@ -75,12 +75,9 @@ function LoginForm() {
     }
 
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'https://order.qimoactivewear.com/auth/callback?type=recovery',
-      });
-      if (error) {
-        setMessage({ type: 'error', text: '发送失败：' + error.message });
+      const result = await sendPasswordResetEmail(email);
+      if (result.error) {
+        setMessage({ type: 'error', text: result.error });
       } else {
         setMessage({
           type: 'success',
