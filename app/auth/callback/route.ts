@@ -13,32 +13,38 @@ export async function GET(request: NextRequest) {
   const next = searchParams.get('next') || '/';
 
   const supabase = await createClient();
+  let sessionOk = false;
 
-  // PKCE flow: exchange code for session
+  // PKCE flow
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      if (type === 'recovery') {
-        return NextResponse.redirect(new URL('/auth/reset-password', request.url));
-      }
-      return NextResponse.redirect(new URL(next, request.url));
-    }
+    if (!error) sessionOk = true;
   }
 
-  // Implicit flow: verify token hash
-  if (token_hash && type) {
+  // Token hash flow
+  if (!sessionOk && token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({ token_hash, type: type as any });
-    if (!error) {
-      if (type === 'recovery') {
-        return NextResponse.redirect(new URL('/auth/reset-password', request.url));
-      }
-      return NextResponse.redirect(new URL(next, request.url));
-    }
+    if (!error) sessionOk = true;
   }
 
-  // Fallback: if type is recovery, still try to go to reset page
+  // Recovery: 获取 session 的 access_token 传给重置页面
   if (type === 'recovery') {
-    return NextResponse.redirect(new URL('/auth/reset-password', request.url));
+    if (sessionOk) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        // 把 token 通过 hash 传给客户端页面
+        const resetUrl = new URL('/auth/reset-password', request.url);
+        return NextResponse.redirect(
+          `${resetUrl.origin}${resetUrl.pathname}#access_token=${session.access_token}&refresh_token=${session.refresh_token || ''}&type=recovery`
+        );
+      }
+    }
+    // session 获取失败也跳转，让页面展示错误
+    return NextResponse.redirect(new URL('/auth/reset-password#error=session_failed', request.url));
+  }
+
+  if (sessionOk) {
+    return NextResponse.redirect(new URL(next, request.url));
   }
 
   return NextResponse.redirect(new URL('/login?error=auth_callback_failed', request.url));
