@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -9,40 +9,66 @@ function ResetPasswordForm() {
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [tokenData, setTokenData] = useState<{
+    access_token: string | null;
+    refresh_token: string | null;
+    user_id: string | null;
+  }>({ access_token: null, refresh_token: null, user_id: null });
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
 
-    // 方法1: 检查 URL hash 里的 access_token
+    // Extract tokens from URL hash (set by callback route)
     const hash = window.location.hash;
     if (hash) {
       const params = new URLSearchParams(hash.substring(1));
-      const token = params.get('access_token');
-      if (token) {
-        setAccessToken(token);
-        // 用 token 设置 session
-        const refreshToken = params.get('refresh_token') || '';
-        supabase.auth.setSession({ access_token: token, refresh_token: refreshToken }).then(({ data }) => {
+
+      // Check for error from callback
+      const hashError = params.get('error');
+      if (hashError) {
+        setMessage({ type: 'error', text: '重置链接已失效，请重新发送重置邮件' });
+        setReady(true);
+        return;
+      }
+
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token') || '';
+      const userId = params.get('user_id') || '';
+
+      if (accessToken) {
+        setTokenData({ access_token: accessToken, refresh_token: refreshToken, user_id: userId });
+
+        // Try to set session on client
+        supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        }).then(({ data }) => {
           if (data.session) setReady(true);
+          else setReady(true); // Still allow form — server API will use admin method
+        }).catch(() => {
+          setReady(true); // Still allow form
         });
+
+        // Clean up hash from URL
+        window.history.replaceState(null, '', window.location.pathname);
+        return;
       }
     }
 
-    // 方法2: 监听认证状态变化
+    // Fallback: listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         setReady(true);
       }
     });
 
-    // 方法3: 直接检查已有 session
+    // Fallback: check existing session
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) setReady(true);
     });
 
-    // 方法4: 2秒后强制放行
+    // Timeout fallback: show form after 2s regardless
     const timer = setTimeout(() => setReady(true), 2000);
 
     return () => { subscription.unsubscribe(); clearTimeout(timer); };
@@ -63,36 +89,44 @@ function ResetPasswordForm() {
 
     setLoading(true);
     try {
-      // 先尝试客户端更新
+      // Try 1: Client-side updateUser (works if session was established)
       const supabase = createClient();
-      let result = await supabase.auth.updateUser({ password });
+      const clientResult = await supabase.auth.updateUser({ password });
 
-      if (result.error) {
-        // 客户端失败，尝试服务端更新（session 可能在 server cookie 里）
-        const res = await fetch('/api/auth/update-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password, access_token: accessToken }),
-        });
-        const json = await res.json();
-        if (json.error) {
-          setMessage({ type: 'error', text: '密码更新失败：' + json.error });
-        } else {
-          setMessage({ type: 'success', text: '密码已更新！正在跳转...' });
-          setTimeout(() => router.push('/login'), 1500);
-        }
-      } else {
-        setMessage({ type: 'success', text: '密码已更新！正在跳转...' });
-        setTimeout(() => router.push('/'), 1500);
+      if (!clientResult.error) {
+        setMessage({ type: 'success', text: '密码已更新！正在跳转到登录页...' });
+        await supabase.auth.signOut();
+        setTimeout(() => router.push('/login'), 1500);
+        return;
       }
-    } catch {
-      setMessage({ type: 'error', text: '操作失败，请重试' });
+
+      // Try 2: Server API (uses admin API with service_role as ultimate fallback)
+      const res = await fetch('/api/auth/update-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          access_token: tokenData.access_token,
+          user_id: tokenData.user_id,
+        }),
+      });
+      const json = await res.json();
+
+      if (json.success) {
+        setMessage({ type: 'success', text: '密码已更新！正在跳转到登录页...' });
+        try { await supabase.auth.signOut(); } catch {}
+        setTimeout(() => router.push('/login'), 1500);
+      } else {
+        setMessage({ type: 'error', text: '密码更新失败：' + (json.error || '请重新发送重置邮件') });
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: '操作失败：' + (err.message || '请重试') });
     } finally {
       setLoading(false);
     }
   }
 
-  // 检测微信浏览器
+  // Detect WeChat browser
   const isWechat = typeof navigator !== 'undefined' && /MicroMessenger/i.test(navigator.userAgent);
 
   return (

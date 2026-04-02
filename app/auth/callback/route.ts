@@ -14,32 +14,42 @@ export async function GET(request: NextRequest) {
 
   const supabase = await createClient();
   let sessionOk = false;
+  let sessionData: { access_token: string; refresh_token: string; user_id: string } | null = null;
 
-  // PKCE flow
+  // PKCE flow — use return value directly (don't rely on getSession)
   if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) sessionOk = true;
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error && data.session) {
+      sessionOk = true;
+      sessionData = {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        user_id: data.session.user.id,
+      };
+    }
   }
 
   // Token hash flow
   if (!sessionOk && token_hash && type) {
-    const { error } = await supabase.auth.verifyOtp({ token_hash, type: type as any });
-    if (!error) sessionOk = true;
+    const { data, error } = await supabase.auth.verifyOtp({ token_hash, type: type as any });
+    if (!error && data.session) {
+      sessionOk = true;
+      sessionData = {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        user_id: data.session.user.id,
+      };
+    }
   }
 
-  // Recovery: 获取 session 的 access_token 传给重置页面
+  // Recovery: pass tokens via hash to reset page
   if (type === 'recovery') {
-    if (sessionOk) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        // 把 token 通过 hash 传给客户端页面
-        const resetUrl = new URL('/auth/reset-password', request.url);
-        return NextResponse.redirect(
-          `${resetUrl.origin}${resetUrl.pathname}#access_token=${session.access_token}&refresh_token=${session.refresh_token || ''}&type=recovery`
-        );
-      }
+    if (sessionOk && sessionData) {
+      const resetUrl = new URL('/auth/reset-password', request.url);
+      return NextResponse.redirect(
+        `${resetUrl.origin}${resetUrl.pathname}#access_token=${sessionData.access_token}&refresh_token=${sessionData.refresh_token}&user_id=${sessionData.user_id}&type=recovery`
+      );
     }
-    // session 获取失败也跳转，让页面展示错误
     return NextResponse.redirect(new URL('/auth/reset-password#error=session_failed', request.url));
   }
 
