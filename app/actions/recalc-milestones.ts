@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { calcDueDates } from '@/lib/schedule';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
+import { isDoneStatus } from '@/lib/domain/types';
 
 /**
  * 重算单个订单所有未完成关卡的截止日期
@@ -47,7 +48,7 @@ export async function recalcOrderMilestones(orderId: string) {
     if (!newDue) continue;
 
     // 已完成的关卡不改时间
-    if (m.status === 'done' || m.status === '已完成' || m.status === 'completed') continue;
+    if (isDoneStatus(m.status)) continue;
 
     await (supabase.from('milestones') as any)
       .update({

@@ -11,7 +11,7 @@ import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { OrderAIRisk } from '@/components/OrderAIRisk';
 import { LiveScorePreview } from '@/components/LiveScorePreview';
 import { DocumentCenterTab } from '@/components/tabs/DocumentCenterTab';
-import { normalizeMilestoneStatus } from '@/lib/domain/types';
+import { normalizeMilestoneStatus, isDoneStatus, isActiveStatus } from '@/lib/domain/types';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
@@ -323,9 +323,9 @@ export default async function OrderDetailPage({
                 if (orderData.is_new_customer) parts.push('⚠ 新客户首单');
                 if (orderData.is_new_factory) parts.push('⚠ 新工厂首单');
                 if (orderData.special_tags?.length > 0) parts.push(`风险标签：${orderData.special_tags.join('、')}`);
-                const doneMilestones = (milestones as any[]).filter((m: any) => m.status === 'done' || m.status === '已完成').length;
+                const doneMilestones = (milestones as any[]).filter((m: any) => isDoneStatus(m.status)).length;
                 const totalMilestones = (milestones as any[]).length;
-                const overdueMilestones = (milestones as any[]).filter((m: any) => (m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < new Date());
+                const overdueMilestones = (milestones as any[]).filter((m: any) => isActiveStatus(m.status) && m.due_at && new Date(m.due_at) < new Date());
                 parts.push(`进度：${doneMilestones}/${totalMilestones}完成`);
                 if (overdueMilestones.length > 0) parts.push(`逾期节点：${overdueMilestones.map((m: any) => m.name).join('、')}`);
                 const etdDate = orderData.etd || orderData.warehouse_due_date;
@@ -342,7 +342,8 @@ export default async function OrderDetailPage({
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">📎 订单资料</h2>
               {(() => {
                 const sensitiveTypes = ['customer_po', 'internal_quote', 'customer_quote'];
-                const canSeeSensitive = isAdmin || isOrderOwner || currentRoles.includes('finance');
+                const isMerchandiser = user ? orderData.merchandiser_user_id === user.id : false;
+                const canSeeSensitive = isAdmin || isOrderOwner || isMerchandiser || currentRoles.includes('finance');
                 const visibleAttachments = attachments.filter((att: any) =>
                   !sensitiveTypes.includes(att.file_type) || canSeeSensitive
                 );
@@ -552,7 +553,8 @@ export default async function OrderDetailPage({
         {activeTab === 'documents' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">📋 单据中心</h2>
-            <DocumentCenterTab orderId={id} isAdmin={isAdmin} currentRoles={currentRoles} />
+            <DocumentCenterTab orderId={id} isAdmin={isAdmin} currentRoles={currentRoles}
+              canViewPriceDocs={isAdmin || currentRoles.includes('finance') || isOrderOwner || (user ? (orderData.owner_user_id === user.id || orderData.merchandiser_user_id === user.id) : false)} />
           </div>
         )}
 

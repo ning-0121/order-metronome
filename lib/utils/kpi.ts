@@ -8,6 +8,8 @@
  * - 阻塞节点数
  */
 
+import { isDoneStatus, isBlockedStatus, isActiveStatus } from '@/lib/domain/types';
+
 export interface MilestoneKPIInput {
   id: string;
   status: string;
@@ -48,11 +50,10 @@ export function computeKPI(milestones: MilestoneKPIInput[]): KPIResult {
   let overdue = 0;
   let blocked = 0;
 
-  for (const m of milestones) {
-    const isDone = m.status === '已完成' || m.status === 'done';
-    const isBlocked = m.status === '阻塞' || m.status === '卡住' || m.status === 'blocked';
+  let overdueInProgress = 0;
 
-    if (isDone) {
+  for (const m of milestones) {
+    if (isDoneStatus(m.status)) {
       completed++;
       if (m.due_at && m.completed_at) {
         const due = new Date(m.due_at);
@@ -62,27 +63,27 @@ export function computeKPI(milestones: MilestoneKPIInput[]): KPIResult {
         } else {
           lateCompleted++;
         }
-      } else if (isDone) {
-        // 没有 due_at 的完成节点视为准时
-        onTime++;
       }
-    } else if (isBlocked) {
+      // 无 due_at 或 无 completed_at 的完成节点不计入准时统计（保守处理）
+    } else if (isBlockedStatus(m.status)) {
       blocked++;
-      // 阻塞且超期
       if (m.due_at && new Date(m.due_at) < now) {
         overdue++;
       }
     } else {
-      // 未完成、未阻塞
+      // 未完成、未阻塞（进行中或未开始）
       if (m.due_at && new Date(m.due_at) < now) {
         overdue++;
+        if (isActiveStatus(m.status)) overdueInProgress++;
       }
     }
   }
 
   const total = milestones.length;
-  // -1 表示"无数据"（没有完成节点时无法计算准时率）
-  const onTimeRate = completed > 0 ? Math.round((onTime / completed) * 100) : -1;
+  // 统一准时率公式：onTime / (有due_at的已完成数 + 进行中已超期数)
+  const completedWithDue = milestones.filter(m => isDoneStatus(m.status) && m.due_at).length;
+  const onTimeBase = completedWithDue + overdueInProgress;
+  const onTimeRate = onTimeBase > 0 ? Math.round((onTime / onTimeBase) * 100) : -1;
   const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return { total, completed, onTime, lateCompleted, overdue, blocked, onTimeRate, completionRate };

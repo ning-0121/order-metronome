@@ -1,6 +1,8 @@
+import { isActiveStatus } from '@/lib/domain/types';
+
 /**
  * Gate Scheduler - Gate 时间计算和依赖检查
- * 
+ *
  * 职责：
  * 1. 根据目标日期和 Gate 模板计算每个 Gate 的 planned_at 和 due_at
  * 2. 处理 Gate 依赖关系
@@ -126,7 +128,7 @@ export function getNextAvailableGate(
     }
 
     // 跳过已在进行中的
-    if (currentStatus.get(gate.gate_key) === 'in_progress') {
+    if (isActiveStatus(currentStatus.get(gate.gate_key) || '')) {
       continue;
     }
 

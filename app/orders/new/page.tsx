@@ -11,6 +11,7 @@ import type { POVerifyResult, ThreeDocVerifyResult } from '@/app/actions/po-veri
 import { SmartInsightsPanel } from '@/components/SmartInsightsPanel';
 import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
 import Link from 'next/link';
+import { isDoneStatus, isActiveStatus } from '@/lib/domain/types';
 
 /** 客户端直传文件到 Supabase Storage（绕过 Vercel 4.5MB 限制） */
 async function uploadFilesToStorage(
@@ -861,8 +862,8 @@ function NewOrderWizard() {
           {milestones.length > 0 ? (
             <div className="space-y-2 mb-6 max-h-96 overflow-y-auto">
               {milestones.map((m: any) => {
-                const isDone = m.status === 'done' || m.status === '已完成';
-                const isActive = m.status === 'in_progress' || m.status === '进行中';
+                const isDone = isDoneStatus(m.status);
+                const isActive = isActiveStatus(m.status);
                 return (
                   <div key={m.id} className={`flex items-center justify-between p-3 rounded-lg ${
                     isDone ? 'bg-gray-100 opacity-60' : isActive ? 'bg-indigo-50 border border-indigo-200' : 'bg-gray-50'

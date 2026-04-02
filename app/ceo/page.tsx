@@ -9,10 +9,10 @@ import { getRoleLabel } from '@/lib/utils/i18n';
 import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
 // RecalcButton removed from global — now per-order only
 
-// 状态兼容函数
-const _isDone = (s: string) => s === 'done' || s === '已完成' || s === 'completed';
-const _isActive = (s: string) => s === 'in_progress' || s === '进行中';
-const _isBlocked = (s: string) => s === 'blocked' || s === '卡单' || s === '卡住';
+import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
+const _isDone = (s: string) => isDoneStatus(s);
+const _isActive = (s: string) => isActiveStatus(s);
+const _isBlocked = (s: string) => isBlockedStatus(s);
 
 export default async function CEOWarRoom() {
   const supabase = await createClient();

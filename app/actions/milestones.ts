@@ -8,7 +8,7 @@ import {
   createMilestone,
   transitionMilestoneStatus,
 } from '@/lib/repositories/milestonesRepo';
-import { normalizeMilestoneStatus } from '@/lib/domain/types';
+import { normalizeMilestoneStatus, isDoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
 
@@ -348,7 +348,7 @@ export async function markMilestoneDone(milestoneId: string) {
       .eq('order_id', milestoneData.order_id)
       .in('step_key', stage1Keys);
     const allStage1Done = stage1Milestones && stage1Milestones.length === 4 &&
-      stage1Milestones.every((m: any) => m.status === 'done' || m.status === '已完成');
+      stage1Milestones.every((m: any) => isDoneStatus(m.status));
     if (allStage1Done) {
       const { data: orderCheck } = await (supabase.from('orders') as any)
         .select('lifecycle_status').eq('id', milestoneData.order_id).single();

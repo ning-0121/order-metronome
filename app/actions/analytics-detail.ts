@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { isDoneStatus, isActiveStatus } from '@/lib/domain/types';
 
 // ════════ 客户分析 ════════
 
@@ -70,8 +71,8 @@ export async function getCustomerAnalytics(
     const rateNow = new Date();
     if (allMsForRate) {
       for (const m of allMsForRate) {
-        const isDone = m.status === 'done' || m.status === '已完成' || m.status === 'completed';
-        const isActive = m.status === 'in_progress' || m.status === '进行中';
+        const isDone = isDoneStatus(m.status);
+        const isActive = isActiveStatus(m.status);
 
         if (isDone && m.due_at) {
           totalDoneMilestones++;
@@ -249,8 +250,8 @@ export async function getEmployeeAnalytics(
       .eq('owner_user_id', targetUserId)
       .in('order_id', [...orderIdSet]);
     for (const m of myMilestones || []) {
-      const isDone = m.status === 'done' || m.status === '已完成' || m.status === 'completed';
-      const isActive = m.status === 'in_progress' || m.status === '进行中';
+      const isDone = isDoneStatus(m.status);
+      const isActive = isActiveStatus(m.status);
       if (isDone && m.due_at) {
         totalDoneMilestones++;
         const completedDate = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
@@ -399,10 +400,14 @@ export async function getEmployeeRanking(
     let overdueActive = 0;
     const nowTime = new Date();
     for (const m of periodMs) {
-      if (m.status === 'done' || m.status === '已完成') {
-        doneCount++;
-        if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) onTime++;
-      } else if ((m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < nowTime) {
+      if (isDoneStatus(m.status)) {
+        if (m.due_at) {
+          doneCount++;
+          // 统一准时判定：actual_at → updated_at → 不计为准时
+          const completedDate = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
+          if (completedDate && completedDate <= new Date(m.due_at)) onTime++;
+        }
+      } else if (isActiveStatus(m.status) && m.due_at && new Date(m.due_at) < nowTime) {
         overdueActive++;
       }
     }

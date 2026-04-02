@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { markMilestoneDone, markMilestoneBlocked, saveChecklistData } from '@/app/actions/milestones';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { isDoneStatus, isActiveStatus, isPendingStatus } from '@/lib/domain/types';
 import { AIAdviceBox } from '@/components/AIAdviceBox';
 import { getChecklistForStep, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 
@@ -64,7 +65,7 @@ export function MilestoneActions({
       const mBlocks: string[] = m.blocks || [];
       if (mBlocks.includes(milestone.step_key)) {
         const status = m.status;
-        const isDone = status === '已完成' || status === 'done' || status === 'completed';
+        const isDone = isDoneStatus(status);
         if (!isDone) {
           blockedBy.push(m.name || m.step_key);
         }
@@ -186,7 +187,7 @@ export function MilestoneActions({
   }
 
   // ── 已完成状态 ─────────────────────────────────────────────────
-  if (milestone.status === '已完成' || milestone.status === 'done') {
+  if (isDoneStatus(milestone.status)) {
     return (
       <div className="flex items-center gap-2 text-green-700 text-sm font-medium bg-green-50 px-3 py-2 rounded-lg">
         <span>✓</span>
@@ -196,8 +197,8 @@ export function MilestoneActions({
   }
 
   // 「进行中」or「pending 但已逾期」or「pending 但有操作权限的用户」都可操作
-  const isInProgress = milestone.status === '进行中' || milestone.status === 'in_progress';
-  const isPending = milestone.status === 'pending' || milestone.status === '未开始';
+  const isInProgress = isActiveStatus(milestone.status);
+  const isPending = isPendingStatus(milestone.status);
   const isPendingOverdue = isPending && milestone.due_at && new Date(milestone.due_at) < new Date();
   const isActive = isInProgress || (isPending && canModify);
   if (!isActive) return null;

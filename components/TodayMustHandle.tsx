@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { formatDate } from '@/lib/utils/date';
 import { getRoleLabel } from '@/lib/utils/i18n';
+import { isBlockedStatus } from '@/lib/domain/types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -93,7 +94,7 @@ export function TodayMustHandle({ milestones }: TodayMustHandleProps) {
                     >
                       {milestone.name}
                     </Link>
-                    {milestone.status === '卡住' && (
+                    {isBlockedStatus(milestone.status) && (
                       <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded font-medium">
                         已阻塞
                       </span>

@@ -3,6 +3,7 @@
  * War Room 根因 → 员工执行任务映射
  * 纯规则，无 LLM
  */
+import { isDoneStatus } from '@/lib/domain/types';
 
 export interface ExecutionTask {
   id: string;
@@ -65,7 +66,7 @@ export function buildExecutionTasks(
   const tasks: ExecutionTask[] = [];
 
   for (const m of milestones) {
-    if (m.status === '已完成') continue;
+    if (isDoneStatus(m.status)) continue;
 
     const due = m.due_at ? new Date(m.due_at) : null;
     const urgency = getUrgency(m.due_at);

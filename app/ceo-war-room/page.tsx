@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
+import { isDoneStatus, isBlockedStatus } from '@/lib/domain/types';
 import Link from 'next/link';
 import { analyzeWarRoom } from '@/lib/warRoom/rootCauseEngine';
 import { suggestActions, summarizeActions, CATEGORY_CONFIG } from '@/lib/warRoom/actionEngine';
@@ -52,11 +53,11 @@ export default async function WarRoomPage() {
   const roleMap: Record<string, { overdue: number; blocked: number }> = {};
   for (const wr of warRoomData) {
     for (const m of wr.order.milestones) {
-      if (m.status === '已完成') continue;
+      if (isDoneStatus(m.status)) continue;
       const r = m.owner_role;
       if (!roleMap[r]) roleMap[r] = { overdue: 0, blocked: 0 };
-      if (m.status !== '已完成' && m.due_at && new Date(m.due_at) < new Date()) roleMap[r].overdue++;
-      if (m.status === '阻塞') roleMap[r].blocked++;
+      if (!isDoneStatus(m.status) && m.due_at && new Date(m.due_at) < new Date()) roleMap[r].overdue++;
+      if (isBlockedStatus(m.status)) roleMap[r].blocked++;
     }
   }
   const RLABELS: Record<string,string> = {sales:'业务',finance:'财务',procurement:'采购',production:'生产',qc:'质检',logistics:'物流'};

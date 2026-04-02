@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { formatDate, isOverdue } from '@/lib/utils/date';
+import { isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
 import Link from 'next/link';
 import { DelayRequestActions } from '@/components/DelayRequestActions';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
@@ -34,12 +35,12 @@ export default async function CEODashboardPage() {
     .order('due_at', { ascending: true });
 
   const overdueMilestones = (allMilestones || []).filter((m: any) => {
-    return m.status === '进行中' && m.due_at && isOverdue(m.due_at);
+    return isActiveStatus(m.status) && m.due_at && isOverdue(m.due_at);
   });
 
   // 2. Blocked milestones
   const blockedMilestones = (allMilestones || []).filter((m: any) => {
-    return m.status === '卡住';
+    return isBlockedStatus(m.status);
   });
 
   // 查询超期节点的延期申请状态
@@ -83,7 +84,7 @@ export default async function CEODashboardPage() {
   // 4. Bottleneck summary by owner_role
   const bottlenecksByRole: Record<string, number> = {};
   (allMilestones || []).forEach((m: any) => {
-    if (m.status === '卡住' || (m.status === '进行中' && m.due_at && isOverdue(m.due_at))) {
+    if (isBlockedStatus(m.status) || (isActiveStatus(m.status) && m.due_at && isOverdue(m.due_at))) {
       const role = m.owner_role || 'unknown';
       bottlenecksByRole[role] = (bottlenecksByRole[role] || 0) + 1;
     }
@@ -92,7 +93,7 @@ export default async function CEODashboardPage() {
   // 5. Bottleneck summary by owner_user_id
   const bottlenecksByUser: Record<string, { count: number; user_id: string; milestones: any[] }> = {};
   (allMilestones || []).forEach((m: any) => {
-    if (m.status === '卡住' || (m.status === '进行中' && m.due_at && isOverdue(m.due_at))) {
+    if (isBlockedStatus(m.status) || (isActiveStatus(m.status) && m.due_at && isOverdue(m.due_at))) {
       const userId = m.owner_user_id || 'unassigned';
       if (!bottlenecksByUser[userId]) {
         bottlenecksByUser[userId] = {

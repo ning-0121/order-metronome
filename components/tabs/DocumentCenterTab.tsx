@@ -9,18 +9,23 @@ interface Props {
   orderId: string;
   isAdmin: boolean;
   currentRoles: string[];
+  /** 是否有权查看价格敏感单据（PI/CI），由父组件根据角色+订单归属判定 */
+  canViewPriceDocs?: boolean;
 }
 
-const DOC_TABS: { key: DocumentType; label: string; icon: string }[] = [
-  { key: 'pi', label: 'PI', icon: '📄' },
+const ALL_DOC_TABS: { key: DocumentType; label: string; icon: string; priceSensitive?: boolean }[] = [
+  { key: 'pi', label: 'PI', icon: '📄', priceSensitive: true },
   { key: 'production_sheet', label: '生产单', icon: '🏭' },
   { key: 'packing_list', label: '装箱单', icon: '📦' },
-  { key: 'ci', label: 'CI', icon: '💰' },
+  { key: 'ci', label: 'CI', icon: '💰', priceSensitive: true },
 ];
 
-export function DocumentCenterTab({ orderId, isAdmin, currentRoles }: Props) {
+export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPriceDocs }: Props) {
+  // 是否可见价格单据：管理员、财务、或父组件明确传入 canViewPriceDocs
+  const showPriceDocs = isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true;
+  const DOC_TABS = showPriceDocs ? ALL_DOC_TABS : ALL_DOC_TABS.filter(t => !t.priceSensitive);
   const [docs, setDocs] = useState<any[]>([]);
-  const [activeDocType, setActiveDocType] = useState<DocumentType>('pi');
+  const [activeDocType, setActiveDocType] = useState<DocumentType>(showPriceDocs ? 'pi' : 'production_sheet');
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);

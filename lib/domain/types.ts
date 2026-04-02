@@ -15,10 +15,13 @@ export type OwnerRole = 'sales' | 'finance' | 'procurement' | 'production' | 'qc
 // 状态转换映射（用于兼容旧代码中的英文状态）
 export const STATUS_MAP: Record<string, MilestoneStatus> = {
   'not_started': '未开始',
+  'pending': '未开始',
   'in_progress': '进行中',
   'blocked': '阻塞',
   '卡住': '阻塞',
+  '卡单': '阻塞',
   'done': '已完成',
+  'completed': '已完成',
   // 中文状态直接映射
   '未开始': '未开始',
   '进行中': '进行中',
@@ -48,6 +51,15 @@ export function normalizeMilestoneStatus(status: string | null | undefined): Mil
   // 默认返回未开始
   return '未开始';
 }
+
+/**
+ * 标准化状态判断函数 — 所有文件应使用这些函数，而非自行定义 _isDone/_isActive 等
+ * 支持中英文混合状态值
+ */
+export const isDoneStatus = (s: string | null | undefined): boolean => normalizeMilestoneStatus(s) === '已完成';
+export const isActiveStatus = (s: string | null | undefined): boolean => normalizeMilestoneStatus(s) === '进行中';
+export const isBlockedStatus = (s: string | null | undefined): boolean => normalizeMilestoneStatus(s) === '阻塞';
+export const isPendingStatus = (s: string | null | undefined): boolean => normalizeMilestoneStatus(s) === '未开始';
 
 /**
  * 状态转换规则定义

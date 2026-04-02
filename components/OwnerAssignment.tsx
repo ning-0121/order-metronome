@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { updateMilestoneOwner } from '@/app/actions/milestones';
 import { getAllUsers, type User } from '@/app/actions/users';
+import { isDoneStatus } from '@/lib/domain/types';
 import { useRouter } from 'next/navigation';
 import { getRoleLabel } from '@/lib/utils/i18n';
 
@@ -55,7 +56,7 @@ export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, mile
   }
 
   // 非管理员不显示；已分配负责人的也不显示；已完成的不显示
-  const isDone = milestoneStatus === 'done' || milestoneStatus === '已完成' || milestoneStatus === 'completed';
+  const isDone = isDoneStatus(milestoneStatus);
   if (!isAdmin || currentOwnerUserId || isDone) return null;
 
   return (
