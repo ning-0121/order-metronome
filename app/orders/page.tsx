@@ -2,6 +2,7 @@ import { getOrders } from '@/app/actions/orders';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { computeOrderStatus } from '@/lib/utils/order-status';
+import { OrderSearchBar } from '@/components/OrderSearchBar';
 
 // 阶段进度计算
 const PHASE_KEYS = [
@@ -29,9 +30,66 @@ function computePhases(milestones: any[]) {
   });
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
+// 多维度搜索
+function matchOrder(order: any, query: string): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase().trim();
+  // 支持多关键词（空格分隔，AND 逻辑）
+  const keywords = q.split(/\s+/).filter(Boolean);
+  return keywords.every(kw => {
+    const fields = [
+      order.order_no,
+      order.customer_name,
+      order.factory_name,
+      order.po_number,
+      order.style_no,
+      order.internal_order_no,
+      order.incoterm,
+      order.order_type,
+      order.notes,
+    ];
+    return fields.some(f => f && String(f).toLowerCase().includes(kw));
+  });
+}
+
+// 提取搜索维度标签
+function getSearchDimensions(orders: any[]): {
+  customers: { name: string; count: number }[];
+  factories: { name: string; count: number }[];
+  incoterms: { name: string; count: number }[];
+  types: { name: string; label: string; count: number }[];
+} {
+  const customerMap: Record<string, number> = {};
+  const factoryMap: Record<string, number> = {};
+  const incotermMap: Record<string, number> = {};
+  const typeMap: Record<string, number> = {};
+
+  for (const o of orders) {
+    if (o.customer_name) customerMap[o.customer_name] = (customerMap[o.customer_name] || 0) + 1;
+    if (o.factory_name) factoryMap[o.factory_name] = (factoryMap[o.factory_name] || 0) + 1;
+    if (o.incoterm) incotermMap[o.incoterm] = (incotermMap[o.incoterm] || 0) + 1;
+    if (o.order_type) typeMap[o.order_type] = (typeMap[o.order_type] || 0) + 1;
+  }
+
+  const typeLabels: Record<string, string> = { trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' };
+
+  return {
+    customers: Object.entries(customerMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
+    factories: Object.entries(factoryMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
+    incoterms: Object.entries(incotermMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
+    types: Object.entries(typeMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, label: typeLabels[name] || name, count })),
+  };
+}
+
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string }> }) {
   const params = await searchParams;
   const statusFilter = params?.status || 'active';
+  const searchQuery = params?.q || '';
+  const customerFilter = params?.customer || '';
+  const factoryFilter = params?.factory || '';
+  const incotermFilter = params?.incoterm || '';
+  const typeFilter = params?.type || '';
+
   const { data: allOrders, error } = await getOrders();
 
   if (error) {
@@ -44,13 +102,29 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     );
   }
 
-  // 按状态分组
+  // 按完成状态分组
   const completedOrders = (allOrders || []).filter((o: any) => {
     const ms = o.milestones || [];
     return ms.length > 0 && ms.every((m: any) => _isDone(m.status));
   });
   const activeOrders = (allOrders || []).filter((o: any) => !completedOrders.includes(o));
-  const orders = statusFilter === 'completed' ? completedOrders : activeOrders;
+  const baseOrders = statusFilter === 'completed' ? completedOrders : activeOrders;
+
+  // 应用维度筛选
+  let filteredOrders = baseOrders;
+  if (customerFilter) filteredOrders = filteredOrders.filter((o: any) => o.customer_name === customerFilter);
+  if (factoryFilter) filteredOrders = filteredOrders.filter((o: any) => o.factory_name === factoryFilter);
+  if (incotermFilter) filteredOrders = filteredOrders.filter((o: any) => o.incoterm === incotermFilter);
+  if (typeFilter) filteredOrders = filteredOrders.filter((o: any) => o.order_type === typeFilter);
+
+  // 应用搜索
+  const orders = filteredOrders.filter((o: any) => matchOrder(o, searchQuery));
+
+  // 搜索维度统计（基于 base orders，不受搜索关键词影响）
+  const dimensions = getSearchDimensions(baseOrders);
+
+  // 是否有活跃的筛选条件
+  const hasFilters = !!(searchQuery || customerFilter || factoryFilter || incotermFilter || typeFilter);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -60,6 +134,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           <h1 className="text-2xl font-bold text-gray-900">订单列表</h1>
           <p className="mt-1 text-sm text-gray-500">
             共 {allOrders?.length || 0} 个订单
+            {hasFilters && <span className="text-indigo-600 ml-1">（当前显示 {orders.length} 个）</span>}
           </p>
         </div>
         <Link
@@ -73,52 +148,100 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         </Link>
       </div>
 
-        {/* 状态筛选 */}
-        <div className="flex gap-1 mb-4">
-          {[
-            { key: 'active', label: '进行中', count: activeOrders.length },
-            { key: 'completed', label: '已完成', count: completedOrders.length },
-          ].map(tab => (
-            <Link
-              key={tab.key}
-              href={`/orders?status=${tab.key}`}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                statusFilter === tab.key
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              {tab.label} ({tab.count})
-            </Link>
-          ))}
-        </div>
-
-        {/* 搜索框 */}
-        <form method="GET" className="flex gap-3 mb-4">
-          <input
-            type="text"
-            name="q"
-            placeholder="搜索订单号、客户名、款号..."
-            className="flex-1 rounded-xl border border-gray-200 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700"
+      {/* 状态筛选 */}
+      <div className="flex gap-1 mb-4">
+        {[
+          { key: 'active', label: '进行中', count: activeOrders.length },
+          { key: 'completed', label: '已完成', count: completedOrders.length },
+        ].map(tab => (
+          <Link
+            key={tab.key}
+            href={`/orders?status=${tab.key}`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              statusFilter === tab.key
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
           >
-            搜索
-          </button>
-        </form>
+            {tab.label} ({tab.count})
+          </Link>
+        ))}
+      </div>
+
+      {/* 搜索 + 维度筛选 */}
+      <OrderSearchBar
+        currentQuery={searchQuery}
+        currentStatus={statusFilter}
+        currentCustomer={customerFilter}
+        currentFactory={factoryFilter}
+        currentIncoterm={incotermFilter}
+        currentType={typeFilter}
+        dimensions={dimensions}
+      />
+
+      {/* 活跃筛选条件标签 */}
+      {hasFilters && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs text-gray-500">筛选条件：</span>
+          {searchQuery && (
+            <Link href={`/orders?status=${statusFilter}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
+              搜索: {searchQuery} <span className="text-indigo-400">×</span>
+            </Link>
+          )}
+          {customerFilter && (
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200">
+              客户: {customerFilter} <span className="text-blue-400">×</span>
+            </Link>
+          )}
+          {factoryFilter && (
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 hover:bg-green-200">
+              工厂: {factoryFilter} <span className="text-green-400">×</span>
+            </Link>
+          )}
+          {incotermFilter && (
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-700 hover:bg-purple-200">
+              贸易: {incotermFilter} <span className="text-purple-400">×</span>
+            </Link>
+          )}
+          {typeFilter && (
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200">
+              类型: {{ trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' }[typeFilter] || typeFilter} <span className="text-amber-400">×</span>
+            </Link>
+          )}
+          <Link href={`/orders?status=${statusFilter}`}
+            className="text-xs text-gray-400 hover:text-gray-600 underline">
+            清除全部
+          </Link>
+        </div>
+      )}
+
       {!orders || orders.length === 0 ? (
         <div className="empty-state rounded-2xl bg-white border border-gray-200">
-          <div className="empty-state-icon">📦</div>
-          <div className="empty-state-title">暂无订单</div>
-          <p className="empty-state-desc mb-6">开始创建您的第一个订单，追踪执行进度</p>
-          <Link href="/orders/new" className="btn-primary inline-flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            创建订单
-          </Link>
+          <div className="empty-state-icon">{hasFilters ? '🔍' : '📦'}</div>
+          <div className="empty-state-title">{hasFilters ? '没有找到匹配的订单' : '暂无订单'}</div>
+          <p className="empty-state-desc mb-6">
+            {hasFilters
+              ? '试试调整搜索条件或筛选维度'
+              : '开始创建您的第一个订单，追踪执行进度'
+            }
+          </p>
+          {hasFilters ? (
+            <Link href={`/orders?status=${statusFilter}`} className="btn-primary inline-flex items-center gap-2">
+              清除筛选
+            </Link>
+          ) : (
+            <Link href="/orders/new" className="btn-primary inline-flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              创建订单
+            </Link>
+          )}
         </div>
       ) : (
         <>
@@ -141,6 +264,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   <div>
                     <div className="font-semibold text-gray-900 text-sm">{order.order_no}</div>
                     <div className="text-xs text-gray-500 mt-0.5">{order.customer_name}{(order as any).factory_name ? ` · ${(order as any).factory_name}` : ''}</div>
+                    {(order as any).po_number && <div className="text-xs text-gray-400 mt-0.5">PO: {(order as any).po_number}</div>}
                   </div>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusConfig.class}`}>{statusConfig.label}</span>
                 </div>
@@ -204,10 +328,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       </div>
                     </td>
                     <td>
-                      <span className="text-gray-700">{order.customer_name}</span>
+                      <Link href={`/orders?status=${statusFilter}&customer=${encodeURIComponent(order.customer_name)}`}
+                        className="text-gray-700 hover:text-indigo-600 hover:underline">{order.customer_name}</Link>
                     </td>
                     <td>
-                      <span className="text-gray-600">{(order as any).factory_name || '—'}</span>
+                      {(order as any).factory_name ? (
+                        <Link href={`/orders?status=${statusFilter}&factory=${encodeURIComponent((order as any).factory_name)}`}
+                          className="text-gray-600 hover:text-indigo-600 hover:underline">{(order as any).factory_name}</Link>
+                      ) : <span className="text-gray-400">—</span>}
                     </td>
                 <td>
                   <div className="text-sm text-gray-900">{(order as any).style_no || '-'}</div>
