@@ -9,18 +9,25 @@ function ResetPasswordForm() {
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
 
-    // 方法1: 检查 URL hash 里的 access_token（Supabase 隐式流）
+    // 方法1: 检查 URL hash 里的 access_token
     const hash = window.location.hash;
-    if (hash && hash.includes('access_token')) {
-      // Supabase 客户端会自动从 hash 中提取 token 并建立 session
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session) setReady(true);
-      });
+    if (hash) {
+      const params = new URLSearchParams(hash.substring(1));
+      const token = params.get('access_token');
+      if (token) {
+        setAccessToken(token);
+        // 用 token 设置 session
+        const refreshToken = params.get('refresh_token') || '';
+        supabase.auth.setSession({ access_token: token, refresh_token: refreshToken }).then(({ data }) => {
+          if (data.session) setReady(true);
+        });
+      }
     }
 
     // 方法2: 监听认证状态变化
@@ -65,7 +72,7 @@ function ResetPasswordForm() {
         const res = await fetch('/api/auth/update-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ password, access_token: accessToken }),
         });
         const json = await res.json();
         if (json.error) {
