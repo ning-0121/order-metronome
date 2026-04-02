@@ -26,6 +26,7 @@ function createEmailTransporter() {
 
 /**
  * Send email notification
+ * Returns { sent: true } on success, { sent: false, reason: string } on failure
  */
 export async function sendEmailNotification(
   to: string | string[],
@@ -34,13 +35,13 @@ export async function sendEmailNotification(
 ): Promise<boolean> {
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
-      console.warn('SMTP not configured, skipping email send');
+      console.error('[SMTP] SMTP_USER or SMTP_PASSWORD not configured');
       return false;
     }
 
     const transporter = createEmailTransporter();
     const recipients = Array.isArray(to) ? to : [to];
-    
+
     await transporter.sendMail({
       from: process.env.SMTP_FROM || process.env.SMTP_USER,
       to: recipients.join(', '),
