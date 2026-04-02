@@ -10,6 +10,7 @@ import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { OrderAIRisk } from '@/components/OrderAIRisk';
 import { LiveScorePreview } from '@/components/LiveScorePreview';
+import { DocumentCenterTab } from '@/components/tabs/DocumentCenterTab';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
@@ -220,6 +221,7 @@ export default async function OrderDetailPage({
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料单' },
           { key: 'production', label: '生产进度' },
+              { key: 'documents', label: '单据中心' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
@@ -536,6 +538,14 @@ export default async function OrderDetailPage({
               isAdmin={isAdmin}
               canReport={currentRoles.some(r => ['sales', 'merchandiser'].includes(r))}
             />
+          </div>
+        )}
+
+        {/* Tab: 单据中心 */}
+        {activeTab === 'documents' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">📋 单据中心</h2>
+            <DocumentCenterTab orderId={id} isAdmin={isAdmin} currentRoles={currentRoles} />
           </div>
         )}
 
