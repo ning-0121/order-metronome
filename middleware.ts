@@ -31,11 +31,12 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Protect routes (except login and auth callback)
+  // Protect routes (except login, auth callback, and auth API)
   const isLoginPage = request.nextUrl.pathname === '/login';
   const isAuthPage = request.nextUrl.pathname.startsWith('/auth/');
+  const isAuthApi = request.nextUrl.pathname.startsWith('/api/auth/');
 
-  if (!user && !isLoginPage && !isAuthPage) {
+  if (!user && !isLoginPage && !isAuthPage && !isAuthApi) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
   
