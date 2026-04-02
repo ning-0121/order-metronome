@@ -46,10 +46,14 @@ export default async function CEOWarRoom() {
     }
   }
 
-  // 风险分类
-  const riskRed = ordersWithMilestones.filter(o => computeOrderStatus(o.milestones || []).color === 'RED');
-  const riskYellow = ordersWithMilestones.filter(o => computeOrderStatus(o.milestones || []).color === 'YELLOW');
-  const riskGreen = ordersWithMilestones.filter(o => computeOrderStatus(o.milestones || []).color === 'GREEN');
+  // 风险分类（带详细原因）
+  const orderStatusMap = new Map<string, ReturnType<typeof computeOrderStatus>>();
+  for (const o of ordersWithMilestones) {
+    orderStatusMap.set(o.id, computeOrderStatus(o.milestones || []));
+  }
+  const riskRed = ordersWithMilestones.filter(o => orderStatusMap.get(o.id)?.color === 'RED');
+  const riskYellow = ordersWithMilestones.filter(o => orderStatusMap.get(o.id)?.color === 'YELLOW');
+  const riskGreen = ordersWithMilestones.filter(o => orderStatusMap.get(o.id)?.color === 'GREEN');
 
   // 所有超期/卡住里程碑
   const { data: allMilestonesWithOrders } = await (supabase.from('milestones') as any)
@@ -420,15 +424,23 @@ export default async function CEOWarRoom() {
               <div className="mt-2 space-y-1 pl-2">
                 {riskRed.length === 0 ? (
                   <p className="text-sm text-gray-500 py-1">无</p>
-                ) : riskRed.slice(0, 10).map((o: any) => (
-                  <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 text-sm group">
-                    <span>
-                      <span className="font-medium text-gray-900">{o.order_no}</span>
-                      <span className="text-gray-500 ml-2">{o.customer_name}</span>
-                    </span>
-                    <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
-                  </Link>
-                ))}
+                ) : riskRed.slice(0, 10).map((o: any) => {
+                  const status = orderStatusMap.get(o.id);
+                  return (
+                    <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-red-50/50 text-sm group">
+                      <div className="flex items-center justify-between">
+                        <span>
+                          <span className="font-medium text-gray-900">{o.order_no}</span>
+                          <span className="text-gray-500 ml-2">{o.customer_name}</span>
+                        </span>
+                        <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
+                      </div>
+                      {status?.riskFactors?.[0] && (
+                        <div className="text-xs text-red-600 mt-0.5 truncate">{status.riskFactors[0]}</div>
+                      )}
+                    </Link>
+                  );
+                })}
               </div>
             </details>
             {/* 黄色 */}
@@ -440,15 +452,23 @@ export default async function CEOWarRoom() {
               <div className="mt-2 space-y-1 pl-2">
                 {riskYellow.length === 0 ? (
                   <p className="text-sm text-gray-500 py-1">无</p>
-                ) : riskYellow.slice(0, 10).map((o: any) => (
-                  <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 text-sm group">
-                    <span>
-                      <span className="font-medium text-gray-900">{o.order_no}</span>
-                      <span className="text-gray-500 ml-2">{o.customer_name}</span>
-                    </span>
-                    <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
-                  </Link>
-                ))}
+                ) : riskYellow.slice(0, 10).map((o: any) => {
+                  const status = orderStatusMap.get(o.id);
+                  return (
+                    <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-yellow-50/50 text-sm group">
+                      <div className="flex items-center justify-between">
+                        <span>
+                          <span className="font-medium text-gray-900">{o.order_no}</span>
+                          <span className="text-gray-500 ml-2">{o.customer_name}</span>
+                        </span>
+                        <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
+                      </div>
+                      {status?.riskFactors?.map((f: string, i: number) => (
+                        <div key={i} className="text-xs text-amber-700 mt-0.5 truncate">⚠ {f}</div>
+                      ))}
+                    </Link>
+                  );
+                })}
               </div>
             </details>
             {/* 绿色 */}
