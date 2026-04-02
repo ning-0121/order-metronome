@@ -13,18 +13,31 @@ function ResetPasswordForm() {
 
   useEffect(() => {
     const supabase = createClient();
-    // 监听所有认证事件
+
+    // 方法1: 检查 URL hash 里的 access_token（Supabase 隐式流）
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token')) {
+      // Supabase 客户端会自动从 hash 中提取 token 并建立 session
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session) setReady(true);
+      });
+    }
+
+    // 方法2: 监听认证状态变化
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         setReady(true);
       }
     });
-    // 直接检查 session — 如果已登录就允许重置
+
+    // 方法3: 直接检查已有 session
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) setReady(true);
     });
-    // 3秒后如果还没 ready，强制允许（用户可能直接访问）
-    const timer = setTimeout(() => setReady(true), 3000);
+
+    // 方法4: 2秒后强制放行
+    const timer = setTimeout(() => setReady(true), 2000);
+
     return () => { subscription.unsubscribe(); clearTimeout(timer); };
   }, []);
 
@@ -43,10 +56,24 @@ function ResetPasswordForm() {
 
     setLoading(true);
     try {
+      // 先尝试客户端更新
       const supabase = createClient();
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) {
-        setMessage({ type: 'error', text: '密码更新失败：' + error.message });
+      let result = await supabase.auth.updateUser({ password });
+
+      if (result.error) {
+        // 客户端失败，尝试服务端更新（session 可能在 server cookie 里）
+        const res = await fetch('/api/auth/update-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        const json = await res.json();
+        if (json.error) {
+          setMessage({ type: 'error', text: '密码更新失败：' + json.error });
+        } else {
+          setMessage({ type: 'success', text: '密码已更新！正在跳转...' });
+          setTimeout(() => router.push('/login'), 1500);
+        }
       } else {
         setMessage({ type: 'success', text: '密码已更新！正在跳转...' });
         setTimeout(() => router.push('/'), 1500);
