@@ -1052,7 +1052,7 @@ export async function saveChecklistData(
           const { data: downstreamMs } = await (supabase.from('milestones') as any)
             .select('id, step_key, status, sequence_number')
             .eq('order_id', milestone.order_id)
-            .in('status', ['pending', 'in_progress', '未开始', '进行中'])
+            .in('status', ['pending', 'in_progress'])
             .order('sequence_number', { ascending: true });
 
           const currentMs = (downstreamMs || []).find((m: any) => m.id === milestoneId);
@@ -1066,7 +1066,9 @@ export async function saveChecklistData(
               await (supabase.rpc as any)('admin_update_milestone', {
                 _milestone_id: ms.id,
                 _updates: { due_at: dateStr, planned_at: dateStr },
-              }).catch(() => {});
+              }).catch((err: any) => {
+                console.warn(`[checklist] Failed to update downstream milestone ${ms.step_key}:`, err?.message || err);
+              });
             }
           }
         }

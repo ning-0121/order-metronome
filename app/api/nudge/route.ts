@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { sendEmailNotification } from '@/lib/utils/notifications';
+import { sendEmailNotification, MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
 import { getCurrentUserRole, isAdmin } from '@/lib/utils/user-role';
 
 /**
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Send email
-    const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+    const ccEmails = MANAGER_CC_EMAILS;
     const messageHtml = customMessage
       ? `<div style="margin:12px 0;padding:12px 16px;background:#fef3c7;border-left:4px solid #d97706;border-radius:4px;"><p style="margin:0;font-size:14px;color:#92400e;"><strong>${senderName} 留言：</strong>${customMessage}</p></div>`
       : '';
@@ -142,19 +142,7 @@ export async function POST(request: NextRequest) {
       <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">去处理</a></p>
     `;
 
-    // 1. 系统内通知（一定会送达）
-    if (milestoneData.owner_user_id) {
-      await (supabase.from('notifications') as any).insert({
-        user_id: milestoneData.owner_user_id,
-        type: 'nudge',
-        title: `🔔 催办提醒：${milestoneData.name}`,
-        message: `${senderName} 提醒你尽快处理「${orderData.order_no}」的「${milestoneData.name}」节点`,
-        related_order_id: orderData.id,
-        status: 'unread',
-      }).catch(() => {});
-    }
-
-    // 2. 邮件通知（可能失败但不阻断）
+    // 邮件通知（可能失败但不阻断）
     const emailSent = await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
 
     return NextResponse.json({

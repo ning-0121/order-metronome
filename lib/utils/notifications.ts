@@ -2,6 +2,14 @@ import nodemailer from 'nodemailer';
 import { createClient } from '../supabase/server';
 
 /**
+ * 管理层抄送邮箱（集中管理，避免硬编码分散各处）
+ * 可通过环境变量 MANAGER_CC_EMAILS 覆盖，逗号分隔
+ */
+export const MANAGER_CC_EMAILS: string[] = (
+  process.env.MANAGER_CC_EMAILS || 'su@qimoclothing.com,alex@qimoclothing.com'
+).split(',').map(e => e.trim()).filter(Boolean);
+
+/**
  * Create SMTP transporter for Tencent enterprise mail
  */
 function createEmailTransporter() {

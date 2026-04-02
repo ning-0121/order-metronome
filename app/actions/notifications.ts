@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { sendEmailNotification } from '@/lib/utils/notifications';
+import { sendEmailNotification, MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
 import { differenceInHours } from 'date-fns';
 
 /**
@@ -58,7 +58,7 @@ export async function checkAndSendReminders() {
     
     if (!recipientEmail) continue;
 
-    const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+    const ccEmails = MANAGER_CC_EMAILS;
 
     // Check for 48h reminder
     if (hoursRemaining <= 48 && hoursRemaining > 24) {
@@ -252,7 +252,7 @@ export async function sendBlockedNotification(
   
   if (!recipientEmail) return { error: 'Creator email not found' };
 
-  const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+  const ccEmails = MANAGER_CC_EMAILS;
 
   // Check if already sent
   const { data: existing } = await supabase
@@ -325,7 +325,7 @@ export async function sendDeliveryDelayAlert(
     recipientEmail = (profile as any)?.email || '';
   } catch { /* ignore */ }
 
-  const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+  const ccEmails = MANAGER_CC_EMAILS;
   const kind = `delivery_delay_red`;
 
   // 去重：同一节点只发一次 RED 预警
