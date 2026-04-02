@@ -293,15 +293,14 @@ function NewOrderWizard() {
   }
 
   function handleStep3Continue() {
-    router.push('/orders/new?step=4&order_id=' + orderId);
-    setCurrentStep(4);
-  }
-
-  useEffect(() => {
-    if (currentStep === 4 && orderId) {
-      setTimeout(() => { router.push('/orders/' + orderId); }, 1500);
+    if (orderId) {
+      // 直接跳转到订单详情页，不再经过 step 4 中转
+      router.push('/orders/' + orderId);
+    } else {
+      // 兜底：如果 orderId 丢失，回到订单列表
+      router.push('/orders');
     }
-  }, [currentStep, orderId, router]);
+  }
 
   const stepLabels = ['创建订单', '执行节拍', '执行说明', '进入执行'];
 
@@ -934,18 +933,25 @@ function NewOrderWizard() {
         </div>
       )}
 
-      {/* ════ STEP 4：完成 ════ */}
+      {/* ════ STEP 4：完成（兜底页，正常流程不会停留） ════ */}
       {currentStep === 4 && (
         <div className="rounded-xl border border-gray-200 bg-white p-8 text-center">
           <div className="py-12">
             <div className="text-5xl mb-4">✅</div>
             <h2 className="text-2xl font-bold mb-2">订单创建成功！</h2>
-            <p className="text-gray-500 mb-6">正在跳转到订单执行页面...</p>
-            {orderId && (
-              <Link href={'/orders/' + orderId} className="text-indigo-600 hover:underline text-sm">
-                如未自动跳转，请点击这里
-              </Link>
-            )}
+            <div className="flex flex-col items-center gap-3 mt-4">
+              {orderId ? (
+                <Link href={'/orders/' + orderId}
+                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors">
+                  进入订单执行页 →
+                </Link>
+              ) : (
+                <Link href="/orders"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors">
+                  返回订单列表
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       )}
