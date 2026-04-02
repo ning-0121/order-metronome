@@ -237,6 +237,19 @@ export function hasChecklistForStep(stepKey: string): boolean {
   return stepKey in CHECKLIST_MAP;
 }
 
+/** 安全解析 checklist_data（可能是 JSON 字符串或数组） */
+function parseChecklistData(data: unknown): ChecklistData {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  }
+  return [];
+}
+
 /** 校验检查清单是否全部必填项已完成 */
 export function validateChecklistComplete(
   stepKey: string,
@@ -246,7 +259,8 @@ export function validateChecklistComplete(
   if (!config) return { valid: true, missing: [] };
 
   const missing: string[] = [];
-  const responseMap = new Map((data || []).map(r => [r.key, r]));
+  const safeData = parseChecklistData(data);
+  const responseMap = new Map(safeData.map(r => [r.key, r]));
 
   for (const item of config.items) {
     if (!item.required) continue;
@@ -268,7 +282,8 @@ export function getScheduleAffectingItems(
   if (!config || !data) return [];
 
   const results: { key: string; label: string; pending_date: string }[] = [];
-  const responseMap = new Map(data.map(r => [r.key, r]));
+  const safeData = parseChecklistData(data);
+  const responseMap = new Map(safeData.map(r => [r.key, r]));
 
   for (const item of config.items) {
     if (item.type !== 'pending_date' || !item.affectsSchedule) continue;
