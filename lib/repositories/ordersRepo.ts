@@ -6,6 +6,7 @@
 import { createClient } from '@/lib/supabase/server';
 import {
   transitionOrderLifecycle,
+  normalizeMilestoneStatus,
   type OrderLifecycleStatus,
 } from '@/lib/domain/types';
 import { createMilestone, transitionMilestoneStatus } from './milestonesRepo';
@@ -53,6 +54,7 @@ const INSERT_WHITELIST = [
 
 const UPDATE_WHITELIST = [
   'customer_name',
+  'customer_id',
   'incoterm',
   'etd',
   'warehouse_due_date',
@@ -73,6 +75,15 @@ const UPDATE_WHITELIST = [
   'order_date',
   'factory_id',
   'factory_name',
+  'is_new_customer',
+  'is_new_factory',
+  'special_tags',
+  'style_count',
+  'color_count',
+  'factory_date',
+  'internal_order_no',
+  'quantity_unit',
+  'eta',
 ] as const;
 
 // ⚠️ 系统级约束：order_no 一旦生成，永不修改
@@ -456,10 +467,7 @@ export async function activateOrder(
   // 如果所有里程碑都是"未开始"，将第一个设为"进行中"
   if (milestones && milestones.length > 0) {
     const allNotStarted = milestones.every((m: any) => {
-      const status = m.status === 'pending' ? '未开始' : 
-                     m.status === 'in_progress' ? '进行中' :
-                     m.status === 'done' ? '已完成' :
-                     m.status === 'blocked' ? '卡住' : m.status;
+      const status = normalizeMilestoneStatus(m.status);
       return status === '未开始';
     });
     
@@ -726,10 +734,7 @@ export async function completeOrder(
   
   if (milestones && milestones.length > 0) {
     const allCompleted = milestones.every((m: any) => {
-      const status = m.status === 'pending' ? '未开始' : 
-                     m.status === 'in_progress' ? '进行中' :
-                     m.status === 'done' ? '已完成' :
-                     m.status === 'blocked' ? '卡住' : m.status;
+      const status = normalizeMilestoneStatus(m.status);
       return status === '已完成';
     });
     

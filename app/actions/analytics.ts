@@ -151,12 +151,13 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
     }
   });
 
-  const phaseData: Record<string, { total: number; completed: number; onTime: number }> = {};
+  const now = new Date();
+  const phaseData: Record<string, { total: number; completed: number; onTime: number; overdue: number }> = {};
 
   (milestones || []).forEach((m: any) => {
     const phase = PHASE_MAP[m.step_key];
     if (!phase) return;
-    if (!phaseData[phase]) phaseData[phase] = { total: 0, completed: 0, onTime: 0 };
+    if (!phaseData[phase]) phaseData[phase] = { total: 0, completed: 0, onTime: 0, overdue: 0 };
     phaseData[phase].total += 1;
 
     if (_isDone(m.status)) {
@@ -164,6 +165,8 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
       if (m.due_at && (!m.actual_at || new Date(m.actual_at) <= new Date(m.due_at))) {
         phaseData[phase].onTime += 1;
       }
+    } else if ((m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < now) {
+      phaseData[phase].overdue += 1;
     }
   });
 

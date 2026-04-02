@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { calcDueDates } from '@/lib/schedule';
+import { MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
 import { updateMilestone, updateMilestones } from '@/lib/repositories/milestonesRepo';
 import { sendEmailNotification } from '@/lib/utils/notifications';
 
@@ -173,7 +174,7 @@ export async function createDelayRequest(
   } catch (e) {
     // Use current user email as fallback
   }
-  const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+  const ccEmails = MANAGER_CC_EMAILS;
 
   const subject = `[Delay Request] Order ${orderData.order_no} - ${milestoneData.name}`;
   const body = `
@@ -331,7 +332,7 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
   } catch (e) {
     // Use current user email as fallback
   }
-  const ccEmails = ['su@qimoclothing.com', 'alex@qimoclothing.com'];
+  const ccEmails = MANAGER_CC_EMAILS;
 
   const subject = `[Approved] Delay Request - Order ${orderData.order_no}`;
   const body = `

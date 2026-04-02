@@ -4,7 +4,8 @@ import crypto from 'crypto';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { sendEmailNotification } from '@/lib/utils/notifications';
 
-const SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'fallback-secret';
+// Use a dedicated secret for HMAC signing. Falls back to service role key (server-only, never public).
+const SECRET = process.env.RESET_TOKEN_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 /**
  * Generate a signed reset token (HMAC-based, no DB needed)

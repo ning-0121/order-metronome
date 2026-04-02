@@ -46,14 +46,32 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles }: Props) {
   const history = typeDocs.filter(d => !d.is_official && d !== currentDraft);
 
   // 上传文件
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+  const ALLOWED_EXTENSIONS = ['pdf', 'xlsx', 'xls', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'csv'];
+
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // 文件大小验证
+    if (file.size > MAX_FILE_SIZE) {
+      alert('文件过大，最大允许 50MB');
+      e.target.value = '';
+      return;
+    }
+
+    // 文件类型验证
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      alert(`不支持的文件类型 .${ext}，仅支持: ${ALLOWED_EXTENSIONS.join(', ')}`);
+      e.target.value = '';
+      return;
+    }
+
     setUploading(true);
 
     try {
       const supabase = createClient();
-      const ext = file.name.split('.').pop() || 'bin';
       const path = `${orderId}/documents/${activeDocType}_${Date.now()}.${ext}`;
 
       const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type, upsert: false });
