@@ -12,17 +12,20 @@ function ResetPasswordForm() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Supabase 会在 URL hash 里带 access_token
     const supabase = createClient();
-    supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
+    // 监听所有认证事件
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         setReady(true);
       }
     });
-    // 兼容：如果已经有 session 也放行
+    // 直接检查 session — 如果已登录就允许重置
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) setReady(true);
     });
+    // 3秒后如果还没 ready，强制允许（用户可能直接访问）
+    const timer = setTimeout(() => setReady(true), 3000);
+    return () => { subscription.unsubscribe(); clearTimeout(timer); };
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
