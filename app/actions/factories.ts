@@ -14,7 +14,16 @@ export interface Factory {
   category: string | null;
   cooperation_status: string | null;
   notes: string | null;
+  product_categories: string[] | null;
+  worker_count: number | null;
+  monthly_capacity: number | null;
+  capacity_unit: string | null;
 }
+
+export const PRODUCT_CATEGORIES = [
+  '瑜伽夹克', '瑜伽文胸', '瑜伽裤子', '瑜伽套装',
+  'T恤', '拉毛裤子', '拉毛上衣', '梭织上衣', '梭织裤子',
+] as const;
 
 /**
  * 获取所有工厂（按名称排序，排除已软删除）
@@ -25,7 +34,7 @@ export async function getFactories(): Promise<{ data: Factory[] | null; error: s
   if (!user) return { data: null, error: '请先登录' };
 
   const { data, error } = await (supabase.from('factories') as any)
-    .select('id, factory_code, factory_name, contact_name, phone, country, city, address, category, cooperation_status, notes')
+    .select('id, factory_code, factory_name, contact_name, phone, country, city, address, category, cooperation_status, notes, product_categories, worker_count, monthly_capacity, capacity_unit')
     .is('deleted_at', null)
     .order('factory_name', { ascending: true });
 
@@ -37,7 +46,8 @@ export async function getFactories(): Promise<{ data: Factory[] | null; error: s
  * 新建工厂（最少字段：factory_name 必填）
  */
 export async function createFactory(
-  factoryName: string
+  factoryName: string,
+  extra?: { product_categories?: string[]; worker_count?: number; monthly_capacity?: number }
 ): Promise<{ data: Factory | null; error: string | null }> {
   const trimmed = factoryName?.trim();
   if (!trimmed) return { data: null, error: '工厂名称不能为空' };
@@ -46,9 +56,14 @@ export async function createFactory(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: '请先登录' };
 
+  const insertPayload: Record<string, any> = { factory_name: trimmed };
+  if (extra?.product_categories?.length) insertPayload.product_categories = extra.product_categories;
+  if (extra?.worker_count) insertPayload.worker_count = extra.worker_count;
+  if (extra?.monthly_capacity) insertPayload.monthly_capacity = extra.monthly_capacity;
+
   const { data, error } = await (supabase.from('factories') as any)
-    .insert({ factory_name: trimmed })
-    .select('id, factory_code, factory_name, contact_name, phone, country, city, address, category, cooperation_status, notes')
+    .insert(insertPayload)
+    .select('id, factory_code, factory_name, contact_name, phone, country, city, address, category, cooperation_status, notes, product_categories, worker_count, monthly_capacity, capacity_unit')
     .single();
 
   if (error) {
