@@ -22,6 +22,7 @@ import { RecalcButton } from '@/components/RecalcButton';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
+import { PackingFilesSection } from '@/components/PackingFilesSection';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -221,7 +222,7 @@ export default async function OrderDetailPage({
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
-          { key: 'bom', label: '原辅料单' },
+          { key: 'bom', label: '包装资料' },
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
@@ -516,6 +517,7 @@ export default async function OrderDetailPage({
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm font-medium text-gray-900">
                             {actionLabels[log.action] || log.action}
+                            {log.milestone_name && <span className="ml-1 text-xs font-normal text-indigo-600">「{log.milestone_name}」</span>}
                             <span className="ml-2 text-xs font-normal text-gray-500">— {actorName}</span>
                           </span>
                           <span className="text-xs text-gray-400 flex-shrink-0">{formatDate(log.created_at)}</span>
@@ -531,11 +533,16 @@ export default async function OrderDetailPage({
             )}
           </div>
         )}
-        {/* Tab: 原辅料单 */}
+        {/* Tab: 包装资料 */}
         {activeTab === 'bom' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">原辅料单</h2>
-            <BomTab orderId={id} />
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">📦 包装资料</h2>
+            {/* 已上传的包装文件 */}
+            <PackingFilesSection orderId={id} />
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-4">原辅料清单 (BOM)</h3>
+              <BomTab orderId={id} />
+            </div>
           </div>
         )}
 

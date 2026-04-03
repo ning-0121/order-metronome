@@ -88,9 +88,25 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
   }
 
   const risk = analysis ? RISK_STYLES[analysis.riskLevel] : null;
+  const today = new Date().toISOString().slice(0, 10);
+  const hasReportToday = reports.some(r => r.report_date === today);
 
   return (
     <div className="space-y-5">
+      {/* ── 今日日报提醒 ── */}
+      {canReport && !hasReportToday && reports.length > 0 && (
+        <div className="rounded-xl p-4 bg-amber-50 border border-amber-200 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-900">⏰ 今日尚未提交生产日报</p>
+            <p className="text-xs text-amber-700 mt-0.5">请在每日下班前更新生产进度，保持数据实时性</p>
+          </div>
+          <button onClick={() => setShowForm(true)}
+            className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 shrink-0">
+            立即填报
+          </button>
+        </div>
+      )}
+
       {/* ── AI 分析概览 ── */}
       {analysis && (
         <div className={`rounded-xl p-5 border ${risk?.bg} ${risk?.border}`}>
