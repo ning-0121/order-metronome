@@ -128,7 +128,10 @@ export async function getUserMilestones(userId: string) {
   return { data: milestones };
 }
 
-export async function markMilestoneDone(milestoneId: string) {
+export async function markMilestoneDone(
+  milestoneId: string,
+  checklistData?: Array<{ key: string; value: any; pending_date?: string }> | null,
+) {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -192,6 +195,36 @@ export async function markMilestoneDone(milestoneId: string) {
   // Check checklist completion (if milestone has a checklist)
   const { hasChecklistForStep, validateChecklistComplete } = await import('@/lib/domain/checklist');
   if (hasChecklistForStep(milestone.step_key)) {
+    // 如果客户端传入了清单数据，先保存到 DB（一步完成，无需用户手动点保存）
+    if (checklistData && checklistData.length > 0) {
+      const now = new Date().toISOString();
+      // 获取已有数据并合并
+      const { data: existingMs } = await (supabase.from('milestones') as any)
+        .select('checklist_data').eq('id', milestoneId).single();
+      const existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> = existingMs?.checklist_data || [];
+      const mergeMap = new Map(existing.map((r: any) => [r.key, r]));
+      for (const item of checklistData) {
+        mergeMap.set(item.key, {
+          key: item.key,
+          value: item.value,
+          pending_date: item.pending_date || undefined,
+          updated_at: now,
+          updated_by: user.id,
+        });
+      }
+      const merged = Array.from(mergeMap.values());
+      // 保存
+      await (supabase.rpc as any)('admin_update_milestone', {
+        _milestone_id: milestoneId,
+        _updates: { checklist_data: JSON.stringify(merged) },
+      }).catch(async () => {
+        await (supabase.from('milestones') as any)
+          .update({ checklist_data: merged })
+          .eq('id', milestoneId);
+      });
+    }
+
+    // 再从 DB 读取验证
     const { data: msWithChecklist } = await (supabase.from('milestones') as any)
       .select('checklist_data').eq('id', milestoneId).single();
     const checkResult = validateChecklistComplete(milestone.step_key, msWithChecklist?.checklist_data || null);
