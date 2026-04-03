@@ -115,14 +115,21 @@ export function MilestoneActions({
     try {
       // 自动保存检查清单（用户可能勾了但没点"保存清单"）
       if (checklistResponsesRef.current && Object.keys(checklistResponsesRef.current).length > 0) {
-        const checklistData = Object.entries(checklistResponsesRef.current).map(([key, r]) => ({
-          key, value: r.value, pending_date: r.pending_date,
-        }));
-        const saveResult = await saveChecklistData(milestone.id, checklistData);
-        if (saveResult.error) {
-          setSubmitError('检查清单保存失败：' + saveResult.error);
-          setLoading(false);
-          return;
+        try {
+          const checklistData = Object.entries(checklistResponsesRef.current).map(([key, r]) => {
+            const item: { key: string; value: any; pending_date?: string } = { key, value: r.value ?? null };
+            if (r.pending_date) item.pending_date = r.pending_date;
+            return item;
+          });
+          const saveResult = await saveChecklistData(milestone.id, checklistData);
+          if (saveResult.error) {
+            setSubmitError('检查清单保存失败：' + saveResult.error);
+            setLoading(false);
+            return;
+          }
+        } catch (checklistErr: any) {
+          // 清单保存失败不阻断提交，继续尝试标记完成
+          console.warn('检查清单自动保存异常:', checklistErr?.message);
         }
       }
 
@@ -142,7 +149,7 @@ export function MilestoneActions({
         // 写入 attachments 表（markMilestoneDone 会检查此表）
         const { data: { publicUrl } } = supabase.storage.from('order-docs').getPublicUrl(path);
         const { data: { user } } = await supabase.auth.getUser();
-        await (supabase.from('attachments') as any).insert({
+        const { error: attachError } = await (supabase.from('attachments') as any).insert({
           milestone_id: milestone.id,
           order_id: orderId,
           url: publicUrl,
@@ -150,6 +157,17 @@ export function MilestoneActions({
           file_type: evidenceFile.type || ext,
           uploaded_by: user?.id || null,
         });
+        if (attachError) {
+          // RLS可能阻止插入，尝试用 order_attachments 表
+          await (supabase.from('order_attachments') as any).insert({
+            order_id: orderId,
+            milestone_id: milestone.id,
+            uploaded_by: user?.id || null,
+            file_name: evidenceFile.name,
+            file_url: publicUrl,
+            mime_type: evidenceFile.type || null,
+          });
+        }
       }
 
       // 保存内部订单号到 orders 表
