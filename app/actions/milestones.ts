@@ -214,15 +214,16 @@ export async function markMilestoneDone(
         });
       }
       const merged = Array.from(mergeMap.values());
-      // 保存
-      await (supabase.rpc as any)('admin_update_milestone', {
+      // 保存（先尝试 RPC，失败则直接更新）
+      const { error: rpcErr } = await (supabase.rpc as any)('admin_update_milestone', {
         _milestone_id: milestoneId,
         _updates: { checklist_data: JSON.stringify(merged) },
-      }).catch(async () => {
+      });
+      if (rpcErr) {
         await (supabase.from('milestones') as any)
           .update({ checklist_data: merged })
           .eq('id', milestoneId);
-      });
+      }
     }
 
     // 再从 DB 读取验证
@@ -524,15 +525,15 @@ async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
       if (dueAt < now) {
         const { ensureBusinessDay, addWorkingDays } = await import('@/lib/utils/date');
         const newDue = ensureBusinessDay(addWorkingDays(now, 2));
-        await (supabase.rpc as any)('admin_update_milestone', {
+        const { error: rpcErr2 } = await (supabase.rpc as any)('admin_update_milestone', {
           _milestone_id: next.id,
           _updates: { due_at: newDue.toISOString(), planned_at: newDue.toISOString() },
-        }).catch(async () => {
-          // fallback: RPC不可用时直接更新
+        });
+        if (rpcErr2) {
           await (supabase.from('milestones') as any)
             .update({ due_at: newDue.toISOString(), planned_at: newDue.toISOString() })
             .eq('id', next.id);
-        });
+        }
       }
     }
   }
@@ -1099,15 +1100,16 @@ export async function saveChecklistData(
   const merged = Array.from(existingMap.values());
 
   // 保存到数据库（用 RPC 绕过 RLS）
-  await (supabase.rpc as any)('admin_update_milestone', {
+  const { error: rpcSaveErr } = await (supabase.rpc as any)('admin_update_milestone', {
     _milestone_id: milestoneId,
     _updates: { checklist_data: JSON.stringify(merged) },
-  }).catch(async () => {
-    // RPC 不支持 JSONB 时 fallback 到直接更新
+  });
+  if (rpcSaveErr) {
+    // RPC 不可用时 fallback 到直接更新
     await (supabase.from('milestones') as any)
       .update({ checklist_data: merged })
       .eq('id', milestoneId);
-  });
+  }
 
   // 检查是否有影响排期的项
   const { getScheduleAffectingItems } = await import('@/lib/domain/checklist');
