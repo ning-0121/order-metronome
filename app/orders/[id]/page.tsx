@@ -547,11 +547,7 @@ export default async function OrderDetailPage({
               <h3 className="text-sm font-semibold text-gray-700 mb-3">🧵 原辅料单</h3>
               <PackingFilesSection orderId={id} fileTypes={['trims_sheet', 'production_order']} emptyText="业务在「生产单上传」节点上传的原辅料单将显示在这里" />
             </div>
-            {/* BOM 清单 */}
-            <div className="pt-4 border-t border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4">📝 BOM 物料清单</h3>
-              <BomTab orderId={id} />
-            </div>
+            {/* BOM 清单已移除 */}
           </div>
         )}
 
