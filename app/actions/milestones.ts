@@ -132,6 +132,7 @@ export async function markMilestoneDone(
   milestoneId: string,
   checklistData?: Array<{ key: string; value: any; pending_date?: string }> | null,
 ) {
+  try {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -399,6 +400,11 @@ export async function markMilestoneDone(
   revalidatePath('/orders');
 
   return { data: updatedMilestone };
+  } catch (err: any) {
+    // 捕获所有未处理异常，返回可读错误而非 Next.js 通用错误
+    console.error('[markMilestoneDone] 未捕获异常:', err?.message, err?.stack);
+    return { error: `服务端异常：${err?.message || '未知错误'}` };
+  }
 }
 
 export async function markMilestoneBlocked(milestoneId: string, blockedReason: string) {

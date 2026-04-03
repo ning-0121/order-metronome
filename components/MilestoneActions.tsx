@@ -185,7 +185,13 @@ export function MilestoneActions({
         router.refresh();
       }
     } catch (err: any) {
-      setSubmitError('操作失败：' + err.message);
+      // 如果是 Next.js 通用错误，给出更友好提示
+      const msg = err?.message || '';
+      if (msg.includes('Server Components') || msg.includes('server')) {
+        setSubmitError('提交失败，请刷新页面后重试。如仍失败请联系管理员。');
+      } else {
+        setSubmitError('操作失败：' + msg);
+      }
     }
     setLoading(false);
   }
