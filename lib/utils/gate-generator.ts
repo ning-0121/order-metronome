@@ -66,12 +66,12 @@ export function generateGateSchedule(params: OrderParams): GateSchedule[] {
     if (!etd) {
       throw new Error('FOB 订单必须提供 ETD');
     }
-    anchorDate = ensureBusinessDay(new Date(etd + 'T00:00:00'));
+    anchorDate = ensureBusinessDay(new Date(etd + 'T00:00:00+08:00'));
   } else {
     if (!warehouse_due_date) {
       throw new Error('DDP 订单必须提供 Warehouse Due Date');
     }
-    anchorDate = ensureBusinessDay(new Date(warehouse_due_date + 'T00:00:00'));
+    anchorDate = ensureBusinessDay(new Date(warehouse_due_date + 'T00:00:00+08:00'));
   }
 
   // 第一步：筛选应该生成的 Gate
