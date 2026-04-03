@@ -16,13 +16,17 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
 
   async function handleApprove() {
     setLoading(true);
-    const result = await approveDelayRequest(delayRequestId, decisionNote || undefined);
-    if (!result.error) {
-      router.refresh();
-      setShowForm(false);
-      setDecisionNote('');
-    } else {
-      alert(result.error);
+    try {
+      const result = await approveDelayRequest(delayRequestId, decisionNote || '');
+      if (!result.error) {
+        router.refresh();
+        setShowForm(false);
+        setDecisionNote('');
+      } else {
+        alert('批准失败：' + result.error);
+      }
+    } catch (err: any) {
+      alert('批准异常：' + (err?.message || '未知错误'));
     }
     setLoading(false);
   }
@@ -33,13 +37,17 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
       return;
     }
     setLoading(true);
-    const result = await rejectDelayRequest(delayRequestId, decisionNote);
-    if (!result.error) {
-      router.refresh();
-      setShowForm(false);
-      setDecisionNote('');
-    } else {
-      alert(result.error);
+    try {
+      const result = await rejectDelayRequest(delayRequestId, decisionNote);
+      if (!result.error) {
+        router.refresh();
+        setShowForm(false);
+        setDecisionNote('');
+      } else {
+        alert('驳回失败：' + result.error);
+      }
+    } catch (err: any) {
+      alert('驳回异常：' + (err?.message || '未知错误'));
     }
     setLoading(false);
   }

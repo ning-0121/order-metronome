@@ -214,6 +214,7 @@ export async function createDelayRequest(
 }
 
 export async function approveDelayRequest(delayRequestId: string, decisionNote?: string) {
+  try {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -362,6 +363,10 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
   revalidatePath('/admin');
 
   return { data: updatedRequest };
+  } catch (err: any) {
+    console.error('[approveDelayRequest] 异常:', err?.message);
+    return { error: `审批异常：${err?.message || '未知错误'}` };
+  }
 }
 
 export async function rejectDelayRequest(delayRequestId: string, decisionNote: string) {
