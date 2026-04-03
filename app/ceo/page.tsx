@@ -254,7 +254,20 @@ export default async function CEOWarRoom() {
     aiInsights.push(`⚡ 未来48小时有 ${(tomorrowRisk || []).length} 个节点即将到期，建议提前跟进。`);
   }
 
-  // ===== 订单流动状态 =====
+  // ===== 订单三阶段分类 =====
+  const newOrders = ordersWithMilestones.filter(o => {
+    const ls = o.lifecycle_status || '';
+    return ls === 'draft' || ls === '草稿' || ls === 'active' || ls === '已生效';
+  });
+  const inProgressOrders = ordersWithMilestones.filter(o => {
+    const ls = o.lifecycle_status || '';
+    return ls === '执行中' || ls === 'running';
+  });
+  const completedOrders = ordersWithMilestones.filter(o => {
+    const ls = o.lifecycle_status || '';
+    return ls === '已完成' || ls === 'completed' || ls === '待复盘' || ls === '已复盘';
+  });
+  // 保留旧分类（兼容）
   const inProgress = ordersWithMilestones.filter(o => {
     const ms = o.milestones || [];
     return ms.some((m: any) => _isActive(m.status)) && !ms.every((m: any) => _isDone(m.status));
@@ -267,6 +280,23 @@ export default async function CEOWarRoom() {
   const delayed = ordersWithMilestones.filter(o => {
     return (o.milestones || []).some((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at));
   });
+
+  // 新订单分析数据
+  const thisMonthNew = newOrders.filter(o => (o.created_at || '').slice(0, 7) === now.toISOString().slice(0, 7));
+  const newOrderTotalQty = newOrders.reduce((s: number, o: any) => s + (o.quantity || 0), 0);
+  const newCustomers = new Set(newOrders.map((o: any) => o.customer_name).filter(Boolean));
+
+  // 进行中分析
+  const overdueInProgress = inProgressOrders.filter(o =>
+    (o.milestones || []).some((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at))
+  );
+  const blockedInProgress = inProgressOrders.filter(o =>
+    (o.milestones || []).some((m: any) => _isBlocked(m.status))
+  );
+
+  // 已完成复盘
+  const needRetrospective = completedOrders.filter(o => o.lifecycle_status === '待复盘');
+  const retrospected = completedOrders.filter(o => o.lifecycle_status === '已复盘');
 
   // ===== 页面渲染 =====
   const TYPE_COLORS: Record<string, string> = {
@@ -638,46 +668,155 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
-      {/* ===== 6. 订单流动状态 ===== */}
+      {/* ===== 6. 订单三阶段分析 ===== */}
       <div className="grid md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-blue-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-blue-900">🔄 进行中</h3>
-            <span className="text-2xl font-bold text-blue-600">{inProgress.length}</span>
+
+        {/* 新订单分析 & 接单建议 */}
+        <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden">
+          <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-100">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-indigo-900">📥 新订单分析</h3>
+              <span className="text-xl font-bold text-indigo-600">{newOrders.length}</span>
+            </div>
+            <p className="text-xs text-indigo-600 mt-0.5">待启动 / 已生效未执行</p>
           </div>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {inProgress.slice(0, 8).map((o: any) => (
-              <Link key={o.id} href={`/orders/${o.id}`} className="block text-sm text-gray-700 hover:text-blue-600 truncate">
-                {o.order_no} — {o.customer_name}
-              </Link>
-            ))}
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className="bg-indigo-50/50 rounded-lg p-2">
+                <div className="text-lg font-bold text-indigo-700">{thisMonthNew.length}</div>
+                <div className="text-xs text-gray-500">本月新增</div>
+              </div>
+              <div className="bg-indigo-50/50 rounded-lg p-2">
+                <div className="text-lg font-bold text-indigo-700">{newOrderTotalQty.toLocaleString()}</div>
+                <div className="text-xs text-gray-500">待排产件数</div>
+              </div>
+            </div>
+            <div className="text-xs text-gray-500">涉及 <span className="font-medium text-gray-700">{newCustomers.size}</span> 个客户</div>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {newOrders.map((o: any) => (
+                <Link key={o.id} href={`/orders/${o.id}`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-indigo-50 text-sm group">
+                  <span className="truncate">
+                    <span className="font-medium text-gray-900">{o.order_no}</span>
+                    <span className="text-gray-500 ml-1">{o.customer_name}</span>
+                  </span>
+                  <span className="text-xs text-gray-400 shrink-0 ml-2">{o.quantity ? `${o.quantity}件` : ''}</span>
+                </Link>
+              ))}
+              {newOrders.length === 0 && <p className="text-sm text-gray-400 text-center py-2">暂无新订单</p>}
+            </div>
+            {newOrders.length > 0 && (
+              <div className="pt-2 border-t border-gray-100">
+                <p className="text-xs text-indigo-700 font-medium">💡 接单建议</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  {newOrders.length >= 5
+                    ? '新订单较多，建议优先确认工厂产能和原料到位情况，避免扎堆上线。'
+                    : newOrders.length >= 2
+                    ? '新订单适量，建议按交期紧急程度排序启动。'
+                    : '新订单较少，可考虑主动联系客户开发新单。'}
+                </p>
+              </div>
+            )}
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-green-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-green-900">📦 待出货</h3>
-            <span className="text-2xl font-bold text-green-600">{readyToShip.length}</span>
+
+        {/* 进行中订单 */}
+        <div className="bg-white rounded-xl border border-blue-200 shadow-sm overflow-hidden">
+          <div className="bg-blue-50 px-4 py-3 border-b border-blue-100">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-blue-900">🔄 进行中订单</h3>
+              <span className="text-xl font-bold text-blue-600">{inProgressOrders.length}</span>
+            </div>
+            <p className="text-xs text-blue-600 mt-0.5">执行中 · 各节点推进状态</p>
           </div>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {readyToShip.slice(0, 8).map((o: any) => (
-              <Link key={o.id} href={`/orders/${o.id}`} className="block text-sm text-gray-700 hover:text-green-600 truncate">
-                {o.order_no} — {o.customer_name}
-              </Link>
-            ))}
-            {readyToShip.length === 0 && <p className="text-sm text-gray-400">暂无</p>}
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-blue-50/50 rounded-lg p-2">
+                <div className="text-lg font-bold text-blue-700">{inProgressOrders.length}</div>
+                <div className="text-xs text-gray-500">执行中</div>
+              </div>
+              <div className="bg-red-50/50 rounded-lg p-2">
+                <div className="text-lg font-bold text-red-600">{overdueInProgress.length}</div>
+                <div className="text-xs text-gray-500">有超期</div>
+              </div>
+              <div className="bg-orange-50/50 rounded-lg p-2">
+                <div className="text-lg font-bold text-orange-600">{blockedInProgress.length}</div>
+                <div className="text-xs text-gray-500">有阻塞</div>
+              </div>
+            </div>
+            {overdueInProgress.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-red-700 mb-1">超期订单：</p>
+                <div className="space-y-1 max-h-24 overflow-y-auto">
+                  {overdueInProgress.map((o: any) => (
+                    <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block text-sm text-red-700 hover:text-red-900 truncate px-2">
+                      {o.order_no} — {o.customer_name}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {inProgressOrders.filter(o => !overdueInProgress.includes(o)).slice(0, 8).map((o: any) => (
+                <Link key={o.id} href={`/orders/${o.id}`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-blue-50 text-sm">
+                  <span className="truncate">
+                    <span className="font-medium text-gray-900">{o.order_no}</span>
+                    <span className="text-gray-500 ml-1">{o.customer_name}</span>
+                  </span>
+                  <span className="text-xs text-gray-400 shrink-0 ml-2">{o.quantity ? `${o.quantity}件` : ''}</span>
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-red-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-red-900">⚠️ 已延期</h3>
-            <span className="text-2xl font-bold text-red-600">{delayed.length}</span>
+
+        {/* 已完成订单复盘 */}
+        <div className="bg-white rounded-xl border border-green-200 shadow-sm overflow-hidden">
+          <div className="bg-green-50 px-4 py-3 border-b border-green-100">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-green-900">✅ 已完成 & 复盘</h3>
+              <span className="text-xl font-bold text-green-600">{completedOrders.length}</span>
+            </div>
+            <p className="text-xs text-green-600 mt-0.5">已完成订单 · 待复盘 / 已复盘</p>
           </div>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {delayed.slice(0, 8).map((o: any) => (
-              <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block text-sm text-gray-700 hover:text-red-600 truncate">
-                {o.order_no} — {o.customer_name}
-              </Link>
-            ))}
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className="bg-amber-50/50 rounded-lg p-2">
+                <div className="text-lg font-bold text-amber-700">{needRetrospective.length}</div>
+                <div className="text-xs text-gray-500">待复盘</div>
+              </div>
+              <div className="bg-green-50/50 rounded-lg p-2">
+                <div className="text-lg font-bold text-green-700">{retrospected.length}</div>
+                <div className="text-xs text-gray-500">已复盘</div>
+              </div>
+            </div>
+            {needRetrospective.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-amber-700 mb-1">待复盘订单：</p>
+                <div className="space-y-1 max-h-24 overflow-y-auto">
+                  {needRetrospective.map((o: any) => (
+                    <Link key={o.id} href={`/orders/${o.id}/retrospective`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-amber-50 text-sm group">
+                      <span className="truncate">
+                        <span className="font-medium text-gray-900">{o.order_no}</span>
+                        <span className="text-gray-500 ml-1">{o.customer_name}</span>
+                      </span>
+                      <span className="text-xs text-amber-600 font-medium">去复盘 →</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+            {completedOrders.length > 0 && (
+              <div className="pt-2 border-t border-gray-100">
+                <p className="text-xs text-green-700 font-medium">📊 完成概览</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  共完成 {completedOrders.length} 单，
+                  {retrospected.length > 0 ? `已复盘 ${retrospected.length} 单` : ''}
+                  {needRetrospective.length > 0 ? `，${needRetrospective.length} 单待复盘` : ''}
+                  {needRetrospective.length === 0 && retrospected.length === 0 ? '暂无复盘记录' : ''}
+                </p>
+              </div>
+            )}
+            {completedOrders.length === 0 && <p className="text-sm text-gray-400 text-center py-2">暂无已完成订单</p>}
           </div>
         </div>
       </div>
