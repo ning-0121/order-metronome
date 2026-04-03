@@ -356,24 +356,24 @@ export default async function CEOWarRoom() {
         );
       })()}
 
-      {/* ===== 状态概览卡片 ===== */}
+      {/* ===== 状态概览卡片（可点击跳转） ===== */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+        <a href="#risk-red" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-red-300 hover:shadow-md transition-all cursor-pointer">
           <div className="text-3xl font-bold text-red-600">{riskRed.length}</div>
           <div className="text-xs text-gray-500 mt-1">🔴 红色风险</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+        </a>
+        <a href="#risk-yellow" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-yellow-300 hover:shadow-md transition-all cursor-pointer">
           <div className="text-3xl font-bold text-yellow-600">{riskYellow.length}</div>
           <div className="text-xs text-gray-500 mt-1">🟡 黄色关注</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+        </a>
+        <a href="#risk-green" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-green-300 hover:shadow-md transition-all cursor-pointer">
           <div className="text-3xl font-bold text-green-600">{riskGreen.length}</div>
           <div className="text-xs text-gray-500 mt-1">🟢 绿色正常</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+        </a>
+        <a href="#risk-blocked" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
           <div className="text-3xl font-bold text-orange-600">{blockedMilestones.length}</div>
           <div className="text-xs text-gray-500 mt-1">🔒 阻塞中</div>
-        </div>
+        </a>
         <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
           <div className="text-3xl font-bold text-indigo-600">{completionRate}%</div>
           <div className="text-xs text-gray-500 mt-1">📊 完成率</div>
@@ -452,8 +452,8 @@ export default async function CEOWarRoom() {
           </div>
           <div className="p-4 space-y-3">
             {/* 红色 */}
-            <details open={riskRed.length > 0}>
-              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-red-50 rounded-lg">
+            <details id="risk-red" open={riskRed.length > 0}>
+              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-red-50 rounded-lg scroll-mt-4">
                 <span className="font-semibold text-red-800">🔴 红色风险</span>
                 <span className="text-sm font-bold text-red-700">{riskRed.length}</span>
               </summary>
@@ -480,8 +480,8 @@ export default async function CEOWarRoom() {
               </div>
             </details>
             {/* 黄色 */}
-            <details>
-              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-yellow-50 rounded-lg">
+            <details id="risk-yellow" open={riskYellow.length > 0}>
+              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-yellow-50 rounded-lg scroll-mt-4">
                 <span className="font-semibold text-yellow-800">🟡 黄色关注</span>
                 <span className="text-sm font-bold text-yellow-700">{riskYellow.length}</span>
               </summary>
@@ -508,8 +508,8 @@ export default async function CEOWarRoom() {
               </div>
             </details>
             {/* 绿色 */}
-            <details>
-              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-green-50 rounded-lg">
+            <details id="risk-green">
+              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-green-50 rounded-lg scroll-mt-4">
                 <span className="font-semibold text-green-800">🟢 正常</span>
                 <span className="text-sm font-bold text-green-700">{riskGreen.length}</span>
               </summary>
@@ -521,6 +521,31 @@ export default async function CEOWarRoom() {
                       <span className="text-gray-500 ml-2">{o.customer_name}</span>
                     </span>
                     <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
+                  </Link>
+                ))}
+              </div>
+            </details>
+            {/* 阻塞中 */}
+            <details id="risk-blocked" open={blockedMilestones.length > 0}>
+              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-orange-50 rounded-lg scroll-mt-4">
+                <span className="font-semibold text-orange-800">🔒 阻塞中</span>
+                <span className="text-sm font-bold text-orange-700">{blockedMilestones.length}</span>
+              </summary>
+              <div className="mt-2 space-y-1 pl-2">
+                {blockedMilestones.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-1">无</p>
+                ) : blockedMilestones.slice(0, 10).map((m: any) => (
+                  <Link key={m.id} href={`/orders/${m.order_id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-orange-50/50 text-sm group">
+                    <div className="flex items-center justify-between">
+                      <span>
+                        <span className="font-medium text-gray-900">{m.orders?.order_no || m.order_id}</span>
+                        <span className="text-gray-500 ml-2">{m.name}</span>
+                      </span>
+                      <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
+                    </div>
+                    <div className="text-xs text-orange-600 mt-0.5 truncate">
+                      {getRoleLabel(m.owner_role || '')} · {m.orders?.customer_name || ''}
+                    </div>
                   </Link>
                 ))}
               </div>
