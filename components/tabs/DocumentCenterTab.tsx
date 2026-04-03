@@ -13,19 +13,30 @@ interface Props {
   canViewPriceDocs?: boolean;
 }
 
-const ALL_DOC_TABS: { key: DocumentType; label: string; icon: string; priceSensitive?: boolean }[] = [
+const ALL_DOC_TABS: { key: DocumentType; label: string; icon: string; priceSensitive?: boolean; productionVisible?: boolean }[] = [
   { key: 'pi', label: 'PI', icon: '📄', priceSensitive: true },
-  { key: 'production_sheet', label: '生产单', icon: '🏭' },
-  { key: 'packing_list', label: '装箱单', icon: '📦' },
+  { key: 'production_sheet', label: '生产单', icon: '🏭', productionVisible: true },
+  { key: 'packing_list', label: '装箱单', icon: '📦', productionVisible: true },
   { key: 'ci', label: 'CI', icon: '💰', priceSensitive: true },
 ];
 
 export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPriceDocs }: Props) {
+  // 生产部角色：只能看生产单和装箱单（不能看PO、报价单、PI、CI）
+  const isProductionOnly = !isAdmin
+    && currentRoles.some(r => ['production'].includes(r))
+    && !currentRoles.some(r => ['sales', 'merchandiser', 'finance', 'procurement'].includes(r));
+
   // 是否可见价格单据：管理员、财务、或父组件明确传入 canViewPriceDocs
-  const showPriceDocs = isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true;
-  const DOC_TABS = showPriceDocs ? ALL_DOC_TABS : ALL_DOC_TABS.filter(t => !t.priceSensitive);
+  const showPriceDocs = !isProductionOnly && (isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true);
+
+  // 生产部只看 productionVisible 的 tab
+  const DOC_TABS = isProductionOnly
+    ? ALL_DOC_TABS.filter(t => t.productionVisible)
+    : showPriceDocs ? ALL_DOC_TABS : ALL_DOC_TABS.filter(t => !t.priceSensitive);
   const [docs, setDocs] = useState<any[]>([]);
-  const [activeDocType, setActiveDocType] = useState<DocumentType>(showPriceDocs ? 'pi' : 'production_sheet');
+  const [activeDocType, setActiveDocType] = useState<DocumentType>(
+    isProductionOnly ? 'production_sheet' : showPriceDocs ? 'pi' : 'production_sheet'
+  );
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);

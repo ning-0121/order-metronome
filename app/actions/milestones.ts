@@ -251,19 +251,21 @@ export async function markMilestoneDone(milestoneId: string) {
     }
   }
 
-  // Check if evidence is required and exists
+  // Check if evidence is required and exists（双表检查）
   if (milestone.evidence_required) {
-    const { data: attachments, error: attachmentsError } = await supabase
-      .from('attachments')
+    // 先查 attachments 表
+    const { data: att1 } = await (supabase.from('attachments') as any)
       .select('id')
       .eq('milestone_id', milestoneId)
       .limit(1);
-    
-    if (attachmentsError) {
-      return { error: `凭证检查失败：${attachmentsError.message}` };
-    }
-    
-    if (!attachments || attachments.length === 0) {
+    // 再查 order_attachments 表
+    const { data: att2 } = await (supabase.from('order_attachments') as any)
+      .select('id')
+      .eq('milestone_id', milestoneId)
+      .limit(1);
+
+    const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0);
+    if (!hasEvidence) {
       return { error: '此节点需要上传凭证后才能标记完成，请先在「去处理」中上传文件' };
     }
   }
