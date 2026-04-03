@@ -228,15 +228,15 @@ export function calcDueDates(params: CalcDueDatesParams) {
   const T0 = parseDate(orderDate) ?? createdAt ?? new Date();
 
   // 计算实际锚点
-  // FOB: 锚点 = ETD（离港日）
-  // DDP: 锚点 = ETA - 25天海运 = 实际必须出运的日期
+  // FOB/RMB: 锚点 = ETD 或 出厂日期（factory_date 通过 etd 参数传入）
+  // DDP: 锚点 = ETA - 25天海运
   let anchorStr: string | null | undefined;
   if (incoterm === 'FOB') {
-    anchorStr = etd;
+    anchorStr = etd; // etd 可能是真正的ETD，也可能是 factory_date（RMB/FOB统一传入）
   } else {
     anchorStr = eta || warehouseDueDate;
   }
-  if (!anchorStr) throw new Error('Missing: ' + (incoterm === 'FOB' ? 'ETD' : 'ETA/到仓日') + ' required');
+  if (!anchorStr) throw new Error('缺少锚点日期：请填写出厂日期');
 
   const rawAnchor = new Date(anchorStr + 'T00:00:00+08:00');
 
