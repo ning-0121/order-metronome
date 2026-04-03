@@ -62,8 +62,44 @@ export const MILESTONE_TEMPLATE_V1: Array<{
 ];
 
 /**
- * 根据订单类型返回适用的里程碑模板（V1 返回全部）
+ * 国内送仓订单需要跳过的出运节点
+ * 这些节点只有出口订单（FOB/DDP）才需要
  */
-export function getApplicableMilestones(_orderType?: string, _shippingSampleRequired?: boolean) {
+const EXPORT_ONLY_STEPS = new Set([
+  'shipping_sample_send',       // 船样寄送
+  'booking_done',               // 订舱完成
+  'customs_export',             // 报关安排出运
+  'finance_shipment_approval',  // 核准出运
+  'shipment_execute',           // 出运
+]);
+
+/**
+ * 国内送仓订单追加的节点（替代出运节点）
+ */
+const DOMESTIC_MILESTONES: Array<{
+  step_key: string;
+  name: string;
+  owner_role: OwnerRole;
+  is_critical: boolean;
+  evidence_required: boolean;
+}> = [
+  { step_key: "domestic_delivery", name: "国内送仓完成", owner_role: "logistics", is_critical: true, evidence_required: true },
+];
+
+/**
+ * 根据订单类型和交付方式返回适用的里程碑模板
+ *
+ * @param deliveryType - 'export'(出口) | 'domestic'(国内送仓)，默认 export
+ */
+export function getApplicableMilestones(
+  _orderType?: string,
+  _shippingSampleRequired?: boolean,
+  deliveryType?: string,
+) {
+  if (deliveryType === 'domestic') {
+    // 国内送仓：过滤掉出运节点，追加国内送仓节点
+    const filtered = MILESTONE_TEMPLATE_V1.filter(m => !EXPORT_ONLY_STEPS.has(m.step_key));
+    return [...filtered, ...DOMESTIC_MILESTONES];
+  }
   return MILESTONE_TEMPLATE_V1;
 }

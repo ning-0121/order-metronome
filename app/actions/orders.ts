@@ -98,6 +98,10 @@ export async function createOrder(
   const incoterm = formData.get('incoterm') as IncotermType;
   if (!incoterm) return { ok: false, error: '请选择贸易条款（FOB / DDP）' };
 
+  // 交付方式：人民币订单默认国内送仓，FOB/DDP默认出口；允许手动覆盖
+  const deliveryTypeRaw = formData.get('delivery_type') as string | null;
+  const delivery_type = deliveryTypeRaw || (['RMB_EX_TAX', 'RMB_INC_TAX'].includes(incoterm) ? 'domestic' : 'export');
+
   const order_type = formData.get('order_type') as OrderType;
   if (!order_type) return { ok: false, error: '请选择订单类型' };
 
@@ -237,6 +241,7 @@ export async function createOrder(
     color_count: colorCount ? parseInt(colorCount, 10) : null,
     factory_date: factory_date || null,
     eta: eta || warehouse_due_date || null,
+    delivery_type,
     notes: (formData.get('notes') as string) || null,
     special_tags: [
       formData.get('has_plus_size') === 'true' ? '大码款' : '',
@@ -317,7 +322,7 @@ export async function createOrder(
     }
   } catch {} // 查询失败不影响订单创建
 
-  const templates = getApplicableMilestones(order_type, shipping_sample_required);
+  const templates = getApplicableMilestones(order_type, shipping_sample_required, delivery_type);
   const milestonesData = [];
   for (let index = 0; index < templates.length; index++) {
     const template = templates[index];

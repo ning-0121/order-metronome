@@ -121,6 +121,8 @@ const TIMELINE = {
   customs_export:                43,
   finance_shipment_approval:     43,
   shipment_execute:              44,
+  // 国内送仓节点（替代 booking/customs/shipment）
+  domestic_delivery:             43,
 } as const;
 
 /** 解析日期为北京时间 0 点 */
@@ -271,6 +273,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
     customs_export:                cap(calc(TIMELINE.customs_export)),
     finance_shipment_approval:     cap(calc(TIMELINE.finance_shipment_approval)),
     shipment_execute:              cap(calc(TIMELINE.shipment_execute)),
+    // 国内送仓节点（与报关同期）
+    domestic_delivery:             cap(calc(TIMELINE.domestic_delivery)),
     // FOB：默认出货前付款（ETD当天）| DDP：到港后10天（ETA+10）
     payment_received:              incoterm === 'FOB' ? new Date(rawAnchor) : addDays(rawAnchor, 10),
   };
