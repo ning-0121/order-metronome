@@ -21,13 +21,13 @@
  *   Day 19  (42%)   客户确认产前样
  *   Day 20  (44%)   生产启动（产前样确认后）
  *   Day 30  (67%)   中查
- *   Day 35  (78%)   包装确认
- *   Day 37  (82%)   尾查
+ *   Day 31  (69%)   船样寄送（中查后立即寄，客户需5-7天确认）
+ *   Day 33  (73%)   包装方式确认（预留4天包装时间）
+ *   Day 36  (80%)   尾查（工厂完成前，问题可修复）
  *   Day 38  (84%)   工厂完成
- *   Day 39  (87%)   验货放行 + 船样
- *   Day 40  (89%)   订舱
- *   Day 43  (96%)   报关安排出运
- *   Day 43  (96%)   核准出运
+ *   Day 40  (89%)   验货/放行（预留2天验货）
+ *   Day 41  (91%)   订舱（放行后）
+ *   Day 43  (96%)   报关安排出运 + 核准出运
  *   Day 44  (98%)   出运
  *   Day 45  (100%)  交期/出运截止
  *   Day 75          收款（交期+30）
@@ -94,7 +94,24 @@ function countWorkdays(from: Date, to: Date): number {
   return count;
 }
 
-// 标准时间线（Day / 45 = 比例）
+/**
+ * 标准45天时间线（Day数 = 从下单日起的天数）
+ *
+ * ⚠️ 时间线设计原则（AI排期必读）：
+ *
+ * 1. 船样必须在中查后立即寄出（Day31），客户需要5-7天确认
+ *    船样确认后才允许出货，不能等到验货放行后再寄
+ *
+ * 2. 包装方式确认（Day33）后需预留4-5天给工厂实际包装
+ *    不能和工厂完成同一天
+ *
+ * 3. 工厂完成（Day38）后需预留2天给验货
+ *    包含：预约第三方QC或客户验货 + 实际验货 + 出结果
+ *
+ * 4. 尾查（Day36）在工厂完成前进行，发现问题可修复
+ *
+ * 5. 验货放行（Day40）后才能订舱出货
+ */
 const TIMELINE = {
   po_confirmed:                  0,
   finance_approval:              1,
@@ -112,16 +129,15 @@ const TIMELINE = {
   pre_production_meeting:        11,
   production_kickoff:            20,
   mid_qc_check:                  30,
-  final_qc_check:                37,
-  packing_method_confirmed:      35,
-  factory_completion:            38,
-  inspection_release:            39,
-  shipping_sample_send:          39,
-  booking_done:                  40,
+  shipping_sample_send:          31,  // 中查后立即寄船样（客户需5-7天确认）
+  packing_method_confirmed:      33,  // 预留4天包装时间到工厂完成
+  final_qc_check:                36,  // 尾查在工厂完成前，发现问题可修复
+  factory_completion:            38,  // 包装完成+QC修复后
+  inspection_release:            40,  // 预留2天：预约验货+验货+出结果
+  booking_done:                  41,  // 放行后订舱
   customs_export:                43,
   finance_shipment_approval:     43,
   shipment_execute:              44,
-  // 国内送仓节点（替代 booking/customs/shipment）
   domestic_delivery:             43,
 } as const;
 
@@ -307,6 +323,25 @@ export function calcDueDates(params: CalcDueDatesParams) {
     if (key === 'payment_received') continue;
     if (date.getTime() < T0.getTime() - 86400000) {
       throw new Error(`排期异常：${key} 早于下单日`);
+    }
+  }
+
+  // 校验5：关键时间间隔二次审核
+  const gaps = [
+    { from: 'packing_method_confirmed', to: 'factory_completion', minDays: 3, label: '包装确认→工厂完成需≥3天包装时间' },
+    { from: 'factory_completion', to: 'inspection_release', minDays: 1, label: '工厂完成→验货放行需≥1天验货时间' },
+    { from: 'shipping_sample_send', to: 'inspection_release', minDays: 5, label: '船样寄出→验货放行需≥5天（客户确认时间）' },
+    { from: 'final_qc_check', to: 'factory_completion', minDays: 1, label: '尾查→工厂完成需≥1天修复时间' },
+    { from: 'inspection_release', to: 'booking_done', minDays: 0, label: '验货放行→订舱不能倒序' },
+  ];
+  for (const gap of gaps) {
+    const fromDate = result[gap.from];
+    const toDate = result[gap.to];
+    if (fromDate && toDate) {
+      const diffDays = Math.round((toDate.getTime() - fromDate.getTime()) / 86400000);
+      if (diffDays < gap.minDays) {
+        console.warn(`[Schedule] 时间间隔警告：${gap.label}，实际仅 ${diffDays} 天`);
+      }
     }
   }
 
