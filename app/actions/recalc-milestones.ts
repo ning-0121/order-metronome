@@ -19,19 +19,25 @@ export async function recalcOrderMilestones(orderId: string) {
   if (!isAdmin) return { error: '仅管理员可重算排期' };
 
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, incoterm, etd, warehouse_due_date, order_date, created_at')
+    .select('id, order_no, incoterm, etd, warehouse_due_date, order_date, created_at, factory_date, eta')
     .eq('id', orderId)
     .single();
   if (!order) return { error: '订单不存在' };
+
+  // RMB订单用出厂日期作为锚点，不需要ETD/ETA
+  const scheduleIncoterm = order.incoterm === 'DDP' ? 'DDP' : 'FOB';
+  const scheduleEtd = order.etd || order.factory_date;
+  if (!scheduleEtd) return { error: '缺少锚点日期：请填写出厂日期' };
 
   let dueDates;
   try {
     dueDates = calcDueDates({
       orderDate: order.order_date,
       createdAt: new Date(order.created_at),
-      incoterm: order.incoterm as 'FOB' | 'DDP',
-      etd: order.etd,
+      incoterm: scheduleIncoterm as 'FOB' | 'DDP',
+      etd: scheduleEtd,
       warehouseDueDate: order.warehouse_due_date,
+      eta: order.eta,
     });
   } catch (e: any) {
     return { error: `排期计算失败：${e.message}` };
