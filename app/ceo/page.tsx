@@ -169,9 +169,49 @@ export default async function CEOWarRoom() {
     });
   });
 
-  // 按优先级排序，取 Top 5
+  // 红色风险订单中超期最多的 → 保证 AI 说"风险最高"的订单一定出现在 Top 5
+  const worstRedOrder = riskRed.sort((a: any, b: any) => {
+    const aO = (a.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
+    const bO = (b.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
+    return bO - aO;
+  })[0];
+  if (worstRedOrder) {
+    const overdueCount = (worstRedOrder.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
+    // 如果这个订单的节点不在 topItems 前5，手动加入一条订单级别的条目
+    const alreadyInTop = topItems.some(item => item.orderNo === worstRedOrder.order_no);
+    if (!alreadyInTop || overdueCount > 0) {
+      topItems.push({
+        id: `risk-order-${worstRedOrder.id}`,
+        priority: 200 + overdueCount * 10, // 订单级别风险优先级最高
+        type: 'overdue',
+        typeLabel: '高危订单',
+        orderId: worstRedOrder.id,
+        orderNo: worstRedOrder.order_no,
+        internalOrderNo: worstRedOrder.internal_order_no || '',
+        customerName: worstRedOrder.customer_name || '',
+        description: `${overdueCount} 个节点超期，整体风险最高`,
+        owner: '',
+        ownerRole: '',
+        daysInfo: `${overdueCount} 个超期`,
+      });
+    }
+  }
+
+  // 按优先级排序，取 Top 5（去重同一订单的重复条目）
   topItems.sort((a, b) => b.priority - a.priority);
-  const top5 = topItems.slice(0, 5);
+  // 去重：同一订单只保留优先级最高的条目
+  const seenOrders = new Set<string>();
+  const top5: TopItem[] = [];
+  for (const item of topItems) {
+    if (top5.length >= 5) break;
+    const key = item.orderId + '-' + item.description;
+    if (item.type === 'overdue' && item.typeLabel === '高危订单') {
+      // 高危订单条目：按 orderId 去重
+      if (seenOrders.has(item.orderId)) continue;
+      seenOrders.add(item.orderId);
+    }
+    top5.push(item);
+  }
 
   // ===== 部门超期统计 =====
   const deptOverdue: Record<string, { count: number; items: any[] }> = {};
@@ -190,12 +230,8 @@ export default async function CEOWarRoom() {
 
   // 找出问题最多的部门
   const worstDept = Object.entries(deptOverdue).sort((a, b) => b[1].count - a[1].count)[0];
-  // 找出风险最高的订单
-  const worstOrder = riskRed.sort((a: any, b: any) => {
-    const aOverdue = (a.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
-    const bOverdue = (b.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
-    return bOverdue - aOverdue;
-  })[0];
+  // 风险最高的订单（复用上面 Top 5 已计算的 worstRedOrder）
+  const worstOrder = worstRedOrder;
 
   const aiInsights: string[] = [];
   if (worstDept) {
