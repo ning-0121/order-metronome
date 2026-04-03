@@ -460,7 +460,7 @@ export default async function CEOWarRoom() {
               <div className="mt-2 space-y-1 pl-2">
                 {riskRed.length === 0 ? (
                   <p className="text-sm text-gray-500 py-1">无</p>
-                ) : riskRed.slice(0, 10).map((o: any) => {
+                ) : riskRed.map((o: any) => {
                   const status = orderStatusMap.get(o.id);
                   return (
                     <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-red-50/50 text-sm group">
@@ -488,7 +488,7 @@ export default async function CEOWarRoom() {
               <div className="mt-2 space-y-1 pl-2">
                 {riskYellow.length === 0 ? (
                   <p className="text-sm text-gray-500 py-1">无</p>
-                ) : riskYellow.slice(0, 10).map((o: any) => {
+                ) : riskYellow.map((o: any) => {
                   const status = orderStatusMap.get(o.id);
                   return (
                     <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-yellow-50/50 text-sm group">
@@ -514,7 +514,7 @@ export default async function CEOWarRoom() {
                 <span className="text-sm font-bold text-green-700">{riskGreen.length}</span>
               </summary>
               <div className="mt-2 space-y-1 pl-2">
-                {riskGreen.slice(0, 5).map((o: any) => (
+                {riskGreen.map((o: any) => (
                   <Link key={o.id} href={`/orders/${o.id}`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 text-sm group">
                     <span>
                       <span className="font-medium text-gray-900">{o.order_no}</span>
@@ -534,7 +534,7 @@ export default async function CEOWarRoom() {
               <div className="mt-2 space-y-1 pl-2">
                 {blockedMilestones.length === 0 ? (
                   <p className="text-sm text-gray-500 py-1">无</p>
-                ) : blockedMilestones.slice(0, 10).map((m: any) => (
+                ) : blockedMilestones.map((m: any) => (
                   <Link key={m.id} href={`/orders/${m.order_id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-orange-50/50 text-sm group">
                     <div className="flex items-center justify-between">
                       <span>
