@@ -1,17 +1,21 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
+import { getAnalyticsSummary, getRoleEfficiency, getShipmentDistribution, getCapacityAIAnalysis } from '@/app/actions/analytics';
 import Link from 'next/link';
+import { ShipmentDistributionChart } from '@/components/ShipmentDistributionChart';
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [summary, roles] = await Promise.all([
+  const [summary, roles, distribution, aiCapacity] = await Promise.all([
     getAnalyticsSummary(),
     getRoleEfficiency(),
+    getShipmentDistribution(),
+    getCapacityAIAnalysis().catch(() => null),
   ]);
+  const currentMonth = new Date().toISOString().slice(0, 7);
 
   // 总览统计
   const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity');
@@ -95,6 +99,13 @@ export default async function AnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {/* ===== 月度出货分布 + AI产能分析 ===== */}
+      <ShipmentDistributionChart
+        distribution={distribution}
+        aiAnalysis={aiCapacity}
+        currentMonth={currentMonth}
+      />
 
       {/* ===== 三维度分析入口 ===== */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
