@@ -335,6 +335,92 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
           <p>暂无{DOCUMENT_TYPES[activeDocType].label}，点击上方按钮创建</p>
         </div>
       )}
+
+      {/* ===== 所有已上传文件汇总 ===== */}
+      <AllUploadedFiles orderId={orderId} isProductionLine={isProductionLine} />
+    </div>
+  );
+}
+
+// ══════ 所有已上传文件（按权限过滤）══════
+
+const FILE_TYPE_CONFIG: Array<{ type: string; label: string; icon: string; sensitive: boolean }> = [
+  { type: 'customer_po', label: '客户PO', icon: '📋', sensitive: true },
+  { type: 'internal_quote', label: '内部报价单', icon: '💰', sensitive: true },
+  { type: 'customer_quote', label: '客户最终报价单', icon: '📄', sensitive: true },
+  { type: 'production_order', label: '生产订单', icon: '🏭', sensitive: false },
+  { type: 'trims_sheet', label: '原辅料单', icon: '🧵', sensitive: false },
+  { type: 'packing_requirement', label: '包装资料', icon: '📦', sensitive: false },
+  { type: 'tech_pack', label: 'Tech Pack', icon: '📐', sensitive: false },
+  { type: 'evidence', label: '节点凭证', icon: '📎', sensitive: false },
+];
+
+function AllUploadedFiles({ orderId, isProductionLine }: { orderId: string; isProductionLine: boolean }) {
+  const [files, setFiles] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const supabase = createClient();
+    (supabase.from('order_attachments') as any)
+      .select('id, file_name, file_url, file_type, mime_type, created_at')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false })
+      .then(({ data }: any) => { setFiles(data || []); setLoading(false); });
+  }, [orderId]);
+
+  if (loading) return null;
+
+  // 权限过滤：生产线只看非敏感文件
+  const visibleTypes = isProductionLine
+    ? FILE_TYPE_CONFIG.filter(t => !t.sensitive)
+    : FILE_TYPE_CONFIG;
+  const visibleTypeKeys = new Set(visibleTypes.map(t => t.type));
+  const filteredFiles = files.filter(f => visibleTypeKeys.has(f.file_type));
+
+  if (filteredFiles.length === 0) return null;
+
+  // 按类型分组
+  const grouped = new Map<string, any[]>();
+  for (const f of filteredFiles) {
+    const list = grouped.get(f.file_type) || [];
+    list.push(f);
+    grouped.set(f.file_type, list);
+  }
+
+  const typeMap = Object.fromEntries(FILE_TYPE_CONFIG.map(t => [t.type, t]));
+
+  return (
+    <div className="border-t border-gray-200 pt-6">
+      <h3 className="text-sm font-semibold text-gray-900 mb-4">📁 所有已上传文件</h3>
+      <div className="space-y-4">
+        {Array.from(grouped.entries()).map(([type, items]) => {
+          const cfg = typeMap[type];
+          return (
+            <div key={type}>
+              <p className="text-xs font-medium text-gray-600 mb-1.5">{cfg?.icon || '📎'} {cfg?.label || type}（{items.length}）</p>
+              <div className="space-y-1">
+                {items.map((f: any) => (
+                  <div key={f.id} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg border border-gray-100">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm text-gray-900 truncate">{f.file_name || '未命名'}</span>
+                      <span className="text-xs text-gray-400">{new Date(f.created_at).toLocaleDateString('zh-CN')}</span>
+                    </div>
+                    {f.file_url && (
+                      <a href={f.file_url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs px-2.5 py-1 rounded bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50 shrink-0">
+                        查看
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {isProductionLine && (
+        <p className="text-xs text-amber-600 mt-3">生产部仅可查看生产订单、原辅料单、包装资料相关文件</p>
+      )}
     </div>
   );
 }
