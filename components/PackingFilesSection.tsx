@@ -11,27 +11,31 @@ interface PackingFile {
   created_at: string;
 }
 
-export function PackingFilesSection({ orderId }: { orderId: string }) {
+interface Props {
+  orderId: string;
+  fileTypes?: string[];
+  emptyText?: string;
+}
+
+export function PackingFilesSection({ orderId, fileTypes, emptyText }: Props) {
   const [files, setFiles] = useState<PackingFile[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const types = fileTypes || ['packing_requirement', 'trims_sheet', 'production_order', 'tech_pack'];
+
   useEffect(() => {
     const supabase = createClient();
-    // 查询该订单的包装相关附件（file_type = packing_requirement, trims_sheet, production_order）
     (supabase.from('order_attachments') as any)
       .select('id, file_name, file_url, file_type, created_at')
       .eq('order_id', orderId)
-      .in('file_type', ['packing_requirement', 'trims_sheet', 'production_order', 'tech_pack'])
+      .in('file_type', types)
       .order('created_at', { ascending: false })
-      .then(({ data }: any) => {
-        setFiles(data || []);
-        setLoading(false);
-      });
-  }, [orderId]);
+      .then(({ data }: any) => { setFiles(data || []); setLoading(false); });
+  }, [orderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const typeLabels: Record<string, string> = {
-    packing_requirement: '装箱要求',
-    trims_sheet: '辅料表',
+    packing_requirement: '包装资料',
+    trims_sheet: '原辅料单',
     production_order: '生产制单',
     tech_pack: 'Tech Pack',
   };
@@ -40,9 +44,8 @@ export function PackingFilesSection({ orderId }: { orderId: string }) {
 
   if (files.length === 0) {
     return (
-      <div className="text-center py-6 text-gray-400 text-sm">
-        <p>暂无包装资料</p>
-        <p className="text-xs mt-1">业务在「生产单上传」节点上传的包装资料将显示在这里</p>
+      <div className="text-center py-4 text-gray-400 text-sm">
+        <p>{emptyText || '暂无文件'}</p>
       </div>
     );
   }

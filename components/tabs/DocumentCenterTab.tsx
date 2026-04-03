@@ -289,15 +289,10 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
         ))}
       </div>
 
-      {/* 操作按钮（生产部不可见） */}
+      {/* 上传按钮（生产部不可见，AI生成移至各节点SOP中） */}
       {canUpload && (
         <div className="flex gap-3 flex-wrap">
-          <button onClick={handleAIGenerate} disabled={generating}
-            className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
-            {generating ? '🤖 AI生成中...' : `🤖 AI生成${DOCUMENT_TYPES[activeDocType].label}`}
-          </button>
-
-          <label className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 cursor-pointer">
+          <label className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 cursor-pointer">
             {uploading ? '📤 上传中...' : `📤 上传${DOCUMENT_TYPES[activeDocType].label}`}
             <input type="file" className="hidden" onChange={handleUpload} disabled={uploading}
               accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" />
