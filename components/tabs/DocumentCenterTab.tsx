@@ -31,10 +31,10 @@ const ALL_DOC_TABS: { key: DocumentType; label: string; icon: string; priceSensi
 ];
 
 export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPriceDocs, orderContext }: Props) {
-  // 生产部角色：只能看生产单和装箱单（不能看PO、报价单、PI、CI）
+  // 生产线角色（生产部+跟单）：只能看生产单和装箱单（不能看PO、报价单、PI、CI）
   const isProductionOnly = !isAdmin
-    && currentRoles.some(r => ['production'].includes(r))
-    && !currentRoles.some(r => ['sales', 'merchandiser', 'finance', 'procurement'].includes(r));
+    && currentRoles.some(r => ['production', 'merchandiser'].includes(r))
+    && !currentRoles.some(r => ['sales', 'finance', 'procurement'].includes(r));
 
   // 是否可见价格单据：管理员、财务、或父组件明确传入 canViewPriceDocs
   const showPriceDocs = !isProductionOnly && (isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true);
