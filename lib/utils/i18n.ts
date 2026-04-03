@@ -16,6 +16,7 @@ export function getRoleLabel(role: string): string {
     'qc': '跟单',             // 质检已合并到跟单
     'quality': '跟单',        // 质检（旧值）已合并到跟单
     'logistics': '物流/仓库',
+    'production_manager': '生产主管',
     'admin': '管理员',
   };
   

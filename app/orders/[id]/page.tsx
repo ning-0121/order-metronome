@@ -271,11 +271,11 @@ export default async function OrderDetailPage({
                     <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
                   </div>
                 ))}
-                {/* 跟单负责人 — 管理员/订单创建者可指定 */}
+                {/* 跟单负责人 — 管理员/订单创建者/生产主管可指定 */}
                 <div className="flex justify-between items-center">
                   <dt className="text-sm text-gray-500">跟单负责人</dt>
                   <dd className="text-sm font-medium">
-                    {(isAdmin || isOrderOwner) ? (
+                    {(isAdmin || isOrderOwner || currentRoles.includes('production_manager')) ? (
                       <MerchandiserAssign orderId={id} currentMerchandiserName={merchandiserName} />
                     ) : (
                       <span className="text-gray-900">{merchandiserName || '未指定'}</span>

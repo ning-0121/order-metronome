@@ -31,21 +31,23 @@ const ALL_DOC_TABS: { key: DocumentType; label: string; icon: string; priceSensi
 ];
 
 export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPriceDocs, orderContext }: Props) {
-  // 生产线角色（生产部+跟单）：只能看生产单和装箱单（不能看PO、报价单、PI、CI）
-  const isProductionOnly = !isAdmin
-    && currentRoles.some(r => ['production', 'merchandiser'].includes(r))
+  // 生产线角色（生产部+跟单+生产主管）：只能看生产单和装箱单
+  const isProductionLine = !isAdmin
+    && currentRoles.some(r => ['production', 'merchandiser', 'production_manager'].includes(r))
     && !currentRoles.some(r => ['sales', 'finance', 'procurement'].includes(r));
+  // 只读（生产部+跟单不能上传，但生产主管可以上传生产单/装箱单）
+  const isProductionOnly = isProductionLine && !currentRoles.includes('production_manager');
 
   // 是否可见价格单据：管理员、财务、或父组件明确传入 canViewPriceDocs
-  const showPriceDocs = !isProductionOnly && (isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true);
+  const showPriceDocs = !isProductionLine && (isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true);
 
-  // 生产部只看 productionVisible 的 tab
-  const DOC_TABS = isProductionOnly
+  // 生产线角色只看 productionVisible 的 tab
+  const DOC_TABS = isProductionLine
     ? ALL_DOC_TABS.filter(t => t.productionVisible)
     : showPriceDocs ? ALL_DOC_TABS : ALL_DOC_TABS.filter(t => !t.priceSensitive);
   const [docs, setDocs] = useState<any[]>([]);
   const [activeDocType, setActiveDocType] = useState<DocumentType>(
-    isProductionOnly ? 'production_sheet' : showPriceDocs ? 'pi' : 'production_sheet'
+    isProductionLine ? 'production_sheet' : showPriceDocs ? 'pi' : 'production_sheet'
   );
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
@@ -261,9 +263,11 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
       )}
 
       {/* 生产部提示 */}
-      {isProductionOnly && (
+      {isProductionLine && (
         <div className="px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-          生产部查看模式 — 仅可查看和下载生产单、装箱单
+          {isProductionOnly
+            ? '生产部查看模式 — 仅可查看和下载生产单、装箱单'
+            : '生产主管模式 — 可查看、上传生产单和装箱单'}
         </div>
       )}
 
