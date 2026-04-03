@@ -215,12 +215,27 @@ export function MilestoneActions({
     setLoading(false);
   }
 
-  // ── 已完成状态 ─────────────────────────────────────────────────
+  // ── 已完成状态（支持补传文件）─────────────────────────────────────
   if (isDoneStatus(milestone.status)) {
+    // 生产单上传节点：分卡上传（生产订单 + 包装资料）
+    const isProductionUpload = milestone.step_key === 'production_order_upload';
+    const needsEvidence = milestone.evidence_required;
+
     return (
-      <div className="flex items-center gap-2 text-green-700 text-sm font-medium bg-green-50 px-3 py-2 rounded-lg">
-        <span>✓</span>
-        <span>已完成</span>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-green-700 text-sm font-medium bg-green-50 px-3 py-2 rounded-lg">
+          <span>✓</span>
+          <span>已完成</span>
+        </div>
+        {/* 补传文件区域 */}
+        {(needsEvidence || isProductionUpload) && canModify && (
+          <CompletedFileUpload
+            milestoneId={milestone.id}
+            orderId={orderId || ''}
+            stepKey={milestone.step_key}
+            isProductionUpload={isProductionUpload}
+          />
+        )}
       </div>
     );
   }
@@ -651,6 +666,103 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange 
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ══════ 已完成节点补传文件 ══════
+
+function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload }: {
+  milestoneId: string; orderId: string; stepKey: string; isProductionUpload: boolean;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [files, setFiles] = useState<Array<{ id: string; file_name: string; file_url: string; file_type: string; created_at: string }>>([]);
+  const [showUpload, setShowUpload] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+    (supabase.from('order_attachments') as any)
+      .select('id, file_name, file_url, file_type, created_at')
+      .eq('order_id', orderId)
+      .eq('milestone_id', milestoneId)
+      .order('created_at', { ascending: false })
+      .then(({ data }: any) => setFiles(data || []));
+  }, [milestoneId, orderId]);
+
+  async function handleUpload(file: File, fileType: string) {
+    setUploading(true);
+    const supabase = createClient();
+    const ext = file.name.split('.').pop() || 'bin';
+    const path = `${orderId}/milestones/${stepKey}_${fileType}_${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type, upsert: true });
+    if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
+    const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
+    const { data: { user } } = await supabase.auth.getUser();
+    await (supabase.from('order_attachments') as any).insert({
+      order_id: orderId, milestone_id: milestoneId,
+      uploaded_by: user?.id || null,
+      file_name: file.name, file_url: urlData?.publicUrl || path,
+      file_type: fileType, mime_type: file.type || null,
+    });
+    const { data } = await (supabase.from('order_attachments') as any)
+      .select('id, file_name, file_url, file_type, created_at')
+      .eq('order_id', orderId).eq('milestone_id', milestoneId).order('created_at', { ascending: false });
+    setFiles(data || []);
+    setUploading(false);
+  }
+
+  const typeLabels: Record<string, string> = {
+    production_order: '生产订单', packing_requirement: '包装资料', evidence: '凭证', trims_sheet: '辅料表',
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-gray-600">
+          {files.length > 0 ? `已上传 ${files.length} 个文件` : '补传文件'}
+        </span>
+        <button onClick={() => setShowUpload(!showUpload)} className="text-xs text-indigo-600 hover:underline">
+          {showUpload ? '收起' : '+ 上传文件'}
+        </button>
+      </div>
+      {files.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {files.map(f => (
+            <div key={f.id} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1.5 border border-gray-100">
+              <span className="truncate text-gray-700">📎 {f.file_name || '文件'} <span className="text-gray-400">({typeLabels[f.file_type] || f.file_type})</span></span>
+              {f.file_url && <a href={f.file_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline shrink-0 ml-2">查看</a>}
+            </div>
+          ))}
+        </div>
+      )}
+      {showUpload && (
+        <div className="space-y-2">
+          {isProductionUpload ? (
+            <>
+              <div className="flex items-center gap-2">
+                <label className="flex-1 text-center py-2 rounded-lg border-2 border-dashed border-indigo-300 text-xs text-indigo-600 cursor-pointer hover:bg-indigo-50">
+                  📄 上传生产订单
+                  <input type="file" className="hidden" disabled={uploading} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                    onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], 'production_order'); e.target.value = ''; }} />
+                </label>
+                <label className="flex-1 text-center py-2 rounded-lg border-2 border-dashed border-amber-300 text-xs text-amber-600 cursor-pointer hover:bg-amber-50">
+                  📦 上传包装资料
+                  <input type="file" className="hidden" disabled={uploading} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                    onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], 'packing_requirement'); e.target.value = ''; }} />
+                </label>
+              </div>
+              <p className="text-xs text-gray-400">包装资料将同步显示在「包装资料」tab</p>
+            </>
+          ) : (
+            <label className="block text-center py-2 rounded-lg border-2 border-dashed border-gray-300 text-xs text-gray-500 cursor-pointer hover:bg-gray-100">
+              📎 上传凭证文件
+              <input type="file" className="hidden" disabled={uploading} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], 'evidence'); e.target.value = ''; }} />
+            </label>
+          )}
+          {uploading && <p className="text-xs text-indigo-500 text-center">上传中...</p>}
+        </div>
+      )}
     </div>
   );
 }
