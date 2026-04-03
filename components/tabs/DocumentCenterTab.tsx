@@ -11,16 +11,26 @@ interface Props {
   currentRoles: string[];
   /** 是否有权查看价格敏感单据（PI/CI），由父组件根据角色+订单归属判定 */
   canViewPriceDocs?: boolean;
+  /** 订单上下文信息，用于文档标题对照 */
+  orderContext?: {
+    orderNo?: string;
+    customerName?: string;
+    factoryName?: string;
+    quantity?: number;
+    incoterm?: string;
+  };
 }
 
 const ALL_DOC_TABS: { key: DocumentType; label: string; icon: string; priceSensitive?: boolean; productionVisible?: boolean }[] = [
   { key: 'pi', label: 'PI', icon: '📄', priceSensitive: true },
   { key: 'production_sheet', label: '生产单', icon: '🏭', productionVisible: true },
+  { key: 'material_sheet', label: '原辅料单', icon: '🧵' },
+  { key: 'purchase_order', label: '采购单', icon: '🛒' },
   { key: 'packing_list', label: '装箱单', icon: '📦', productionVisible: true },
   { key: 'ci', label: 'CI', icon: '💰', priceSensitive: true },
 ];
 
-export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPriceDocs }: Props) {
+export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPriceDocs, orderContext }: Props) {
   // 生产部角色：只能看生产单和装箱单（不能看PO、报价单、PI、CI）
   const isProductionOnly = !isAdmin
     && currentRoles.some(r => ['production'].includes(r))
@@ -177,16 +187,16 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
             </a>
           )}
 
-          {/* 提交审核 */}
-          {doc.status === 'draft' && (
+          {/* 提交审核（生产部不可操作） */}
+          {doc.status === 'draft' && !isProductionOnly && (
             <button onClick={() => handleSubmit(doc.id)} disabled={isPending}
               className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
               提交审核
             </button>
           )}
 
-          {/* 审批操作（管理员或财务） */}
-          {doc.status === 'pending_review' && (isAdmin || currentRoles.includes('finance')) && (
+          {/* 审批操作（管理员或财务，生产部不可操作） */}
+          {doc.status === 'pending_review' && !isProductionOnly && (isAdmin || currentRoles.includes('finance')) && (
             <>
               <button onClick={() => handleApprove(doc.id)} disabled={isPending}
                 className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
@@ -234,8 +244,29 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
 
   if (loading) return <div className="text-center py-12 text-gray-400">加载中...</div>;
 
+  // 生产部只读：不能上传/AI生成/审批
+  const canUpload = !isProductionOnly;
+
   return (
     <div className="space-y-6">
+      {/* 订单上下文对照信息 */}
+      {orderContext && (
+        <div className="flex items-center gap-4 px-4 py-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+          <span className="font-mono font-bold text-gray-900">{orderContext.orderNo}</span>
+          <span className="text-gray-600">{orderContext.customerName}</span>
+          {orderContext.factoryName && <span className="text-gray-500">{orderContext.factoryName}</span>}
+          {orderContext.quantity && <span className="text-gray-500">{orderContext.quantity}件</span>}
+          {orderContext.incoterm && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">{orderContext.incoterm}</span>}
+        </div>
+      )}
+
+      {/* 生产部提示 */}
+      {isProductionOnly && (
+        <div className="px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          生产部查看模式 — 仅可查看和下载生产单、装箱单
+        </div>
+      )}
+
       {/* 单据类型切换 */}
       <div className="flex gap-2 flex-wrap">
         {DOC_TABS.map(tab => (
@@ -254,19 +285,21 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
         ))}
       </div>
 
-      {/* 操作按钮 */}
-      <div className="flex gap-3 flex-wrap">
-        <button onClick={handleAIGenerate} disabled={generating}
-          className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
-          {generating ? '🤖 AI生成中...' : `🤖 AI生成${DOCUMENT_TYPES[activeDocType].label}`}
-        </button>
+      {/* 操作按钮（生产部不可见） */}
+      {canUpload && (
+        <div className="flex gap-3 flex-wrap">
+          <button onClick={handleAIGenerate} disabled={generating}
+            className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
+            {generating ? '🤖 AI生成中...' : `🤖 AI生成${DOCUMENT_TYPES[activeDocType].label}`}
+          </button>
 
-        <label className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 cursor-pointer">
-          {uploading ? '📤 上传中...' : `📤 上传${DOCUMENT_TYPES[activeDocType].label}`}
-          <input type="file" className="hidden" onChange={handleUpload} disabled={uploading}
-            accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" />
-        </label>
-      </div>
+          <label className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 cursor-pointer">
+            {uploading ? '📤 上传中...' : `📤 上传${DOCUMENT_TYPES[activeDocType].label}`}
+            <input type="file" className="hidden" onChange={handleUpload} disabled={uploading}
+              accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" />
+          </label>
+        </div>
+      )}
 
       {/* 当前正式版本 */}
       {officialDoc && (

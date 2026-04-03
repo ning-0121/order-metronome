@@ -571,7 +571,14 @@ export default async function OrderDetailPage({
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">📋 单据中心</h2>
             <DocumentCenterTab orderId={id} isAdmin={isAdmin} currentRoles={currentRoles}
-              canViewPriceDocs={isAdmin || currentRoles.includes('finance') || isOrderOwner || (user ? (orderData.owner_user_id === user.id || orderData.merchandiser_user_id === user.id) : false)} />
+              canViewPriceDocs={isAdmin || currentRoles.includes('finance') || isOrderOwner || (user ? (orderData.owner_user_id === user.id || orderData.merchandiser_user_id === user.id) : false)}
+              orderContext={{
+                orderNo: orderData.order_no,
+                customerName: orderData.customer_name,
+                factoryName: orderData.factory_name,
+                quantity: orderData.quantity,
+                incoterm: orderData.incoterm,
+              }} />
           </div>
         )}
 
