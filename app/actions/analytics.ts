@@ -229,3 +229,83 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
       onTimeRate: (data.completed + data.overdue) > 0 ? Math.round(data.onTime / (data.completed + data.overdue) * 100) : 0,
     }));
 }
+
+// ══════════════════════════════════════════════════
+// 月度出货分布 + AI 产能分析
+// ══════════════════════════════════════════════════
+
+export interface MonthlyShipment {
+  month: string; label: string; orderCount: number; totalQuantity: number;
+  completedCount: number; plannedCount: number; customers: string[]; factories: string[];
+}
+
+export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
+  const supabase = await createClient();
+  const { data: orders } = await (supabase.from('orders') as any)
+    .select('id, order_no, customer_name, factory_name, quantity, factory_date, etd, incoterm, lifecycle_status')
+    .not('lifecycle_status', 'eq', '已取消');
+  if (!orders || orders.length === 0) return [];
+
+  const now = new Date();
+  const months: string[] = [];
+  for (let i = -6; i <= 5; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    months.push(d.toISOString().slice(0, 7));
+  }
+
+  const monthMap = new Map<string, { orders: any[]; completed: number; planned: number; qty: number; customers: Set<string>; factories: Set<string> }>();
+  for (const m of months) monthMap.set(m, { orders: [], completed: 0, planned: 0, qty: 0, customers: new Set(), factories: new Set() });
+
+  for (const o of orders) {
+    const shipDate = o.factory_date || o.etd;
+    if (!shipDate) continue;
+    const monthKey = shipDate.slice(0, 7);
+    const bucket = monthMap.get(monthKey);
+    if (!bucket) continue;
+    bucket.orders.push(o); bucket.qty += o.quantity || 0;
+    if (o.customer_name) bucket.customers.add(o.customer_name);
+    if (o.factory_name) bucket.factories.add(o.factory_name);
+    const ls = o.lifecycle_status || '';
+    if (ls === '已完成' || ls === 'completed' || ls === '已复盘') bucket.completed++; else bucket.planned++;
+  }
+
+  return months.map(m => {
+    const b = monthMap.get(m)!;
+    return { month: m, label: `${parseInt(m.split('-')[1])}月`, orderCount: b.orders.length, totalQuantity: b.qty,
+      completedCount: b.completed, plannedCount: b.planned, customers: Array.from(b.customers), factories: Array.from(b.factories) };
+  });
+}
+
+export interface CapacityAnalysis {
+  summary: string;
+  monthlyInsights: Array<{ month: string; label: string; status: 'overload' | 'normal' | 'underload' | 'empty'; advice: string }>;
+  recommendations: string[];
+}
+
+export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
+  const distribution = await getShipmentDistribution();
+  const dataStr = distribution.map(m => `${m.month}(${m.label}): ${m.orderCount}单/${m.totalQuantity}件 [完成${m.completedCount}/计划${m.plannedCount}] 客户${m.customers.length}家 工厂${m.factories.length}家`).join('\n');
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const prompt = `你是一位资深外贸服装生产管理顾问。以下是一家服装外贸公司过去6个月+未来6个月的订单出货分布：\n\n${dataStr}\n\n当前月份：${currentMonth}\n\n请分析：\n1. 对每个月给出产能状态（overload/normal/underload/empty）和一句话建议\n2. 总体排产形势（2-3句话）\n3. 3-5条行动建议（含：是否需要提前准备产能、哪些月可接加单、排产节奏、业务开发力度）\n\n返回JSON：{"summary":"...","monthlyInsights":[{"month":"2026-04","label":"4月","status":"normal","advice":"..."}],"recommendations":["..."]}\n只返回JSON。`;
+
+  try {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const client = new Anthropic();
+    const response = await client.messages.create({ model: 'claude-sonnet-4-20250514', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] });
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return { summary: parsed.summary || '分析完成',
+        monthlyInsights: (parsed.monthlyInsights || []).map((i: any) => ({ month: i.month, label: i.label || i.month, status: i.status || 'normal', advice: i.advice || '' })),
+        recommendations: parsed.recommendations || [] };
+    }
+  } catch (err: any) { console.error('[getCapacityAIAnalysis]', err?.message); }
+
+  const avgQty = distribution.reduce((s, m) => s + m.totalQuantity, 0) / Math.max(distribution.length, 1);
+  return { summary: `平均每月出货 ${Math.round(avgQty)} 件。`,
+    monthlyInsights: distribution.map(m => ({ month: m.month, label: m.label,
+      status: m.totalQuantity === 0 ? 'empty' as const : m.totalQuantity > avgQty * 1.5 ? 'overload' as const : m.totalQuantity < avgQty * 0.5 ? 'underload' as const : 'normal' as const,
+      advice: m.totalQuantity === 0 ? '无订单，加大开发' : m.totalQuantity > avgQty * 1.5 ? '产能紧张' : m.totalQuantity < avgQty * 0.5 ? '可接加单' : '正常' })),
+    recommendations: ['关注空档期，提前联系客户了解加单需求'] };
+}
