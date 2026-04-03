@@ -67,9 +67,12 @@ function formatToday(): string {
 }
 
 function getTodayDateString(): string {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return today.toISOString().split('T')[0];
+  // 使用北京时间，避免 toISOString() 转换 UTC 导致凌晨日期错误
+  const now = new Date();
+  const year = now.toLocaleString('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric' });
+  const month = now.toLocaleString('en-CA', { timeZone: 'Asia/Shanghai', month: '2-digit' });
+  const day = now.toLocaleString('en-CA', { timeZone: 'Asia/Shanghai', day: '2-digit' });
+  return `${year}-${month}-${day}`;
 }
 
 /** 判断用户角色是否匹配里程碑 owner_role */
@@ -110,7 +113,7 @@ export default async function DashboardPage() {
   const isAdmin = userRoles.includes('admin');
 
   const today = getTodayDateString();
-  const tomorrow = new Date(today);
+  const tomorrow = new Date(today + 'T00:00:00+08:00');
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split('T')[0];
 

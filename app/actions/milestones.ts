@@ -802,7 +802,7 @@ export async function updateMilestoneActualDate(
 
   // ===== 动态调整后续节点排期 =====
   if (actualAt) {
-    const actualDate = new Date(actualAt + 'T00:00:00');
+    const actualDate = new Date(actualAt + 'T00:00:00+08:00');
     const stepKey = milestone.step_key;
 
     // 原辅料到货 → 影响生产启动排期（到货后 +1 工作日）
