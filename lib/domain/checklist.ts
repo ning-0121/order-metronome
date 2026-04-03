@@ -109,12 +109,13 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   production_order_upload: {
     title: '生产单上传检查清单',
     items: [
-      { key: 'production_order_file', label: '生产制单已上传', type: 'checkbox', required: true, role: 'sales', group: '必传文件',
+      { key: 'production_order_file', label: '生产订单已上传', type: 'checkbox', required: true, role: 'sales', group: '必传文件',
         helpText: '含款式、面料、尺码、工艺等完整生产信息' },
+      { key: 'trims_sheet_file', label: '原辅料单已上传', type: 'checkbox', required: true, role: 'sales', group: '必传文件',
+        helpText: '面辅料明细、用量、供应商信息' },
       { key: 'packing_requirement_file', label: '包装资料已上传', type: 'checkbox', required: true, role: 'sales', group: '必传文件',
         helpText: '装箱方式、唛头、吊牌、洗标等包装要求' },
-      { key: 'trims_sheet_file', label: '辅料表已上传', type: 'checkbox', required: false, role: 'sales', group: '可选文件' },
-      { key: 'production_info_complete', label: '确认生产单信息完整，可交付生产部', type: 'checkbox', required: true, role: 'sales', group: '确认' },
+      { key: 'production_info_complete', label: '确认三份资料完整，可交付生产部', type: 'checkbox', required: true, role: 'sales', group: '确认' },
     ],
   },
 

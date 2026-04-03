@@ -222,7 +222,7 @@ export default async function OrderDetailPage({
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
-          { key: 'bom', label: '包装资料' },
+          { key: 'bom', label: '原辅料和包装' },
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
@@ -533,14 +533,23 @@ export default async function OrderDetailPage({
             )}
           </div>
         )}
-        {/* Tab: 包装资料 */}
+        {/* Tab: 原辅料和包装 */}
         {activeTab === 'bom' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">📦 包装资料</h2>
-            {/* 已上传的包装文件 */}
-            <PackingFilesSection orderId={id} />
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4">原辅料清单 (BOM)</h3>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
+            <h2 className="text-lg font-semibold text-gray-900">📋 原辅料和包装资料</h2>
+            {/* 包装资料文件 */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">📦 包装资料</h3>
+              <PackingFilesSection orderId={id} fileTypes={['packing_requirement', 'tech_pack']} emptyText="业务在「生产单上传」节点上传的包装资料将显示在这里" />
+            </div>
+            {/* 原辅料单文件 */}
+            <div className="pt-4 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">🧵 原辅料单</h3>
+              <PackingFilesSection orderId={id} fileTypes={['trims_sheet', 'production_order']} emptyText="业务在「生产单上传」节点上传的原辅料单将显示在这里" />
+            </div>
+            {/* BOM 清单 */}
+            <div className="pt-4 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-4">📝 BOM 物料清单</h3>
               <BomTab orderId={id} />
             </div>
           </div>
@@ -549,7 +558,12 @@ export default async function OrderDetailPage({
         {/* Tab: 生产进度 */}
         {activeTab === 'production' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">生产进度</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">生产进度</h2>
+            {/* 生产订单文件快捷查看 */}
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-gray-600 mb-2">📄 生产订单</h3>
+              <PackingFilesSection orderId={id} fileTypes={['production_order']} emptyText="暂未上传生产订单，请在「执行进度→生产单上传」中补传" />
+            </div>
             <ProductionProgressTab
               orderId={id}
               isAdmin={isAdmin}

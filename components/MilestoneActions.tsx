@@ -739,19 +739,24 @@ function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload
         <div className="space-y-2">
           {isProductionUpload ? (
             <>
-              <div className="flex items-center gap-2">
-                <label className="flex-1 text-center py-2 rounded-lg border-2 border-dashed border-indigo-300 text-xs text-indigo-600 cursor-pointer hover:bg-indigo-50">
-                  📄 上传生产订单
+              <div className="grid grid-cols-3 gap-2">
+                <label className="text-center py-2.5 rounded-lg border-2 border-dashed border-indigo-300 text-xs text-indigo-600 cursor-pointer hover:bg-indigo-50">
+                  📄 生产订单
                   <input type="file" className="hidden" disabled={uploading} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
                     onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], 'production_order'); e.target.value = ''; }} />
                 </label>
-                <label className="flex-1 text-center py-2 rounded-lg border-2 border-dashed border-amber-300 text-xs text-amber-600 cursor-pointer hover:bg-amber-50">
-                  📦 上传包装资料
+                <label className="text-center py-2.5 rounded-lg border-2 border-dashed border-green-300 text-xs text-green-600 cursor-pointer hover:bg-green-50">
+                  🧵 原辅料单
+                  <input type="file" className="hidden" disabled={uploading} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                    onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], 'trims_sheet'); e.target.value = ''; }} />
+                </label>
+                <label className="text-center py-2.5 rounded-lg border-2 border-dashed border-amber-300 text-xs text-amber-600 cursor-pointer hover:bg-amber-50">
+                  📦 包装资料
                   <input type="file" className="hidden" disabled={uploading} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
                     onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], 'packing_requirement'); e.target.value = ''; }} />
                 </label>
               </div>
-              <p className="text-xs text-gray-400">包装资料将同步显示在「包装资料」tab</p>
+              <p className="text-xs text-gray-400">文件将同步显示在「原辅料和包装」tab</p>
             </>
           ) : (
             <label className="block text-center py-2 rounded-lg border-2 border-dashed border-gray-300 text-xs text-gray-500 cursor-pointer hover:bg-gray-100">
