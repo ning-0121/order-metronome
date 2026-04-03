@@ -237,42 +237,80 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
 export interface MonthlyShipment {
   month: string; label: string; orderCount: number; totalQuantity: number;
   completedCount: number; plannedCount: number; customers: string[]; factories: string[];
+  // 三日期维度：当月有多少订单在该阶段
+  orderDateCount: number;    // 下单月
+  productionCount: number;   // 生产上线月（production_kickoff due_at）
+  factoryDateCount: number;  // 出厂月
 }
 
 export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
   const supabase = await createClient();
   const { data: orders } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, factory_name, quantity, factory_date, etd, incoterm, lifecycle_status')
+    .select('id, order_no, customer_name, factory_name, quantity, factory_date, etd, order_date, created_at, incoterm, lifecycle_status')
     .not('lifecycle_status', 'eq', '已取消');
   if (!orders || orders.length === 0) return [];
 
+  // 获取所有订单的 production_kickoff 节点（生产上线日期）
+  const orderIds = orders.map((o: any) => o.id);
+  const { data: prodMilestones } = await (supabase.from('milestones') as any)
+    .select('order_id, due_at')
+    .in('order_id', orderIds)
+    .eq('step_key', 'production_kickoff');
+  const prodDateMap = new Map<string, string>();
+  for (const m of prodMilestones || []) {
+    if (m.due_at) prodDateMap.set(m.order_id, m.due_at.slice(0, 7));
+  }
+
+  // 当前月 + 未来8个月
   const now = new Date();
+  const currentMonth = now.toISOString().slice(0, 7);
   const months: string[] = [];
-  for (let i = -6; i <= 5; i++) {
+  for (let i = 0; i <= 8; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
     months.push(d.toISOString().slice(0, 7));
   }
 
-  const monthMap = new Map<string, { orders: any[]; completed: number; planned: number; qty: number; customers: Set<string>; factories: Set<string> }>();
-  for (const m of months) monthMap.set(m, { orders: [], completed: 0, planned: 0, qty: 0, customers: new Set(), factories: new Set() });
+  const monthMap = new Map<string, {
+    orders: any[]; completed: number; planned: number; qty: number;
+    customers: Set<string>; factories: Set<string>;
+    orderDateCount: number; productionCount: number; factoryDateCount: number;
+  }>();
+  for (const m of months) monthMap.set(m, {
+    orders: [], completed: 0, planned: 0, qty: 0, customers: new Set(), factories: new Set(),
+    orderDateCount: 0, productionCount: 0, factoryDateCount: 0,
+  });
 
   for (const o of orders) {
     const shipDate = o.factory_date || o.etd;
     if (!shipDate) continue;
-    const monthKey = shipDate.slice(0, 7);
-    const bucket = monthMap.get(monthKey);
-    if (!bucket) continue;
-    bucket.orders.push(o); bucket.qty += o.quantity || 0;
-    if (o.customer_name) bucket.customers.add(o.customer_name);
-    if (o.factory_name) bucket.factories.add(o.factory_name);
-    const ls = o.lifecycle_status || '';
-    if (ls === '已完成' || ls === 'completed' || ls === '已复盘') bucket.completed++; else bucket.planned++;
+    const shipMonth = shipDate.slice(0, 7);
+    // 出厂月维度
+    const bucket = monthMap.get(shipMonth);
+    if (bucket) {
+      bucket.orders.push(o); bucket.qty += o.quantity || 0;
+      bucket.factoryDateCount++;
+      if (o.customer_name) bucket.customers.add(o.customer_name);
+      if (o.factory_name) bucket.factories.add(o.factory_name);
+      const ls = o.lifecycle_status || '';
+      if (ls === '已完成' || ls === 'completed' || ls === '已复盘') bucket.completed++; else bucket.planned++;
+    }
+    // 下单月维度
+    const orderMonth = (o.order_date || o.created_at || '').slice(0, 7);
+    const orderBucket = monthMap.get(orderMonth);
+    if (orderBucket) orderBucket.orderDateCount++;
+    // 生产上线月维度
+    const prodMonth = prodDateMap.get(o.id);
+    if (prodMonth) {
+      const prodBucket = monthMap.get(prodMonth);
+      if (prodBucket) prodBucket.productionCount++;
+    }
   }
 
   return months.map(m => {
     const b = monthMap.get(m)!;
     return { month: m, label: `${parseInt(m.split('-')[1])}月`, orderCount: b.orders.length, totalQuantity: b.qty,
-      completedCount: b.completed, plannedCount: b.planned, customers: Array.from(b.customers), factories: Array.from(b.factories) };
+      completedCount: b.completed, plannedCount: b.planned, customers: Array.from(b.customers), factories: Array.from(b.factories),
+      orderDateCount: b.orderDateCount, productionCount: b.productionCount, factoryDateCount: b.factoryDateCount };
   });
 }
 
@@ -284,7 +322,7 @@ export interface CapacityAnalysis {
 
 export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
   const distribution = await getShipmentDistribution();
-  const dataStr = distribution.map(m => `${m.month}(${m.label}): ${m.orderCount}单/${m.totalQuantity}件 [完成${m.completedCount}/计划${m.plannedCount}] 客户${m.customers.length}家 工厂${m.factories.length}家`).join('\n');
+  const dataStr = distribution.map(m => `${m.month}(${m.label}): 出厂${m.factoryDateCount}单/${m.totalQuantity}件 [完成${m.completedCount}/计划${m.plannedCount}] 下单${m.orderDateCount} 生产上线${m.productionCount} 客户${m.customers.length}家 工厂${m.factories.length}家`).join('\n');
   const currentMonth = new Date().toISOString().slice(0, 7);
   const prompt = `你是一位资深外贸服装生产管理顾问。以下是一家服装外贸公司过去6个月+未来6个月的订单出货分布：\n\n${dataStr}\n\n当前月份：${currentMonth}\n\n请分析：\n1. 对每个月给出产能状态（overload/normal/underload/empty）和一句话建议\n2. 总体排产形势（2-3句话）\n3. 3-5条行动建议（含：是否需要提前准备产能、哪些月可接加单、排产节奏、业务开发力度）\n\n返回JSON：{"summary":"...","monthlyInsights":[{"month":"2026-04","label":"4月","status":"normal","advice":"..."}],"recommendations":["..."]}\n只返回JSON。`;
 
