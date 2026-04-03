@@ -823,10 +823,10 @@ export async function getOrderLogs(orderId: string) {
     return { error: '请先登录' };
   }
   
-  // 从 milestone_logs 读取
+  // 从 milestone_logs 读取（关联 milestone 名称）
   const { data: logs, error } = await (supabase
     .from('milestone_logs') as any)
-    .select('id, milestone_id, order_id, action, note, actor_user_id, created_at')
+    .select('id, milestone_id, order_id, action, note, actor_user_id, created_at, milestones(name)')
     .eq('order_id', orderId)
     .order('created_at', { ascending: false })
     .limit(100);
@@ -841,15 +841,16 @@ export async function getOrderLogs(orderId: string) {
   if (actorIds.length > 0) {
     const { data: profiles } = await (supabase
       .from('profiles') as any)
-      .select('user_id, full_name')
+      .select('user_id, full_name, name, email')
       .in('user_id', actorIds);
-    profileMap = (profiles || []).reduce((m: any, p: any) => { m[p.user_id] = p.full_name; return m; }, {});
+    profileMap = (profiles || []).reduce((m: any, p: any) => { m[p.user_id] = p.full_name || p.name || p.email?.split('@')[0] || '未知'; return m; }, {});
   }
 
-  // 附加姓名到日志
+  // 附加姓名+节点名到日志
   const logsWithNames = (logs || []).map((l: any) => ({
     ...l,
     actor_name: profileMap[l.actor_user_id] || null,
+    milestone_name: l.milestones?.name || null,
   }));
 
   return { data: logsWithNames };

@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getShipmentConfirmation, createShipmentConfirmation, approveShipment, executeShipment } from '@/app/actions/shipments';
 import { getShipmentBatches, enableSplitShipment, updateShipmentBatch } from '@/app/actions/shipment-batches';
+import { createClient } from '@/lib/supabase/client';
 
 interface ShipmentBatch {
   id: string; batch_no: number; quantity: number; quantity_unit?: string;
@@ -40,6 +41,9 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
   const [editingBatch, setEditingBatch] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
 
+  // Packing List 文件
+  const [packingDocs, setPackingDocs] = useState<Array<{ id: string; file_name: string; file_url: string; created_at: string }>>([]);
+
   // 出货申请表单
   const [applyForm, setApplyForm] = useState({
     shipment_qty: '', customer_name: '', product_name: '',
@@ -55,8 +59,24 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([getShipmentConfirmation(orderId), getShipmentBatches(orderId)])
-      .then(([c, b]) => { setConf(c.data || null); setBatches(b.data || []); setLoading(false); });
+    const supabase = createClient();
+    Promise.all([
+      getShipmentConfirmation(orderId),
+      getShipmentBatches(orderId),
+      // 获取已上传的 packing list 文档
+      (supabase.from('order_documents') as any)
+        .select('id, file_name, file_url, created_at')
+        .eq('order_id', orderId)
+        .eq('document_type', 'packing_list')
+        .order('created_at', { ascending: false })
+        .then(({ data }: any) => data || [])
+        .catch(() => []),
+    ]).then(([c, b, docs]) => {
+      setConf(c.data || null);
+      setBatches(b.data || []);
+      setPackingDocs(docs);
+      setLoading(false);
+    });
   }, [orderId]);
 
   useEffect(() => { load(); }, [load]);
@@ -172,6 +192,37 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
       </div>
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+
+      {/* ===== Packing List 区域 ===== */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-gray-900">📦 Packing List（装箱单）</h3>
+          {packingDocs.length === 0 && canApply && (
+            <a href={`/orders/${orderId}?tab=documents`} className="text-xs text-indigo-600 hover:underline font-medium">去单据中心上传 →</a>
+          )}
+        </div>
+        {packingDocs.length > 0 ? (
+          <div className="space-y-1.5">
+            {packingDocs.map(doc => (
+              <div key={doc.id} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span>📎</span>
+                  <span className="text-sm text-gray-900 truncate">{doc.file_name || '装箱单'}</span>
+                  <span className="text-xs text-gray-400">{new Date(doc.created_at).toLocaleDateString('zh-CN')}</span>
+                </div>
+                {doc.file_url && (
+                  <a href={doc.file_url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs px-2.5 py-1 rounded bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50 shrink-0">查看</a>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-3 text-sm text-amber-700 bg-amber-50 rounded-lg border border-amber-200">
+            ⚠️ 尚未上传 Packing List，请业务在「单据中心 → 装箱单」中上传后再申请出货
+          </div>
+        )}
+      </div>
 
       {/* ===== Step 1: 验货确认 ===== */}
       {currentStep === 0 && (
