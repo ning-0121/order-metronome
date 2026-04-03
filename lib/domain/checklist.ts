@@ -165,14 +165,29 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   // ── 阶段3：工厂匹配 ──────────────────────────
 
   factory_confirmed: {
-    title: '工厂匹配检查清单',
+    title: '工厂匹配评估（目标价·品质·交期）',
     items: [
-      { key: 'product_type_match', label: '产品类型匹配', type: 'checkbox', required: true, role: 'merchandiser', group: '匹配评估' },
-      { key: 'price_delivery_match', label: '目标价和交期匹配', type: 'checkbox', required: true, role: 'merchandiser', group: '匹配评估' },
-      { key: 'quality_grade_match', label: '品质等级匹配', type: 'checkbox', required: true, role: 'merchandiser', group: '匹配评估' },
-      { key: 'primary_factory', label: '第一候选工厂', type: 'text', required: true, role: 'merchandiser', group: '工厂选择' },
-      { key: 'backup_factory', label: '备选工厂', type: 'text', required: false, role: 'merchandiser', group: '工厂选择',
-        helpText: '建议准备备选工厂以防产能不足' },
+      // 目标价评估
+      { key: 'factory_quote_price', label: '工厂报价（元/件）', type: 'number', required: true, role: 'merchandiser', group: '目标价评估',
+        helpText: '填写工厂给到的加工单价' },
+      { key: 'target_price_match', label: '报价 vs 目标价', type: 'select', required: true, role: 'merchandiser', group: '目标价评估',
+        options: ['在目标价内', '略超（5%以内，可接受）', '超出较多（需协商客户或换厂）'] },
+      // 品质评估
+      { key: 'factory_quality_grade', label: '工厂品质等级', type: 'select', required: true, role: 'merchandiser', group: '品质评估',
+        options: ['A级（高端客户适用）', 'B级（中端，满足大部分客户）', 'C级（需加强QC管控）'] },
+      { key: 'factory_quality_history', label: '历史品质表现', type: 'select', required: true, role: 'merchandiser', group: '品质评估',
+        options: ['优秀（无重大投诉）', '一般（有过小问题已改进）', '较差（需特别关注）', '新工厂（无历史数据）'] },
+      // 交期评估
+      { key: 'factory_capacity_ok', label: '产能是否满足本单交期', type: 'select', required: true, role: 'merchandiser', group: '交期评估',
+        options: ['完全满足', '紧张但可行（需跟紧）', '无法满足（需协商交期或分厂）'] },
+      { key: 'factory_current_load', label: '工厂当前在手订单量', type: 'select', required: false, role: 'merchandiser', group: '交期评估',
+        options: ['较空闲（<50%产能）', '正常（50-80%）', '饱和（>80%需注意）'] },
+      // 最终确认
+      { key: 'primary_factory', label: '确定工厂', type: 'text', required: true, role: 'merchandiser', group: '最终确认' },
+      { key: 'backup_factory', label: '备选工厂', type: 'text', required: false, role: 'merchandiser', group: '最终确认',
+        helpText: '建议准备备选以防产能不足' },
+      { key: 'factory_match_conclusion', label: '综合评估结论', type: 'select', required: true, role: 'merchandiser', group: '最终确认',
+        options: ['推荐（价格+品质+交期均满足）', '可接受（有风险点但可控）', '不推荐（需换厂或协商客户）'] },
     ],
   },
 

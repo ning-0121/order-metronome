@@ -77,6 +77,8 @@ function getTodayDateString(): string {
 
 /** 判断用户角色是否匹配里程碑 owner_role */
 function isMyMilestone(milestone: any, userRoles: string[]): boolean {
+  // 生产主管看所有订单
+  if (userRoles.includes('production_manager')) return true;
   if (!milestone.owner_role) return false;
   const ownerRole = milestone.owner_role.toLowerCase();
   return userRoles.some(r => {
