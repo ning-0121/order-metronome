@@ -113,26 +113,6 @@ export function MilestoneActions({
     setLoading(true);
 
     try {
-      // 自动保存检查清单（用户可能勾了但没点"保存清单"）
-      if (checklistResponsesRef.current && Object.keys(checklistResponsesRef.current).length > 0) {
-        try {
-          const checklistData = Object.entries(checklistResponsesRef.current).map(([key, r]) => {
-            const item: { key: string; value: any; pending_date?: string } = { key, value: r.value ?? null };
-            if (r.pending_date) item.pending_date = r.pending_date;
-            return item;
-          });
-          const saveResult = await saveChecklistData(milestone.id, checklistData);
-          if (saveResult.error) {
-            setSubmitError('检查清单保存失败：' + saveResult.error);
-            setLoading(false);
-            return;
-          }
-        } catch (checklistErr: any) {
-          // 清单保存失败不阻断提交，继续尝试标记完成
-          console.warn('检查清单自动保存异常:', checklistErr?.message);
-        }
-      }
-
       // 上传凭证文件（同时写入 storage + attachments 表）
       if (evidenceFile && orderId) {
         const supabase = createClient();
@@ -186,8 +166,18 @@ export function MilestoneActions({
           .eq('id', milestone.id);
       }
 
-      // 标记完成
-      const result = await markMilestoneDone(milestone.id);
+      // 收集检查清单数据，连同标记完成一起发给服务端
+      let checklistPayload: Array<{ key: string; value: any; pending_date?: string }> | null = null;
+      if (checklistResponsesRef.current && Object.keys(checklistResponsesRef.current).length > 0) {
+        checklistPayload = Object.entries(checklistResponsesRef.current).map(([key, r]) => {
+          const item: { key: string; value: any; pending_date?: string } = { key, value: r.value ?? null };
+          if (r.pending_date) item.pending_date = r.pending_date;
+          return item;
+        });
+      }
+
+      // 标记完成（服务端会先保存清单再验证）
+      const result = await markMilestoneDone(milestone.id, checklistPayload);
       if (result.error) {
         setSubmitError(result.error);
       } else {
