@@ -562,6 +562,12 @@ export default async function OrderDetailPage({
               isAdmin={isAdmin}
               userId={user?.id}
               isSplitShipment={orderData.is_split_shipment || false}
+              orderContext={{
+                customerName: orderData.customer_name,
+                factoryDate: orderData.factory_date,
+                etd: orderData.etd,
+                incoterm: orderData.incoterm,
+              }}
             />
           </div>
         )}
