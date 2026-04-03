@@ -51,6 +51,7 @@ const INSERT_WHITELIST = [
   'eta',
   'imported_at',
   'import_current_step',
+  'delivery_type',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -85,6 +86,9 @@ const UPDATE_WHITELIST = [
   'internal_order_no',
   'quantity_unit',
   'eta',
+  'delivery_type',
+  'is_split_shipment',
+  'total_batches',
 ] as const;
 
 // ⚠️ 系统级约束：order_no 一旦生成，永不修改

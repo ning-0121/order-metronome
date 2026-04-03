@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { markMilestoneDone, markMilestoneBlocked, saveChecklistData } from '@/app/actions/milestones';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -35,6 +35,8 @@ export function MilestoneActions({
   const [evidenceNote, setEvidenceNote] = useState('');
   const [blockError, setBlockError] = useState('');
   const [submitError, setSubmitError] = useState('');
+  // 检查清单响应数据的引用，供提交时自动保存
+  const checklistResponsesRef = useRef<Record<string, { value: any; pending_date?: string }> | null>(null);
 
   // 多角色匹配：用户任一角色匹配节点 owner_role 即可操作
   // 管理员不在此列（管理员监督不替代执行，与服务端权限一致）
@@ -111,6 +113,19 @@ export function MilestoneActions({
     setLoading(true);
 
     try {
+      // 自动保存检查清单（用户可能勾了但没点"保存清单"）
+      if (checklistResponsesRef.current && Object.keys(checklistResponsesRef.current).length > 0) {
+        const checklistData = Object.entries(checklistResponsesRef.current).map(([key, r]) => ({
+          key, value: r.value, pending_date: r.pending_date,
+        }));
+        const saveResult = await saveChecklistData(milestone.id, checklistData);
+        if (saveResult.error) {
+          setSubmitError('检查清单保存失败：' + saveResult.error);
+          setLoading(false);
+          return;
+        }
+      }
+
       // 上传凭证文件（同时写入 storage + attachments 表）
       if (evidenceFile && orderId) {
         const supabase = createClient();
@@ -316,6 +331,7 @@ export function MilestoneActions({
             milestone={milestone}
             orderId={orderId || ''}
             currentRoles={allRoles}
+            onResponsesChange={(responses) => { checklistResponsesRef.current = responses; }}
           />
 
           <div>
@@ -447,10 +463,11 @@ export function MilestoneActions({
 
 // ══════ 检查清单子组件 ══════
 
-function ChecklistSection({ milestone, orderId, currentRoles }: {
+function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange }: {
   milestone: any;
   orderId: string;
   currentRoles: string[];
+  onResponsesChange?: (responses: Record<string, { value: any; pending_date?: string }>) => void;
 }) {
   const [config] = useState<ChecklistConfig | null>(() => getChecklistForStep(milestone.step_key));
   const [responses, setResponses] = useState<Record<string, { value: any; pending_date?: string }>>({});
@@ -471,12 +488,23 @@ function ChecklistSection({ milestone, orderId, currentRoles }: {
   if (!config) return null;
 
   const handleChange = (key: string, value: any, pendingDate?: string) => {
-    setResponses(prev => ({
-      ...prev,
-      [key]: { value, pending_date: pendingDate || prev[key]?.pending_date },
-    }));
+    setResponses(prev => {
+      const next = {
+        ...prev,
+        [key]: { value, pending_date: pendingDate || prev[key]?.pending_date },
+      };
+      onResponsesChange?.(next);
+      return next;
+    });
     setSaved(false);
   };
+
+  // 初始化时也同步给父组件
+  useEffect(() => {
+    if (Object.keys(responses).length > 0) {
+      onResponsesChange?.(responses);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async () => {
     setSaving(true);

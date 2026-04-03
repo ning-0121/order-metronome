@@ -75,6 +75,7 @@ function NewOrderWizard() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<any[]>([]);
   const [incoterm, setIncoterm] = useState<string>('');
+  const [deliveryType, setDeliveryType] = useState<string>('');
   const [shippingSampleRequired, setShippingSampleRequired] = useState(false);
   const [preGeneratedOrderNo, setPreGeneratedOrderNo] = useState<string | null>(null);
   const [orderNoLoading, setOrderNoLoading] = useState(true);
@@ -512,7 +513,14 @@ function NewOrderWizard() {
                     贸易条款 <span className="text-red-500">*</span>
                   </label>
                   <select name="incoterm" required value={incoterm}
-                    onChange={(e) => setIncoterm(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setIncoterm(v);
+                      // 自动推断交付方式：人民币→国内送仓，FOB/DDP→出口
+                      if (['RMB_EX_TAX', 'RMB_INC_TAX'].includes(v)) setDeliveryType('domestic');
+                      else if (v) setDeliveryType('export');
+                      else setDeliveryType('');
+                    }}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                     <option value="">请选择</option>
                     <option value="RMB_EX_TAX">人民币不含税</option>
@@ -520,6 +528,21 @@ function NewOrderWizard() {
                     <option value="FOB">FOB（离岸价）</option>
                     <option value="DDP">DDP（完税后交货）</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    交付方式
+                  </label>
+                  <input type="hidden" name="delivery_type" value={deliveryType} />
+                  <select value={deliveryType}
+                    onChange={(e) => setDeliveryType(e.target.value)}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    <option value="export">出口（含订舱/报关/出运）</option>
+                    <option value="domestic">国内送仓（无需出运节点）</option>
+                  </select>
+                  {deliveryType === 'domestic' && (
+                    <p className="text-xs text-amber-600 mt-1">将跳过订舱、报关、出运节点，替换为「国内送仓完成」</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Cancel Date</label>

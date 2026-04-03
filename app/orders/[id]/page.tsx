@@ -21,6 +21,7 @@ import { OrderActions } from '@/components/OrderActions';
 import { RecalcButton } from '@/components/RecalcButton';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
+import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -39,7 +40,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'documents', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -222,6 +223,7 @@ export default async function OrderDetailPage({
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料单' },
           { key: 'production', label: '生产进度' },
+              { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
@@ -545,6 +547,21 @@ export default async function OrderDetailPage({
               orderId={id}
               isAdmin={isAdmin}
               canReport={currentRoles.some(r => ['sales', 'merchandiser'].includes(r))}
+            />
+          </div>
+        )}
+
+        {/* Tab: 出货管理 */}
+        {activeTab === 'shipment' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">出货管理</h2>
+            <ShipmentTab
+              orderId={id}
+              orderQty={orderData.quantity || undefined}
+              currentRole={currentRole || ''}
+              isAdmin={isAdmin}
+              userId={user?.id}
+              isSplitShipment={orderData.is_split_shipment || false}
             />
           </div>
         )}
