@@ -12,6 +12,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { generateSuggestionsForOrder } from '@/lib/agent/generateSuggestions';
+import { enhanceSuggestionsWithAI, getEnhancementContext } from '@/lib/agent/aiEnhance';
 import { CIRCUIT_BREAKER } from '@/lib/agent/types';
 import { NextResponse } from 'next/server';
 
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
     // 2. 获取所有执行中订单
     const { data: orders } = await supabase
       .from('orders')
-      .select('id, order_no, customer_name, factory_name, lifecycle_status')
+      .select('id, order_no, customer_name, factory_name, quantity, lifecycle_status, incoterm, order_type, factory_date, is_new_customer, is_new_factory')
       .in('lifecycle_status', ['执行中', 'running', 'active', '已生效']);
 
     if (!orders || orders.length === 0) {
@@ -80,11 +81,28 @@ export async function POST(req: Request) {
 
       const orderActions = (allExistingActions || []).filter((a: any) => a.order_id === order.id);
 
-      const suggestions = generateSuggestionsForOrder(
+      let suggestions = generateSuggestionsForOrder(
         order, milestones || [], profileList, orderActions
       );
 
       if (suggestions.length === 0) continue;
+
+      // Phase 2: AI 增强（只对有 high severity 建议的订单调用，控制成本）
+      const hasHighSeverity = suggestions.some(s => s.severity === 'high');
+      if (hasHighSeverity) {
+        try {
+          const memory = await getEnhancementContext(supabase, order.id, order.customer_name, order.factory_name);
+          const milestonesCtx = (milestones || []).map((m: any) => ({
+            name: m.name, status: m.status, dueAt: m.due_at,
+            daysOverdue: m.due_at && new Date(m.due_at) < new Date() ? Math.ceil((Date.now() - new Date(m.due_at).getTime()) / 86400000) : 0,
+            ownerRole: m.owner_role, isCritical: m.is_critical,
+          }));
+          suggestions = await enhanceSuggestionsWithAI(suggestions, {
+            orderNo: order.order_no, customerName: order.customer_name,
+            factoryName: order.factory_name, quantity: order.quantity,
+          }, milestonesCtx, memory);
+        } catch { /* AI失败不影响，用规则引擎原始建议 */ }
+      }
 
       // 存入数据库
       const rows = suggestions.map(s => ({
