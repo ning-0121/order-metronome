@@ -46,7 +46,7 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
       city: f.city || '',
       address: f.address || '',
       cooperation_status: f.cooperation_status || 'active',
-      product_categories: f.product_categories || [],
+      product_categories: Array.isArray(f.product_categories) ? f.product_categories : [],
       worker_count: f.worker_count || '',
       monthly_capacity: f.monthly_capacity || '',
       notes: f.notes || '',
@@ -147,7 +147,7 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
                     {PRODUCT_CATEGORIES.map(cat => (
                       <button key={cat} type="button" onClick={() => toggleCategory(cat)}
                         className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all ${
-                          form.product_categories.includes(cat) ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-white border-gray-200 text-gray-600'
+                          (Array.isArray(form.product_categories) && form.product_categories.includes(cat)) ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-white border-gray-200 text-gray-600'
                         }`}>{cat}</button>
                     ))}
                   </div>
