@@ -9,6 +9,7 @@ import { OrderScoreCard } from '@/components/OrderScoreCard';
 import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { OrderAIRisk } from '@/components/OrderAIRisk';
+import { OrderAgentSuggestions } from '@/components/OrderAgentSuggestions';
 import { LiveScorePreview } from '@/components/LiveScorePreview';
 import { DocumentCenterTab } from '@/components/tabs/DocumentCenterTab';
 import { normalizeMilestoneStatus, isDoneStatus, isActiveStatus } from '@/lib/domain/types';
@@ -338,6 +339,11 @@ export default async function OrderDetailPage({
                 }
                 return parts.join('，');
               })()} orderId={id} />
+            </div>
+
+            {/* Agent 可执行建议 */}
+            <div className="md:col-span-2">
+              <OrderAgentSuggestions orderId={id} />
             </div>
 
             {/* 订单资料 */}

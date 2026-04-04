@@ -1,0 +1,177 @@
+'use client';
+
+import { useState } from 'react';
+import { executeAgentAction, dismissAgentAction, rollbackAgentAction } from '@/app/actions/agent-execute';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { ACTION_CONFIG } from '@/lib/agent/types';
+import type { AgentSuggestion } from '@/lib/agent/types';
+
+const SEVERITY_STYLES = {
+  high: { bg: 'bg-red-50', border: 'border-red-200', badge: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
+  medium: { bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  low: { bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+};
+
+export function AgentSuggestionCard({ suggestion, showOrder = true }: {
+  suggestion: AgentSuggestion;
+  showOrder?: boolean;
+}) {
+  const router = useRouter();
+  const [status, setStatus] = useState(suggestion.status);
+  const [executing, setExecuting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [error, setError] = useState('');
+
+  const config = ACTION_CONFIG[suggestion.actionType];
+  const style = SEVERITY_STYLES[suggestion.severity];
+
+  async function handleExecute() {
+    // 需要确认？
+    if (config.confirmMessage && !showConfirm) {
+      setShowConfirm(true);
+      return;
+    }
+
+    setExecuting(true);
+    setError('');
+    setShowConfirm(false);
+
+    const result = await executeAgentAction(suggestion.id);
+    if (result.error) {
+      setError(result.error);
+    } else {
+      setStatus('executed');
+      router.refresh();
+    }
+    setExecuting(false);
+  }
+
+  async function handleDismiss() {
+    setExecuting(true);
+    await dismissAgentAction(suggestion.id);
+    setStatus('dismissed');
+    setExecuting(false);
+  }
+
+  async function handleRollback() {
+    setExecuting(true);
+    setError('');
+    const result = await rollbackAgentAction(suggestion.id);
+    if (result.error) {
+      setError(result.error);
+    } else {
+      setStatus('pending');
+      router.refresh();
+    }
+    setExecuting(false);
+  }
+
+  // 已处理的建议简化显示
+  if (status === 'executed') {
+    return (
+      <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200 text-sm">
+        <span className="text-green-700">✅ {suggestion.title}</span>
+        {suggestion.canRollback && (
+          <button onClick={handleRollback} disabled={executing}
+            className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50">
+            撤销
+          </button>
+        )}
+      </div>
+    );
+  }
+  if (status === 'dismissed') {
+    return (
+      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm text-gray-400">
+        已忽略：{suggestion.title}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`rounded-xl border p-4 ${style.bg} ${style.border}`}>
+      {/* 头部 */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-base">{config.icon}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${style.badge}`}>
+              {suggestion.severity === 'high' ? '紧急' : suggestion.severity === 'medium' ? '建议' : '提示'}
+            </span>
+            {showOrder && suggestion.orderNo && (
+              <Link href={`/orders/${suggestion.orderId}`} className="text-xs text-indigo-600 hover:underline">
+                {suggestion.orderNo}
+              </Link>
+            )}
+          </div>
+          <p className="text-sm font-medium text-gray-900">{suggestion.title}</p>
+          <p className="text-xs text-gray-600 mt-1">{suggestion.description}</p>
+          {suggestion.reason && (
+            <p className="text-xs text-gray-500 mt-1 italic">💡 {suggestion.reason}</p>
+          )}
+        </div>
+      </div>
+
+      {/* 确认弹窗 */}
+      {showConfirm && (
+        <div className="mt-3 p-3 bg-white rounded-lg border border-gray-300">
+          <p className="text-sm text-gray-800 mb-2">{config.confirmMessage}</p>
+          <div className="flex gap-2">
+            <button onClick={handleExecute} disabled={executing}
+              className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+              确认执行
+            </button>
+            <button onClick={() => setShowConfirm(false)}
+              className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600">
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 错误 */}
+      {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+
+      {/* 操作按钮 */}
+      {!showConfirm && (
+        <div className="flex gap-2 mt-3">
+          <button onClick={handleExecute} disabled={executing}
+            className="px-4 py-2 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+            {executing ? '执行中...' : config.buttonLabel}
+          </button>
+          <button onClick={handleDismiss} disabled={executing}
+            className="px-3 py-2 text-xs text-gray-500 hover:text-gray-700 hover:bg-white rounded-lg transition-colors">
+            忽略
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 批量展示 Agent 建议（用于 CEO 页面和订单详情页）
+ */
+export function AgentSuggestionsPanel({ suggestions, title, showOrder }: {
+  suggestions: AgentSuggestion[];
+  title?: string;
+  showOrder?: boolean;
+}) {
+  if (!suggestions || suggestions.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden">
+      <div className="bg-indigo-50 px-5 py-3 border-b border-indigo-100 flex items-center gap-2">
+        <span className="text-lg">🤖</span>
+        <h2 className="text-sm font-bold text-indigo-900">{title || 'Agent 智能建议'}</h2>
+        <span className="text-xs text-indigo-500 ml-auto">{suggestions.length} 条待处理</span>
+      </div>
+      <div className="p-4 space-y-3">
+        {suggestions.map(s => (
+          <AgentSuggestionCard key={s.id} suggestion={s} showOrder={showOrder} />
+        ))}
+      </div>
+    </div>
+  );
+}
