@@ -280,9 +280,9 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
     allMonthsSet.add(d.toISOString().slice(0, 7));
   }
-  // 只保留最近12个月（过去3个月 + 当月 + 未来8个月）
-  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 7);
-  const months = Array.from(allMonthsSet).filter(m => m >= threeMonthsAgo).sort();
+  // 只保留当月 + 未来月份，以及有数据的近期月份（上月起）
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
+  const months = Array.from(allMonthsSet).filter(m => m >= lastMonth).sort();
 
   const monthMap = new Map<string, {
     orders: any[]; completed: number; planned: number; qty: number;
