@@ -45,7 +45,8 @@ export async function getAllUsers(): Promise<{ data: User[] | null; error: strin
 export async function updateUserRoles(
   targetUserId: string,
   newRoles: string[],
-  newName?: string
+  newName?: string,
+  wechatPushKey?: string,
 ): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { isAdmin } = await getCurrentUserRole(supabase);
@@ -56,11 +57,15 @@ export async function updateUserRoles(
 
   const updateData: any = {
     roles: newRoles,
-    role: newRoles[0] || 'sales', // 兼容旧 role 字段
+    role: newRoles[0] || 'sales',
   };
 
   if (newName !== undefined) {
     updateData.name = newName;
+  }
+
+  if (wechatPushKey !== undefined) {
+    updateData.wechat_push_key = wechatPushKey || null;
   }
 
   const { error } = await (supabase.from('profiles') as any)

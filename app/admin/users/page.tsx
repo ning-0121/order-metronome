@@ -17,7 +17,7 @@ export default async function AdminUsersPage() {
   }
 
   const { data: profiles } = await (supabase.from('profiles') as any)
-    .select('user_id, email, name, role, roles')
+    .select('user_id, email, name, role, roles, wechat_push_key')
     .order('email', { ascending: true });
 
   return (

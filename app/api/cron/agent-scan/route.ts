@@ -14,6 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 import { generateSuggestionsForOrder } from '@/lib/agent/generateSuggestions';
 import { enhanceSuggestionsWithAI, getEnhancementContext } from '@/lib/agent/aiEnhance';
 import { CIRCUIT_BREAKER } from '@/lib/agent/types';
+import { pushToUsers } from '@/lib/utils/wechat-push';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60; // Vercel 最大60秒
@@ -147,6 +148,12 @@ export async function POST(req: Request) {
               status: 'unread',
             });
 
+            // 微信推送
+            await pushToUsers(supabase, [payload.target_user_id],
+              `⏰ 节点超期提醒 — ${order.order_no}`,
+              `您负责的节点已超期${payload.days_overdue || ''}天，请尽快处理。`
+            ).catch(() => {});
+
             // 标记为已执行
             await supabase
               .from('agent_actions')
@@ -170,6 +177,12 @@ export async function POST(req: Request) {
               related_milestone_id: action.milestone_id,
               status: 'unread',
             });
+            // 微信推送
+            await pushToUsers(supabase, [payload.target_user_id],
+              `📢 轮到你了 — ${order.order_no}`,
+              `前置节点已完成，请启动「${payload.next_milestone_name || '下一节点'}」。`
+            ).catch(() => {});
+
             await supabase.from('agent_actions')
               .update({ status: 'executed', executed_at: new Date().toISOString() })
               .eq('id', action.id);
