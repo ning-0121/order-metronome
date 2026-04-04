@@ -54,12 +54,13 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
   }
 
   function toggleCategory(cat: string) {
-    setForm(f => ({
-      ...f,
-      product_categories: f.product_categories.includes(cat)
-        ? f.product_categories.filter((c: string) => c !== cat)
-        : [...f.product_categories, cat],
-    }));
+    setForm(f => {
+      const cats = Array.isArray(f.product_categories) ? f.product_categories : [];
+      return {
+        ...f,
+        product_categories: cats.includes(cat) ? cats.filter((c: string) => c !== cat) : [...cats, cat],
+      };
+    });
   }
 
   async function handleSave(factoryId: string) {
@@ -180,7 +181,7 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
                       {f.worker_count && <span>{f.worker_count}人</span>}
                       {f.monthly_capacity && <span>月产能{f.monthly_capacity.toLocaleString()}件</span>}
                     </div>
-                    {f.product_categories && f.product_categories.length > 0 && (
+                    {Array.isArray(f.product_categories) && f.product_categories.length > 0 && (
                       <div className="flex gap-1 mt-1 flex-wrap">
                         {f.product_categories.map((c: string) => (
                           <span key={c} className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{c}</span>
