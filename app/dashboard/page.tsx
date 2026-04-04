@@ -263,6 +263,87 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* 角色专属快捷区 */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 mb-8">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-base">⚡</span>
+          <h2 className="text-sm font-bold text-gray-900">
+            {userRoles.includes('admin') || userRoles.includes('production_manager') ? '管理快捷入口' :
+             userRoles.includes('sales') || userRoles.includes('merchandiser') ? '我的工作台' :
+             userRoles.includes('finance') ? '财务工作台' :
+             userRoles.includes('procurement') ? '采购工作台' :
+             userRoles.includes('logistics') ? '物流工作台' : '工作台'}
+          </h2>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {/* 所有角色通用 */}
+          <Link href="/orders" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-indigo-50 text-sm text-gray-700 hover:text-indigo-700 transition-colors">
+            <span>📦</span> 订单列表
+          </Link>
+
+          {/* 管理员/生产主管 */}
+          {(userRoles.includes('admin') || userRoles.includes('production_manager')) && (
+            <>
+              <Link href="/ceo" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-red-50 text-sm text-gray-700 hover:text-red-700 transition-colors">
+                <span>🎯</span> War Room
+              </Link>
+              <Link href="/analytics" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-purple-50 text-sm text-gray-700 hover:text-purple-700 transition-colors">
+                <span>📊</span> 数据分析
+              </Link>
+              <Link href="/factories" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-amber-50 text-sm text-gray-700 hover:text-amber-700 transition-colors">
+                <span>🏭</span> 工厂管理
+              </Link>
+            </>
+          )}
+
+          {/* 业务/跟单 */}
+          {(userRoles.includes('sales') || userRoles.includes('merchandiser')) && (
+            <>
+              <Link href="/orders/new" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-green-50 text-sm text-gray-700 hover:text-green-700 transition-colors">
+                <span>➕</span> 新建订单
+              </Link>
+              <Link href="/customers" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-blue-50 text-sm text-gray-700 hover:text-blue-700 transition-colors">
+                <span>🤝</span> 客户管理
+              </Link>
+              <Link href="/quotes" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-amber-50 text-sm text-gray-700 hover:text-amber-700 transition-colors">
+                <span>💰</span> 报价管理
+              </Link>
+            </>
+          )}
+
+          {/* 财务 */}
+          {userRoles.includes('finance') && (
+            <>
+              <Link href="/quotes" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-amber-50 text-sm text-gray-700 hover:text-amber-700 transition-colors">
+                <span>💰</span> 报价审批
+              </Link>
+              <Link href="/analytics" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-purple-50 text-sm text-gray-700 hover:text-purple-700 transition-colors">
+                <span>📊</span> 数据分析
+              </Link>
+            </>
+          )}
+
+          {/* 采购 */}
+          {userRoles.includes('procurement') && (
+            <Link href="/factories" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-amber-50 text-sm text-gray-700 hover:text-amber-700 transition-colors">
+              <span>🏭</span> 工厂/供应商
+            </Link>
+          )}
+
+          {/* 物流 */}
+          {userRoles.includes('logistics') && (
+            <Link href="/warehouse" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-sky-50 text-sm text-gray-700 hover:text-sky-700 transition-colors">
+              <span>🚚</span> 仓库/出货
+            </Link>
+          )}
+
+          {/* 通用 */}
+          <Link href="/memos" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 text-sm text-gray-700 transition-colors">
+            <span>📝</span> 备忘录
+          </Link>
+        </div>
+      </div>
+
       {/* All clear state */}
       {totalIssues === 0 && (
         <div className="section text-center py-16">
