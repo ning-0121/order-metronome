@@ -24,6 +24,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/orders', label: '订单列表', icon: '📦' },
         { href: '/quotes', label: '报价管理', icon: '💰' },
         { href: '/customers', label: '客户管理', icon: '🤝' },
+        { href: '/factories', label: '工厂管理', icon: '🏭' },
         { href: '/memos', label: '备忘录', icon: '📝' },
         { href: '/analytics', label: '数据分析', icon: '📊' },
         { href: '/ai-knowledge', label: 'AI知识库', icon: '🧠' },
