@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { getFactories, createFactory, type Factory, PRODUCT_CATEGORIES } from '@/app/actions/factories';
+import { getFactories, createFactory, type Factory } from '@/app/actions/factories';
+import { PRODUCT_CATEGORIES } from '@/lib/constants/factory';
 
 export function FactorySelect() {
   const [factories, setFactories] = useState<Factory[]>([]);

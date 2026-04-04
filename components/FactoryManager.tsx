@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { PRODUCT_CATEGORIES } from '@/app/actions/factories';
+import { PRODUCT_CATEGORIES } from '@/lib/constants/factory';
 
 interface Factory {
   id: string;

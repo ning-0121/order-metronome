@@ -20,10 +20,7 @@ export interface Factory {
   capacity_unit: string | null;
 }
 
-export const PRODUCT_CATEGORIES = [
-  '瑜伽夹克', '瑜伽文胸', '瑜伽裤子', '瑜伽套装',
-  'T恤', '拉毛裤子', '拉毛上衣', '梭织上衣', '梭织裤子',
-] as const;
+// PRODUCT_CATEGORIES 已移至 lib/constants/factory.ts（客户端可安全导入）
 
 /**
  * 获取所有工厂（按名称排序，排除已软删除）
