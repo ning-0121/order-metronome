@@ -261,14 +261,28 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
     if (m.due_at) prodDateMap.set(m.order_id, m.due_at.slice(0, 7));
   }
 
-  // 当前月 + 未来8个月
+  // 找出所有相关月份范围：从最早下单月到未来8个月
   const now = new Date();
   const currentMonth = now.toISOString().slice(0, 7);
-  const months: string[] = [];
+
+  // 收集所有涉及的月份
+  const allMonthsSet = new Set<string>();
+  for (const o of orders) {
+    const orderMonth = (o.order_date || o.created_at || '').slice(0, 7);
+    if (orderMonth) allMonthsSet.add(orderMonth);
+    const factoryMonth = (o.factory_date || o.etd || '').slice(0, 7);
+    if (factoryMonth) allMonthsSet.add(factoryMonth);
+    const prodMonth = prodDateMap.get(o.id);
+    if (prodMonth) allMonthsSet.add(prodMonth);
+  }
+  // 确保当月+未来8个月都在
   for (let i = 0; i <= 8; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    months.push(d.toISOString().slice(0, 7));
+    allMonthsSet.add(d.toISOString().slice(0, 7));
   }
+  // 只保留最近12个月（过去3个月 + 当月 + 未来8个月）
+  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 7);
+  const months = Array.from(allMonthsSet).filter(m => m >= threeMonthsAgo).sort();
 
   const monthMap = new Map<string, {
     orders: any[]; completed: number; planned: number; qty: number;
@@ -281,10 +295,22 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
   });
 
   for (const o of orders) {
+    // 下单月维度（用 order_date 或 created_at）
+    const orderMonth = (o.order_date || o.created_at || '').slice(0, 7);
+    const orderBucket = monthMap.get(orderMonth);
+    if (orderBucket) orderBucket.orderDateCount++;
+
+    // 生产上线月维度
+    const prodMonth = prodDateMap.get(o.id);
+    if (prodMonth) {
+      const prodBucket = monthMap.get(prodMonth);
+      if (prodBucket) prodBucket.productionCount++;
+    }
+
+    // 出厂月维度
     const shipDate = o.factory_date || o.etd;
     if (!shipDate) continue;
     const shipMonth = shipDate.slice(0, 7);
-    // 出厂月维度
     const bucket = monthMap.get(shipMonth);
     if (bucket) {
       bucket.orders.push(o); bucket.qty += o.quantity || 0;
@@ -294,16 +320,7 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
       const ls = o.lifecycle_status || '';
       if (ls === '已完成' || ls === 'completed' || ls === '已复盘') bucket.completed++; else bucket.planned++;
     }
-    // 下单月维度
-    const orderMonth = (o.order_date || o.created_at || '').slice(0, 7);
-    const orderBucket = monthMap.get(orderMonth);
-    if (orderBucket) orderBucket.orderDateCount++;
-    // 生产上线月维度
-    const prodMonth = prodDateMap.get(o.id);
-    if (prodMonth) {
-      const prodBucket = monthMap.get(prodMonth);
-      if (prodBucket) prodBucket.productionCount++;
-    }
+
   }
 
   return months.map(m => {
