@@ -20,6 +20,7 @@ interface UserProfile {
   name: string | null;
   role: string | null;
   roles: string[] | null;
+  wechat_push_key: string | null;
 }
 
 interface UserRoleManagerProps {
@@ -32,6 +33,7 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
   const [editRoles, setEditRoles] = useState<string[]>([]);
   const [editName, setEditName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editWechatKey, setEditWechatKey] = useState('');
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const [resetting, setResetting] = useState(false);
@@ -40,6 +42,7 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
     setEditingUserId(user.user_id);
     setEditRoles(user.roles && user.roles.length > 0 ? [...user.roles] : user.role ? [user.role] : []);
     setEditName(user.name || '');
+    setEditWechatKey(user.wechat_push_key || '');
   }
 
   function toggleRole(role: string) {
@@ -71,7 +74,7 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
       return;
     }
     setSaving(true);
-    const result = await updateUserRoles(userId, editRoles, editName);
+    const result = await updateUserRoles(userId, editRoles, editName, editWechatKey || undefined);
     if (result.error) {
       alert(result.error);
     } else {
@@ -109,6 +112,22 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
                       {user.email}
                     </div>
                   </div>
+                </div>
+
+                {/* 微信通知 SendKey */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">微信通知 SendKey</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={editWechatKey}
+                      onChange={(e) => setEditWechatKey(e.target.value)}
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                      placeholder="从 sct.ftqq.com 获取 SendKey"
+                    />
+                    {editWechatKey && <span className="flex items-center text-green-600 text-xs">✓ 已配置</span>}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">配置后系统通知将同步推送到个人微信。<a href="https://sct.ftqq.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">获取 SendKey →</a></p>
                 </div>
 
                 {/* 角色多选 — 大面积展示 */}
