@@ -7,6 +7,8 @@ import { DelayRequestActions } from '@/components/DelayRequestActions';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
+import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
+import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 // RecalcButton removed from global — now per-order only
 
 import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
@@ -26,10 +28,12 @@ export default async function CEOWarRoom() {
   const ceoName = (ceoProfile as any)?.name || user.email?.split('@')[0];
 
   // 效率分析数据
-  const [analyticsSummary, roleEfficiency] = await Promise.all([
+  const [analyticsSummary, roleEfficiency, agentResult] = await Promise.all([
     getAnalyticsSummary(),
     getRoleEfficiency(),
+    getAllPendingAgentSuggestions().catch(() => ({ data: [] })),
   ]);
+  const agentSuggestions = agentResult.data || [];
 
   const now = new Date();
   const today = now.toISOString().split('T')[0];
@@ -473,6 +477,15 @@ export default async function CEOWarRoom() {
           ))}
         </div>
       </div>
+
+      {/* ===== Agent 智能建议 ===== */}
+      {agentSuggestions.length > 0 && (
+        <AgentSuggestionsPanel
+          suggestions={agentSuggestions}
+          title="Agent 智能建议 — 可一键执行"
+          showOrder={true}
+        />
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* ===== 3. 风险订单区 ===== */}
