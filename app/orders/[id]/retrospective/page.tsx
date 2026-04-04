@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getOrder, getRetrospective, submitRetrospectiveAction } from '@/app/actions/orders';
 import { formatDate } from '@/lib/utils/date';
+import { RetrospectiveAISummary } from '@/components/RetrospectiveAISummary';
 
 export default function RetrospectivePage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -174,6 +175,9 @@ export default function RetrospectivePage({ params }: { params: { id: string } }
           订单号: {orderData.order_no} | 客户: {orderData.customer_name}
         </p>
       </div>
+
+      {/* AI 复盘摘要 */}
+      <RetrospectiveAISummary orderId={params.id} orderNo={orderData.order_no} customerName={orderData.customer_name} />
 
       {isRetrospectiveCompleted && retrospective && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
