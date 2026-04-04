@@ -208,6 +208,54 @@ export function generateSuggestionsForOrder(
     );
   }
 
+  // ── 规则 6: 节点完成后通知下一节点负责人 ──
+  const sortedMilestones = [...milestones].sort((a, b) => {
+    if (!a.due_at || !b.due_at) return 0;
+    return a.due_at.localeCompare(b.due_at);
+  });
+  for (let i = 0; i < sortedMilestones.length - 1; i++) {
+    const current = sortedMilestones[i];
+    const next = sortedMilestones[i + 1];
+    if (!isDoneStatus(current.status)) continue;
+    if (isDoneStatus(next.status)) continue;
+    if (!next.owner_user_id) continue;
+    // 当前刚完成（3天内）且下一个还没开始
+    if (!isActiveStatus(next.status) && !isBlockedStatus(next.status)) {
+      const nextOwner = profiles.find(p => p.user_id === next.owner_user_id);
+      if (nextOwner) {
+        add(
+          'notify_next', 'medium', 50,
+          `「${current.name}」已完成，建议通知 ${nextOwner.name || nextOwner.email.split('@')[0]} 启动「${next.name}」`,
+          `前置节点已完成，下一节点可以开始。`,
+          `及时推进避免空等。`,
+          { target_user_id: next.owner_user_id, target_name: nextOwner.name, next_milestone_name: next.name },
+          next.id, next.name,
+        );
+      }
+    }
+  }
+
+  // ── 规则 7: 生产阶段订单无日报提醒 ──
+  const productionStarted = milestones.some(m => m.step_key === 'production_kickoff' && isDoneStatus(m.status));
+  const factoryDone = milestones.some(m => m.step_key === 'factory_completion' && isDoneStatus(m.status));
+  if (productionStarted && !factoryDone) {
+    // 找跟单负责人
+    const merchMilestone = milestones.find(m => m.owner_role === 'merchandiser' && m.owner_user_id);
+    if (merchMilestone?.owner_user_id) {
+      const merch = profiles.find(p => p.user_id === merchMilestone.owner_user_id);
+      if (merch) {
+        add(
+          'send_nudge', 'low', 40,
+          `订单 ${order.order_no} 生产中，提醒 ${merch.name || '跟单'} 提交日报`,
+          `该订单已进入生产阶段，请每日更新生产进度。`,
+          `日报有助于及时发现产能问题和品质风险。`,
+          { target_user_id: merch.user_id, target_name: merch.name, is_daily_report_reminder: true },
+          undefined, undefined,
+        );
+      }
+    }
+  }
+
   // 按优先级排序，取 top N
   suggestions.sort((a, b) => b._priority - a._priority);
   return suggestions.slice(0, CIRCUIT_BREAKER.maxSuggestionsPerOrder).map(s => {
