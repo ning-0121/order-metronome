@@ -46,11 +46,16 @@ export function ShipmentDistributionChart({ distribution, aiAnalysis, currentMon
         <div className="flex items-end gap-1.5 mt-4">
           {distribution.map(m => {
             const isCurrent = m.month === currentMonth;
+            const isPast = m.month < currentMonth;
             const insight = getMonthStatus(m.month);
             const statusCfg = insight ? STATUS_CONFIG[insight.status] : null;
             const h1 = maxCount > 0 ? (m.orderDateCount / maxCount) * 100 : 0;
             const h2 = maxCount > 0 ? (m.productionCount / maxCount) * 100 : 0;
             const h3 = maxCount > 0 ? (m.factoryDateCount / maxCount) * 100 : 0;
+            // 当月进度
+            const today = new Date();
+            const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+            const dayOfMonth = today.getDate();
             return (
               <div key={m.month} className="flex-1 flex flex-col items-center cursor-pointer group"
                 onClick={() => setExpandedMonth(expandedMonth === m.month ? null : m.month)}>
@@ -59,7 +64,9 @@ export function ShipmentDistributionChart({ distribution, aiAnalysis, currentMon
                   <div className="w-1/4 bg-amber-500 rounded-t-sm group-hover:bg-amber-600 transition-all" style={{ height: `${Math.max(h2, 2)}%` }} title={`上线 ${m.productionCount}`} />
                   <div className="w-1/4 bg-emerald-500 rounded-t-sm group-hover:bg-emerald-600 transition-all" style={{ height: `${Math.max(h3, 2)}%` }} title={`出厂 ${m.factoryDateCount}`} />
                 </div>
-                <div className={`mt-2 text-xs text-center ${isCurrent ? 'font-bold text-indigo-700' : 'text-gray-600'}`}>{m.label}</div>
+                <div className={`mt-2 text-xs text-center ${isCurrent ? 'font-bold text-indigo-700' : isPast ? 'text-gray-400' : 'text-gray-600'}`}>
+                  {m.label}{isCurrent && <span className="text-indigo-400 ml-0.5">({dayOfMonth}/{daysInMonth}天)</span>}
+                </div>
                 <div className="text-xs text-gray-400">{m.orderCount > 0 ? `${m.orderCount}单` : '-'}</div>
                 {statusCfg && <div className={`w-2 h-2 rounded-full mt-1 ${statusCfg.color}`} title={statusCfg.label} />}
               </div>
@@ -75,7 +82,12 @@ export function ShipmentDistributionChart({ distribution, aiAnalysis, currentMon
           return (
             <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold text-gray-900">{m.month} · {m.label}</h3>
+                <div>
+                  <h3 className="font-bold text-gray-900">{m.month} · {m.label}</h3>
+                  {expandedMonth === currentMonth && (
+                    <p className="text-xs text-indigo-600 mt-0.5">当月已过 {new Date().getDate()} 天，数据为截至今日</p>
+                  )}
+                </div>
                 <button onClick={() => setExpandedMonth(null)} className="text-xs text-gray-400 hover:text-gray-600">关闭</button>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">

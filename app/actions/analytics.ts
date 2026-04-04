@@ -341,7 +341,9 @@ export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
   const distribution = await getShipmentDistribution();
   const dataStr = distribution.map(m => `${m.month}(${m.label}): 出厂${m.factoryDateCount}单/${m.totalQuantity}件 [完成${m.completedCount}/计划${m.plannedCount}] 下单${m.orderDateCount} 生产上线${m.productionCount} 客户${m.customers.length}家 工厂${m.factories.length}家`).join('\n');
   const currentMonth = new Date().toISOString().slice(0, 7);
-  const prompt = `你是一位资深外贸服装生产管理顾问。以下是一家服装外贸公司过去6个月+未来6个月的订单出货分布：\n\n${dataStr}\n\n当前月份：${currentMonth}\n\n请分析：\n1. 对每个月给出产能状态（overload/normal/underload/empty）和一句话建议\n2. 总体排产形势（2-3句话）\n3. 3-5条行动建议（含：是否需要提前准备产能、哪些月可接加单、排产节奏、业务开发力度）\n\n返回JSON：{"summary":"...","monthlyInsights":[{"month":"2026-04","label":"4月","status":"normal","advice":"..."}],"recommendations":["..."]}\n只返回JSON。`;
+  const dayOfMonth = new Date().getDate();
+  const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  const prompt = `你是一位资深外贸服装生产管理顾问。以下是一家服装外贸公司的订单分布：\n\n${dataStr}\n\n当前日期：${new Date().toISOString().slice(0, 10)}（${currentMonth}月已过${dayOfMonth}/${daysInMonth}天）\n注意：当月数据是截至今日的，分析时请考虑月份进度。\n\n请分析：\n1. 对每个月给出产能状态（overload/normal/underload/empty）和一句话建议\n2. 总体排产形势（2-3句话）\n3. 3-5条行动建议（含：是否需要提前准备产能、哪些月可接加单、排产节奏、业务开发力度）\n\n返回JSON：{"summary":"...","monthlyInsights":[{"month":"2026-04","label":"4月","status":"normal","advice":"..."}],"recommendations":["..."]}\n只返回JSON。`;
 
   try {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
