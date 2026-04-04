@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* 隐藏滚动条（移动端tab横向滚动用） */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
 :root {
   --background: #fafbfc;
   --foreground: #1a1a2e;
