@@ -153,8 +153,12 @@ export function generateSuggestionsForOrder(
       'send_nudge', days >= 5 ? 'high' : 'medium', 70 + days,
       `「${m.name}」已超期 ${days} 天，建议催办 ${ownerName}`,
       `该节点截止日期为 ${m.due_at?.slice(0, 10)}，已超期 ${days} 天。`,
-      `超期节点影响后续所有环节的排期。`,
-      { target_user_id: m.owner_user_id, target_name: ownerName, days_overdue: days },
+      `超期节点影响后续所有环节的排期。${days >= 3 ? ' 催办后48小时无回应将自动升级CEO。' : ''}`,
+      {
+        target_user_id: m.owner_user_id, target_name: ownerName, days_overdue: days,
+        // 链式动作：催办→48h后升级CEO（仅超期≥3天触发）
+        ...(days >= 3 ? { chain_next_type: 'escalate_ceo', chain_delay_hours: 48, chain_id: `chain-${order.id}-${m.id}` } : {}),
+      },
       m.id, m.name,
     );
   }
