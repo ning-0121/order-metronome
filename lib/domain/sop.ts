@@ -489,6 +489,95 @@ export const SOP_MAP: Record<string, SOPConfig> = {
     completion_rules: ['货物已送达客户仓库', '签收凭证已上传'],
   },
 
+  // ══════ 打样专用节点 SOP ══════
+
+  sample_confirm: {
+    sop_title: '打样确认 SOP',
+    sop_steps: [
+      '1. 确认客户打样需求：款式、面料、颜色、尺码',
+      '2. 与客户确认打样数量和交期',
+      '3. 确认打样费用承担方式（客户付/公司承担/免费）',
+      '4. 将打样需求整理成文档，分发给采购和跟单',
+    ],
+    required_fields: ['客户打样需求确认'],
+    completion_rules: ['打样需求已明确', '打样数量和交期已确认'],
+  },
+
+  sample_material: {
+    sop_title: '打样面料采购 SOP',
+    sop_steps: [
+      '1. 根据打样需求确认面辅料品种和用量',
+      '2. 联系供应商采购打样用面辅料（可用库存面料）',
+      '3. 确认面料到位时间，不影响打样排期',
+      '4. 面料到位后通知跟单安排打样',
+    ],
+    required_fields: ['面料采购/备料确认'],
+    completion_rules: ['打样面辅料已到位'],
+  },
+
+  sample_making: {
+    sop_title: '打样制作 SOP',
+    sop_steps: [
+      '1. 将客户要求和面辅料交给工厂打样',
+      '2. 跟进打样进度，确保在交期内完成',
+      '3. 打样过程中如有工艺疑问，及时与客户确认',
+      '4. 打样完成后通知跟单安排品质检查',
+    ],
+    required_fields: ['打样进度确认'],
+    completion_rules: ['样品制作完成'],
+  },
+
+  sample_qc: {
+    sop_title: '打样检验 SOP',
+    sop_steps: [
+      '1. 检查样品外观：颜色、版型、做工、尺寸',
+      '2. 对照客户要求逐项确认',
+      '3. 如有问题标注并拍照记录',
+      '4. 合格 → 交给业务安排寄样',
+      '5. 不合格 → 反馈工厂修改后复检',
+    ],
+    required_fields: ['样品检验照片'],
+    completion_rules: ['样品品质检验通过', '检验照片已上传'],
+  },
+
+  sample_sent: {
+    sop_title: '样品寄出 SOP',
+    sop_steps: [
+      '1. 确认客户收件地址和联系人',
+      '2. 包装样品（注意防护，附色卡/面料小样）',
+      '3. 安排快递/国际物流寄出',
+      '4. 获取运单号并通知客户',
+      '5. 上传运单号至系统',
+    ],
+    required_fields: ['运单号'],
+    completion_rules: ['样品已寄出', '已通知客户并提供运单号'],
+  },
+
+  sample_customer_confirm: {
+    sop_title: '客户确认样品 SOP',
+    sop_steps: [
+      '1. 跟进客户收样情况（预计5-7天国际快递）',
+      '2. 主动联系客户了解样品评价',
+      '3. 客户确认OK → 上传确认凭证，推进到打样完成',
+      '4. 客户要修改 → 记录修改意见，重新打样（标记阻塞）',
+      '5. 客户不回复超过14天 → 主动跟进或标记关闭',
+    ],
+    required_fields: ['客户确认邮件或书面反馈'],
+    completion_rules: ['客户书面确认样品合格'],
+  },
+
+  sample_complete: {
+    sop_title: '打样完成 SOP',
+    sop_steps: [
+      '1. 确认客户已正式确认样品',
+      '2. 整理打样过程中的注意事项和工艺要点',
+      '3. 将打样经验记录到客户记忆（供后续大货参考）',
+      '4. 如客户准备下单，引导创建正式生产订单',
+    ],
+    required_fields: ['打样完成确认'],
+    completion_rules: ['客户确认通过', '打样经验已记录'],
+  },
+
   payment_received: {
     sop_title: '收款完成 SOP',
     sop_steps: [
