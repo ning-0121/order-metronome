@@ -57,6 +57,7 @@ const INSERT_WHITELIST = [
   'sample_status',
   'product_description',
   'target_price',
+  'quote_stage',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -96,6 +97,7 @@ const UPDATE_WHITELIST = [
   'sample_status',
   'product_description',
   'target_price',
+  'quote_stage',
   'is_split_shipment',
   'total_batches',
 ] as const;
