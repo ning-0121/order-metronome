@@ -36,6 +36,54 @@ export async function POST(req: Request) {
 
     const supabase = createClient(url, serviceKey);
 
+    // 0. 链式动作：检查已执行的链式建议，到时间后生成下一步
+    const { data: chainActions } = await supabase
+      .from('agent_actions')
+      .select('id, order_id, milestone_id, action_payload, executed_at')
+      .eq('status', 'executed')
+      .not('action_payload->chain_next_type', 'is', null)
+      .limit(50);
+
+    let chainGenerated = 0;
+    for (const ca of chainActions || []) {
+      const payload = ca.action_payload as any;
+      if (!payload?.chain_next_type || !payload?.chain_delay_hours || !ca.executed_at) continue;
+      // 检查是否已过等待时间
+      const execTime = new Date(ca.executed_at).getTime();
+      const waitMs = payload.chain_delay_hours * 60 * 60 * 1000;
+      if (Date.now() - execTime < waitMs) continue;
+      // 检查原节点是否已解决（如果已解决就不升级了）
+      if (ca.milestone_id) {
+        const { data: ms } = await supabase.from('milestones').select('status').eq('id', ca.milestone_id).single();
+        if (ms && (ms.status === 'done' || ms.status === '已完成')) {
+          // 节点已完成，清除链（标记chain为null防重复）
+          await supabase.from('agent_actions').update({ action_payload: { ...payload, chain_next_type: null } }).eq('id', ca.id);
+          continue;
+        }
+      }
+      // 生成下一步
+      const chainDedup = `${payload.chain_id || ca.id}:step2`;
+      const { data: existing } = await supabase.from('agent_actions').select('id').eq('dedup_key', chainDedup).in('status', ['pending', 'executing']).limit(1);
+      if (existing && existing.length > 0) continue;
+
+      await supabase.from('agent_actions').insert({
+        order_id: ca.order_id,
+        milestone_id: ca.milestone_id,
+        action_type: payload.chain_next_type,
+        title: `[自动升级] 催办后${payload.chain_delay_hours}h无回应，建议升级CEO`,
+        description: '前一步催办已执行但节点仍未处理，建议升级管理层介入。',
+        reason: '链式动作自动触发：催办→等待→升级',
+        severity: 'high',
+        action_payload: { chain_step: 2, chain_id: payload.chain_id },
+        status: 'pending',
+        dedup_key: chainDedup,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      });
+      // 清除原动作的chain防重复触发
+      await supabase.from('agent_actions').update({ action_payload: { ...payload, chain_next_type: null } }).eq('id', ca.id);
+      chainGenerated++;
+    }
+
     // 1. 清理过期建议
     const { count: expiredCount } = await supabase
       .from('agent_actions')
@@ -223,11 +271,48 @@ export async function POST(req: Request) {
       }
     }
 
+    // 8. 跨订单协调：同一工厂多订单延期 → 整体建议
+    let crossOrderSuggestions = 0;
+    const factoryOverdueMap = new Map<string, string[]>(); // factory → orderNos
+    for (const order of orders) {
+      if (!order.factory_name) continue;
+      const { data: orderMs } = await supabase.from('milestones').select('status, due_at')
+        .eq('order_id', order.id).in('status', ['in_progress', '进行中']).lt('due_at', new Date().toISOString()).limit(1);
+      if (orderMs && orderMs.length > 0) {
+        const list = factoryOverdueMap.get(order.factory_name) || [];
+        list.push(order.order_no);
+        factoryOverdueMap.set(order.factory_name, list);
+      }
+    }
+    for (const [factory, orderNos] of factoryOverdueMap) {
+      if (orderNos.length < 3) continue; // 3个以上才触发
+      const dedupKey = `cross:${factory}:${new Date().toISOString().slice(0, 10)}`;
+      const { data: existing } = await supabase.from('agent_actions').select('id').eq('dedup_key', dedupKey).in('status', ['pending', 'executing']).limit(1);
+      if (existing && existing.length > 0) continue;
+      const firstOrder = orders.find((o: any) => o.factory_name === factory);
+      if (!firstOrder) continue;
+      await supabase.from('agent_actions').insert({
+        order_id: firstOrder.id,
+        action_type: 'escalate_ceo',
+        title: `⚠️ 工厂「${factory}」${orderNos.length}个订单同时延期`,
+        description: `涉及订单：${orderNos.join('、')}。建议与工厂整体协调产能和交期。`,
+        reason: '多订单同一工厂延期表明工厂产能问题，需系统性解决而非逐单催办。',
+        severity: 'high',
+        action_payload: { factory_name: factory, order_nos: orderNos, is_cross_order: true },
+        status: 'pending',
+        dedup_key: dedupKey,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      });
+      crossOrderSuggestions++;
+    }
+
     return NextResponse.json({
       success: true,
       ordersScanned: orders.length,
       suggestionsGenerated: totalGenerated,
+      chainActionsGenerated: chainGenerated,
       autoExecuted: totalAutoExecuted,
+      crossOrderSuggestions,
       expiredCleaned: expiredCount || 0,
       timestamp: new Date().toISOString(),
     });
