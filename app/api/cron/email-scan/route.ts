@@ -1,22 +1,18 @@
 /**
- * 邮件扫描 Cron — 每15分钟检查新邮件
+ * 邮件扫描 Cron — 每15分钟
  *
- * 两种模式：
- * 1. 被动模式（推荐）：腾讯企邮自动转发到 /api/mail-inbox，本 cron 负责 AI 分析
- * 2. 主动模式：通过 Google Apps Script 中转拉取
- *
- * 本 cron 的职责：
- * - 扫描 mail_inbox 表中未分析的邮件
- * - AI 分析邮件内容，提取订单信息
- * - 对比现有订单，检查遗漏/误读
- * - 通知业务员
+ * 1. 扫描 mail_inbox 中未分析的邮件
+ * 2. AI 智能匹配客户和订单（不依赖PO号）
+ * 3. 检测数量/交期/要求变更
+ * 4. 通知业务员差异和遗漏
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { analyzeEmailWithAI, buildCustomerContext } from '@/lib/agent/emailMatcher';
 import { parseEmailForOrderInfo } from '@/lib/utils/imap-fetch';
 import { NextResponse } from 'next/server';
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
@@ -32,77 +28,149 @@ export async function POST(req: Request) {
 
     const supabase = createClient(url, serviceKey);
 
-    // 获取未分析的邮件（最近24小时，未关联订单的）
+    // 获取未分析的邮件
     const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
     const { data: unprocessed } = await supabase
       .from('mail_inbox')
-      .select('id, from_email, subject, raw_body, received_at, order_id, extracted_po')
+      .select('id, from_email, subject, raw_body, received_at, order_id')
       .is('order_id', null)
       .gte('received_at', oneDayAgo)
       .order('received_at', { ascending: false })
-      .limit(20);
+      .limit(10); // 每次最多处理10封，控制AI费用
 
     if (!unprocessed || unprocessed.length === 0) {
       return NextResponse.json({ success: true, processed: 0 });
     }
 
+    // 构建客户和订单上下文（一次查询，所有邮件共用）
+    const customerContext = await buildCustomerContext(supabase);
+
     let matched = 0;
     let alerted = 0;
 
     for (const email of unprocessed) {
+      // 1. 先用规则引擎快速提取
       const parsed = parseEmailForOrderInfo(email.subject, email.raw_body || '');
 
-      // 尝试匹配现有订单
-      for (const po of parsed.poNumbers) {
+      // 2. 用 AI 深度分析
+      const analysis = await analyzeEmailWithAI(
+        email.from_email,
+        email.subject,
+        email.raw_body || '',
+        customerContext,
+      );
+
+      // 3. 匹配订单
+      let orderId: string | null = null;
+      let orderOwner: string | null = null;
+      const orderNo = analysis.matchedOrderNo || (parsed.poNumbers.length > 0 ? parsed.poNumbers[0] : null);
+
+      if (orderNo) {
         const { data: order } = await supabase
           .from('orders')
           .select('id, order_no, customer_name, quantity, owner_user_id')
-          .or(`order_no.eq.${po},po_number.eq.${po}`)
+          .or(`order_no.eq.${orderNo},po_number.eq.${orderNo}`)
           .limit(1)
           .maybeSingle();
-
         if (order) {
-          // 关联邮件到订单
+          orderId = order.id;
+          orderOwner = order.owner_user_id;
+
+          // 更新邮件关联
           await supabase.from('mail_inbox')
-            .update({ order_id: order.id, customer_id: order.customer_name })
+            .update({ order_id: order.id, customer_id: analysis.customerName || order.customer_name })
             .eq('id', email.id);
           matched++;
 
-          // 检查数量差异
-          if (parsed.quantities.length > 0 && order.quantity) {
-            for (const qty of parsed.quantities) {
-              if (Math.abs(qty - order.quantity) > order.quantity * 0.1) {
-                // 数量差异 >10%，通知业务员
-                if (order.owner_user_id) {
-                  await supabase.from('notifications').insert({
-                    user_id: order.owner_user_id,
-                    type: 'email_alert',
-                    title: `📧 邮件数量与订单不一致`,
-                    message: `邮件中提到 ${qty} 件，但订单 ${order.order_no} 数量为 ${order.quantity} 件。请核实。\n邮件主题：${email.subject}`,
-                    related_order_id: order.id,
-                    status: 'unread',
-                  });
-                  alerted++;
-                }
-              }
-            }
-          }
-
-          // 紧急邮件通知
-          if (parsed.urgentKeywords.length > 0 && order.owner_user_id) {
+          // 4. 检测变更并通知
+          if (analysis.changes.length > 0 && orderOwner) {
+            const changeDesc = analysis.changes.map(c => `• ${c.description}`).join('\n');
             await supabase.from('notifications').insert({
-              user_id: order.owner_user_id,
-              type: 'email_urgent',
-              title: `🚨 客户紧急邮件 — ${order.order_no}`,
-              message: `客户邮件包含紧急关键词(${parsed.urgentKeywords.join('/')})。\n主题：${email.subject}`,
+              user_id: orderOwner,
+              type: 'email_change_detected',
+              title: `📧 客户邮件检测到变更 — ${order.order_no}`,
+              message: `${analysis.customerName || '客户'}的邮件中发现以下变更：\n${changeDesc}\n\n建议：${analysis.suggestedAction || '请核实'}`,
               related_order_id: order.id,
               status: 'unread',
             });
             alerted++;
           }
 
-          break; // 一封邮件只匹配一个订单
+          // 数量差异检测
+          if (analysis.quantityMentioned && order.quantity) {
+            const diff = Math.abs(analysis.quantityMentioned - order.quantity);
+            if (diff > order.quantity * 0.05) { // 差异>5%
+              await supabase.from('notifications').insert({
+                user_id: orderOwner,
+                type: 'email_qty_mismatch',
+                title: `⚠️ 邮件数量与订单不一致 — ${order.order_no}`,
+                message: `邮件提到 ${analysis.quantityMentioned} 件，订单为 ${order.quantity} 件（差异 ${diff} 件）。\n邮件主题：${email.subject}`,
+                related_order_id: order.id,
+                status: 'unread',
+              });
+              alerted++;
+            }
+          }
         }
+      }
+
+      // 5. 紧急邮件通知（即使未匹配到订单）
+      if (analysis.urgentLevel === 'urgent') {
+        // 找到客户对应的业务员
+        if (analysis.customerName) {
+          const { data: custOrder } = await supabase
+            .from('orders')
+            .select('owner_user_id')
+            .eq('customer_name', analysis.customerName)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (custOrder?.owner_user_id) {
+            await supabase.from('notifications').insert({
+              user_id: custOrder.owner_user_id,
+              type: 'email_urgent',
+              title: `🚨 客户紧急邮件 — ${analysis.customerName}`,
+              message: `主题：${email.subject}\n${analysis.suggestedAction || '请尽快回复'}`,
+              related_order_id: orderId,
+              status: 'unread',
+            });
+            alerted++;
+          }
+        }
+      }
+
+      // 6. 样品相关邮件
+      if (analysis.sampleRelated && analysis.customerName) {
+        const { data: sampleOrder } = await supabase
+          .from('orders')
+          .select('id, owner_user_id')
+          .eq('customer_name', analysis.customerName)
+          .eq('order_purpose', 'sample')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (sampleOrder?.owner_user_id) {
+          await supabase.from('notifications').insert({
+            user_id: sampleOrder.owner_user_id,
+            type: 'email_sample',
+            title: `🧪 客户样品邮件 — ${analysis.customerName}`,
+            message: `${analysis.suggestedAction || '客户关于样品有新回复，请查看'}`,
+            related_order_id: sampleOrder.id,
+            status: 'unread',
+          });
+        }
+      }
+
+      // 7. 写入客户记忆
+      if (analysis.customerName && analysis.changes.length > 0) {
+        await supabase.from('customer_memory').insert({
+          customer_id: analysis.customerName,
+          order_id: orderId,
+          source_type: 'email_ai',
+          content: `邮件分析：${analysis.changes.map(c => c.description).join('；')}`,
+          category: analysis.sampleRelated ? 'sample' : 'general',
+          risk_level: analysis.urgentLevel === 'urgent' ? 'high' : 'low',
+        }).catch(() => {});
       }
     }
 
@@ -113,6 +181,7 @@ export async function POST(req: Request) {
       alerted,
     });
   } catch (err: any) {
+    console.error('[email-scan]', err?.message);
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
 }
