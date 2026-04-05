@@ -91,6 +91,7 @@ function NewOrderWizard() {
   const [selectedFactory, setSelectedFactory] = useState('');
   const [isImport, setIsImport] = useState(false);
   const [importCurrentStep, setImportCurrentStep] = useState('');
+  const isSampleOrder = searchParams.get('type') === 'sample';
 
   useEffect(() => {
     const stepParam = searchParams.get('step');
@@ -248,6 +249,10 @@ function NewOrderWizard() {
   /** 实际创建订单 */
   async function doCreateOrder(rawFormData: FormData, filesToUpload: { file: File; fileType: string; label: string }[]) {
     setLoading(true);
+    // 样品单标记
+    if (isSampleOrder) {
+      rawFormData.set('order_purpose', 'sample');
+    }
     try {
       const result = await createOrder(rawFormData, preGeneratedOrderNo!);
 
@@ -334,7 +339,7 @@ function NewOrderWizard() {
       {/* ════ STEP 1：创建订单 ════ */}
       {currentStep === 1 && (
         <div className="rounded-xl border border-gray-200 bg-white p-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-1">新建订单</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-1">{isSampleOrder ? '新建样品单' : '新建订单'}</h2>
           <p className="text-sm text-gray-500 mb-6">以客户 PO 为单位录入，系统将自动生成执行节拍</p>
 
           {/* 系统单号 */}

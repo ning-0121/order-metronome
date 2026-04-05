@@ -81,9 +81,10 @@ function getSearchDimensions(orders: any[]): {
   };
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string }> }) {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string }> }) {
   const params = await searchParams;
   const statusFilter = params?.status || 'active';
+  const purposeFilter = params?.purpose || 'production';
   const searchQuery = params?.q || '';
   const customerFilter = params?.customer || '';
   const factoryFilter = params?.factory || '';
@@ -102,12 +103,22 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     );
   }
 
+  // 按用途分组（订单 vs 样品单）
+  const purposeOrders = (allOrders || []).filter((o: any) => {
+    const p = (o as any).order_purpose || 'production';
+    if (purposeFilter === 'sample') return p === 'sample';
+    return p !== 'sample'; // production + inquiry 都算订单
+  });
+
+  const totalProduction = (allOrders || []).filter((o: any) => (o.order_purpose || 'production') !== 'sample').length;
+  const totalSample = (allOrders || []).filter((o: any) => o.order_purpose === 'sample').length;
+
   // 按完成状态分组
-  const completedOrders = (allOrders || []).filter((o: any) => {
+  const completedOrders = purposeOrders.filter((o: any) => {
     const ms = o.milestones || [];
     return ms.length > 0 && ms.every((m: any) => _isDone(m.status));
   });
-  const activeOrders = (allOrders || []).filter((o: any) => !completedOrders.includes(o));
+  const activeOrders = purposeOrders.filter((o: any) => !completedOrders.includes(o));
   const baseOrders = statusFilter === 'completed' ? completedOrders : activeOrders;
 
   // 应用维度筛选
@@ -138,14 +149,34 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </p>
         </div>
         <Link
-          href="/orders/new"
+          href={purposeFilter === 'sample' ? '/orders/new?type=sample' : '/orders/new'}
           className="btn-primary inline-flex items-center gap-2"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          新建订单
+          {purposeFilter === 'sample' ? '新建样品单' : '新建订单'}
         </Link>
+      </div>
+
+      {/* 用途切换：订单 vs 样品单 */}
+      <div className="flex gap-2 mb-4">
+        {[
+          { key: 'production', label: '📦 订单', count: totalProduction },
+          { key: 'sample', label: '🧪 样品单', count: totalSample },
+        ].map(tab => (
+          <Link
+            key={tab.key}
+            href={`/orders?purpose=${tab.key}&status=active`}
+            className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              purposeFilter === tab.key
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {tab.label}（{tab.count}）
+          </Link>
+        ))}
       </div>
 
       {/* 状态筛选 */}
@@ -156,7 +187,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         ].map(tab => (
           <Link
             key={tab.key}
-            href={`/orders?status=${tab.key}`}
+            href={`/orders?purpose=${purposeFilter}&status=${tab.key}`}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               statusFilter === tab.key
                 ? 'bg-indigo-600 text-white'
