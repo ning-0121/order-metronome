@@ -15,6 +15,7 @@ import { generateSuggestionsForOrder } from '@/lib/agent/generateSuggestions';
 import { enhanceSuggestionsWithAI, getEnhancementContext } from '@/lib/agent/aiEnhance';
 import { CIRCUIT_BREAKER } from '@/lib/agent/types';
 import { pushToUsers } from '@/lib/utils/wechat-push';
+import { buildCustomerProfile, type CustomerProfile } from '@/lib/agent/customerProfile';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60; // Vercel 最大60秒
@@ -121,6 +122,7 @@ export async function POST(req: Request) {
       .select('dedup_key, status, created_at, order_id');
 
     let totalGenerated = 0;
+    const customerProfileCache = new Map<string, CustomerProfile | null>();
     let totalAutoExecuted = 0;
 
     // 5. 逐订单生成建议
@@ -132,8 +134,17 @@ export async function POST(req: Request) {
 
       const orderActions = (allExistingActions || []).filter((a: any) => a.order_id === order.id);
 
+      // 客户画像（缓存：同一客户不重复计算）
+      let custProfile: CustomerProfile | null = null;
+      if (order.customer_name) {
+        if (!customerProfileCache.has(order.customer_name)) {
+          customerProfileCache.set(order.customer_name, await buildCustomerProfile(supabase, order.customer_name).catch(() => null));
+        }
+        custProfile = customerProfileCache.get(order.customer_name) || null;
+      }
+
       let suggestions = generateSuggestionsForOrder(
-        order, milestones || [], profileList, orderActions
+        order, milestones || [], profileList, orderActions, custProfile
       );
 
       if (suggestions.length === 0) continue;
