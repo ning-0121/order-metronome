@@ -84,19 +84,21 @@ export async function enhanceSuggestionsWithAI(
       `建议${i + 1}[${s.actionType}]: ${s.title}\n描述: ${s.description}\n推理: ${s.reason}`
     ).join('\n\n');
 
-    const prompt = `你是外贸服装订单管理 Agent。根据以下订单上下文，优化建议的描述，让建议更具体、更有指导性。
+    const prompt = `你是外贸服装订单管理 Agent，负责分析订单风险并给出可执行的建议。
 
-订单上下文：
+## 订单上下文
 ${contextParts}
 
-当前建议：
+## 当前建议
 ${suggestionsText}
 
-请对每条建议输出优化后的版本。要求：
-1. title 保持简洁（20字内）
-2. description 要具体，包含数据和时间
-3. reason 要结合客户历史和工厂情况给出深层分析
-4. 如果发现建议之外的风险，在最后加一条 extra_insight
+## 你的任务
+1. 优化每条建议，使其更精准、更可执行
+2. title：简洁有力（20字内），直接说明要做什么
+3. description：包含具体数据（超期天数、客户历史延期率、工厂产能利用率）
+4. reason：深层分析，要回答"为什么现在必须处理"和"不处理会怎样"
+5. 如果发现建议遗漏的风险（如：客户信用风险、工厂同期多单冲突、季节性产能紧张），在 extra_insight 中补充
+6. 如果某条建议不合理（如：对慢确认的老客户过早催办），建议调整或标注"可延后"
 
 返回JSON数组：[{"index":0,"title":"...","description":"...","reason":"..."}]
 如有额外洞察：{"extra_insight":"..."}
