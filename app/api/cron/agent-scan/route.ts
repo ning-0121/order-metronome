@@ -17,6 +17,7 @@ import { CIRCUIT_BREAKER } from '@/lib/agent/types';
 import { pushToUsers } from '@/lib/utils/wechat-push';
 import { buildCustomerProfile, type CustomerProfile } from '@/lib/agent/customerProfile';
 import { buildFactoryProfile, type FactoryProfile } from '@/lib/agent/factoryProfile';
+import { analyzeHistoricalPattern } from '@/lib/agent/historicalPattern';
 import { AGENT_FLAGS } from '@/lib/agent/featureFlags';
 import { NextResponse } from 'next/server';
 
@@ -181,6 +182,11 @@ export async function POST(req: Request) {
             daysOverdue: m.due_at && new Date(m.due_at) < new Date() ? Math.ceil((Date.now() - new Date(m.due_at).getTime()) / 86400000) : 0,
             ownerRole: m.owner_role, isCritical: m.is_critical,
           }));
+          // 注入历史模式到AI上下文
+          const histPattern = await analyzeHistoricalPattern(supabase, order.customer_name, order.factory_name, order.quantity).catch(() => null);
+          if (histPattern) {
+            memory.historicalPattern = `历史分析(${histPattern.similarOrderCount}单)：超期率${histPattern.overdueRate}%，常超期节点：${histPattern.commonDelayNodes.join('、')}，${histPattern.riskPrediction}`;
+          }
           // 注入工厂产能数据到AI上下文
           if (factProfile) {
             memory.factoryCapacity = factProfile.monthlyCapacity || undefined;
@@ -221,10 +227,38 @@ export async function POST(req: Request) {
 
       totalGenerated += (inserted || []).length;
 
-      // 统计超期数（用于客户记忆）
+      // 统计超期数
       const overdueCount = (milestones || []).filter((m: any) =>
         m.status !== 'done' && m.status !== '已完成' && m.due_at && new Date(m.due_at) < new Date()
       ).length;
+
+      // 5.5 主动提问：关键异常推送给负责人（每单每天最多1次）
+      if (overdueCount >= 3 && order.owner_user_id) {
+        const questionDedup = `question:${order.id}:${new Date().toISOString().slice(0, 10)}`;
+        const { data: existQ } = await supabase.from('agent_actions').select('id').eq('dedup_key', questionDedup).limit(1);
+        if (!existQ || existQ.length === 0) {
+          await supabase.from('notifications').insert({
+            user_id: order.owner_user_id,
+            type: 'agent_question',
+            title: `🤖 Agent 提问：${order.order_no} 需要你的判断`,
+            message: `订单有${overdueCount}个节点超期。请判断：1)需要申请延期？2)需要协调资源？3)可以正常推进？请在订单详情页操作。`,
+            related_order_id: order.id,
+            status: 'unread',
+          });
+          // 微信推送
+          if (AGENT_FLAGS.wechatPush()) {
+            await pushToUsers(supabase, [order.owner_user_id],
+              `🤖 Agent提问：${order.order_no}`,
+              `${overdueCount}个节点超期，需要你判断下一步行动。请打开系统处理。`
+            ).catch(() => {});
+          }
+          await supabase.from('agent_actions').insert({
+            order_id: order.id, action_type: 'send_nudge', title: `主动提问：${order.order_no}`,
+            status: 'executed', executed_at: new Date().toISOString(),
+            dedup_key: questionDedup, expires_at: new Date(Date.now() + 86400000).toISOString(),
+          });
+        }
+      }
 
       // 6. L1 自动执行（每单每次最多2个自动执行，防通知轰炸）
       let autoExecThisOrder = 0;

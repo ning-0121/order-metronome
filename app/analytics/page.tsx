@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getAnalyticsSummary, getRoleEfficiency, getShipmentDistribution, getCapacityAIAnalysis } from '@/app/actions/analytics';
 import Link from 'next/link';
 import { ShipmentDistributionChart } from '@/components/ShipmentDistributionChart';
+import { SchedulingPanel } from '@/components/SchedulingPanel';
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
@@ -106,6 +107,9 @@ export default async function AnalyticsPage() {
         aiAnalysis={aiCapacity}
         currentMonth={currentMonth}
       />
+
+      {/* ===== 智能排单建议 ===== */}
+      <SchedulingPanel />
 
       {/* ===== 三维度分析入口 ===== */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

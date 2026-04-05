@@ -41,7 +41,8 @@ interface MemoryContext {
   factoryCapacity?: number;
   factoryCategories?: string[];
   historicalOnTimeRate?: number;
-  agentFeedback?: string; // 历史 Agent 建议的执行/忽略统计
+  agentFeedback?: string;
+  historicalPattern?: string; // 历史相似订单模式分析
 }
 
 /**
@@ -77,6 +78,7 @@ export async function enhanceSuggestionsWithAI(
       memory.customerMemories.length > 0 ? `客户历史：${memory.customerMemories.slice(0, 3).join('；')}` : '',
       memory.historicalOnTimeRate !== undefined ? `工厂历史准时率：${memory.historicalOnTimeRate}%` : '',
       memory.factoryCapacity ? `工厂月产能：${memory.factoryCapacity}件` : '',
+      memory.historicalPattern || '',
       memory.agentFeedback || '',
     ].filter(Boolean).join('\n');
 
