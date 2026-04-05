@@ -17,6 +17,7 @@ import { CIRCUIT_BREAKER } from '@/lib/agent/types';
 import { pushToUsers } from '@/lib/utils/wechat-push';
 import { buildCustomerProfile, type CustomerProfile } from '@/lib/agent/customerProfile';
 import { buildFactoryProfile, type FactoryProfile } from '@/lib/agent/factoryProfile';
+import { AGENT_FLAGS } from '@/lib/agent/featureFlags';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60; // Vercel 最大60秒
@@ -38,7 +39,9 @@ export async function POST(req: Request) {
 
     const supabase = createClient(url, serviceKey);
 
-    // 0. 链式动作：检查已执行的链式建议，到时间后生成下一步
+    // 0. 链式动作
+    if (AGENT_FLAGS.chainActions()) {
+    // 链式动作：检查已执行的链式建议，到时间后生成下一步
     const { data: chainActions } = await supabase
       .from('agent_actions')
       .select('id, order_id, milestone_id, action_payload, executed_at')
@@ -85,6 +88,7 @@ export async function POST(req: Request) {
       await supabase.from('agent_actions').update({ action_payload: { ...payload, chain_next_type: null } }).eq('id', ca.id);
       chainGenerated++;
     }
+    } // end chainActions flag
 
     // 1. 清理过期建议
     const { count: expiredCount } = await supabase
@@ -136,9 +140,9 @@ export async function POST(req: Request) {
 
       const orderActions = (allExistingActions || []).filter((a: any) => a.order_id === order.id);
 
-      // 客户画像（缓存：同一客户不重复计算）
+      // 客户画像
       let custProfile: CustomerProfile | null = null;
-      if (order.customer_name) {
+      if (AGENT_FLAGS.customerProfile() && order.customer_name) {
         if (!customerProfileCache.has(order.customer_name)) {
           customerProfileCache.set(order.customer_name, await buildCustomerProfile(supabase, order.customer_name).catch(() => null));
         }
@@ -147,7 +151,7 @@ export async function POST(req: Request) {
 
       // 工厂画像
       let factProfile: FactoryProfile | null = null;
-      if (order.factory_name) {
+      if (AGENT_FLAGS.factoryProfile() && order.factory_name) {
         if (!factoryProfileCache.has(order.factory_name)) {
           factoryProfileCache.set(order.factory_name, await buildFactoryProfile(supabase, order.factory_name).catch(() => null));
         }
@@ -160,8 +164,8 @@ export async function POST(req: Request) {
 
       if (suggestions.length === 0) continue;
 
-      // Phase 2: AI 增强（只对有 high severity 建议的订单调用，控制成本）
-      const hasHighSeverity = suggestions.some(s => s.severity === 'high');
+      // Phase 2: AI 增强
+      const hasHighSeverity = AGENT_FLAGS.aiEnhance() && suggestions.some(s => s.severity === 'high');
       if (hasHighSeverity) {
         try {
           const memory = await getEnhancementContext(supabase, order.id, order.customer_name, order.factory_name);
