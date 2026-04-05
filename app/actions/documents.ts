@@ -319,6 +319,13 @@ export async function rejectDocument(docId: string, reason: string): Promise<{ e
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
+  // 权限检查：仅管理员或财务可驳回
+  const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!roles.includes('admin') && !roles.includes('finance')) {
+    return { error: '仅管理员或财务可以驳回单据' };
+  }
+
   const { error } = await (supabase.from('order_documents') as any)
     .update({
       status: 'rejected',

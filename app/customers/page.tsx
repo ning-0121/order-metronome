@@ -8,6 +8,13 @@ export default async function CustomersPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
+  // 权限：仅业务/跟单/管理员/行政可访问
+  const { data: profile } = await supabase.from('profiles').select('roles, role').eq('user_id', user.id).single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!userRoles.some(r => ['admin', 'sales', 'merchandiser', 'admin_assistant', 'production_manager'].includes(r))) {
+    redirect('/dashboard');
+  }
+
   // 获取所有订单按客户分组
   const { data: orders } = await (supabase.from('orders') as any)
     .select('id, order_no, customer_name, customer_id, quantity, factory_name, incoterm, order_type, lifecycle_status, created_at, factory_date, etd')

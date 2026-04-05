@@ -15,7 +15,7 @@ export type AgentActionType =
   | 'notify_next'         // 通知下一节点负责人
   | 'remind_missing_doc'; // 提醒缺失资料
 
-export type AgentActionStatus = 'pending' | 'executed' | 'dismissed' | 'expired';
+export type AgentActionStatus = 'pending' | 'executing' | 'executed' | 'dismissed' | 'expired';
 export type AgentSeverity = 'high' | 'medium' | 'low';
 
 export interface AgentSuggestion {

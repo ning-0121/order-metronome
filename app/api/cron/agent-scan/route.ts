@@ -90,6 +90,13 @@ export async function POST(req: Request) {
     }
     } // end chainActions flag
 
+    // 0.5 清理卡死的 'executing' 状态（超5分钟未完成的回退pending）
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    await supabase.from('agent_actions')
+      .update({ status: 'pending' })
+      .eq('status', 'executing')
+      .lt('created_at', fiveMinAgo);
+
     // 1. 清理过期建议
     const { count: expiredCount } = await supabase
       .from('agent_actions')
