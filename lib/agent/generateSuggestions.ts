@@ -10,6 +10,8 @@ import { isOverdue } from '@/lib/utils/date';
 import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
 import type { AgentSuggestion, AgentActionType, AgentSeverity } from './types';
 import { CIRCUIT_BREAKER } from './types';
+import type { CustomerProfile } from './customerProfile';
+import { getNudgeThreshold } from './customerProfile';
 
 interface OrderData {
   id: string;
@@ -74,7 +76,9 @@ export function generateSuggestionsForOrder(
   milestones: MilestoneData[],
   profiles: ProfileData[],
   existingActions: ExistingAction[],
+  customerProfile?: CustomerProfile | null,
 ): AgentSuggestion[] {
+  const nudgeThreshold = getNudgeThreshold(customerProfile || null);
   const suggestions: Array<AgentSuggestion & { _priority: number }> = [];
 
   function add(
@@ -144,15 +148,16 @@ export function generateSuggestionsForOrder(
     if (!m.owner_user_id) continue;
 
     const days = daysOverdue(m.due_at);
-    if (days < 2) continue;
+    if (days < nudgeThreshold) continue;
 
     const owner = profiles.find(p => p.user_id === m.owner_user_id);
     const ownerName = owner?.name || '负责人';
+    const profileNote = customerProfile ? ` (该客户历史延期率${customerProfile.delayRate}%)` : '';
 
     add(
       'send_nudge', days >= 5 ? 'high' : 'medium', 70 + days,
       `「${m.name}」已超期 ${days} 天，建议催办 ${ownerName}`,
-      `该节点截止日期为 ${m.due_at?.slice(0, 10)}，已超期 ${days} 天。`,
+      `该节点截止日期为 ${m.due_at?.slice(0, 10)}，已超期 ${days} 天。${profileNote}`,
       `超期节点影响后续所有环节的排期。${days >= 3 ? ' 催办后48小时无回应将自动升级CEO。' : ''}`,
       {
         target_user_id: m.owner_user_id, target_name: ownerName, days_overdue: days,
