@@ -44,11 +44,13 @@ export async function POST(req: Request) {
       .lt('expires_at', new Date().toISOString())
       .select('id', { count: 'exact', head: true });
 
-    // 2. 获取所有执行中订单
+    // 2. 获取执行中订单（限制200单防OOM，按创建时间倒序优先处理新单）
     const { data: orders } = await supabase
       .from('orders')
       .select('id, order_no, customer_name, factory_name, quantity, lifecycle_status, incoterm, order_type, factory_date, is_new_customer, is_new_factory')
-      .in('lifecycle_status', ['执行中', 'running', 'active', '已生效']);
+      .in('lifecycle_status', ['执行中', 'running', 'active', '已生效'])
+      .order('created_at', { ascending: false })
+      .limit(200);
 
     if (!orders || orders.length === 0) {
       return NextResponse.json({ message: 'No active orders', expired: expiredCount });
@@ -132,8 +134,11 @@ export async function POST(req: Request) {
         m.status !== 'done' && m.status !== '已完成' && m.due_at && new Date(m.due_at) < new Date()
       ).length;
 
-      // 6. L1 自动执行：超期通知 + 日报提醒（不需要人确认的动作）
+      // 6. L1 自动执行（每单每次最多2个自动执行，防通知轰炸）
+      let autoExecThisOrder = 0;
+      const MAX_AUTO_PER_ORDER = 2;
       for (const action of inserted || []) {
+        if (autoExecThisOrder >= MAX_AUTO_PER_ORDER) break;
         if (action.action_type === 'send_nudge') {
           // 自动催办：发送通知给负责人
           const payload = action.action_payload as any;
@@ -161,6 +166,7 @@ export async function POST(req: Request) {
               .eq('id', action.id);
 
             totalAutoExecuted++;
+            autoExecThisOrder++;
           }
         }
 
@@ -187,6 +193,7 @@ export async function POST(req: Request) {
               .update({ status: 'executed', executed_at: new Date().toISOString() })
               .eq('id', action.id);
             totalAutoExecuted++;
+            autoExecThisOrder++;
           }
         }
       }

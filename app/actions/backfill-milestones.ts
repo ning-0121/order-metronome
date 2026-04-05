@@ -16,7 +16,14 @@ import { ensureBusinessDay } from '@/lib/utils/date';
 
 export async function backfillOrderMilestones(orderId: string) {
   const supabase = await createClient();
-  
+
+  // 认证 + 权限检查
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { getCurrentUserRole } = await import('@/lib/utils/user-role');
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { error: '仅管理员可执行此操作' };
+
   // Get order
   const { data: order, error: orderError } = await supabase
     .from('orders')
