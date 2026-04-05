@@ -9,6 +9,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { analyzeEmailWithAI, buildCustomerContext } from '@/lib/agent/emailMatcher';
+import { generateEmailDraft } from '@/lib/agent/emailDraft';
 import { parseEmailForOrderInfo } from '@/lib/utils/imap-fetch';
 import { NextResponse } from 'next/server';
 
@@ -158,6 +159,24 @@ export async function POST(req: Request) {
             related_order_id: sampleOrder.id,
             status: 'unread',
           });
+        }
+      }
+
+      // 6.5 生成回复草稿（需要回复的邮件：有变更/紧急/样品反馈）
+      if ((analysis.changes.length > 0 || analysis.urgentLevel !== 'normal' || analysis.sampleRelated) && orderOwner) {
+        const draft = await generateEmailDraft(supabase,
+          { from: email.from_email, subject: email.subject, body: email.raw_body || '' },
+          orderId, analysis.customerName,
+        );
+        if (draft) {
+          await supabase.from('notifications').insert({
+            user_id: orderOwner,
+            type: 'email_draft',
+            title: `✉️ AI已草拟回复 — ${email.subject}`,
+            message: `回复要点：${draft.keyPoints.join('、')}\n\n草稿：\n${draft.body.slice(0, 300)}...`,
+            related_order_id: orderId,
+            status: 'unread',
+          }).catch(() => {});
         }
       }
 

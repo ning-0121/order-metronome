@@ -19,6 +19,7 @@ import { buildCustomerProfile, type CustomerProfile } from '@/lib/agent/customer
 import { buildFactoryProfile, type FactoryProfile } from '@/lib/agent/factoryProfile';
 import { analyzeHistoricalPattern } from '@/lib/agent/historicalPattern';
 import { AGENT_FLAGS } from '@/lib/agent/featureFlags';
+import { executeMultiStepReasoning } from '@/lib/agent/multiStepReasoning';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60; // Vercel 最大60秒
@@ -97,6 +98,9 @@ export async function POST(req: Request) {
       .update({ status: 'pending' })
       .eq('status', 'executing')
       .lt('created_at', fiveMinAgo);
+
+    // 0.8 多轮推理：检查催办后24h的进展
+    const multiStepEscalated = await executeMultiStepReasoning(supabase).catch(() => 0);
 
     // 1. 清理过期建议
     const { count: expiredCount } = await supabase

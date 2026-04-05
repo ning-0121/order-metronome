@@ -42,7 +42,8 @@ interface MemoryContext {
   factoryCategories?: string[];
   historicalOnTimeRate?: number;
   agentFeedback?: string;
-  historicalPattern?: string; // 历史相似订单模式分析
+  historicalPattern?: string;
+  unifiedContext?: string;  // 统一知识图谱上下文
 }
 
 /**
@@ -80,6 +81,7 @@ export async function enhanceSuggestionsWithAI(
       memory.factoryCapacity ? `工厂月产能：${memory.factoryCapacity}件` : '',
       memory.historicalPattern || '',
       memory.agentFeedback || '',
+      memory.unifiedContext || '',
     ].filter(Boolean).join('\n');
 
     const suggestionsText = highSuggestions.map((s, i) =>
