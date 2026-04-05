@@ -16,6 +16,7 @@ import { enhanceSuggestionsWithAI, getEnhancementContext } from '@/lib/agent/aiE
 import { CIRCUIT_BREAKER } from '@/lib/agent/types';
 import { pushToUsers } from '@/lib/utils/wechat-push';
 import { buildCustomerProfile, type CustomerProfile } from '@/lib/agent/customerProfile';
+import { buildFactoryProfile, type FactoryProfile } from '@/lib/agent/factoryProfile';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60; // Vercel 最大60秒
@@ -123,6 +124,7 @@ export async function POST(req: Request) {
 
     let totalGenerated = 0;
     const customerProfileCache = new Map<string, CustomerProfile | null>();
+    const factoryProfileCache = new Map<string, FactoryProfile | null>();
     let totalAutoExecuted = 0;
 
     // 5. 逐订单生成建议
@@ -143,6 +145,15 @@ export async function POST(req: Request) {
         custProfile = customerProfileCache.get(order.customer_name) || null;
       }
 
+      // 工厂画像
+      let factProfile: FactoryProfile | null = null;
+      if (order.factory_name) {
+        if (!factoryProfileCache.has(order.factory_name)) {
+          factoryProfileCache.set(order.factory_name, await buildFactoryProfile(supabase, order.factory_name).catch(() => null));
+        }
+        factProfile = factoryProfileCache.get(order.factory_name) || null;
+      }
+
       let suggestions = generateSuggestionsForOrder(
         order, milestones || [], profileList, orderActions, custProfile
       );
@@ -159,6 +170,17 @@ export async function POST(req: Request) {
             daysOverdue: m.due_at && new Date(m.due_at) < new Date() ? Math.ceil((Date.now() - new Date(m.due_at).getTime()) / 86400000) : 0,
             ownerRole: m.owner_role, isCritical: m.is_critical,
           }));
+          // 注入工厂产能数据到AI上下文
+          if (factProfile) {
+            memory.factoryCapacity = factProfile.monthlyCapacity || undefined;
+            memory.historicalOnTimeRate = factProfile.historicalOnTimeRate;
+            if (factProfile.utilizationRate > 90) {
+              memory.customerMemories = [
+                `⚠ 工厂${order.factory_name}当前产能利用率${factProfile.utilizationRate}%（${factProfile.tags.join('、')}）`,
+                ...memory.customerMemories,
+              ];
+            }
+          }
           suggestions = await enhanceSuggestionsWithAI(suggestions, {
             orderNo: order.order_no, customerName: order.customer_name,
             factoryName: order.factory_name, quantity: order.quantity,
