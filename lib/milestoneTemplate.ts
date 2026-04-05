@@ -87,6 +87,25 @@ const DOMESTIC_MILESTONES: Array<{
 ];
 
 /**
+ * 打样专用里程碑模板（7个节点，14天周期）
+ */
+export const SAMPLE_MILESTONE_TEMPLATE: Array<{
+  step_key: string;
+  name: string;
+  owner_role: OwnerRole;
+  is_critical: boolean;
+  evidence_required: boolean;
+}> = [
+  { step_key: "sample_confirm", name: "打样确认", owner_role: "sales", is_critical: true, evidence_required: false },
+  { step_key: "sample_material", name: "打样面料采购", owner_role: "procurement", is_critical: true, evidence_required: false },
+  { step_key: "sample_making", name: "打样制作", owner_role: "merchandiser", is_critical: true, evidence_required: false },
+  { step_key: "sample_qc", name: "打样检验", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  { step_key: "sample_sent", name: "样品寄出", owner_role: "sales", is_critical: true, evidence_required: true },
+  { step_key: "sample_customer_confirm", name: "客户确认样品", owner_role: "sales", is_critical: true, evidence_required: true },
+  { step_key: "sample_complete", name: "打样完成", owner_role: "sales", is_critical: true, evidence_required: false },
+];
+
+/**
  * 根据订单类型和交付方式返回适用的里程碑模板
  *
  * @param deliveryType - 'export'(出口) | 'domestic'(国内送仓)，默认 export
@@ -95,7 +114,12 @@ export function getApplicableMilestones(
   _orderType?: string,
   _shippingSampleRequired?: boolean,
   deliveryType?: string,
+  orderPurpose?: string,
 ) {
+  // 打样单用简化模板
+  if (orderPurpose === 'sample') {
+    return SAMPLE_MILESTONE_TEMPLATE;
+  }
   if (deliveryType === 'domestic') {
     // 国内送仓：过滤掉出运节点，追加国内送仓节点
     const filtered = MILESTONE_TEMPLATE_V1.filter(m => !EXPORT_ONLY_STEPS.has(m.step_key));
