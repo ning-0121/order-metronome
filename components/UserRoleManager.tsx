@@ -11,6 +11,7 @@ const ALL_ROLES = [
   { value: 'finance', label: '财务', desc: '订单审核、加工费确认、成本核算、收款' },
   { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认' },
   { value: 'production_manager', label: '生产主管', desc: '查看所有订单、指定跟单、只看生产单/装箱单' },
+  { value: 'admin_assistant', label: '行政督办', desc: '查看所有订单进度、催办跟进、不可见价格文件' },
   { value: 'logistics', label: '物流/仓库', desc: '出货签核、装箱、物流协调' },
 ];
 

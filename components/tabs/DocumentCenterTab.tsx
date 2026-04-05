@@ -31,15 +31,18 @@ const ALL_DOC_TABS: { key: DocumentType; label: string; icon: string; priceSensi
 ];
 
 export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPriceDocs, orderContext }: Props) {
+  // 行政督办：可以看除价格之外的所有文件
+  const isAdminAssistant = currentRoles.includes('admin_assistant') && !isAdmin;
+
   // 生产线角色（生产部+跟单+生产主管）：只能看生产单和装箱单
-  const isProductionLine = !isAdmin
+  const isProductionLine = !isAdmin && !isAdminAssistant
     && currentRoles.some(r => ['production', 'merchandiser', 'production_manager'].includes(r))
     && !currentRoles.some(r => ['sales', 'finance', 'procurement'].includes(r));
   // 只读（生产部+跟单不能上传，但生产主管可以上传生产单/装箱单）
   const isProductionOnly = isProductionLine && !currentRoles.includes('production_manager');
 
-  // 是否可见价格单据：管理员、财务、或父组件明确传入 canViewPriceDocs
-  const showPriceDocs = !isProductionLine && (isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true);
+  // 是否可见价格单据：管理员、财务、或父组件明确传入（行政不可见）
+  const showPriceDocs = !isProductionLine && !isAdminAssistant && (isAdmin || currentRoles.includes('finance') || canViewPriceDocs === true);
 
   // 生产线角色只看 productionVisible 的 tab
   const DOC_TABS = isProductionLine
@@ -337,7 +340,7 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
       )}
 
       {/* ===== 所有已上传文件汇总 ===== */}
-      <AllUploadedFiles orderId={orderId} isProductionLine={isProductionLine} />
+      <AllUploadedFiles orderId={orderId} isProductionLine={isProductionLine} hidePriceDocs={isAdminAssistant || isProductionLine} />
     </div>
   );
 }
@@ -355,7 +358,7 @@ const FILE_TYPE_CONFIG: Array<{ type: string; label: string; icon: string; sensi
   { type: 'evidence', label: '节点凭证', icon: '📎', sensitive: false },
 ];
 
-function AllUploadedFiles({ orderId, isProductionLine }: { orderId: string; isProductionLine: boolean }) {
+function AllUploadedFiles({ orderId, isProductionLine, hidePriceDocs }: { orderId: string; isProductionLine: boolean; hidePriceDocs?: boolean }) {
   const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -370,8 +373,8 @@ function AllUploadedFiles({ orderId, isProductionLine }: { orderId: string; isPr
 
   if (loading) return null;
 
-  // 权限过滤：生产线只看非敏感文件
-  const visibleTypes = isProductionLine
+  // 权限过滤：生产线只看非敏感文件，行政也隐藏价格文件
+  const visibleTypes = (isProductionLine || hidePriceDocs)
     ? FILE_TYPE_CONFIG.filter(t => !t.sensitive)
     : FILE_TYPE_CONFIG;
   const visibleTypeKeys = new Set(visibleTypes.map(t => t.type));
