@@ -778,6 +778,63 @@ export default function GuidePage() {
         </div>
       </section>
 
+      {/* ====== 8.5 v4.0 更新说明 ====== */}
+      <section className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">!</span>
+          v4.0 更新说明（2026-04-05）
+        </h2>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-purple-200 bg-purple-50/30 p-4">
+            <h3 className="text-sm font-bold text-purple-800 mb-2">🧪 样品单流程</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• 订单列表新增<strong>「样品单」</strong>tab，与订单分开管理</li>
+              <li>• 样品单使用7节点简化流程：打样确认→面料采购→打样制作→打样检验→样品寄出→客户确认→打样完成</li>
+              <li>• 样品单14天周期（vs 订单45天）</li>
+              <li>• 客户确认后可从样品单创建正式生产订单</li>
+            </ul>
+          </div>
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-4">
+            <h3 className="text-sm font-bold text-indigo-800 mb-2">🤖 AI Agent 系统</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• <strong>每小时自动巡检</strong>所有订单，发现超期自动催办</li>
+              <li>• <strong>可执行建议</strong>：Agent建议带按钮，一键分配/催办/升级CEO</li>
+              <li>• <strong>每日摘要</strong>：每天8:30自动推送今日到期、超期、昨日完成</li>
+              <li>• <strong>预测性提醒</strong>：节点2-3天内到期但未启动自动预警</li>
+              <li>• <strong>链式动作</strong>：催办后48小时无回应自动升级CEO</li>
+              <li>• <strong>跨订单协调</strong>：同工厂3+订单延期触发整体协调建议</li>
+              <li>• <strong>对话助手</strong>：在「我的助手」可直接问订单状态</li>
+              <li>• <strong>微信推送</strong>：配置Server酱后通知同步到个人微信</li>
+            </ul>
+          </div>
+          <div className="rounded-xl border border-green-200 bg-green-50/30 p-4">
+            <h3 className="text-sm font-bold text-green-800 mb-2">📦 出货管理四步流程</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• Step 1：<strong>验货确认</strong>（跟单/QC）→ 尾查PASS后解锁</li>
+              <li>• Step 2：<strong>申请出货</strong>（业务）→ 填写数量/客户/送货方式/CI</li>
+              <li>• Step 3：<strong>财务审批</strong>（财务）→ 确认付款状态后批准</li>
+              <li>• Step 4：<strong>物流执行</strong>（物流）→ 填写提单号/柜号后确认</li>
+            </ul>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50/30 p-4">
+            <h3 className="text-sm font-bold text-amber-800 mb-2">👥 新增角色</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• <strong>生产主管</strong>：看所有订单、指定跟单、只看生产单/装箱单</li>
+              <li>• <strong>行政督办</strong>：看所有订单进度、催办跟进、不可见价格文件</li>
+            </ul>
+          </div>
+          <div className="rounded-xl border border-red-200 bg-red-50/30 p-4">
+            <h3 className="text-sm font-bold text-red-800 mb-2">⏱ 时间线修正</h3>
+            <ul className="text-sm text-gray-700 space-y-1.5">
+              <li>• 船样寄送提前到Day31（中查后立即寄，客户需5-7天确认）</li>
+              <li>• 包装确认提前到Day33（预留4天包装时间）</li>
+              <li>• 验货放行调整到Day40（预留2天验货时间）</li>
+              <li>• 人民币/FOB订单只需出厂日期，不再强制要求ETD</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
       {/* ====== 9. 常见问题 ====== */}
       <section id="faq" className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
