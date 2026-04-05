@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/daily-summary",
       "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/email-scan",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
