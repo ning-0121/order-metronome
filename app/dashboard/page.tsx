@@ -305,18 +305,12 @@ export default async function DashboardPage() {
               <Link href="/customers" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-blue-50 text-sm text-gray-700 hover:text-blue-700 transition-colors">
                 <span>🤝</span> 客户管理
               </Link>
-              <Link href="/quotes" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-amber-50 text-sm text-gray-700 hover:text-amber-700 transition-colors">
-                <span>💰</span> 报价管理
-              </Link>
             </>
           )}
 
           {/* 财务 */}
           {userRoles.includes('finance') && (
             <>
-              <Link href="/quotes" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-amber-50 text-sm text-gray-700 hover:text-amber-700 transition-colors">
-                <span>💰</span> 报价审批
-              </Link>
               <Link href="/analytics" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-purple-50 text-sm text-gray-700 hover:text-purple-700 transition-colors">
                 <span>📊</span> 数据分析
               </Link>
