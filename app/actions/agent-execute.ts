@@ -13,11 +13,35 @@ export async function executeAgentAction(actionId: string): Promise<{ error?: st
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { error: '请先登录' };
 
-    // 获取建议
-    const { data: action } = await (supabase.from('agent_actions') as any)
-      .select('*').eq('id', actionId).single();
-    if (!action) return { error: '建议不存在' };
-    if (action.status !== 'pending') return { error: '该建议已处理' };
+    // 获取建议（原子更新防双击：C3 幂等性修复）
+    const { data: action, error: claimErr } = await (supabase.from('agent_actions') as any)
+      .update({ status: 'executing' })
+      .eq('id', actionId)
+      .eq('status', 'pending')
+      .select('*')
+      .single();
+    if (claimErr || !action) return { error: '建议不存在或已被处理' };
+
+    // 过期检查
+    if (action.expires_at && new Date(action.expires_at) < new Date()) {
+      await (supabase.from('agent_actions') as any).update({ status: 'expired' }).eq('id', actionId);
+      return { error: '建议已过期' };
+    }
+
+    // 角色验证（C2）
+    const { data: profile } = await supabase.from('profiles').select('roles, role').eq('user_id', user.id).single();
+    const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+    const isAdmin = userRoles.includes('admin');
+    const { ACTION_CONFIG } = await import('@/lib/agent/types');
+    const config = ACTION_CONFIG[action.action_type as keyof typeof ACTION_CONFIG];
+    if (config?.requiredRoles?.length > 0 && !isAdmin) {
+      const hasRole = config.requiredRoles.some((r: string) => userRoles.includes(r));
+      if (!hasRole) {
+        // 回滚 status
+        await (supabase.from('agent_actions') as any).update({ status: 'pending' }).eq('id', actionId);
+        return { error: `无权执行此操作，需要角色：${config.requiredRoles.join('/')}` };
+      }
+    }
 
     // 熔断检查：单订单每天限制
     const today = new Date().toISOString().slice(0, 10);
