@@ -44,6 +44,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/guide', label: '操作说明', icon: '📖' },
       ]
     : [
+        { href: '/admin/agent', label: 'Agent监控', icon: '🤖' },
         { href: '/guide', label: '操作说明', icon: '📖' },
       ];
 

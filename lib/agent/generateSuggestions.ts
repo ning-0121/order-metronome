@@ -208,6 +208,27 @@ export function generateSuggestionsForOrder(
     );
   }
 
+  // ── 规则 5.5: 预测性提醒 — 即将超期预警 ──
+  for (const m of milestones) {
+    if (isDoneStatus(m.status)) continue;
+    if (!m.due_at) continue;
+    const dueDate = new Date(m.due_at);
+    const now = new Date();
+    const daysLeft = Math.ceil((dueDate.getTime() - now.getTime()) / 86400000);
+    // 2-3天内到期 + 节点还没开始 → 预警
+    if (daysLeft >= 1 && daysLeft <= 3 && !isActiveStatus(m.status)) {
+      const owner = m.owner_user_id ? profiles.find(p => p.user_id === m.owner_user_id) : null;
+      add(
+        'send_nudge', 'medium', 55 + (3 - daysLeft) * 5,
+        `「${m.name}」${daysLeft}天后到期但未启动，建议提前准备`,
+        `截止日期 ${m.due_at?.slice(0, 10)}，仅剩 ${daysLeft} 天${m.is_critical ? '（关键节点）' : ''}。`,
+        `提前介入可避免超期。节点尚未进入"进行中"状态。`,
+        { target_user_id: m.owner_user_id, target_name: owner?.name || '负责人', days_left: daysLeft, is_prediction: true },
+        m.id, m.name,
+      );
+    }
+  }
+
   // ── 规则 6: 节点完成后通知下一节点负责人 ──
   const sortedMilestones = [...milestones].sort((a, b) => {
     if (!a.due_at || !b.due_at) return 0;
