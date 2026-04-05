@@ -138,7 +138,49 @@ export async function POST(req: Request) {
       }
     } catch {}
 
-    return NextResponse.json({ success: true, summary: summaryText });
+    // ===== 邮件摘要：按业务员分类整理昨日邮件 =====
+    const { data: yesterdayEmails } = await supabase
+      .from('mail_inbox')
+      .select('id, from_email, subject, raw_body, customer_id, order_id')
+      .gte('received_at', yesterday + 'T00:00:00')
+      .lt('received_at', today + 'T00:00:00');
+
+    if (yesterdayEmails && yesterdayEmails.length > 0) {
+      // 按关联订单找到对应业务员
+      const orderIds = [...new Set((yesterdayEmails || []).map((e: any) => e.order_id).filter(Boolean))];
+      let ownerMap: Record<string, string> = {};
+      if (orderIds.length > 0) {
+        const { data: orders } = await supabase.from('orders').select('id, owner_user_id').in('id', orderIds);
+        ownerMap = (orders || []).reduce((m: any, o: any) => { if (o.owner_user_id) m[o.id] = o.owner_user_id; return m; }, {});
+      }
+
+      // 按业务员分组
+      const emailsByOwner: Record<string, Array<{ subject: string; from: string; customer: string }>> = {};
+      for (const email of yesterdayEmails) {
+        const ownerId = email.order_id ? ownerMap[email.order_id] : null;
+        if (!ownerId) continue;
+        if (!emailsByOwner[ownerId]) emailsByOwner[ownerId] = [];
+        emailsByOwner[ownerId].push({
+          subject: email.subject,
+          from: email.from_email,
+          customer: email.customer_id || '未知客户',
+        });
+      }
+
+      // 给每个业务员发送邮件摘要通知
+      for (const [userId, emails] of Object.entries(emailsByOwner)) {
+        const emailList = emails.map((e, i) => `${i + 1}. [${e.customer}] ${e.subject} (${e.from})`).join('\n');
+        await supabase.from('notifications').insert({
+          user_id: userId,
+          type: 'daily_email_summary',
+          title: `📧 昨日邮件摘要（${emails.length} 封）`,
+          message: `昨日收到 ${emails.length} 封客户邮件，请检查是否都已处理：\n${emailList}`,
+          status: 'unread',
+        }).catch(() => {});
+      }
+    }
+
+    return NextResponse.json({ success: true, summary: summaryText, emailsProcessed: (yesterdayEmails || []).length });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
