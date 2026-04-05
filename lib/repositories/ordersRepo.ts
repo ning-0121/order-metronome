@@ -52,6 +52,11 @@ const INSERT_WHITELIST = [
   'imported_at',
   'import_current_step',
   'delivery_type',
+  'order_purpose',
+  'parent_order_id',
+  'sample_status',
+  'product_description',
+  'target_price',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -87,6 +92,10 @@ const UPDATE_WHITELIST = [
   'quantity_unit',
   'eta',
   'delivery_type',
+  'order_purpose',
+  'sample_status',
+  'product_description',
+  'target_price',
   'is_split_shipment',
   'total_batches',
 ] as const;

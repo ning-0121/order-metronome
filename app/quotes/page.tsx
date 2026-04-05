@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { QuoteApproval } from '@/components/QuoteApproval';
+import { CreateSampleButton } from '@/components/CreateSampleButton';
 
 export default async function QuotesPage() {
   const supabase = await createClient();
@@ -50,8 +51,8 @@ export default async function QuotesPage() {
             待审批 {pending.length} · 已通过 {approved.length} · 已驳回 {rejected.length}
           </p>
         </div>
-        <Link href="/orders/new" className="btn-primary inline-flex items-center gap-2">
-          + 新建报价/订单
+        <Link href="/quotes/new" className="btn-primary inline-flex items-center gap-2">
+          + 新建报价单
         </Link>
       </div>
 
@@ -115,6 +116,7 @@ export default async function QuotesPage() {
                 <th className="px-4 py-2.5 font-medium text-gray-600">报价状态</th>
                 <th className="px-4 py-2.5 font-medium text-gray-600">审批人</th>
                 <th className="px-4 py-2.5 font-medium text-gray-600">创建日期</th>
+                <th className="px-4 py-2.5 font-medium text-gray-600">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -141,6 +143,11 @@ export default async function QuotesPage() {
                       {o.quote_approved_by ? approverMap[o.quote_approved_by] || '-' : '-'}
                     </td>
                     <td className="px-4 py-2.5 text-gray-400 text-xs">{formatDate(o.created_at)}</td>
+                    <td className="px-4 py-2.5">
+                      {o.quote_status === 'approved' && o.order_purpose !== 'sample' && (
+                        <CreateSampleButton quoteOrderId={o.id} orderNo={o.order_no} />
+                      )}
+                    </td>
                   </tr>
                 );
               })}
