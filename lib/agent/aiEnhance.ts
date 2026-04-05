@@ -88,7 +88,11 @@ export async function enhanceSuggestionsWithAI(
       `建议${i + 1}[${s.actionType}]: ${s.title}\n描述: ${s.description}\n推理: ${s.reason}`
     ).join('\n\n');
 
+    const { buildIndustryPrompt } = await import('./industryKnowledge');
+
     const prompt = `你是外贸服装订单管理 Agent，负责分析订单风险并给出可执行的建议。
+
+${buildIndustryPrompt()}
 
 ## 订单上下文
 ${contextParts}

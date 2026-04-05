@@ -134,11 +134,13 @@ export async function calculateOrderScore(
   // 改为按 owner_role 动态归类（不再依赖硬编码 step 列表，防止遗漏节点）
 
   function calcRoleScore(roleSteps: string[]): ScoreDetail {
-    // 按 owner_role 动态归类（去重，防止双重计算）
-    const targetRoles = roleSteps === SALES_STEPS
-      ? ['sales']
-      : ['merchandiser', 'production', 'qc', 'quality'];
-    const roleMilestones = milestones.filter((m: any) => targetRoles.includes(m.owner_role));
+    // 按 owner_role 动态归类（完全动态，不硬编码角色名）
+    const salesRoles = new Set(['sales']);
+    const nonSalesRoles = new Set(
+      milestones.map((m: any) => m.owner_role).filter((r: string) => r && !salesRoles.has(r) && r !== 'finance' && r !== 'logistics')
+    );
+    const targetRoles = roleSteps === SALES_STEPS ? salesRoles : nonSalesRoles;
+    const roleMilestones = milestones.filter((m: any) => targetRoles.has(m.owner_role));
 
     // 节拍准时率
     const overdueSteps: string[] = [];

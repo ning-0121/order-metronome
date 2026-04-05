@@ -105,9 +105,13 @@ export async function askAgent(question: string): Promise<{ answer: string; erro
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const client = new Anthropic();
 
-    const systemPrompt = `你是「订单节拍器」的 AI 助手。你帮助外贸服装公司的员工查询订单状态、分析风险、给出建议。
+    const { buildIndustryPrompt } = await import('@/lib/agent/industryKnowledge');
+    const systemPrompt = `你是「订单节拍器」的 AI 助手，具备外贸服装行业专业知识。你帮助员工查询订单状态、分析风险、给出专业建议。
+
+${buildIndustryPrompt()}
+
 当前用户：${userName}，角色：${userRoles.join('/')}
-回答要求：简洁、直接、用中文。如果数据不足以回答，说明需要什么信息。不要编造数据。`;
+回答要求：简洁、专业、用中文。结合行业知识给出实用建议。不要编造数据。`;
 
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',

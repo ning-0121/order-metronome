@@ -113,7 +113,7 @@ export async function POST(req: Request) {
     // 2. 获取执行中订单（限制200单防OOM，按创建时间倒序优先处理新单）
     const { data: orders } = await supabase
       .from('orders')
-      .select('id, order_no, customer_name, factory_name, quantity, lifecycle_status, incoterm, order_type, factory_date, is_new_customer, is_new_factory')
+      .select('id, order_no, customer_name, factory_name, quantity, lifecycle_status, incoterm, order_type, factory_date, is_new_customer, is_new_factory, special_tags')
       .in('lifecycle_status', ['执行中', 'running', 'active', '已生效'])
       .order('created_at', { ascending: false })
       .limit(200);
@@ -186,6 +186,15 @@ export async function POST(req: Request) {
             daysOverdue: m.due_at && new Date(m.due_at) < new Date() ? Math.ceil((Date.now() - new Date(m.due_at).getTime()) / 86400000) : 0,
             ownerRole: m.owner_role, isCritical: m.is_critical,
           }));
+          // 注入行业知识建议
+          const { getIndustryAdvice } = await import('@/lib/agent/industryKnowledge');
+          const industryTips = getIndustryAdvice({
+            specialTags: order.special_tags, orderType: order.order_type,
+            quantity: order.quantity, currentMonth: new Date().getMonth() + 1,
+          });
+          if (industryTips.length > 0) {
+            memory.customerMemories = [...(memory.customerMemories || []), ...industryTips.map(t => `[行业] ${t}`)];
+          }
           // 注入历史模式到AI上下文
           const histPattern = await analyzeHistoricalPattern(supabase, order.customer_name, order.factory_name, order.quantity).catch(() => null);
           if (histPattern) {
@@ -269,7 +278,7 @@ export async function POST(req: Request) {
       const MAX_AUTO_PER_ORDER = 2;
       for (const action of inserted || []) {
         if (autoExecThisOrder >= MAX_AUTO_PER_ORDER) break;
-        if (action.action_type === 'send_nudge') {
+        if (action.action_type === 'send_nudge' && AGENT_FLAGS.autoNudge()) {
           // 自动催办：发送通知给负责人
           const payload = action.action_payload as any;
           if (payload?.target_user_id) {
@@ -301,7 +310,7 @@ export async function POST(req: Request) {
         }
 
         // L1 自动执行：通知下一节点 + 自动推进状态
-        if (action.action_type === 'notify_next') {
+        if (action.action_type === 'notify_next' && AGENT_FLAGS.autoNotifyNext()) {
           const payload = action.action_payload as any;
           // L2 自动推进：将下一节点从 pending → in_progress
           if (action.milestone_id) {
@@ -360,7 +369,9 @@ export async function POST(req: Request) {
       }
     }
 
-    // 8. 跨订单协调：同一工厂多订单延期 → 整体建议
+    // 8. 跨订单协调（Feature Flag）
+    if (AGENT_FLAGS.crossOrderAnalysis()) {
+    // 跨订单协调：同一工厂多订单延期 → 整体建议
     let crossOrderSuggestions = 0;
     const factoryOverdueMap = new Map<string, string[]>(); // factory → orderNos
     for (const order of orders) {
@@ -394,6 +405,8 @@ export async function POST(req: Request) {
       });
       crossOrderSuggestions++;
     }
+
+    } // end crossOrderAnalysis flag
 
     // 9. 资源协调：超负荷工厂建议转厂
     for (const [factoryName, profile] of factoryProfileCache) {

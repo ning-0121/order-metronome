@@ -217,8 +217,9 @@ export function generateSuggestionsForOrder(
     );
   }
 
-  // ── 规则 5.5: 预测性提醒 — 即将超期预警 ──
-  for (const m of milestones) {
+  // ── 规则 5.5: 预测性提醒（Feature Flag 控制）──
+  const { AGENT_FLAGS } = require('./featureFlags');
+  if (AGENT_FLAGS.predictiveWarning()) for (const m of milestones) {
     if (isDoneStatus(m.status)) continue;
     if (!m.due_at) continue;
     const dueDate = new Date(m.due_at);
