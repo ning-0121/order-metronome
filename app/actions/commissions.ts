@@ -131,9 +131,16 @@ export async function calculateOrderScore(
   const deliveryDetail = { score: deliveryScore, max: 10 as const, daysLate };
 
   // ===== 按角色计算个人维度 =====
+  // 改为按 owner_role 动态归类（不再依赖硬编码 step 列表，防止遗漏节点）
 
   function calcRoleScore(roleSteps: string[]): ScoreDetail {
-    const roleMilestones = milestones.filter((m: any) => roleSteps.includes(m.step_key));
+    // 优先用 owner_role 匹配，fallback 到硬编码列表
+    const targetRoles = roleSteps === SALES_STEPS
+      ? ['sales']
+      : ['merchandiser', 'production', 'qc', 'quality'];
+    const roleMilestones = milestones.filter((m: any) =>
+      roleSteps.includes(m.step_key) || targetRoles.includes(m.owner_role)
+    );
 
     // 节拍准时率
     const overdueSteps: string[] = [];
@@ -144,7 +151,8 @@ export async function calculateOrderScore(
         if (new Date(completedAt) > new Date(m.due_at)) {
           overdueSteps.push(m.name);
         }
-      } else if (m.due_at && m.status !== 'done' && new Date(m.due_at) < new Date()) {
+      } else if (m.due_at && !isDoneStatus(m.status) && new Date(m.due_at) < new Date()) {
+        // 未完成但已超期 — 扣分
         overdueSteps.push(m.name);
       }
     }
