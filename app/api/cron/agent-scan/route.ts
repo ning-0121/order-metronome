@@ -255,15 +255,22 @@ export async function POST(req: Request) {
           }
         }
 
-        // L1 自动执行：通知下一节点负责人
+        // L1 自动执行：通知下一节点 + 自动推进状态
         if (action.action_type === 'notify_next') {
           const payload = action.action_payload as any;
+          // L2 自动推进：将下一节点从 pending → in_progress
+          if (action.milestone_id) {
+            await supabase.from('milestones')
+              .update({ status: 'in_progress' })
+              .eq('id', action.milestone_id)
+              .eq('status', 'pending');
+          }
           if (payload?.target_user_id) {
             await supabase.from('notifications').insert({
               user_id: payload.target_user_id,
               type: 'agent_notify',
               title: `[Agent] 轮到你了`,
-              message: `前置节点已完成，请启动「${payload.next_milestone_name || '下一节点'}」。订单：${order.order_no}`,
+              message: `前置节点已完成，「${payload.next_milestone_name || '下一节点'}」已自动启动。订单：${order.order_no}`,
               related_order_id: order.id,
               related_milestone_id: action.milestone_id,
               status: 'unread',
@@ -341,6 +348,42 @@ export async function POST(req: Request) {
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       });
       crossOrderSuggestions++;
+    }
+
+    // 9. 资源协调：超负荷工厂建议转厂
+    for (const [factoryName, profile] of factoryProfileCache) {
+      if (!profile || profile.utilizationRate <= 120) continue;
+      // 找产能空闲的同类工厂
+      const { data: altFactories } = await supabase
+        .from('factories')
+        .select('factory_name, monthly_capacity, worker_count')
+        .is('deleted_at', null)
+        .neq('factory_name', factoryName);
+      const available = (altFactories || []).filter((f: any) => {
+        const fp = factoryProfileCache.get(f.factory_name);
+        return fp && fp.utilizationRate < 60;
+      });
+      if (available.length > 0) {
+        const dedupKey = `resource:${factoryName}:${new Date().toISOString().slice(0, 10)}`;
+        const { data: existing } = await supabase.from('agent_actions').select('id').eq('dedup_key', dedupKey).in('status', ['pending', 'executing']).limit(1);
+        if (!existing || existing.length === 0) {
+          const firstOrder = orders.find((o: any) => o.factory_name === factoryName);
+          if (firstOrder) {
+            await supabase.from('agent_actions').insert({
+              order_id: firstOrder.id,
+              action_type: 'escalate_ceo',
+              title: `🏭 工厂「${factoryName}」超负荷（${profile.utilizationRate}%），建议分流`,
+              description: `${factoryName}当前产能利用率${profile.utilizationRate}%，可考虑转部分订单到：${available.map((f: any) => f.factory_name).join('、')}`,
+              reason: '产能超负荷会导致交期延误和品质下降，建议提前分流。',
+              severity: 'high',
+              action_payload: { factory_name: factoryName, utilization: profile.utilizationRate, alternatives: available.map((f: any) => f.factory_name) },
+              status: 'pending',
+              dedup_key: dedupKey,
+              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            });
+          }
+        }
+      }
     }
 
     return NextResponse.json({

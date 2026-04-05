@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/agent-scan",
       "schedule": "7 * * * *"
+    },
+    {
+      "path": "/api/cron/daily-summary",
+      "schedule": "30 0 * * *"
     }
   ]
 }
