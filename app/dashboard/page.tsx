@@ -77,8 +77,8 @@ function getTodayDateString(): string {
 
 /** 判断用户角色是否匹配里程碑 owner_role */
 function isMyMilestone(milestone: any, userRoles: string[]): boolean {
-  // 生产主管看所有订单
-  if (userRoles.includes('production_manager')) return true;
+  // 生产主管、行政督办看所有订单
+  if (userRoles.includes('production_manager') || userRoles.includes('admin_assistant')) return true;
   if (!milestone.owner_role) return false;
   const ownerRole = milestone.owner_role.toLowerCase();
   return userRoles.some(r => {
@@ -268,7 +268,7 @@ export default async function DashboardPage() {
         <div className="flex items-center gap-2 mb-3">
           <span className="text-base">⚡</span>
           <h2 className="text-sm font-bold text-gray-900">
-            {userRoles.includes('admin') || userRoles.includes('production_manager') ? '管理快捷入口' :
+            {userRoles.includes('admin') || userRoles.includes('production_manager') || userRoles.includes('admin_assistant') ? '管理快捷入口' :
              userRoles.includes('sales') || userRoles.includes('merchandiser') ? '我的工作台' :
              userRoles.includes('finance') ? '财务工作台' :
              userRoles.includes('procurement') ? '采购工作台' :
