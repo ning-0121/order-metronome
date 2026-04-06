@@ -202,7 +202,10 @@ export async function markMilestoneDone(
       // 获取已有数据并合并
       const { data: existingMs } = await (supabase.from('milestones') as any)
         .select('checklist_data').eq('id', milestoneId).single();
-      const existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> = existingMs?.checklist_data || [];
+      let existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> = [];
+      const rawData = existingMs?.checklist_data;
+      if (Array.isArray(rawData)) existing = rawData;
+      else if (typeof rawData === 'string') { try { const p = JSON.parse(rawData); if (Array.isArray(p)) existing = p; } catch {} }
       const mergeMap = new Map(existing.map((r: any) => [r.key, r]));
       for (const item of checklistData) {
         mergeMap.set(item.key, {
