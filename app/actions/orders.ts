@@ -480,8 +480,10 @@ export async function getOrders() {
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
   const isAdmin = roles.includes('admin');
 
-  if (isAdmin) {
-    // 管理员看全部订单
+  // 管理员/财务/行政/生产主管看全部订单
+  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager'].includes(r));
+
+  if (canSeeAll) {
     const { data: orders, error } = await (supabase.from('orders') as any)
       .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
       .order('created_at', { ascending: false });

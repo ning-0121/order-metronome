@@ -154,8 +154,9 @@ export default async function DashboardPage() {
     ...(assignedMilestones || []).map((m: any) => m.order_id),
   ]);
 
-  // 权限过滤：普通员工只看自己相关订单的节点
-  const filterByMyOrders = (list: any[]) => isAdmin ? list : list.filter((m: any) => myOrderIds.has(m.order_id));
+  // 权限过滤：管理员/财务/行政/生产主管看所有订单，其他员工只看自己的
+  const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager'].includes(r));
+  const filterByMyOrders = (list: any[]) => canSeeAll ? list : list.filter((m: any) => myOrderIds.has(m.order_id));
   const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
   const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);
 
