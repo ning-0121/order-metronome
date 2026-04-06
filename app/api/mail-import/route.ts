@@ -14,13 +14,33 @@ import { NextResponse } from 'next/server';
 
 export const maxDuration = 60;
 
+export async function GET(req: Request) {
+  // GET 用于浏览器一键触发，使用 cookie 或 cron secret
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  const cookies = req.headers.get('cookie') || '';
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && !cookies.includes('sb-')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return handleImport(req);
+}
+
 export async function POST(req: Request) {
   try {
     const authHeader = req.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    const cookies = req.headers.get('cookie') || '';
+    if (cronSecret && authHeader !== `Bearer ${cronSecret}` && !cookies.includes('sb-')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    return handleImport(req);
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message }, { status: 500 });
+  }
+}
+
+async function handleImport(req: Request) {
+  try {
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -28,9 +48,19 @@ export async function POST(req: Request) {
 
     const supabase = createClient(url, serviceKey);
 
-    // 支持两种方式：POST body 传凭证，或用环境变量
+    // 支持三种方式：POST body / GET URL params / 环境变量
     let body: { email?: string; password?: string; days?: number; max?: number } = {};
-    try { body = await req.json(); } catch {}
+    if (req.method === 'POST') {
+      try { body = await req.json(); } catch {}
+    } else {
+      const params = new URL(req.url).searchParams;
+      body = {
+        email: params.get('email') || undefined,
+        password: params.get('password') || undefined,
+        days: params.get('days') ? parseInt(params.get('days')!) : undefined,
+        max: params.get('max') ? parseInt(params.get('max')!) : undefined,
+      };
+    }
 
     const imapUser = body.email || process.env.IMAP_USER;
     const imapPass = body.password || process.env.IMAP_PASSWORD;
