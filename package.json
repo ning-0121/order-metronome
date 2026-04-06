@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check": "npx tsx scripts/pre-deploy-check.ts",
+    "predeploy": "npm run build && npm run check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

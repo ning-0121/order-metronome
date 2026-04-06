@@ -88,27 +88,36 @@ Supabase（PostgreSQL + Auth）
 
 ## Claude 的工作规程
 
-### 每次发布前，我会检查：
+### 每次 git push 前，必须执行：
 
-1. **代码审核**
-   - [ ] TypeScript 类型是否正确（无 any 滥用）
-   - [ ] Server Actions 是否有权限校验
-   - [ ] RLS 策略是否覆盖新表/新操作
-   - [ ] 无 console.log 遗留在生产代码中
+```bash
+npm run build && npm run check
+```
+
+回归检查脚本 `scripts/pre-deploy-check.ts` 会自动验证：
+- 里程碑模板完整性（生产≥20节点，打样=7节点）
+- 模板路由正确（export/domestic/sample 分别返回正确模板）
+- Agent 配置完整（8种动作、熔断限制、Feature Flag）
+- 角色定义完整（8个角色全部注册）
+- 行业知识库完整
+
+**任何检查失败 → 不允许推送！**
+
+### 额外检查清单：
+
+1. **权限安全**
+   - [ ] 新增的 Server Action 有 auth + 角色检查
+   - [ ] 不暴露价格信息给 production/merchandiser/admin_assistant 角色
 
 2. **数据库变更**
-   - [ ] 新 SQL 已同步追加到 `supabase/migration.sql`
-   - [ ] 已在 Supabase SQL Editor 手动执行
-   - [ ] RLS 策略已为新表配置
+   - [ ] 新 SQL 已同步追加到 `supabase/migrations/` 目录
+   - [ ] 通知用户在 Supabase SQL Editor 执行
 
-3. **环境变量**
-   - [ ] 新增变量已在 Vercel 环境变量中配置
-   - [ ] 已同步更新 README 中的环境变量示例
-
-4. **部署验证**
-   - [ ] Vercel 构建状态为 Ready（无 Error）
-   - [ ] 线上地址功能正常访问
-   - [ ] 无 console 报错
+3. **不引入回归**
+   - [ ] 修改评分逻辑时确认四个角色（业务/跟单/采购/财务）都正常
+   - [ ] 修改权限时确认 canSeeAll 包含 admin/finance/admin_assistant/production_manager
+   - [ ] 修改里程碑时确认 schedule.ts TIMELINE 中有对应 key
+   - [ ] 修改 Agent 时确认 Feature Flag 有对应开关
 
 ### 数据库变更规范
 
