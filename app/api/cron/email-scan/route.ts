@@ -33,48 +33,67 @@ export async function POST(req: Request) {
 
     // ═══ Step 0: 从 IMAP 拉取新邮件写入 mail_inbox ═══
     let fetched = 0;
-    try {
-      const newEmails = await fetchNewEmails(30);
-      for (const email of newEmails) {
-        // 提取发件人地址
-        const fromEmail = email.from.includes('<')
-          ? email.from.match(/<(.+?)>/)?.[1] || email.from
-          : email.from;
+    let imapStatus = 'skipped';
+    let imapError = '';
 
-        // 去重：同一发件人+同一主题+同一天 只入库一次
-        const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);
-        const { data: existing } = await supabase
-          .from('mail_inbox')
-          .select('id')
-          .eq('from_email', fromEmail)
-          .eq('subject', email.subject)
-          .gte('received_at', `${emailDate}T00:00:00`)
-          .lte('received_at', `${emailDate}T23:59:59`)
-          .limit(1)
-          .maybeSingle();
+    const imapUser = process.env.IMAP_USER;
+    const imapPass = process.env.IMAP_PASSWORD;
 
-        if (existing) continue; // 已入库，跳过
+    if (!imapUser || !imapPass) {
+      imapStatus = 'no_credentials';
+      console.warn('[email-scan] IMAP_USER/IMAP_PASSWORD 未配置');
+    } else {
+      try {
+        console.log(`[email-scan] IMAP 连接 ${imapUser}...`);
+        const newEmails = await fetchNewEmails(30);
+        imapStatus = `fetched_${newEmails.length}`;
+        console.log(`[email-scan] IMAP 拉取到 ${newEmails.length} 封邮件`);
 
-        // 生成 thread_id
-        const threadSubject = email.subject
-          .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
-          .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
-          .trim();
-        const threadId = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
+        for (const email of newEmails) {
+          const fromEmail = email.from.includes('<')
+            ? email.from.match(/<(.+?)>/)?.[1] || email.from
+            : email.from;
 
-        await supabase.from('mail_inbox').insert({
-          from_email: fromEmail,
-          subject: email.subject,
-          raw_body: email.body,
-          received_at: email.date || new Date().toISOString(),
-          message_id: email.messageId,
-          in_reply_to: email.inReplyTo,
-          thread_id: threadId,
-        });
-        fetched++;
+          // 去重：同一发件人+同一主题+同一天 只入库一次
+          const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+          const { data: existing } = await supabase
+            .from('mail_inbox')
+            .select('id')
+            .eq('from_email', fromEmail)
+            .eq('subject', email.subject)
+            .gte('received_at', `${emailDate}T00:00:00`)
+            .lte('received_at', `${emailDate}T23:59:59`)
+            .limit(1)
+            .maybeSingle();
+
+          if (existing) continue;
+
+          const threadSubject = email.subject
+            .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
+            .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
+            .trim();
+          const threadId = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
+
+          const { error: insertErr } = await supabase.from('mail_inbox').insert({
+            from_email: fromEmail,
+            subject: email.subject,
+            raw_body: email.body,
+            received_at: email.date || new Date().toISOString(),
+            message_id: email.messageId,
+            in_reply_to: email.inReplyTo,
+            thread_id: threadId,
+          });
+          if (insertErr) {
+            console.error('[email-scan] 写入 mail_inbox 失败:', insertErr.message);
+          } else {
+            fetched++;
+          }
+        }
+      } catch (imapErr: any) {
+        imapStatus = 'error';
+        imapError = imapErr?.message || 'Unknown IMAP error';
+        console.error('[email-scan] IMAP 连接失败:', imapError);
       }
-    } catch (imapErr: any) {
-      console.error('[email-scan] IMAP fetch error:', imapErr?.message);
     }
 
     // 获取未分析的邮件
@@ -284,6 +303,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      imap: { status: imapStatus, error: imapError || undefined, user: imapUser || 'not_set' },
       fetched,
       processed: unprocessed.length,
       matched,

@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  serverExternalPackages: ['exceljs'],
+  serverExternalPackages: ['exceljs', 'imapflow'],
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',
