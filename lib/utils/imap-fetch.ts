@@ -1,38 +1,172 @@
 /**
  * IMAP 邮件抓取 — 腾讯企业邮箱
  *
- * 通过 IMAP 协议连接腾讯企邮，拉取未读邮件
+ * 短连接模式：连上 → 拉新邮件 → 断开，适合 Vercel 60秒限制
+ *
  * 环境变量：
  *   IMAP_HOST=imap.exmail.qq.com
  *   IMAP_PORT=993
- *   IMAP_USER=orders@qimoclothing.com
+ *   IMAP_USER=salesrep@qimoclothing.com
  *   IMAP_PASSWORD=xxxx
  */
 
-interface FetchedEmail {
+export interface FetchedEmail {
   uid: number;
   from: string;
   subject: string;
   body: string;
   date: string;
+  messageId: string | null;
+  inReplyTo: string | null;
 }
 
 /**
- * 拉取未读邮件（最近50封）
- * 使用 fetch 调用系统 API 而非直接 IMAP（Vercel 不支持长连接）
- * 所以我们用更简单的方案：通过腾讯企邮的 SMTP 转发规则
+ * 通过 IMAP 短连接拉取最近的邮件
+ * 每次拉取最近24h内的邮件（去重由调用方处理）
  */
-export async function fetchNewEmails(): Promise<FetchedEmail[]> {
-  // Vercel Serverless 不支持 IMAP 长连接
-  // 方案：腾讯企邮设置"自动转发"到我们的 API
-  // 或者用外部服务（如 Zapier/n8n）转发到 /api/mail-inbox
+export async function fetchNewEmails(maxCount = 30): Promise<FetchedEmail[]> {
+  const host = process.env.IMAP_HOST || 'imap.exmail.qq.com';
+  const port = parseInt(process.env.IMAP_PORT || '993');
+  const user = process.env.IMAP_USER;
+  const pass = process.env.IMAP_PASSWORD;
 
-  // 这里提供一个轻量的 HTTP 方式：
-  // 如果配置了 GMAIL_API_KEY（Google Apps Script webhook），
-  // 可以通过 Google 中转拉取
+  if (!user || !pass) {
+    console.warn('[imap-fetch] IMAP_USER / IMAP_PASSWORD 未配置，跳过邮件拉取');
+    return [];
+  }
 
-  console.warn('[imap-fetch] Vercel 不支持直接 IMAP。请配置邮件转发到 /api/mail-inbox');
-  return [];
+  const emails: FetchedEmail[] = [];
+
+  try {
+    const { ImapFlow } = await import('imapflow');
+
+    const client = new ImapFlow({
+      host,
+      port,
+      secure: true,
+      auth: { user, pass },
+      logger: false,
+      // 连接超时30秒（留30秒给处理）
+      greetTimeout: 15000,
+      socketTimeout: 30000,
+    } as any);
+
+    await client.connect();
+
+    // 打开收件箱
+    const lock = await client.getMailboxLock('INBOX');
+
+    try {
+      // 搜索最近24小时内的邮件
+      const since = new Date(Date.now() - 24 * 3600000);
+      const searchResult = await client.search({
+        since,
+      });
+
+      if (!searchResult || searchResult.length === 0) {
+        return [];
+      }
+
+      // 只取最近的 maxCount 封
+      const uids = searchResult.slice(-maxCount);
+
+      for await (const msg of client.fetch(uids, {
+        envelope: true,
+        source: true,
+        uid: true,
+      })) {
+        try {
+          const envelope = msg.envelope;
+          const from = envelope?.from?.[0]
+            ? `${envelope.from[0].name || ''} <${envelope.from[0].address || ''}>`.trim()
+            : '';
+          const fromEmail = envelope?.from?.[0]?.address || '';
+          const subject = envelope?.subject || '';
+          const date = envelope?.date?.toISOString() || new Date().toISOString();
+          const messageId = envelope?.messageId || null;
+          const inReplyTo = envelope?.inReplyTo || null;
+
+          // 提取纯文本正文
+          let body = '';
+          if (msg.source) {
+            const sourceStr = msg.source.toString('utf-8');
+            body = extractPlainText(sourceStr);
+          }
+
+          emails.push({
+            uid: msg.uid,
+            from: fromEmail || from,
+            subject,
+            body: body.slice(0, 5000), // 限制正文长度
+            date,
+            messageId,
+            inReplyTo,
+          });
+        } catch (parseErr) {
+          // 单封邮件解析失败不影响其他
+          console.error('[imap-fetch] Parse error:', parseErr);
+        }
+      }
+    } finally {
+      lock.release();
+    }
+
+    await client.logout();
+  } catch (err: any) {
+    console.error('[imap-fetch] Connection error:', err?.message);
+  }
+
+  return emails;
+}
+
+/**
+ * 从邮件原始源中提取纯文本（简易版）
+ */
+function extractPlainText(source: string): string {
+  // 尝试找 text/plain 部分
+  const plainMatch = source.match(/Content-Type:\s*text\/plain[\s\S]*?\r?\n\r?\n([\s\S]*?)(?=\r?\n--|\r?\n\.\r?\n|$)/i);
+  if (plainMatch) {
+    let text = plainMatch[1];
+    // 处理 quoted-printable
+    if (source.includes('quoted-printable')) {
+      text = text.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    }
+    // 处理 base64
+    if (source.includes('Content-Transfer-Encoding: base64')) {
+      try {
+        text = Buffer.from(text.replace(/\s/g, ''), 'base64').toString('utf-8');
+      } catch {}
+    }
+    return text.trim();
+  }
+
+  // 如果找不到 text/plain，尝试从 HTML 提取
+  const htmlMatch = source.match(/Content-Type:\s*text\/html[\s\S]*?\r?\n\r?\n([\s\S]*?)(?=\r?\n--|\r?\n\.\r?\n|$)/i);
+  if (htmlMatch) {
+    let html = htmlMatch[1];
+    if (source.includes('Content-Transfer-Encoding: base64')) {
+      try { html = Buffer.from(html.replace(/\s/g, ''), 'base64').toString('utf-8'); } catch {}
+    }
+    // 简单去标签
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // 最后兜底：取body后面的内容
+  const bodyIdx = source.indexOf('\r\n\r\n');
+  if (bodyIdx > 0) {
+    return source.slice(bodyIdx + 4, bodyIdx + 5004).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  return '';
 }
 
 /**
@@ -81,7 +215,7 @@ export function parseEmailForOrderInfo(subject: string, body: string): {
     if (text.toLowerCase().includes(kw)) urgentKeywords.push(kw);
   }
 
-  // 客户名称线索（From 字段或签名）
+  // 客户名称线索
   const customerHints: string[] = [];
 
   return { poNumbers, customerHints, quantities, urgentKeywords, hasAttachment: text.includes('attachment') || text.includes('attached') };

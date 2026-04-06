@@ -12,7 +12,7 @@ import { analyzeEmailWithAI, buildCustomerContext } from '@/lib/agent/emailMatch
 import { identifyCustomerFromEmail } from '@/lib/agent/customerEmailMapping';
 import { extractCommunicationDetails, saveCommunicationDetails } from '@/lib/agent/orderCommunicationLog';
 import { generateEmailDraft } from '@/lib/agent/emailDraft';
-import { parseEmailForOrderInfo } from '@/lib/utils/imap-fetch';
+import { parseEmailForOrderInfo, fetchNewEmails } from '@/lib/utils/imap-fetch';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60;
@@ -30,6 +30,52 @@ export async function POST(req: Request) {
     if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' }, { status: 500 });
 
     const supabase = createClient(url, serviceKey);
+
+    // ═══ Step 0: 从 IMAP 拉取新邮件写入 mail_inbox ═══
+    let fetched = 0;
+    try {
+      const newEmails = await fetchNewEmails(30);
+      for (const email of newEmails) {
+        // 提取发件人地址
+        const fromEmail = email.from.includes('<')
+          ? email.from.match(/<(.+?)>/)?.[1] || email.from
+          : email.from;
+
+        // 去重：同一发件人+同一主题+同一天 只入库一次
+        const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+        const { data: existing } = await supabase
+          .from('mail_inbox')
+          .select('id')
+          .eq('from_email', fromEmail)
+          .eq('subject', email.subject)
+          .gte('received_at', `${emailDate}T00:00:00`)
+          .lte('received_at', `${emailDate}T23:59:59`)
+          .limit(1)
+          .maybeSingle();
+
+        if (existing) continue; // 已入库，跳过
+
+        // 生成 thread_id
+        const threadSubject = email.subject
+          .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
+          .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
+          .trim();
+        const threadId = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
+
+        await supabase.from('mail_inbox').insert({
+          from_email: fromEmail,
+          subject: email.subject,
+          raw_body: email.body,
+          received_at: email.date || new Date().toISOString(),
+          message_id: email.messageId,
+          in_reply_to: email.inReplyTo,
+          thread_id: threadId,
+        });
+        fetched++;
+      }
+    } catch (imapErr: any) {
+      console.error('[email-scan] IMAP fetch error:', imapErr?.message);
+    }
 
     // 获取未分析的邮件
     const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
@@ -238,6 +284,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      fetched,
       processed: unprocessed.length,
       matched,
       alerted,
