@@ -20,6 +20,7 @@ import { buildFactoryProfile, type FactoryProfile } from '@/lib/agent/factoryPro
 import { analyzeHistoricalPattern } from '@/lib/agent/historicalPattern';
 import { AGENT_FLAGS } from '@/lib/agent/featureFlags';
 import { executeMultiStepReasoning } from '@/lib/agent/multiStepReasoning';
+import { analyzeChainImpact } from '@/lib/agent/chainImpact';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60; // Vercel 最大60秒
@@ -349,6 +350,62 @@ export async function POST(req: Request) {
             autoExecThisOrder++;
           }
         }
+      }
+
+      // 6.5 链路预警：上下游提前通知
+      try {
+        const chainMilestones = (milestones || []).map((m: any, idx: number) => ({
+          ...m, sort_order: idx,
+        }));
+        const anchorDate = order.factory_date || order.etd || null;
+        const chainAlerts = analyzeChainImpact(chainMilestones, order.order_no, anchorDate);
+
+        for (const alert of chainAlerts) {
+          // 去重：每天每个目标+来源只通知一次
+          const alertDedup = `chain:${alert.type}:${alert.targetUserId || alert.targetRole}:${alert.sourceMilestoneId}:${new Date().toISOString().slice(0, 10)}`;
+          const { data: existAlert } = await supabase.from('notifications')
+            .select('id').eq('type', 'chain_alert')
+            .gte('created_at', new Date().toISOString().slice(0, 10) + 'T00:00:00Z')
+            .limit(1);
+          // 简单限制：每单每次最多发5条链路预警
+          if (chainAlerts.indexOf(alert) >= 5) break;
+
+          if (alert.targetUserId) {
+            await supabase.from('notifications').insert({
+              user_id: alert.targetUserId,
+              type: 'chain_alert',
+              title: alert.title,
+              message: alert.message,
+              related_order_id: order.id,
+              related_milestone_id: alert.affectedMilestoneId,
+              status: 'unread',
+            }).catch(() => {});
+
+            // 高优先级链路预警也推微信
+            if (alert.severity === 'high') {
+              await pushToUsers(supabase, [alert.targetUserId], alert.title, alert.message).catch(() => {});
+            }
+          }
+
+          // deadline_risk 通知所有管理员
+          if (alert.type === 'deadline_risk') {
+            const { data: admins } = await supabase.from('profiles')
+              .select('user_id').or("role.eq.admin,roles.cs.{admin}");
+            for (const admin of admins || []) {
+              await supabase.from('notifications').insert({
+                user_id: admin.user_id,
+                type: 'chain_alert',
+                title: alert.title,
+                message: alert.message,
+                related_order_id: order.id,
+                status: 'unread',
+              }).catch(() => {});
+              await pushToUsers(supabase, [admin.user_id], alert.title, alert.message).catch(() => {});
+            }
+          }
+        }
+      } catch (chainErr: any) {
+        console.error('[agent-scan] Chain impact error:', chainErr?.message);
       }
 
       // 7. 客户记忆自动积累：记录超期模式
