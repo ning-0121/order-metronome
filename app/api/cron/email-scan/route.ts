@@ -9,6 +9,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { analyzeEmailWithAI, buildCustomerContext } from '@/lib/agent/emailMatcher';
+import { identifyCustomerFromEmail } from '@/lib/agent/customerEmailMapping';
+import { extractCommunicationDetails, saveCommunicationDetails } from '@/lib/agent/orderCommunicationLog';
 import { generateEmailDraft } from '@/lib/agent/emailDraft';
 import { parseEmailForOrderInfo } from '@/lib/utils/imap-fetch';
 import { NextResponse } from 'next/server';
@@ -52,6 +54,12 @@ export async function POST(req: Request) {
     for (const email of unprocessed) {
       // 1. 先用规则引擎快速提取
       const parsed = parseEmailForOrderInfo(email.subject, email.raw_body || '');
+
+      // 1.5 智能客户识别（域名映射 → 历史匹配 → AI识别）
+      const customerResult = await identifyCustomerFromEmail(supabase, email.from_email, email.subject, email.raw_body || '');
+      if (customerResult.customerName) {
+        analysis.customerName = analysis.customerName || customerResult.customerName;
+      }
 
       // 2. 用 AI 深度分析
       const analysis = await analyzeEmailWithAI(
@@ -177,6 +185,15 @@ export async function POST(req: Request) {
             related_order_id: orderId,
             status: 'unread',
           }).catch(() => {});
+        }
+      }
+
+      // 6.8 提取订单沟通细节（归属到客户+订单，业务员换了也不丢）
+      if (analysis.customerName || customerResult.customerName) {
+        const custName = analysis.customerName || customerResult.customerName || '';
+        const details = await extractCommunicationDetails(email.subject, email.raw_body || '', email.from_email, email.received_at);
+        if (details.length > 0) {
+          await saveCommunicationDetails(supabase, custName, orderId, details);
         }
       }
 
