@@ -105,7 +105,7 @@ export async function POST(req: Request) {
       .is('order_id', null)
       .gte('received_at', oneDayAgo)
       .order('received_at', { ascending: false })
-      .limit(10); // 每次最多处理10封，控制AI费用
+      .limit(30); // 每次最多处理30封
 
     if (!unprocessed || unprocessed.length === 0) {
       return NextResponse.json({ success: true, processed: 0 });
