@@ -35,10 +35,22 @@ export async function GET(req: Request) {
   } else {
     try {
       const { ImapFlow } = await import('imapflow');
+
+      // 显示密码前4位用于确认（不暴露完整密码）
+      results.debug = {
+        passwordPrefix: pass.slice(0, 4) + '****',
+        passwordLength: pass.length,
+      };
+
       const client = new ImapFlow({
         host, port, secure: true,
         auth: { user, pass },
-        logger: false,
+        logger: {
+          debug: () => {},
+          info: (msg: any) => { results.imapLog = results.imapLog || []; results.imapLog.push(String(msg?.msg || msg)); },
+          warn: (msg: any) => { results.imapLog = results.imapLog || []; results.imapLog.push('WARN:' + String(msg?.msg || msg)); },
+          error: (msg: any) => { results.imapLog = results.imapLog || []; results.imapLog.push('ERR:' + String(msg?.msg || msg)); },
+        },
         greetTimeout: 10000,
         socketTimeout: 15000,
       } as any);
@@ -91,7 +103,13 @@ export async function GET(req: Request) {
 
       await client.logout();
     } catch (err: any) {
-      results.imap = { status: 'error', message: err?.message || 'Unknown error', host, user };
+      results.imap = {
+        status: 'error',
+        message: err?.message || 'Unknown error',
+        code: err?.code,
+        responseText: err?.responseText || err?.response,
+        host, user,
+      };
     }
   }
 
