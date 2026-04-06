@@ -31,6 +31,7 @@ export async function POST(req: Request) {
     if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' }, { status: 500 });
 
     const supabase = createClient(url, serviceKey);
+    const startTime = Date.now();
 
     // ═══ Step 0: 从 IMAP 拉取新邮件写入 mail_inbox ═══
     let fetched = 0;
@@ -120,19 +121,33 @@ export async function POST(req: Request) {
     let alerted = 0;
 
     for (const email of unprocessed) {
+      // 超时保护：接近50秒就停止，留时间给返回
+      if (Date.now() - startTime > 48000) {
+        console.log('[email-scan] 接近超时，停止处理，剩余邮件下次处理');
+        break;
+      }
+
       // 1. 先用规则引擎快速提取
       const parsed = parseEmailForOrderInfo(email.subject, email.raw_body || '');
 
-      // 1.5 智能客户识别（域名映射 → 历史匹配 → AI识别）
+      // 1.5 智能客户识别（域名映射 → 历史匹配 → 模糊匹配，不调AI）
       const customerResult = await identifyCustomerFromEmail(supabase, email.from_email, email.subject, email.raw_body || '');
 
-      // 2. 用 AI 深度分析
-      const analysis = await analyzeEmailWithAI(
-        email.from_email,
-        email.subject,
-        email.raw_body || '',
-        customerContext,
-      );
+      // 2. 只对已识别客户的邮件做 AI 深度分析（节省时间和费用）
+      let analysis: any;
+      if (customerResult.customerName && customerResult.confidence !== 'low') {
+        analysis = await analyzeEmailWithAI(
+          email.from_email, email.subject, email.raw_body || '', customerContext,
+        );
+      } else {
+        // 无法识别客户的邮件：跳过AI，只保存基本信息
+        analysis = {
+          customerName: customerResult.customerName, poNumber: null, productHints: [],
+          quantityMentioned: null, deliveryMentioned: null, priceChange: false,
+          sampleRelated: false, urgentLevel: 'normal', changes: [],
+          matchedOrderNo: null, matchConfidence: 'low', suggestedAction: null,
+        };
+      }
 
       // 合并客户识别结果
       const customerName = customerResult.customerName || analysis.customerName || null;
@@ -203,8 +218,12 @@ export async function POST(req: Request) {
           matched++;
           console.log(`[email-scan] 匹配成功: ${email.subject} → ${order.order_no}`);
 
-          // 4. 深度对比邮件 vs 订单数据
+          // 4. 深度对比邮件 vs 订单数据（仅在时间充足时运行）
           try {
+            if (Date.now() - startTime > 40000) {
+              // 时间不足，跳过深度对比
+              continue;
+            }
             const compareResult = await deepCompareEmailWithOrder(supabase, {
               subject: email.subject,
               body: email.raw_body || '',
