@@ -46,14 +46,16 @@ export async function POST(req: Request) {
     } else {
       try {
         console.log(`[email-scan] IMAP 连接 ${imapUser}...`);
-        const newEmails = await fetchNewEmails(30);
+        const newEmails = await fetchNewEmails(30, 1); // 拉取最近1天
         imapStatus = `fetched_${newEmails.length}`;
         console.log(`[email-scan] IMAP 拉取到 ${newEmails.length} 封邮件`);
 
         for (const email of newEmails) {
-          const fromEmail = email.from.includes('<')
-            ? email.from.match(/<(.+?)>/)?.[1] || email.from
-            : email.from;
+          const rawFrom = email.from || '';
+          const fromEmail = rawFrom.includes('<')
+            ? rawFrom.match(/<(.+?)>/)?.[1] || rawFrom
+            : rawFrom;
+          if (!fromEmail) continue;
 
           // 去重：同一发件人+同一主题+同一天 只入库一次
           const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);

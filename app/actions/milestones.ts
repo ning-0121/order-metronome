@@ -143,7 +143,7 @@ export async function markMilestoneDone(
   // Get current milestone (for order_id, evidence_required, owner_role, step_key, status)
   const { data: milestone, error: getError } = await (supabase
     .from('milestones') as any)
-    .select('order_id, evidence_required, owner_role, owner_user_id, step_key, status')
+    .select('order_id, evidence_required, owner_role, owner_user_id, step_key, status, actual_at, due_at, name')
     .eq('id', milestoneId)
     .single();
   

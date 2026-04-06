@@ -7,6 +7,8 @@
  * 3. 通知上游负责人：你的延迟影响了谁
  */
 
+import { normalizeMilestoneStatus, isDoneStatus } from '@/lib/domain/types';
+
 interface MilestoneForChain {
   id: string;
   step_key: string;
@@ -52,7 +54,7 @@ export function analyzeChainImpact(
 
     const dueDate = new Date(current.due_at);
     const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / 86400000);
-    const isDone = current.status === '已完成' || current.status === 'done' || current.status === 'completed';
+    const isDone = isDoneStatus(normalizeMilestoneStatus(current.status));
     const isActive = current.status === '进行中' || current.status === 'in_progress';
 
     if (isDone) continue;
@@ -192,7 +194,7 @@ export function analyzeChainImpact(
 function findNextUndone(sorted: MilestoneForChain[], fromIndex: number): MilestoneForChain | null {
   for (let j = fromIndex + 1; j < sorted.length; j++) {
     const m = sorted[j];
-    if (m.status !== '已完成' && m.status !== 'done' && m.status !== 'completed') {
+    if (!isDoneStatus(normalizeMilestoneStatus(m.status))) {
       return m;
     }
   }
@@ -206,7 +208,7 @@ function findDownstreamUndone(sorted: MilestoneForChain[], fromIndex: number, co
   const result: MilestoneForChain[] = [];
   for (let j = fromIndex + 1; j < sorted.length && result.length < count; j++) {
     const m = sorted[j];
-    if (m.status !== '已完成' && m.status !== 'done' && m.status !== 'completed') {
+    if (!isDoneStatus(normalizeMilestoneStatus(m.status))) {
       result.push(m);
     }
   }

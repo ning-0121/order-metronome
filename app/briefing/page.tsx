@@ -1,6 +1,7 @@
 import { getTodayBriefing } from '@/app/actions/briefing';
 import { BriefingCard } from '@/components/BriefingCard';
 import { createClient } from '@/lib/supabase/server';
+import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 
@@ -8,6 +9,13 @@ export default async function BriefingPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
+
+  // 权限：仅业务/跟单/管理员可查看简报
+  const { data: profile } = await supabase.from('profiles').select('roles, role').eq('user_id', user.id).single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!userRoles.some(r => ['admin', 'sales', 'merchandiser', 'admin_assistant', 'production_manager'].includes(r))) {
+    redirect('/dashboard');
+  }
 
   const { data: briefing } = await getTodayBriefing();
 

@@ -8,6 +8,17 @@ import { NextResponse } from 'next/server';
 export const maxDuration = 30;
 
 export async function GET(req: Request) {
+  // 认证：需要 CRON_SECRET 或已登录用户
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    // 检查是否有 Supabase session cookie（已登录管理员可访问）
+    const cookies = req.headers.get('cookie') || '';
+    if (!cookies.includes('sb-')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
+
   const results: Record<string, any> = {
     timestamp: new Date().toISOString(),
     env: {

@@ -62,7 +62,7 @@ export async function POST(req: Request) {
       if (Date.now() - execTime < waitMs) continue;
       // 检查原节点是否已解决（如果已解决就不升级了）
       if (ca.milestone_id) {
-        const { data: ms } = await supabase.from('milestones').select('status').eq('id', ca.milestone_id).single();
+        const { data: ms } = await supabase.from('milestones').select('status').eq('id', ca.milestone_id).maybeSingle();
         if (ms && (ms.status === 'done' || ms.status === '已完成')) {
           // 节点已完成，清除链（标记chain为null防重复）
           await supabase.from('agent_actions').update({ action_payload: { ...payload, chain_next_type: null } }).eq('id', ca.id);
