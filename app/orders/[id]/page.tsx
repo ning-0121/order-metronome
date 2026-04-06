@@ -24,6 +24,7 @@ import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
+import { EmailTab } from '@/components/tabs/EmailTab';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -42,7 +43,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'emails', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -227,6 +228,7 @@ export default async function OrderDetailPage({
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
+              { key: 'emails', label: '邮件往来' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
@@ -609,6 +611,15 @@ export default async function OrderDetailPage({
                 incoterm: orderData.incoterm,
               }} />
           </div>
+        )}
+
+        {/* Tab: 邮件往来 */}
+        {activeTab === 'emails' && (
+          <EmailTab
+            orderId={id}
+            customerName={orderData.customer_name || ''}
+            orderNo={orderData.order_no || ''}
+          />
         )}
 
         {/* Tab: 执行评分 */}

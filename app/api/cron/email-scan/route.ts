@@ -57,9 +57,6 @@ export async function POST(req: Request) {
 
       // 1.5 智能客户识别（域名映射 → 历史匹配 → AI识别）
       const customerResult = await identifyCustomerFromEmail(supabase, email.from_email, email.subject, email.raw_body || '');
-      if (customerResult.customerName) {
-        analysis.customerName = analysis.customerName || customerResult.customerName;
-      }
 
       // 2. 用 AI 深度分析
       const analysis = await analyzeEmailWithAI(
@@ -68,6 +65,35 @@ export async function POST(req: Request) {
         email.raw_body || '',
         customerContext,
       );
+
+      // 合并客户识别结果
+      if (customerResult.customerName) {
+        analysis.customerName = analysis.customerName || customerResult.customerName;
+      }
+
+      // 2.5 邮件线索追踪 — 生成 thread_id（基于主题去除 Re:/Fwd: 前缀）
+      const threadSubject = email.subject
+        .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
+        .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
+        .trim();
+      const threadId = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
+
+      // 检查是否是线索中的第一封
+      const { data: existingThread } = await supabase
+        .from('mail_inbox')
+        .select('id')
+        .eq('thread_id', threadId)
+        .lt('received_at', email.received_at)
+        .limit(1)
+        .maybeSingle();
+
+      const isThreadStart = !existingThread;
+
+      // 更新线索字段
+      await supabase.from('mail_inbox')
+        .update({ thread_id: threadId, is_thread_start: isThreadStart })
+        .eq('id', email.id)
+        .catch(() => {});
 
       // 3. 匹配订单
       let orderId: string | null = null;

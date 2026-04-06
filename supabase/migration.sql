@@ -1429,3 +1429,27 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS internal_order_no text DEFAULT NULL;
 -- ===== 2026-03-30 历史订单导入模式 =====
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS imported_at timestamptz DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS import_current_step text DEFAULT NULL;
+
+-- ===== 2026-04-06 客户邮箱域名映射 =====
+CREATE TABLE IF NOT EXISTS public.customer_email_domains (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_name text NOT NULL,
+  email_domain text NOT NULL,
+  sample_email text,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(customer_name, email_domain)
+);
+ALTER TABLE public.customer_email_domains ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customer_email_domains_authenticated" ON public.customer_email_domains
+  FOR ALL USING (auth.uid() IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_customer_email_domains_domain ON public.customer_email_domains(email_domain);
+
+-- ===== 2026-04-06 邮件线索追踪 =====
+ALTER TABLE public.mail_inbox
+  ADD COLUMN IF NOT EXISTS message_id text,
+  ADD COLUMN IF NOT EXISTS in_reply_to text,
+  ADD COLUMN IF NOT EXISTS thread_id text,
+  ADD COLUMN IF NOT EXISTS is_thread_start boolean DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_mail_inbox_thread_id ON public.mail_inbox(thread_id) WHERE thread_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mail_inbox_message_id ON public.mail_inbox(message_id) WHERE message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mail_inbox_from_email ON public.mail_inbox(from_email);

@@ -18,14 +18,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { from_email?: string; subject?: string; raw_body?: string; received_at?: string };
+  let body: { from_email?: string; subject?: string; raw_body?: string; received_at?: string; message_id?: string; in_reply_to?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { from_email, subject, raw_body, received_at } = body;
+  const { from_email, subject, raw_body, received_at, message_id, in_reply_to } = body;
   if (!from_email || !subject) {
     return NextResponse.json({ error: 'from_email and subject are required' }, { status: 400 });
   }
@@ -58,6 +58,13 @@ export async function POST(request: Request) {
     }
   }
 
+  // 生成 thread_id（基于主题去除 Re:/Fwd: 前缀）
+  const threadSubject = subject
+    .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
+    .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
+    .trim();
+  const thread_id = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
+
   const { data: row, error: insertError } = await (supabase.from('mail_inbox') as any)
     .insert({
       from_email,
@@ -68,6 +75,9 @@ export async function POST(request: Request) {
       extracted_style: extracted.extracted_style || null,
       customer_id,
       order_id,
+      message_id: message_id || null,
+      in_reply_to: in_reply_to || null,
+      thread_id,
     })
     .select('id')
     .single();

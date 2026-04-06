@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
+import { CustomerEmailMappingPanel } from '@/components/CustomerEmailMappingPanel';
 
 export default async function CustomersPage() {
   const supabase = await createClient();
@@ -116,6 +117,11 @@ export default async function CustomersPage() {
                       </div>
                     </div>
                   </div>
+                </div>
+
+                {/* 邮箱域名绑定 */}
+                <div className="px-5 pb-1">
+                  <CustomerEmailMappingPanel customerName={c.name} />
                 </div>
 
                 {/* 客户记忆 */}
