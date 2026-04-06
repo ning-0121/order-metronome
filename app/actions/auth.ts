@@ -59,7 +59,7 @@ export async function signUp(email: string, password: string, name: string) {
         title: `新员工注册：${name}`,
         message: `${name}（${email}）刚注册了账号，请前往用户管理分配角色`,
         status: 'unread',
-      }).catch(() => {});
+      });
     }
   }
 

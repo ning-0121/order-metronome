@@ -90,7 +90,7 @@ export async function executeAgentAction(actionId: string): Promise<{ error?: st
             milestoneId: action.milestone_id,
             message: `[Agent] ${action.title}`,
           }),
-        }).catch(() => {});
+        });
         break;
       }
 

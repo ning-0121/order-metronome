@@ -90,7 +90,7 @@ ${tuningResults.map(r => `${r.actionType}: 执行率${r.executionRate}% → ${r.
       content: weeklyReport,
       structured_data: { tuningResults, generatedAt: new Date().toISOString() },
       confidence: 0.9,
-    }).catch(() => {});
+    });
 
     // 4. 通知管理员
     const { data: admins } = await supabase.from('profiles').select('user_id').or("role.eq.admin,roles.cs.{admin}");
@@ -101,7 +101,7 @@ ${tuningResults.map(r => `${r.actionType}: 执行率${r.executionRate}% → ${r.
         title: '🤖 Agent 周报已生成',
         message: weeklyReport.slice(0, 200) + '...',
         status: 'unread',
-      }).catch(() => {});
+      });
     }
 
     // 5. 邮件画像学习：分析客户邮件沟通模式

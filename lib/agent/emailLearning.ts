@@ -97,7 +97,7 @@ ${emailSummary}
         category: 'general',
         risk_level: profile.riskFlags.length >= 2 ? 'high' : profile.riskFlags.length >= 1 ? 'medium' : 'low',
         content_json: profile,
-      }).catch(() => {});
+      });
 
       return profile;
     }

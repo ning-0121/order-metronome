@@ -456,7 +456,7 @@ export async function createOrder(
         message: `客户：${customer_name}，数量：${quantity || '未填'}`,
         related_order_id: orderData.id,
         status: 'unread',
-      }).catch(() => {});
+      });
     }
   } catch {} // 通知失败不阻断订单创建
 

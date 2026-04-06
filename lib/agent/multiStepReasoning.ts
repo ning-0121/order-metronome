@@ -133,7 +133,7 @@ export async function executeMultiStepReasoning(supabase: any): Promise<number> 
         content: `催办有效：${observation}`,
         category: 'general',
         risk_level: 'low',
-      }).catch(() => {});
+      });
     }
   }
 

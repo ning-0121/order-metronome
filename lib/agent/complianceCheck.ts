@@ -128,7 +128,7 @@ export async function runComplianceChecks(supabase: any): Promise<{
           message: f.description,
           related_order_id: f.orderId,
           status: 'unread',
-        }).catch(() => {});
+        });
         notified++;
       }
 
@@ -143,7 +143,7 @@ export async function runComplianceChecks(supabase: any): Promise<{
             message: f.description,
             related_order_id: f.orderId,
             status: 'unread',
-          }).catch(() => {});
+          });
         }
       }
     }

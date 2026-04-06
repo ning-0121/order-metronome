@@ -47,11 +47,13 @@ export async function identifyCustomerFromEmail(
 
   if (historicalMatch?.customer_id) {
     // 自动建立映射
-    await supabase.from('customer_email_domains').upsert({
-      customer_name: historicalMatch.customer_id,
-      email_domain: domain,
-      sample_email: fromEmail,
-    }, { onConflict: 'customer_name,email_domain' }).catch(() => {});
+    try {
+      await supabase.from('customer_email_domains').upsert({
+        customer_name: historicalMatch.customer_id,
+        email_domain: domain,
+        sample_email: fromEmail,
+      }, { onConflict: 'customer_name,email_domain' });
+    } catch {}
     return { customerName: historicalMatch.customer_id, confidence: 'high', method: 'historical_match' };
   }
 
@@ -63,12 +65,14 @@ export async function identifyCustomerFromEmail(
   const uniqueCustomers = [...new Set((customers || []).map((c: any) => c.customer_name).filter(Boolean))];
 
   for (const name of uniqueCustomers) {
-    const nameLower = name.toLowerCase().replace(/\s+/g, '');
+    const nameLower = (name as string).toLowerCase().replace(/\s+/g, '');
     if (domain.includes(nameLower) || nameLower.includes(domain.split('.')[0])) {
-      await supabase.from('customer_email_domains').upsert({
-        customer_name: name, email_domain: domain, sample_email: fromEmail,
-      }, { onConflict: 'customer_name,email_domain' }).catch(() => {});
-      return { customerName: name, confidence: 'medium', method: 'name_domain_match' };
+      try {
+        await supabase.from('customer_email_domains').upsert({
+          customer_name: name, email_domain: domain, sample_email: fromEmail,
+        }, { onConflict: 'customer_name,email_domain' });
+      } catch {}
+      return { customerName: name as string, confidence: 'medium', method: 'name_domain_match' };
     }
   }
 
@@ -86,9 +90,11 @@ export async function identifyCustomerFromEmail(
     if (match) {
       const parsed = JSON.parse(match[0]);
       if (parsed.customerName) {
-        await supabase.from('customer_email_domains').upsert({
-          customer_name: parsed.customerName, email_domain: domain, sample_email: fromEmail,
-        }, { onConflict: 'customer_name,email_domain' }).catch(() => {});
+        try {
+          await supabase.from('customer_email_domains').upsert({
+            customer_name: parsed.customerName, email_domain: domain, sample_email: fromEmail,
+          }, { onConflict: 'customer_name,email_domain' });
+        } catch {}
         return { customerName: parsed.customerName, confidence: 'medium', method: 'ai_match' };
       }
     }

@@ -356,5 +356,5 @@ async function logDocAction(supabase: any, docId: string, orderId: string, actio
     action,
     actor_user_id: userId,
     detail: detail || null,
-  }).catch(() => {});
+  });
 }

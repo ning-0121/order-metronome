@@ -180,7 +180,7 @@ export async function POST(req: Request) {
         title: `🔧 每晚维护完成 — ${issuesFound === 0 ? '系统健康' : `${autoFixed}项自动修复`}`,
         message: reportText.slice(0, 500),
         status: 'unread',
-      }).catch(() => {});
+      });
 
       // 微信推送
       if (admin.wechat_push_key) {

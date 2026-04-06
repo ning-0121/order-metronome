@@ -71,7 +71,7 @@ export async function POST(req: Request) {
         title: `📋 今日简报 — ${result.totalEmails}封邮件 ${result.urgentCount > 0 ? `🚨${result.urgentCount}个紧急` : ''}`,
         message: result.summaryText.slice(0, 300),
         status: 'unread',
-      }).catch(() => {});
+      });
 
       // 微信推送
       if (user.wechat_push_key) {

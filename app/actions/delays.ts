@@ -204,7 +204,7 @@ export async function createDelayRequest(
       related_order_id: orderData.id,
       related_milestone_id: milestoneId,
       status: 'unread',
-    }).catch(() => {});
+    });
   }
 
   revalidatePath(`/orders/${orderData.id}`);
@@ -356,7 +356,7 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
       related_order_id: orderData.id,
       related_milestone_id: delayRequestData.milestone_id,
       status: 'unread',
-    }).catch(() => {});
+    });
   }
 
   revalidatePath(`/orders/${orderData.id}`);
@@ -464,7 +464,7 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
       related_order_id: orderData.id,
       related_milestone_id: delayRequestData.milestone_id,
       status: 'unread',
-    }).catch(() => {});
+    });
 
     // 驳回邮件
     const { data: reqProfile } = await (supabase.from('profiles') as any).select('email').eq('user_id', delayRequestData.requested_by).single();

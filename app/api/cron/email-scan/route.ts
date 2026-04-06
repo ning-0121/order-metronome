@@ -339,7 +339,7 @@ export async function POST(req: Request) {
             message: `回复要点：${draft.keyPoints.join('、')}\n\n草稿：\n${draft.body.slice(0, 300)}...`,
             related_order_id: orderId,
             status: 'unread',
-          }).catch(() => {});
+          });
         }
       }
 
@@ -361,7 +361,7 @@ export async function POST(req: Request) {
           content: `邮件分析：${analysis.changes.map(c => c.description).join('；')}`,
           category: analysis.sampleRelated ? 'sample' : 'general',
           risk_level: analysis.urgentLevel === 'urgent' ? 'high' : 'low',
-        }).catch(() => {});
+        });
       }
     }
 

@@ -176,7 +176,7 @@ export async function POST(req: Request) {
           title: `📧 昨日邮件摘要（${emails.length} 封）`,
           message: `昨日收到 ${emails.length} 封客户邮件，请检查是否都已处理：\n${emailList}`,
           status: 'unread',
-        }).catch(() => {});
+        });
       }
     }
 

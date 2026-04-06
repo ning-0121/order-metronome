@@ -379,7 +379,7 @@ export async function POST(req: Request) {
               related_order_id: order.id,
               related_milestone_id: alert.affectedMilestoneId,
               status: 'unread',
-            }).catch(() => {});
+            });
 
             // 高优先级链路预警也推微信
             if (alert.severity === 'high') {
@@ -399,7 +399,7 @@ export async function POST(req: Request) {
                 message: alert.message,
                 related_order_id: order.id,
                 status: 'unread',
-              }).catch(() => {});
+              });
               await pushToUsers(supabase, [admin.user_id], alert.title, alert.message).catch(() => {});
             }
           }
@@ -428,7 +428,7 @@ export async function POST(req: Request) {
             content: memoryContent,
             category: 'delay',
             risk_level: overdueCount >= 4 ? 'high' : 'medium',
-          }).catch(() => {});
+          });
         }
       }
     }
