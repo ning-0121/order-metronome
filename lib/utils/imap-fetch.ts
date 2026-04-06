@@ -24,7 +24,7 @@ export interface FetchedEmail {
  * 通过 IMAP 短连接拉取最近的邮件
  * 每次拉取最近24h内的邮件（去重由调用方处理）
  */
-export async function fetchNewEmails(maxCount = 30): Promise<FetchedEmail[]> {
+export async function fetchNewEmails(maxCount = 30, lookbackDays = 1): Promise<FetchedEmail[]> {
   const host = process.env.IMAP_HOST || 'imap.exmail.qq.com';
   const port = parseInt(process.env.IMAP_PORT || '993');
   const user = process.env.IMAP_USER;
@@ -57,8 +57,8 @@ export async function fetchNewEmails(maxCount = 30): Promise<FetchedEmail[]> {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // 搜索最近24小时内的邮件
-      const since = new Date(Date.now() - 24 * 3600000);
+      // 搜索指定时间范围内的邮件
+      const since = new Date(Date.now() - lookbackDays * 24 * 3600000);
       const searchResult = await client.search({
         since,
       });
