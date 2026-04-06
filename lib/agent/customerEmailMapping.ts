@@ -64,9 +64,18 @@ export async function identifyCustomerFromEmail(
     .limit(200);
   const uniqueCustomers = [...new Set((customers || []).map((c: any) => c.customer_name).filter(Boolean))];
 
-  for (const name of uniqueCustomers) {
+  // 客户名长度≥3才用模糊匹配，否则容易误报（如"AP"匹配到"app"、"apparel"）
+  // 优先匹配最长的客户名（更精确）
+  const sortedCustomers = uniqueCustomers
+    .filter((n: any) => typeof n === 'string' && n.length >= 3)
+    .sort((a: any, b: any) => b.length - a.length);
+
+  const domainPrefix = domain.split('.')[0];
+  for (const name of sortedCustomers) {
     const nameLower = (name as string).toLowerCase().replace(/\s+/g, '');
-    if (domain.includes(nameLower) || nameLower.includes(domain.split('.')[0])) {
+    // 严格匹配：客户名必须是域名前缀的子串（如 "rag" in "ragapparel"），
+    // 而不是整个域名（避免 "ap" 匹配 "supabase.io"）
+    if (domainPrefix.includes(nameLower) || nameLower.includes(domainPrefix)) {
       try {
         await supabase.from('customer_email_domains').upsert({
           customer_name: name, email_domain: domain, sample_email: fromEmail,
