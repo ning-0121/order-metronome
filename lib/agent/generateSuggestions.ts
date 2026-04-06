@@ -77,6 +77,7 @@ export function generateSuggestionsForOrder(
   profiles: ProfileData[],
   existingActions: ExistingAction[],
   customerProfile?: CustomerProfile | null,
+  attachmentTypes?: string[],
 ): AgentSuggestion[] {
   const nudgeThreshold = getNudgeThreshold(customerProfile || null);
   const suggestions: Array<AgentSuggestion & { _priority: number }> = [];
@@ -202,15 +203,36 @@ export function generateSuggestionsForOrder(
     );
   }
 
-  // ── 规则 5: 缺失凭证提醒 ──
+  // ── 规则 5: 缺失凭证提醒（检查附件后再告警）──
+  // 节点 step_key → 对应的附件 file_type 映射
+  const stepToFileType: Record<string, string[]> = {
+    po_confirmed: ['customer_po'],
+    production_order_upload: ['production_order', 'trims_sheet'],
+    finance_approval: ['internal_quote', 'customer_quote'],
+    sample_sent: ['tech_pack'],
+    final_qc_check: ['qc_report'],
+    shipment_execute: ['packing_list'],
+  };
+  const uploads = attachmentTypes || [];
+
   for (const m of milestones) {
     if (!isDoneStatus(m.status)) continue;
     if (!m.evidence_required) continue;
-    // 这里不检查附件表（避免 N+1 查询），由执行时检查
+
+    // 如果有对应文件类型映射，检查是否已上传
+    const requiredTypes = stepToFileType[m.step_key];
+    if (requiredTypes) {
+      const hasEvidence = requiredTypes.some(t => uploads.includes(t));
+      if (hasEvidence) continue; // 已有附件，不告警
+    } else {
+      // 没有明确映射的节点，如果订单有任何附件就不告警
+      if (uploads.length > 0) continue;
+    }
+
     add(
       'remind_missing_doc', 'low', 30,
-      `「${m.name}」已完成但可能缺少凭证文件`,
-      `该节点要求上传凭证，请检查是否已上传。`,
+      `「${m.name}」已完成但缺少凭证文件`,
+      `该节点要求上传凭证，请上传相关文件。`,
       `缺少凭证将影响订单复盘和审计。`,
       {},
       m.id, m.name,

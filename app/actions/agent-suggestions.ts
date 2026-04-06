@@ -58,7 +58,13 @@ export async function getAgentSuggestions(orderId: string): Promise<{ data: Agen
       .select('dedup_key, status, created_at')
       .eq('order_id', orderId);
 
-    const suggestions = generateSuggestionsForOrder(order, milestones || [], profileList, allActions || []);
+    // 查附件（过滤缺凭证误报）
+    const { data: orderAttachments } = await (supabase.from('order_attachments') as any)
+      .select('file_type')
+      .eq('order_id', orderId);
+    const attachmentTypes = (orderAttachments || []).map((a: any) => a.file_type);
+
+    const suggestions = generateSuggestionsForOrder(order, milestones || [], profileList, allActions || [], null, attachmentTypes);
 
     // 存入数据库
     if (suggestions.length > 0) {

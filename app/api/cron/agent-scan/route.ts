@@ -170,8 +170,15 @@ export async function POST(req: Request) {
         factProfile = factoryProfileCache.get(order.factory_name) || null;
       }
 
+      // 查订单附件（用于过滤"缺少凭证"误报）
+      const { data: orderAttachments } = await supabase
+        .from('order_attachments')
+        .select('file_type')
+        .eq('order_id', order.id);
+      const attachmentTypes = (orderAttachments || []).map((a: any) => a.file_type);
+
       let suggestions = generateSuggestionsForOrder(
-        order, milestones || [], profileList, orderActions, custProfile
+        order, milestones || [], profileList, orderActions, custProfile, attachmentTypes
       );
 
       if (suggestions.length === 0) continue;
