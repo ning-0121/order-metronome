@@ -17,7 +17,17 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "订单节拍器",
-  description: "订单跟踪和里程碑管理系统",
+  description: "Qimo 订单跟踪和里程碑管理系统",
+  manifest: "/manifest.json",
+  themeColor: "#4f46e5",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "订单节拍器",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
+  },
 };
 
 export default async function RootLayout({
