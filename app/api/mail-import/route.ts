@@ -1,11 +1,11 @@
 /**
- * 邮件历史导入 API — 一次性拉取历史邮件
+ * 邮件历史导入 API
  *
- * POST /api/mail-import?days=90
+ * POST /api/mail-import
+ * Body: { email: "lucy@qimoclothing.com", password: "xxx", days: 90 }
  * Header: Authorization: Bearer <CRON_SECRET>
  *
- * 从 IMAP 拉取指定天数内的邮件写入 mail_inbox
- * 用于初始化系统、建立客户画像
+ * 连接指定邮箱的 IMAP，拉取历史邮件写入 mail_inbox
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -28,23 +28,28 @@ export async function POST(req: Request) {
 
     const supabase = createClient(url, serviceKey);
 
-    // 从 URL 参数获取回溯天数，默认90天
-    const { searchParams } = new URL(req.url);
-    const days = Math.min(parseInt(searchParams.get('days') || '90'), 180);
-    const maxEmails = Math.min(parseInt(searchParams.get('max') || '500'), 1000);
+    // 支持两种方式：POST body 传凭证，或用环境变量
+    let body: { email?: string; password?: string; days?: number; max?: number } = {};
+    try { body = await req.json(); } catch {}
 
-    console.log(`[mail-import] 开始导入最近 ${days} 天的邮件，最多 ${maxEmails} 封`);
+    const imapUser = body.email || process.env.IMAP_USER;
+    const imapPass = body.password || process.env.IMAP_PASSWORD;
+    const days = Math.min(body.days || 90, 180);
+    const maxEmails = Math.min(body.max || 500, 1000);
 
-    // 拉取邮件
-    const emails = await fetchNewEmails(maxEmails, days);
+    if (!imapUser || !imapPass) {
+      return NextResponse.json({ error: '请提供邮箱地址和密码' }, { status: 400 });
+    }
+
+    console.log(`[mail-import] 开始导入 ${imapUser} 最近 ${days} 天的邮件`);
+
+    const emails = await fetchNewEmails(maxEmails, days, { user: imapUser, pass: imapPass });
 
     if (emails.length === 0) {
       return NextResponse.json({
         success: true,
-        message: '未找到邮件，请确认 IMAP 配置正确且邮箱中有邮件',
-        fetched: 0,
-        inserted: 0,
-        skipped: 0,
+        message: `${imapUser} 最近 ${days} 天没有找到邮件`,
+        fetched: 0, inserted: 0, skipped: 0,
       });
     }
 
@@ -56,7 +61,6 @@ export async function POST(req: Request) {
         ? email.from.match(/<(.+?)>/)?.[1] || email.from
         : email.from;
 
-      // 去重
       const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);
       const { data: existing } = await supabase
         .from('mail_inbox')
@@ -68,12 +72,8 @@ export async function POST(req: Request) {
         .limit(1)
         .maybeSingle();
 
-      if (existing) {
-        skipped++;
-        continue;
-      }
+      if (existing) { skipped++; continue; }
 
-      // 生成 thread_id
       const threadSubject = email.subject
         .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
         .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
@@ -95,7 +95,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: `导入完成：${inserted} 封入库，${skipped} 封跳过（已存在）`,
+      message: `${imapUser} 导入完成：拉取${emails.length}封，入库${inserted}封，跳过${skipped}封`,
+      account: imapUser,
       fetched: emails.length,
       inserted,
       skipped,
@@ -105,5 +106,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
 }
-
-export async function GET(req: Request) { return POST(req); }
