@@ -133,14 +133,8 @@ export async function calculateOrderScore(
   // ===== 按角色计算个人维度 =====
   // 改为按 owner_role 动态归类（不再依赖硬编码 step 列表，防止遗漏节点）
 
-  function calcRoleScore(roleSteps: string[]): ScoreDetail {
-    // 按 owner_role 动态归类（完全动态，不硬编码角色名）
-    const salesRoles = new Set(['sales']);
-    const nonSalesRoles = new Set(
-      milestones.map((m: any) => m.owner_role).filter((r: string) => r && !salesRoles.has(r) && r !== 'finance' && r !== 'logistics')
-    );
-    const targetRoles = roleSteps === SALES_STEPS ? salesRoles : nonSalesRoles;
-    const roleMilestones = milestones.filter((m: any) => targetRoles.has(m.owner_role));
+  function calcRoleScore(targetRoleSet: Set<string>): ScoreDetail {
+    const roleMilestones = milestones.filter((m: any) => targetRoleSet.has(m.owner_role));
 
     // 节拍准时率
     const overdueSteps: string[] = [];
@@ -182,7 +176,7 @@ export async function calculateOrderScore(
     };
   }
 
-  const salesDetail = calcRoleScore(SALES_STEPS);
+  const salesDetail = calcRoleScore(new Set(['sales']));
   const salesTotal = Math.min(110, Math.max(0,
     salesDetail.ontime.score + salesDetail.noBlock.score +
     salesDetail.noDelay.score + salesDetail.quality.score + salesDetail.delivery.score
@@ -222,7 +216,7 @@ export async function calculateOrderScore(
 
   // 写入跟单评分（如有跟单负责人）
   if (merchandiserUserId) {
-    const merchDetail = calcRoleScore(MERCHANDISER_STEPS);
+    const merchDetail = calcRoleScore(new Set(['merchandiser', 'production', 'qc', 'quality']));
     const merchTotal = Math.min(110, Math.max(0,
       merchDetail.ontime.score + merchDetail.noBlock.score +
       merchDetail.noDelay.score + merchDetail.quality.score + merchDetail.delivery.score
@@ -259,7 +253,7 @@ export async function calculateOrderScore(
     salesScore: { ...salesPayload, total_score: salesTotal, grade: vetoed ? 'D' : salesGrade.grade, detail_json: salesDetail },
   };
   if (merchandiserUserId) {
-    const merchDetail = calcRoleScore(MERCHANDISER_STEPS);
+    const merchDetail = calcRoleScore(new Set(['merchandiser', 'production', 'qc', 'quality']));
     const merchTotal = Math.min(110, Math.max(0,
       merchDetail.ontime.score + merchDetail.noBlock.score +
       merchDetail.noDelay.score + merchDetail.quality.score + merchDetail.delivery.score
@@ -267,6 +261,53 @@ export async function calculateOrderScore(
     const merchGrade = calcGrade(merchTotal);
     result.merchandiserScore = { total_score: merchTotal, grade: vetoed ? 'D' : merchGrade.grade, detail_json: merchDetail };
   }
+
+  // 采购评分
+  const procurementMilestones = milestones.filter((m: any) => m.owner_role === 'procurement');
+  if (procurementMilestones.length > 0) {
+    const procDetail = calcRoleScore(new Set(['procurement']));
+    const procTotal = Math.min(110, Math.max(0,
+      procDetail.ontime.score + procDetail.noBlock.score + procDetail.noDelay.score + procDetail.quality.score + procDetail.delivery.score
+    ));
+    const procGrade = calcGrade(procTotal);
+    // 找采购负责人
+    const procUser = procurementMilestones.find((m: any) => m.owner_user_id);
+    if (procUser?.owner_user_id) {
+      await (supabase.from('order_commissions') as any).upsert({
+        order_id: orderId, user_id: procUser.owner_user_id, role: 'procurement',
+        score_ontime: procDetail.ontime.score, score_no_block: procDetail.noBlock.score,
+        score_no_delay: procDetail.noDelay.score, score_quality: procDetail.quality.score,
+        score_delivery: procDetail.delivery.score, total_score: procTotal,
+        grade: vetoed ? 'D' : procGrade.grade, vetoed, detail_json: procDetail,
+        calculated_at: new Date().toISOString(),
+      }, { onConflict: 'order_id,user_id' });
+    }
+    result.procurementScore = { total_score: procTotal, grade: vetoed ? 'D' : procGrade.grade, detail_json: procDetail,
+      userName: procUser?.owner_user_id ? '采购' : null };
+  }
+
+  // 财务评分
+  const financeMilestones = milestones.filter((m: any) => m.owner_role === 'finance');
+  if (financeMilestones.length > 0) {
+    const finDetail = calcRoleScore(new Set(['finance']));
+    const finTotal = Math.min(110, Math.max(0,
+      finDetail.ontime.score + finDetail.noBlock.score + finDetail.noDelay.score + finDetail.quality.score + finDetail.delivery.score
+    ));
+    const finGrade = calcGrade(finTotal);
+    const finUser = financeMilestones.find((m: any) => m.owner_user_id);
+    if (finUser?.owner_user_id) {
+      await (supabase.from('order_commissions') as any).upsert({
+        order_id: orderId, user_id: finUser.owner_user_id, role: 'finance',
+        score_ontime: finDetail.ontime.score, score_no_block: finDetail.noBlock.score,
+        score_no_delay: finDetail.noDelay.score, score_quality: finDetail.quality.score,
+        score_delivery: finDetail.delivery.score, total_score: finTotal,
+        grade: vetoed ? 'D' : finGrade.grade, vetoed, detail_json: finDetail,
+        calculated_at: new Date().toISOString(),
+      }, { onConflict: 'order_id,user_id' });
+    }
+    result.financeScore = { total_score: finTotal, grade: vetoed ? 'D' : finGrade.grade, detail_json: finDetail };
+  }
+
   return { data: result };
 }
 

@@ -79,6 +79,64 @@ export function LiveScorePreview({ orderId }: { orderId: string }) {
               </div>
             </div>
           )}
+
+          {/* 采购评分 */}
+          {score.procurementScore && (
+            <div className="rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-gray-900">采购评分</h3>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-orange-600">{score.procurementScore.total_score}</span>
+                  <span className="text-sm text-gray-400">/100</span>
+                  <span className={`text-lg font-bold ${gradeColors[score.procurementScore.grade] || 'text-gray-600'}`}>{score.procurementScore.grade}</span>
+                </div>
+              </div>
+              <div className="space-y-2 text-sm">
+                {score.procurementScore.detail_json && Object.entries(score.procurementScore.detail_json).map(([key, val]: any) => (
+                  <div key={key} className="flex justify-between">
+                    <span className="text-gray-600">{key === 'ontime' ? '节拍准时' : key === 'noBlock' ? '零阻塞' : key === 'noDelay' ? '延期控制' : key === 'quality' ? '品质达标' : key === 'delivery' ? '准时交付' : key}</span>
+                    <span className={`font-medium ${val.score >= val.max * 0.8 ? 'text-green-600' : val.score >= val.max * 0.5 ? 'text-amber-600' : 'text-red-600'}`}>
+                      {val.score}/{val.max}
+                    </span>
+                  </div>
+                ))}
+                {score.procurementScore.detail_json?.ontime?.overdueSteps?.length > 0 && (
+                  <div className="mt-2 p-2 bg-red-50 rounded text-xs text-red-700">
+                    超期节点：{score.procurementScore.detail_json.ontime.overdueSteps.join('、')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 财务评分 */}
+          {score.financeScore && (
+            <div className="rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-gray-900">财务评分</h3>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-green-600">{score.financeScore.total_score}</span>
+                  <span className="text-sm text-gray-400">/100</span>
+                  <span className={`text-lg font-bold ${gradeColors[score.financeScore.grade] || 'text-gray-600'}`}>{score.financeScore.grade}</span>
+                </div>
+              </div>
+              <div className="space-y-2 text-sm">
+                {score.financeScore.detail_json && Object.entries(score.financeScore.detail_json).map(([key, val]: any) => (
+                  <div key={key} className="flex justify-between">
+                    <span className="text-gray-600">{key === 'ontime' ? '节拍准时' : key === 'noBlock' ? '零阻塞' : key === 'noDelay' ? '延期控制' : key === 'quality' ? '品质达标' : key === 'delivery' ? '准时交付' : key}</span>
+                    <span className={`font-medium ${val.score >= val.max * 0.8 ? 'text-green-600' : val.score >= val.max * 0.5 ? 'text-amber-600' : 'text-red-600'}`}>
+                      {val.score}/{val.max}
+                    </span>
+                  </div>
+                ))}
+                {score.financeScore.detail_json?.ontime?.overdueSteps?.length > 0 && (
+                  <div className="mt-2 p-2 bg-red-50 rounded text-xs text-red-700">
+                    超期节点：{score.financeScore.detail_json.ontime.overdueSteps.join('、')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
