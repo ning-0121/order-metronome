@@ -328,10 +328,28 @@ export async function markMilestoneDone(
       att3 = data || [];
     }
 
-    const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0;
-    if (!hasEvidence) {
-      const typeHint = expectedTypes ? `（需要：${expectedTypes.join(' 或 ')}）` : '';
-      return { error: `此节点需要上传凭证后才能标记完成${typeHint}，请先上传对应文件` };
+    // 生产单上传特殊处理：需要三个文件全部上传
+    if (milestone.step_key === 'production_order_upload' && milestone.order_id) {
+      const requiredTypes = ['production_order', 'trims_sheet', 'packing_requirement'];
+      const missing: string[] = [];
+      const typeNames: Record<string, string> = { production_order: '生产订单', trims_sheet: '原辅料单', packing_requirement: '包装资料' };
+      for (const ft of requiredTypes) {
+        const { data: found } = await (supabase.from('order_attachments') as any)
+          .select('id')
+          .eq('order_id', milestone.order_id)
+          .eq('file_type', ft)
+          .limit(1);
+        if (!found || found.length === 0) missing.push(typeNames[ft] || ft);
+      }
+      if (missing.length > 0) {
+        return { error: `生产单上传需要三个文件全部上传才能标记完成。\n缺少：${missing.join('、')}` };
+      }
+    } else {
+      const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0;
+      if (!hasEvidence) {
+        const typeHint = expectedTypes ? `（需要：${expectedTypes.join(' 或 ')}）` : '';
+        return { error: `此节点需要上传凭证后才能标记完成${typeHint}，请先上传对应文件` };
+      }
     }
   }
   

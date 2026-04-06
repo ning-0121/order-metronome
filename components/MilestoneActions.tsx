@@ -104,6 +104,20 @@ export function MilestoneActions({
       return;
     }
 
+    // 生产单上传：前端校验三个文件
+    if (milestone.step_key === 'production_order_upload') {
+      const hasTrims = extraFiles.some((f: any) => f._fileType === 'trims_sheet');
+      const hasPacking = extraFiles.some((f: any) => f._fileType === 'packing_requirement');
+      const missing: string[] = [];
+      if (!evidenceFile) missing.push('生产订单');
+      if (!hasTrims) missing.push('原辅料单');
+      if (!hasPacking) missing.push('包装资料');
+      if (missing.length > 0) {
+        setSubmitError(`⚠️ 生产单上传需要三个文件全部上传：\n缺少：${missing.join('、')}`);
+        return;
+      }
+    }
+
     // 阻断校验
     const blockers = getBlockers();
     if (blockers.length > 0) {
@@ -117,8 +131,9 @@ export function MilestoneActions({
       // 上传凭证文件（同时写入 storage + attachments 表）
       if (evidenceFile && orderId) {
         const supabase = createClient();
+        const fileType = (evidenceFile as any)._fileType || 'evidence';
         const ext = evidenceFile.name.split('.').pop() || 'bin';
-        const path = orderId + '/milestones/' + milestone.step_key + '_' + Date.now() + '.' + ext;
+        const path = orderId + '/milestones/' + milestone.step_key + '_' + fileType + '_' + Date.now() + '.' + ext;
         const { error: uploadError } = await supabase.storage
           .from('order-docs')
           .upload(path, evidenceFile, { contentType: evidenceFile.type, upsert: true });
@@ -127,42 +142,34 @@ export function MilestoneActions({
           setLoading(false);
           return;
         }
-        // 写入 attachments 表（markMilestoneDone 会检查此表）
         const { data: { publicUrl } } = supabase.storage.from('order-docs').getPublicUrl(path);
         const { data: { user } } = await supabase.auth.getUser();
-        const { error: attachError } = await (supabase.from('attachments') as any).insert({
-          milestone_id: milestone.id,
+        // 写入 order_attachments 表（带 file_type 标记）
+        await (supabase.from('order_attachments') as any).insert({
           order_id: orderId,
-          url: publicUrl,
-          file_name: evidenceFile.name,
-          file_type: evidenceFile.type || ext,
+          milestone_id: milestone.id,
           uploaded_by: user?.id || null,
+          file_name: evidenceFile.name,
+          file_url: publicUrl,
+          file_type: fileType,
+          mime_type: evidenceFile.type || null,
         });
-        if (attachError) {
-          // RLS可能阻止插入，尝试用 order_attachments 表
-          await (supabase.from('order_attachments') as any).insert({
-            order_id: orderId,
-            milestone_id: milestone.id,
-            uploaded_by: user?.id || null,
-            file_name: evidenceFile.name,
-            file_url: publicUrl,
-            mime_type: evidenceFile.type || null,
-          });
-        }
       }
 
-      // 上传额外文件（多文件支持）
+      // 上传额外文件（多文件支持，带 file_type 标记）
       if (extraFiles.length > 0 && orderId) {
         const supabase2 = createClient();
         const { data: { user: u2 } } = await supabase2.auth.getUser();
         for (const file of extraFiles) {
+          const fileType = (file as any)._fileType || 'evidence';
           const ext2 = file.name.split('.').pop() || 'bin';
-          const path2 = orderId + '/milestones/' + milestone.step_key + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext2;
+          const path2 = orderId + '/milestones/' + milestone.step_key + '_' + fileType + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext2;
           await supabase2.storage.from('order-docs').upload(path2, file, { contentType: file.type, upsert: true });
           const { data: { publicUrl: url2 } } = supabase2.storage.from('order-docs').getPublicUrl(path2);
           await (supabase2.from('order_attachments') as any).insert({
             order_id: orderId, milestone_id: milestone.id,
-            uploaded_by: u2?.id || null, file_name: file.name, file_url: url2, mime_type: file.type || null,
+            uploaded_by: u2?.id || null, file_name: file.name, file_url: url2,
+            file_type: fileType, mime_type: file.type || null,
           });
         }
       }
@@ -380,6 +387,60 @@ export function MilestoneActions({
             onResponsesChange={(responses) => { checklistResponsesRef.current = responses; }}
           />
 
+          {/* 生产单上传：三卡分类上传 */}
+          {milestone.step_key === 'production_order_upload' ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-2">
+                上传生产资料 <span className="text-red-500">*三个文件都必传</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="flex flex-col items-center py-3 rounded-lg border-2 border-dashed border-indigo-300 text-xs text-indigo-600 cursor-pointer hover:bg-indigo-50">
+                  📄 生产订单
+                  <span className="text-[10px] text-gray-400 mt-0.5">AI可生成 或 手动上传</span>
+                  <input type="file" className="hidden" accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                    onChange={e => {
+                      if (e.target.files?.[0]) {
+                        setEvidenceFile(e.target.files[0]);
+                        // 标记文件类型
+                        (e.target.files[0] as any)._fileType = 'production_order';
+                      }
+                    }} />
+                </label>
+                <label className="flex flex-col items-center py-3 rounded-lg border-2 border-dashed border-green-300 text-xs text-green-600 cursor-pointer hover:bg-green-50">
+                  🧵 原辅料单
+                  <span className="text-[10px] text-gray-400 mt-0.5">业务手动上传</span>
+                  <input type="file" className="hidden" accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                    onChange={e => {
+                      if (e.target.files?.[0]) {
+                        const f = e.target.files[0];
+                        (f as any)._fileType = 'trims_sheet';
+                        setExtraFiles(prev => [...prev.filter((p: any) => p._fileType !== 'trims_sheet'), f]);
+                      }
+                    }} />
+                </label>
+                <label className="flex flex-col items-center py-3 rounded-lg border-2 border-dashed border-amber-300 text-xs text-amber-600 cursor-pointer hover:bg-amber-50">
+                  📦 包装资料
+                  <span className="text-[10px] text-gray-400 mt-0.5">业务手动上传</span>
+                  <input type="file" className="hidden" accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                    onChange={e => {
+                      if (e.target.files?.[0]) {
+                        const f = e.target.files[0];
+                        (f as any)._fileType = 'packing_requirement';
+                        setExtraFiles(prev => [...prev.filter((p: any) => p._fileType !== 'packing_requirement'), f]);
+                      }
+                    }} />
+                </label>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                {evidenceFile ? `✅ 生产订单：${evidenceFile.name}` : '⬜ 生产订单：未选'}
+                {' · '}
+                {extraFiles.some((f: any) => f._fileType === 'trims_sheet') ? `✅ 原辅料单` : '⬜ 原辅料单：未选'}
+                {' · '}
+                {extraFiles.some((f: any) => f._fileType === 'packing_requirement') ? `✅ 包装资料` : '⬜ 包装资料：未选'}
+              </p>
+              <p className="text-xs text-indigo-500 mt-1">文件将同步显示在「原辅料和包装」及「生产进度」Tab</p>
+            </div>
+          ) : (
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
               {(() => {
@@ -388,7 +449,6 @@ export function MilestoneActions({
                   final_qc_check: '上传尾查报告',
                   inspection_release: '上传验货报告 / 放行单',
                   po_confirmed: '上传客户PO',
-                  production_order_upload: '上传生产单',
                   order_docs_bom_complete: '上传BOM/订单资料',
                   bulk_materials_confirmed: '上传原辅料确认单',
                   procurement_order_placed: '上传采购单',
@@ -419,6 +479,7 @@ export function MilestoneActions({
               {extraFiles.length > 0 && <span className="text-indigo-600 ml-1">（已选 {1 + extraFiles.length} 个文件）</span>}
             </p>
           </div>
+          )}
 
           {/* 财务审核：内部订单号 */}
           {milestone.step_key === 'finance_approval' && (
