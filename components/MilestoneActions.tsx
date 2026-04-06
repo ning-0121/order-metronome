@@ -32,6 +32,7 @@ export function MilestoneActions({
   const [showBlockForm, setShowBlockForm] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [extraFiles, setExtraFiles] = useState<File[]>([]);
   const [evidenceNote, setEvidenceNote] = useState('');
   const [blockError, setBlockError] = useState('');
   const [submitError, setSubmitError] = useState('');
@@ -146,6 +147,22 @@ export function MilestoneActions({
             file_name: evidenceFile.name,
             file_url: publicUrl,
             mime_type: evidenceFile.type || null,
+          });
+        }
+      }
+
+      // 上传额外文件（多文件支持）
+      if (extraFiles.length > 0 && orderId) {
+        const supabase2 = createClient();
+        const { data: { user: u2 } } = await supabase2.auth.getUser();
+        for (const file of extraFiles) {
+          const ext2 = file.name.split('.').pop() || 'bin';
+          const path2 = orderId + '/milestones/' + milestone.step_key + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext2;
+          await supabase2.storage.from('order-docs').upload(path2, file, { contentType: file.type, upsert: true });
+          const { data: { publicUrl: url2 } } = supabase2.storage.from('order-docs').getPublicUrl(path2);
+          await (supabase2.from('order_attachments') as any).insert({
+            order_id: orderId, milestone_id: milestone.id,
+            uploaded_by: u2?.id || null, file_name: file.name, file_url: url2, mime_type: file.type || null,
           });
         }
       }
@@ -387,10 +404,20 @@ export function MilestoneActions({
             <input
               type="file"
               accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
-              onChange={e => setEvidenceFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={e => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                  setEvidenceFile(files[0]);
+                  setExtraFiles(Array.from(files).slice(1));
+                }
+              }}
               className="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white file:text-indigo-700 hover:file:bg-indigo-50 cursor-pointer"
             />
-            <p className="text-xs text-gray-400 mt-1">支持 PDF、图片、Excel、Word</p>
+            <p className="text-xs text-gray-400 mt-1">
+              支持 PDF、图片、Excel、Word，可同时选择多个文件
+              {extraFiles.length > 0 && <span className="text-indigo-600 ml-1">（已选 {1 + extraFiles.length} 个文件）</span>}
+            </p>
           </div>
 
           {/* 财务审核：内部订单号 */}
