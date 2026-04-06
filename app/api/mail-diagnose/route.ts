@@ -28,6 +28,7 @@ export async function GET(req: Request) {
       IMAP_PASSWORD: process.env.IMAP_PASSWORD ? '已设置(****)' : '未设置',
       SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? '已设置' : '未设置',
       CRON_SECRET: process.env.CRON_SECRET ? '已设置' : '未设置',
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? '已设置' : '❌ 未设置（AI分析不可用）',
     },
     imap: { status: 'not_tested' },
     mailbox: {},

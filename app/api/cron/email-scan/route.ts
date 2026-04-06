@@ -135,38 +135,57 @@ export async function POST(req: Request) {
       );
 
       // 合并客户识别结果
+      const customerName = customerResult.customerName || analysis.customerName || null;
       if (customerResult.customerName) {
-        analysis.customerName = analysis.customerName || customerResult.customerName;
+        analysis.customerName = customerName;
       }
 
-      // 2.5 邮件线索追踪 — 生成 thread_id（基于主题去除 Re:/Fwd: 前缀）
+      // 2.5 邮件线索追踪
       const threadSubject = email.subject
         .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
         .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
         .trim();
       const threadId = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
 
-      // 检查是否是线索中的第一封
       const { data: existingThread } = await supabase
-        .from('mail_inbox')
-        .select('id')
-        .eq('thread_id', threadId)
-        .lt('received_at', email.received_at)
-        .limit(1)
-        .maybeSingle();
+        .from('mail_inbox').select('id')
+        .eq('thread_id', threadId).lt('received_at', email.received_at)
+        .limit(1).maybeSingle();
 
-      const isThreadStart = !existingThread;
-
-      // 更新线索字段
+      // ★ 立即保存客户识别+线索（不管是否匹配到订单）
       await supabase.from('mail_inbox')
-        .update({ thread_id: threadId, is_thread_start: isThreadStart })
+        .update({
+          customer_id: customerName,
+          thread_id: threadId,
+          is_thread_start: !existingThread,
+        })
         .eq('id', email.id)
         .catch(() => {});
 
-      // 3. 匹配订单
+      // 3. 匹配订单 — 多策略匹配
       let orderId: string | null = null;
       let orderOwner: string | null = null;
-      const orderNo = analysis.matchedOrderNo || (parsed.poNumbers.length > 0 ? parsed.poNumbers[0] : null);
+
+      // 策略A: AI 分析结果 或 规则引擎提取的 PO 号
+      let orderNo = analysis.matchedOrderNo || (parsed.poNumbers.length > 0 ? parsed.poNumbers[0] : null);
+
+      // 策略B: 从邮件主题提取纯数字（如 "Re: 531 CAPRIS" → "531"）
+      if (!orderNo) {
+        const subjectClean = threadSubject.replace(/^#/, '');
+        const numMatch = subjectClean.match(/^(\d{2,6})\b/);
+        if (numMatch) orderNo = numMatch[1];
+      }
+
+      // 策略C: 从主题中找任何 3-6 位数字匹配 po_number
+      if (!orderNo && customerName) {
+        const allNums = threadSubject.match(/\d{3,6}/g) || [];
+        for (const num of allNums) {
+          const { data: poMatch } = await supabase.from('orders')
+            .select('id').eq('po_number', num).eq('customer_name', customerName)
+            .limit(1).maybeSingle();
+          if (poMatch) { orderNo = num; break; }
+        }
+      }
 
       if (orderNo) {
         const { data: order } = await supabase
@@ -178,12 +197,11 @@ export async function POST(req: Request) {
         if (order) {
           orderId = order.id;
           orderOwner = order.owner_user_id;
-
-          // 更新邮件关联
           await supabase.from('mail_inbox')
-            .update({ order_id: order.id, customer_id: analysis.customerName || order.customer_name })
+            .update({ order_id: order.id, customer_id: customerName || order.customer_name })
             .eq('id', email.id);
           matched++;
+          console.log(`[email-scan] 匹配成功: ${email.subject} → ${order.order_no}`);
 
           // 4. 深度对比邮件 vs 订单数据
           try {
