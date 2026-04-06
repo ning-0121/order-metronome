@@ -35,8 +35,12 @@ export async function middleware(request: NextRequest) {
   const isLoginPage = request.nextUrl.pathname === '/login';
   const isAuthPage = request.nextUrl.pathname.startsWith('/auth/');
   const isAuthApi = request.nextUrl.pathname.startsWith('/api/auth/');
+  const isCronApi = request.nextUrl.pathname.startsWith('/api/cron/');
+  const isMailApi = request.nextUrl.pathname.startsWith('/api/mail-');
+  const isBackupApi = request.nextUrl.pathname === '/api/backup';
+  const isPublicApi = isCronApi || isMailApi || isBackupApi;
 
-  if (!user && !isLoginPage && !isAuthPage && !isAuthApi) {
+  if (!user && !isLoginPage && !isAuthPage && !isAuthApi && !isPublicApi) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
   
