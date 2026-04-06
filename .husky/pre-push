@@ -1,0 +1,6 @@
+#!/bin/sh
+
+echo "🔍 推送前回归检查..."
+npm run build || { echo "❌ 构建失败，阻止推送"; exit 1; }
+npx tsx scripts/pre-deploy-check.ts || { echo "❌ 回归检查失败，阻止推送"; exit 1; }
+echo "✅ 检查通过，允许推送"

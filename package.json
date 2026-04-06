@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "check": "npx tsx scripts/pre-deploy-check.ts",
-    "predeploy": "npm run build && npm run check"
+    "predeploy": "npm run build && npm run check",
+    "prepare": "husky"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "husky": "^9.1.7",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
