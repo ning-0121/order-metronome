@@ -104,7 +104,14 @@ ${tuningResults.map(r => `${r.actionType}: 执行率${r.executionRate}% → ${r.
       }).catch(() => {});
     }
 
-    return NextResponse.json({ success: true, tuningResults, report: weeklyReport.slice(0, 200) });
+    // 5. 邮件画像学习：分析客户邮件沟通模式
+    let customersLearned = 0;
+    try {
+      const { learnAllCustomerProfiles } = await import('@/lib/agent/emailLearning');
+      customersLearned = await learnAllCustomerProfiles(supabase);
+    } catch {}
+
+    return NextResponse.json({ success: true, tuningResults, report: weeklyReport.slice(0, 200), customersLearned });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
