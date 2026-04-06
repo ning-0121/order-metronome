@@ -185,6 +185,19 @@ export default async function DashboardPage() {
     }
   }
 
+  // 获取逾期节点负责人姓名
+  const ownerIds = [...new Set(filteredOverdue.map((m: any) => m.owner_user_id).filter(Boolean))];
+  let ownerNameMap: Record<string, string> = {};
+  if (ownerIds.length > 0) {
+    const { data: ownerProfiles } = await (supabase.from('profiles') as any)
+      .select('user_id, name, email').in('user_id', ownerIds);
+    ownerNameMap = (ownerProfiles || []).reduce((m: any, p: any) => { m[p.user_id] = p.name || p.email?.split('@')[0]; return m; }, {});
+  }
+  // 将负责人名字附加到milestone对象上
+  for (const m of filteredOverdue) {
+    (m as any)._ownerName = m.owner_user_id ? ownerNameMap[m.owner_user_id] || null : null;
+  }
+
   // 卡住清单
   const { data: rawBlockedMilestones } = await (supabase
     .from('milestones') as any)
@@ -367,7 +380,7 @@ export default async function DashboardPage() {
             </div>
           </div>
           <div className="space-y-3">
-            {myOverdue.slice(0, 5).map((milestone: any) => (
+            {myOverdue.map((milestone: any) => (
               <MilestoneCard
                 key={milestone.id}
                 milestone={milestone}
@@ -377,11 +390,6 @@ export default async function DashboardPage() {
                 delayStatus={delayRequestMap[milestone.id]}
               />
             ))}
-            {myOverdue.length > 5 && (
-              <Link href="/orders" className="block text-center text-sm text-red-600 hover:text-red-700 font-medium py-2">
-                查看全部 {myOverdue.length} 个我的逾期节点 →
-              </Link>
-            )}
           </div>
         </div>
       )}
@@ -399,7 +407,7 @@ export default async function DashboardPage() {
             </div>
           </div>
           <div className="space-y-3">
-            {othersOverdue.slice(0, 5).map((milestone: any) => (
+            {othersOverdue.map((milestone: any) => (
               <MilestoneCard
                 key={milestone.id}
                 milestone={milestone}
@@ -409,11 +417,6 @@ export default async function DashboardPage() {
                 delayStatus={delayRequestMap[milestone.id]}
               />
             ))}
-            {othersOverdue.length > 5 && (
-              <Link href="/orders" className="block text-center text-sm text-orange-600 hover:text-orange-700 font-medium py-2">
-                查看全部 {othersOverdue.length} 个他人逾期节点 →
-              </Link>
-            )}
           </div>
         </div>
       )}
@@ -537,10 +540,11 @@ function MilestoneCard({ milestone, variant, badge, isMine, delayStatus }: { mil
               <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">延期已批准</span>
             )}
           </div>
-          <p className="text-sm text-gray-700 mb-1">{milestone.name}</p>
-          <div className="flex items-center gap-4 text-xs text-gray-500">
-            <span>截止: {milestone.due_at ? formatDate(milestone.due_at) : '-'}</span>
-            <span>负责: {ROLE_LABELS[milestone.owner_role] || milestone.owner_role}</span>
+          <p className="text-sm text-gray-700 mb-1">{milestone.name} {order?.customer_name && <span className="text-gray-400">· {order.customer_name}</span>}</p>
+          <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+            <span>截止: <span className="text-red-600 font-medium">{milestone.due_at ? formatDate(milestone.due_at) : '-'}</span></span>
+            <span>负责: <span className="font-medium text-gray-700">{milestone._ownerName || ROLE_LABELS[milestone.owner_role] || milestone.owner_role}{milestone._ownerName ? `（${ROLE_LABELS[milestone.owner_role] || milestone.owner_role}）` : ''}</span></span>
+            {order?.internal_order_no && <span>内部号: {order.internal_order_no}</span>}
           </div>
         </Link>
         <div className="flex items-center gap-2 ml-3 flex-shrink-0">
