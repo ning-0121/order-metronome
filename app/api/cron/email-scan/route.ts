@@ -13,6 +13,7 @@ import { identifyCustomerFromEmail } from '@/lib/agent/customerEmailMapping';
 import { extractCommunicationDetails, saveCommunicationDetails } from '@/lib/agent/orderCommunicationLog';
 import { generateEmailDraft } from '@/lib/agent/emailDraft';
 import { parseEmailForOrderInfo, fetchNewEmails } from '@/lib/utils/imap-fetch';
+import { deepCompareEmailWithOrder } from '@/lib/agent/emailOrderCompare';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60;
@@ -182,29 +183,53 @@ export async function POST(req: Request) {
             .eq('id', email.id);
           matched++;
 
-          // 4. 检测变更并通知
-          if (analysis.changes.length > 0 && orderOwner) {
-            const changeDesc = analysis.changes.map(c => `• ${c.description}`).join('\n');
-            await supabase.from('notifications').insert({
-              user_id: orderOwner,
-              type: 'email_change_detected',
-              title: `📧 客户邮件检测到变更 — ${order.order_no}`,
-              message: `${analysis.customerName || '客户'}的邮件中发现以下变更：\n${changeDesc}\n\n建议：${analysis.suggestedAction || '请核实'}`,
-              related_order_id: order.id,
-              status: 'unread',
-            });
-            alerted++;
-          }
+          // 4. 深度对比邮件 vs 订单数据
+          try {
+            const compareResult = await deepCompareEmailWithOrder(supabase, {
+              subject: email.subject,
+              body: email.raw_body || '',
+              fromEmail: email.from_email,
+              quantityMentioned: analysis.quantityMentioned,
+              deliveryMentioned: analysis.deliveryMentioned,
+              changes: analysis.changes,
+              sampleRelated: analysis.sampleRelated,
+            }, order.id);
 
-          // 数量差异检测
-          if (analysis.quantityMentioned && order.quantity) {
-            const diff = Math.abs(analysis.quantityMentioned - order.quantity);
-            if (diff > order.quantity * 0.05) { // 差异>5%
+            if (compareResult.hasDiscrepancy && orderOwner) {
+              const discList = compareResult.discrepancies
+                .map(d => `• [${d.severity === 'high' ? '严重' : d.severity === 'medium' ? '注意' : '轻微'}] ${d.field}：邮件「${d.emailValue}」vs 系统「${d.orderValue}」\n  → ${d.suggestion}`)
+                .join('\n');
+
               await supabase.from('notifications').insert({
                 user_id: orderOwner,
-                type: 'email_qty_mismatch',
-                title: `⚠️ 邮件数量与订单不一致 — ${order.order_no}`,
-                message: `邮件提到 ${analysis.quantityMentioned} 件，订单为 ${order.quantity} 件（差异 ${diff} 件）。\n邮件主题：${email.subject}`,
+                type: 'email_change_detected',
+                title: `🔍 邮件-订单对比发现差异 — ${order.order_no}`,
+                message: `${compareResult.summary}\n\n${discList}`,
+                related_order_id: order.id,
+                status: 'unread',
+              });
+              alerted++;
+
+              // 高严重度差异推微信
+              const highItems = compareResult.discrepancies.filter(d => d.severity === 'high');
+              if (highItems.length > 0) {
+                const { pushToUsers } = await import('@/lib/utils/wechat-push');
+                await pushToUsers(supabase, [orderOwner],
+                  `🔍 ${order.order_no} 邮件-订单差异`,
+                  `${compareResult.summary}\n${highItems.map(d => `• ${d.field}：${d.suggestion}`).join('\n')}`
+                ).catch(() => {});
+              }
+            }
+          } catch (compareErr: any) {
+            console.error('[email-scan] Compare error:', compareErr?.message);
+            // 降级到简单对比
+            if (analysis.changes.length > 0 && orderOwner) {
+              const changeDesc = analysis.changes.map(c => `• ${c.description}`).join('\n');
+              await supabase.from('notifications').insert({
+                user_id: orderOwner,
+                type: 'email_change_detected',
+                title: `📧 客户邮件检测到变更 — ${order.order_no}`,
+                message: `${changeDesc}\n\n建议：${analysis.suggestedAction || '请核实'}`,
                 related_order_id: order.id,
                 status: 'unread',
               });
