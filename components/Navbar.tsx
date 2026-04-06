@@ -30,6 +30,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
     : [
         { href: '/dashboard', label: '我的工作台', icon: '📋' },
         { href: '/orders', label: '订单列表', icon: '📦' },
+        { href: '/briefing', label: '今日简报', icon: '📧' },
         { href: '/memos', label: '备忘录', icon: '📝' },
       ];
 

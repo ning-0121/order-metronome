@@ -24,4 +24,8 @@ export const AGENT_FLAGS = {
   customerProfile: () => process.env.AGENT_FLAG_CUSTOMER_PROFILE !== 'false',
   /** 工厂产能感知 */
   factoryProfile: () => process.env.AGENT_FLAG_FACTORY_PROFILE !== 'false',
+  /** 邮件-订单执行对照 */
+  complianceCheck: () => process.env.AGENT_FLAG_COMPLIANCE !== 'false',
+  /** 业务员每日简报 */
+  dailyBriefing: () => process.env.AGENT_FLAG_DAILY_BRIEFING !== 'false',
 };

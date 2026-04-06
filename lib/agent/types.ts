@@ -13,7 +13,8 @@ export type AgentActionType =
   | 'add_note'            // 添加内部备注
   | 'escalate_ceo'        // 升级给 CEO
   | 'notify_next'         // 通知下一节点负责人
-  | 'remind_missing_doc'; // 提醒缺失资料
+  | 'remind_missing_doc'  // 提醒缺失资料
+  | 'compliance_alert';   // 邮件-订单执行对照告警
 
 export type AgentActionStatus = 'pending' | 'executing' | 'executed' | 'dismissed' | 'expired';
 export type AgentSeverity = 'high' | 'medium' | 'low';
@@ -105,6 +106,12 @@ export const ACTION_CONFIG: Record<AgentActionType, {
     buttonLabel: '提醒上传',
     canRollback: false,
     requiredRoles: ['admin', 'sales'],
+  },
+  compliance_alert: {
+    icon: '🔍',
+    buttonLabel: '查看详情',
+    canRollback: false,
+    requiredRoles: [],
   },
 };
 

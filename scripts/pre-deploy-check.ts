@@ -60,7 +60,7 @@ assert(CIRCUIT_BREAKER.maxGlobalPerHour === 20, `全局限制 ${CIRCUIT_BREAKER.
 assert(CIRCUIT_BREAKER.maxSuggestionsPerOrder === 3, `每单建议 ${CIRCUIT_BREAKER.maxSuggestionsPerOrder} 条`);
 
 const actionTypes = Object.keys(ACTION_CONFIG);
-assert(actionTypes.length >= 8, `Agent动作类型 ${actionTypes.length} 种 (≥8)`);
+assert(actionTypes.length >= 9, `Agent动作类型 ${actionTypes.length} 种 (≥9)`);
 assert(actionTypes.includes('assign_owner'), 'Agent包含 assign_owner');
 assert(actionTypes.includes('escalate_ceo'), 'Agent包含 escalate_ceo');
 
@@ -81,7 +81,7 @@ for (const role of requiredRoles) {
 // ════ 5. Feature Flags 完整性 ════
 console.log('\n🚩 Feature Flags');
 const { AGENT_FLAGS } = require('../lib/agent/featureFlags');
-const requiredFlags = ['autoNudge', 'autoNotifyNext', 'chainActions', 'crossOrderAnalysis', 'aiEnhance', 'wechatPush', 'customerProfile', 'factoryProfile'];
+const requiredFlags = ['autoNudge', 'autoNotifyNext', 'chainActions', 'crossOrderAnalysis', 'aiEnhance', 'wechatPush', 'customerProfile', 'factoryProfile', 'complianceCheck', 'dailyBriefing'];
 for (const flag of requiredFlags) {
   assert(typeof AGENT_FLAGS[flag] === 'function', `Flag ${flag} 存在且是函数`);
   assert(typeof AGENT_FLAGS[flag]() === 'boolean', `Flag ${flag}() 返回 boolean`);

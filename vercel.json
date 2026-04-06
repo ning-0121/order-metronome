@@ -32,6 +32,14 @@
     {
       "path": "/api/cron/nightly-maintenance",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/compliance-check",
+      "schedule": "30 23 * * *"
+    },
+    {
+      "path": "/api/cron/daily-briefing",
+      "schedule": "0 0 * * *"
     }
   ]
 }
