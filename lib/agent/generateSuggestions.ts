@@ -207,10 +207,16 @@ export function generateSuggestionsForOrder(
   // 节点 step_key → 对应的附件 file_type 映射
   const stepToFileType: Record<string, string[]> = {
     po_confirmed: ['customer_po'],
-    production_order_upload: ['production_order', 'trims_sheet'],
+    production_order_upload: ['production_order', 'trims_sheet', 'packing_requirement'],
     finance_approval: ['internal_quote', 'customer_quote'],
-    sample_sent: ['tech_pack'],
+    processing_fee_confirmed: ['internal_quote'],
+    procurement_order_placed: ['procurement_order'],
+    mid_qc_check: ['qc_report'],
     final_qc_check: ['qc_report'],
+    inspection_release: ['qc_report'],
+    sample_sent: ['tech_pack'],
+    booking_done: ['packing_list'],
+    customs_export: ['packing_list'],
     shipment_execute: ['packing_list'],
   };
   const uploads = attachmentTypes || [];
