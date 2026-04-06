@@ -289,22 +289,49 @@ export async function markMilestoneDone(
     }
   }
 
-  // Check if evidence is required and exists（双表检查）
+  // Check if evidence is required and exists（三重检查）
   if (milestone.evidence_required) {
-    // 先查 attachments 表
+    // 检查1: milestone_id 关联的附件（attachments 表）
     const { data: att1 } = await (supabase.from('attachments') as any)
       .select('id')
       .eq('milestone_id', milestoneId)
       .limit(1);
-    // 再查 order_attachments 表
+    // 检查2: milestone_id 关联的附件（order_attachments 表）
     const { data: att2 } = await (supabase.from('order_attachments') as any)
       .select('id')
       .eq('milestone_id', milestoneId)
       .limit(1);
+    // 检查3: 按 order_id + file_type 匹配（订单资料区上传的文件）
+    const stepToFileType: Record<string, string[]> = {
+      po_confirmed: ['customer_po'],
+      production_order_upload: ['production_order', 'trims_sheet'],
+      finance_approval: ['internal_quote', 'customer_quote'],
+      order_docs_bom_complete: ['trims_sheet', 'production_order'],
+      processing_fee_confirmed: ['internal_quote'],
+      mid_qc_check: ['qc_report'],
+      final_qc_check: ['qc_report'],
+      inspection_release: ['qc_report'],
+      booking_done: ['packing_list'],
+      customs_export: ['packing_list'],
+      shipment_execute: ['packing_list'],
+      sample_qc: ['qc_report'],
+      sample_sent: ['tech_pack'],
+    };
+    let att3: any[] = [];
+    const expectedTypes = stepToFileType[milestone.step_key];
+    if (expectedTypes && milestone.order_id) {
+      const { data } = await (supabase.from('order_attachments') as any)
+        .select('id')
+        .eq('order_id', milestone.order_id)
+        .in('file_type', expectedTypes)
+        .limit(1);
+      att3 = data || [];
+    }
 
-    const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0);
+    const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0;
     if (!hasEvidence) {
-      return { error: '此节点需要上传凭证后才能标记完成，请先在「去处理」中上传文件' };
+      const typeHint = expectedTypes ? `（需要：${expectedTypes.join(' 或 ')}）` : '';
+      return { error: `此节点需要上传凭证后才能标记完成${typeHint}，请先上传对应文件` };
     }
   }
   
