@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/agent-learn",
       "schedule": "0 16 * * 0"
+    },
+    {
+      "path": "/api/cron/nightly-maintenance",
+      "schedule": "0 14 * * *"
     }
   ]
 }
