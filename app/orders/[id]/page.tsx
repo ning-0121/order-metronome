@@ -25,6 +25,7 @@ import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { EmailTab } from '@/components/tabs/EmailTab';
+import { EmailDiffsTab } from '@/components/tabs/EmailDiffsTab';
 import { BackButton } from '@/components/BackButton';
 // POVerifyButton removed - auto-verify at order creation
 
@@ -48,7 +49,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'emails', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'emails', 'email_diffs', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -242,6 +243,7 @@ export default async function OrderDetailPage({
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
               { key: 'emails', label: '邮件往来' },
+              { key: 'email_diffs', label: '邮件差异' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
@@ -638,6 +640,11 @@ export default async function OrderDetailPage({
             customerName={orderData.customer_name || ''}
             orderNo={orderData.order_no || ''}
           />
+        )}
+
+        {/* Tab: 邮件差异 */}
+        {activeTab === 'email_diffs' && (
+          <EmailDiffsTab orderId={id} />
         )}
 
         {/* Tab: 执行评分 */}

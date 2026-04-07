@@ -142,6 +142,40 @@ export function BriefingCard({ content, briefingDate }: Props) {
         </Section>
       )}
 
+      {/* 🔍 邮件-订单差异（开放未解决） */}
+      {content.emailOrderDiffs && content.emailOrderDiffs.length > 0 && (
+        <Section title={`🔍 邮件 vs 订单差异（${content.emailOrderDiffs.length}）`} defaultOpen>
+          <div className="space-y-2">
+            {content.emailOrderDiffs.map((d) => (
+              <div key={d.diffId} className={`p-3 rounded-lg border ${
+                d.severity === 'high' ? 'bg-red-50 border-red-200' :
+                d.severity === 'medium' ? 'bg-amber-50 border-amber-200' :
+                'bg-gray-50 border-gray-200'
+              }`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${severityColors[d.severity]}`}>
+                    {d.severity === 'high' ? '严重' : d.severity === 'medium' ? '注意' : '轻微'}
+                  </span>
+                  <span className="text-xs text-gray-600 font-medium">{d.field}</span>
+                  <span className="text-xs text-gray-400">{d.customer} · {d.orderNo}</span>
+                </div>
+                <div className="text-xs text-gray-700 mt-1">
+                  <span className="text-red-600">邮件：{d.emailValue || '—'}</span>
+                  <span className="mx-2">vs</span>
+                  <span className="text-blue-600">订单：{d.orderValue || '—'}</span>
+                </div>
+                {d.suggestion && (
+                  <p className="text-xs text-gray-500 mt-1">💡 {d.suggestion}</p>
+                )}
+                <Link href={`/orders/${d.orderId}?tab=email_diffs`} className="text-xs text-indigo-600 hover:underline mt-1 inline-block">
+                  打开订单 →
+                </Link>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {/* ✉️ 待审回复草稿 */}
       {content.draftReplies.length > 0 && (
         <Section title={`✉️ AI 回复草稿（${content.draftReplies.length}）`}>

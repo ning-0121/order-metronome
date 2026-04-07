@@ -88,6 +88,9 @@ function NewOrderWizard() {
   const [verifying, setVerifying] = useState(false);
   const [threeDocResult, setThreeDocResult] = useState<ThreeDocVerifyResult | null>(null);
   const [showThreeDocDialog, setShowThreeDocDialog] = useState(false);
+  // CEO 价格审批闸门（Phase 1）
+  const [showPriceGate, setShowPriceGate] = useState(false);
+  const [priceApprovalId, setPriceApprovalId] = useState<string | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [selectedFactory, setSelectedFactory] = useState('');
   const [isImport, setIsImport] = useState(false);
@@ -165,11 +168,64 @@ function NewOrderWizard() {
     if (!filesToUpload.find(f => f.fileType === 'internal_quote')) { showError('请上传内部报价单（必传）'); return; }
     if (!filesToUpload.find(f => f.fileType === 'customer_quote')) { showError('请上传客户最终报价单（必传）'); return; }
 
-    // 检查是否有客户PO文件 → 自动比对（PDF / 图片 / Excel）
+    // 文件验证可用格式
     const isVerifiable = (f: File) =>
       f.type === 'application/pdf' ||
       f.type.startsWith('image/') ||
       /\.(xlsx|xls|xlsm)$/i.test(f.name);
+
+    // ═══════════════════════════════════════════════════════
+    // Phase 1: 三单比对 — 价格优先（CEO 强制规则）
+    // 内部报价 vs 客户报价 vs 客户PO 价格必须一致
+    // ═══════════════════════════════════════════════════════
+    const threeFiles = filesToUpload.filter(f =>
+      ['customer_po', 'internal_quote', 'customer_quote'].includes(f.fileType)
+    );
+    if (threeFiles.length >= 2) {
+      setVerifying(true);
+      try {
+        const docsForVerify = await Promise.all(threeFiles.map(async f => {
+          const buf = await f.file.arrayBuffer();
+          return {
+            type: f.fileType as 'internal_quote' | 'customer_quote' | 'customer_po',
+            base64: btoa(String.fromCharCode(...new Uint8Array(buf))),
+            fileType: f.file.type,
+            fileName: f.file.name,
+          };
+        }));
+        const threeRes = await verifyThreeDocuments(docsForVerify);
+        if (threeRes.data) {
+          // ⚠️ 价格不一致 → 强制 CEO 审批闸门（除非已经持有有效审批）
+          if (!threeRes.data.priceMatch && threeRes.data.priceDiffs.length > 0) {
+            const existingApproval = priceApprovalId; // 已经批准的会被保留
+            if (!existingApproval) {
+              setThreeDocResult(threeRes.data);
+              setPendingFormData(rawFormData);
+              setPendingFiles(filesToUpload);
+              setShowPriceGate(true);
+              setVerifying(false);
+              return;
+            }
+          }
+          // 非价格的其他差异 → 普通弹窗（可忽略继续）
+          if (!threeRes.data.allMatch && threeRes.data.differences.length > 0) {
+            setThreeDocResult(threeRes.data);
+            setPendingFormData(rawFormData);
+            setPendingFiles(filesToUpload);
+            setShowThreeDocDialog(true);
+            setVerifying(false);
+            return;
+          }
+        }
+      } catch {
+        // 三单比对失败不阻断创建
+      }
+      setVerifying(false);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Phase 2: PO 内容自检 — 数量 / 交期 / 客户名 / 文件类型
+    // ═══════════════════════════════════════════════════════
     if (poFile && isVerifiable(poFile.file)) {
       setVerifying(true);
       try {
@@ -195,7 +251,6 @@ function NewOrderWizard() {
           (verifyRes.data.special_terms && verifyRes.data.special_terms.length > 0)
         );
         if (hasIssues) {
-          // 有差异 → 弹窗让用户选择
           setPoVerifyResult(verifyRes.data);
           setPendingFormData(rawFormData);
           setPendingFiles(filesToUpload);
@@ -209,37 +264,67 @@ function NewOrderWizard() {
       setVerifying(false);
     }
 
-    // 三单比对：内部报价 vs 客户报价 vs 客户PO
-    const threeFiles = filesToUpload.filter(f => ['customer_po', 'internal_quote', 'customer_quote'].includes(f.fileType));
-    if (threeFiles.length >= 2) {
-      setVerifying(true);
-      try {
-        const docsForVerify = await Promise.all(threeFiles.map(async f => {
-          const buf = await f.file.arrayBuffer();
-          return {
-            type: f.fileType as 'internal_quote' | 'customer_quote' | 'customer_po',
-            base64: btoa(String.fromCharCode(...new Uint8Array(buf))),
-            fileType: f.file.type,
-            fileName: f.file.name,
-          };
-        }));
-        const threeRes = await verifyThreeDocuments(docsForVerify);
-        if (threeRes.data && !threeRes.data.allMatch && threeRes.data.differences.length > 0) {
-          setThreeDocResult(threeRes.data);
-          setPendingFormData(rawFormData);
-          setPendingFiles(filesToUpload);
-          setShowThreeDocDialog(true);
-          setVerifying(false);
-          return;
-        }
-      } catch {
-        // 三单比对失败不阻断创建
-      }
-      setVerifying(false);
-    }
-
-    // 无差异 → 直接创建
+    // 全部通过 → 直接创建
     await doCreateOrder(rawFormData, filesToUpload);
+  }
+
+  /** 推送 CEO 审批价格差异 */
+  async function handleRequestPriceApproval() {
+    if (!threeDocResult || !pendingFormData) return;
+    setLoading(true);
+    try {
+      const { requestPriceApproval } = await import('@/app/actions/price-approvals');
+      const snapshot: Record<string, any> = {};
+      pendingFormData.forEach((v, k) => {
+        if (typeof v === 'string') snapshot[k] = v;
+      });
+      const res = await requestPriceApproval({
+        customer_name: snapshot.customer_name || '',
+        po_number: snapshot.customer_po_number || '',
+        form_snapshot: snapshot,
+        price_diffs: threeDocResult.priceDiffs,
+        summary: threeDocResult.summary,
+      });
+      if (res.error) { alert(res.error); return; }
+      setPriceApprovalId(res.id || null);
+      setShowPriceGate(false);
+      alert(
+        '已推送 CEO 审批 ✓\n\n' +
+        '请等待 CEO 在「价格审批」页面批准后，重新点击「创建订单」。\n' +
+        '24 小时内审批未通过，需要重新申请。'
+      );
+    } catch (err: any) {
+      alert('推送失败：' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /** 检查 CEO 是否已批准 — 业务员点击"我已获批，重试"时调用 */
+  async function handleCheckApprovalAndRetry() {
+    if (!priceApprovalId || !pendingFormData) return;
+    setLoading(true);
+    try {
+      const { getMyPriceApproval } = await import('@/app/actions/price-approvals');
+      const res = await getMyPriceApproval(priceApprovalId);
+      if (res.error || !res.data) { alert(res.error || '查询失败'); return; }
+      const status = (res.data as any).status;
+      if (status === 'pending') {
+        alert('CEO 还未审批，请稍等。');
+        return;
+      }
+      if (status === 'rejected') {
+        alert('CEO 已驳回：\n' + ((res.data as any).review_note || '无备注') + '\n\n请联系客户修改 PO 后重新申请。');
+        return;
+      }
+      if (status === 'approved') {
+        setShowPriceGate(false);
+        // 重新提交（priceApprovalId 仍在 state 里，下次比对会跳过价格闸门）
+        await doCreateOrder(pendingFormData, pendingFiles);
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   /** 忽略差异，继续创建 */
@@ -744,6 +829,91 @@ function NewOrderWizard() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* 价格闸门弹窗 — Phase 1：三单价格不一致必须 CEO 审批 */}
+      {showPriceGate && threeDocResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6 space-y-4 border-4 border-red-500">
+            <div className="flex items-start gap-3">
+              <span className="text-3xl">🚨</span>
+              <div>
+                <h3 className="text-xl font-bold text-red-700">价格不一致 — 不能直接创建订单</h3>
+                <p className="text-sm text-gray-700 mt-1">
+                  AI 检测到「内部报价 / 客户报价 / 客户PO」的价格不一致。
+                  按 CEO 规则，价格不一致的订单必须先和客户对齐 PO，
+                  或推送 CEO 审批后才能创建。
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+              <p className="font-medium">📋 AI 总结：</p>
+              <p className="mt-1">{threeDocResult.summary || '价格字段在三份文件中存在差异'}</p>
+            </div>
+
+            {/* 价格差异明细表 */}
+            {threeDocResult.priceDiffs.length > 0 && (
+              <div className="rounded-lg border border-red-300 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-red-50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-red-700">字段</th>
+                      <th className="text-left px-3 py-2 font-medium text-red-700">内部报价</th>
+                      <th className="text-left px-3 py-2 font-medium text-red-700">客户报价</th>
+                      <th className="text-left px-3 py-2 font-medium text-red-700">客户 PO</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-100">
+                    {threeDocResult.priceDiffs.map((d, i) => (
+                      <tr key={i} className="bg-white">
+                        <td className="px-3 py-2 font-medium text-gray-900">{d.field}</td>
+                        <td className="px-3 py-2 text-gray-700">{d.internalValue || '—'}</td>
+                        <td className="px-3 py-2 text-gray-700">{d.customerQuoteValue || '—'}</td>
+                        <td className="px-3 py-2 text-gray-700">{d.poValue || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="space-y-2 text-sm text-gray-600">
+              <p className="font-medium text-gray-900">下一步建议：</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li><span className="font-medium">推荐</span>：联系客户修改 PO，让价格一致后重新上传</li>
+                <li>或：推送 CEO 审批 — CEO 批准后可继续创建订单</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2 border-t border-gray-100">
+              <button
+                onClick={() => { setShowPriceGate(false); setPriceApprovalId(null); }}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                返回修改 PO
+              </button>
+              {priceApprovalId ? (
+                <button
+                  onClick={handleCheckApprovalAndRetry}
+                  disabled={loading}
+                  className="px-5 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                >
+                  {loading ? '查询中...' : '✓ CEO 已批准，继续创建'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleRequestPriceApproval}
+                  disabled={loading}
+                  className="px-5 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+                >
+                  {loading ? '推送中...' : '🚨 推送 CEO 审批'}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

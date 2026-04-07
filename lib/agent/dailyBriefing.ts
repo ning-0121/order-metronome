@@ -22,6 +22,19 @@ export interface BriefingContent {
   complianceIssues: Array<{ type: string; description: string; severity: string; orderId: string | null }>;
   prioritySuggestions: Array<{ rank: number; action: string; reason: string }>;
   draftReplies: Array<{ emailSubject: string; draftPreview: string }>;
+  /** 邮件-订单差异（来自 email_order_diffs 表，仅 status='open' 的） */
+  emailOrderDiffs?: Array<{
+    diffId: string;
+    orderId: string;
+    orderNo: string;
+    customer: string;
+    field: string;
+    emailValue: string;
+    orderValue: string;
+    severity: 'high' | 'medium' | 'low';
+    suggestion: string;
+    detectedAt: string;
+  }>;
 }
 
 /**
@@ -93,6 +106,15 @@ export async function generateBriefingForUser(
     .eq('type', 'email_draft')
     .eq('status', 'unread')
     .limit(5);
+
+  // 5.5 获取邮件-订单差异（仅未解决的）
+  const { data: openDiffs } = await supabase
+    .from('email_order_diffs')
+    .select('id, order_id, field, email_value, order_value, severity, suggestion, detected_at')
+    .in('order_id', orderIds)
+    .eq('status', 'open')
+    .order('detected_at', { ascending: false })
+    .limit(20);
 
   // 按客户分组邮件
   const emailsByCustomer = new Map<string, any[]>();
@@ -192,6 +214,21 @@ ${complianceContext || '无'}
       emailSubject: n.title?.replace('✉️ AI已草拟回复 — ', '') || '',
       draftPreview: n.message?.slice(0, 100) || '',
     })),
+    emailOrderDiffs: (openDiffs || []).map((d: any) => {
+      const order = myOrders.find((o: any) => o.id === d.order_id);
+      return {
+        diffId: d.id,
+        orderId: d.order_id,
+        orderNo: order?.order_no || '?',
+        customer: order?.customer_name || '',
+        field: d.field,
+        emailValue: d.email_value || '',
+        orderValue: d.order_value || '',
+        severity: d.severity,
+        suggestion: d.suggestion || '',
+        detectedAt: d.detected_at?.slice(0, 16) || '',
+      };
+    }),
   };
 
   const summaryText = aiResult?.plainTextSummary ||

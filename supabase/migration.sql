@@ -1547,3 +1547,24 @@ CREATE INDEX IF NOT EXISTS idx_email_order_diffs_order ON public.email_order_dif
 CREATE INDEX IF NOT EXISTS idx_email_order_diffs_status ON public.email_order_diffs(status, severity, detected_at DESC);
 ALTER TABLE public.email_order_diffs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "email_order_diffs_authenticated" ON public.email_order_diffs FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- ===== 2026-04-08 订单创建前价格审批 =====
+CREATE TABLE IF NOT EXISTS public.pre_order_price_approvals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  requested_by uuid NOT NULL REFERENCES auth.users(id),
+  customer_name text,
+  po_number text,
+  form_snapshot jsonb NOT NULL DEFAULT '{}',
+  price_diffs jsonb NOT NULL DEFAULT '[]',
+  summary text,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+  reviewed_by uuid REFERENCES auth.users(id),
+  reviewed_at timestamptz,
+  review_note text,
+  created_at timestamptz DEFAULT now(),
+  expires_at timestamptz DEFAULT (now() + interval '24 hours')
+);
+CREATE INDEX IF NOT EXISTS idx_pre_order_price_approvals_status ON public.pre_order_price_approvals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pre_order_price_approvals_requester ON public.pre_order_price_approvals(requested_by, status);
+ALTER TABLE public.pre_order_price_approvals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "pre_order_price_approvals_authenticated" ON public.pre_order_price_approvals FOR ALL USING (auth.uid() IS NOT NULL);

@@ -42,6 +42,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/memos', label: '备忘录', icon: '📝' },
         { href: '/ai-knowledge', label: 'AI知识库', icon: '🧠' },
         { href: '/admin/mail-monitor', label: '邮件无声失败', icon: '📧' },
+        { href: '/admin/price-approvals', label: '价格审批', icon: '💰' },
         { href: '/guide', label: '操作说明', icon: '📖' },
       ]
     : [

@@ -354,6 +354,16 @@ export interface ThreeDocVerifyResult {
   }[];
   risks: string[];
   allMatch: boolean;
+  /** 价格是否一致 — 三单价格全部对齐时为 true */
+  priceMatch: boolean;
+  /** 价格相关差异（从 differences 中筛选出来，便于 UI 优先展示） */
+  priceDiffs: {
+    field: string;
+    internalValue: string;
+    customerQuoteValue: string;
+    poValue: string;
+    note: string;
+  }[];
 }
 
 /**
@@ -406,27 +416,43 @@ export async function verifyThreeDocuments(
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1200,
-      system: `你是服装外贸订单审核专家。请比对内部报价单、客户报价单和客户PO这三份文件，找出以下维度的差异：
-1. 款号/Style Number
-2. 单价/Price（注意币种）
-3. 数量/Quantity
-4. 交期/Delivery Date
-5. 颜色/Color
-6. 尺码配比/Size Ratio
-7. 包装方式/Packing
-8. 工艺要求/Craft Requirements
-9. 其他特殊条款
+      system: `你是服装外贸订单审核专家。请比对内部报价单、客户报价单和客户PO这三份文件。
 
-返回严格JSON格式：
+【最高优先级 — 价格一致性】
+首先必须严格检查"单价"是否三单一致。这是 CEO 强制的规则：
+- 内部报价单的单价 → 必须 = 我们给客户报价单的单价 → 必须 = 客户PO的单价
+- 任何币种、单价、起订量价格阶梯不一致 → 严重错误
+- 价格不一致的订单不允许创建，必须先和客户对齐 PO
+
+【其他比对维度】
+1. 款号/Style Number
+2. 数量/Quantity
+3. 交期/Delivery Date
+4. 颜色/Color
+5. 尺码配比/Size Ratio
+6. 包装方式/Packing
+7. 工艺要求/Craft Requirements
+8. 其他特殊条款
+
+返回严格JSON格式（不要 markdown 包裹）：
 {
-  "summary": "一句话总结比对结果",
+  "summary": "一句话总结比对结果，价格不一致时必须明确说明",
+  "priceMatch": true或false,
+  "priceDiffs": [
+    {"field": "单价/起订量价格阶梯/币种", "internalValue": "...", "customerQuoteValue": "...", "poValue": "...", "note": "差异说明"}
+  ],
   "differences": [
-    {"field": "字段名", "internalValue": "内部报价值", "customerQuoteValue": "客户报价值", "poValue": "PO值", "severity": "error或warning", "note": "风险说明"}
+    {"field": "字段名", "internalValue": "...", "customerQuoteValue": "...", "poValue": "...", "severity": "error或warning", "note": "风险说明"}
   ],
   "risks": ["风险点1", "风险点2"],
   "allMatch": true或false
 }
-如果三单完全一致，differences为空数组，allMatch为true。只返回JSON。`,
+
+注意：
+- priceDiffs 是 differences 的子集，专门列出价格相关差异
+- 如果价格完全一致，priceMatch=true 且 priceDiffs=[]
+- 即使价格一致，其他字段不一致仍然要列在 differences 里
+- 只返回JSON。`,
       messages: [{ role: 'user', content }],
     });
 
@@ -437,12 +463,21 @@ export async function verifyThreeDocuments(
     let parsed: any;
     try { parsed = JSON.parse(jsonStr); } catch { return { error: 'AI 返回格式异常，请重试' }; }
 
+    const differences = Array.isArray(parsed.differences) ? parsed.differences : [];
+    const priceDiffs = Array.isArray(parsed.priceDiffs)
+      ? parsed.priceDiffs
+      : differences.filter((d: any) =>
+          /价|单价|price|币种|currency|单价阶梯|起订|moq/i.test(d.field || '')
+        );
+
     return {
       data: {
         summary: parsed.summary || '',
-        differences: Array.isArray(parsed.differences) ? parsed.differences : [],
+        differences,
         risks: Array.isArray(parsed.risks) ? parsed.risks : [],
         allMatch: !!parsed.allMatch,
+        priceMatch: parsed.priceMatch != null ? !!parsed.priceMatch : priceDiffs.length === 0,
+        priceDiffs,
       },
     };
   } catch (err: any) {
