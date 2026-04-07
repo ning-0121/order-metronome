@@ -912,14 +912,16 @@ export async function getDelayRequestsByOrder(orderId: string) {
     return { error: 'Unauthorized' };
   }
 
+  // 用 milestone 别名（单数）便于 UI 读取
   const { data: requests, error } = await (supabase
     .from('delay_requests') as any)
     .select(`
       *,
-      milestones!inner(
+      milestone:milestones!inner(
         id,
         name,
-        due_at
+        due_at,
+        status
       )
     `)
     .eq('order_id', orderId)
