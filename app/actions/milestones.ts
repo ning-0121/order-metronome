@@ -434,6 +434,21 @@ export async function markMilestoneDone(
       .eq('step_key', 'production_order_upload');
   }
 
+  // ── 用户输入日期覆盖下游节点 due_at ──
+  // BOM 预评估完成 → 用 fabric_order_date / expected_arrival_date 覆盖下游
+  // 生产预评估完成 → 用 production_line_start_date 覆盖 production_kickoff
+  if (
+    milestoneData.step_key === 'order_docs_bom_complete' ||
+    milestoneData.step_key === 'bulk_materials_confirmed'
+  ) {
+    try {
+      await applyChecklistDateOverrides(supabase, milestoneData.order_id, milestoneData.step_key);
+    } catch (overrideErr: any) {
+      console.error('[applyChecklistDateOverrides] failed:', overrideErr?.message);
+      // 失败不阻断主流程
+    }
+  }
+
   // 采购下单完成 → 检查到货日期是否有交期风险
   if (milestoneData.step_key === 'procurement_order_placed' && milestoneData.actual_at) {
     const actualDelivery = new Date(milestoneData.actual_at);
@@ -601,6 +616,89 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
   revalidatePath('/orders');
   
   return { data: updatedMilestone };
+}
+
+/**
+ * 用户在预评估节点填的日期 → 覆盖下游节点的 due_at
+ *
+ * BOM 预评估 (order_docs_bom_complete):
+ *   - fabric_order_date     → procurement_order_placed.due_at
+ *   - expected_arrival_date → materials_received_inspected.due_at
+ *
+ * 生产预评估 (bulk_materials_confirmed):
+ *   - production_line_start_date → production_kickoff.due_at
+ *
+ * 修改时同时记日志。失败不影响主流程。
+ */
+async function applyChecklistDateOverrides(
+  supabase: any,
+  orderId: string,
+  stepKey: 'order_docs_bom_complete' | 'bulk_materials_confirmed',
+): Promise<void> {
+  // 读取该节点的 checklist_data
+  const { data: ms } = await (supabase.from('milestones') as any)
+    .select('checklist_data')
+    .eq('order_id', orderId)
+    .eq('step_key', stepKey)
+    .single();
+  if (!ms || !Array.isArray(ms.checklist_data)) return;
+
+  const responses = ms.checklist_data as Array<{ key: string; value: any; pending_date?: string }>;
+  const getDate = (key: string): string | null => {
+    const r = responses.find(x => x.key === key);
+    if (!r) return null;
+    return r.pending_date || (typeof r.value === 'string' ? r.value : null);
+  };
+
+  // 节点 → 用户日期 的映射
+  const overrideMap: Array<{ targetStep: string; date: string | null; sourceLabel: string }> = [];
+
+  if (stepKey === 'order_docs_bom_complete') {
+    overrideMap.push(
+      { targetStep: 'procurement_order_placed', date: getDate('fabric_order_date'), sourceLabel: '布料下单日期' },
+      { targetStep: 'materials_received_inspected', date: getDate('expected_arrival_date'), sourceLabel: '预计到料日期' },
+    );
+  } else if (stepKey === 'bulk_materials_confirmed') {
+    overrideMap.push(
+      { targetStep: 'production_kickoff', date: getDate('production_line_start_date'), sourceLabel: '预计上线日期' },
+    );
+  }
+
+  for (const { targetStep, date, sourceLabel } of overrideMap) {
+    if (!date) continue;
+    // 解析为 ISO；用 23:59:59 让"当天截止"
+    let isoDate: string;
+    try {
+      const d = new Date(date + 'T23:59:59+08:00');
+      if (isNaN(d.getTime())) continue;
+      isoDate = d.toISOString();
+    } catch {
+      continue;
+    }
+
+    // 仅更新未完成的节点（不破坏已完成数据）
+    const { data: target } = await (supabase.from('milestones') as any)
+      .select('id, status, due_at')
+      .eq('order_id', orderId)
+      .eq('step_key', targetStep)
+      .single();
+    if (!target) continue;
+    const status = String(target.status || '').toLowerCase();
+    if (status === 'done' || status === '已完成') continue;
+
+    await (supabase.from('milestones') as any)
+      .update({ due_at: isoDate, planned_at: isoDate })
+      .eq('id', target.id);
+
+    // 写日志
+    await (supabase.from('milestone_logs') as any).insert({
+      milestone_id: target.id,
+      order_id: orderId,
+      action: 'recalc_schedule',
+      note: `按用户输入「${sourceLabel}」更新截止日为 ${date}`,
+      payload: { source_step: stepKey, source_field: sourceLabel, new_due_at: isoDate },
+    });
+  }
 }
 
 async function autoAdvanceNextMilestone(supabase: any, orderId: string) {

@@ -129,9 +129,13 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   order_docs_bom_complete: {
     title: '原辅料预评估检查清单（精简版）',
     items: [
-      // ── 核心 2 项：到料日期 + 预算判断 ──
+      // ── 核心 3 项：下单日 + 到料日 + 预算判断 ──
+      { key: 'fabric_order_date', label: '布料下单日期', type: 'pending_date', required: true, role: 'procurement', group: '快速评估',
+        affectsSchedule: true,
+        helpText: '采购预计什么时候给工厂下大货布料订单 — 影响下游排期' },
       { key: 'expected_arrival_date', label: '预计到料日期', type: 'pending_date', required: true, role: 'procurement', group: '快速评估',
-        helpText: '只填这一个最关键项 — 系统会自动比对生产排期判断风险' },
+        affectsSchedule: true,
+        helpText: '布料/辅料预计什么时候到工厂 — 决定原辅料到货验收节点' },
       { key: 'within_budget', label: '是否在预算/排期内', type: 'select', required: true, role: 'procurement', group: '快速评估',
         options: ['✅ 全部在预算和排期内（无需详细说明）', '⚠️ 超预算或来不及（需填写下方说明）'] },
 
@@ -151,7 +155,12 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   bulk_materials_confirmed: {
     title: '生产预评估检查清单',
     items: [
-      // 跟单填写
+      // ── 关键日期（影响排期）──
+      { key: 'production_line_start_date', label: '预计上线日期（开裁日）', type: 'pending_date', required: true, role: 'merchandiser', group: '关键日期',
+        affectsSchedule: true,
+        helpText: '跟单根据原料到货 + 工厂产能评估的实际开裁日 — 决定生产启动节点' },
+
+      // ── 评估项 ──
       { key: 'delivery_feasible', label: '交期是否可行', type: 'select', required: true, role: 'merchandiser', group: '交期评估',
         options: ['可以按时完成', '紧张但可行', '无法满足（需沟通客户）'] },
       { key: 'delivery_risk_note', label: '交期风险说明', type: 'text', required: false, role: 'merchandiser', group: '交期评估',

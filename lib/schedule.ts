@@ -113,28 +113,43 @@ function countWorkdays(from: Date, to: Date): number {
  * 5. 验货放行（Day40）后才能订舱出货
  */
 const TIMELINE = {
+  // ── 阶段 1：订单评审（0-3 天）──
   po_confirmed:                  0,
   finance_approval:              1,
-  order_kickoff_meeting:         3,
-  production_order_upload:       4,
-  order_docs_bom_complete:       3,
-  bulk_materials_confirmed:      3,
-  processing_fee_confirmed:      2,
-  factory_confirmed:             3,
+  order_kickoff_meeting:         2,   // 业务+CEO 双签会议
+  production_order_upload:       3,   // 业务上传生产单 + 原辅料单
+
+  // ── 阶段 2：双线并行预评估（5 天）──
+  order_docs_bom_complete:       5,   // BOM 预评估（采购）— 必须在生产单上传后
+  bulk_materials_confirmed:      5,   // 生产预评估（跟单）— 同步进行
+
+  // ── 阶段 3：工厂匹配 + 加工费（6-8 天）──
+  processing_fee_confirmed:      6,   // 加工费确认（财务）
+  factory_confirmed:             8,   // 工厂匹配确认（跟单）
+
+  // ── 阶段 4：采购下单 + 产前样准备（9-19 天）──
+  procurement_order_placed:      9,   // 采购下单 — 工厂确认后立即下大货料
   pre_production_sample_ready:   14,
   pre_production_sample_sent:    15,
   pre_production_sample_approved: 19,
-  procurement_order_placed:      2,
-  materials_received_inspected:  12,
-  pre_production_meeting:        11,
-  production_kickoff:            20,
+
+  // ── 阶段 5：原料到货 + 产前会（20-21 天）──
+  materials_received_inspected:  20,  // 原辅料到货验收
+  pre_production_meeting:        21,  // 产前会（原料到齐 + 客户确认样品后）
+
+  // ── 阶段 6：开裁 + 中查 ──
+  production_kickoff:            22,  // 生产启动/开裁
   mid_qc_check:                  30,  // 跟单中查
   mid_qc_sales_check:            31,  // 业务中查（跟单后 1 天复核）
-  packing_method_confirmed:      31,  // 包装方式+包装资料确认（工厂完成前至少1周）
-  shipping_sample_send:          31,  // 中查后立即寄船样（客户需5-7天确认）
-  final_qc_check:                36,  // 跟单尾查 — 工厂完成前可修复
-  final_qc_sales_check:          37,  // 业务尾查（跟单后 1 天复核）
-  factory_completion:            38,  // 包装完成+QC修复后
+
+  // ── 阶段 7：包装方式确认 + 船样寄送 ──
+  packing_method_confirmed:      32,  // 包装方式+资料确认（必须在船样和工厂完成前）
+  shipping_sample_send:          33,  // 船样寄送（包装确认后才能寄）
+
+  // ── 阶段 8：尾查 + 工厂完成 ──
+  final_qc_check:                35,  // 跟单尾查 — 工厂完成前可修复
+  final_qc_sales_check:          36,  // 业务尾查（跟单后 1 天复核）
+  factory_completion:            38,  // 工厂完成（包装+尾查都通过后）
   inspection_release:            40,  // 预留2天：预约验货+验货+出结果
   booking_done:                  41,  // 放行后订舱
   customs_export:                43,
