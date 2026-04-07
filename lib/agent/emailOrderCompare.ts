@@ -183,9 +183,10 @@ ${memoryContext}
             severity: d.severity,
             suggestion: (d.suggestion || '').slice(0, 1000),
           }));
-          // upsert: dedup_key 已存在 → 跳过（保留最早检测时间和已有 status）
+          // upsert: 已存在的 (mail_inbox_id, order_id, field) 三元组 → 跳过
+          // 保留最早检测时间和已有 status
           await supabase.from('email_order_diffs').upsert(rows, {
-            onConflict: 'dedup_key',
+            onConflict: 'mail_inbox_id,order_id,field',
             ignoreDuplicates: true,
           });
         } catch (persistErr: any) {

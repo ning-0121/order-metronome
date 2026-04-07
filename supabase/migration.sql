@@ -1539,13 +1539,15 @@ CREATE TABLE IF NOT EXISTS public.email_order_diffs (
   resolved_by uuid REFERENCES auth.users(id),
   resolved_at timestamptz,
   resolution_note text,
-  detected_at timestamptz DEFAULT now(),
-  dedup_key text GENERATED ALWAYS AS (mail_inbox_id::text || '|' || order_id::text || '|' || field) STORED,
-  UNIQUE(dedup_key)
+  detected_at timestamptz DEFAULT now()
 );
+-- 去重：(mail_inbox_id, order_id, field) 三元组唯一
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_email_order_diff_dedup
+  ON public.email_order_diffs(mail_inbox_id, order_id, field);
 CREATE INDEX IF NOT EXISTS idx_email_order_diffs_order ON public.email_order_diffs(order_id, status);
 CREATE INDEX IF NOT EXISTS idx_email_order_diffs_status ON public.email_order_diffs(status, severity, detected_at DESC);
 ALTER TABLE public.email_order_diffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "email_order_diffs_authenticated" ON public.email_order_diffs;
 CREATE POLICY "email_order_diffs_authenticated" ON public.email_order_diffs FOR ALL USING (auth.uid() IS NOT NULL);
 
 -- ===== 2026-04-08 订单创建前价格审批 =====

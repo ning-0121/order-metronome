@@ -37,17 +37,18 @@ CREATE TABLE IF NOT EXISTS public.email_order_diffs (
   resolved_at timestamptz,
   resolution_note text,
   -- 元数据
-  detected_at timestamptz DEFAULT now(),
-  -- 去重：同一封邮件 + 同一订单 + 同一字段，只存一次
-  dedup_key text GENERATED ALWAYS AS (mail_inbox_id::text || '|' || order_id::text || '|' || field) STORED,
-  UNIQUE(dedup_key)
+  detected_at timestamptz DEFAULT now()
 );
 
+-- 去重：(mail_inbox_id, order_id, field) 三元组唯一（用唯一索引代替 generated 列，更兼容）
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_email_order_diff_dedup
+  ON public.email_order_diffs(mail_inbox_id, order_id, field);
 CREATE INDEX IF NOT EXISTS idx_email_order_diffs_order ON public.email_order_diffs(order_id, status);
 CREATE INDEX IF NOT EXISTS idx_email_order_diffs_status ON public.email_order_diffs(status, severity, detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_email_order_diffs_mail ON public.email_order_diffs(mail_inbox_id);
 
 ALTER TABLE public.email_order_diffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "email_order_diffs_authenticated" ON public.email_order_diffs;
 CREATE POLICY "email_order_diffs_authenticated" ON public.email_order_diffs
   FOR ALL USING (auth.uid() IS NOT NULL);
 
