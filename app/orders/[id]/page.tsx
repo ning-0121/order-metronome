@@ -136,11 +136,26 @@ export default async function OrderDetailPage({
       {/* 顶部 Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto">
+          {/* 醒目返回按钮 */}
+          {fromUrl !== '/orders' && (
+            <div className="mb-3">
+              <Link
+                href={fromUrl}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
+              >
+                ← {fromUrl.includes('risk-orders')
+                    ? '返回风险订单列表，继续处理其他订单'
+                    : fromUrl === '/ceo' || fromUrl === '/dashboard'
+                      ? '返回首页'
+                      : '返回上一页'}
+              </Link>
+            </div>
+          )}
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-3 mb-1">
-                <Link href={fromUrl} className="text-sm text-gray-400 hover:text-gray-600">
-                  ← {fromUrl.includes('risk-orders') ? '返回风险订单列表' : fromUrl === '/ceo' ? '返回首页' : fromUrl === '/dashboard' ? '返回首页' : '订单列表'}
+                <Link href={fromUrl === '/orders' ? '/orders' : fromUrl} className="text-sm text-gray-400 hover:text-gray-600">
+                  ← {fromUrl === '/orders' ? '订单列表' : '上一级'}
                 </Link>
               </div>
               <div className="flex items-center gap-3">
