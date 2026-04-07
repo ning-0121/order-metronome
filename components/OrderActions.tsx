@@ -20,7 +20,11 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
 
   const isDraft = lifecycleStatus === 'draft';
   const canActivate = false; // 自动激活：阶段1全部完成后系统自动确认，不再手动操作
-  const canDelete = isDraft && isAdmin; // 只有管理员可以删除草稿订单
+  // 删除规则：
+  // - draft 订单 → 创建者或管理员都可以删
+  // - 非 draft 订单 → 只有管理员能强制删除（用于清理脏数据）
+  const canDelete = isAdmin || (isDraft && isOrderOwner);
+  const isForceDelete = isAdmin && !isDraft;
   // 取消逻辑：业务员申请取消→管理员审批，管理员直接取消
   const canRequestCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && isOrderOwner && !isAdmin;
   const canDirectCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && isAdmin;
@@ -43,11 +47,18 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   }
 
   async function handleDelete() {
-    const input = prompt(`确定删除订单？此操作不可恢复！\n\n请输入订单号 ${orderNo} 确认删除：`);
+    const warningPrefix = isForceDelete
+      ? `⚠️ 管理员强制删除\n\n该订单状态为「${lifecycleStatus}」，并非草稿。\n` +
+        `删除后将同时清理：里程碑、操作日志、延期申请、附件、变更申请、通知。\n` +
+        `此操作不可恢复！\n\n`
+      : `确定删除订单？此操作不可恢复！\n\n`;
+    const input = prompt(warningPrefix + `请输入订单号 ${orderNo} 确认删除：`);
     if (!input || input.trim() !== orderNo) {
       if (input !== null) alert('订单号输入不正确，删除已取消');
       return;
     }
+    // 非草稿订单需要二次确认
+    if (isForceDelete && !confirm(`再次确认：真的要强制删除「${orderNo}」吗？`)) return;
     setLoading(true);
 
     try {
@@ -101,14 +112,19 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
         </button>
       )}
 
-      {/* 删除草稿 */}
+      {/* 删除订单 */}
       {canDelete && (
         <button
           onClick={handleDelete}
           disabled={loading}
-          className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-50"
+          className={`text-xs px-3 py-1.5 rounded-lg border disabled:opacity-50 ${
+            isForceDelete
+              ? 'border-red-400 bg-red-50 text-red-700 hover:bg-red-100 font-medium'
+              : 'border-red-200 text-red-500 hover:bg-red-50'
+          }`}
+          title={isForceDelete ? '管理员强制删除（已激活订单）' : '删除草稿订单'}
         >
-          删除订单
+          {isForceDelete ? '强制删除' : '删除订单'}
         </button>
       )}
 
