@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { runMissingInfoCheck } from '@/app/actions/skills';
+import { runMissingInfoCheck, runRiskAssessment } from '@/app/actions/skills';
 import type { SkillResult, SkillFinding } from '@/lib/agent/skills/types';
 
 interface Props {
@@ -30,56 +30,94 @@ const SEV_LABEL: Record<string, string> = {
   low: '⚪ 轻微',
 };
 
+interface SkillState {
+  result: SkillResult | null;
+  error: string | null;
+  shadow: boolean;
+  loading: boolean;
+}
+
+const INITIAL_STATE: SkillState = {
+  result: null,
+  error: null,
+  shadow: false,
+  loading: true,
+};
+
 export function AISkillSidebar({ orderId, isAdmin }: Props) {
-  const [missingInfo, setMissingInfo] = useState<SkillResult | null>(null);
-  const [missingError, setMissingError] = useState<string | null>(null);
-  const [missingShadow, setMissingShadow] = useState(false);
-  const [missingLoading, setMissingLoading] = useState(true);
+  const [missing, setMissing] = useState<SkillState>(INITIAL_STATE);
+  const [risk, setRisk] = useState<SkillState>(INITIAL_STATE);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Phase 1：仅 admin 可见
   useEffect(() => {
     if (!isAdmin) {
-      setMissingLoading(false);
+      setMissing({ ...INITIAL_STATE, loading: false });
+      setRisk({ ...INITIAL_STATE, loading: false });
       return;
     }
     let cancelled = false;
-    setMissingLoading(true);
-    setMissingError(null);
+
+    // 并行加载两个 Skill
+    setMissing({ ...INITIAL_STATE, loading: true });
+    setRisk({ ...INITIAL_STATE, loading: true });
+
     runMissingInfoCheck(orderId).then(res => {
       if (cancelled) return;
-      if (res.error) {
-        setMissingError(res.error);
-        setMissingInfo(null);
-      } else {
-        setMissingInfo(res.result || null);
-        setMissingShadow(!!res.shadow);
-      }
-      setMissingLoading(false);
+      setMissing({
+        result: res.result || null,
+        error: res.error || null,
+        shadow: !!res.shadow,
+        loading: false,
+      });
     });
+
+    runRiskAssessment(orderId).then(res => {
+      if (cancelled) return;
+      setRisk({
+        result: res.result || null,
+        error: res.error || null,
+        shadow: !!res.shadow,
+        loading: false,
+      });
+    });
+
     return () => { cancelled = true; };
   }, [orderId, isAdmin, refreshKey]);
 
   if (!isAdmin) return null;
 
+  const refresh = () => setRefreshKey(k => k + 1);
+
   return (
     <div className="space-y-3">
-      {/* 缺失资料卡 */}
+      {/* Skill 1：风险评估 */}
+      <SkillCard
+        title="风险评估"
+        icon="📊"
+        loading={risk.loading}
+        error={risk.error}
+        result={risk.result}
+        shadow={risk.shadow}
+        onRefresh={refresh}
+      />
+
+      {/* Skill 2：缺失资料 */}
       <SkillCard
         title="缺失资料检查"
         icon="📋"
-        loading={missingLoading}
-        error={missingError}
-        result={missingInfo}
-        shadow={missingShadow}
-        onRefresh={() => setRefreshKey(k => k + 1)}
+        loading={missing.loading}
+        error={missing.error}
+        result={missing.result}
+        shadow={missing.shadow}
+        onRefresh={refresh}
       />
 
-      {/* Phase 1 占位：风险评估 / 报价审核（shadow only，UI 不展示） */}
+      {/* Phase 1 占位：报价审核（下一波） */}
       <div className="text-xs text-gray-400 text-center py-2 border border-dashed border-gray-200 rounded-lg">
-        💡 风险评估 / 报价审核 Skill 正在后台 shadow 模式运行中
+        💡 报价审核 Skill 即将上线
         <br />
-        <span className="text-[10px]">CEO 验证后才会放出</span>
+        <span className="text-[10px]">在订单详情页 / 新建订单时可见</span>
       </div>
     </div>
   );
