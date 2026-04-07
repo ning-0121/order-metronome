@@ -170,6 +170,25 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
   const [showPOParser, setShowPOParser] = useState(false);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+
+  // 从 URL ?focus=<milestone_id> 自动滚动+展开+高亮
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const focus = params.get('focus');
+    if (focus) {
+      setFocusedId(focus);
+      setExpandedId(focus);
+      // 延迟滚动等渲染完成
+      setTimeout(() => {
+        const el = document.getElementById(`milestone-${focus}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
+      // 5秒后清除高亮
+      setTimeout(() => setFocusedId(null), 5000);
+    }
+  }, []);
 
   useEffect(() => {
     let stale = false;
@@ -247,7 +266,9 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
 
                 return (
                   <div key={m.id}
-                    className={'px-5 py-4 ' + (
+                    id={`milestone-${m.id}`}
+                    className={'px-5 py-4 transition-all ' + (
+                      focusedId === m.id ? 'ring-4 ring-amber-400 bg-amber-50' :
                       isDone ? 'bg-green-50/30' :
                       isBlocked ? 'bg-orange-50' :
                       isHardBlocked ? 'bg-red-50/30' :

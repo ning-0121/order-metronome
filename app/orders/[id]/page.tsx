@@ -32,11 +32,12 @@ export default async function OrderDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; from?: string }>;
+  searchParams: Promise<{ tab?: string; from?: string; focus?: string }>;
 }) {
   const { id } = await params;
   const resolvedSearchParams = await searchParams;
   const rawTab = resolvedSearchParams?.tab ?? '';
+  const focusMs = resolvedSearchParams?.focus || '';
   const fromUrl = resolvedSearchParams?.from
     ? decodeURIComponent(resolvedSearchParams.from)
     : '/orders';

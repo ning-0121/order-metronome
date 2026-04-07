@@ -20,6 +20,8 @@ interface RiskOrder {
   blockedNames: string[];
   riskColor: string;
   riskReason: string;
+  focusMilestoneId?: string | null;
+  focusMilestoneName?: string;
 }
 
 export function RiskOrderList({ orders }: { orders: RiskOrder[] }) {
@@ -94,8 +96,13 @@ export function RiskOrderList({ orders }: { orders: RiskOrder[] }) {
               {/* 操作按钮 */}
               <div className="flex flex-col gap-2 shrink-0">
                 <Link
-                  href={`/orders/${o.id}?from=${fromParam}`}
+                  href={
+                    o.focusMilestoneId
+                      ? `/orders/${o.id}?tab=progress&focus=${o.focusMilestoneId}&from=${fromParam}`
+                      : `/orders/${o.id}?from=${fromParam}`
+                  }
                   className="inline-flex items-center justify-center gap-1 rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-700"
+                  title={o.focusMilestoneName ? `直接定位到「${o.focusMilestoneName}」` : ''}
                 >
                   📋 处理
                 </Link>

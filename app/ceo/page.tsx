@@ -11,10 +11,11 @@ import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
 import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 // RecalcButton removed from global — now per-order only
 
-import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
+import { isDoneStatus, isActiveStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
 const _isBlocked = (s: string) => isBlockedStatus(s);
+const _isPending = (s: string) => normalizeMilestoneStatus(s) === '未开始';
 
 export default async function CEOWarRoom() {
   const supabase = await createClient();
@@ -113,12 +114,14 @@ export default async function CEOWarRoom() {
   }
 
   const topItems: TopItem[] = [];
+  const orderFocusMs: Record<string, string> = {}; // orderId -> milestone_id 用于跳转定位
 
   // 超期节点（优先级最高）
   overdueMilestones.slice(0, 20).forEach((m: any) => {
     const dueAt = new Date(m.due_at);
     const daysOver = Math.max(1, Math.ceil((now.getTime() - dueAt.getTime()) / (86400000)));
     const ownerProfile = m.owner_user_id ? userMap[m.owner_user_id] : null;
+    if (!orderFocusMs[m.order_id]) orderFocusMs[m.order_id] = m.id;
     topItems.push({
       id: `overdue-${m.id}`,
       priority: daysOver * 10 + (m.is_critical ? 5 : 0),
@@ -138,6 +141,7 @@ export default async function CEOWarRoom() {
   // 卡住节点
   blockedMilestones.forEach((m: any) => {
     const ownerProfile = m.owner_user_id ? userMap[m.owner_user_id] : null;
+    if (!orderFocusMs[m.order_id]) orderFocusMs[m.order_id] = m.id;
     topItems.push({
       id: `blocked-${m.id}`,
       priority: 50,
@@ -201,21 +205,27 @@ export default async function CEOWarRoom() {
     }
   }
 
-  // 按优先级排序，取 Top 5（去重同一订单的重复条目）
+  // 按订单聚合：同一订单合并显示所有问题
   topItems.sort((a, b) => b.priority - a.priority);
-  // 去重：同一订单只保留优先级最高的条目
-  const seenOrders = new Set<string>();
-  const top5: TopItem[] = [];
+  const orderMap = new Map<string, TopItem & { issues: string[]; issueCount: number }>();
   for (const item of topItems) {
-    if (top5.length >= 5) break;
-    const key = item.orderId + '-' + item.description;
-    if (item.type === 'overdue' && item.typeLabel === '高危订单') {
-      // 高危订单条目：按 orderId 去重
-      if (seenOrders.has(item.orderId)) continue;
-      seenOrders.add(item.orderId);
+    if (!item.orderId) continue;
+    const existing = orderMap.get(item.orderId);
+    if (existing) {
+      existing.issues.push(`${item.typeLabel}：${item.description}`);
+      existing.issueCount++;
+      if (item.priority > existing.priority) existing.priority = item.priority;
+    } else {
+      orderMap.set(item.orderId, {
+        ...item,
+        issues: [`${item.typeLabel}：${item.description}`],
+        issueCount: 1,
+      });
     }
-    top5.push(item);
   }
+  const top5 = Array.from(orderMap.values())
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 5);
 
   // ===== 部门超期统计 =====
   const deptOverdue: Record<string, { count: number; items: any[] }> = {};
@@ -414,11 +424,11 @@ export default async function CEOWarRoom() {
         </div>
       </div>
 
-      {/* ===== 1. 今日 Top 5 必须处理 ===== */}
-      <div className="bg-white rounded-xl border-2 border-red-100 shadow-sm overflow-hidden">
-        <div className="bg-red-50 px-5 py-3 border-b border-red-100">
-          <h2 className="text-lg font-bold text-red-900">🎯 今日必须处理（Top 5）</h2>
-          <p className="text-xs text-red-700">按紧急程度排序，点击直接进入处理</p>
+      {/* ===== 1. 今日必做 — 按订单聚合 ===== */}
+      <div className="bg-white rounded-xl border-2 border-red-200 shadow-md overflow-hidden">
+        <div className="bg-gradient-to-r from-red-50 to-orange-50 px-5 py-3 border-b border-red-100">
+          <h2 className="text-lg font-bold text-red-900">🎯 今日必做事项（Top {top5.length}）</h2>
+          <p className="text-xs text-red-700 mt-0.5">按订单聚合，每单一行，点击直接定位到要处理的节点</p>
         </div>
         {top5.length === 0 ? (
           <div className="p-8 text-center">
@@ -427,34 +437,41 @@ export default async function CEOWarRoom() {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {top5.map((item, i) => (
-              <div key={item.id} className="px-5 py-4 hover:bg-gray-50 transition-colors">
+            {top5.map((item: any, i: number) => (
+              <div key={item.orderId} className="px-5 py-4 hover:bg-gray-50 transition-colors">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <span className="text-lg font-bold text-gray-400 w-6 text-center flex-shrink-0">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <span className="text-lg font-bold text-red-600 w-6 text-center flex-shrink-0">
                       {i + 1}
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${TYPE_COLORS[item.type] || ''}`}>
-                          {item.typeLabel}
-                        </span>
                         <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
                           {item.orderNo}
                         </Link>
-                        {item.internalOrderNo && (
-                          <span className="text-xs text-gray-400">({item.internalOrderNo})</span>
-                        )}
                         <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
+                          {item.issueCount} 个问题
+                        </span>
                       </div>
-                      <div className="text-sm text-gray-700 mt-1">{item.description}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        负责：{item.owner}（{item.ownerRole}）· {item.daysInfo}
+                      <div className="text-sm text-gray-700 mt-1 space-y-0.5">
+                        {item.issues.slice(0, 3).map((issue: string, j: number) => (
+                          <div key={j} className="text-xs text-gray-600">• {issue}</div>
+                        ))}
+                        {item.issueCount > 3 && (
+                          <div className="text-xs text-gray-400">还有 {item.issueCount - 3} 个问题...</div>
+                        )}
                       </div>
                     </div>
                   </div>
                   <Link
-                    href={item.type === 'delay' ? `/ceo#delay-approvals` : `/orders/${item.orderId}?tab=progress`}
+                    href={
+                      item.type === 'delay'
+                        ? `/ceo#delay-approvals`
+                        : orderFocusMs[item.orderId]
+                          ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
+                          : `/orders/${item.orderId}?tab=progress&from=/ceo`
+                    }
                     className="flex-shrink-0 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
                   >
                     去处理
@@ -466,184 +483,7 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
-      {/* ===== 2. AI 分析建议 ===== */}
-      <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden">
-        <div className="bg-indigo-50 px-5 py-3 border-b border-indigo-100">
-          <h2 className="text-lg font-bold text-indigo-900">🤖 AI 分析建议</h2>
-        </div>
-        <div className="p-5 space-y-2">
-          {aiInsights.map((insight, i) => (
-            <div key={i} className="text-sm text-gray-800 leading-relaxed">{insight}</div>
-          ))}
-        </div>
-      </div>
-
-      {/* ===== Agent 智能建议 ===== */}
-      {agentSuggestions.length > 0 && (
-        <AgentSuggestionsPanel
-          suggestions={agentSuggestions}
-          title="Agent 智能建议 — 可一键执行"
-          showOrder={true}
-        />
-      )}
-
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* ===== 3. 风险订单区 ===== */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-            <h2 className="text-lg font-bold text-gray-900">🔥 风险订单</h2>
-          </div>
-          <div className="p-4 space-y-3">
-            {/* 红色 */}
-            <details id="risk-red" open={riskRed.length > 0}>
-              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-red-50 rounded-lg scroll-mt-4">
-                <span className="font-semibold text-red-800">🔴 红色风险</span>
-                <span className="text-sm font-bold text-red-700">{riskRed.length}</span>
-              </summary>
-              <div className="mt-2 space-y-1 pl-2">
-                {riskRed.length === 0 ? (
-                  <p className="text-sm text-gray-500 py-1">无</p>
-                ) : riskRed.map((o: any) => {
-                  const status = orderStatusMap.get(o.id);
-                  return (
-                    <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-red-50/50 text-sm group">
-                      <div className="flex items-center justify-between">
-                        <span>
-                          <span className="font-medium text-gray-900">{o.order_no}</span>
-                          <span className="text-gray-500 ml-2">{o.customer_name}</span>
-                        </span>
-                        <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
-                      </div>
-                      {status?.riskFactors?.[0] && (
-                        <div className="text-xs text-red-600 mt-0.5 truncate">{status.riskFactors[0]}</div>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </details>
-            {/* 黄色 */}
-            <details id="risk-yellow" open={riskYellow.length > 0}>
-              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-yellow-50 rounded-lg scroll-mt-4">
-                <span className="font-semibold text-yellow-800">🟡 黄色关注</span>
-                <span className="text-sm font-bold text-yellow-700">{riskYellow.length}</span>
-              </summary>
-              <div className="mt-2 space-y-1 pl-2">
-                {riskYellow.length === 0 ? (
-                  <p className="text-sm text-gray-500 py-1">无</p>
-                ) : riskYellow.map((o: any) => {
-                  const status = orderStatusMap.get(o.id);
-                  return (
-                    <Link key={o.id} href={`/orders/${o.id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-yellow-50/50 text-sm group">
-                      <div className="flex items-center justify-between">
-                        <span>
-                          <span className="font-medium text-gray-900">{o.order_no}</span>
-                          <span className="text-gray-500 ml-2">{o.customer_name}</span>
-                        </span>
-                        <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
-                      </div>
-                      {status?.riskFactors?.map((f: string, i: number) => (
-                        <div key={i} className="text-xs text-amber-700 mt-0.5 truncate">⚠ {f}</div>
-                      ))}
-                    </Link>
-                  );
-                })}
-              </div>
-            </details>
-            {/* 绿色 */}
-            <details id="risk-green">
-              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-green-50 rounded-lg scroll-mt-4">
-                <span className="font-semibold text-green-800">🟢 正常</span>
-                <span className="text-sm font-bold text-green-700">{riskGreen.length}</span>
-              </summary>
-              <div className="mt-2 space-y-1 pl-2">
-                {riskGreen.map((o: any) => (
-                  <Link key={o.id} href={`/orders/${o.id}`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 text-sm group">
-                    <span>
-                      <span className="font-medium text-gray-900">{o.order_no}</span>
-                      <span className="text-gray-500 ml-2">{o.customer_name}</span>
-                    </span>
-                    <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
-                  </Link>
-                ))}
-              </div>
-            </details>
-            {/* 阻塞中 */}
-            <details id="risk-blocked" open={blockedMilestones.length > 0}>
-              <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-orange-50 rounded-lg scroll-mt-4">
-                <span className="font-semibold text-orange-800">🔒 阻塞中</span>
-                <span className="text-sm font-bold text-orange-700">{blockedMilestones.length}</span>
-              </summary>
-              <div className="mt-2 space-y-1 pl-2">
-                {blockedMilestones.length === 0 ? (
-                  <p className="text-sm text-gray-500 py-1">无</p>
-                ) : blockedMilestones.map((m: any) => (
-                  <Link key={m.id} href={`/orders/${m.order_id}?tab=progress`} className="block py-2 px-2 rounded hover:bg-orange-50/50 text-sm group">
-                    <div className="flex items-center justify-between">
-                      <span>
-                        <span className="font-medium text-gray-900">{m.orders?.order_no || m.order_id}</span>
-                        <span className="text-gray-500 ml-2">{m.name}</span>
-                      </span>
-                      <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">查看 →</span>
-                    </div>
-                    <div className="text-xs text-orange-600 mt-0.5 truncate">
-                      {getRoleLabel(m.owner_role || '')} · {m.orders?.customer_name || ''}
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </details>
-          </div>
-        </div>
-
-        {/* ===== 4. 延期/堵点中心 ===== */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-            <h2 className="text-lg font-bold text-gray-900">🚧 超期/堵点（按部门）</h2>
-          </div>
-          <div className="p-4 space-y-3">
-            {Object.entries(deptOverdue).length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-4">暂无超期节点 🎉</p>
-            ) : (
-              Object.entries(deptOverdue)
-                .sort((a, b) => b[1].count - a[1].count)
-                .map(([role, data]) => (
-                  <details key={role}>
-                    <summary className="cursor-pointer flex items-center justify-between py-2 px-3 bg-red-50/50 rounded-lg">
-                      <span className="font-medium text-gray-900">{getRoleLabel(role)}</span>
-                      <span className="text-sm font-bold text-red-600">{data.count} 个超期</span>
-                    </summary>
-                    <div className="mt-2 space-y-1 pl-2">
-                      {data.items.slice(0, 8).map((m: any) => {
-                        const dueAt = new Date(m.due_at);
-                        const daysOver = Math.max(1, Math.ceil((now.getTime() - dueAt.getTime()) / 86400000));
-                        const ownerProfile = m.owner_user_id ? userMap[m.owner_user_id] : null;
-                        return (
-                          <Link key={m.id} href={`/orders/${m.order_id}?tab=progress`}
-                            className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 text-sm group">
-                            <span className="flex-1 min-w-0">
-                              <span className="font-medium">{m.orders?.order_no}</span>
-                              <span className="text-gray-500 mx-1">·</span>
-                              <span className="text-gray-700">{m.name}</span>
-                              <span className="text-gray-400 mx-1">·</span>
-                              <span className="text-gray-500">{ownerProfile?.name || '未分配'}</span>
-                            </span>
-                            <span className="flex items-center gap-2 flex-shrink-0">
-                              <span className="text-xs text-red-600">超{daysOver}天</span>
-                              <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">→</span>
-                            </span>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </details>
-                ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ===== 5. 待审批延期 ===== */}
+      {/* ===== 2. 待审批延期 ===== */}
       <div id="delay-approvals" className="bg-white rounded-xl border border-yellow-200 shadow-sm overflow-hidden">
         <div className="bg-yellow-50 px-5 py-3 border-b border-yellow-100">
           <h2 className="text-lg font-bold text-yellow-900">⏳ 待审批延期（{(pendingDelays || []).length}）</h2>
@@ -681,7 +521,34 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
-      {/* ===== 6. 订单三阶段分析 ===== */}
+      {/* ===== 3. AI 智能助手（合并 AI 分析建议 + Agent 智能建议） ===== */}
+      <div className="bg-white rounded-xl border-2 border-indigo-200 shadow-md overflow-hidden">
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 px-5 py-3 border-b border-indigo-100">
+          <h2 className="text-lg font-bold text-indigo-900">🤖 AI 智能助手</h2>
+          <p className="text-xs text-indigo-600 mt-0.5">实时分析 + 可执行建议</p>
+        </div>
+        {aiInsights.length > 0 && (
+          <div className="p-5 space-y-2 border-b border-indigo-100">
+            {aiInsights.map((insight, i) => (
+              <div key={i} className="text-sm text-gray-800 leading-relaxed">{insight}</div>
+            ))}
+          </div>
+        )}
+        {agentSuggestions.length > 0 && (
+          <div className="p-2">
+            <AgentSuggestionsPanel
+              suggestions={agentSuggestions}
+              title=""
+              showOrder={true}
+            />
+          </div>
+        )}
+        {aiInsights.length === 0 && agentSuggestions.length === 0 && (
+          <div className="p-6 text-center text-gray-400 text-sm">✨ 当前无智能建议</div>
+        )}
+      </div>
+
+      {/* ===== 4. 订单三阶段分析 ===== */}
       <div className="grid md:grid-cols-3 gap-4">
 
         {/* 新订单分析 & 接单建议 */}
@@ -834,34 +701,148 @@ export default async function CEOWarRoom() {
         </div>
       </div>
 
-      {/* ===== 7. 明日提醒 ===== */}
-      {(tomorrowRisk || []).length > 0 && (
-        <div className="bg-white rounded-xl border border-purple-200 shadow-sm overflow-hidden">
-          <div className="bg-purple-50 px-5 py-3 border-b border-purple-100">
-            <h2 className="text-lg font-bold text-purple-900">⚡ 明日风险窗口（{(tomorrowRisk || []).length} 个节点即将到期）</h2>
-          </div>
-          <div className="p-4 space-y-1">
-            {(tomorrowRisk as any[]).slice(0, 10).map((m: any) => (
-              <Link key={m.id} href={`/orders/${m.order_id}?tab=progress`}
-                className="flex items-center justify-between py-2 px-3 rounded hover:bg-gray-50 text-sm group">
-                <span>
-                  <span className="font-medium">{m.orders?.order_no}</span>
-                  <span className="text-gray-500 mx-2">·</span>
-                  <span className="text-gray-700">{m.name}</span>
-                  <span className="text-gray-400 mx-1">·</span>
-                  <span className="text-xs text-gray-500">{getRoleLabel(m.owner_role)}</span>
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="text-xs text-purple-600">到期：{formatDate(m.due_at)}</span>
-                  <span className="text-blue-600 opacity-0 group-hover:opacity-100 text-xs">→</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* ===== 5. 明日风险预警（按订单聚合 + 提前协作提醒） ===== */}
+      {(() => {
+        // 按订单聚合明日风险节点
+        const tomorrowOrderMap = new Map<string, { orderNo: string; customerName: string; orderId: string; nodes: any[]; owners: Set<string> }>();
+        for (const m of (tomorrowRisk || []) as any[]) {
+          const orderId = m.order_id;
+          const ownerProfile = m.owner_user_id ? userMap[m.owner_user_id] : null;
+          const ownerName = ownerProfile?.name || ownerProfile?.email || '未分配';
+          const existing = tomorrowOrderMap.get(orderId);
+          if (existing) {
+            existing.nodes.push(m);
+            if (ownerName !== '未分配') existing.owners.add(`${ownerName}（${getRoleLabel(m.owner_role)}）`);
+          } else {
+            tomorrowOrderMap.set(orderId, {
+              orderNo: m.orders?.order_no || '',
+              customerName: m.orders?.customer_name || '',
+              orderId,
+              nodes: [m],
+              owners: new Set(ownerName !== '未分配' ? [`${ownerName}（${getRoleLabel(m.owner_role)}）`] : []),
+            });
+          }
+        }
 
-      {/* 效率分析已移至数据分析页 /analytics */}
+        if (tomorrowOrderMap.size === 0) return null;
+
+        return (
+          <div className="bg-white rounded-xl border-2 border-purple-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-purple-50 to-pink-50 px-5 py-3 border-b border-purple-100">
+              <h2 className="text-lg font-bold text-purple-900">⚡ 明日风险预警（{tomorrowOrderMap.size} 个订单需要关注）</h2>
+              <p className="text-xs text-purple-600 mt-0.5">未来48小时即将到期，已自动通知相关负责人</p>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {Array.from(tomorrowOrderMap.values()).map(info => (
+                <div key={info.orderId} className="px-5 py-3 hover:bg-purple-50/30">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Link href={`/orders/${info.orderId}`} className="font-semibold text-purple-700 hover:underline text-sm">
+                          {info.orderNo}
+                        </Link>
+                        <span className="text-gray-500 text-sm">{info.customerName}</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{info.nodes.length}个节点</span>
+                      </div>
+                      <div className="text-xs text-gray-600 mt-1">
+                        <span className="text-gray-500">节点：</span>
+                        {info.nodes.slice(0, 3).map((n: any) => n.name).join('、')}
+                        {info.nodes.length > 3 && '...'}
+                      </div>
+                      {info.owners.size > 0 && (
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          👥 协作：{Array.from(info.owners).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                    <Link
+                      href={`/orders/${info.orderId}?tab=progress&from=/ceo`}
+                      className="text-xs px-3 py-1.5 rounded bg-purple-600 text-white hover:bg-purple-700"
+                    >
+                      去查看
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ===== 6. 协作风险提醒（上下游协作） ===== */}
+      {(() => {
+        // 找出"前置节点已完成但下一节点还未启动"的协作断点
+        const collabRisks: Array<{ orderNo: string; orderId: string; customerName: string; from: string; to: string; toOwner: string; daysSince: number }> = [];
+
+        for (const order of ordersWithMilestones) {
+          const ms = (order.milestones || []).sort((a: any, b: any) =>
+            ((a.sequence_number || 0) - (b.sequence_number || 0))
+          );
+          for (let i = 0; i < ms.length - 1; i++) {
+            const cur = ms[i];
+            const next = ms[i + 1];
+            if (_isDone(cur.status) && _isPending(next.status) && cur.actual_at) {
+              const daysSince = Math.floor((now.getTime() - new Date(cur.actual_at).getTime()) / 86400000);
+              if (daysSince >= 1) {
+                const ownerProfile = next.owner_user_id ? userMap[next.owner_user_id] : null;
+                collabRisks.push({
+                  orderNo: order.order_no,
+                  orderId: order.id,
+                  customerName: order.customer_name || '',
+                  from: cur.name,
+                  to: next.name,
+                  toOwner: ownerProfile?.name || ownerProfile?.email || `${getRoleLabel(next.owner_role)}（未分配）`,
+                  daysSince,
+                });
+              }
+            }
+          }
+        }
+
+        if (collabRisks.length === 0) return null;
+
+        return (
+          <div className="bg-white rounded-xl border-2 border-amber-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-5 py-3 border-b border-amber-100">
+              <h2 className="text-lg font-bold text-amber-900">🤝 协作风险提醒（{collabRisks.length} 个交接卡顿）</h2>
+              <p className="text-xs text-amber-600 mt-0.5">前序节点已完成但后续未启动，需要提前提醒下游同事</p>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {collabRisks.slice(0, 10).map((r, i) => (
+                <div key={i} className="px-5 py-3 hover:bg-amber-50/30">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Link href={`/orders/${r.orderId}`} className="font-semibold text-amber-700 hover:underline text-sm">
+                          {r.orderNo}
+                        </Link>
+                        <span className="text-gray-500 text-sm">{r.customerName}</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">已停{r.daysSince}天</span>
+                      </div>
+                      <div className="text-xs text-gray-600 mt-1">
+                        ✅ <span className="text-green-700">{r.from}</span> 已完成 →
+                        ⏳ <span className="text-amber-700">{r.to}</span> 未启动
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        请提醒：<span className="font-medium">{r.toOwner}</span>
+                      </div>
+                    </div>
+                    <Link
+                      href={`/orders/${r.orderId}?tab=progress&from=/ceo`}
+                      className="text-xs px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700"
+                    >
+                      催办
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 风险订单列表已移至独立页面 /risk-orders/[type]，点击顶部数字卡片进入 */}
+      {/* 部门超期/堵点已移至数据分析页 /analytics */}
     </div>
   );
 }

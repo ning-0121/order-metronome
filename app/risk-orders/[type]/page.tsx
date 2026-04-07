@@ -69,6 +69,10 @@ export default async function RiskOrdersPage({ params }: { params: Promise<{ typ
     const overdue = milestones.filter((m: any) => isActiveStatus(m.status) && m.due_at && isOverdue(m.due_at));
     const blocked = milestones.filter((m: any) => isBlockedStatus(m.status));
     const status = computeOrderStatus(milestones);
+    // 找到优先处理的节点：阻塞 > 最久逾期
+    const focusMilestone = blocked[0] || overdue.sort((a: any, b: any) =>
+      new Date(a.due_at).getTime() - new Date(b.due_at).getTime()
+    )[0];
     return {
       id: o.id,
       orderNo: o.order_no,
@@ -84,6 +88,8 @@ export default async function RiskOrdersPage({ params }: { params: Promise<{ typ
       blockedNames: blocked.slice(0, 3).map((m: any) => m.name),
       riskColor: status?.color || 'GREEN',
       riskReason: status?.reasons?.[0] || '',
+      focusMilestoneId: focusMilestone?.id || null,
+      focusMilestoneName: focusMilestone?.name || '',
     };
   });
 
