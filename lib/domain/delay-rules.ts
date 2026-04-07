@@ -93,9 +93,11 @@ export const NODE_MAX_DELAY_DAYS: Record<string, number> = {
   production_kickoff: 2,
   pre_production_meeting: 1,
 
-  // 阶段5：过程控制（1-2天）
+  // 阶段5：过程控制（1-2天）— 验货分跟单/业务双重把关
   mid_qc_check: 2,
+  mid_qc_sales_check: 1,
   final_qc_check: 2,
+  final_qc_sales_check: 1,
 
   // 阶段6：出货控制（1-2天）
   packing_method_confirmed: 1,

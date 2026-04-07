@@ -6,6 +6,7 @@ import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { CustomerSelect } from '@/components/CustomerSelect';
 import { FactorySelect } from '@/components/FactorySelect';
+import { MultiFactorySelect } from '@/components/MultiFactorySelect';
 import { verifyPOAgainstOrder, verifyThreeDocuments } from '@/app/actions/po-verify';
 import type { POVerifyResult, ThreeDocVerifyResult } from '@/app/actions/po-verify';
 import { SmartInsightsPanel } from '@/components/SmartInsightsPanel';
@@ -437,6 +438,9 @@ function NewOrderWizard() {
                 <div>
                   <FactorySelect />
                 </div>
+                <div className="col-span-2">
+                  <MultiFactorySelect />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     客户 PO 号 <span className="text-red-500">*</span>
@@ -521,9 +525,10 @@ function NewOrderWizard() {
                     onChange={(e) => {
                       const v = e.target.value;
                       setIncoterm(v);
-                      // 自动推断交付方式：人民币→国内送仓，FOB/DDP→出口
-                      if (['RMB_EX_TAX', 'RMB_INC_TAX'].includes(v)) setDeliveryType('domestic');
-                      else if (v) setDeliveryType('export');
+                      // 只有 DDP 需要我们订舱报关出运
+                      // FOB / 人民币(含税/不含税) → 全部走送仓流程
+                      if (v === 'DDP') setDeliveryType('export');
+                      else if (v) setDeliveryType('domestic');
                       else setDeliveryType('');
                     }}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
@@ -542,11 +547,11 @@ function NewOrderWizard() {
                   <select value={deliveryType}
                     onChange={(e) => setDeliveryType(e.target.value)}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                    <option value="export">出口（含订舱/报关/出运）</option>
-                    <option value="domestic">国内送仓（无需出运节点）</option>
+                    <option value="export">出口（DDP，含订舱/报关/出运）</option>
+                    <option value="domestic">送仓（FOB / 人民币 / 国内送仓）</option>
                   </select>
                   {deliveryType === 'domestic' && (
-                    <p className="text-xs text-amber-600 mt-1">将跳过订舱、报关、出运节点，替换为「国内送仓完成」</p>
+                    <p className="text-xs text-amber-600 mt-1">将跳过订舱/报关/出运节点，替换为「国内送仓完成」</p>
                   )}
                 </div>
                 <div>
@@ -591,6 +596,31 @@ function NewOrderWizard() {
                       <p className="text-xs text-gray-500 mt-0.5">勾选后需填写截止日期</p>
                     </div>
                   </label>
+                </div>
+
+                {/* 跳过产前样：客户用设计样直接做大货 / 翻单 */}
+                <div className="col-span-2">
+                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50">
+                    <input type="checkbox" name="skip_pre_production_sample" value="true"
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600" />
+                    <div>
+                      <span className="text-sm font-medium text-gray-900">不需要产前样</span>
+                      <p className="text-xs text-gray-500 mt-0.5">客户用设计样直接做大货 / 翻单 / 老款 — 将跳过产前样准备/寄出/确认 3 个节点</p>
+                    </div>
+                  </label>
+                </div>
+
+                {/* 样品确认天数覆盖：针对慢确认客户 */}
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    样品确认预留天数（可选）
+                  </label>
+                  <input type="number" name="sample_confirm_days_override" min="7" max="60"
+                    placeholder="默认 19 天 — 慢确认客户填 25-30 天"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <p className="text-xs text-gray-500 mt-1">
+                    某些客户产前样确认要将近 1 个月 — 提前设置可让排期更真实
+                  </p>
                 </div>
                 {shippingSampleRequired && (
                   <div>

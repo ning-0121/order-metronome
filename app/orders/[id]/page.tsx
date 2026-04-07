@@ -202,8 +202,8 @@ export default async function OrderDetailPage({
                   <DeadlineCountdown targetDate={orderData.factory_date} label="出厂" />
                 </div>
               )}
-              {/* ETD 离港日 */}
-              {orderData.etd && (
+              {/* ETD/ETA 仅 DDP 才显示（FOB / 人民币 由客户自己安排出运或我们送仓） */}
+              {orderData.incoterm === 'DDP' && orderData.etd && (
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-400">
                     ETD：<span className="text-gray-700 font-medium">{formatDate(orderData.etd)}</span>
@@ -211,8 +211,7 @@ export default async function OrderDetailPage({
                   <DeadlineCountdown targetDate={orderData.etd} label="ETD" />
                 </div>
               )}
-              {/* ETA 到仓日 */}
-              {orderData.warehouse_due_date && (
+              {orderData.incoterm === 'DDP' && orderData.warehouse_due_date && (
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-400">
                     ETA：<span className="text-gray-700 font-medium">{formatDate(orderData.warehouse_due_date)}</span>

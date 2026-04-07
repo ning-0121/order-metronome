@@ -19,7 +19,7 @@ export async function recalcOrderMilestones(orderId: string) {
   if (!isAdmin) return { error: '仅管理员可重算排期' };
 
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, incoterm, etd, warehouse_due_date, order_date, created_at, factory_date, eta')
+    .select('id, order_no, incoterm, etd, warehouse_due_date, order_date, created_at, factory_date, eta, skip_pre_production_sample, sample_confirm_days_override')
     .eq('id', orderId)
     .single();
   if (!order) return { error: '订单不存在' };
@@ -38,6 +38,8 @@ export async function recalcOrderMilestones(orderId: string) {
       etd: scheduleEtd,
       warehouseDueDate: order.warehouse_due_date,
       eta: order.eta,
+      skipPreProductionSample: !!order.skip_pre_production_sample,
+      sampleConfirmDaysOverride: order.sample_confirm_days_override ?? null,
     });
   } catch (e: any) {
     return { error: `排期计算失败：${e.message}` };

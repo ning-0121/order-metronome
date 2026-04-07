@@ -304,13 +304,14 @@ export async function markMilestoneDone(
     // 检查3: 按 order_id + file_type 匹配（订单资料区上传的文件）
     const stepToFileType: Record<string, string[]> = {
       po_confirmed: ['customer_po'],
-      production_order_upload: ['production_order', 'trims_sheet'],
+      production_order_upload: ['production_order', 'trims_sheet'], // 包装资料拆分到 packing_method_confirmed
       finance_approval: ['internal_quote', 'customer_quote'],
       processing_fee_confirmed: ['internal_quote'],
       procurement_order_placed: ['procurement_order'],
       mid_qc_check: ['qc_report'],
       final_qc_check: ['qc_report'],
       inspection_release: ['qc_report'],
+      packing_method_confirmed: ['packing_requirement'], // 包装资料移到这里
       booking_done: ['packing_list'],
       customs_export: ['packing_list'],
       shipment_execute: ['packing_list'],
@@ -328,11 +329,11 @@ export async function markMilestoneDone(
       att3 = data || [];
     }
 
-    // 生产单上传特殊处理：需要三个文件全部上传
+    // 生产单上传：需要 生产订单 + 原辅料单 两个文件（包装资料可以晚点）
     if (milestone.step_key === 'production_order_upload' && milestone.order_id) {
-      const requiredTypes = ['production_order', 'trims_sheet', 'packing_requirement'];
+      const requiredTypes = ['production_order', 'trims_sheet'];
       const missing: string[] = [];
-      const typeNames: Record<string, string> = { production_order: '生产订单', trims_sheet: '原辅料单', packing_requirement: '包装资料' };
+      const typeNames: Record<string, string> = { production_order: '生产订单', trims_sheet: '原辅料单' };
       for (const ft of requiredTypes) {
         const { data: found } = await (supabase.from('order_attachments') as any)
           .select('id')
@@ -342,7 +343,7 @@ export async function markMilestoneDone(
         if (!found || found.length === 0) missing.push(typeNames[ft] || ft);
       }
       if (missing.length > 0) {
-        return { error: `生产单上传需要三个文件全部上传才能标记完成。\n缺少：${missing.join('、')}` };
+        return { error: `生产单上传需要两个文件：生产订单 + 原辅料单\n缺少：${missing.join('、')}\n（包装资料可以晚些上传，最晚在「包装方式确认」前 1 周）` };
       }
     } else {
       const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0;

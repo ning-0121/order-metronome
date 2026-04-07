@@ -45,11 +45,13 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "materials_received_inspected", name: "原辅料到货验收", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   { step_key: "production_kickoff", name: "生产启动/开裁", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   { step_key: "pre_production_meeting", name: "产前会", owner_role: "merchandiser", is_critical: false, evidence_required: false },
-  // 阶段5：过程控制
-  { step_key: "mid_qc_check", name: "中查", owner_role: "merchandiser", is_critical: false, evidence_required: true },
-  { step_key: "final_qc_check", name: "尾查", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  // 阶段5：过程控制（验货分跟单 + 业务双重把关）
+  { step_key: "mid_qc_check", name: "跟单中查", owner_role: "merchandiser", is_critical: false, evidence_required: true },
+  { step_key: "mid_qc_sales_check", name: "业务中查", owner_role: "sales", is_critical: false, evidence_required: true },
+  { step_key: "final_qc_check", name: "跟单尾查", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  { step_key: "final_qc_sales_check", name: "业务尾查", owner_role: "sales", is_critical: true, evidence_required: true },
   // 阶段6：出货控制
-  { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: true, evidence_required: false },
+  { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "factory_completion", name: "工厂完成", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   { step_key: "inspection_release", name: "验货/放行", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "shipping_sample_send", name: "船样寄送", owner_role: "sales", is_critical: false, evidence_required: false },
@@ -63,7 +65,8 @@ export const MILESTONE_TEMPLATE_V1: Array<{
 
 /**
  * 国内送仓订单需要跳过的出运节点
- * 这些节点只有出口订单（FOB/DDP）才需要
+ * 这些节点只有出口订单（DDP）才需要
+ * FOB / 人民币含税 / 人民币不含税 → 都走送仓流程
  */
 const EXPORT_ONLY_STEPS = new Set([
   'shipping_sample_send',       // 船样寄送
@@ -71,6 +74,16 @@ const EXPORT_ONLY_STEPS = new Set([
   'customs_export',             // 报关安排出运
   'finance_shipment_approval',  // 核准出运
   'shipment_execute',           // 出运
+]);
+
+/**
+ * 不需要产前样的订单跳过的节点
+ * 适用于：客户直接用设计样 / 翻单 / 老款直接大货
+ */
+const PRE_PRODUCTION_SAMPLE_STEPS = new Set([
+  'pre_production_sample_ready',
+  'pre_production_sample_sent',
+  'pre_production_sample_approved',
 ]);
 
 /**
@@ -108,22 +121,38 @@ export const SAMPLE_MILESTONE_TEMPLATE: Array<{
 /**
  * 根据订单类型和交付方式返回适用的里程碑模板
  *
- * @param deliveryType - 'export'(出口) | 'domestic'(国内送仓)，默认 export
+ * 出运流程判定：deliveryType === 'export' → 走 DDP 出运流程
+ * 只有 DDP 需要我们订舱/报关/出运；FOB / 人民币(含税/不含税) 都走送仓流程。
+ * 表单层面会根据 incoterm 自动设置 deliveryType（DDP→export，其余→domestic）。
+ *
+ * @param deliveryType - 'export'(DDP出口) | 'domestic'(送仓)
+ * @param orderPurpose - 'production' | 'sample'
+ * @param skipPreProductionSample - 是否跳过产前样（客户直接用设计样）
  */
 export function getApplicableMilestones(
   _orderType?: string,
   _shippingSampleRequired?: boolean,
   deliveryType?: string,
   orderPurpose?: string,
+  skipPreProductionSample?: boolean,
 ) {
   // 打样单用简化模板
   if (orderPurpose === 'sample') {
     return SAMPLE_MILESTONE_TEMPLATE;
   }
-  if (deliveryType === 'domestic') {
-    // 国内送仓：过滤掉出运节点，追加国内送仓节点
-    const filtered = MILESTONE_TEMPLATE_V1.filter(m => !EXPORT_ONLY_STEPS.has(m.step_key));
+
+  let template = [...MILESTONE_TEMPLATE_V1];
+
+  // 跳过产前样节点（客户用设计样直接做大货 / 翻单 / 老款）
+  if (skipPreProductionSample) {
+    template = template.filter(m => !PRE_PRODUCTION_SAMPLE_STEPS.has(m.step_key));
+  }
+
+  if (deliveryType !== 'export') {
+    // 非出口（FOB / 人民币 / 国内送仓）：过滤出运节点，追加国内送仓节点
+    const filtered = template.filter(m => !EXPORT_ONLY_STEPS.has(m.step_key));
     return [...filtered, ...DOMESTIC_MILESTONES];
   }
-  return MILESTONE_TEMPLATE_V1;
+
+  return template;
 }

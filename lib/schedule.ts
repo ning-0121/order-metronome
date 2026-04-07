@@ -128,10 +128,12 @@ const TIMELINE = {
   materials_received_inspected:  12,
   pre_production_meeting:        11,
   production_kickoff:            20,
-  mid_qc_check:                  30,
+  mid_qc_check:                  30,  // 跟单中查
+  mid_qc_sales_check:            31,  // 业务中查（跟单后 1 天复核）
+  packing_method_confirmed:      31,  // 包装方式+包装资料确认（工厂完成前至少1周）
   shipping_sample_send:          31,  // 中查后立即寄船样（客户需5-7天确认）
-  packing_method_confirmed:      33,  // 预留4天包装时间到工厂完成
-  final_qc_check:                36,  // 尾查在工厂完成前，发现问题可修复
+  final_qc_check:                36,  // 跟单尾查 — 工厂完成前可修复
+  final_qc_sales_check:          37,  // 业务尾查（跟单后 1 天复核）
   factory_completion:            38,  // 包装完成+QC修复后
   inspection_release:            40,  // 预留2天：预约验货+验货+出结果
   booking_done:                  41,  // 放行后订舱
@@ -171,6 +173,10 @@ export interface CalcDueDatesParams {
   orderType?: 'sample' | 'bulk' | 'repeat';
   shippingSampleRequired?: boolean;
   shippingSampleDeadline?: string | null;
+  /** 样品确认预留天数（覆盖默认 19 天）— 针对慢确认客户 */
+  sampleConfirmDaysOverride?: number | null;
+  /** 跳过产前样（不计算这些节点的截止日期） */
+  skipPreProductionSample?: boolean;
 }
 
 /**
@@ -231,6 +237,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
     etd, warehouseDueDate, eta,
     shippingSampleRequired = false,
     shippingSampleDeadline,
+    sampleConfirmDaysOverride,
+    skipPreProductionSample = false,
   } = params;
 
   const T0 = parseDate(orderDate) ?? createdAt ?? new Date();
@@ -271,6 +279,11 @@ export function calcDueDates(params: CalcDueDatesParams) {
     ? parseDate(shippingSampleDeadline)!
     : calc(TIMELINE.shipping_sample_send);
 
+  // 样品确认天数覆盖：针对慢确认客户
+  // 默认 pre_production_sample_approved 在 Day 19 (42%)
+  // 如果客户需要更长确认时间，提前 N 天准备样品
+  const sampleConfirmDays = sampleConfirmDaysOverride ?? TIMELINE.pre_production_sample_approved;
+
   const result: Record<string, Date> = {
     po_confirmed:                  cap(calc(TIMELINE.po_confirmed)),
     finance_approval:              cap(calc(TIMELINE.finance_approval)),
@@ -282,13 +295,15 @@ export function calcDueDates(params: CalcDueDatesParams) {
     factory_confirmed:             cap(calc(TIMELINE.factory_confirmed)),
     pre_production_sample_ready:   cap(calc(TIMELINE.pre_production_sample_ready)),
     pre_production_sample_sent:    cap(calc(TIMELINE.pre_production_sample_sent)),
-    pre_production_sample_approved: cap(calc(TIMELINE.pre_production_sample_approved)),
+    pre_production_sample_approved: cap(calc(sampleConfirmDays)),
     procurement_order_placed:      cap(calc(TIMELINE.procurement_order_placed)),
     materials_received_inspected:  cap(calc(TIMELINE.materials_received_inspected)),
     pre_production_meeting:        cap(calc(TIMELINE.pre_production_meeting)),
     production_kickoff:            cap(calc(TIMELINE.production_kickoff)),
     mid_qc_check:                  cap(calc(TIMELINE.mid_qc_check)),
+    mid_qc_sales_check:            cap(calc(TIMELINE.mid_qc_sales_check)),
     final_qc_check:                cap(calc(TIMELINE.final_qc_check)),
+    final_qc_sales_check:          cap(calc(TIMELINE.final_qc_sales_check)),
     packing_method_confirmed:      cap(calc(TIMELINE.packing_method_confirmed)),
     factory_completion:            cap(calc(TIMELINE.factory_completion)),
     inspection_release:            cap(calc(TIMELINE.inspection_release)),

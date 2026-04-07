@@ -58,6 +58,11 @@ const INSERT_WHITELIST = [
   'product_description',
   'target_price',
   'quote_stage',
+  // 订单灵活性增强（2026-04-07）
+  'skip_pre_production_sample',
+  'sample_confirm_days_override',
+  'factory_ids',
+  'factory_names',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -100,6 +105,11 @@ const UPDATE_WHITELIST = [
   'quote_stage',
   'is_split_shipment',
   'total_batches',
+  // 订单灵活性增强（2026-04-07）
+  'skip_pre_production_sample',
+  'sample_confirm_days_override',
+  'factory_ids',
+  'factory_names',
 ] as const;
 
 // ⚠️ 系统级约束：order_no 一旦生成，永不修改

@@ -104,16 +104,23 @@ export function MilestoneActions({
       return;
     }
 
-    // 生产单上传：前端校验三个文件
+    // 生产单上传：前端校验两个文件（生产订单 + 原辅料单），包装资料拆到包装确认节点
     if (milestone.step_key === 'production_order_upload') {
       const hasTrims = extraFiles.some((f: any) => f._fileType === 'trims_sheet');
-      const hasPacking = extraFiles.some((f: any) => f._fileType === 'packing_requirement');
       const missing: string[] = [];
       if (!evidenceFile) missing.push('生产订单');
       if (!hasTrims) missing.push('原辅料单');
-      if (!hasPacking) missing.push('包装资料');
       if (missing.length > 0) {
-        setSubmitError(`⚠️ 生产单上传需要三个文件全部上传：\n缺少：${missing.join('、')}`);
+        setSubmitError(`⚠️ 生产单上传需要两个文件：\n缺少：${missing.join('、')}\n（包装资料可以晚些上传，最晚在「包装方式确认」前 1 周）`);
+        return;
+      }
+    }
+
+    // 包装方式确认：需要包装资料
+    if (milestone.step_key === 'packing_method_confirmed') {
+      const hasPacking = evidenceFile || extraFiles.some((f: any) => f._fileType === 'packing_requirement');
+      if (!hasPacking) {
+        setSubmitError('⚠️ 包装方式确认需要上传"包装资料"文件');
         return;
       }
     }
@@ -387,13 +394,13 @@ export function MilestoneActions({
             onResponsesChange={(responses) => { checklistResponsesRef.current = responses; }}
           />
 
-          {/* 生产单上传：三卡分类上传 */}
+          {/* 生产单上传：2 个文件（生产订单 + 原辅料单）*/}
           {milestone.step_key === 'production_order_upload' ? (
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-2">
-                上传生产资料 <span className="text-red-500">*三个文件都必传</span>
+                上传生产资料 <span className="text-red-500">*生产订单 + 原辅料单 必传</span>
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <label className="flex flex-col items-center py-3 rounded-lg border-2 border-dashed border-indigo-300 text-xs text-indigo-600 cursor-pointer hover:bg-indigo-50">
                   📄 生产订单
                   <span className="text-[10px] text-gray-400 mt-0.5">AI可生成 或 手动上传</span>
@@ -401,7 +408,6 @@ export function MilestoneActions({
                     onChange={e => {
                       if (e.target.files?.[0]) {
                         setEvidenceFile(e.target.files[0]);
-                        // 标记文件类型
                         (e.target.files[0] as any)._fileType = 'production_order';
                       }
                     }} />
@@ -418,27 +424,33 @@ export function MilestoneActions({
                       }
                     }} />
                 </label>
-                <label className="flex flex-col items-center py-3 rounded-lg border-2 border-dashed border-amber-300 text-xs text-amber-600 cursor-pointer hover:bg-amber-50">
-                  📦 包装资料
-                  <span className="text-[10px] text-gray-400 mt-0.5">业务手动上传</span>
-                  <input type="file" className="hidden" accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
-                    onChange={e => {
-                      if (e.target.files?.[0]) {
-                        const f = e.target.files[0];
-                        (f as any)._fileType = 'packing_requirement';
-                        setExtraFiles(prev => [...prev.filter((p: any) => p._fileType !== 'packing_requirement'), f]);
-                      }
-                    }} />
-                </label>
               </div>
               <p className="text-xs text-gray-400 mt-2">
                 {evidenceFile ? `✅ 生产订单：${evidenceFile.name}` : '⬜ 生产订单：未选'}
                 {' · '}
                 {extraFiles.some((f: any) => f._fileType === 'trims_sheet') ? `✅ 原辅料单` : '⬜ 原辅料单：未选'}
-                {' · '}
-                {extraFiles.some((f: any) => f._fileType === 'packing_requirement') ? `✅ 包装资料` : '⬜ 包装资料：未选'}
               </p>
-              <p className="text-xs text-indigo-500 mt-1">文件将同步显示在「原辅料和包装」及「生产进度」Tab</p>
+              <p className="text-xs text-amber-600 mt-1">💡 包装资料可以晚些上传，最晚在「包装方式确认」节点前 1 周</p>
+            </div>
+          ) : milestone.step_key === 'packing_method_confirmed' ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-2">
+                上传包装资料 <span className="text-red-500">*必传</span>
+              </label>
+              <label className="flex flex-col items-center py-4 rounded-lg border-2 border-dashed border-amber-300 text-xs text-amber-600 cursor-pointer hover:bg-amber-50">
+                📦 包装资料
+                <span className="text-[10px] text-gray-400 mt-0.5">包装方式 / 装箱要求 / 唛头等</span>
+                <input type="file" className="hidden" accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                  onChange={e => {
+                    if (e.target.files?.[0]) {
+                      setEvidenceFile(e.target.files[0]);
+                      (e.target.files[0] as any)._fileType = 'packing_requirement';
+                    }
+                  }} />
+              </label>
+              <p className="text-xs text-gray-400 mt-2">
+                {evidenceFile ? `✅ 已选：${evidenceFile.name}` : '⬜ 未选'}
+              </p>
             </div>
           ) : (
           <div>

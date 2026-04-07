@@ -118,6 +118,27 @@ export async function createOrder(
   const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
   const factory_name = formData.get('factory_name') as string | null;
   const factory_id = formData.get('factory_id') as string | null;
+
+  // 多工厂（分厂区生产）— 客户端以 JSON 字符串数组写入
+  let factory_ids: string[] | null = null;
+  let factory_names: string[] | null = null;
+  try {
+    const idsRaw = formData.get('factory_ids') as string | null;
+    const namesRaw = formData.get('factory_names') as string | null;
+    if (idsRaw) {
+      const parsed = JSON.parse(idsRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) factory_ids = parsed;
+    }
+    if (namesRaw) {
+      const parsed = JSON.parse(namesRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) factory_names = parsed;
+    }
+  } catch {}
+
+  // 跳过产前样 + 样品确认天数覆盖
+  const skip_pre_production_sample = formData.get('skip_pre_production_sample') === 'true';
+  const sampleConfirmRaw = formData.get('sample_confirm_days_override') as string | null;
+  const sample_confirm_days_override = sampleConfirmRaw ? parseInt(sampleConfirmRaw, 10) : null;
   const totalQuantity = formData.get('total_quantity') as string | null;
   const quantityUnit = formData.get('quantity_unit') as string || '件';
   // 统一按件数存储：套 = 数量 × 2
@@ -235,6 +256,12 @@ export async function createOrder(
     order_date: order_date || null,
     factory_id: factory_id || null,
     factory_name: factory_name || null,
+    factory_ids: factory_ids,
+    factory_names: factory_names,
+    skip_pre_production_sample: skip_pre_production_sample,
+    sample_confirm_days_override: sample_confirm_days_override && !isNaN(sample_confirm_days_override)
+      ? sample_confirm_days_override
+      : null,
     is_new_customer: isNewCustomer,
     is_new_factory: isNewFactory,
     created_by: user.id,
@@ -294,6 +321,8 @@ export async function createOrder(
       orderType: (order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
       shippingSampleRequired: shipping_sample_required,
       shippingSampleDeadline: shipping_sample_deadline,
+      sampleConfirmDaysOverride: sample_confirm_days_override,
+      skipPreProductionSample: skip_pre_production_sample,
     });
   } catch (scheduleErr: any) {
     console.error('[createOrder] STEP 4 FAIL: calcDueDates —', scheduleErr.message);
@@ -326,7 +355,13 @@ export async function createOrder(
     }
   } catch {} // 查询失败不影响订单创建
 
-  const templates = getApplicableMilestones(order_type, shipping_sample_required, delivery_type, order_purpose);
+  const templates = getApplicableMilestones(
+    order_type,
+    shipping_sample_required,
+    delivery_type,
+    order_purpose,
+    skip_pre_production_sample,
+  );
   const milestonesData = [];
   for (let index = 0; index < templates.length; index++) {
     const template = templates[index];

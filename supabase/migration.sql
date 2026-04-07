@@ -1510,3 +1510,10 @@ ALTER TABLE public.delay_requests
   );
 ALTER TABLE public.delay_requests ADD COLUMN IF NOT EXISTS delay_days integer;
 ALTER TABLE public.delay_requests ADD COLUMN IF NOT EXISTS impacts_final_delivery boolean DEFAULT false;
+
+-- ===== 2026-04-07 订单灵活性增强 =====
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS skip_pre_production_sample boolean DEFAULT false;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sample_confirm_days_override integer;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS factory_ids text[];
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS factory_names text[];
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS default_sample_confirm_days integer;

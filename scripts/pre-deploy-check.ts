@@ -28,8 +28,13 @@ console.log('📋 里程碑模板');
 assert(MILESTONE_TEMPLATE_V1.length >= 20, `生产模板有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥20)`);
 assert(SAMPLE_MILESTONE_TEMPLATE.length === 7, `打样模板有 ${SAMPLE_MILESTONE_TEMPLATE.length} 个节点 (=7)`);
 
-// 生产模板必须包含关键节点
-const requiredSteps = ['po_confirmed', 'finance_approval', 'production_kickoff', 'mid_qc_check', 'final_qc_check', 'inspection_release', 'payment_received'];
+// 生产模板必须包含关键节点（含跟单/业务双重验货）
+const requiredSteps = [
+  'po_confirmed', 'finance_approval', 'production_kickoff',
+  'mid_qc_check', 'mid_qc_sales_check',
+  'final_qc_check', 'final_qc_sales_check',
+  'inspection_release', 'payment_received',
+];
 for (const step of requiredSteps) {
   assert(MILESTONE_TEMPLATE_V1.some(m => m.step_key === step), `生产模板包含 ${step}`);
 }
@@ -52,6 +57,17 @@ assert(!domesticMilestones.some(m => m.step_key === 'booking_done'), 'domestic�
 
 const sampleMilestones = getApplicableMilestones('sample', false, 'domestic', 'sample');
 assert(sampleMilestones.length === 7, `sample订单返回 ${sampleMilestones.length} 个节点 (=7)`);
+
+// 跳过产前样：3 个产前样节点应被过滤掉
+const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);
+assert(
+  !skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_ready'),
+  '跳过产前样模式：不包含 pre_production_sample_ready'
+);
+assert(
+  skipSampleMilestones.length === prodMilestones.length - 3,
+  `跳过产前样模式节点数(${skipSampleMilestones.length}) = 标准export(${prodMilestones.length}) - 3`
+);
 
 // ════ 3. Agent 配置完整性 ════
 console.log('\n🤖 Agent 配置');
