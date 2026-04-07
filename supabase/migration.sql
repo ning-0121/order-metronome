@@ -1502,3 +1502,11 @@ CREATE POLICY "daily_briefings_insert" ON public.daily_briefings FOR INSERT WITH
 
 -- ===== 2026-04-07 企业微信用户ID =====
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS wecom_userid text;
+
+-- ===== 2026-04-07 延期申请原因分类 =====
+ALTER TABLE public.delay_requests
+  ADD COLUMN IF NOT EXISTS reason_category text CHECK (
+    reason_category IN ('customer', 'supplier', 'internal', 'force_majeure')
+  );
+ALTER TABLE public.delay_requests ADD COLUMN IF NOT EXISTS delay_days integer;
+ALTER TABLE public.delay_requests ADD COLUMN IF NOT EXISTS impacts_final_delivery boolean DEFAULT false;

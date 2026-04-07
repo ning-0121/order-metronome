@@ -51,12 +51,13 @@ type DelayReasonType =
 
 export async function createDelayRequest(
   milestoneId: string,
-  reasonType: DelayReasonType,
+  reasonType: string,
   reasonDetail: string,
   proposedNewAnchorDate?: string,
   proposedNewDueAt?: string,
   requiresCustomerApproval: boolean = false,
-  customerApprovalEvidenceUrl?: string
+  customerApprovalEvidenceUrl?: string,
+  reasonCategory?: 'customer' | 'supplier' | 'internal' | 'force_majeure'
 ) {
   const supabase = await createClient();
 
@@ -117,16 +118,51 @@ export async function createDelayRequest(
     return { error: 'Must provide either new anchor date or new due date' };
   }
   
+  // 使用延期规则引擎校验
+  const { validateDelayRequest, DELAY_CATEGORIES } = await import('@/lib/domain/delay-rules');
+  const category = reasonCategory || 'internal';
+  const categoryInfo = DELAY_CATEGORIES[category];
+
+  if (proposedNewDueAt && milestoneData.due_at) {
+    const validation = validateDelayRequest({
+      stepKey: milestoneData.step_key,
+      category,
+      currentDueAt: milestoneData.due_at,
+      proposedDueAt: proposedNewDueAt,
+    });
+    if (!validation.allowed) {
+      return { error: validation.reason };
+    }
+  }
+
+  // 计算延期天数
+  let delayDays = 0;
+  if (proposedNewDueAt && milestoneData.due_at) {
+    delayDays = Math.ceil(
+      (new Date(proposedNewDueAt).getTime() - new Date(milestoneData.due_at).getTime()) / 86400000
+    );
+  } else if (proposedNewAnchorDate) {
+    const oldAnchor = orderData.incoterm === 'FOB' ? orderData.etd : orderData.warehouse_due_date;
+    if (oldAnchor) {
+      delayDays = Math.ceil(
+        (new Date(proposedNewAnchorDate).getTime() - new Date(oldAnchor).getTime()) / 86400000
+      );
+    }
+  }
+
   // Create delay request
   const insertPayload: any = {
     order_id: orderData.id,
     milestone_id: milestoneId,
     requested_by: user.id,
     reason_type: reasonType,
+    reason_category: category,
     reason_detail: reasonDetail,
     proposed_new_anchor_date: proposedNewAnchorDate || null,
     proposed_new_due_at: proposedNewDueAt || null,
     requires_customer_approval: requiresCustomerApproval,
+    delay_days: delayDays,
+    impacts_final_delivery: categoryInfo.impactsFinalDeliveryDate,
     status: 'pending',
   };
   const { data: delayRequest, error } = await (supabase
@@ -613,10 +649,32 @@ async function recalculateSchedule(
     console.error('recalculateSchedule: milestone or order is missing');
     return;
   }
-  
+
   const orderData = order as any;
   const milestoneData = milestone as any;
-  
+  const category = delayRequest.reason_category || 'internal';
+  const impactsDelivery = delayRequest.impacts_final_delivery;
+
+  // 客户/不可抗力原因 → 顺延交期（更新 anchor + 所有下游节点）
+  // 内部/供应商原因 → 只改当前节点，保持交期不变，下游窗口被压缩
+  if (!impactsDelivery && delayRequest.proposed_new_due_at) {
+    // 内部原因：只更新当前节点，不动下游
+    await updateMilestone(milestoneData.id, {
+      planned_at: delayRequest.proposed_new_due_at,
+      due_at: delayRequest.proposed_new_due_at,
+    });
+
+    await logMilestoneAction(
+      supabase,
+      milestoneData.id,
+      orderData.id,
+      'recalc_schedule',
+      `内部原因延期 ${delayRequest.delay_days} 天，下游窗口被压缩，交期不变`,
+      { category, delay_days: delayRequest.delay_days },
+    );
+    return;
+  }
+
   // If proposed_new_anchor_date is provided, update order and recalculate all milestones
   if (delayRequest.proposed_new_anchor_date) {
     const updates: any = {};
