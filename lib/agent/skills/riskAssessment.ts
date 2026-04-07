@@ -32,14 +32,29 @@ interface RiskDimension {
   label: string;
   /** 此维度的最高加分 */
   maxScore: number;
-  /** 检测函数：返回这次实际加分 + 触发原因 */
-  evaluate: (ctx: RiskContext) => { score: number; reason?: string };
+  /**
+   * 检测函数：返回 score + reason + evidence
+   * 重要：evidence 必须是真实数据源描述，例如「customer_memory 表 1 条 complaint 类型记录」
+   * 没有真实数据时必须返回 score: 0，绝不"凭感觉"加分
+   */
+  evaluate: (ctx: RiskContext) => { score: number; reason?: string; evidence?: string };
 }
 
 interface RiskContext {
   order: any;
-  customer: { totalOrders: number; complaintCount: number; avgDelayDays: number };
-  factory: { totalOrders: number; avgDelayDays: number; qcPassRate: number | null };
+  customer: {
+    totalOrders: number;
+    complaintCount: number;
+    qualityIssueCount: number;
+    avgDelayDays: number;
+    hasEnoughData: boolean; // 是否有足够订单数据可参考（≥3 单）
+  };
+  factory: {
+    totalOrders: number;
+    avgDelayDays: number;
+    qcPassRate: number | null;
+    hasEnoughData: boolean;
+  };
   milestones: Array<{ step_key: string; status: string; due_at: string | null }>;
   attachments: Array<{ file_type: string }>;
   specialTags: string[];
@@ -54,8 +69,20 @@ const DIMENSIONS: RiskDimension[] = [
     label: '新客户首单',
     maxScore: 20,
     evaluate: ctx => {
-      if (ctx.order.is_new_customer || ctx.customer.totalOrders === 0) {
-        return { score: 20, reason: '该客户在系统内首单 — 沟通模式 / 付款节奏 / 验货标准都未知' };
+      // 证据：业务在创建订单时勾选了"新客户首单"标记 OR 系统查到该客户历史订单数=0
+      if (ctx.order.is_new_customer === true) {
+        return {
+          score: 20,
+          reason: '该客户在系统内首单 — 沟通模式 / 付款节奏 / 验货标准都未知',
+          evidence: '订单字段 is_new_customer = true（业务创建时手动勾选或系统自动检测）',
+        };
+      }
+      if (ctx.customer.totalOrders === 0) {
+        return {
+          score: 20,
+          reason: '该客户在系统内首单',
+          evidence: `查询 orders 表：customer_name='${ctx.order.customer_name}' 历史订单数 = 0`,
+        };
       }
       return { score: 0 };
     },
@@ -66,13 +93,28 @@ const DIMENSIONS: RiskDimension[] = [
     label: '客户历史投诉',
     maxScore: 10,
     evaluate: ctx => {
-      if (ctx.customer.complaintCount >= 2) {
-        return { score: 10, reason: `该客户历史有 ${ctx.customer.complaintCount} 条投诉记录，需高度警惕` };
+      // 证据：必须真的有 complaint / quality 类的 customer_memory 记录
+      // 严格区分：delay 类型的记录是延期申请，不是投诉
+      // 新客户（首单）逻辑上不可能有投诉，必须先排除
+      if (ctx.order.is_new_customer === true || ctx.customer.totalOrders === 0) {
+        return { score: 0 };
       }
-      if (ctx.customer.complaintCount === 1) {
-        return { score: 5, reason: '客户曾投诉过 1 次' };
+      const total = ctx.customer.complaintCount + ctx.customer.qualityIssueCount;
+      if (total === 0) {
+        return { score: 0 };
       }
-      return { score: 0 };
+      if (total >= 2) {
+        return {
+          score: 10,
+          reason: `该客户有 ${ctx.customer.complaintCount} 条投诉 + ${ctx.customer.qualityIssueCount} 条质量问题记录`,
+          evidence: `customer_memory 表：category IN ('complaint','quality') 共 ${total} 条`,
+        };
+      }
+      return {
+        score: 5,
+        reason: `客户有 ${total} 条投诉/质量问题记录`,
+        evidence: `customer_memory 表：category IN ('complaint','quality') 共 ${total} 条`,
+      };
     },
   },
 
@@ -83,8 +125,19 @@ const DIMENSIONS: RiskDimension[] = [
     label: '新工厂首单',
     maxScore: 15,
     evaluate: ctx => {
-      if (ctx.order.is_new_factory || ctx.factory.totalOrders === 0) {
-        return { score: 15, reason: '工厂在系统内前 3 单 — 必须提高 QC 频率，建议 100% 检验' };
+      if (ctx.order.is_new_factory === true) {
+        return {
+          score: 15,
+          reason: '工厂在系统内前 3 单 — 必须提高 QC 频率，建议 100% 检验',
+          evidence: '订单字段 is_new_factory = true',
+        };
+      }
+      if (ctx.order.factory_id && ctx.factory.totalOrders === 0) {
+        return {
+          score: 15,
+          reason: '工厂在系统内首单 — 必须提高 QC 频率',
+          evidence: `查询 orders 表：factory_id='${ctx.order.factory_id}' 历史订单数 = 0`,
+        };
       }
       return { score: 0 };
     },
@@ -97,7 +150,11 @@ const DIMENSIONS: RiskDimension[] = [
     evaluate: ctx => {
       const ids = ctx.order.factory_ids;
       if (Array.isArray(ids) && ids.length > 0) {
-        return { score: 8, reason: `涉及 ${ids.length + 1} 个厂区，工序衔接 / 质量一致性风险高` };
+        return {
+          score: 8,
+          reason: `涉及 ${ids.length + 1} 个厂区，工序衔接 / 质量一致性风险高`,
+          evidence: `订单字段 factory_ids = [${ids.length} 个额外厂区]`,
+        };
       }
       return { score: 0 };
     },
@@ -108,27 +165,39 @@ const DIMENSIONS: RiskDimension[] = [
     label: '工厂历史延期率高',
     maxScore: 10,
     evaluate: ctx => {
+      // 必须有足够的历史数据才能下结论 — 至少 3 单
+      if (!ctx.factory.hasEnoughData) return { score: 0 };
       if (ctx.factory.avgDelayDays >= 5) {
-        return { score: 10, reason: `工厂历史平均延期 ${Math.round(ctx.factory.avgDelayDays)} 天` };
+        return {
+          score: 10,
+          reason: `工厂历史平均延期 ${Math.round(ctx.factory.avgDelayDays)} 天`,
+          evidence: `factories 表 avg_delay_days = ${ctx.factory.avgDelayDays}（基于 ${ctx.factory.totalOrders} 单）`,
+        };
       }
       if (ctx.factory.avgDelayDays >= 2) {
-        return { score: 5, reason: `工厂历史平均延期 ${Math.round(ctx.factory.avgDelayDays)} 天` };
+        return {
+          score: 5,
+          reason: `工厂历史平均延期 ${Math.round(ctx.factory.avgDelayDays)} 天`,
+          evidence: `factories 表 avg_delay_days = ${ctx.factory.avgDelayDays}（基于 ${ctx.factory.totalOrders} 单）`,
+        };
       }
       return { score: 0 };
     },
   },
 
-  // 3. 品类维度
+  // 3. 品类维度（特殊标签 = 业务在创建订单时勾选的，证据明确）
   {
     id: 'high_stretch',
     category: '品类',
     label: '高弹面料',
     maxScore: 10,
     evaluate: ctx => {
-      if (ctx.specialTags.includes('高弹面料')) {
-        return { score: 10, reason: '氨纶含量高 → 缩水率 / 单耗超标风险，需提前测缩水' };
-      }
-      return { score: 0 };
+      if (!ctx.specialTags.includes('高弹面料')) return { score: 0 };
+      return {
+        score: 10,
+        reason: '氨纶含量高 → 缩水率 / 单耗超标风险，需提前测缩水',
+        evidence: '订单创建时业务勾选了「高弹面料」标签',
+      };
     },
   },
   {
@@ -137,10 +206,12 @@ const DIMENSIONS: RiskDimension[] = [
     label: 'Plus Size',
     maxScore: 10,
     evaluate: ctx => {
-      if (ctx.specialTags.includes('大码款')) {
-        return { score: 10, reason: 'XL 以上 grade 容易出错，建议每个码段单独打样' };
-      }
-      return { score: 0 };
+      if (!ctx.specialTags.includes('大码款')) return { score: 0 };
+      return {
+        score: 10,
+        reason: 'XL 以上 grade 容易出错，建议每个码段单独打样',
+        evidence: '订单创建时业务勾选了「大码款」标签',
+      };
     },
   },
   {
@@ -149,10 +220,12 @@ const DIMENSIONS: RiskDimension[] = [
     label: '复杂印花',
     maxScore: 5,
     evaluate: ctx => {
-      if (ctx.specialTags.includes('复杂印花')) {
-        return { score: 5, reason: '满印 / 精细对位 — 印花对色和套位风险' };
-      }
-      return { score: 0 };
+      if (!ctx.specialTags.includes('复杂印花')) return { score: 0 };
+      return {
+        score: 5,
+        reason: '满印 / 精细对位 — 印花对色和套位风险',
+        evidence: '订单创建时业务勾选了「复杂印花」标签',
+      };
     },
   },
 
@@ -163,10 +236,12 @@ const DIMENSIONS: RiskDimension[] = [
     label: '浅色风险',
     maxScore: 10,
     evaluate: ctx => {
-      if (ctx.specialTags.includes('浅色风险')) {
-        return { score: 10, reason: '白 / 米 / 浅灰 — 色牢度 / 染色不匀风险，要求工厂提前送样' };
-      }
-      return { score: 0 };
+      if (!ctx.specialTags.includes('浅色风险')) return { score: 0 };
+      return {
+        score: 10,
+        reason: '白 / 米 / 浅灰 — 色牢度 / 染色不匀风险，要求工厂提前送样',
+        evidence: '订单创建时业务勾选了「浅色风险」标签',
+      };
     },
   },
   {
@@ -175,10 +250,12 @@ const DIMENSIONS: RiskDimension[] = [
     label: '撞色拼接',
     maxScore: 10,
     evaluate: ctx => {
-      if (ctx.specialTags.includes('撞色风险')) {
-        return { score: 10, reason: '深浅色拼接 — 沾色风险，必须做色牢度测试' };
-      }
-      return { score: 0 };
+      if (!ctx.specialTags.includes('撞色风险')) return { score: 0 };
+      return {
+        score: 10,
+        reason: '深浅色拼接 — 沾色风险，必须做色牢度测试',
+        evidence: '订单创建时业务勾选了「撞色风险」标签',
+      };
     },
   },
 
@@ -193,7 +270,11 @@ const DIMENSIONS: RiskDimension[] = [
       const styles = ctx.order.style_count || 0;
       const colors = ctx.order.color_count || 0;
       if (qty < 500 && styles >= 3 && colors >= 3) {
-        return { score: 8, reason: `仅 ${qty} 件分 ${styles} 款 ${colors} 色 — 工艺切换成本高，工厂可能不愿做` };
+        return {
+          score: 8,
+          reason: `仅 ${qty} 件分 ${styles} 款 ${colors} 色 — 工艺切换成本高，工厂可能不愿做`,
+          evidence: `订单字段 quantity=${qty} / style_count=${styles} / color_count=${colors}`,
+        };
       }
       return { score: 0 };
     },
@@ -211,10 +292,18 @@ const DIMENSIONS: RiskDimension[] = [
       if (!orderDate || !factoryDate) return { score: 0 };
       const days = Math.ceil((factoryDate.getTime() - orderDate.getTime()) / 86400000);
       if (days <= 25) {
-        return { score: 15, reason: `仅 ${days} 天交期 — 极端紧迫，建议增加 buffer` };
+        return {
+          score: 15,
+          reason: `仅 ${days} 天交期 — 极端紧迫，建议增加 buffer`,
+          evidence: `订单字段：order_date=${ctx.order.order_date} → factory_date=${ctx.order.factory_date}（${days} 天）`,
+        };
       }
       if (days <= 35) {
-        return { score: 8, reason: `${days} 天交期 — 偏紧，跟单需密切跟进` };
+        return {
+          score: 8,
+          reason: `${days} 天交期 — 偏紧，跟单需密切跟进`,
+          evidence: `订单字段：order_date=${ctx.order.order_date} → factory_date=${ctx.order.factory_date}（${days} 天）`,
+        };
       }
       return { score: 0 };
     },
@@ -225,10 +314,12 @@ const DIMENSIONS: RiskDimension[] = [
     label: '业务标记交期紧',
     maxScore: 5,
     evaluate: ctx => {
-      if (ctx.specialTags.includes('交期紧急')) {
-        return { score: 5, reason: '业务在创建时已标记交期紧急' };
-      }
-      return { score: 0 };
+      if (!ctx.specialTags.includes('交期紧急')) return { score: 0 };
+      return {
+        score: 5,
+        reason: '业务在创建时已标记交期紧急',
+        evidence: '订单创建时业务勾选了「交期紧急」标签',
+      };
     },
   },
   {
@@ -240,12 +331,19 @@ const DIMENSIONS: RiskDimension[] = [
       const factoryDate = ctx.order.factory_date ? new Date(ctx.order.factory_date) : null;
       if (!factoryDate) return { score: 0 };
       const month = factoryDate.getMonth() + 1; // 1-12
-      // 9-11 月（圣诞订单旺季 + 工厂超载）+ 1-2 月（春节前后）
       if (month >= 9 && month <= 11) {
-        return { score: 8, reason: '跨秋冬旺季（9-11月）— 工厂产能紧张，QC 和物流双高峰' };
+        return {
+          score: 8,
+          reason: '跨秋冬旺季（9-11月）— 工厂产能紧张，QC 和物流双高峰',
+          evidence: `订单 factory_date=${ctx.order.factory_date}（${month} 月）`,
+        };
       }
       if (month === 1 || month === 2) {
-        return { score: 8, reason: '跨春节前后 — 工人短缺 / 节后开工不齐' };
+        return {
+          score: 8,
+          reason: '跨春节前后 — 工人短缺 / 节后开工不齐',
+          evidence: `订单 factory_date=${ctx.order.factory_date}（${month} 月，春节区间）`,
+        };
       }
       return { score: 0 };
     },
@@ -258,10 +356,12 @@ const DIMENSIONS: RiskDimension[] = [
     label: '定制包装',
     maxScore: 8,
     evaluate: ctx => {
-      if (ctx.order.packaging_type === 'custom') {
-        return { score: 8, reason: '非标准包装 — 必须客户多轮确认，常见拖期点' };
-      }
-      return { score: 0 };
+      if (ctx.order.packaging_type !== 'custom') return { score: 0 };
+      return {
+        score: 8,
+        reason: '非标准包装 — 必须客户多轮确认，常见拖期点',
+        evidence: '订单字段 packaging_type = "custom"',
+      };
     },
   },
 
@@ -278,7 +378,11 @@ const DIMENSIONS: RiskDimension[] = [
       if (!ctx.hasFile('customer_quote')) missing.push('客户报价单');
       if (missing.length === 0) return { score: 0 };
       const score = Math.min(20, missing.length * 7);
-      return { score, reason: `缺关键文件：${missing.join(' / ')}` };
+      return {
+        score,
+        reason: `缺关键文件：${missing.join(' / ')}`,
+        evidence: `查 order_attachments 表：${missing.length} 个 file_type 缺失`,
+      };
     },
   },
 
@@ -289,30 +393,48 @@ const DIMENSIONS: RiskDimension[] = [
     label: '跳过产前样 + 新工厂',
     maxScore: 25,
     evaluate: ctx => {
-      const skipSample = ctx.order.skip_pre_production_sample;
-      const newFactory = ctx.order.is_new_factory || ctx.factory.totalOrders === 0;
+      const skipSample = ctx.order.skip_pre_production_sample === true;
+      const newFactory = ctx.order.is_new_factory === true || (ctx.order.factory_id && ctx.factory.totalOrders === 0);
       if (skipSample && newFactory) {
-        return { score: 25, reason: '跳过产前样 + 新工厂 — 极高风险，强烈建议至少做 1 件确认样' };
+        return {
+          score: 25,
+          reason: '跳过产前样 + 新工厂 — 极高风险，强烈建议至少做 1 件确认样',
+          evidence: 'skip_pre_production_sample=true 且 is_new_factory=true',
+        };
       }
       if (skipSample) {
-        return { score: 8, reason: '跳过产前样 — 老工厂可接受，但首件确认必须严格' };
+        return {
+          score: 8,
+          reason: '跳过产前样 — 老工厂可接受，但首件确认必须严格',
+          evidence: '订单字段 skip_pre_production_sample = true',
+        };
       }
       return { score: 0 };
     },
   },
 
-  // 10. 历史维度（同客户上单延期）
+  // 10. 历史维度（同客户上单延期）— 必须有足够数据才能下结论
   {
     id: 'customer_recent_delay',
     category: '历史',
     label: '该客户上单延期',
     maxScore: 12,
     evaluate: ctx => {
+      // 必须至少有 3 单历史，否则无意义
+      if (!ctx.customer.hasEnoughData) return { score: 0 };
       if (ctx.customer.avgDelayDays >= 5) {
-        return { score: 12, reason: `该客户最近 5 单平均延期 ${Math.round(ctx.customer.avgDelayDays)} 天` };
+        return {
+          score: 12,
+          reason: `该客户最近订单平均延期 ${Math.round(ctx.customer.avgDelayDays)} 天`,
+          evidence: `基于 ${ctx.customer.totalOrders} 单历史里程碑数据计算`,
+        };
       }
       if (ctx.customer.avgDelayDays >= 2) {
-        return { score: 6, reason: `该客户历史有轻度延期记录` };
+        return {
+          score: 6,
+          reason: `该客户历史有轻度延期记录（平均 ${Math.round(ctx.customer.avgDelayDays)} 天）`,
+          evidence: `基于 ${ctx.customer.totalOrders} 单历史里程碑数据计算`,
+        };
       }
       return { score: 0 };
     },
@@ -510,7 +632,13 @@ export const riskAssessmentSkill: SkillModule = {
 // ════════════════════════════════════════════════
 
 async function computeCustomerStats(supabase: any, customerName: string | null) {
-  const empty = { totalOrders: 0, complaintCount: 0, avgDelayDays: 0 };
+  const empty = {
+    totalOrders: 0,
+    complaintCount: 0,
+    qualityIssueCount: 0,
+    avgDelayDays: 0,
+    hasEnoughData: false,
+  };
   if (!customerName) return empty;
 
   try {
@@ -518,48 +646,62 @@ async function computeCustomerStats(supabase: any, customerName: string | null) 
     const { count: orderCount } = await (supabase.from('orders') as any)
       .select('id', { count: 'exact', head: true })
       .eq('customer_name', customerName);
+    const totalOrders = orderCount || 0;
 
-    // 投诉数（从 customer_memory 找 category in ['complaint','quality','delay']）
+    // 投诉数（仅 category='complaint'，不算 delay/general）
     let complaintCount = 0;
+    let qualityIssueCount = 0;
     try {
-      const { count } = await (supabase.from('customer_memory') as any)
+      const { count: cc } = await (supabase.from('customer_memory') as any)
         .select('id', { count: 'exact', head: true })
         .eq('customer_id', customerName)
-        .in('category', ['complaint', 'quality', 'delay']);
-      complaintCount = count || 0;
+        .eq('category', 'complaint');
+      complaintCount = cc || 0;
+
+      const { count: qc } = await (supabase.from('customer_memory') as any)
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_id', customerName)
+        .eq('category', 'quality');
+      qualityIssueCount = qc || 0;
     } catch {}
 
-    // 平均延期：取最近 5 单的逾期天数平均
+    // 平均延期：必须有 ≥3 单 + ≥3 条 actual_at 数据才能可信
     let avgDelayDays = 0;
     try {
-      const { data: recent } = await (supabase.from('orders') as any)
-        .select('id, factory_date')
-        .eq('customer_name', customerName)
-        .order('created_at', { ascending: false })
-        .limit(5);
-      if (recent && recent.length > 0) {
-        // 简化：用 milestone 是否有 overdue 估算
-        const orderIds = recent.map((o: any) => o.id);
-        const { data: overdueMs } = await (supabase.from('milestones') as any)
-          .select('order_id, due_at, actual_at, status')
-          .in('order_id', orderIds);
-        const delays: number[] = [];
-        for (const m of (overdueMs || [])) {
-          if (m.actual_at && m.due_at) {
-            const d = (new Date(m.actual_at).getTime() - new Date(m.due_at).getTime()) / 86400000;
-            if (d > 0) delays.push(d);
+      if (totalOrders >= 3) {
+        const { data: recent } = await (supabase.from('orders') as any)
+          .select('id')
+          .eq('customer_name', customerName)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (recent && recent.length > 0) {
+          const orderIds = recent.map((o: any) => o.id);
+          const { data: doneMs } = await (supabase.from('milestones') as any)
+            .select('order_id, due_at, actual_at')
+            .in('order_id', orderIds)
+            .not('actual_at', 'is', null);
+          const delays: number[] = [];
+          for (const m of (doneMs || [])) {
+            if (m.actual_at && m.due_at) {
+              const d = (new Date(m.actual_at).getTime() - new Date(m.due_at).getTime()) / 86400000;
+              if (d > 0) delays.push(d);
+            }
           }
-        }
-        if (delays.length > 0) {
-          avgDelayDays = delays.reduce((a, b) => a + b, 0) / delays.length;
+          // 至少 3 个真实数据点才计算平均
+          if (delays.length >= 3) {
+            avgDelayDays = delays.reduce((a, b) => a + b, 0) / delays.length;
+          }
         }
       }
     } catch {}
 
     return {
-      totalOrders: orderCount || 0,
+      totalOrders,
       complaintCount,
+      qualityIssueCount,
       avgDelayDays,
+      // 至少 3 单才算"足够数据"做历史分析
+      hasEnoughData: totalOrders >= 3,
     };
   } catch {
     return empty;
@@ -567,15 +709,15 @@ async function computeCustomerStats(supabase: any, customerName: string | null) 
 }
 
 async function computeFactoryStats(supabase: any, factoryId: string | null) {
-  const empty = { totalOrders: 0, avgDelayDays: 0, qcPassRate: null };
+  const empty = { totalOrders: 0, avgDelayDays: 0, qcPassRate: null, hasEnoughData: false };
   if (!factoryId) return empty;
 
   try {
     const { count } = await (supabase.from('orders') as any)
       .select('id', { count: 'exact', head: true })
       .eq('factory_id', factoryId);
+    const totalOrders = count || 0;
 
-    // 工厂表可能已有缓存字段（factories.avg_delay_days / qc_pass_rate）
     let avgDelayDays = 0;
     let qcPassRate: number | null = null;
     try {
@@ -590,9 +732,11 @@ async function computeFactoryStats(supabase: any, factoryId: string | null) {
     } catch {}
 
     return {
-      totalOrders: count || 0,
+      totalOrders,
       avgDelayDays,
       qcPassRate,
+      // 至少 3 单才算"足够数据"做历史分析
+      hasEnoughData: totalOrders >= 3,
     };
   } catch {
     return empty;

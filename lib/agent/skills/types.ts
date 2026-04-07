@@ -35,6 +35,8 @@ export interface SkillFinding {
   severity: SkillSeverity;
   label: string;
   detail?: string;
+  /** 数据依据 — 必须来自真实数据源，不能凭感觉。空字符串 = 无依据，UI 应隐藏或标"数据不足" */
+  evidence?: string;
   /** 哪个里程碑会被卡住（缺失资料 Skill 用） */
   blocksStep?: string;
   blocksStepName?: string;

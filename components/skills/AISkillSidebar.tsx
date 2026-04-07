@@ -240,6 +240,11 @@ function FindingItem({ finding }: { finding: SkillFinding }) {
           {finding.detail && (
             <p className="text-[11px] mt-0.5 opacity-90">{finding.detail}</p>
           )}
+          {finding.evidence && (
+            <p className="text-[10px] mt-1 text-gray-500 italic">
+              📎 依据：{finding.evidence}
+            </p>
+          )}
           {finding.blocksStepName && (
             <p className="text-[10px] mt-0.5 opacity-75">
               卡 {finding.blocksStepName}

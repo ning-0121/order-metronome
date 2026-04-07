@@ -333,32 +333,43 @@ export interface MonthlyShipment {
 
 export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
   const supabase = await createClient();
+  // 注意：不再 fallback 到 etd 当出厂日（etd 是离港日，差 25 天）
+  // 也不再 fallback 到 created_at 当下单日（created_at 是行插入时间，与业务无关）
   const { data: orders } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, factory_name, quantity, factory_date, etd, order_date, created_at, incoterm, lifecycle_status')
+    .select('id, order_no, customer_name, factory_name, quantity, factory_date, order_date, lifecycle_status')
     .not('lifecycle_status', 'eq', '已取消');
   if (!orders || orders.length === 0) return [];
 
-  // 获取所有订单的 production_kickoff 节点（生产上线日期）
+  // 获取所有订单的关键里程碑（po_confirmed 实际/计划 + production_kickoff 实际/计划）
   const orderIds = orders.map((o: any) => o.id);
-  const { data: prodMilestones } = await (supabase.from('milestones') as any)
-    .select('order_id, due_at')
+  const { data: keyMilestones } = await (supabase.from('milestones') as any)
+    .select('order_id, step_key, due_at, actual_at')
     .in('order_id', orderIds)
-    .eq('step_key', 'production_kickoff');
-  const prodDateMap = new Map<string, string>();
-  for (const m of prodMilestones || []) {
-    if (m.due_at) prodDateMap.set(m.order_id, m.due_at.slice(0, 7));
+    .in('step_key', ['po_confirmed', 'production_kickoff']);
+
+  const poDateMap = new Map<string, string>();      // 下单 = po_confirmed.actual_at || due_at || order_date
+  const prodDateMap = new Map<string, string>();    // 生产上线 = production_kickoff.actual_at || due_at
+  for (const m of keyMilestones || []) {
+    const date = m.actual_at || m.due_at;
+    if (!date) continue;
+    const month = date.slice(0, 7);
+    if (m.step_key === 'po_confirmed' && !poDateMap.has(m.order_id)) {
+      poDateMap.set(m.order_id, month);
+    }
+    if (m.step_key === 'production_kickoff' && !prodDateMap.has(m.order_id)) {
+      prodDateMap.set(m.order_id, month);
+    }
   }
 
-  // 找出所有相关月份范围：从最早下单月到未来8个月
+  // 收集所有相关月份
   const now = new Date();
-  const currentMonth = now.toISOString().slice(0, 7);
-
-  // 收集所有涉及的月份
   const allMonthsSet = new Set<string>();
   for (const o of orders) {
-    const orderMonth = (o.order_date || o.created_at || '').slice(0, 7);
+    // 下单月：优先 po_confirmed milestone，回退到 order_date（不再用 created_at）
+    const orderMonth = poDateMap.get(o.id) || (o.order_date ? o.order_date.slice(0, 7) : '');
     if (orderMonth) allMonthsSet.add(orderMonth);
-    const factoryMonth = (o.factory_date || o.etd || '').slice(0, 7);
+    // 出厂月：仅用 factory_date，不再 fallback 到 etd
+    const factoryMonth = o.factory_date ? o.factory_date.slice(0, 7) : '';
     if (factoryMonth) allMonthsSet.add(factoryMonth);
     const prodMonth = prodDateMap.get(o.id);
     if (prodMonth) allMonthsSet.add(prodMonth);
@@ -383,22 +394,23 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
   });
 
   for (const o of orders) {
-    // 下单月维度（用 order_date 或 created_at）
-    const orderMonth = (o.order_date || o.created_at || '').slice(0, 7);
-    const orderBucket = monthMap.get(orderMonth);
-    if (orderBucket) orderBucket.orderDateCount++;
+    // 下单月维度：优先 po_confirmed.actual_at/due_at，回退 order_date
+    const orderMonth = poDateMap.get(o.id) || (o.order_date ? o.order_date.slice(0, 7) : '');
+    if (orderMonth) {
+      const orderBucket = monthMap.get(orderMonth);
+      if (orderBucket) orderBucket.orderDateCount++;
+    }
 
-    // 生产上线月维度
+    // 生产上线月维度（来自 production_kickoff milestone）
     const prodMonth = prodDateMap.get(o.id);
     if (prodMonth) {
       const prodBucket = monthMap.get(prodMonth);
       if (prodBucket) prodBucket.productionCount++;
     }
 
-    // 出厂月维度
-    const shipDate = o.factory_date || o.etd;
-    if (!shipDate) continue;
-    const shipMonth = shipDate.slice(0, 7);
+    // 出厂月维度（仅 factory_date，不用 etd 兜底）
+    if (!o.factory_date) continue;
+    const shipMonth = o.factory_date.slice(0, 7);
     const bucket = monthMap.get(shipMonth);
     if (bucket) {
       bucket.orders.push(o); bucket.qty += o.quantity || 0;
