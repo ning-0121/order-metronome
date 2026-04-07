@@ -134,13 +134,16 @@ export default async function OrderDetailPage({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* 顶部 Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-40 shadow-sm">
+      {/* 醒目返回按钮 — 独立浮动栏，避免被 Navbar 遮挡 */}
+      <div className="bg-indigo-50 border-b border-indigo-200 px-6 py-3">
         <div className="max-w-7xl mx-auto">
-          {/* 醒目返回按钮 — 永远可见 */}
-          <div className="mb-3">
-            <BackButton fromUrl={fromUrl} />
-          </div>
+          <BackButton fromUrl={fromUrl} />
+        </div>
+      </div>
+
+      {/* 顶部 Header */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="max-w-7xl mx-auto">
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-3 mb-1">
