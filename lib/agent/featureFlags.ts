@@ -29,3 +29,27 @@ export const AGENT_FLAGS = {
   /** 业务员每日简报 */
   dailyBriefing: () => process.env.AGENT_FLAG_DAILY_BRIEFING !== 'false',
 };
+
+/**
+ * AI Skills 开关 — 默认全部 false，必须显式设置 SKILL_*=true 才生效
+ *
+ * Phase 1（本周）：missing_info / risk_assessment / quote_review
+ * Phase 2（下周）：delay_prediction / customer_confirmation
+ * Phase 3（后续）：outsource_risk / milestone_generation
+ *
+ * Shadow Mode 默认开启（写日志但不展示给用户），需要显式 SKILL_SHADOW_MODE=false 才关
+ */
+export const SKILL_FLAGS = {
+  // Phase 1
+  riskAssessment: () => process.env.SKILL_RISK_ASSESSMENT === 'true',
+  missingInfo: () => process.env.SKILL_MISSING_INFO === 'true',
+  quoteReview: () => process.env.SKILL_QUOTE_REVIEW === 'true',
+  // Phase 2
+  delayPrediction: () => process.env.SKILL_DELAY_PREDICTION === 'true',
+  customerConfirmation: () => process.env.SKILL_CUSTOMER_CONFIRMATION === 'true',
+  // Phase 3
+  outsourceRisk: () => process.env.SKILL_OUTSOURCE_RISK === 'true',
+  milestoneGeneration: () => process.env.SKILL_MILESTONE_GENERATION === 'true',
+  // 全局 shadow 模式（默认 ON — 第一周必须先观察日志）
+  shadowMode: () => process.env.SKILL_SHADOW_MODE !== 'false',
+};

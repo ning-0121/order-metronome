@@ -1623,3 +1623,74 @@ DROP POLICY IF EXISTS "order_attachments_select_v2" ON public.order_attachments;
 CREATE POLICY "order_attachments_select_v2" ON public.order_attachments FOR SELECT USING (
   auth.uid() IS NOT NULL AND public.user_can_access_order(auth.uid(), order_id)
 );
+
+-- ===== 2026-04-08 AI Skills Phase 1 基础设施 =====
+-- 详见 supabase/migrations/20260408_ai_skills_phase1.sql
+CREATE TABLE IF NOT EXISTS public.ai_skill_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  skill_name text NOT NULL,
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE,
+  customer_id text,
+  input_hash text NOT NULL,
+  input_snapshot jsonb NOT NULL DEFAULT '{}',
+  output_result jsonb,
+  source text NOT NULL DEFAULT 'rules' CHECK (source IN ('rules', 'rules+ai', 'cached', 'manual')),
+  confidence_score integer CHECK (confidence_score IS NULL OR (confidence_score BETWEEN 0 AND 100)),
+  confidence_level text CHECK (confidence_level IS NULL OR confidence_level IN ('high', 'medium', 'low')),
+  status text NOT NULL DEFAULT 'success' CHECK (status IN ('success', 'failed', 'timeout', 'shadow')),
+  duration_ms integer,
+  error_message text,
+  is_shadow boolean NOT NULL DEFAULT false,
+  expires_at timestamptz,
+  invalidated_at timestamptz,
+  triggered_by text CHECK (triggered_by IS NULL OR triggered_by IN ('user', 'cron', 'event', 'manual')),
+  triggered_user_id uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_runs_order_skill ON public.ai_skill_runs(order_id, skill_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_runs_cache_lookup ON public.ai_skill_runs(skill_name, input_hash, expires_at) WHERE invalidated_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_ai_skill_runs_shadow ON public.ai_skill_runs(skill_name, is_shadow, created_at DESC) WHERE is_shadow = true;
+ALTER TABLE public.ai_skill_runs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ai_skill_runs_admin_select" ON public.ai_skill_runs;
+CREATE POLICY "ai_skill_runs_admin_select" ON public.ai_skill_runs FOR SELECT USING (
+  auth.uid() IS NOT NULL AND public.user_can_see_all_orders(auth.uid())
+);
+DROP POLICY IF EXISTS "ai_skill_runs_admin_insert" ON public.ai_skill_runs;
+CREATE POLICY "ai_skill_runs_admin_insert" ON public.ai_skill_runs FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE TABLE IF NOT EXISTS public.ai_skill_actions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL REFERENCES public.ai_skill_runs(id) ON DELETE CASCADE,
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE,
+  action_type text NOT NULL,
+  action_payload jsonb NOT NULL DEFAULT '{}',
+  executed_by uuid NOT NULL REFERENCES auth.users(id),
+  executed_at timestamptz NOT NULL DEFAULT now(),
+  rollback_available boolean NOT NULL DEFAULT false,
+  rollback_until timestamptz,
+  rollback_payload jsonb,
+  rolled_back_at timestamptz,
+  rolled_back_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_actions_order ON public.ai_skill_actions(order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_actions_run ON public.ai_skill_actions(run_id);
+ALTER TABLE public.ai_skill_actions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ai_skill_actions_admin" ON public.ai_skill_actions;
+CREATE POLICY "ai_skill_actions_admin" ON public.ai_skill_actions FOR ALL USING (
+  auth.uid() IS NOT NULL AND public.user_can_see_all_orders(auth.uid())
+);
+
+CREATE TABLE IF NOT EXISTS public.ai_skill_circuit_state (
+  skill_name text PRIMARY KEY,
+  consecutive_failures integer NOT NULL DEFAULT 0,
+  paused_until timestamptz,
+  last_failure_at timestamptz,
+  last_failure_message text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.ai_skill_circuit_state ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ai_skill_circuit_state_admin" ON public.ai_skill_circuit_state;
+CREATE POLICY "ai_skill_circuit_state_admin" ON public.ai_skill_circuit_state FOR ALL USING (
+  auth.uid() IS NOT NULL AND public.user_can_see_all_orders(auth.uid())
+);

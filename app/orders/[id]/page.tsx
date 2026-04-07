@@ -22,6 +22,7 @@ import { OrderActions } from '@/components/OrderActions';
 import { RecalcButton } from '@/components/RecalcButton';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
+import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { EmailTab } from '@/components/tabs/EmailTab';
@@ -271,7 +272,14 @@ export default async function OrderDetailPage({
 
         {/* Tab: 基本信息 */}
         {activeTab === 'basic' && (
-          <><div className="grid gap-6 md:grid-cols-2">
+          <>
+          {/* AI Skills 侧栏 — 仅 admin 可见，Phase 1 只展示缺失资料检查 */}
+          {isAdmin && (
+            <div className="mb-6">
+              <AISkillSidebar orderId={id} isAdmin={isAdmin} />
+            </div>
+          )}
+          <div className="grid gap-6 md:grid-cols-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">基础信息</h2>
               <dl className="space-y-3">
