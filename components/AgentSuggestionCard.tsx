@@ -100,7 +100,7 @@ export function AgentSuggestionCard({ suggestion, showOrder = true }: {
               {suggestion.severity === 'high' ? '紧急' : suggestion.severity === 'medium' ? '建议' : '提示'}
             </span>
             {showOrder && suggestion.orderNo && (
-              <Link href={`/orders/${suggestion.orderId}`} className="text-xs text-indigo-600 hover:underline">
+              <Link href={`/orders/${suggestion.orderId}?from=/ceo`} className="text-xs text-indigo-600 hover:underline">
                 {suggestion.orderNo}
               </Link>
             )}
@@ -205,18 +205,21 @@ export function AgentSuggestionsPanel({ suggestions, title, showOrder }: {
         {orderGroups.map(group => {
           const sev = maxSev(group.items);
           return (
-            <details key={group.orderId} className="rounded-xl border border-gray-200 overflow-hidden" open={sev === 'high'}>
-              <summary className="cursor-pointer px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between">
+            <details key={group.orderId} className="group rounded-xl border border-gray-200 overflow-hidden">
+              <summary className="cursor-pointer px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between list-none">
                 <div className="flex items-center gap-2">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sevColor(sev)}`}>
                     {sev === 'high' ? '紧急' : sev === 'medium' ? '建议' : '提示'}
                   </span>
-                  <Link href={`/orders/${group.orderId}`} className="font-semibold text-indigo-700 hover:underline text-sm">
+                  <Link href={`/orders/${group.orderId}?from=/ceo`} className="font-semibold text-indigo-700 hover:underline text-sm">
                     {group.orderNo}
                   </Link>
                   <span className="text-xs text-gray-500">{group.items.length} 条建议</span>
                 </div>
-                <span className="text-xs text-gray-400">点击展开</span>
+                <span className="text-xs text-indigo-500 flex items-center gap-1">
+                  <span className="group-open:hidden">▼ 展开</span>
+                  <span className="hidden group-open:inline">▲ 收起</span>
+                </span>
               </summary>
               <div className="p-3 space-y-2 bg-white">
                 {group.items.map(s => (

@@ -25,6 +25,7 @@ import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { EmailTab } from '@/components/tabs/EmailTab';
+import { BackButton } from '@/components/BackButton';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -134,28 +135,17 @@ export default async function OrderDetailPage({
   return (
     <div className="min-h-screen bg-gray-50">
       {/* 顶部 Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto">
-          {/* 醒目返回按钮 */}
-          {fromUrl !== '/orders' && (
-            <div className="mb-3">
-              <Link
-                href={fromUrl}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
-              >
-                ← {fromUrl.includes('risk-orders')
-                    ? '返回风险订单列表，继续处理其他订单'
-                    : fromUrl === '/ceo' || fromUrl === '/dashboard'
-                      ? '返回首页'
-                      : '返回上一页'}
-              </Link>
-            </div>
-          )}
+          {/* 醒目返回按钮 — 永远可见 */}
+          <div className="mb-3">
+            <BackButton fromUrl={fromUrl} />
+          </div>
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-3 mb-1">
-                <Link href={fromUrl === '/orders' ? '/orders' : fromUrl} className="text-sm text-gray-400 hover:text-gray-600">
-                  ← {fromUrl === '/orders' ? '订单列表' : '上一级'}
+                <Link href="/orders" className="text-sm text-gray-400 hover:text-gray-600">
+                  订单列表
                 </Link>
               </div>
               <div className="flex items-center gap-3">
