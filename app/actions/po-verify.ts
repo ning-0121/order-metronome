@@ -3,6 +3,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 export interface POVerifyResult {
+  /** 文件类型自检：是否真的是客户 PO */
+  document_type?: 'customer_po' | 'quotation' | 'invoice' | 'packing_list' | 'tech_pack' | 'sample_card' | 'other' | 'unknown';
+  /** AI 对"是否为有效 PO"的置信度 0-100 */
+  confidence?: number;
+  /** 文件类型校验未通过时的警告 */
+  document_type_warning?: string;
   po_quantity?: number;
   po_delivery_date?: string;
   po_customer?: string;
@@ -26,35 +32,53 @@ export interface POVerifyResult {
   raw_extracted: Record<string, string>;
 }
 
-const VERIFY_PROMPT = `你是一个资深外贸服装订单风险分析专家。请从这个客户PO中提取关键信息并分析风险，返回严格的JSON（不要markdown包裹）：
+const VERIFY_PROMPT = `你是一个资深外贸服装订单风险分析专家。
+
+【第一步 — 文件类型校验】
+首先你必须判断这个文件**是不是客户 PO**。常见的非 PO 文件包括：
+- quotation: 报价单（有 "Quote/Quotation/报价"，无明确订单数量承诺）
+- invoice: 发票（有 "Invoice/INV"，是已发货后的账单）
+- packing_list: 装箱单（有 "Packing List"，列箱号尺寸）
+- tech_pack: 工艺单/技术包（有详细的尺寸表、工艺说明，无订单数量/交期）
+- sample_card: 样品卡/色卡
+- other: 其他无法识别的文档
+
+判断规则：
+- 真正的 PO 必须包含：客户公司名 + PO号 + 数量 + 交期 三项中的至少 2 项
+- 关键词：Purchase Order / PO Number / Order # / 采购订单 / 订购单
+- 如果只有报价没有订单承诺 → quotation
+- 如果只有尺寸表没有数量 → tech_pack
+
+【第二步 — 提取关键信息并返回 JSON】
+返回严格的 JSON（不要 markdown 包裹）：
 
 {
-  "quantity": 总数量（数字，不要单位），
+  "document_type": "customer_po" | "quotation" | "invoice" | "packing_list" | "tech_pack" | "sample_card" | "other",
+  "confidence": 0-100 的整数（你对 document_type 判断的把握，以及 PO 字段提取的整体置信度）,
+  "document_type_warning": 如果不是 customer_po，给出一句中文警告说明这看起来不是 PO，否则为 null,
+  "quantity": 总数量（数字，不要单位）,
   "delivery_date": "交期/到仓日/ETD（YYYY-MM-DD格式）",
   "customer_name": "客户名称",
   "style_no": "款号",
   "po_number": "PO号",
   "order_date": "下单日期（YYYY-MM-DD格式）",
   "risks": [
-    {
-      "type": "light_color",
-      "label": "浅色风险",
-      "detail": "具体说明，如：白色/米色面料，注意色牢度"
-    }
+    { "type": "light_color", "label": "浅色风险", "detail": "白色/米色面料，注意色牢度" }
   ],
   "special_terms": ["客户特殊要求1", "客户特殊要求2"]
 }
 
-risks 风险分析规则（请仔细扫描PO内容）：
-- light_color：如果颜色为白色、米色、浅灰、浅粉、奶油色等浅色，提示色牢度风险
-- color_clash：如果有深浅色拼接（如黑白、深蓝+浅色等），提示撞色沾色风险
-- special_wash：如果有特殊洗水/水洗/砂洗/酵素洗要求，提示工艺风险
-- tight_deadline：如果交期在30天以内，提示交期紧张
-- special_packing：如果有特殊包装要求（不同于标准包装），提示包装风险
+风险规则：
+- light_color：白/米/浅灰/浅粉/奶油等浅色 → 色牢度风险
+- color_clash：深浅色拼接（黑白、深蓝+浅色）→ 撞色沾色
+- special_wash：特殊洗水/水洗/砂洗/酵素洗 → 工艺风险
+- tight_deadline：交期 ≤ 30 天 → 交期紧张
+- special_packing：非标准包装 → 包装风险
 
-special_terms：提取PO中涉及生产和出货的特殊条款/要求（如验货标准、罚款条款、特殊测试要求等）
+special_terms：提取生产/出货特殊条款（验货标准、罚款条款、测试要求等）
 
-如果某个字段找不到填 null，risks 和 special_terms 没有就填空数组。`;
+字段找不到填 null，risks 和 special_terms 没有就填空数组。
+**置信度评分**：document_type 明确 + 关键字段都能提取 → 80-100；只能提取部分字段 → 50-80；非 PO 文件或几乎无法提取 → 0-50。`;
 
 /**
  * 从已上传的 PO 附件中提取关键信息，与订单数据比对
@@ -125,6 +149,42 @@ export async function verifyPOAgainstOrder(
     }
     const differences: POVerifyResult['differences'] = [];
     const matched: string[] = [];
+
+    // ── 文件类型自检：如果不是 customer_po 或置信度太低，立即作为 error 抛出 ──
+    const docType = extracted.document_type || 'unknown';
+    const confidence = typeof extracted.confidence === 'number' ? extracted.confidence : null;
+    let docTypeWarning: string | undefined;
+    if (docType !== 'customer_po') {
+      const typeLabel: Record<string, string> = {
+        quotation: '报价单',
+        invoice: '发票',
+        packing_list: '装箱单',
+        tech_pack: '工艺单/技术包',
+        sample_card: '样品卡',
+        other: '其他文档',
+        unknown: '无法识别',
+      };
+      docTypeWarning =
+        extracted.document_type_warning ||
+        `⚠️ AI 判断这不是客户 PO，看起来是「${typeLabel[docType] || docType}」。请确认上传的文件正确。`;
+      // 把它作为最高优先级的差异加入列表，强制业务关注
+      differences.push({
+        field: 'document_type',
+        fieldLabel: '文件类型',
+        poValue: typeLabel[docType] || docType,
+        orderValue: '客户 PO',
+        severity: 'error',
+      });
+    } else if (confidence !== null && confidence < 60) {
+      docTypeWarning = `⚠️ AI 提取置信度较低（${confidence}/100），请人工核对所有字段。`;
+      differences.push({
+        field: 'confidence',
+        fieldLabel: '提取置信度',
+        poValue: `${confidence}/100`,
+        orderValue: '≥ 60',
+        severity: 'warning',
+      });
+    }
 
     // 比对数量
     if (extracted.quantity != null && orderData.quantity != null) {
@@ -202,6 +262,9 @@ export async function verifyPOAgainstOrder(
 
     return {
       data: {
+        document_type: docType,
+        confidence: confidence ?? undefined,
+        document_type_warning: docTypeWarning,
         po_quantity: extracted.quantity,
         po_delivery_date: extracted.delivery_date,
         po_customer: extracted.customer_name,

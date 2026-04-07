@@ -811,6 +811,18 @@ function NewOrderWizard() {
               <h3 className="text-lg font-bold text-gray-900">AI 订单审核报告</h3>
             </div>
 
+            {/* 文件类型自检 — 不是 PO 时强提示 */}
+            {poVerifyResult.document_type_warning && (
+              <div className="rounded-lg bg-red-100 border-2 border-red-400 p-4 text-sm text-red-800 font-medium">
+                {poVerifyResult.document_type_warning}
+                {poVerifyResult.confidence !== undefined && (
+                  <div className="text-xs text-red-600 mt-1 font-normal">
+                    AI 置信度：{poVerifyResult.confidence}/100
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 数据差异 */}
             {poVerifyResult.differences.length > 0 && (
               <>

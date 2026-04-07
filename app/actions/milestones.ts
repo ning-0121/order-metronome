@@ -26,8 +26,17 @@ type MilestoneLogAction =
   | 'update'
   | 'execution_note';
 
-/** 检查订单是否允许修改关卡（已取消/已完成的订单禁止操作） */
-async function checkOrderModifiable(supabase: any, orderId: string): Promise<string | null> {
+/**
+ * 检查订单是否允许修改关卡
+ * - 普通角色：已完成 / 已取消订单禁止操作
+ * - 管理员：可强制操作（用于历史数据修复 / 状态回滚）
+ */
+async function checkOrderModifiable(
+  supabase: any,
+  orderId: string,
+  isAdmin: boolean = false,
+): Promise<string | null> {
+  if (isAdmin) return null; // 管理员后门：任意状态都允许操作
   const { data: order } = await (supabase.from('orders') as any)
     .select('lifecycle_status')
     .eq('id', orderId)
@@ -151,24 +160,20 @@ export async function markMilestoneDone(
     return { error: getError?.message || '找不到该执行节点' };
   }
 
-  // 生命周期校验：已完成/已取消的订单禁止操作
-  const lifecycleError = await checkOrderModifiable(supabase, milestone.order_id);
-  if (lifecycleError) return { error: lifecycleError };
-
-  // Check role: must be assigned user or matching owner_role
-  // 管理员不能替代执行关卡（管理员负责监督、指派、审批，不替代一线操作）
+  // 角色解析
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, roles')
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdmin = userRoles.includes('admin');
 
-  // 管理员禁止标记完成（管理员负责监督，不替代一线操作；多角色管理员同样受限）
-  if (userRoles.includes('admin')) {
-    return { error: '管理员不能标记关卡完成，请由对应角色的负责人操作' };
-  }
+  // 生命周期校验：已完成/已取消的订单禁止操作（管理员可强制）
+  const lifecycleError = await checkOrderModifiable(supabase, milestone.order_id, isAdmin);
+  if (lifecycleError) return { error: lifecycleError };
 
+  // 管理员可以代标完成（用于一线人员离职/休假的应急场景），但日志会标注「管理员代操作」
   const isAssignedUser = milestone.owner_user_id === user.id;
   // 角色合并：production/qc/quality 都归入 merchandiser
   const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
@@ -182,8 +187,8 @@ export async function markMilestoneDone(
       return false;
     }
   );
-  if (!isAssignedUser && !roleMatches) {
-    return { error: '无权操作：只有对应角色的负责人可以标记完成' };
+  if (!isAssignedUser && !roleMatches && !isAdmin) {
+    return { error: '无权操作：只有对应角色的负责人或管理员可以标记完成' };
   }
 
   // 自动认领：如果该关卡尚未分配具体负责人，且操作者角色匹配，自动认领
@@ -487,11 +492,7 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
     return { error: getError?.message || '找不到该执行节点' };
   }
 
-  // 生命周期校验
-  const lifecycleErr = await checkOrderModifiable(supabase, milestone.order_id);
-  if (lifecycleErr) return { error: lifecycleErr };
-
-  // Check role: must be admin, assigned user, or matching owner_role (V2: multi-role)
+  // 角色解析
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, roles')
@@ -499,6 +500,10 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdminUser = userRoles.includes('admin');
+  // 生命周期校验（管理员可强制）
+  const lifecycleErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUser);
+  if (lifecycleErr) return { error: lifecycleErr };
+
   const isAssignedUser = milestone.owner_user_id === user.id;
   const roleMatches = milestone.owner_role && userRoles.some(
     (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
@@ -627,9 +632,12 @@ export async function updateMilestoneStatus(
     .eq('id', milestoneId)
     .single();
 
-  // 生命周期校验
+  // 生命周期校验（管理员可强制）
   if (milestone) {
-    const lcErr = await checkOrderModifiable(supabase, (milestone as any).order_id);
+    const { data: profileLc } = await supabase
+      .from('profiles').select('role, roles').eq('user_id', user.id).single();
+    const lcRoles: string[] = (profileLc as any)?.roles?.length > 0 ? (profileLc as any).roles : [(profileLc as any)?.role].filter(Boolean);
+    const lcErr = await checkOrderModifiable(supabase, (milestone as any).order_id, lcRoles.includes('admin'));
     if (lcErr) return { error: lcErr };
   }
   
@@ -711,11 +719,11 @@ export async function markMilestoneUnblocked(milestoneId: string) {
     return { error: '无权操作：只有管理员可以解除卡住状态' };
   }
 
-  // 生命周期校验
+  // 生命周期校验（管理员强制操作）
   const { data: msForCheck } = await (supabase.from('milestones') as any)
     .select('order_id').eq('id', milestoneId).single();
   if (msForCheck) {
-    const lcErr = await checkOrderModifiable(supabase, msForCheck.order_id);
+    const lcErr = await checkOrderModifiable(supabase, msForCheck.order_id, true /* admin */);
     if (lcErr) return { error: lcErr };
   }
 
@@ -1111,16 +1119,19 @@ export async function saveChecklistData(
     .single();
   if (!milestone) return { error: '节点不存在' };
 
-  // 生命周期校验
-  const lcErr = await checkOrderModifiable(supabase, milestone.order_id);
+  // 角色解析（先读，给生命周期校验和检查项校验复用）
+  const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdminUserCl = userRoles.includes('admin');
+
+  // 生命周期校验（管理员可强制）
+  const lcErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUserCl);
   if (lcErr) return { error: lcErr };
 
-  // 角色校验：只能编辑自己角色对应的检查项
+  // 角色校验：只能编辑自己角色对应的检查项（管理员不受限）
   const { getChecklistForStep } = await import('@/lib/domain/checklist');
   const checklistConfig = getChecklistForStep(milestone.step_key);
-  if (checklistConfig) {
-    const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
-    const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (checklistConfig && !isAdminUserCl) {
     for (const r of responses) {
       const itemDef = checklistConfig.items.find((i: any) => i.key === r.key);
       if (itemDef && !userRoles.some((ur: string) => ur.toLowerCase() === itemDef.role.toLowerCase())) {

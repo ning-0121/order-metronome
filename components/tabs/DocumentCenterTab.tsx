@@ -340,7 +340,12 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
       )}
 
       {/* ===== 所有已上传文件汇总 ===== */}
-      <AllUploadedFiles orderId={orderId} isProductionLine={isProductionLine} hidePriceDocs={isAdminAssistant || isProductionLine} />
+      <AllUploadedFiles
+        orderId={orderId}
+        isProductionLine={isProductionLine}
+        hidePriceDocs={isAdminAssistant || isProductionLine}
+        canDelete={isAdmin || currentRoles.includes('sales')}
+      />
     </div>
   );
 }
@@ -358,7 +363,7 @@ const FILE_TYPE_CONFIG: Array<{ type: string; label: string; icon: string; sensi
   { type: 'evidence', label: '节点凭证', icon: '📎', sensitive: false },
 ];
 
-function AllUploadedFiles({ orderId, isProductionLine, hidePriceDocs }: { orderId: string; isProductionLine: boolean; hidePriceDocs?: boolean }) {
+function AllUploadedFiles({ orderId, isProductionLine, hidePriceDocs, canDelete }: { orderId: string; isProductionLine: boolean; hidePriceDocs?: boolean; canDelete?: boolean }) {
   const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -370,6 +375,14 @@ function AllUploadedFiles({ orderId, isProductionLine, hidePriceDocs }: { orderI
       .order('created_at', { ascending: false })
       .then(({ data }: any) => { setFiles(data || []); setLoading(false); });
   }, [orderId]);
+
+  async function handleDelete(f: any) {
+    if (!confirm(`确定删除「${f.file_name}」？此操作不可恢复。`)) return;
+    const { deleteAttachment } = await import('@/app/actions/attachments');
+    const res = await deleteAttachment(f.id, orderId);
+    if (res.error) { alert(res.error); return; }
+    setFiles(prev => prev.filter(x => x.id !== f.id));
+  }
 
   if (loading) return null;
 
@@ -408,12 +421,24 @@ function AllUploadedFiles({ orderId, isProductionLine, hidePriceDocs }: { orderI
                       <span className="text-sm text-gray-900 truncate">{f.file_name || '未命名'}</span>
                       <span className="text-xs text-gray-400">{new Date(f.created_at).toLocaleDateString('zh-CN')}</span>
                     </div>
-                    {f.file_url && (
-                      <a href={f.file_url} target="_blank" rel="noopener noreferrer"
-                        className="text-xs px-2.5 py-1 rounded bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50 shrink-0">
-                        查看
-                      </a>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {f.file_url && (
+                        <a href={f.file_url} target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2.5 py-1 rounded bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50">
+                          查看
+                        </a>
+                      )}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(f)}
+                          className="text-xs px-2.5 py-1 rounded bg-white border border-red-200 text-red-600 hover:bg-red-50"
+                          title="删除"
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

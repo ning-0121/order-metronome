@@ -830,7 +830,23 @@ function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload
           {files.map(f => (
             <div key={f.id} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1.5 border border-gray-100">
               <span className="truncate text-gray-700">📎 {f.file_name || '文件'} <span className="text-gray-400">({typeLabels[f.file_type] || f.file_type})</span></span>
-              {f.file_url && <a href={f.file_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline shrink-0 ml-2">查看</a>}
+              <span className="flex items-center gap-2 shrink-0 ml-2">
+                {f.file_url && <a href={f.file_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">查看</a>}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!confirm(`确定删除「${f.file_name}」？此操作不可恢复。`)) return;
+                    const { deleteAttachment } = await import('@/app/actions/attachments');
+                    const res = await deleteAttachment(f.id, orderId);
+                    if (res.error) { alert(res.error); return; }
+                    setFiles(prev => prev.filter(x => x.id !== f.id));
+                  }}
+                  className="text-red-500 hover:text-red-700"
+                  title="删除"
+                >
+                  删除
+                </button>
+              </span>
             </div>
           ))}
         </div>

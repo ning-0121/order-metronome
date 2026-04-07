@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { deleteAttachment } from '@/app/actions/attachments';
 
 interface PackingFile {
   id: string;
@@ -15,9 +16,11 @@ interface Props {
   orderId: string;
   fileTypes?: string[];
   emptyText?: string;
+  /** 是否允许删除（默认 true — 由订单页根据角色判断后传入） */
+  canDelete?: boolean;
 }
 
-export function PackingFilesSection({ orderId, fileTypes, emptyText }: Props) {
+export function PackingFilesSection({ orderId, fileTypes, emptyText, canDelete = true }: Props) {
   const [files, setFiles] = useState<PackingFile[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,6 +35,13 @@ export function PackingFilesSection({ orderId, fileTypes, emptyText }: Props) {
       .order('created_at', { ascending: false })
       .then(({ data }: any) => { setFiles(data || []); setLoading(false); });
   }, [orderId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleDelete(f: PackingFile) {
+    if (!confirm(`确定删除「${f.file_name}」？此操作不可恢复。`)) return;
+    const res = await deleteAttachment(f.id, orderId);
+    if (res.error) { alert(res.error); return; }
+    setFiles(prev => prev.filter(x => x.id !== f.id));
+  }
 
   const typeLabels: Record<string, string> = {
     packing_requirement: '包装资料',
@@ -63,12 +73,24 @@ export function PackingFilesSection({ orderId, fileTypes, emptyText }: Props) {
               </p>
             </div>
           </div>
-          {f.file_url && (
-            <a href={f.file_url} target="_blank" rel="noopener noreferrer"
-              className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50 shrink-0">
-              查看/下载
-            </a>
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {f.file_url && (
+              <a href={f.file_url} target="_blank" rel="noopener noreferrer"
+                className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50">
+                查看/下载
+              </a>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={() => handleDelete(f)}
+                className="text-xs px-3 py-1.5 rounded-lg bg-white border border-red-200 text-red-600 hover:bg-red-50"
+                title="删除"
+              >
+                删除
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>
