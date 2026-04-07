@@ -61,51 +61,54 @@ export const DELAY_CATEGORIES: Record<DelayCategory, DelayCategoryInfo> = {
 /**
  * 每个节点的最大允许延期天数（内部/供应商原因使用）
  *
- * 设计原则：
- * - 越靠近出货，允许的延期越少
- * - 关键卡点给更多空间
- * - 出运节点基本不能延
+ * CEO 锁定的标准（2026-04-07 确认）：
+ * - 订单评审 / 预评估：1 天（快速决策，不应拖延）
+ * - 产前样：1-3 天（等客户确认略放宽）
+ * - 采购生产：1-5 天（原料验收最宽松）
+ * - 过程控制：1-2 天
+ * - 出货控制：1-2 天
+ * - 物流：1 天
  */
 export const NODE_MAX_DELAY_DAYS: Record<string, number> = {
-  // 阶段1：订单评审（相对灵活）
-  po_confirmed: 3,
-  finance_approval: 2,
+  // 阶段1：订单评审（最多1天）
+  po_confirmed: 1,
+  finance_approval: 1,
   order_kickoff_meeting: 1,
-  production_order_upload: 3,
+  production_order_upload: 1,
 
-  // 阶段2：预评估（关键卡点）
-  order_docs_bom_complete: 5,
-  bulk_materials_confirmed: 3,
+  // 阶段2：预评估（最多1天）
+  order_docs_bom_complete: 1,
+  bulk_materials_confirmed: 1,
 
-  // 阶段3：工厂匹配 & 产前样（风险高）
-  processing_fee_confirmed: 2,
-  factory_confirmed: 5,
-  pre_production_sample_ready: 7,
-  pre_production_sample_sent: 2,
-  pre_production_sample_approved: 10, // 等客户确认，容易延迟
+  // 阶段3：工厂匹配 & 产前样（1-3天）
+  processing_fee_confirmed: 1,
+  factory_confirmed: 2,
+  pre_production_sample_ready: 3,
+  pre_production_sample_sent: 1,
+  pre_production_sample_approved: 3, // 等客户确认
 
-  // 阶段4：采购与生产（硬性限制）
-  procurement_order_placed: 3,
-  materials_received_inspected: 5,
-  production_kickoff: 3, // 开裁一旦错过很难追
+  // 阶段4：采购与生产（1-5天）
+  procurement_order_placed: 2,
+  materials_received_inspected: 5, // 原料到货变数最大
+  production_kickoff: 2,
   pre_production_meeting: 1,
 
-  // 阶段5：过程控制（压缩空间小）
+  // 阶段5：过程控制（1-2天）
   mid_qc_check: 2,
   final_qc_check: 2,
 
-  // 阶段6：出货控制（基本不能延）
+  // 阶段6：出货控制（1-2天）
   packing_method_confirmed: 1,
-  factory_completion: 2, // 延了就赶不上船
+  factory_completion: 2,
   inspection_release: 1,
-  shipping_sample_send: 2,
+  shipping_sample_send: 1,
 
-  // 阶段7：物流收款（绝对死线）
+  // 阶段7：物流收款（1天）
   booking_done: 1,
-  customs_export: 0, // 报关时间基本固定
+  customs_export: 1,
   finance_shipment_approval: 1,
-  shipment_execute: 0, // 船期固定
-  payment_received: 30, // 付款可以延
+  shipment_execute: 1,
+  payment_received: 1,
 };
 
 export interface DelayValidationResult {
