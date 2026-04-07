@@ -1568,3 +1568,6 @@ CREATE INDEX IF NOT EXISTS idx_pre_order_price_approvals_status ON public.pre_or
 CREATE INDEX IF NOT EXISTS idx_pre_order_price_approvals_requester ON public.pre_order_price_approvals(requested_by, status);
 ALTER TABLE public.pre_order_price_approvals ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "pre_order_price_approvals_authenticated" ON public.pre_order_price_approvals FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- 订单关联到价格审批 — 用于审计追溯
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS price_approval_id uuid REFERENCES public.pre_order_price_approvals(id);

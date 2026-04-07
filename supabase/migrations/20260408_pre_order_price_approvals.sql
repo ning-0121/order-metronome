@@ -44,3 +44,9 @@ CREATE POLICY "pre_order_price_approvals_authenticated"
 
 COMMENT ON TABLE public.pre_order_price_approvals IS
   '订单创建前的价格审批 — CEO 必须放行三单价格不一致的订单';
+
+-- 订单关联到价格审批 — 用于审计追溯
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS price_approval_id uuid REFERENCES public.pre_order_price_approvals(id);
+COMMENT ON COLUMN public.orders.price_approval_id IS
+  '若订单创建时三单价格不一致，需要 CEO 审批，此字段记录对应审批 ID';

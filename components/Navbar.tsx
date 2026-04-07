@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
 import { NotificationBell } from '@/components/NotificationBell';
+import { getPendingPriceApprovalsCount } from '@/app/actions/price-approvals';
 
 interface NavbarProps {
   isAdmin?: boolean;
@@ -14,6 +15,22 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [pendingPriceCount, setPendingPriceCount] = useState(0);
+
+  // 价格审批待办数量 — 仅管理员，每 60s 刷新
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    const fetchCount = async () => {
+      try {
+        const n = await getPendingPriceApprovalsCount();
+        if (!cancelled) setPendingPriceCount(n);
+      } catch {}
+    };
+    fetchCount();
+    const t = setInterval(fetchCount, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isAdmin]);
 
   if (pathname === '/login') {
     return null;
@@ -89,19 +106,30 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
               {moreLinks.length > 0 && (
                 <div className="relative">
                   <button onClick={() => setMoreOpen(!moreOpen)}
-                    className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all">
+                    className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all relative">
                     更多 <svg className={`w-3 h-3 transition-transform ${moreOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    {pendingPriceCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white" />
+                    )}
                   </button>
                   {moreOpen && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-                      <div className="absolute top-full left-0 mt-1 w-44 bg-white rounded-xl border border-gray-200 shadow-lg z-50 py-1">
-                        {moreLinks.map(link => (
-                          <Link key={link.href} href={link.href} onClick={() => setMoreOpen(false)}
-                            className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
-                            <span>{link.icon}</span>{link.label}
-                          </Link>
-                        ))}
+                      <div className="absolute top-full left-0 mt-1 w-52 bg-white rounded-xl border border-gray-200 shadow-lg z-50 py-1">
+                        {moreLinks.map(link => {
+                          const showBadge = link.href === '/admin/price-approvals' && pendingPriceCount > 0;
+                          return (
+                            <Link key={link.href} href={link.href} onClick={() => setMoreOpen(false)}
+                              className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                              <span className="flex items-center gap-2"><span>{link.icon}</span>{link.label}</span>
+                              {showBadge && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold min-w-[18px] text-center">
+                                  {pendingPriceCount}
+                                </span>
+                              )}
+                            </Link>
+                          );
+                        })}
                       </div>
                     </>
                   )}

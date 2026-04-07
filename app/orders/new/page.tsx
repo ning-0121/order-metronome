@@ -343,6 +343,10 @@ function NewOrderWizard() {
     if (isSampleOrder) {
       rawFormData.set('order_purpose', 'sample');
     }
+    // 已批准的价格审批 ID 透传到服务端校验
+    if (priceApprovalId) {
+      rawFormData.set('price_approval_id', priceApprovalId);
+    }
     try {
       const result = await createOrder(rawFormData, preGeneratedOrderNo!);
 

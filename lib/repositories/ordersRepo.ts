@@ -63,6 +63,8 @@ const INSERT_WHITELIST = [
   'sample_confirm_days_override',
   'factory_ids',
   'factory_names',
+  // 价格审批追溯（2026-04-08）
+  'price_approval_id',
 ] as const;
 
 const UPDATE_WHITELIST = [

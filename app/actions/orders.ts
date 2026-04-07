@@ -200,6 +200,38 @@ export async function createOrder(
   const po_number = formData.get('customer_po_number') as string | null;
   const internal_order_no = formData.get('internal_order_no') as string | null;
 
+  // ── 价格审批闸门校验（CEO 强制规则） ──
+  // 1) 如果业务员持有 price_approval_id，必须验证它有效（防止伪造 ID）
+  // 2) 如果该客户+PO 有 24h 内的 pending 价格审批且未提供 ID，禁止创建（防止绕过审批）
+  const priceApprovalId = formData.get('price_approval_id') as string | null;
+  let validatedApprovalId: string | null = null;
+  if (priceApprovalId) {
+    const { validatePriceApproval } = await import('./price-approvals');
+    const result = await validatePriceApproval(priceApprovalId, user.id);
+    if (!result.valid) {
+      return { ok: false, error: `价格审批校验失败：${result.error}` };
+    }
+    validatedApprovalId = priceApprovalId;
+  } else if (po_number && customer_name) {
+    // 没传 ID 时，检查是否有同客户+同 PO 的待审批申请
+    const { data: pending } = await (supabase.from('pre_order_price_approvals') as any)
+      .select('id, status, expires_at')
+      .eq('requested_by', user.id)
+      .eq('customer_name', customer_name)
+      .eq('po_number', po_number)
+      .eq('status', 'pending')
+      .gte('created_at', new Date(Date.now() - 86400000).toISOString())
+      .limit(1);
+    if (pending && pending.length > 0) {
+      return {
+        ok: false,
+        error:
+          `⚠️ 该客户+PO 有待 CEO 审批的价格申请（ID: ${pending[0].id.slice(0, 8)}...），` +
+          `请等待 CEO 在「价格审批」页面批准后，再回到表单点「✓ CEO 已批准，继续创建」。`,
+      };
+    }
+  }
+
   // ── 重复订单检测：同客户+同PO号+同数量 ──
   if (po_number && quantity && customer_name) {
     const { data: duplicates } = await (supabase.from('orders') as any)
@@ -258,6 +290,7 @@ export async function createOrder(
     factory_name: factory_name || null,
     factory_ids: factory_ids,
     factory_names: factory_names,
+    price_approval_id: validatedApprovalId,
     skip_pre_production_sample: skip_pre_production_sample,
     sample_confirm_days_override: sample_confirm_days_override && !isNaN(sample_confirm_days_override)
       ? sample_confirm_days_override

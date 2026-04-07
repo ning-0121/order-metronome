@@ -76,7 +76,7 @@ export async function approvePriceApproval(
   if (!isAdmin) return { error: '仅管理员/CEO 可审批价格' };
 
   const { data: row } = await (supabase.from('pre_order_price_approvals') as any)
-    .select('id, status')
+    .select('id, status, requested_by, customer_name, po_number')
     .eq('id', approvalId)
     .single();
   if (!row) return { error: '审批记录不存在' };
@@ -93,8 +93,50 @@ export async function approvePriceApproval(
 
   if (error) return { error: error.message };
 
+  // ── 通知申请人 ──
+  const requesterId = (row as any).requested_by;
+  const customerLabel = `${(row as any).customer_name || '?'} · PO ${(row as any).po_number || '?'}`;
+  const decisionEmoji = decision === 'approved' ? '✅' : '❌';
+  const decisionText = decision === 'approved' ? '已批准' : '已驳回';
+  const title = `${decisionEmoji} 价格审批${decisionText} — ${customerLabel}`;
+  const message = decision === 'approved'
+    ? `CEO 已批准该订单的价格差异。请回到「新建订单」表单点「✓ CEO 已批准，继续创建」。${note ? '\n备注：' + note : ''}`
+    : `CEO 驳回原因：${note || '无'}\n请联系客户修改 PO 后重新申请。`;
+
+  // 站内通知
+  try {
+    await (supabase.from('notifications') as any).insert({
+      user_id: requesterId,
+      type: 'price_approval',
+      title,
+      message,
+    });
+  } catch {}
+
+  // 企业微信推送
+  try {
+    const { pushToUsers } = await import('@/lib/utils/wechat-push');
+    await pushToUsers(supabase, [requesterId], title, message);
+  } catch {}
+
   revalidatePath('/admin/price-approvals');
   return {};
+}
+
+/**
+ * 仅返回待审批数量（用于 navbar 红点提醒）
+ */
+export async function getPendingPriceApprovalsCount(): Promise<number> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return 0;
+  const { count } = await (supabase.from('pre_order_price_approvals') as any)
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending')
+    .gte('expires_at', new Date().toISOString());
+  return count || 0;
 }
 
 /**
