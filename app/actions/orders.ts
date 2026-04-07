@@ -203,6 +203,7 @@ export async function createOrder(
   // ── 价格审批闸门校验（CEO 强制规则） ──
   // 1) 如果业务员持有 price_approval_id，必须验证它有效（防止伪造 ID）
   // 2) 如果该客户+PO 有 24h 内的 pending 价格审批且未提供 ID，禁止创建（防止绕过审批）
+  //    注意：不限制 requested_by — 防止 A 业务员创建审批、B 绕过的攻击
   const priceApprovalId = formData.get('price_approval_id') as string | null;
   let validatedApprovalId: string | null = null;
   if (priceApprovalId) {
@@ -213,10 +214,9 @@ export async function createOrder(
     }
     validatedApprovalId = priceApprovalId;
   } else if (po_number && customer_name) {
-    // 没传 ID 时，检查是否有同客户+同 PO 的待审批申请
+    // 没传 ID 时，检查同客户+同 PO 是否有任何人的 pending 申请
     const { data: pending } = await (supabase.from('pre_order_price_approvals') as any)
-      .select('id, status, expires_at')
-      .eq('requested_by', user.id)
+      .select('id, status, expires_at, requested_by')
       .eq('customer_name', customer_name)
       .eq('po_number', po_number)
       .eq('status', 'pending')
@@ -706,7 +706,7 @@ export async function activateOrderAction(orderId: string) {
 }
 
 /**
- * 申请取消订单
+ * 申请取消订单 — 仅创建者 / 跟单负责人 / 管理员
  */
 export async function requestCancelAction(
   orderId: string,
@@ -714,21 +714,35 @@ export async function requestCancelAction(
   reasonDetail: string
 ) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
+  // 权限校验：必须是订单创建者 / 跟单 / 管理员
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by, owner_user_id')
+    .eq('id', orderId)
+    .single();
+  if (!order) return { error: '订单不存在' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  const isCreator = order.created_by === user.id;
+  const isOwner = order.owner_user_id === user.id;
+  if (!isAdmin && !isCreator && !isOwner) {
+    return { error: '无权申请取消：仅订单创建者、跟单负责人或管理员可以操作' };
+  }
+
   const result = await requestCancel(orderId, reasonType, reasonDetail);
-  
+
   if (result.error) {
     return { error: result.error };
   }
-  
+
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/orders');
-  
+
   return { data: result.data };
 }
 

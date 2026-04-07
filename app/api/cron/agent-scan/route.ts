@@ -317,22 +317,17 @@ export async function POST(req: Request) {
           }
         }
 
-        // L1 自动执行：通知下一节点 + 自动推进状态
+        // L1 自动执行：仅发送"轮到你了"通知，不自动修改里程碑状态
+        // 修复（2026-04-07 审计）：之前会把下一节点从 pending 自动推进到 in_progress，
+        // 这是静默的数据修改，用户没有机会审阅。现在仅发通知，由负责人自己点击「开始处理」。
         if (action.action_type === 'notify_next' && AGENT_FLAGS.autoNotifyNext()) {
           const payload = action.action_payload as any;
-          // L2 自动推进：将下一节点从 pending → in_progress
-          if (action.milestone_id) {
-            await supabase.from('milestones')
-              .update({ status: 'in_progress' })
-              .eq('id', action.milestone_id)
-              .eq('status', 'pending');
-          }
           if (payload?.target_user_id) {
             await supabase.from('notifications').insert({
               user_id: payload.target_user_id,
               type: 'agent_notify',
               title: `[Agent] 轮到你了`,
-              message: `前置节点已完成，「${payload.next_milestone_name || '下一节点'}」已自动启动。订单：${order.order_no}`,
+              message: `前置节点已完成，请启动「${payload.next_milestone_name || '下一节点'}」。订单：${order.order_no}`,
               related_order_id: order.id,
               related_milestone_id: action.milestone_id,
               status: 'unread',

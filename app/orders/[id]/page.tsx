@@ -70,16 +70,20 @@ export default async function OrderDetailPage({
     }
   }
 
-  const { data: milestones } = await getMilestonesByOrder(id);
-  const { data: delayRequests } = await getDelayRequestsByOrder(id);
-  const { data: logs } = await getOrderLogs(id);
-
-  // 获取订单附件
-  const { data: attachmentsRaw } = await (supabase.from('order_attachments') as any)
-    .select('id, file_type, file_name, file_url, storage_path, file_size, mime_type, uploaded_by, created_at')
-    .eq('order_id', id)
-    .order('created_at', { ascending: true });
-  const attachments = (attachmentsRaw || []) as any[];
+  // ── 并行加载 4 个独立查询（之前是串行，P1 性能修复） ──
+  const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult] = await Promise.all([
+    getMilestonesByOrder(id),
+    getDelayRequestsByOrder(id),
+    getOrderLogs(id),
+    (supabase.from('order_attachments') as any)
+      .select('id, file_type, file_name, file_url, storage_path, file_size, mime_type, uploaded_by, created_at')
+      .eq('order_id', id)
+      .order('created_at', { ascending: true }),
+  ]);
+  const { data: milestones } = milestonesResult;
+  const { data: delayRequests } = delayRequestsResult;
+  const { data: logs } = logsResult;
+  const attachments = (attachmentsResult.data || []) as any[];
 
   // 负责业务/理单
   let ownerName = '—';

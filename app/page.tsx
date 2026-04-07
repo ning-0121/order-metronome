@@ -9,7 +9,7 @@ export default async function Home() {
 
   const { isAdmin } = await getCurrentUserRole(supabase);
 
-  // Admin → CEO War Room（决策视图）
-  // 员工 → /my-today（执行视图）
-  redirect(isAdmin ? '/ceo-war-room' : '/my-today');
+  // Admin → /ceo（决策视图）
+  // 员工 → /dashboard（执行视图）
+  redirect(isAdmin ? '/ceo' : '/dashboard');
 }

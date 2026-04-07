@@ -50,14 +50,10 @@ function makeDedupKey(orderId: string, actionType: string, milestoneId?: string)
 }
 
 function isDuplicate(key: string, existing: ExistingAction[]): boolean {
-  const now = Date.now();
-  return existing.some(a => {
-    if (a.dedup_key !== key) return false;
-    if (a.status === 'pending') return true;
-    // 已执行/已忽略的 24 小时内不重复
-    const age = now - new Date(a.created_at).getTime();
-    return age < 24 * 60 * 60 * 1000;
-  });
+  // 永久去重：只要 dedup_key 相同，不论状态都跳过
+  // 避免同一个建议因 cron 反复扫描被重新生成（即使已被用户 dismissed 或 executed）
+  // 如需让"已执行/已忽略"的建议能重新生成，用户需手动触发 reset 或删除历史记录
+  return existing.some(a => a.dedup_key === key);
 }
 
 function daysOverdue(dueAt: string | null): number {

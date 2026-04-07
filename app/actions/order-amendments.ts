@@ -43,6 +43,20 @@ export async function submitOrderAmendment(
     return { error: '请至少选择一项需要修改的内容' };
   }
 
+  // 权限：仅订单创建者 / 跟单负责人 / 管理员可提交变更申请
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by, owner_user_id')
+    .eq('id', orderId)
+    .single();
+  if (!order) return { error: '订单不存在' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  const isCreator = order.created_by === user.id;
+  const isOwner = order.owner_user_id === user.id;
+  if (!isAdmin && !isCreator && !isOwner) {
+    return { error: '无权申请变更：仅订单创建者、跟单负责人或管理员可以操作' };
+  }
+
   // ── 服务端窗口期校验 ──
   const doneStepKeys = await loadDoneStepKeys(supabase, orderId);
   let childOrderHint = false;

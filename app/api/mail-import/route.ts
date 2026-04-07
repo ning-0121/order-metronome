@@ -48,15 +48,23 @@ async function handleImport(req: Request) {
 
     const supabase = createClient(url, serviceKey);
 
-    // 支持三种方式：POST body / GET URL params / 环境变量
-    let body: { email?: string; password?: string; days?: number; max?: number; skip?: number } = {};
+    // 安全：密码永远从环境变量读取，严禁通过 URL 参数 / body 传输明文密码
+    let body: { email?: string; days?: number; max?: number; skip?: number } = {};
     if (req.method === 'POST') {
-      try { body = await req.json(); } catch {}
+      try {
+        const raw = await req.json();
+        body = {
+          email: raw.email,
+          days: raw.days,
+          max: raw.max,
+          skip: raw.skip,
+          // 不再接受 raw.password — 会被忽略
+        };
+      } catch {}
     } else {
       const params = new URL(req.url).searchParams;
       body = {
         email: params.get('email') || undefined,
-        password: params.get('password') || undefined,
         days: params.get('days') ? parseInt(params.get('days')!) : undefined,
         max: params.get('max') ? parseInt(params.get('max')!) : undefined,
         skip: params.get('skip') ? parseInt(params.get('skip')!) : undefined,
@@ -64,7 +72,7 @@ async function handleImport(req: Request) {
     }
 
     const imapUser = body.email || process.env.IMAP_USER;
-    const imapPass = body.password || process.env.IMAP_PASSWORD;
+    const imapPass = process.env.IMAP_PASSWORD; // 仅从环境变量读
     const days = Math.min(body.days || 90, 365);
     const maxEmails = Math.min(body.max || 20, 50); // 默认20，最多50
     const skipFromEnd = body.skip || 0;

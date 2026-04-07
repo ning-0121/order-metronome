@@ -11,6 +11,13 @@ export const maxDuration = 60;
 
 export async function GET(req: Request) {
   try {
+    // 安全：必须带 CRON_SECRET
+    const authHeader = req.headers.get('authorization');
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' });
