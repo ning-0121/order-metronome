@@ -73,9 +73,9 @@ export async function fetchNewEmails(
       // 拉取时按收件时间过滤（lookbackDays），只保留范围内的
       const sinceTime = Date.now() - lookbackDays * 24 * 3600000;
 
+      // 只拉 envelope（头信息），不拉 source（正文）— 10倍速度提升
       for await (const msg of client.fetch(seqRange, {
         envelope: true,
-        source: true,
         uid: true,
       })) {
         try {
@@ -93,12 +93,8 @@ export async function fetchNewEmails(
           const messageId = envelope?.messageId || null;
           const inReplyTo = envelope?.inReplyTo || null;
 
-          // 提取纯文本正文
-          let body = '';
-          if (msg.source) {
-            const sourceStr = msg.source.toString('utf-8');
-            body = extractPlainText(sourceStr);
-          }
+          // 正文先留空，AI 分析时再按需拉取
+          const body = '';
 
           emails.push({
             uid: msg.uid,
