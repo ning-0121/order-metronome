@@ -38,6 +38,8 @@ CREATE INDEX IF NOT EXISTS idx_pre_order_price_approvals_requester
   ON public.pre_order_price_approvals(requested_by, status);
 
 ALTER TABLE public.pre_order_price_approvals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "pre_order_price_approvals_authenticated"
+  ON public.pre_order_price_approvals;
 CREATE POLICY "pre_order_price_approvals_authenticated"
   ON public.pre_order_price_approvals
   FOR ALL USING (auth.uid() IS NOT NULL);
