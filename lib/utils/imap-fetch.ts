@@ -28,6 +28,7 @@ export async function fetchNewEmails(
   maxCount = 30,
   lookbackDays = 1,
   customCredentials?: { user: string; pass: string },
+  skipFromEnd = 0, // 跳过最末尾的N封（用于分页：第二批从此开始）
 ): Promise<FetchedEmail[]> {
   const host = process.env.IMAP_HOST || 'imap.exmail.qq.com';
   const port = parseInt(process.env.IMAP_PORT || '993');
@@ -66,16 +67,19 @@ export async function fetchNewEmails(
       const totalMessages = mailbox.exists || 0;
       if (totalMessages === 0) return [];
 
-      // 取最后 maxCount 封：序列号范围 (total - maxCount + 1) : total
-      const startSeq = Math.max(1, totalMessages - maxCount + 1);
-      const seqRange = `${startSeq}:${totalMessages}`;
+      // 分页：endSeq = total - skipFromEnd, startSeq = endSeq - maxCount + 1
+      const endSeq = Math.max(1, totalMessages - skipFromEnd);
+      const startSeq = Math.max(1, endSeq - maxCount + 1);
+      if (startSeq > endSeq) return [];
+      const seqRange = `${startSeq}:${endSeq}`;
 
       // 拉取时按收件时间过滤（lookbackDays），只保留范围内的
       const sinceTime = Date.now() - lookbackDays * 24 * 3600000;
 
-      // 只拉 envelope（头信息），不拉 source（正文）— 10倍速度提升
+      // 拉取 envelope + source（正文），完整邮件信息
       for await (const msg of client.fetch(seqRange, {
         envelope: true,
+        source: true,
         uid: true,
       })) {
         try {
@@ -93,8 +97,12 @@ export async function fetchNewEmails(
           const messageId = envelope?.messageId || null;
           const inReplyTo = envelope?.inReplyTo || null;
 
-          // 正文先留空，AI 分析时再按需拉取
-          const body = '';
+          // 提取纯文本正文
+          let body = '';
+          if (msg.source) {
+            const sourceStr = msg.source.toString('utf-8');
+            body = extractPlainText(sourceStr);
+          }
 
           emails.push({
             uid: msg.uid,

@@ -49,7 +49,7 @@ async function handleImport(req: Request) {
     const supabase = createClient(url, serviceKey);
 
     // 支持三种方式：POST body / GET URL params / 环境变量
-    let body: { email?: string; password?: string; days?: number; max?: number } = {};
+    let body: { email?: string; password?: string; days?: number; max?: number; skip?: number } = {};
     if (req.method === 'POST') {
       try { body = await req.json(); } catch {}
     } else {
@@ -59,21 +59,23 @@ async function handleImport(req: Request) {
         password: params.get('password') || undefined,
         days: params.get('days') ? parseInt(params.get('days')!) : undefined,
         max: params.get('max') ? parseInt(params.get('max')!) : undefined,
+        skip: params.get('skip') ? parseInt(params.get('skip')!) : undefined,
       };
     }
 
     const imapUser = body.email || process.env.IMAP_USER;
     const imapPass = body.password || process.env.IMAP_PASSWORD;
-    const days = Math.min(body.days || 90, 180);
-    const maxEmails = Math.min(body.max || 500, 1000);
+    const days = Math.min(body.days || 90, 365);
+    const maxEmails = Math.min(body.max || 20, 50); // 默认20，最多50
+    const skipFromEnd = body.skip || 0;
 
     if (!imapUser || !imapPass) {
       return NextResponse.json({ error: '请提供邮箱地址和密码' }, { status: 400 });
     }
 
-    console.log(`[mail-import] 开始导入 ${imapUser} 最近 ${days} 天的邮件`);
+    console.log(`[mail-import] 开始导入 ${imapUser} 最近 ${days} 天的邮件 max=${maxEmails} skip=${skipFromEnd}`);
 
-    const emails = await fetchNewEmails(maxEmails, days, { user: imapUser, pass: imapPass });
+    const emails = await fetchNewEmails(maxEmails, days, { user: imapUser, pass: imapPass }, skipFromEnd);
 
     if (emails.length === 0) {
       return NextResponse.json({
@@ -123,6 +125,7 @@ async function handleImport(req: Request) {
       if (!error) inserted++;
     }
 
+    const nextSkip = skipFromEnd + emails.length;
     return NextResponse.json({
       success: true,
       message: `${imapUser} 导入完成：拉取${emails.length}封，入库${inserted}封，跳过${skipped}封`,
@@ -130,6 +133,9 @@ async function handleImport(req: Request) {
       fetched: emails.length,
       inserted,
       skipped,
+      nextPage: emails.length === maxEmails
+        ? `继续下一批: /api/mail-import?days=${days}&max=${maxEmails}&skip=${nextSkip}`
+        : '已到末尾',
     });
   } catch (err: any) {
     console.error('[mail-import]', err?.message);
