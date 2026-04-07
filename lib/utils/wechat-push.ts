@@ -1,18 +1,59 @@
 /**
  * 企业微信通知推送
  *
- * 优先使用企业微信应用消息（精准发送给指定员工）
- * 备用：Server酱（向后兼容）
- *
- * 企业微信配置（环境变量）：
- *   WECOM_CORP_ID       — 企业ID
- *   WECOM_CORP_SECRET   — 应用Secret
- *   WECOM_AGENT_ID      — 应用AgentId
+ * 优先级（从高到低）：
+ * 1. 企业微信群机器人 webhook（最简单，不需要 ICP 备案 / IP 白名单）
+ *    → 设置 WECOM_WEBHOOK_URL 环境变量
+ *    → 消息发到群里，群成员都能看到
+ * 2. 企业微信应用消息（精准发送给指定员工）
+ *    → 需要 WECOM_CORP_ID / WECOM_CORP_SECRET / WECOM_AGENT_ID
+ *    → 需要域名 ICP 备案 + 设置可信 IP
+ * 3. Server酱（向后兼容）
  *
  * 个人 wechat_push_key 字段（profiles表）：
  *   - 优先解析为企业微信 userid（如 alex/lucy）
  *   - 兼容旧 Server酱 SendKey
  */
+
+/**
+ * 通过企业微信群机器人 webhook 发送消息
+ * 不需要 access_token / IP 白名单 / 域名校验，最简单的方案
+ */
+export async function sendWecomWebhook(
+  title: string,
+  content: string,
+  mentionedUserIds?: string[],
+): Promise<boolean> {
+  const url = process.env.WECOM_WEBHOOK_URL;
+  if (!url) return false;
+
+  try {
+    // 用 markdown 格式：标题加粗，内容下面跟正文，可以 @用户
+    const mentionLine = mentionedUserIds && mentionedUserIds.length > 0
+      ? mentionedUserIds.map(u => `<@${u}>`).join(' ') + '\n'
+      : '';
+
+    const payload = {
+      msgtype: 'markdown',
+      markdown: {
+        content: `${mentionLine}**${title.slice(0, 200)}**\n${content.slice(0, 1500)}`,
+      },
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json: any = await res.json();
+    if (json.errcode === 0) return true;
+    console.warn('[WeCom Webhook] Send failed:', json.errmsg);
+    return false;
+  } catch (err: any) {
+    console.warn('[WeCom Webhook] Error:', err?.message);
+    return false;
+  }
+}
 
 interface WecomTokenCache {
   token: string;
@@ -135,11 +176,12 @@ export async function sendWechatPush(
 }
 
 /**
- * 批量推送：自动选择企业微信 / Server酱
+ * 批量推送：自动选择最佳通道
  *
  * 优先级：
- * 1. 如果用户 profile 有 wecom_userid → 企业微信应用消息
- * 2. 否则 wechat_push_key 不为空 → Server酱
+ * 1. 群机器人 webhook（最简单，群广播 + @相关用户）
+ * 2. 企业微信应用消息（需要可信域名 + IP 白名单）
+ * 3. Server酱（向后兼容）
  */
 export async function pushToUsers(
   supabase: any,
@@ -154,26 +196,34 @@ export async function pushToUsers(
     .select('user_id, email, wechat_push_key, wecom_userid')
     .in('user_id', userIds);
 
+  // ── 优先：群机器人 webhook ──
+  // 一次发到群里，可以 @ 多个相关用户
+  if (process.env.WECOM_WEBHOOK_URL) {
+    const mentionedIds = (profiles || [])
+      .map((p: any) => p.wecom_userid || p.email?.split('@')[0])
+      .filter(Boolean);
+    const ok = await sendWecomWebhook(title, content || title, mentionedIds);
+    if (ok) return userIds.length; // 群消息算作全员送达
+  }
+
+  // ── 备选：应用消息（精准发送）──
   let sent = 0;
-  const wecomEnabled = !!(process.env.WECOM_CORP_ID && process.env.WECOM_CORP_SECRET && process.env.WECOM_AGENT_ID);
+  const wecomAppEnabled = !!(process.env.WECOM_CORP_ID && process.env.WECOM_CORP_SECRET && process.env.WECOM_AGENT_ID);
 
   for (const p of profiles || []) {
     let ok = false;
 
-    // 优先：企业微信
-    if (wecomEnabled) {
-      // 1. 用 wecom_userid 字段
+    if (wecomAppEnabled) {
       if (p.wecom_userid) {
         ok = await sendWecomMessage(p.wecom_userid, title, content || title);
       }
-      // 2. 用邮箱前缀（约定企微 userid 与邮箱前缀一致）
       if (!ok && p.email) {
         const userid = p.email.split('@')[0];
         ok = await sendWecomMessage(userid, title, content || title);
       }
     }
 
-    // 备用：Server酱
+    // 兜底：Server酱
     if (!ok && p.wechat_push_key) {
       ok = await sendWechatPush(p.wechat_push_key, title, content);
     }
