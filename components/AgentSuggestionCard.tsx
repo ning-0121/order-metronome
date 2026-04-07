@@ -151,7 +151,7 @@ export function AgentSuggestionCard({ suggestion, showOrder = true }: {
 }
 
 /**
- * 批量展示 Agent 建议（用于 CEO 页面和订单详情页）
+ * 批量展示 Agent 建议（按订单分组）
  */
 export function AgentSuggestionsPanel({ suggestions, title, showOrder }: {
   suggestions: AgentSuggestion[];
@@ -160,17 +160,72 @@ export function AgentSuggestionsPanel({ suggestions, title, showOrder }: {
 }) {
   if (!suggestions || suggestions.length === 0) return null;
 
+  // 按订单分组
+  const grouped = new Map<string, { orderNo: string; orderId: string; items: AgentSuggestion[] }>();
+  for (const s of suggestions) {
+    const key = s.orderId || 'unknown';
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.items.push(s);
+    } else {
+      grouped.set(key, {
+        orderNo: s.orderNo || '未关联订单',
+        orderId: s.orderId || '',
+        items: [s],
+      });
+    }
+  }
+
+  // 按建议数量排序（多的在前）
+  const orderGroups = Array.from(grouped.values()).sort((a, b) => b.items.length - a.items.length);
+
+  // 计算最高严重度
+  const maxSev = (items: AgentSuggestion[]) => {
+    if (items.some(i => i.severity === 'high')) return 'high';
+    if (items.some(i => i.severity === 'medium')) return 'medium';
+    return 'low';
+  };
+
+  const sevColor = (sev: string) => {
+    if (sev === 'high') return 'bg-red-100 text-red-700';
+    if (sev === 'medium') return 'bg-amber-100 text-amber-700';
+    return 'bg-blue-100 text-blue-700';
+  };
+
   return (
     <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden">
-      <div className="bg-indigo-50 px-5 py-3 border-b border-indigo-100 flex items-center gap-2">
-        <span className="text-lg">🤖</span>
-        <h2 className="text-sm font-bold text-indigo-900">{title || 'Agent 智能建议'}</h2>
-        <span className="text-xs text-indigo-500 ml-auto">{suggestions.length} 条待处理</span>
-      </div>
+      {title && (
+        <div className="bg-indigo-50 px-5 py-3 border-b border-indigo-100 flex items-center gap-2">
+          <span className="text-lg">🤖</span>
+          <h2 className="text-sm font-bold text-indigo-900">{title}</h2>
+          <span className="text-xs text-indigo-500 ml-auto">{orderGroups.length} 个订单 · {suggestions.length} 条建议</span>
+        </div>
+      )}
       <div className="p-4 space-y-3">
-        {suggestions.map(s => (
-          <AgentSuggestionCard key={s.id} suggestion={s} showOrder={showOrder} />
-        ))}
+        {orderGroups.map(group => {
+          const sev = maxSev(group.items);
+          return (
+            <details key={group.orderId} className="rounded-xl border border-gray-200 overflow-hidden" open={sev === 'high'}>
+              <summary className="cursor-pointer px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sevColor(sev)}`}>
+                    {sev === 'high' ? '紧急' : sev === 'medium' ? '建议' : '提示'}
+                  </span>
+                  <Link href={`/orders/${group.orderId}`} className="font-semibold text-indigo-700 hover:underline text-sm">
+                    {group.orderNo}
+                  </Link>
+                  <span className="text-xs text-gray-500">{group.items.length} 条建议</span>
+                </div>
+                <span className="text-xs text-gray-400">点击展开</span>
+              </summary>
+              <div className="p-3 space-y-2 bg-white">
+                {group.items.map(s => (
+                  <AgentSuggestionCard key={s.id} suggestion={s} showOrder={false} />
+                ))}
+              </div>
+            </details>
+          );
+        })}
       </div>
     </div>
   );

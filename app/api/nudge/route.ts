@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { sendEmailNotification, MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
+import { pushToUsers } from '@/lib/utils/wechat-push';
 import { getCurrentUserRole, isAdmin } from '@/lib/utils/user-role';
 
 /**
@@ -142,14 +143,28 @@ export async function POST(request: NextRequest) {
       <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">去处理</a></p>
     `;
 
+    // 企业微信推送
+    let wecomSent = false;
+    if (milestoneData.owner_user_id) {
+      const wecomTitle = `${senderName} 催你处理「${milestoneData.name}」`;
+      const wecomContent = notifMsg + `\n\n点击查看：${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderData.id}?tab=progress`;
+      const sentCount = await pushToUsers(supabase, [milestoneData.owner_user_id], wecomTitle, wecomContent);
+      wecomSent = sentCount > 0;
+    }
+
     // 邮件通知（可能失败但不阻断）
     const emailSent = await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
 
+    const channels: string[] = ['系统通知'];
+    if (wecomSent) channels.push('企业微信');
+    if (emailSent) channels.push('邮件');
+
     return NextResponse.json({
       success: true,
-      message: emailSent ? '催办已发送（系统通知+邮件）' : '催办已发送（系统通知，邮件发送失败）',
+      message: `催办已发送（${channels.join('+')}）`,
       recipient_email: recipientEmail,
       emailSent,
+      wecomSent,
     });
   } catch (error: any) {
     console.error('Error sending nudge:', error);

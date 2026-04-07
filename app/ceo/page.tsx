@@ -247,25 +247,46 @@ export default async function CEOWarRoom() {
   // 风险最高的订单（复用上面 Top 5 已计算的 worstRedOrder）
   const worstOrder = worstRedOrder;
 
+  // 按订单聚合各类问题
+  const ordersWithOverdue = ordersWithMilestones.filter(o =>
+    (o.milestones || []).some((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at))
+  );
+  const ordersWithBlocked = ordersWithMilestones.filter(o =>
+    (o.milestones || []).some((m: any) => _isBlocked(m.status))
+  );
+  const tomorrowOrderCount = new Set((tomorrowRisk || []).map((m: any) => m.order_id)).size;
+
+  // 部门问题按订单聚合
+  const deptOrderMap: Record<string, Set<string>> = {};
+  for (const m of overdueMilestones as any[]) {
+    const role = m.owner_role || 'unknown';
+    if (!deptOrderMap[role]) deptOrderMap[role] = new Set();
+    deptOrderMap[role].add(m.order_id);
+  }
+  const worstDeptByOrder = Object.entries(deptOrderMap)
+    .map(([role, ordersSet]) => ({ role, orderCount: ordersSet.size }))
+    .sort((a, b) => b.orderCount - a.orderCount)[0];
+
   const aiInsights: string[] = [];
-  if (worstDept) {
-    aiInsights.push(`📌 ${getRoleLabel(worstDept[0])}部门当前问题最多（${worstDept[1].count} 个超期节点），建议重点关注。`);
+  if (worstDeptByOrder && worstDeptByOrder.orderCount > 0) {
+    aiInsights.push(`📌 ${getRoleLabel(worstDeptByOrder.role)}部门涉及 ${worstDeptByOrder.orderCount} 个订单存在超期，建议重点关注。`);
   }
   if (worstOrder) {
     const overdueInOrder = (worstOrder.milestones || []).filter((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at)).length;
-    aiInsights.push(`🚨 订单 ${worstOrder.order_no}（${worstOrder.customer_name}）风险最高，有 ${overdueInOrder} 个超期节点，需要 CEO 介入。`);
+    aiInsights.push(`🚨 风险最高订单：${worstOrder.order_no}（${worstOrder.customer_name}），${overdueInOrder} 个节点超期，需要 CEO 介入。`);
   }
   if ((pendingDelays || []).length > 2) {
-    aiInsights.push(`⏳ 当前有 ${(pendingDelays || []).length} 个延期申请待审批，建议今日内全部处理。`);
+    const delayOrderCount = new Set((pendingDelays || []).map((d: any) => d.milestones?.order_id)).size;
+    aiInsights.push(`⏳ ${delayOrderCount} 个订单有延期申请待审批，建议今日内全部处理。`);
   }
-  if (blockedMilestones.length > 0) {
-    aiInsights.push(`🔒 ${blockedMilestones.length} 个节点被阻塞，影响后续流程推进。`);
+  if (ordersWithBlocked.length > 0) {
+    aiInsights.push(`🔒 ${ordersWithBlocked.length} 个订单存在阻塞节点，影响后续流程推进。`);
   }
-  if (riskRed.length === 0 && overdueMilestones.length <= 2) {
+  if (riskRed.length === 0 && ordersWithOverdue.length === 0) {
     aiInsights.push(`✅ 整体运行良好，无需紧急决策。`);
   }
-  if ((tomorrowRisk || []).length > 0) {
-    aiInsights.push(`⚡ 未来48小时有 ${(tomorrowRisk || []).length} 个节点即将到期，建议提前跟进。`);
+  if (tomorrowOrderCount > 0) {
+    aiInsights.push(`⚡ 未来48小时有 ${tomorrowOrderCount} 个订单的节点即将到期，建议提前跟进。`);
   }
 
   // ===== 订单三阶段分类 =====
