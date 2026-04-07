@@ -24,13 +24,14 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+  -- 注意：role 是 user_role enum，必须 ::text 转换；roles 类型可能是 text[] 或 user_role[]
   SELECT COALESCE(
     EXISTS (
       SELECT 1 FROM public.profiles
       WHERE user_id = uid
         AND (
-          role = ANY(ARRAY['admin', 'finance', 'admin_assistant', 'production_manager'])
-          OR roles && ARRAY['admin', 'finance', 'admin_assistant', 'production_manager']
+          role::text = ANY(ARRAY['admin', 'finance', 'admin_assistant', 'production_manager'])
+          OR (roles IS NOT NULL AND roles::text[] && ARRAY['admin', 'finance', 'admin_assistant', 'production_manager'])
         )
     ),
     false

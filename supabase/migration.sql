@@ -1579,11 +1579,14 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS price_approval_id uuid REFERE
 -- 详见 supabase/migrations/20260408_rls_hardening.sql
 CREATE OR REPLACE FUNCTION public.user_can_see_all_orders(uid uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  -- 注意：role 是 user_role enum，必须 ::text 转换；roles 是 text[]/user_role[]，统一转 text[]
   SELECT COALESCE(EXISTS (
     SELECT 1 FROM public.profiles
     WHERE user_id = uid
-      AND (role = ANY(ARRAY['admin','finance','admin_assistant','production_manager'])
-           OR roles && ARRAY['admin','finance','admin_assistant','production_manager'])
+      AND (
+        role::text = ANY(ARRAY['admin','finance','admin_assistant','production_manager'])
+        OR (roles IS NOT NULL AND roles::text[] && ARRAY['admin','finance','admin_assistant','production_manager'])
+      )
   ), false);
 $$;
 
