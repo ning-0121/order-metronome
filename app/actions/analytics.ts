@@ -41,8 +41,10 @@ export interface AnalyticsSummary {
   completionRate: number;
   onTimeCount: number;
   onTimeRate: number;
-  overdueCount: number;
-  blockedCount: number;
+  overdueCount: number;          // 兼容字段：超期节点数
+  blockedCount: number;           // 兼容字段：阻塞节点数
+  overdueOrderCount: number;      // 涉及超期的订单数
+  blockedOrderCount: number;      // 涉及阻塞的订单数
   thisWeekCompleted: number;
   lastWeekCompleted: number;
 }
@@ -59,9 +61,13 @@ export interface RoleEfficiency {
   role: string;
   roleLabel: string;
   completedCount: number;
-  overdueCount: number;
+  overdueCount: number;          // 涉及该角色的超期节点数（保留兼容）
+  overdueOrderCount: number;     // 涉及该角色超期的订单数
   onTimeCount: number;
   onTimeRate: number;
+  /** 平均工作分（与 commissions.ts 一致的算法） */
+  avgScore: number;
+  grade: 'S' | 'A' | 'B' | 'C' | 'D';
 }
 
 export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
@@ -73,8 +79,8 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   // 总订单数
   const { count: totalOrders } = await supabase.from('orders').select('*', { count: 'exact', head: true });
 
-  // 所有里程碑
-  const { data: allMilestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, updated_at, step_key');
+  // 所有里程碑（带order_id用于按订单聚合）
+  const { data: allMilestones } = await (supabase.from('milestones') as any).select('id, order_id, status, due_at, actual_at, updated_at, step_key');
   const milestones = allMilestones || [];
   const totalMilestones = milestones.length;
   const completedMilestones = milestones.filter(m => _isDone((m as any).status)).length;
@@ -103,11 +109,15 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   const onTimeBase = onTimeDoneBase + overdueInProgressCount;
   const onTimeRate = onTimeBase > 0 ? Math.round(onTimeCount / onTimeBase * 100) : 0;
 
-  // 超期/阻塞
-  const overdueCount = milestones.filter((m: any) =>
+  // 超期/阻塞 — 节点数 + 涉及订单数
+  const overdueMilestones = milestones.filter((m: any) =>
     _isActive(m.status) && m.due_at && new Date(m.due_at) < now
-  ).length;
-  const blockedCount = milestones.filter((m: any) => isBlockedStatus(m.status)).length;
+  );
+  const blockedMilestones = milestones.filter((m: any) => isBlockedStatus(m.status));
+  const overdueCount = overdueMilestones.length;
+  const blockedCount = blockedMilestones.length;
+  const overdueOrderCount = new Set(overdueMilestones.map((m: any) => m.order_id)).size;
+  const blockedOrderCount = new Set(blockedMilestones.map((m: any) => m.order_id)).size;
 
   // 本周 vs 上周完成数
   const startOfWeek = new Date(now);
@@ -136,6 +146,8 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
     onTimeRate,
     overdueCount,
     blockedCount,
+    overdueOrderCount,
+    blockedOrderCount,
     thisWeekCompleted: thisWeekCompleted || 0,
     lastWeekCompleted: lastWeekCompleted || 0,
   };
@@ -197,14 +209,43 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
   if (!user) throw new Error('请先登录');
   const now = new Date();
 
-  const { data: roleMilestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, updated_at, owner_role');
+  const { SCORING_CONFIG, ROLE_GROUPS, calcGrade } = await import('@/lib/domain/scoring-constants');
+  const { isBlockedStatus } = await import('@/lib/domain/types');
 
-  const roleData: Record<string, { completed: number; overdue: number; onTime: number }> = {};
+  // 加载所有里程碑（含 order_id 用于按订单聚合）
+  const { data: roleMilestones } = await (supabase.from('milestones') as any)
+    .select('id, order_id, status, due_at, actual_at, updated_at, owner_role, name');
+
+  // 加载所有延期申请（用于扣分）
+  const { data: allDelays } = await (supabase.from('delay_requests') as any)
+    .select('milestone_id, status').in('status', ['pending', 'approved']);
+
+  // 加载阻塞日志（实际有过被阻塞历史的节点）
+  const { data: blockLogs } = await (supabase.from('milestone_logs') as any)
+    .select('milestone_id').eq('action', 'mark_blocked');
+
+  const roleData: Record<string, {
+    completed: number;
+    overdue: number;
+    onTime: number;
+    overdueOrders: Set<string>;
+    /** 累积每个订单的分数，最后取平均 */
+    orderScores: Map<string, { ontime: number; noBlock: number; noDelay: number }>;
+  }> = {};
 
   (roleMilestones || []).forEach((m: any) => {
     const role = m.owner_role || 'unknown';
-    if (!roleData[role]) roleData[role] = { completed: 0, overdue: 0, onTime: 0 };
+    if (!roleData[role]) {
+      roleData[role] = {
+        completed: 0,
+        overdue: 0,
+        onTime: 0,
+        overdueOrders: new Set(),
+        orderScores: new Map(),
+      };
+    }
 
+    // 完成统计
     if (_isDone(m.status)) {
       roleData[role].completed += 1;
       if (m.due_at) {
@@ -215,19 +256,66 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
       }
     } else if (_isActive(m.status) && m.due_at && new Date(m.due_at) < now) {
       roleData[role].overdue += 1;
+      roleData[role].overdueOrders.add(m.order_id);
+    }
+
+    // 按订单聚合扣分项（与 commissions.ts 算法对齐）
+    const orderId = m.order_id;
+    if (!roleData[role].orderScores.has(orderId)) {
+      roleData[role].orderScores.set(orderId, {
+        ontime: SCORING_CONFIG.ontime.max,
+        noBlock: SCORING_CONFIG.noBlock.max,
+        noDelay: SCORING_CONFIG.noDelay.max,
+      });
+    }
+    const scoreEntry = roleData[role].orderScores.get(orderId)!;
+
+    // 超期/延迟完成扣 ontime 分
+    let isOverdueForScoring = false;
+    if (m.due_at && _isDone(m.status)) {
+      const completedAt = m.actual_at || m.due_at;
+      if (new Date(completedAt) > new Date(m.due_at)) isOverdueForScoring = true;
+    } else if (m.due_at && !_isDone(m.status) && new Date(m.due_at) < now) {
+      isOverdueForScoring = true;
+    }
+    if (isOverdueForScoring) {
+      scoreEntry.ontime = Math.max(0, scoreEntry.ontime - SCORING_CONFIG.ontime.perOverduePenalty);
+    }
+
+    // 阻塞过的节点扣 noBlock 分
+    if ((blockLogs || []).some((l: any) => l.milestone_id === m.id)) {
+      scoreEntry.noBlock = Math.max(0, scoreEntry.noBlock - SCORING_CONFIG.noBlock.perBlockPenalty);
+    }
+
+    // 该节点的延期申请扣 noDelay 分
+    const delayCount = (allDelays || []).filter((d: any) => d.milestone_id === m.id).length;
+    if (delayCount > 0) {
+      scoreEntry.noDelay = Math.max(0, scoreEntry.noDelay - SCORING_CONFIG.noDelay.perDelayPenalty * delayCount);
     }
   });
 
   return Object.entries(roleData)
     .sort((a, b) => b[1].completed - a[1].completed)
-    .map(([role, data]) => ({
-      role,
-      roleLabel: getRoleLabel(role),
-      completedCount: data.completed,
-      overdueCount: data.overdue,
-      onTimeCount: data.onTime,
-      onTimeRate: (data.completed + data.overdue) > 0 ? Math.round(data.onTime / (data.completed + data.overdue) * 100) : 0,
-    }));
+    .map(([role, data]) => {
+      // 计算平均分（quality 和 delivery 是共享分，这里按角色满分给）
+      const orderCount = data.orderScores.size;
+      const sumScore = Array.from(data.orderScores.values()).reduce((sum, s) =>
+        sum + s.ontime + s.noBlock + s.noDelay + SCORING_CONFIG.quality.max + SCORING_CONFIG.delivery.max
+      , 0);
+      const avgScore = orderCount > 0 ? Math.round(sumScore / orderCount) : 0;
+
+      return {
+        role,
+        roleLabel: getRoleLabel(role),
+        completedCount: data.completed,
+        overdueCount: data.overdue,
+        overdueOrderCount: data.overdueOrders.size,
+        onTimeCount: data.onTime,
+        onTimeRate: (data.completed + data.overdue) > 0 ? Math.round(data.onTime / (data.completed + data.overdue) * 100) : 0,
+        avgScore,
+        grade: calcGrade(avgScore),
+      };
+    });
 }
 
 // ══════════════════════════════════════════════════

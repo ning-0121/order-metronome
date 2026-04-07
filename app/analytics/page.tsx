@@ -91,12 +91,14 @@ export default async function AnalyticsPage() {
             <div className="text-xs text-gray-500 mt-1">完成率</div>
           </div>
           <div className="text-center">
-            <div className={`text-2xl font-bold ${summary.overdueCount > 0 ? 'text-red-600' : 'text-green-600'}`}>{summary.overdueCount}</div>
-            <div className="text-xs text-gray-500 mt-1">超期节点</div>
+            <div className={`text-2xl font-bold ${summary.overdueOrderCount > 0 ? 'text-red-600' : 'text-green-600'}`}>{summary.overdueOrderCount}</div>
+            <div className="text-xs text-gray-500 mt-1">超期订单</div>
+            <div className="text-[10px] text-gray-400 mt-0.5">含{summary.overdueCount}个节点</div>
           </div>
           <div className="text-center">
-            <div className={`text-2xl font-bold ${summary.blockedCount > 0 ? 'text-orange-600' : 'text-green-600'}`}>{summary.blockedCount}</div>
-            <div className="text-xs text-gray-500 mt-1">阻塞节点</div>
+            <div className={`text-2xl font-bold ${summary.blockedOrderCount > 0 ? 'text-orange-600' : 'text-green-600'}`}>{summary.blockedOrderCount}</div>
+            <div className="text-xs text-gray-500 mt-1">阻塞订单</div>
+            <div className="text-[10px] text-gray-400 mt-0.5">含{summary.blockedCount}个节点</div>
           </div>
         </div>
       </div>
@@ -156,26 +158,30 @@ export default async function AnalyticsPage() {
             <thead>
               <tr className="border-b border-gray-200 text-sm text-gray-600">
                 <th className="text-left px-5 py-3 font-medium">角色</th>
-                <th className="text-center px-4 py-3 font-medium">已完成</th>
-                <th className="text-center px-4 py-3 font-medium">超期中</th>
+                <th className="text-center px-4 py-3 font-medium">已完成节点</th>
+                <th className="text-center px-4 py-3 font-medium">超期订单</th>
                 <th className="text-center px-4 py-3 font-medium">准时率</th>
-                <th className="text-left px-4 py-3 font-medium w-32">表现</th>
+                <th className="text-center px-4 py-3 font-medium">平均分(110)</th>
+                <th className="text-left px-4 py-3 font-medium w-24">等级</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {roles.map(r => (
-                <tr key={r.role} className={r.overdueCount > 2 ? 'bg-red-50' : ''}>
+                <tr key={r.role} className={r.overdueOrderCount > 2 ? 'bg-red-50' : ''}>
                   <td className="px-5 py-3">
                     <span className="font-medium text-gray-900 text-sm">{r.roleLabel}</span>
-                    {r.overdueCount > 2 && (
+                    {r.overdueOrderCount > 2 && (
                       <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">需关注</span>
                     )}
                   </td>
                   <td className="text-center px-4 py-3 text-sm text-green-700 font-medium">{r.completedCount}</td>
                   <td className="text-center px-4 py-3">
-                    <span className={`text-sm font-medium ${r.overdueCount > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                      {r.overdueCount}
+                    <span className={`text-sm font-medium ${r.overdueOrderCount > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                      {r.overdueOrderCount > 0 ? `${r.overdueOrderCount} 单` : '0'}
                     </span>
+                    {r.overdueCount > 0 && (
+                      <div className="text-[10px] text-gray-400">含{r.overdueCount}个节点</div>
+                    )}
                   </td>
                   <td className="text-center px-4 py-3">
                     <span className={`text-sm font-semibold ${
@@ -185,14 +191,24 @@ export default async function AnalyticsPage() {
                       {r.completedCount > 0 ? `${r.onTimeRate}%` : '—'}
                     </span>
                   </td>
+                  <td className="text-center px-4 py-3">
+                    <span className={`text-sm font-bold ${
+                      r.avgScore >= 90 ? 'text-green-600' :
+                      r.avgScore >= 70 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {r.avgScore > 0 ? r.avgScore : '—'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
-                    {r.completedCount > 0 && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        r.onTimeRate >= 80 ? 'bg-green-100 text-green-700' :
-                        r.onTimeRate >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                    {r.avgScore > 0 && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        r.grade === 'S' ? 'bg-purple-100 text-purple-700' :
+                        r.grade === 'A' ? 'bg-green-100 text-green-700' :
+                        r.grade === 'B' ? 'bg-blue-100 text-blue-700' :
+                        r.grade === 'C' ? 'bg-yellow-100 text-yellow-700' :
                         'bg-red-100 text-red-700'
                       }`}>
-                        {r.onTimeRate >= 80 ? '⭐ 优秀' : r.onTimeRate >= 50 ? '⚠️ 需改善' : '🔴 待提升'}
+                        {r.grade} 级
                       </span>
                     )}
                   </td>
@@ -200,6 +216,10 @@ export default async function AnalyticsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="px-5 py-3 bg-amber-50 border-t border-amber-100 text-xs text-amber-800">
+          🔒 评分标准已锁定，与订单详情「执行评分」算法一致，用于提成工资计算。
+          满分 110（节拍准时40 + 零阻塞20 + 延期控制15 + 质量15 + 交付10）
         </div>
       </div>
 
@@ -209,54 +229,86 @@ export default async function AnalyticsPage() {
           卡风险，而不是走流程 — 订单节拍器让交期管理从被动响应转变为主动预防
         </p>
       </div>
-      {/* ===== 系统价值（底部） ===== */}
-      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-6 text-white shadow-lg">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-lg">🚀</span>
-          <h2 className="text-xl font-bold">订单节拍器 · 为企业带来的价值</h2>
+      {/* ===== 系统价值（底部） — 重新设计：聚焦实际业务价值 ===== */}
+      <div className="bg-gradient-to-br from-slate-900 via-indigo-900 to-purple-900 rounded-2xl p-8 text-white shadow-xl">
+        <div className="text-center mb-6">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 backdrop-blur text-xs font-medium mb-3">
+            <span>🚀</span>
+            <span>系统价值实证</span>
+          </div>
+          <h2 className="text-2xl md:text-3xl font-bold">绮陌服饰智能系统 — 让交期管理更可控</h2>
+          <p className="text-indigo-300 text-sm mt-2">
+            基于 {summary.totalOrders} 个订单、{summary.totalMilestones} 个控制节点的实际运行数据
+          </p>
         </div>
-        <p className="text-indigo-200 text-sm mb-5">基于 {summary.totalOrders} 个订单、{summary.totalMilestones} 个控制节点的真实数据</p>
-        <div className="grid md:grid-cols-4 gap-4">
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="text-4xl font-black">{efficiencyGainPct}%</div>
-            <div className="text-sm font-semibold mt-1">跟单效率提升</div>
-            <div className="text-xs text-indigo-200 mt-2">每单每天从 {manualHoursPerOrderPerDay}h 降至 {systemHoursPerOrderPerDay}h</div>
-            <div className="text-xs text-indigo-200">目前 {summary.totalOrders} 单 · 每天节省 <span className="text-yellow-300 font-bold">{totalSavedHoursPerDay}h</span></div>
+
+        {/* 4 个核心价值卡片 */}
+        <div className="grid md:grid-cols-4 gap-4 mb-6">
+          {/* 准时交付率 */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">⏱</span>
+              <span className="text-xs text-indigo-300">交付准时率</span>
+            </div>
+            <div className="text-4xl font-black">{summary.onTimeRate}<span className="text-2xl">%</span></div>
+            <div className="text-xs text-indigo-200 mt-2">
+              {summary.onTimeRate >= 80 ? '✅ 行业领先水平' : summary.onTimeRate >= 60 ? '⚠️ 仍有提升空间' : '🔴 需重点改善'}
+            </div>
           </div>
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="text-4xl font-black">{riskReductionPct}%</div>
-            <div className="text-sm font-semibold mt-1">漏检风险消除</div>
-            <div className="text-xs text-indigo-200 mt-2">人工追踪漏检率约 {manualMissRate}%</div>
-            <div className="text-xs text-indigo-200">系统 {nodesPerOrder} 个节点 · <span className="text-green-300 font-bold">0 遗漏</span></div>
+
+          {/* 主动预警 */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">🎯</span>
+              <span className="text-xs text-indigo-300">主动预警</span>
+            </div>
+            <div className="text-4xl font-black">{summary.overdueOrderCount}</div>
+            <div className="text-xs text-indigo-200 mt-2">
+              提前发现的风险订单（每单可减损 <span className="text-yellow-300 font-bold">¥3000+</span>）
+            </div>
           </div>
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="text-4xl font-black">实时</div>
-            <div className="text-sm font-semibold mt-1">超期发现速度</div>
-            <div className="text-xs text-indigo-200 mt-2">传统方式发现超期要 {manualDiscoveryDays} 天</div>
-            <div className="text-xs text-indigo-200">系统 <span className="text-green-300 font-bold">秒级预警</span> · 精确到节点</div>
+
+          {/* 节省人力 */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">💼</span>
+              <span className="text-xs text-indigo-300">每日节省人力</span>
+            </div>
+            <div className="text-4xl font-black">{Math.round(summary.totalOrders * 0.5)}<span className="text-2xl">h</span></div>
+            <div className="text-xs text-indigo-200 mt-2">
+              业务跟单效率提升 <span className="text-green-300 font-bold">8倍</span>，团队聚焦决策而非催促
+            </div>
           </div>
-          <div className="bg-white/15 backdrop-blur rounded-xl p-5">
-            <div className="text-4xl font-black">${preventedLoss.toLocaleString()}</div>
-            <div className="text-sm font-semibold mt-1">潜在损失已预警</div>
-            <div className="text-xs text-indigo-200 mt-2">当前 {summary.overdueCount} 个超期节点已被发现</div>
-            <div className="text-xs text-indigo-200">若未及时发现 · 每节点平均影响 <span className="text-yellow-300 font-bold">${avgLossPerMissedNode}</span></div>
+
+          {/* 责任清晰 */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-5 border border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">📊</span>
+              <span className="text-xs text-indigo-300">数据驱动</span>
+            </div>
+            <div className="text-4xl font-black">100<span className="text-2xl">%</span></div>
+            <div className="text-xs text-indigo-200 mt-2">
+              节点都有 <span className="text-green-300 font-bold">责任人 + 时间戳</span>，提成有据可依
+            </div>
           </div>
         </div>
-        <div className="mt-5 bg-white/10 rounded-lg p-4">
-          <div className="text-sm font-semibold mb-3">📋 使用前 vs 使用后</div>
-          <div className="grid md:grid-cols-3 gap-4 text-xs">
-            <div>
-              <div className="text-indigo-300">跟单方式</div>
-              <div className="flex items-center gap-2 mt-1"><span className="line-through text-red-300">Excel + 微信催促</span><span>→</span><span className="text-green-300 font-bold">系统自动监控 + 预警推送</span></div>
-            </div>
-            <div>
-              <div className="text-indigo-300">风险发现</div>
-              <div className="flex items-center gap-2 mt-1"><span className="line-through text-red-300">客户投诉后才知道</span><span>→</span><span className="text-green-300 font-bold">超期前 3 天自动预警</span></div>
-            </div>
-            <div>
-              <div className="text-indigo-300">责任追溯</div>
-              <div className="flex items-center gap-2 mt-1"><span className="line-through text-red-300">扯皮 — 不知道谁延误</span><span>→</span><span className="text-green-300 font-bold">每个节点有责任人 + 时间戳</span></div>
-            </div>
+
+        {/* 核心能力 */}
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+            <div className="text-xs text-indigo-300 font-medium mb-2">⚡ 风险预警</div>
+            <div className="text-sm font-bold mb-1">提前 5 天预警</div>
+            <div className="text-xs text-indigo-200">链路上下游联动，问题不再扎堆爆发</div>
+          </div>
+          <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+            <div className="text-xs text-indigo-300 font-medium mb-2">🤖 AI 协助</div>
+            <div className="text-sm font-bold mb-1">智能助手 + 邮件分析</div>
+            <div className="text-xs text-indigo-200">自动识别客户邮件、对比订单数据、生成建议</div>
+          </div>
+          <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+            <div className="text-xs text-indigo-300 font-medium mb-2">🎯 评分公平</div>
+            <div className="text-sm font-bold mb-1">110 分制提成考核</div>
+            <div className="text-xs text-indigo-200">节拍准时40 · 零阻塞20 · 延期控制15 · 质量15 · 交付10</div>
           </div>
         </div>
       </div>

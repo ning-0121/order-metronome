@@ -402,8 +402,8 @@ export default async function CEOWarRoom() {
                   </p>
                   <div className="mt-4 flex items-center gap-4 text-xs text-gray-400">
                     <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-indigo-300" />{totalOrders} 个订单</span>
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-300" />{ordersWithMilestones.filter(o => (o.milestones || []).some((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at))).length} 个订单逾期</span>
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-300" />{ordersWithMilestones.filter(o => (o.milestones || []).some((m: any) => _isBlocked(m.status))).length} 个订单阻塞</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-300" />{riskRed.length} 个红色风险</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-300" />{ordersWithBlocked.length} 个订单阻塞</span>
                     <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-300" />{new Set((pendingDelays || []).map((d: any) => d.milestones?.order_id)).size} 个订单待审批</span>
                   </div>
                 </div>
@@ -436,7 +436,7 @@ export default async function CEOWarRoom() {
           <div className="text-xs text-gray-500 mt-1">🟢 绿色正常</div>
         </Link>
         <Link href="/risk-orders/blocked" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
-          <div className="text-3xl font-bold text-orange-600">{ordersWithMilestones.filter(o => (o.milestones || []).some((m: any) => _isBlocked(m.status))).length}</div>
+          <div className="text-3xl font-bold text-orange-600">{ordersWithBlocked.length}</div>
           <div className="text-xs text-gray-500 mt-1">🔒 阻塞中</div>
         </Link>
         <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">

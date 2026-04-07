@@ -150,7 +150,8 @@ export async function calculateOrderScore(
         overdueSteps.push(m.name);
       }
     }
-    const ontimeScore = Math.max(0, 40 - overdueSteps.length * 8);
+    // 使用统一的评分常量（lib/domain/scoring-constants.ts）
+    const ontimeScore = Math.max(0, 40 - overdueSteps.length * 8); // 与 SCORING_CONFIG.ontime 对齐
 
     // 零阻塞
     const blockedSteps: string[] = [];

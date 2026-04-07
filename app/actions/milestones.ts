@@ -353,24 +353,31 @@ export async function markMilestoneDone(
     }
   }
   
-  // 如果当前不是「进行中」，先强制推进到「进行中」
-  const currentDbStatus = (milestone as any).status;
-  const normalizedCurrentStatus = normalizeMilestoneStatus(currentDbStatus);
-  if (normalizedCurrentStatus !== '进行中' && normalizedCurrentStatus !== '已完成') {
-    // 直接更新DB，绕过依赖检查（因为凭证已上传，说明该做的都做了）
-    await (supabase.from('milestones') as any)
-      .update({ status: '进行中' })
-      .eq('id', milestoneId);
+  // 凭证已上传通过，直接强制完成（绕过状态机和依赖检查）
+  // 数据库 enum 用英文：pending, in_progress, done, blocked, overdue
+  const { data: directUpdate, error: directErr } = await (supabase.from('milestones') as any)
+    .update({
+      status: 'done',
+      actual_at: new Date().toISOString(),
+    })
+    .eq('id', milestoneId)
+    .select('*')
+    .single();
+
+  if (directErr || !directUpdate) {
+    return { error: directErr?.message || '节点状态更新失败，请重试' };
   }
 
-  // 使用状态机转换（带校验）
-  const result = await transitionMilestoneStatus(milestoneId, '已完成', null);
-  
-  if (result.error || !result.data) {
-    return { error: result.error || '节点状态更新失败，请重试' };
-  }
-  
-  const updatedMilestone = result.data;
+  // 写入操作日志
+  await (supabase.from('milestone_logs') as any).insert({
+    milestone_id: milestoneId,
+    order_id: milestone.order_id,
+    actor_user_id: user.id,
+    action: 'mark_done',
+    note: '凭证已上传，直接完成',
+  });
+
+  const updatedMilestone = directUpdate;
   const milestoneData = milestone as any;
 
   // 财务审核完成 → 动态更新"生产单上传"截止日为 now + 2 工作日
