@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { createClient } from '../supabase/server';
+import { shouldSendEmail as policyShouldSendEmail, getTier } from '../domain/notification-policy';
 
 /** HTML转义：防止XSS注入到邮件模板 */
 export function escapeHtml(str: string): string {
@@ -98,6 +99,13 @@ export async function createInAppNotification(
 
 /**
  * Send notification (email + in-app)
+ *
+ * 通知频率策略：
+ * - sendEmail 参数留作显式覆盖（true = 强制发邮件，false = 强制不发）
+ * - 默认 undefined：交给 lib/domain/notification-policy 决定
+ *   · URGENT 类型 → 立即发邮件（延期审批、价格审批、阻塞等）
+ *   · DIGEST 类型 → 只站内，邮件合并到早 8 点每日简报
+ *   · STATION_ONLY → 永不邮件
  */
 export async function sendNotification(
   userId: string,
@@ -107,33 +115,42 @@ export async function sendNotification(
   message: string,
   relatedOrderId?: string,
   relatedMilestoneId?: string,
-  sendEmail: boolean = true
+  sendEmail?: boolean,
 ): Promise<void> {
   // Create in-app notification
   await createInAppNotification(userId, type, title, message, relatedOrderId, relatedMilestoneId);
-  
-  // Send email if enabled
-  if (sendEmail) {
-    const emailSent = await sendEmailNotification(userEmail, title, message);
-    
-    // Update notification with email status
-    if (emailSent) {
-      const supabase = await createClient();
-      const { data: notifications } = await (supabase
+
+  // 决定是否发邮件：显式覆盖 > 策略表
+  const effectiveSendEmail = sendEmail !== undefined
+    ? sendEmail
+    : policyShouldSendEmail(type);
+
+  if (!effectiveSendEmail) {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[notify] ${type} (${getTier(type)}) — 站内 only, 邮件跳过`);
+    }
+    return;
+  }
+
+  const emailSent = await sendEmailNotification(userEmail, title, message);
+
+  // Update notification with email status
+  if (emailSent) {
+    const supabase = await createClient();
+    const { data: notifications } = await (supabase
+      .from('notifications') as any)
+      .select('id')
+      .eq('user_id', userId)
+      .eq('type', type)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (notifications) {
+      await (supabase
         .from('notifications') as any)
-        .select('id')
-        .eq('user_id', userId)
-        .eq('type', type)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (notifications) {
-        await (supabase
-          .from('notifications') as any)
-          .update({ email_sent: true })
-          .eq('id', (notifications as any).id);
-      }
+        .update({ email_sent: true })
+        .eq('id', (notifications as any).id);
     }
   }
 }

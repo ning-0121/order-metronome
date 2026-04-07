@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { sendEmailNotification, MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
 import { isDoneStatus } from '@/lib/domain/types';
 import { differenceInHours } from 'date-fns';
+import { shouldSendEmail } from '@/lib/domain/notification-policy';
 
 /**
  * Check and send reminder notifications for in_progress milestones
@@ -315,6 +316,15 @@ async function checkAndSendNotification(
       ${evidenceRequired ? '<p><strong>⚠️ Evidence Required</strong></p>' : ''}
       <p>Please take action to ensure this milestone is completed on time.</p>
     `;
+  }
+
+  // 通知频率策略：DIGEST 类型（remind_48/24/12/overdue）不立即发邮件，
+  // 合并到每日简报；URGENT 类型（delay_no_request_*, blocked）立即发
+  if (!shouldSendEmail(kind)) {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[notify] ${kind} — DIGEST, 合并到每日简报`);
+    }
+    return true;
   }
 
   const allRecipients = [recipientEmail, ...ccEmails];
