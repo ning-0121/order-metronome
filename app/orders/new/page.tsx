@@ -165,8 +165,12 @@ function NewOrderWizard() {
     if (!filesToUpload.find(f => f.fileType === 'internal_quote')) { showError('请上传内部报价单（必传）'); return; }
     if (!filesToUpload.find(f => f.fileType === 'customer_quote')) { showError('请上传客户最终报价单（必传）'); return; }
 
-    // 检查是否有客户PO文件 → 自动比对
-    if (poFile && (poFile.file.type === 'application/pdf' || poFile.file.type.startsWith('image/'))) {
+    // 检查是否有客户PO文件 → 自动比对（PDF / 图片 / Excel）
+    const isVerifiable = (f: File) =>
+      f.type === 'application/pdf' ||
+      f.type.startsWith('image/') ||
+      /\.(xlsx|xls|xlsm)$/i.test(f.name);
+    if (poFile && isVerifiable(poFile.file)) {
       setVerifying(true);
       try {
         const buffer = await poFile.file.arrayBuffer();

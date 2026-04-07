@@ -1517,3 +1517,33 @@ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sample_confirm_days_override 
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS factory_ids text[];
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS factory_names text[];
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS default_sample_confirm_days integer;
+
+-- ===== 2026-04-08 邮件 AI 加强 — 差异持久化 + 无声失败监控 =====
+ALTER TABLE public.mail_inbox
+  ADD COLUMN IF NOT EXISTS processing_status text DEFAULT 'pending'
+    CHECK (processing_status IN ('pending', 'fully_matched', 'matched_customer', 'unmatched', 'parse_failed', 'skipped'));
+ALTER TABLE public.mail_inbox ADD COLUMN IF NOT EXISTS last_processed_at timestamptz;
+CREATE INDEX IF NOT EXISTS idx_mail_inbox_processing_status ON public.mail_inbox(processing_status, received_at DESC)
+  WHERE processing_status IN ('unmatched', 'matched_customer', 'parse_failed');
+
+CREATE TABLE IF NOT EXISTS public.email_order_diffs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mail_inbox_id uuid REFERENCES public.mail_inbox(id) ON DELETE CASCADE,
+  order_id uuid REFERENCES public.orders(id) ON DELETE CASCADE,
+  field text NOT NULL,
+  email_value text,
+  order_value text,
+  severity text NOT NULL DEFAULT 'medium' CHECK (severity IN ('high', 'medium', 'low')),
+  suggestion text,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved', 'ignored', 'false_positive')),
+  resolved_by uuid REFERENCES auth.users(id),
+  resolved_at timestamptz,
+  resolution_note text,
+  detected_at timestamptz DEFAULT now(),
+  dedup_key text GENERATED ALWAYS AS (mail_inbox_id::text || '|' || order_id::text || '|' || field) STORED,
+  UNIQUE(dedup_key)
+);
+CREATE INDEX IF NOT EXISTS idx_email_order_diffs_order ON public.email_order_diffs(order_id, status);
+CREATE INDEX IF NOT EXISTS idx_email_order_diffs_status ON public.email_order_diffs(status, severity, detected_at DESC);
+ALTER TABLE public.email_order_diffs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "email_order_diffs_authenticated" ON public.email_order_diffs FOR ALL USING (auth.uid() IS NOT NULL);

@@ -120,8 +120,18 @@ export async function verifyPOAgainstOrder(
           { type: 'text', text: '请从这个PO中提取关键信息。' }
         ]
       }];
+    } else if (fileName.match(/\.(xlsx|xls|xlsm)$/i)) {
+      // Excel PO 支持：用 exceljs 解析为文本表格，再交给 Claude 提取
+      const sheetText = await extractExcelToText(fileBase64);
+      if (!sheetText) return { error: 'Excel 文件解析失败，请确认文件未损坏' };
+      messages = [{
+        role: 'user',
+        content: [
+          { type: 'text', text: `这是一个 Excel 格式的客户 PO。下面是各 sheet 的内容（已转为文本表格），请提取关键信息：\n\n${sheetText.slice(0, 30000)}` },
+        ]
+      }];
     } else {
-      return { error: '暂只支持 PDF 和图片格式的 PO 比对' };
+      return { error: '暂只支持 PDF / 图片 / Excel 格式的 PO 比对' };
     }
 
     const response = await client.messages.create({
@@ -279,6 +289,52 @@ export async function verifyPOAgainstOrder(
     };
   } catch (err: any) {
     return { error: `比对失败：${err.message}` };
+  }
+}
+
+/**
+ * 把 Excel 文件转成文本表格（每个 sheet 用 markdown 格式呈现）
+ * 让 Claude 可以直接读懂内容并提取 PO 字段
+ */
+async function extractExcelToText(base64: string): Promise<string | null> {
+  try {
+    const ExcelJS = (await import('exceljs')).default;
+    const buffer = Buffer.from(base64, 'base64');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as any);
+
+    const parts: string[] = [];
+    for (const ws of wb.worksheets) {
+      // 跳过空 sheet
+      if (ws.rowCount === 0) continue;
+      parts.push(`## Sheet: ${ws.name}`);
+      const rows: string[] = [];
+      ws.eachRow({ includeEmpty: false }, (row) => {
+        const cells: string[] = [];
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          let v = cell.value;
+          if (v == null) { cells.push(''); return; }
+          if (typeof v === 'object') {
+            // 富文本/公式/日期等
+            if ((v as any).text) v = (v as any).text;
+            else if ((v as any).result != null) v = (v as any).result;
+            else if (v instanceof Date) v = v.toISOString().slice(0, 10);
+            else if ((v as any).richText) v = (v as any).richText.map((r: any) => r.text).join('');
+            else v = JSON.stringify(v);
+          }
+          cells.push(String(v).replace(/\|/g, '\\|').slice(0, 200));
+        });
+        // 只保留有内容的行
+        if (cells.some(c => c.trim())) rows.push('| ' + cells.join(' | ') + ' |');
+      });
+      if (rows.length === 0) continue;
+      parts.push(rows.slice(0, 200).join('\n')); // 每个 sheet 最多 200 行，防 prompt 爆炸
+      parts.push('');
+    }
+    return parts.join('\n');
+  } catch (err: any) {
+    console.error('[po-verify] Excel parse error:', err?.message);
+    return null;
   }
 }
 

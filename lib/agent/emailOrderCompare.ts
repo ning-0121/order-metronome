@@ -24,6 +24,9 @@ export interface CompareResult {
 
 /**
  * 深度对比邮件内容与订单数据
+ *
+ * @param mailInboxId 可选 — 传入则把差异持久化到 email_order_diffs 表
+ *                     便于追溯"差异是否解决"
  */
 export async function deepCompareEmailWithOrder(
   supabase: any,
@@ -37,6 +40,7 @@ export async function deepCompareEmailWithOrder(
     sampleRelated: boolean;
   },
   orderId: string,
+  mailInboxId?: string,
 ): Promise<CompareResult> {
   const defaultResult: CompareResult = { hasDiscrepancy: false, discrepancies: [], summary: '无明显差异' };
 
@@ -155,7 +159,7 @@ ${memoryContext}
     const match = text.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
-      return {
+      const result: CompareResult = {
         hasDiscrepancy: parsed.hasDiscrepancy || false,
         discrepancies: (parsed.discrepancies || []).map((d: any) => ({
           field: d.field || '',
@@ -166,6 +170,30 @@ ${memoryContext}
         })),
         summary: parsed.summary || '对比完成',
       };
+
+      // ── 差异持久化：可追溯"差异是否解决" ──
+      if (mailInboxId && result.hasDiscrepancy && result.discrepancies.length > 0) {
+        try {
+          const rows = result.discrepancies.map(d => ({
+            mail_inbox_id: mailInboxId,
+            order_id: orderId,
+            field: d.field,
+            email_value: (d.emailValue || '').slice(0, 1000),
+            order_value: (d.orderValue || '').slice(0, 1000),
+            severity: d.severity,
+            suggestion: (d.suggestion || '').slice(0, 1000),
+          }));
+          // upsert: dedup_key 已存在 → 跳过（保留最早检测时间和已有 status）
+          await supabase.from('email_order_diffs').upsert(rows, {
+            onConflict: 'dedup_key',
+            ignoreDuplicates: true,
+          });
+        } catch (persistErr: any) {
+          console.error('[emailOrderCompare] persist diff failed:', persistErr?.message);
+        }
+      }
+
+      return result;
     }
   } catch (err: any) {
     console.error('[emailOrderCompare] AI error:', err?.message);

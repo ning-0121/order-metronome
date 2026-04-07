@@ -232,7 +232,7 @@ export async function POST(req: Request) {
               deliveryMentioned: analysis.deliveryMentioned,
               changes: analysis.changes,
               sampleRelated: analysis.sampleRelated,
-            }, order.id);
+            }, order.id, email.id /* mailInboxId — 让差异持久化到 email_order_diffs */);
 
             if (compareResult.hasDiscrepancy && orderOwner) {
               const discList = compareResult.discrepancies
@@ -363,6 +363,16 @@ export async function POST(req: Request) {
           risk_level: analysis.urgentLevel === 'urgent' ? 'high' : 'low',
         });
       }
+
+      // 8. 写入处理状态 — 用于发现"被吞掉"的邮件
+      let finalStatus: 'fully_matched' | 'matched_customer' | 'unmatched';
+      if (orderId) finalStatus = 'fully_matched';
+      else if (customerName) finalStatus = 'matched_customer';
+      else finalStatus = 'unmatched';
+      await supabase.from('mail_inbox')
+        .update({ processing_status: finalStatus, last_processed_at: new Date().toISOString() })
+        .eq('id', email.id)
+        .catch(() => {});
     }
 
     return NextResponse.json({

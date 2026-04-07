@@ -874,17 +874,18 @@ export async function updateMilestoneActualDate(
   const milestone = milestoneArr?.[0];
   if (getErr || !milestone) return { error: '找不到该节点' };
 
-  // 权限：仅关卡对应角色或指定负责人可填写实际日期
+  // 权限：关卡负责人 / 角色匹配 / 管理员（管理员可补录历史数据）
   const { data: dateProfile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const dateUserRoles: string[] = (dateProfile as any)?.roles?.length > 0 ? (dateProfile as any).roles : [(dateProfile as any)?.role].filter(Boolean);
+  const isDateAdmin = dateUserRoles.includes('admin');
   const isDateAssigned = milestone.owner_user_id === user.id;
   const dateRoleMatches = milestone.owner_role && dateUserRoles.some(
     (r: string) => r.toLowerCase() === milestone.owner_role.toLowerCase()
       || (milestone.owner_role === 'sales' && r === 'merchandiser')
       || (milestone.owner_role === 'merchandiser' && r === 'sales')
   );
-  if (!isDateAssigned && !dateRoleMatches) {
-    return { error: '仅对应角色的负责人可填写实际日期' };
+  if (!isDateAdmin && !isDateAssigned && !dateRoleMatches) {
+    return { error: '仅对应角色的负责人或管理员可填写实际日期' };
   }
 
   // 校验：只有指定节点允许填写

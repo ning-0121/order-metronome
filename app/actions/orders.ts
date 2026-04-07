@@ -577,17 +577,17 @@ export async function updateOrder(id: string, formData: FormData) {
     return { error: '请先登录' };
   }
 
-  // 权限检查：只有订单创建者或 admin 可以修改
+  // 权限检查：订单创建者 / 跟单负责人 / 管理员
   const { data: existingOrder } = await (supabase.from('orders') as any)
-    .select('created_by')
+    .select('created_by, owner_user_id')
     .eq('id', id)
     .single();
   if (!existingOrder) {
     return { error: '订单不存在' };
   }
   const { isAdmin: isAdminUser } = await getCurrentUserRole(supabase);
-  if (existingOrder.created_by !== user.id && !isAdminUser) {
-    return { error: '无权修改此订单' };
+  if (existingOrder.created_by !== user.id && existingOrder.owner_user_id !== user.id && !isAdminUser) {
+    return { error: '无权修改此订单：仅订单创建者、跟单负责人或管理员可以修改' };
   }
 
   const updates: Record<string, any> = {};
@@ -644,17 +644,19 @@ export async function activateOrderAction(orderId: string) {
     return { error: '请先登录' };
   }
 
-  // 权限检查：只有订单创建者或 admin 可以激活
+  // 权限检查：订单创建者 / 跟单负责人 (owner_user_id) / 管理员
   const { data: order } = await (supabase.from('orders') as any)
-    .select('created_by')
+    .select('created_by, owner_user_id')
     .eq('id', orderId)
     .single();
   if (!order) {
     return { error: '订单不存在' };
   }
   const { isAdmin } = await getCurrentUserRole(supabase);
-  if (order.created_by !== user.id && !isAdmin) {
-    return { error: '无权操作此订单' };
+  const isCreator = order.created_by === user.id;
+  const isCurrentOwner = order.owner_user_id === user.id;
+  if (!isCreator && !isCurrentOwner && !isAdmin) {
+    return { error: '无权操作此订单：仅订单创建者、跟单负责人或管理员可以操作' };
   }
 
   const result = await activateOrder(orderId);
