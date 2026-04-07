@@ -370,14 +370,28 @@ export async function createOrder(
     admin: 'admin', merchandiser: 'merchandiser', quality: 'qc',
   };
 
-  // 自动分配：查询各角色的默认负责人
+  // ── 自动分配：查询各角色的默认负责人 ──
+  // 优先级 1: DEFAULT_ASSIGNEES 配置（财务=方圆，采购=Helen）
+  // 优先级 2: 角色匹配且全公司只有一个用户 → 自动分配
   const roleUserMap: Record<string, string | null> = { sales: user.id };
   try {
+    const { DEFAULT_ASSIGNEES, findAssigneeUserId } = await import('@/lib/domain/default-assignees');
     const { data: allProfiles } = await (supabase.from('profiles') as any)
-      .select('user_id, role, roles');
+      .select('user_id, name, email, role, roles');
+
     if (allProfiles) {
       for (const roleToFind of ['procurement', 'finance', 'logistics']) {
-        const matched = allProfiles.filter((p: any) => {
+        // 1. 先按 DEFAULT_ASSIGNEES 配置精准匹配
+        const matcher = (DEFAULT_ASSIGNEES as any)[roleToFind];
+        if (matcher) {
+          const userId = findAssigneeUserId(allProfiles as any, matcher);
+          if (userId) {
+            roleUserMap[roleToFind] = userId;
+            continue;
+          }
+        }
+        // 2. 兜底：该角色全公司只有一个人 → 用 ta
+        const matched = (allProfiles as any[]).filter((p: any) => {
           const r: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
           return r.includes(roleToFind);
         });
@@ -386,7 +400,9 @@ export async function createOrder(
         }
       }
     }
-  } catch {} // 查询失败不影响订单创建
+  } catch (assignErr: any) {
+    console.error('[createOrder] auto-assign error:', assignErr?.message);
+  } // 查询失败不影响订单创建
 
   const templates = getApplicableMilestones(
     order_type,
