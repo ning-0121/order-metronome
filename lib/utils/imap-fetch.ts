@@ -58,29 +58,32 @@ export async function fetchNewEmails(
     await client.connect();
 
     // 打开收件箱
+    const mailbox = await client.mailboxOpen('INBOX');
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // 搜索指定时间范围内的邮件
-      const since = new Date(Date.now() - lookbackDays * 24 * 3600000);
-      const searchResult = await client.search({
-        since,
-      });
+      // 优化策略：直接按序列号取最后 N 封，跳过 search（在大邮箱里 search 极慢）
+      const totalMessages = mailbox.exists || 0;
+      if (totalMessages === 0) return [];
 
-      if (!searchResult || searchResult.length === 0) {
-        return [];
-      }
+      // 取最后 maxCount 封：序列号范围 (total - maxCount + 1) : total
+      const startSeq = Math.max(1, totalMessages - maxCount + 1);
+      const seqRange = `${startSeq}:${totalMessages}`;
 
-      // 只取最近的 maxCount 封
-      const uids = searchResult.slice(-maxCount);
+      // 拉取时按收件时间过滤（lookbackDays），只保留范围内的
+      const sinceTime = Date.now() - lookbackDays * 24 * 3600000;
 
-      for await (const msg of client.fetch(uids, {
+      for await (const msg of client.fetch(seqRange, {
         envelope: true,
         source: true,
         uid: true,
       })) {
         try {
           const envelope = msg.envelope;
+          // 时间过滤：超出 lookbackDays 范围的跳过
+          if (envelope?.date && envelope.date.getTime() < sinceTime) {
+            continue;
+          }
           const from = envelope?.from?.[0]
             ? `${envelope.from[0].name || ''} <${envelope.from[0].address || ''}>`.trim()
             : '';
