@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { calcDueDates } from '@/lib/schedule';
-import { MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
+import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 import { updateMilestone, updateMilestones } from '@/lib/repositories/milestonesRepo';
 import { sendEmailNotification } from '@/lib/utils/notifications';
 
@@ -162,6 +162,21 @@ export async function createDelayRequest(
     });
   }
   
+  // 获取申请人信息
+  const { data: requesterProfile } = await (supabase.from('profiles') as any)
+    .select('name, email, role, roles').eq('user_id', user.id).single();
+  const requesterName = requesterProfile?.name || user.email?.split('@')[0] || '员工';
+  const requesterRoles = (requesterProfile as any)?.roles?.length > 0
+    ? (requesterProfile as any).roles
+    : [(requesterProfile as any)?.role].filter(Boolean);
+  const requesterRoleLabel = requesterRoles.length > 0
+    ? requesterRoles.map((r: string) => ({
+        sales: '业务', merchandiser: '跟单', finance: '财务',
+        procurement: '采购', production: '生产', qc: 'QC',
+        logistics: '物流', admin: '管理员'
+      } as any)[r] || r).join('/')
+    : '员工';
+
   // Send email notification
   let recipientEmail = user.email || '';
   try {
@@ -176,35 +191,106 @@ export async function createDelayRequest(
   }
   const ccEmails = MANAGER_CC_EMAILS;
 
-  const subject = `[Delay Request] Order ${orderData.order_no} - ${milestoneData.name}`;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com';
+  const orderLink = `${appUrl}/orders/${orderData.id}?tab=delays&from=/ceo`;
+  const approvalLink = `${appUrl}/ceo#delay-approvals`;
+
+  const subject = `[延期申请] ${requesterName} 申请延期 — ${orderData.order_no} · ${milestoneData.name}`;
   const body = `
-    <h2>Delay Request Submitted</h2>
-    <p><strong>Order:</strong> ${orderData.order_no}</p>
-    <p><strong>Milestone:</strong> ${milestoneData.name}</p>
-    <p><strong>Reason Type:</strong> ${reasonType}</p>
-    <p><strong>Reason Detail:</strong> ${reasonDetail}</p>
-    ${proposedNewAnchorDate ? `<p><strong>New Anchor Date:</strong> ${proposedNewAnchorDate}</p>` : ''}
-    ${proposedNewDueAt ? `<p><strong>New Due Date:</strong> ${proposedNewDueAt}</p>` : ''}
-    <p>Please review and approve/reject this delay request.</p>
+    <div style="font-family: -apple-system, 'PingFang SC', sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 24px; border-radius: 12px 12px 0 0;">
+        <h2 style="color: white; margin: 0; font-size: 22px;">⏳ 延期申请待审批</h2>
+        <p style="color: #fef3c7; margin: 8px 0 0; font-size: 14px;">请尽快登录系统审批处理</p>
+      </div>
+
+      <div style="background: white; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
+        <div style="background: #fef3c7; border-left: 4px solid #d97706; padding: 12px 16px; border-radius: 4px; margin-bottom: 20px;">
+          <p style="margin: 0; color: #92400e; font-size: 14px;">
+            <strong>👤 申请人：</strong>${requesterName}（${requesterRoleLabel}）<br>
+            <strong>📧 邮箱：</strong>${user.email || '—'}
+          </p>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; width: 100px;">订单号</td>
+            <td style="padding: 8px 0; font-weight: 600; color: #111827;">
+              <a href="${orderLink}" style="color: #4f46e5; text-decoration: none;">${orderData.order_no}</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">客户</td>
+            <td style="padding: 8px 0; font-weight: 600; color: #111827;">${orderData.customer_name || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">申请节点</td>
+            <td style="padding: 8px 0; font-weight: 600; color: #dc2626;">${milestoneData.name}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">延期原因</td>
+            <td style="padding: 8px 0; color: #111827;">
+              <span style="display: inline-block; background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 4px; font-size: 12px;">${reasonType}</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; vertical-align: top;">详细说明</td>
+            <td style="padding: 8px 0; color: #111827; line-height: 1.6;">${escapeHtml(reasonDetail || '无')}</td>
+          </tr>
+          ${proposedNewAnchorDate ? `
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">新 Anchor</td>
+            <td style="padding: 8px 0; color: #111827;">${proposedNewAnchorDate}</td>
+          </tr>` : ''}
+          ${proposedNewDueAt ? `
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">新截止日期</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${proposedNewDueAt}</td>
+          </tr>` : ''}
+        </table>
+
+        <div style="display: flex; gap: 10px; margin-top: 24px;">
+          <a href="${orderLink}" style="flex: 1; display: inline-block; background: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; text-align: center;">
+            📋 查看订单详情
+          </a>
+          <a href="${approvalLink}" style="flex: 1; display: inline-block; background: #d97706; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; text-align: center;">
+            ✅ 去审批处理
+          </a>
+        </div>
+
+        <p style="color: #9ca3af; font-size: 12px; margin-top: 20px; margin-bottom: 0; text-align: center;">
+          绮陌服饰智能系统 · 延期申请自动通知
+        </p>
+      </div>
+    </div>
   `;
 
   await sendEmailNotification([recipientEmail, ...ccEmails], subject, body);
 
-  // 通知管理员铃铛：有延期申请待审批
-  const { data: requesterProfile } = await (supabase.from('profiles') as any).select('name').eq('user_id', user.id).single();
-  const requesterName = requesterProfile?.name || user.email?.split('@')[0] || '员工';
+  // 管理员：系统内通知 + 企业微信推送
   const { data: admins } = await (supabase.from('profiles') as any)
     .select('user_id').or("role.eq.admin,roles.cs.{admin}");
+  const adminUserIds: string[] = [];
   for (const admin of admins || []) {
     await (supabase.from('notifications') as any).insert({
       user_id: admin.user_id,
       type: 'delay_request',
-      title: `${requesterName} 申请延期：${milestoneData.name}`,
-      message: `订单 ${orderData.order_no} 的「${milestoneData.name}」申请延期，原因：${reasonDetail.slice(0, 100)}`,
+      title: `${requesterName}（${requesterRoleLabel}）申请延期：${milestoneData.name}`,
+      message: `订单 ${orderData.order_no}（${orderData.customer_name || '—'}）的「${milestoneData.name}」申请延期\n原因：${reasonDetail.slice(0, 100)}`,
       related_order_id: orderData.id,
       related_milestone_id: milestoneId,
       status: 'unread',
     });
+    adminUserIds.push(admin.user_id);
+  }
+
+  // 企业微信推送管理员
+  if (adminUserIds.length > 0) {
+    try {
+      const { pushToUsers } = await import('@/lib/utils/wechat-push');
+      const wecomTitle = `⏳ ${requesterName} 申请延期`;
+      const wecomContent = `订单：${orderData.order_no}（${orderData.customer_name || '—'}）\n节点：${milestoneData.name}\n原因：${reasonType}\n说明：${reasonDetail.slice(0, 100)}\n\n点击查看详情：${orderLink}`;
+      await pushToUsers(supabase, adminUserIds, wecomTitle, wecomContent);
+    } catch {}
   }
 
   revalidatePath(`/orders/${orderData.id}`);
