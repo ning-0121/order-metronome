@@ -6,6 +6,7 @@ import { calcDueDates } from '@/lib/schedule';
 import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 import { updateMilestone, updateMilestones } from '@/lib/repositories/milestonesRepo';
 import { sendEmailNotification } from '@/lib/utils/notifications';
+import { isBlockedStatus } from '@/lib/domain/types';
 
 type MilestoneLogAction =
   | 'mark_done'
@@ -402,6 +403,35 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
       risk_level: 'low',
       created_by: user.id,
     });
+  }
+
+  // 🔓 关键修复：批准延期后自动解除阻塞状态，恢复为"进行中"
+  // 这样节点就不再显示为阻塞/逾期
+  const wasBlocked = isBlockedStatus(milestoneData.status);
+  const { notes: oldNotes } = milestoneData;
+  const unblockNote = wasBlocked
+    ? `[${new Date().toISOString().slice(0, 10)}] 延期批准，自动解除阻塞`
+    : null;
+  const newNotes = unblockNote
+    ? (oldNotes ? `${oldNotes}\n${unblockNote}` : unblockNote)
+    : oldNotes;
+
+  await (supabase.from('milestones') as any)
+    .update({
+      status: 'in_progress',  // 英文 enum
+      notes: newNotes,
+    })
+    .eq('id', milestoneData.id);
+
+  if (wasBlocked) {
+    await logMilestoneAction(
+      supabase,
+      milestoneData.id,
+      orderData.id,
+      'unblock',
+      '延期批准，自动解除阻塞',
+      {}
+    );
   }
 
   // Recalculate schedule
