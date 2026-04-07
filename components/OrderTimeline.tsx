@@ -50,18 +50,21 @@ const MILESTONE_GROUPS = [
   },
   {
     key: 'stage4', emoji: '🟩',
-    titleCn: '阶段 4：采购与生产',
+    titleCn: '阶段 4：采购与生产准备',
+    // 顺序修复（2026-04-08）：产前会必须在原料到货后、开裁前
     stepKeys: ['procurement_order_placed', 'materials_received_inspected', 'pre_production_meeting', 'production_kickoff'],
   },
   {
     key: 'stage5', emoji: '🟪',
-    titleCn: '阶段 5：过程控制',
-    stepKeys: ['mid_qc_check', 'final_qc_check'],
+    titleCn: '阶段 5：过程控制（跟单+业务双重验货）',
+    // 补全（2026-04-08）：之前漏了 mid_qc_sales_check / final_qc_sales_check
+    stepKeys: ['mid_qc_check', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check'],
   },
   {
     key: 'stage6', emoji: '🟥',
     titleCn: '阶段 6：出货控制',
-    stepKeys: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'],
+    // 顺序修复（2026-04-08）：船样寄送必须在包装确认后、工厂完成前
+    stepKeys: ['packing_method_confirmed', 'shipping_sample_send', 'factory_completion', 'inspection_release'],
   },
   {
     key: 'stage7', emoji: '🟫',
@@ -202,13 +205,18 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
     return () => { stale = true; };
   }, [expandedId]);
 
-  // 按 sequence_number 全局排序（兼容旧数据用 due_at 兜底）
+  // 排序策略修复（2026-04-08）：优先按 due_at 排，sequence_number 做兜底
+  // 之前用 sequence_number 优先，导致老订单（template 改版前创建）显示顺序错乱
+  // 改为 due_at 优先后，无论 sequence_number 是新还是旧都能正确显示
   const sorted = [...milestones].sort((a, b) => {
+    if (a.due_at && b.due_at) {
+      const t = new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
+      if (t !== 0) return t;
+    }
+    // due_at 相同或缺失时，用 sequence_number 兜底
     const aN = (a as any).sequence_number ?? 99;
     const bN = (b as any).sequence_number ?? 99;
-    if (aN !== bN) return aN - bN;
-    if (!a.due_at || !b.due_at) return 0;
-    return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
+    return aN - bN;
   });
 
   const grouped = MILESTONE_GROUPS.map(g => ({
