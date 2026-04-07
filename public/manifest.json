@@ -1,7 +1,7 @@
 {
-  "name": "订单节拍器",
-  "short_name": "节拍器",
-  "description": "Qimo 订单跟踪和里程碑管理系统",
+  "name": "绮陌服饰智能系统",
+  "short_name": "绮陌智能",
+  "description": "Qimo Activewear 智能订单管理系统",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

@@ -60,7 +60,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
                 ⏱
               </div>
               <span className="hidden sm:block text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                订单节拍器
+                绮陌服饰智能系统
               </span>
             </Link>
 

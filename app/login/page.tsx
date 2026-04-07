@@ -104,7 +104,7 @@ function LoginForm() {
         <div className="text-center">
           <div className="flex items-center justify-center gap-2 mb-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xl">⏱</div>
-            <span className="text-xl font-bold text-gray-900">订单节拍器</span>
+            <span className="text-xl font-bold text-gray-900">绮陌服饰智能系统</span>
           </div>
           <p className="text-xs text-gray-400 mb-1">卡风险，而不是走流程</p>
           <p className="text-sm font-medium text-gray-600">{titles[mode]}</p>

@@ -16,14 +16,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "订单节拍器",
-  description: "Qimo 订单跟踪和里程碑管理系统",
+  title: "绮陌服饰智能系统",
+  description: "Qimo Activewear 智能订单管理系统",
   manifest: "/manifest.json",
   themeColor: "#4f46e5",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "订单节拍器",
+    title: "绮陌服饰智能系统",
   },
   other: {
     "mobile-web-app-capable": "yes",
@@ -55,9 +55,9 @@ export default async function RootLayout({
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs text-gray-500">
               <div className="flex items-center gap-2">
                 <span className="text-base">⏱</span>
-                <span className="font-semibold text-gray-700">绮陌服饰订单节拍器</span>
+                <span className="font-semibold text-gray-700">绮陌服饰智能系统</span>
                 <span className="text-gray-400">·</span>
-                <span>Qimo Activewear Order Metronome</span>
+                <span>Qimo Activewear Intelligent System</span>
               </div>
               <div className="flex items-center gap-4">
                 <span>© {currentYear} 义乌绮陌服饰有限公司</span>
