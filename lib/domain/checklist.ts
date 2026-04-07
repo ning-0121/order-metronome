@@ -103,6 +103,11 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'trims_confirmed', label: '吊牌/洗标/贴纸/包装袋/纸箱等辅料确认', type: 'checkbox', required: true, role: 'sales', group: '包装辅料' },
       { key: 'unconfirmed_note', label: '未确认项备注', type: 'text', required: false, role: 'sales',
         helpText: '如有未确认项，说明具体内容和跟进计划' },
+      // ── 双签：业务 + CEO 必须双方共同确认 ──
+      { key: 'sales_signed', label: '业务确认评审会已召开并完成', type: 'checkbox', required: true, role: 'sales', group: '✍️ 双签确认',
+        helpText: '业务在评审会结束后勾选，确认已完成评审' },
+      { key: 'ceo_signed', label: 'CEO/管理员确认评审会到位', type: 'checkbox', required: true, role: 'admin', group: '✍️ 双签确认',
+        helpText: 'CEO 出席评审会后勾选 — 必须由管理员账号操作，业务无法替代' },
     ],
   },
 
@@ -122,25 +127,24 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   // ── 阶段2：原辅料预评估 + 生产预评估 ──────────────────
 
   order_docs_bom_complete: {
-    title: '原辅料预评估检查清单',
+    title: '原辅料预评估检查清单（精简版）',
     items: [
-      // 采购填写
-      { key: 'fabric_supplier', label: '面料供应商状态', type: 'select', required: true, role: 'procurement', group: '采购评估',
-        options: ['已有供应商', '需要寻找新供应商', '客户指定供应商'] },
-      { key: 'trims_supplier', label: '辅料供应商状态', type: 'select', required: true, role: 'procurement', group: '采购评估',
-        options: ['已有供应商', '需要寻找新供应商', '客户指定供应商'] },
-      { key: 'material_eta', label: '大致到料时间', type: 'text', required: true, role: 'procurement', group: '采购评估',
-        helpText: '如：下单后15天到料' },
-      { key: 'material_price_ok', label: '原辅料价格在预算范围内', type: 'select', required: true, role: 'procurement', group: '采购评估',
-        options: ['在预算内', '略超预算（可接受）', '超预算较多（需协商）'] },
-      { key: 'high_risk_material', label: '是否存在高风险材料', type: 'select', required: true, role: 'procurement', group: '风险评估',
-        options: ['无高风险材料', '有（已标注并通知业务）'] },
-      { key: 'risk_note', label: '风险材料说明及应对', type: 'text', required: false, role: 'procurement', group: '风险评估',
-        helpText: '高弹面料克重偏差、浅色色差风险、特殊工艺面料等' },
-      // 业务确认
-      { key: 'sales_material_reviewed', label: '业务已审阅采购评估', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
-      { key: 'sales_price_feedback', label: '业务对价格的意见', type: 'select', required: true, role: 'sales', group: '业务确认',
-        options: ['价格合适', '需要和客户确认', '需要寻找替代材料'] },
+      // ── 核心 2 项：到料日期 + 预算判断 ──
+      { key: 'expected_arrival_date', label: '预计到料日期', type: 'pending_date', required: true, role: 'procurement', group: '快速评估',
+        helpText: '只填这一个最关键项 — 系统会自动比对生产排期判断风险' },
+      { key: 'within_budget', label: '是否在预算/排期内', type: 'select', required: true, role: 'procurement', group: '快速评估',
+        options: ['✅ 全部在预算和排期内（无需详细说明）', '⚠️ 超预算或来不及（需填写下方说明）'] },
+
+      // ── 仅在"超预算"时才需要填的字段（required: false）──
+      { key: 'over_budget_reason', label: '超预算/来不及 原因说明', type: 'text', required: false, role: 'procurement', group: '异常说明',
+        helpText: '仅当上方选择"超预算或来不及"时填写。说明哪个料、超多少、建议方案' },
+      { key: 'high_risk_material', label: '是否有高风险材料需要标注', type: 'checkbox', required: false, role: 'procurement', group: '异常说明',
+        helpText: '高弹克重偏差 / 浅色色差 / 特殊工艺面料等' },
+      { key: 'risk_note', label: '高风险材料说明', type: 'text', required: false, role: 'procurement', group: '异常说明' },
+
+      // ── 业务确认（仅在"超预算"时需要） ──
+      { key: 'sales_acknowledged', label: '业务已知悉异常情况', type: 'checkbox', required: false, role: 'sales', group: '业务确认',
+        helpText: '仅当采购标记"超预算或来不及"时需要业务勾选' },
     ],
   },
 
@@ -295,6 +299,19 @@ export function validateChecklistComplete(
     const response = responseMap.get(item.key);
     if (!response || response.value === null || response.value === '' || response.value === false) {
       missing.push(item.label);
+    }
+  }
+
+  // ── 条件性必填规则（超出 required 静态标记） ──
+
+  // BOM 预评估：超预算时，原因和业务确认变为必填
+  if (stepKey === 'order_docs_bom_complete') {
+    const budgetStatus = responseMap.get('within_budget')?.value;
+    if (typeof budgetStatus === 'string' && budgetStatus.includes('超预算')) {
+      const reason = responseMap.get('over_budget_reason')?.value;
+      if (!reason) missing.push('超预算/来不及 原因说明');
+      const ack = responseMap.get('sales_acknowledged')?.value;
+      if (!ack) missing.push('业务已知悉异常情况');
     }
   }
 

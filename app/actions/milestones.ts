@@ -191,6 +191,30 @@ export async function markMilestoneDone(
     return { error: '无权操作：只有对应角色的负责人或管理员可以标记完成' };
   }
 
+  // 顺序约束：某些节点必须等前置节点完成（管理员可绕过）
+  // 修复 2026-04-08：之前业务员可以"先寄出后准备"，逻辑荒谬
+  const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = {
+    pre_production_sample_sent: ['pre_production_sample_ready'],
+    pre_production_sample_approved: ['pre_production_sample_ready', 'pre_production_sample_sent'],
+    mid_qc_sales_check: ['mid_qc_check'],
+    final_qc_sales_check: ['final_qc_check'],
+  };
+  const prerequisites = SEQUENTIAL_REQUIREMENTS[milestone.step_key];
+  if (prerequisites && !isAdmin) {
+    const { data: prereqRows } = await (supabase.from('milestones') as any)
+      .select('step_key, status, name')
+      .eq('order_id', milestone.order_id)
+      .in('step_key', prerequisites);
+    const notDone = (prereqRows || []).filter((m: any) => {
+      const s = String(m.status || '').toLowerCase();
+      return s !== 'done' && s !== '已完成';
+    });
+    if (notDone.length > 0) {
+      const names = notDone.map((m: any) => m.name || m.step_key).join('、');
+      return { error: `必须先完成前置节点：${names}` };
+    }
+  }
+
   // 自动认领：如果该关卡尚未分配具体负责人，且操作者角色匹配，自动认领
   if (!milestone.owner_user_id && roleMatches) {
     await (supabase.from('milestones') as any)
@@ -240,6 +264,21 @@ export async function markMilestoneDone(
     const checkResult = validateChecklistComplete(milestone.step_key, msWithChecklist?.checklist_data || null);
     if (!checkResult.valid) {
       return { error: `检查清单未完成，缺少：${checkResult.missing.join('、')}` };
+    }
+
+    // 双签校验：order_kickoff_meeting 必须 sales 和 admin 是不同的人
+    if (milestone.step_key === 'order_kickoff_meeting') {
+      const checklistArr = Array.isArray(msWithChecklist?.checklist_data)
+        ? msWithChecklist!.checklist_data
+        : [];
+      const salesEntry = checklistArr.find((r: any) => r.key === 'sales_signed');
+      const ceoEntry = checklistArr.find((r: any) => r.key === 'ceo_signed');
+      if (!salesEntry?.value || !ceoEntry?.value) {
+        return { error: '订单评审会必须业务和 CEO 双方都勾选才能完成' };
+      }
+      if (salesEntry.updated_by && ceoEntry.updated_by && salesEntry.updated_by === ceoEntry.updated_by) {
+        return { error: '订单评审会双签必须由两个不同账号操作（业务 + CEO 不能是同一人）' };
+      }
     }
   }
 
@@ -1129,13 +1168,29 @@ export async function saveChecklistData(
   const lcErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUserCl);
   if (lcErr) return { error: lcErr };
 
-  // 角色校验：只能编辑自己角色对应的检查项（管理员不受限）
+  // 角色校验：只能编辑自己角色对应的检查项（管理员一般不受限）
+  // 例外：order_kickoff_meeting 的双签字段强制角色匹配，admin 也不能替代 sales
   const { getChecklistForStep } = await import('@/lib/domain/checklist');
   const checklistConfig = getChecklistForStep(milestone.step_key);
-  if (checklistConfig && !isAdminUserCl) {
+  const STRICT_ROLE_FIELDS: Record<string, string[]> = {
+    order_kickoff_meeting: ['sales_signed', 'ceo_signed'],
+  };
+  const strictKeys = STRICT_ROLE_FIELDS[milestone.step_key] || [];
+  if (checklistConfig) {
     for (const r of responses) {
       const itemDef = checklistConfig.items.find((i: any) => i.key === r.key);
-      if (itemDef && !userRoles.some((ur: string) => ur.toLowerCase() === itemDef.role.toLowerCase())) {
+      if (!itemDef) continue;
+
+      const isStrict = strictKeys.includes(r.key);
+      const requiredRole = itemDef.role.toLowerCase();
+      const userHasRole = userRoles.some((ur: string) => ur.toLowerCase() === requiredRole);
+
+      // 严格双签字段：必须真的有对应角色，admin 不能代替 sales
+      if (isStrict && !userHasRole) {
+        return { error: `无权编辑「${itemDef.label}」— 必须由 ${itemDef.role} 角色本人勾选` };
+      }
+      // 普通字段：admin 可以代任何角色
+      if (!isStrict && !isAdminUserCl && !userHasRole) {
         return { error: `无权编辑「${itemDef.label}」（需要${itemDef.role}角色）` };
       }
     }
