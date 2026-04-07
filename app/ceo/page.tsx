@@ -371,9 +371,9 @@ export default async function CEOWarRoom() {
                   </p>
                   <div className="mt-4 flex items-center gap-4 text-xs text-gray-400">
                     <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-indigo-300" />{totalOrders} 个订单</span>
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-300" />{overdueMilestones.length} 个超期</span>
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-300" />{blockedMilestones.length} 个阻塞</span>
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-300" />{(pendingDelays || []).length} 个待审批</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-300" />{ordersWithMilestones.filter(o => (o.milestones || []).some((m: any) => _isActive(m.status) && m.due_at && isOverdue(m.due_at))).length} 个订单逾期</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-300" />{ordersWithMilestones.filter(o => (o.milestones || []).some((m: any) => _isBlocked(m.status))).length} 个订单阻塞</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-300" />{new Set((pendingDelays || []).map((d: any) => d.milestones?.order_id)).size} 个订单待审批</span>
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0 ml-6 space-y-2">
@@ -390,24 +390,24 @@ export default async function CEOWarRoom() {
         );
       })()}
 
-      {/* ===== 状态概览卡片（可点击跳转） ===== */}
+      {/* ===== 状态概览卡片（点击进入独立页面） ===== */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <a href="#risk-red" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-red-300 hover:shadow-md transition-all cursor-pointer">
+        <Link href="/risk-orders/red" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-red-300 hover:shadow-md transition-all cursor-pointer">
           <div className="text-3xl font-bold text-red-600">{riskRed.length}</div>
           <div className="text-xs text-gray-500 mt-1">🔴 红色风险</div>
-        </a>
-        <a href="#risk-yellow" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-yellow-300 hover:shadow-md transition-all cursor-pointer">
+        </Link>
+        <Link href="/risk-orders/yellow" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-yellow-300 hover:shadow-md transition-all cursor-pointer">
           <div className="text-3xl font-bold text-yellow-600">{riskYellow.length}</div>
           <div className="text-xs text-gray-500 mt-1">🟡 黄色关注</div>
-        </a>
-        <a href="#risk-green" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-green-300 hover:shadow-md transition-all cursor-pointer">
+        </Link>
+        <Link href="/risk-orders/green" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-green-300 hover:shadow-md transition-all cursor-pointer">
           <div className="text-3xl font-bold text-green-600">{riskGreen.length}</div>
           <div className="text-xs text-gray-500 mt-1">🟢 绿色正常</div>
-        </a>
-        <a href="#risk-blocked" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
-          <div className="text-3xl font-bold text-orange-600">{blockedMilestones.length}</div>
+        </Link>
+        <Link href="/risk-orders/blocked" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
+          <div className="text-3xl font-bold text-orange-600">{ordersWithMilestones.filter(o => (o.milestones || []).some((m: any) => _isBlocked(m.status))).length}</div>
           <div className="text-xs text-gray-500 mt-1">🔒 阻塞中</div>
-        </a>
+        </Link>
         <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
           <div className="text-3xl font-bold text-indigo-600">{completionRate}%</div>
           <div className="text-xs text-gray-500 mt-1">📊 完成率</div>
