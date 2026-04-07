@@ -43,15 +43,15 @@ export async function executeAgentAction(actionId: string): Promise<{ error?: st
       }
     }
 
-    // 熔断检查：单订单每天限制
-    const today = new Date().toISOString().slice(0, 10);
+    // 熔断检查：单订单滚动 24h 限制（P1 修复：之前用 today 切割，跨天可被绕过）
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { count: orderCount } = await (supabase.from('agent_actions') as any)
       .select('id', { count: 'exact', head: true })
       .eq('order_id', action.order_id)
       .eq('status', 'executed')
-      .gte('executed_at', today + 'T00:00:00Z');
+      .gte('executed_at', oneDayAgo);
     if ((orderCount || 0) >= CIRCUIT_BREAKER.maxPerOrderPerDay) {
-      return { error: `该订单今日已执行 ${CIRCUIT_BREAKER.maxPerOrderPerDay} 个建议，已达上限` };
+      return { error: `该订单 24 小时内已执行 ${CIRCUIT_BREAKER.maxPerOrderPerDay} 个建议，已达上限` };
     }
 
     // 熔断检查：全局每小时限制

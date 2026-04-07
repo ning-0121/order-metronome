@@ -112,11 +112,14 @@ ${suggestionsText}
 如有额外洞察：{"extra_insight":"..."}
 只返回JSON。`;
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    const response = await client.messages.create(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 800,
+        messages: [{ role: 'user', content: prompt }],
+      },
+      { signal: AbortSignal.timeout(30_000) }, // P1 修复：30s 超时防止拖死 cron
+    );
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     const jsonMatch = text.match(/\[[\s\S]*\]/);

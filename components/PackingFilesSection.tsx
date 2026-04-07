@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { deleteAttachment } from '@/app/actions/attachments';
+import { deleteAttachment, getAttachmentDownloadUrl } from '@/app/actions/attachments';
 
 interface PackingFile {
   id: string;
@@ -43,6 +43,13 @@ export function PackingFilesSection({ orderId, fileTypes, emptyText, canDelete =
     setFiles(prev => prev.filter(x => x.id !== f.id));
   }
 
+  // P1 修复：用临时签名 URL 代替永久 public URL
+  async function handleDownload(f: PackingFile) {
+    const res = await getAttachmentDownloadUrl(f.id);
+    if (res.error) { alert(res.error); return; }
+    if (res.url) window.open(res.url, '_blank', 'noopener,noreferrer');
+  }
+
   const typeLabels: Record<string, string> = {
     packing_requirement: '包装资料',
     trims_sheet: '原辅料单',
@@ -74,12 +81,13 @@ export function PackingFilesSection({ orderId, fileTypes, emptyText, canDelete =
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {f.file_url && (
-              <a href={f.file_url} target="_blank" rel="noopener noreferrer"
-                className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50">
-                查看/下载
-              </a>
-            )}
+            <button
+              type="button"
+              onClick={() => handleDownload(f)}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50"
+            >
+              查看/下载
+            </button>
             {canDelete && (
               <button
                 type="button"

@@ -190,6 +190,85 @@ export async function deleteAttachment(attachmentId: string, orderId: string) {
 }
 
 /**
+ * 获取附件的临时签名下载 URL（1 小时有效）
+ *
+ * P1 修复（2026-04-07）：
+ * 之前所有附件用 getPublicUrl() 永久公开，泄露风险高。
+ * 现在用 createSignedUrl 按需签发。
+ *
+ * 权限：上传者本人 / 订单创建者 / 跟单负责人 / 管理员
+ *
+ * 用法（前端）：
+ *   const { url, error } = await getAttachmentDownloadUrl(attachment.id);
+ *   if (url) window.open(url);
+ *
+ * 注意：要让此功能完全生效，Storage bucket "order-docs" 需要在 Supabase Dashboard
+ * 设置为 private（取消 Public 勾选）。在 bucket 还是 public 时，老的 file_url
+ * 仍然能直接访问 — 这一步是渐进式收紧。
+ */
+export async function getAttachmentDownloadUrl(
+  attachmentId: string,
+): Promise<{ url?: string; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: row, error: fetchErr } = await (supabase.from('order_attachments') as any)
+    .select('id, storage_path, file_url, uploaded_by, order_id')
+    .eq('id', attachmentId)
+    .single();
+  if (fetchErr || !row) return { error: '附件不存在' };
+
+  // 权限校验
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles')
+    .eq('user_id', user.id)
+    .single();
+  const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
+  const isAdmin = roles.includes('admin');
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by, owner_user_id')
+    .eq('id', row.order_id)
+    .single();
+
+  const isUploader = row.uploaded_by === user.id;
+  const isOrderOwner = order && (order.created_by === user.id || order.owner_user_id === user.id);
+
+  if (!isAdmin && !isUploader && !isOrderOwner) {
+    return { error: '无权下载该附件' };
+  }
+
+  // 优先用 storage_path 签发 signed URL
+  let pathToSign: string | null = row.storage_path || null;
+  // 兼容老数据：从 file_url 反解 path
+  if (!pathToSign && row.file_url) {
+    try {
+      const u = new URL(row.file_url);
+      const idx = u.pathname.indexOf('/order-docs/');
+      if (idx >= 0) pathToSign = u.pathname.slice(idx + '/order-docs/'.length);
+    } catch {}
+  }
+
+  if (!pathToSign) {
+    // 兜底：返回老的 public URL
+    return { url: row.file_url || undefined };
+  }
+
+  const { data: signedData, error: signErr } = await supabase.storage
+    .from('order-docs')
+    .createSignedUrl(pathToSign, 3600);
+
+  if (signErr || !signedData?.signedUrl) {
+    // 签发失败时回退到 public URL（保证可用性）
+    console.error('[getAttachmentDownloadUrl] signed url failed:', signErr?.message);
+    return { url: row.file_url || undefined };
+  }
+
+  return { url: signedData.signedUrl };
+}
+
+/**
  * 检查里程碑是否已上传凭证
  */
 export async function checkMilestoneEvidence(milestoneId: string) {

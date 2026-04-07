@@ -165,11 +165,14 @@ ${complianceContext || '无'}
 }
 只返回JSON。`;
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    const response = await client.messages.create(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
+      },
+      { signal: AbortSignal.timeout(30_000) }, // P1 修复：30s 超时
+    );
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     const match = text.match(/\{[\s\S]*\}/);

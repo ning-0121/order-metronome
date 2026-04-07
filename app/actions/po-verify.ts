@@ -134,12 +134,15 @@ export async function verifyPOAgainstOrder(
       return { error: '暂只支持 PDF / 图片 / Excel 格式的 PO 比对' };
     }
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: VERIFY_PROMPT,
-      messages,
-    });
+    const response = await client.messages.create(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        system: VERIFY_PROMPT,
+        messages,
+      },
+      { signal: AbortSignal.timeout(45_000) }, // P1 修复：PDF 解析较慢，给 45s
+    );
 
     const text = response.content
       .filter(block => block.type === 'text')
@@ -454,7 +457,9 @@ export async function verifyThreeDocuments(
 - 即使价格一致，其他字段不一致仍然要列在 differences 里
 - 只返回JSON。`,
       messages: [{ role: 'user', content }],
-    });
+    },
+    { signal: AbortSignal.timeout(45_000) }, // P1 修复：三单比对慢，给 45s
+    );
 
     const text = response.content.filter(b => b.type === 'text').map(b => (b as Anthropic.TextBlock).text).join('');
     let jsonStr = text.trim();

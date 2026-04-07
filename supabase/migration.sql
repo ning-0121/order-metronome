@@ -1574,3 +1574,49 @@ CREATE POLICY "pre_order_price_approvals_authenticated" ON public.pre_order_pric
 
 -- 订单关联到价格审批 — 用于审计追溯
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS price_approval_id uuid REFERENCES public.pre_order_price_approvals(id);
+
+-- ===== 2026-04-08 RLS 加固（P1 安全审计修复） =====
+-- 详见 supabase/migrations/20260408_rls_hardening.sql
+CREATE OR REPLACE FUNCTION public.user_can_see_all_orders(uid uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT COALESCE(EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE user_id = uid
+      AND (role = ANY(ARRAY['admin','finance','admin_assistant','production_manager'])
+           OR roles && ARRAY['admin','finance','admin_assistant','production_manager'])
+  ), false);
+$$;
+
+CREATE OR REPLACE FUNCTION public.user_can_access_order(uid uuid, oid uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.user_can_see_all_orders(uid)
+    OR EXISTS (SELECT 1 FROM public.orders WHERE id = oid AND (created_by = uid OR owner_user_id = uid))
+    OR EXISTS (SELECT 1 FROM public.milestones WHERE order_id = oid AND owner_user_id = uid);
+$$;
+
+GRANT EXECUTE ON FUNCTION public.user_can_see_all_orders(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.user_can_access_order(uuid, uuid) TO authenticated;
+
+DROP POLICY IF EXISTS "orders_select_all" ON public.orders;
+DROP POLICY IF EXISTS "orders_select_own" ON public.orders;
+DROP POLICY IF EXISTS "orders_select_v2" ON public.orders;
+CREATE POLICY "orders_select_v2" ON public.orders FOR SELECT USING (
+  auth.uid() IS NOT NULL AND (
+    public.user_can_see_all_orders(auth.uid())
+    OR created_by = auth.uid()
+    OR owner_user_id = auth.uid()
+    OR EXISTS (SELECT 1 FROM public.milestones WHERE order_id = orders.id AND owner_user_id = auth.uid())
+  )
+);
+
+DROP POLICY IF EXISTS "milestones_select" ON public.milestones;
+DROP POLICY IF EXISTS "milestones_select_v2" ON public.milestones;
+CREATE POLICY "milestones_select_v2" ON public.milestones FOR SELECT USING (
+  auth.uid() IS NOT NULL AND public.user_can_access_order(auth.uid(), order_id)
+);
+
+DROP POLICY IF EXISTS "order_attachments_select" ON public.order_attachments;
+DROP POLICY IF EXISTS "order_attachments_select_v2" ON public.order_attachments;
+CREATE POLICY "order_attachments_select_v2" ON public.order_attachments FOR SELECT USING (
+  auth.uid() IS NOT NULL AND public.user_can_access_order(auth.uid(), order_id)
+);
