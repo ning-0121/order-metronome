@@ -470,7 +470,12 @@ export default async function OrderDetailPage({
 
           {/* 订单修改申请 */}
           <div className="mt-6">
-            <OrderAmendmentPanel orderId={orderData.id} order={orderData} isAdmin={isAdmin} />
+            <OrderAmendmentPanel
+              orderId={orderData.id}
+              order={orderData}
+              isAdmin={isAdmin}
+              doneStepKeys={(milestones || []).filter((m: any) => isDoneStatus(m.status)).map((m: any) => m.step_key)}
+            />
           </div>
           </>
         )}

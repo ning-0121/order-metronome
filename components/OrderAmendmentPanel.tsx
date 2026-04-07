@@ -1,30 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { submitOrderAmendment, getOrderAmendments, approveOrderAmendment } from '@/app/actions/order-amendments';
-
-const EDITABLE_FIELDS: { key: string; label: string }[] = [
-  { key: 'quantity', label: '数量' },
-  { key: 'colors', label: '颜色' },
-  { key: 'sizes', label: '尺码' },
-  { key: 'etd', label: '交期 (ETD)' },
-  { key: 'warehouse_due_date', label: '到仓日期' },
-  { key: 'unit_price', label: '单价' },
-  { key: 'total_amount', label: '总金额' },
-  { key: 'payment_terms', label: '付款条件' },
-  { key: 'incoterm', label: '贸易条款' },
-  { key: 'packaging_type', label: '包装方式' },
-  { key: 'factory_name', label: '工厂' },
-  { key: 'notes', label: '备注' },
-];
+import {
+  submitOrderAmendment,
+  getOrderAmendments,
+  approveOrderAmendment,
+} from '@/app/actions/order-amendments';
+import {
+  AMENDMENT_RULES,
+  checkAmendmentAllowed,
+  type AmendmentRule,
+} from '@/lib/domain/amendment-policy';
 
 interface Props {
   orderId: string;
   order: any;
   isAdmin: boolean;
+  /** 该订单已完成的 step_key 列表（由父组件传入） */
+  doneStepKeys?: string[];
 }
 
-export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
+export function OrderAmendmentPanel({ orderId, order, isAdmin, doneStepKeys = [] }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [amendments, setAmendments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,6 +29,8 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
   const [reason, setReason] = useState('');
   const [changes, setChanges] = useState<Record<string, { from: string; to: string }>>({});
 
+  const doneSet = new Set(doneStepKeys);
+
   useEffect(() => { loadAmendments(); }, [orderId]);
 
   async function loadAmendments() {
@@ -40,12 +38,26 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
     setAmendments(res.data || []);
   }
 
+  // 当前选中字段的规则与窗口状态
+  const selectedRule = selectedField
+    ? AMENDMENT_RULES.find(r => r.field === selectedField) || null
+    : null;
+  const selectedCheck = selectedField ? checkAmendmentAllowed(selectedField, doneSet) : null;
+
+  function fieldCurrentValue(rule: AmendmentRule): string {
+    if (rule.field === 'quantity_increase' || rule.field === 'quantity_decrease') {
+      return String(order.quantity ?? '—');
+    }
+    return String(order[rule.field] ?? '—');
+  }
+
   function addChange() {
-    if (!selectedField || !newValue) return;
-    const field = EDITABLE_FIELDS.find(f => f.key === selectedField);
-    if (!field) return;
-    const currentValue = order[selectedField] ?? '—';
-    setChanges(prev => ({ ...prev, [selectedField]: { from: String(currentValue), to: newValue } }));
+    if (!selectedField || !newValue || !selectedRule || !selectedCheck?.allowed) return;
+    const currentValue = fieldCurrentValue(selectedRule);
+    setChanges(prev => ({
+      ...prev,
+      [selectedField]: { from: currentValue, to: newValue },
+    }));
     setSelectedField('');
     setNewValue('');
   }
@@ -59,8 +71,13 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
     if (reason.trim().length < 5) { alert('请填写修改原因（至少5个字）'); return; }
     setLoading(true);
     const result = await submitOrderAmendment(orderId, changes, reason);
-    if (result.error) alert(result.error);
-    else {
+    if (result.error) {
+      let msg = result.error;
+      if (result.childOrderHint) {
+        msg += '\n\n💡 加单超过窗口期：请在订单页发起「创建追加子订单」（暂未上线，可联系管理员）';
+      }
+      alert(msg);
+    } else {
       alert('修改申请已提交，等待管理员审批');
       setShowForm(false);
       setChanges({});
@@ -79,6 +96,10 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
   }
 
   const pendingCount = amendments.filter(a => a.status === 'pending').length;
+
+  // 把规则分成 可改 / 锁定 两组，便于显示
+  const allowedRules = AMENDMENT_RULES.filter(r => checkAmendmentAllowed(r.field, doneSet).allowed);
+  const blockedRules = AMENDMENT_RULES.filter(r => !checkAmendmentAllowed(r.field, doneSet).allowed);
 
   return (
     <div className="mt-4">
@@ -100,17 +121,20 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
           {/* 已添加的修改项 */}
           {Object.keys(changes).length > 0 && (
             <div className="space-y-2">
-              {Object.entries(changes).map(([key, val]) => (
-                <div key={key} className="flex items-center gap-3 p-2 bg-white rounded-lg border border-amber-200">
-                  <span className="text-sm font-medium text-gray-700 w-20">
-                    {EDITABLE_FIELDS.find(f => f.key === key)?.label}
-                  </span>
-                  <span className="text-sm text-red-500 line-through">{val.from}</span>
-                  <span className="text-sm">→</span>
-                  <span className="text-sm text-green-600 font-medium">{val.to}</span>
-                  <button onClick={() => removeChange(key)} className="ml-auto text-xs text-red-400 hover:text-red-600">删除</button>
-                </div>
-              ))}
+              {Object.entries(changes).map(([key, val]) => {
+                const rule = AMENDMENT_RULES.find(r => r.field === key);
+                return (
+                  <div key={key} className="flex items-center gap-3 p-2 bg-white rounded-lg border border-amber-200">
+                    <span className="text-sm font-medium text-gray-700 w-20">
+                      {rule?.label || key}
+                    </span>
+                    <span className="text-sm text-red-500 line-through">{val.from}</span>
+                    <span className="text-sm">→</span>
+                    <span className="text-sm text-green-600 font-medium">{val.to}</span>
+                    <button onClick={() => removeChange(key)} className="ml-auto text-xs text-red-400 hover:text-red-600">删除</button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -118,29 +142,68 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
           <div className="flex gap-2">
             <select
               value={selectedField}
-              onChange={e => setSelectedField(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+              onChange={e => { setSelectedField(e.target.value); setNewValue(''); }}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white min-w-[140px]"
             >
-              <option value="">选择要修改的字段</option>
-              {EDITABLE_FIELDS.filter(f => !changes[f.key]).map(f => (
-                <option key={f.key} value={f.key}>{f.label}</option>
-              ))}
+              <option value="">选择字段</option>
+              <optgroup label="✅ 可改">
+                {allowedRules
+                  .filter(r => !changes[r.field])
+                  .map(r => (
+                    <option key={r.field} value={r.field}>{r.label}</option>
+                  ))}
+              </optgroup>
+              {blockedRules.length > 0 && (
+                <optgroup label="🔒 已锁定">
+                  {blockedRules.map(r => (
+                    <option key={r.field} value={r.field} disabled>
+                      {r.label}（已超窗口）
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
-            <input
-              type="text"
-              value={newValue}
-              onChange={e => setNewValue(e.target.value)}
-              placeholder="修改为..."
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
+            {selectedRule?.inputType === 'select' && selectedRule.options ? (
+              <select
+                value={newValue}
+                onChange={e => setNewValue(e.target.value)}
+                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+              >
+                <option value="">选择新值...</option>
+                {selectedRule.options.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={selectedRule?.inputType === 'number' ? 'number' : 'text'}
+                value={newValue}
+                onChange={e => setNewValue(e.target.value)}
+                placeholder="修改为..."
+                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+            )}
             <button
               onClick={addChange}
-              disabled={!selectedField || !newValue}
+              disabled={!selectedField || !newValue || !selectedCheck?.allowed}
               className="px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
             >
               添加
             </button>
           </div>
+
+          {/* 当前字段窗口期提示 */}
+          {selectedRule && selectedCheck && !selectedCheck.allowed && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+              🔒 <span className="font-medium">{selectedRule.label}</span> 已锁定：{selectedCheck.reason}
+            </div>
+          )}
+          {selectedRule && selectedCheck?.allowed && selectedRule.postApprovalReminder && (
+            <div className="rounded-lg bg-amber-100 border border-amber-300 p-3 text-xs text-amber-800 whitespace-pre-line">
+              <span className="font-semibold">⚠️ 审批通过后业务必做：</span>
+              {'\n'}{selectedRule.postApprovalReminder}
+            </div>
+          )}
 
           {/* 原因 */}
           <div>
@@ -197,17 +260,24 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin }: Props) {
                 )}
               </div>
               <div className="space-y-1 mb-2">
-                {Object.entries(a.fields_to_change || {}).map(([key, val]: [string, any]) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <span className="text-gray-600 font-medium">{EDITABLE_FIELDS.find(f => f.key === key)?.label || key}：</span>
-                    <span className="text-red-500 line-through">{val.from}</span>
-                    <span>→</span>
-                    <span className="text-green-600 font-medium">{val.to}</span>
-                  </div>
-                ))}
+                {Object.entries(a.fields_to_change || {}).map(([key, val]: [string, any]) => {
+                  const rule = AMENDMENT_RULES.find(r => r.field === key);
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <span className="text-gray-600 font-medium">{rule?.label || key}：</span>
+                      <span className="text-red-500 line-through">{val.from}</span>
+                      <span>→</span>
+                      <span className="text-green-600 font-medium">{val.to}</span>
+                    </div>
+                  );
+                })}
               </div>
               <p className="text-gray-600">原因：{a.reason}</p>
-              {a.admin_note && <p className="text-gray-500 mt-1">管理员备注：{a.admin_note}</p>}
+              {a.admin_note && (
+                <p className="text-gray-600 mt-1 whitespace-pre-line">
+                  <span className="font-medium">备注：</span>{a.admin_note}
+                </p>
+              )}
             </div>
           ))}
         </div>
