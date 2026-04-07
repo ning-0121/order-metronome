@@ -32,11 +32,14 @@ export default async function OrderDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; from?: string }>;
 }) {
   const { id } = await params;
   const resolvedSearchParams = await searchParams;
   const rawTab = resolvedSearchParams?.tab ?? '';
+  const fromUrl = resolvedSearchParams?.from
+    ? decodeURIComponent(resolvedSearchParams.from)
+    : '/orders';
   if (rawTab === 'timeline') {
     redirect(`/orders/${id}?tab=progress`);
   }
@@ -135,7 +138,9 @@ export default async function OrderDetailPage({
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-3 mb-1">
-                <Link href="/orders" className="text-sm text-gray-400 hover:text-gray-600">← 订单列表</Link>
+                <Link href={fromUrl} className="text-sm text-gray-400 hover:text-gray-600">
+                  ← {fromUrl.includes('risk-orders') ? '返回风险订单列表' : fromUrl === '/ceo' ? '返回首页' : fromUrl === '/dashboard' ? '返回首页' : '订单列表'}
+                </Link>
               </div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-gray-900">{orderData.order_no}</h1>
@@ -233,7 +238,7 @@ export default async function OrderDetailPage({
             ].map(t => (
               <Link
                 key={t.key}
-                href={`/orders/${id}?tab=${t.key}`}
+                href={`/orders/${id}?tab=${t.key}${fromUrl !== '/orders' ? `&from=${encodeURIComponent(fromUrl)}` : ''}`}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${
                   activeTab === t.key
                     ? 'border-indigo-600 text-indigo-600'

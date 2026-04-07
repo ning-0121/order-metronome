@@ -1499,3 +1499,6 @@ CREATE INDEX IF NOT EXISTS idx_daily_briefings_user_date ON public.daily_briefin
 ALTER TABLE public.daily_briefings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "daily_briefings_own_select" ON public.daily_briefings FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "daily_briefings_insert" ON public.daily_briefings FOR INSERT WITH CHECK (true);
+
+-- ===== 2026-04-07 企业微信用户ID =====
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS wecom_userid text;

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 interface RiskOrder {
@@ -23,6 +24,8 @@ interface RiskOrder {
 
 export function RiskOrderList({ orders }: { orders: RiskOrder[] }) {
   const [memoOrder, setMemoOrder] = useState<RiskOrder | null>(null);
+  const pathname = usePathname();
+  const fromParam = encodeURIComponent(pathname);
 
   if (orders.length === 0) {
     return (
@@ -91,7 +94,7 @@ export function RiskOrderList({ orders }: { orders: RiskOrder[] }) {
               {/* 操作按钮 */}
               <div className="flex flex-col gap-2 shrink-0">
                 <Link
-                  href={`/orders/${o.id}`}
+                  href={`/orders/${o.id}?from=${fromParam}`}
                   className="inline-flex items-center justify-center gap-1 rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-700"
                 >
                   📋 处理
