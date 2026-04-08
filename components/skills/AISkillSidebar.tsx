@@ -15,7 +15,7 @@ import type { SkillResult, SkillFinding } from '@/lib/agent/skills/types';
 
 interface Props {
   orderId: string;
-  isAdmin: boolean;
+  isAdmin?: boolean; // 保留兼容，但不再用于权限拦截
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -44,18 +44,14 @@ const INITIAL_STATE: SkillState = {
   loading: true,
 };
 
-export function AISkillSidebar({ orderId, isAdmin }: Props) {
+export function AISkillSidebar({ orderId }: Props) {
   const [missing, setMissing] = useState<SkillState>(INITIAL_STATE);
   const [risk, setRisk] = useState<SkillState>(INITIAL_STATE);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Phase 1：仅 admin 可见
+  // 权限由 server action 内部判断（订单创建者/跟单/节点负责人/admin）
+  // 没权限的用户会收到 error，UI 展示空状态
   useEffect(() => {
-    if (!isAdmin) {
-      setMissing({ ...INITIAL_STATE, loading: false });
-      setRisk({ ...INITIAL_STATE, loading: false });
-      return;
-    }
     let cancelled = false;
 
     // 并行加载两个 Skill
@@ -83,9 +79,13 @@ export function AISkillSidebar({ orderId, isAdmin }: Props) {
     });
 
     return () => { cancelled = true; };
-  }, [orderId, isAdmin, refreshKey]);
+  }, [orderId, refreshKey]);
 
-  if (!isAdmin) return null;
+  // 如果两个 Skill 都返回"无权"错误，整个侧栏隐藏（外部用户）
+  const bothNoPermission =
+    missing.error === '无权访问此订单的 AI Skill' &&
+    risk.error === '无权访问此订单的 AI Skill';
+  if (bothNoPermission) return null;
 
   const refresh = () => setRefreshKey(k => k + 1);
 
@@ -231,19 +231,32 @@ function SkillCard({
 }
 
 function FindingItem({ finding }: { finding: SkillFinding }) {
+  // 「数据状态」类别用蓝色提示样式（不是风险，是诚实告知数据缺失）
+  const isDataStatus = finding.category === '数据状态';
+  const className = isDataStatus
+    ? 'bg-blue-50 border-blue-200 text-blue-800'
+    : SEV_COLOR[finding.severity];
+  const icon = isDataStatus ? 'ℹ️ 数据' : SEV_LABEL[finding.severity];
+
   return (
-    <li className={`text-xs px-2 py-1.5 rounded border ${SEV_COLOR[finding.severity]}`}>
+    <li className={`text-xs px-2 py-1.5 rounded border ${className}`}>
       <div className="flex items-start gap-1.5">
-        <span className="shrink-0">{SEV_LABEL[finding.severity]}</span>
+        <span className="shrink-0">{icon}</span>
         <div className="flex-1 min-w-0">
           <p className="font-medium">{finding.label}</p>
           {finding.detail && (
             <p className="text-[11px] mt-0.5 opacity-90">{finding.detail}</p>
           )}
-          {finding.evidence && (
-            <p className="text-[10px] mt-1 text-gray-500 italic">
+          {finding.evidence ? (
+            <p className="text-[10px] mt-1 text-gray-500 italic break-all">
               📎 依据：{finding.evidence}
             </p>
+          ) : (
+            !isDataStatus && (
+              <p className="text-[10px] mt-1 text-amber-600 italic">
+                ⚠ 此条无明确数据依据 — 仅供参考
+              </p>
+            )
           )}
           {finding.blocksStepName && (
             <p className="text-[10px] mt-0.5 opacity-75">

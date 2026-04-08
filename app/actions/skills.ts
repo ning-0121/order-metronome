@@ -16,9 +16,60 @@ import { riskAssessmentSkill } from '@/lib/agent/skills/riskAssessment';
 import type { SkillResult } from '@/lib/agent/skills/types';
 
 /**
+ * 权限检查：用户是否有权访问该订单的 AI Skill
+ *
+ * 允许：
+ * - admin / finance / production_manager / admin_assistant（全公司可见角色）
+ * - 订单创建者 (created_by)
+ * - 跟单负责人 (owner_user_id)
+ * - 该订单中分配了里程碑的负责人
+ */
+async function canAccessOrderSkill(supabase: any, orderId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (isAdmin) return true;
+
+  // 角色检查
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles')
+    .eq('user_id', user.id)
+    .single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0
+    ? (profile as any).roles
+    : [(profile as any)?.role].filter(Boolean);
+
+  // 全公司可见角色
+  if (userRoles.some((r: string) => ['finance', 'production_manager', 'admin_assistant'].includes(r))) {
+    return true;
+  }
+
+  // 订单所有权
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by, owner_user_id')
+    .eq('id', orderId)
+    .single();
+  if (!order) return false;
+
+  if (order.created_by === user.id) return true;
+  if (order.owner_user_id === user.id) return true;
+
+  // 该订单中是否有分配给当前用户的里程碑
+  const { data: ms } = await (supabase.from('milestones') as any)
+    .select('id')
+    .eq('order_id', orderId)
+    .eq('owner_user_id', user.id)
+    .limit(1);
+  if (ms && ms.length > 0) return true;
+
+  return false;
+}
+
+/**
  * 跑「缺失资料检查」Skill
  *
- * 权限：仅 admin（Phase 1 阶段所有 Skill 都仅 admin 可见）
+ * 权限：admin / 财务/管理助理/生产主管 / 订单创建者 / 跟单 / 节点负责人
  * Feature flag：SKILL_MISSING_INFO=true 才生效
  */
 export async function runMissingInfoCheck(orderId: string): Promise<{
@@ -27,33 +78,28 @@ export async function runMissingInfoCheck(orderId: string): Promise<{
   shadow?: boolean;
   cached?: boolean;
 }> {
-  // 1. Feature flag 检查
   if (!SKILL_FLAGS.missingInfo()) {
     return { error: 'Skill 未启用' };
   }
 
-  // 2. 权限：仅 admin
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可访问 AI Skill' };
 
-  // 3. 通过 runner 调度
+  const allowed = await canAccessOrderSkill(supabase, orderId);
+  if (!allowed) return { error: '无权访问此订单的 AI Skill' };
+
   try {
     const output = await runSkill(missingInfoSkill, { orderId }, { triggeredBy: 'user' });
-
     if (output.circuitBroken) {
       return { error: 'Skill 已熔断（连续失败过多），请稍后重试' };
     }
-
     return {
       result: output.displayResult || undefined,
       shadow: output.displayResult === null && output.internalResult !== null,
       cached: output.cacheHit,
     };
   } catch (err: any) {
-    // runner 内部已经兜底过，这里基本不会触发
     console.error('[runMissingInfoCheck] outer error:', err?.message);
     return { error: 'Skill 运行异常' };
   }
@@ -63,7 +109,7 @@ export async function runMissingInfoCheck(orderId: string): Promise<{
  * 跑「风险评估」Skill
  *
  * 12 维度规则评分 + AI 增强（可选）
- * 权限：仅 admin
+ * 权限：同 runMissingInfoCheck
  * Feature flag：SKILL_RISK_ASSESSMENT=true 才生效
  */
 export async function runRiskAssessment(orderId: string): Promise<{
@@ -79,8 +125,9 @@ export async function runRiskAssessment(orderId: string): Promise<{
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可访问 AI Skill' };
+
+  const allowed = await canAccessOrderSkill(supabase, orderId);
+  if (!allowed) return { error: '无权访问此订单的 AI Skill' };
 
   try {
     const output = await runSkill(riskAssessmentSkill, { orderId }, { triggeredBy: 'user' });

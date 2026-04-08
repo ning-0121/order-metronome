@@ -271,12 +271,11 @@ export default async function OrderDetailPage({
         {/* Tab: 基本信息 */}
         {activeTab === 'basic' && (
           <>
-          {/* AI Skills 侧栏 — 仅 admin 可见，Phase 1 只展示缺失资料检查 */}
-          {isAdmin && (
-            <div className="mb-6">
-              <AISkillSidebar orderId={id} isAdmin={isAdmin} />
-            </div>
-          )}
+          {/* AI Skills 侧栏 — 订单创建者/跟单/节点负责人/admin 都可见
+              （无权用户会被 server action 拦截，UI 自动隐藏） */}
+          <div className="mb-6">
+            <AISkillSidebar orderId={id} />
+          </div>
           <div className="grid gap-6 md:grid-cols-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">基础信息</h2>

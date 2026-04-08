@@ -507,7 +507,8 @@ export const riskAssessmentSkill: SkillModule = {
   hashInput: (input: SkillInput) => {
     return JSON.stringify({
       orderId: input.orderId,
-      version: 'v1',
+      // v3：4 维度桶重构 + 数据不足显式 + 修复 evidence 透传
+      version: 'v3',
     });
   },
 
@@ -553,6 +554,7 @@ export const riskAssessmentSkill: SkillModule = {
     };
 
     // 2. 跑所有维度规则
+    // 修复 BUG：之前 push findings 时丢失了 evidence 字段，导致 UI 看不到证据链
     const findings: SkillFinding[] = [];
     const dimensionScores: Record<string, number> = {};
     let totalScore = 0;
@@ -568,6 +570,7 @@ export const riskAssessmentSkill: SkillModule = {
             severity: r.score >= 15 ? 'high' : r.score >= 8 ? 'medium' : 'low',
             label: dim.label,
             detail: r.reason,
+            evidence: r.evidence,  // ← 关键修复：透传证据
           });
         }
       } catch (err: any) {
@@ -575,33 +578,59 @@ export const riskAssessmentSkill: SkillModule = {
       }
     }
 
-    // 3. 总分映射等级
+    // 3. 数据不足检测：如果客户和工厂都是新的，明确告知"数据不足"
+    const insufficientNotices: SkillFinding[] = [];
+    if (!riskCtx.customer.hasEnoughData && order.customer_name) {
+      insufficientNotices.push({
+        category: '数据状态',
+        severity: 'low',
+        label: '客户历史数据不足',
+        detail: `该客户在系统内仅 ${riskCtx.customer.totalOrders} 单，无法判断历史投诉/延期表现`,
+        evidence: `查询 orders 表：customer_name='${order.customer_name}' 总订单数 = ${riskCtx.customer.totalOrders}（< 3 单基线）`,
+      });
+    }
+    if (!riskCtx.factory.hasEnoughData && order.factory_id) {
+      insufficientNotices.push({
+        category: '数据状态',
+        severity: 'low',
+        label: '工厂历史数据不足',
+        detail: `该工厂在系统内仅 ${riskCtx.factory.totalOrders} 单，无法判断历史质量/交期表现`,
+        evidence: `查询 orders 表：factory_id='${order.factory_id}' 总订单数 = ${riskCtx.factory.totalOrders}（< 3 单基线）`,
+      });
+    }
+
+    // 4. 总分映射等级
     const score = Math.min(100, totalScore);
     let level: 'high' | 'medium' | 'low';
     let summary: string;
     if (score >= 60) {
       level = 'high';
-      summary = `🔴 高风险订单 (${score}/100) — Top ${Math.min(3, findings.length)} 风险点见下`;
+      summary = `🔴 高风险订单 (${score}/100) — 共 ${findings.length} 项风险，重点见下`;
     } else if (score >= 30) {
       level = 'medium';
-      summary = `🟡 中风险订单 (${score}/100) — 需重点关注`;
+      summary = `🟡 中风险订单 (${score}/100) — 共 ${findings.length} 项需关注`;
+    } else if (findings.length > 0) {
+      level = 'low';
+      summary = `🟢 低风险订单 (${score}/100) — ${findings.length} 项轻微风险`;
     } else {
       level = 'low';
-      summary = `🟢 低风险订单 (${score}/100) — 按常规流程执行`;
+      summary = `🟢 低风险订单 (${score}/100) — 按常规流程执行，无已识别风险点`;
     }
 
-    // 4. 按 score 倒序，取 Top 5
+    // 5. 按 score 倒序，取 Top 6（之前 5 太少，看不到全貌）
     findings.sort((a, b) => {
       const order = { high: 3, medium: 2, low: 1 };
       return order[b.severity] - order[a.severity];
     });
-    const topFindings = findings.slice(0, 5);
+    const topFindings = findings.slice(0, 6);
 
-    // 5. AI 增强（可选，失败不影响）
+    // 6. AI 增强（可选，失败不影响）
     const { enhanced, success: aiSuccess } = await enhanceWithAI(order, topFindings.slice(0, 3));
+    // 合并：AI 增强过的 + 剩余原始 + 数据不足提醒（始终放最后）
     const finalFindings = [
       ...enhanced,
       ...topFindings.slice(enhanced.length),
+      ...insufficientNotices,
     ];
 
     return {
@@ -609,11 +638,21 @@ export const riskAssessmentSkill: SkillModule = {
       score,
       summary,
       findings: finalFindings,
-      suggestions: finalFindings.slice(0, 3).map(f => ({
-        action: f.detail || f.label,
-        reason: `[${f.category}] ${f.label}`,
-      })),
-      confidence: aiSuccess ? 90 : 85,
+      suggestions: finalFindings
+        .filter(f => f.category !== '数据状态')
+        .slice(0, 3)
+        .map(f => ({
+          action: f.detail || f.label,
+          reason: `[${f.category}] ${f.label}`,
+        })),
+      // 置信度反映"可参考的真实数据有多少"
+      // 数据不足时降低置信度
+      confidence: (() => {
+        let conf = aiSuccess ? 90 : 85;
+        if (!riskCtx.customer.hasEnoughData) conf -= 15;
+        if (!riskCtx.factory.hasEnoughData) conf -= 10;
+        return Math.max(40, conf);
+      })(),
       source: aiSuccess ? 'rules+ai' : 'rules',
       meta: {
         totalScore: score,
@@ -622,6 +661,10 @@ export const riskAssessmentSkill: SkillModule = {
         dimensionsEvaluated: DIMENSIONS.length,
         dimensionsTriggered: Object.keys(dimensionScores).length,
         aiEnhanced: aiSuccess,
+        customerDataSufficient: riskCtx.customer.hasEnoughData,
+        factoryDataSufficient: riskCtx.factory.hasEnoughData,
+        customerTotalOrders: riskCtx.customer.totalOrders,
+        factoryTotalOrders: riskCtx.factory.totalOrders,
       },
     };
   },
