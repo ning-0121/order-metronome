@@ -36,13 +36,19 @@ const CHINA_HOLIDAYS: Set<string> = new Set([
   '2027-10-05','2027-10-06','2027-10-07',
 ]);
 
-/** 检查是否为非工作日（周日 + 中国法定节假日） */
+/**
+ * 检查是否为非工作日（周日 + 中国法定节假日）
+ *
+ * ⚠️ 必须用北京时间解析日期！服务器 TZ 可能是 UTC（Vercel），
+ * 直接用 getDay/getFullYear 会把北京的 04-08 误判为 UTC 的 04-07。
+ */
 function isNonWorkday(d: Date): boolean {
-  if (d.getDay() === 0) return true; // 周日
-  // 转北京时间日期字符串
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  // 把 UTC 时间 +8h 后用 UTC 方法读取 → 得到北京本地日期
+  const bj = new Date(d.getTime() + 8 * 3600 * 1000);
+  if (bj.getUTCDay() === 0) return true; // 周日
+  const y = bj.getUTCFullYear();
+  const m = String(bj.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(bj.getUTCDate()).padStart(2, '0');
   return CHINA_HOLIDAYS.has(`${y}-${m}-${day}`);
 }
 

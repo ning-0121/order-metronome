@@ -882,24 +882,46 @@ export async function markMilestoneUnblocked(milestoneId: string) {
     return { error: '请先登录' };
   }
 
-  // Only admin can unblock milestones (multi-role safe)
+  // 角色与授权：admin / finance / production_manager / admin_assistant
+  // 订单创建者 / 跟单负责人 / 该节点的执行人 均可解除卡住
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, roles')
     .eq('user_id', user.id)
     .single();
-  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  if (!userRoles.includes('admin')) {
-    return { error: '无权操作：只有管理员可以解除卡住状态' };
+  const userRoles: string[] = (profile as any)?.roles?.length > 0
+    ? (profile as any).roles
+    : [(profile as any)?.role].filter(Boolean);
+  const isAdmin = userRoles.includes('admin');
+  const isPrivileged = isAdmin || userRoles.some((r: string) =>
+    ['finance', 'production_manager', 'admin_assistant'].includes(r));
+
+  // 拿到该节点 + 订单所有权信息
+  const { data: msForCheck } = await (supabase.from('milestones') as any)
+    .select('order_id, owner_user_id, status')
+    .eq('id', milestoneId)
+    .single();
+  if (!msForCheck) return { error: '节点不存在' };
+
+  let allowed = isPrivileged;
+  if (!allowed) {
+    const { data: order } = await (supabase.from('orders') as any)
+      .select('created_by, owner_user_id')
+      .eq('id', msForCheck.order_id)
+      .single();
+    if (order) {
+      if (order.created_by === user.id) allowed = true;
+      else if (order.owner_user_id === user.id) allowed = true;
+      else if (msForCheck.owner_user_id === user.id) allowed = true;
+    }
+  }
+  if (!allowed) {
+    return { error: '无权操作：仅管理员 / 订单创建者 / 跟单 / 节点执行人可解除卡住' };
   }
 
-  // 生命周期校验（管理员强制操作）
-  const { data: msForCheck } = await (supabase.from('milestones') as any)
-    .select('order_id').eq('id', milestoneId).single();
-  if (msForCheck) {
-    const lcErr = await checkOrderModifiable(supabase, msForCheck.order_id, true /* admin */);
-    if (lcErr) return { error: lcErr };
-  }
+  // 生命周期校验（非 admin 也按非强制走标准校验）
+  const lcErr = await checkOrderModifiable(supabase, msForCheck.order_id, isAdmin);
+  if (lcErr) return { error: lcErr };
 
   // 使用状态机转换（卡住 -> 进行中）
   const result = await transitionMilestoneStatus(milestoneId, '进行中', '已解除阻塞');

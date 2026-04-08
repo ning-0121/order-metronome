@@ -76,11 +76,17 @@ const CHINA_HOLIDAYS: Set<string> = new Set([
   '2027-10-05','2027-10-06','2027-10-07',
 ]);
 
-/** 检查是否为非工作日（周日 + 中国法定节假日） */
+/**
+ * 检查是否为非工作日（周日 + 中国法定节假日）
+ * ⚠️ 北京时区处理：服务器 TZ 可能是 UTC，必须先 +8h 再用 UTC 方法读取。
+ */
 function isNonWorkday(d: Date): boolean {
-  if (d.getDay() === 0) return true; // 周日
-  const key = d.toISOString().slice(0, 10);
-  return CHINA_HOLIDAYS.has(key);
+  const bj = new Date(d.getTime() + 8 * 3600 * 1000);
+  if (bj.getUTCDay() === 0) return true; // 周日
+  const y = bj.getUTCFullYear();
+  const m = String(bj.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(bj.getUTCDate()).padStart(2, '0');
+  return CHINA_HOLIDAYS.has(`${y}-${m}-${day}`);
 }
 
 /** 计算两个日期间的有效工作日数 */

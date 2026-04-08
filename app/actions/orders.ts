@@ -411,6 +411,14 @@ export async function createOrder(
     order_purpose,
     skip_pre_production_sample,
   );
+  // 防御性下限：任何节点 due_at 不能早于下单日（T0），
+  // 否则 ensureBusinessDay 遇到连续节假日可能越界回退（历史 bug 防护）
+  const T0Floor = order_date
+    ? new Date(order_date + 'T00:00:00+08:00')
+    : new Date(orderData.created_at);
+  const clampNotBeforeT0 = (d: Date): Date =>
+    d.getTime() < T0Floor.getTime() ? new Date(T0Floor) : d;
+
   const milestonesData = [];
   for (let index = 0; index < templates.length; index++) {
     const template = templates[index];
@@ -423,13 +431,14 @@ export async function createOrder(
     const dbRole = ROLE_TO_DB[template.owner_role] || 'sales';
     // 自动分配：业务=创建者，采购/财务/物流=角色唯一用户，跟单=管理员指定
     const autoAssign = roleUserMap[dbRole] || null;
+    const safeDue = clampNotBeforeT0(ensureBusinessDay(dueAt));
     milestonesData.push({
       step_key: template.step_key,
       name: template.name,
       owner_role: dbRole,
       owner_user_id: autoAssign,
-      planned_at: ensureBusinessDay(dueAt).toISOString(),
-      due_at: ensureBusinessDay(dueAt).toISOString(),
+      planned_at: safeDue.toISOString(),
+      due_at: safeDue.toISOString(),
       status: index === 0 ? 'in_progress' : 'pending',
       is_critical: template.is_critical,
       evidence_required: template.evidence_required,
