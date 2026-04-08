@@ -34,13 +34,24 @@ export function computeDeliveryAlert(actualAt: string | null, dueAt: string | nu
 }
 
 /**
- * 计算实际日期与截止日期的偏差天数
+ * 计算实际日期与截止日期的偏差天数（按北京日历日）
  * 正数=延迟，负数=提前
+ *
+ * ⚠️ 必须按"日历日"算不能按"毫秒差"，否则 04-08 10:00 完成、04-07 20:00 截止
+ * 会被 Math.ceil(14h/24h) 算成 1 天差 + 1 = 2 天，但实际是 1 天。
  */
 export function computeDelayDays(actualAt: string | null, dueAt: string | null): number {
   if (!actualAt || !dueAt) return 0;
-  const diffMs = new Date(actualAt).getTime() - new Date(dueAt).getTime();
-  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  // 把时间戳转成北京日期 YYYY-MM-DD，再按日历日差计算
+  const toBjDate = (iso: string): Date => {
+    const d = new Date(iso);
+    const bj = new Date(d.getTime() + 8 * 3600 * 1000);
+    // 截断到 UTC 的 00:00 — 此时 UTC 日期就是北京日期
+    return new Date(Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate()));
+  };
+  const actualDay = toBjDate(actualAt);
+  const dueDay = toBjDate(dueAt);
+  return Math.round((actualDay.getTime() - dueDay.getTime()) / 86400000);
 }
 
 /**

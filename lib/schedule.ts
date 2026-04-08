@@ -370,11 +370,14 @@ export function calcDueDates(params: CalcDueDatesParams) {
     }
   }
 
-  // 校验4：不早于下单日
+  // 校验4 + 防御性 clamp：任何节点（收款除外）都不能早于下单日
+  // 历史 bug：ensureBusinessDay 时区问题曾把 T0 向后回退到节假日之前
+  // 这里最后一道防线 — 不再 throw，直接 clamp 到 T0
   for (const [key, date] of Object.entries(result)) {
     if (key === 'payment_received') continue;
-    if (date.getTime() < T0.getTime() - 86400000) {
-      throw new Error(`排期异常：${key} 早于下单日`);
+    if (date.getTime() < T0.getTime()) {
+      console.warn(`[Schedule] clamp: ${key} (${date.toISOString()}) → T0 (${T0.toISOString()})`);
+      result[key] = new Date(T0);
     }
   }
 

@@ -28,6 +28,7 @@ interface OrderTimelineProps {
   orderIncoterm: 'FOB' | 'DDP';
   currentRole?: string;
   currentRoles?: string[];
+  currentUserId?: string;
   isAdmin?: boolean;
 }
 
@@ -169,7 +170,7 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   );
 }
 
-export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, currentRoles = [], isAdmin = false }: OrderTimelineProps) {
+export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, currentRoles = [], currentUserId, isAdmin = false }: OrderTimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
   const [showPOParser, setShowPOParser] = useState(false);
@@ -315,17 +316,8 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
                           )}
                           {overdue && isActive && (() => {
-                            const ownerRole = (m.owner_role || '').toLowerCase();
-                            const allUserRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
-                            // 管理员不执行关卡，不显示「我的逾期」
-                            const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
-                            const isMineOverdue = !isAdmin && allUserRoles.some(r => {
-                              const nr = r.toLowerCase();
-                              return nr === ownerRole
-                                || (ownerRole === 'sales' && nr === 'merchandiser')
-                                || (ownerRole === 'merchandiser' && nr === 'sales')
-                                || (merchGroup.includes(ownerRole) && merchGroup.includes(nr));
-                            });
+                            // 严格按 owner_user_id 判断 — 否则同 role 的同事会被误标成"我的逾期"
+                            const isMineOverdue = !isAdmin && !!currentUserId && (m as any).owner_user_id === currentUserId;
                             const roleName = getRoleLabel(m.owner_role);
                             return isMineOverdue
                               ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">🔴 我的逾期</span>
@@ -353,16 +345,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (() => {
                             if (!overdue || !isActive) return <span>截止：{formatDate(m.due_at)}</span>;
-                            const ownerRole = (m.owner_role || '').toLowerCase();
-                            const allUserRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
-                            const merchGroup2 = ['merchandiser', 'production', 'qc', 'quality'];
-                            const isMineOverdue = !isAdmin && allUserRoles.some(r => {
-                              const nr = r.toLowerCase();
-                              return nr === ownerRole
-                                || (ownerRole === 'sales' && nr === 'merchandiser')
-                                || (ownerRole === 'merchandiser' && nr === 'sales')
-                                || (merchGroup2.includes(ownerRole) && merchGroup2.includes(nr));
-                            });
+                            const isMineOverdue = !isAdmin && !!currentUserId && (m as any).owner_user_id === currentUserId;
                             return (
                               <span className={isMineOverdue ? 'text-red-600 font-semibold' : 'text-orange-500 font-medium'}>
                                 截止：{formatDate(m.due_at)}

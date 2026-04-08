@@ -130,7 +130,18 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   if (typeFilter) filteredOrders = filteredOrders.filter((o: any) => o.order_type === typeFilter);
 
   // 应用搜索
-  const orders = filteredOrders.filter((o: any) => matchOrder(o, searchQuery));
+  const unsorted = filteredOrders.filter((o: any) => matchOrder(o, searchQuery));
+
+  // 按出厂日升序排序（空值放最后），同日内按订单号
+  const orders = [...unsorted].sort((a: any, b: any) => {
+    const aDate = a.factory_date || a.etd || null;
+    const bDate = b.factory_date || b.etd || null;
+    if (!aDate && !bDate) return (a.order_no || '').localeCompare(b.order_no || '');
+    if (!aDate) return 1;
+    if (!bDate) return -1;
+    const cmp = String(aDate).localeCompare(String(bDate));
+    return cmp !== 0 ? cmp : (a.order_no || '').localeCompare(b.order_no || '');
+  });
 
   // 搜索维度统计（基于 base orders，不受搜索关键词影响）
   const dimensions = getSearchDimensions(baseOrders);
@@ -327,6 +338,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             <thead>
               <tr>
                 <th>订单号</th>
+                <th>内部单号</th>
                 <th>客户</th>
                 <th>工厂</th>
                 <th>款号/PO</th>
@@ -361,6 +373,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                           {typeLabels[order.order_type] || order.order_type}
                         </span>
                       </div>
+                    </td>
+                    <td>
+                      <span className="text-xs text-gray-600 font-mono">
+                        {(order as any).internal_order_no || '-'}
+                      </span>
                     </td>
                     <td>
                       <Link href={`/orders?status=${statusFilter}&customer=${encodeURIComponent(order.customer_name)}`}

@@ -502,6 +502,7 @@ export default async function OrderDetailPage({
                 orderIncoterm={orderData.incoterm as 'FOB' | 'DDP'}
                 currentRole={currentRole}
                 currentRoles={currentRoles}
+                currentUserId={user.id}
                 isAdmin={isAdmin}
               />
             ) : (

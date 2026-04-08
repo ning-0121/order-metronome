@@ -145,7 +145,11 @@ export function MilestoneActions({
           .from('order-docs')
           .upload(path, evidenceFile, { contentType: evidenceFile.type, upsert: true });
         if (uploadError) {
-          setSubmitError('文件上传失败：' + uploadError.message);
+          const msg = String(uploadError.message || '');
+          const friendly = msg.includes('exceeded the maximum allowed size') || msg.includes('Payload too large')
+            ? `⚠️ 文件过大，Supabase 存储拒收：${evidenceFile.name}（${(evidenceFile.size / 1024 / 1024).toFixed(1)}MB）。请压缩后重试（推荐 ≤ 10MB）。`
+            : `文件上传失败：${msg}`;
+          setSubmitError(friendly);
           setLoading(false);
           return;
         }
@@ -479,17 +483,88 @@ export function MilestoneActions({
               multiple
               onChange={e => {
                 const files = e.target.files;
-                if (files && files.length > 0) {
-                  setEvidenceFile(files[0]);
-                  setExtraFiles(Array.from(files).slice(1));
+                if (!files || files.length === 0) return;
+                // 前端体积限制：单文件 20MB，总计 50MB — 避免 Supabase Storage 5xx
+                const MAX_SINGLE_MB = 20;
+                const MAX_TOTAL_MB = 50;
+                const picked = Array.from(files);
+                const oversized = picked.filter(f => f.size > MAX_SINGLE_MB * 1024 * 1024);
+                if (oversized.length > 0) {
+                  setSubmitError(
+                    `⚠️ 文件超过 ${MAX_SINGLE_MB}MB 限制，无法上传：\n` +
+                      oversized.map(f => `· ${f.name} (${(f.size / 1024 / 1024).toFixed(1)}MB)`).join('\n') +
+                      `\n\n建议：压缩图片（画质降到 85%）或拆分 PDF`,
+                  );
+                  e.target.value = '';
+                  return;
                 }
+                // 追加模式 — 允许多次选择累积
+                const existingTotal =
+                  (evidenceFile ? evidenceFile.size : 0) +
+                  extraFiles.reduce((sum, f) => sum + f.size, 0);
+                const newTotal = existingTotal + picked.reduce((sum, f) => sum + f.size, 0);
+                if (newTotal > MAX_TOTAL_MB * 1024 * 1024) {
+                  setSubmitError(
+                    `⚠️ 累计文件超过 ${MAX_TOTAL_MB}MB 上限，请先移除部分文件或压缩后再上传`,
+                  );
+                  e.target.value = '';
+                  return;
+                }
+                setSubmitError(null);
+                // 第一次选：第一个当主凭证，其余当额外
+                // 再次选：全部追加到 extraFiles
+                if (!evidenceFile) {
+                  setEvidenceFile(picked[0]);
+                  setExtraFiles(prev => [...prev, ...picked.slice(1)]);
+                } else {
+                  setExtraFiles(prev => [...prev, ...picked]);
+                }
+                e.target.value = '';
               }}
               className="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white file:text-indigo-700 hover:file:bg-indigo-50 cursor-pointer"
             />
             <p className="text-xs text-gray-400 mt-1">
-              支持 PDF、图片、Excel、Word，可同时选择多个文件
-              {extraFiles.length > 0 && <span className="text-indigo-600 ml-1">（已选 {1 + extraFiles.length} 个文件）</span>}
+              支持 PDF、图片、Excel、Word · 单个 ≤ 20MB · 总计 ≤ 50MB · 可分多次选择
             </p>
+            {(evidenceFile || extraFiles.length > 0) && (
+              <div className="mt-2 space-y-1">
+                {evidenceFile && (
+                  <div className="flex items-center justify-between text-xs bg-indigo-50 px-2 py-1 rounded border border-indigo-100">
+                    <span className="truncate text-indigo-700">
+                      📎 {evidenceFile.name} <span className="text-gray-400">({(evidenceFile.size / 1024).toFixed(0)}KB)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (extraFiles.length > 0) {
+                          setEvidenceFile(extraFiles[0]);
+                          setExtraFiles(extraFiles.slice(1));
+                        } else {
+                          setEvidenceFile(null);
+                        }
+                      }}
+                      className="text-red-500 hover:text-red-700 ml-2 text-[10px]"
+                    >
+                      移除
+                    </button>
+                  </div>
+                )}
+                {extraFiles.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs bg-gray-50 px-2 py-1 rounded border border-gray-100">
+                    <span className="truncate text-gray-700">
+                      📎 {f.name} <span className="text-gray-400">({(f.size / 1024).toFixed(0)}KB)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setExtraFiles(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-red-500 hover:text-red-700 ml-2 text-[10px]"
+                    >
+                      移除
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           )}
 
