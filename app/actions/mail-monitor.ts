@@ -40,6 +40,48 @@ export async function getSilentFailureMails(daysBack: number = 7) {
 }
 
 /**
+ * 获取当前用户的今日邮件晨报
+ *
+ * 优先级：
+ *  1. 今日已生成的晨报（cron 凌晨跑过）→ 直接返回
+ *  2. 当日还没生成 → 兜底用昨日的（或返回 null 让 UI 提示尚未生成）
+ */
+export async function getTodayMorningBriefing(): Promise<{ data?: any; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 取最近 2 天内的最新一份晨报
+  const { data, error } = await (supabase.from('daily_briefings') as any)
+    .select('briefing_date, content, summary_text, total_emails, urgent_count, compliance_count')
+    .eq('user_id', user.id)
+    .lte('briefing_date', today)
+    .gte('briefing_date', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
+    .order('briefing_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!data) return { error: '暂无晨报 — cron 还未生成今日内容（每日凌晨 00:00 北京时间生成）' };
+
+  // content 是 jsonb，里面 morning_email 才是晨报内容
+  const content = (data as any).content || {};
+  const morningEmail = content.morning_email;
+  if (!morningEmail) {
+    return { error: '今日晨报正在生成中，请稍后刷新' };
+  }
+
+  return {
+    data: {
+      briefingDate: (data as any).briefing_date,
+      ...morningEmail,
+    },
+  };
+}
+
+/**
  * 标记一封邮件为"已人工处理"
  */
 export async function markMailHandled(mailId: string) {

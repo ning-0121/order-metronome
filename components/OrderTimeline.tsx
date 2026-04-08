@@ -320,18 +320,14 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                               ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">🔴 我的逾期</span>
                               : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">⚠ {roleName}逾期</span>;
                           })()}
-                          {/* 交期预警徽章 */}
-                          {(() => {
-                            const alert = computeDeliveryAlert(m.actual_at, m.due_at);
-                            if (alert === 'RED') {
-                              const days = computeDelayDays(m.actual_at, m.due_at);
-                              return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">🚨 交期风险 +{days}天</span>;
+                          {/* 逾期完成徽章（已完成节点专用） — 让 CEO/督导/下游一眼看到 */}
+                          {isDone && (() => {
+                            const days = computeDelayDays(m.actual_at, m.due_at);
+                            if (days <= 0) return null;
+                            if (days > 3) {
+                              return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium" title="将影响订单评分">🚨 逾期 {days} 天完成</span>;
                             }
-                            if (alert === 'YELLOW') {
-                              const days = computeDelayDays(m.actual_at, m.due_at);
-                              return <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium">⚠ 进度偏差 +{days}天</span>;
-                            }
-                            return null;
+                            return <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium" title="将影响订单评分">⚠ 逾期 {days} 天完成</span>;
                           })()}
                           {/* SOP 按钮 */}
                           {(() => {

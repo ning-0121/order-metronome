@@ -1694,3 +1694,7 @@ DROP POLICY IF EXISTS "ai_skill_circuit_state_admin" ON public.ai_skill_circuit_
 CREATE POLICY "ai_skill_circuit_state_admin" ON public.ai_skill_circuit_state FOR ALL USING (
   auth.uid() IS NOT NULL AND public.user_can_see_all_orders(auth.uid())
 );
+
+-- ===== 2026-04-08 客户邮箱补充字段 =====
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS contact_emails text[] DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS idx_customers_contact_emails ON public.customers USING GIN (contact_emails);

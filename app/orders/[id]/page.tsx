@@ -25,8 +25,7 @@ import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
-import { EmailTab } from '@/components/tabs/EmailTab';
-import { EmailDiffsTab } from '@/components/tabs/EmailDiffsTab';
+import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { BackButton } from '@/components/BackButton';
 // POVerifyButton removed - auto-verify at order creation
 
@@ -50,7 +49,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'emails', 'email_diffs', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'email_center', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -247,8 +246,7 @@ export default async function OrderDetailPage({
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
-              { key: 'emails', label: '邮件往来' },
-              { key: 'email_diffs', label: '邮件差异' },
+              { key: 'email_center', label: '邮件中心' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
@@ -645,18 +643,13 @@ export default async function OrderDetailPage({
           </div>
         )}
 
-        {/* Tab: 邮件往来 */}
-        {activeTab === 'emails' && (
-          <EmailTab
+        {/* Tab: 邮件中心（合并原邮件往来 + 邮件差异 + 联系邮箱） */}
+        {activeTab === 'email_center' && (
+          <EmailCenterTab
             orderId={id}
             customerName={orderData.customer_name || ''}
             orderNo={orderData.order_no || ''}
           />
-        )}
-
-        {/* Tab: 邮件差异 */}
-        {activeTab === 'email_diffs' && (
-          <EmailDiffsTab orderId={id} />
         )}
 
         {/* Tab: 执行评分 */}

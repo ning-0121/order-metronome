@@ -314,22 +314,17 @@ export async function markMilestoneDone(
     }
   }
 
-  // 延期门禁：超期里程碑必须先提交延期申请才能标记完成
+  // 逾期允许直接处理（CEO 拍板 2026-04-08）：
+  // 不再强制先提交延期申请。逾期天数会被记录到 milestone_logs 用于后续评分扣分，
+  // 同时 UI 会标注「逾期 X 天完成」让 CEO/督导/下游负责人都能看到。
+  // 计算逾期天数留到 mark_done 之后写日志时统一处理。
   const milestoneData_precheck = milestone as any;
+  let overdueDays = 0;
   if (milestoneData_precheck.due_at) {
     const dueDate = new Date(milestoneData_precheck.due_at);
     const now = new Date();
     if (now > dueDate) {
-      // 检查是否已提交延期申请
-      const { data: delayReqs } = await (supabase.from('delay_requests') as any)
-        .select('id, status')
-        .eq('milestone_id', milestoneId)
-        .in('status', ['pending', 'approved']);
-      if (!delayReqs || delayReqs.length === 0) {
-        return {
-          error: '此节点已超期，请先在「延期申请」中提交延期申请后再标记完成。未经审批的超期会影响订单整体评分。'
-        };
-      }
+      overdueDays = Math.ceil((now.getTime() - dueDate.getTime()) / (24 * 60 * 60 * 1000));
     }
   }
 
@@ -413,14 +408,56 @@ export async function markMilestoneDone(
     return { error: directErr?.message || '节点状态更新失败，请重试' };
   }
 
-  // 写入操作日志
+  // 写入操作日志（包含逾期天数，供后续评分使用）
   await (supabase.from('milestone_logs') as any).insert({
     milestone_id: milestoneId,
     order_id: milestone.order_id,
     actor_user_id: user.id,
     action: 'mark_done',
-    note: '凭证已上传，直接完成',
+    note: overdueDays > 0
+      ? `凭证已上传，完成时已逾期 ${overdueDays} 天`
+      : '凭证已上传，按时完成',
+    payload: overdueDays > 0 ? { overdue_days: overdueDays } : null,
   });
+
+  // 逾期完成 → 给订单负责人 + admin 发提醒（让 CEO/督导都看到）
+  if (overdueDays > 0) {
+    try {
+      const { data: orderForNotif } = await (supabase.from('orders') as any)
+        .select('order_no, customer_name, owner_user_id, created_by')
+        .eq('id', milestone.order_id)
+        .single();
+      if (orderForNotif) {
+        const targets = new Set<string>();
+        if (orderForNotif.owner_user_id) targets.add(orderForNotif.owner_user_id);
+        if (orderForNotif.created_by && orderForNotif.created_by !== user.id) {
+          targets.add(orderForNotif.created_by);
+        }
+        // 也通知 admin 们
+        const { data: admins } = await (supabase.from('profiles') as any)
+          .select('user_id, role, roles')
+          .or('role.eq.admin,roles.cs.{admin}');
+        for (const a of admins || []) {
+          if (a.user_id !== user.id) targets.add(a.user_id);
+        }
+
+        const title = `⏰ 节点逾期 ${overdueDays} 天完成 — ${orderForNotif.order_no}`;
+        const message = `${orderForNotif.customer_name} 订单的「${(milestone as any).name}」已完成，但比计划晚 ${overdueDays} 天。会进入订单评分。`;
+        for (const userId of targets) {
+          await (supabase.from('notifications') as any).insert({
+            user_id: userId,
+            type: 'milestone_overdue_done',
+            title,
+            message,
+            related_order_id: milestone.order_id,
+            related_milestone_id: milestoneId,
+          });
+        }
+      }
+    } catch (notifErr: any) {
+      console.error('[overdue notify] failed:', notifErr?.message);
+    }
+  }
 
   const updatedMilestone = directUpdate;
   const milestoneData = milestone as any;
