@@ -10,7 +10,11 @@
  */
 
 import { useEffect, useState } from 'react';
-import { runMissingInfoCheck, runRiskAssessment } from '@/app/actions/skills';
+import {
+  runMissingInfoCheck,
+  runRiskAssessment,
+  runCustomerEmailInsights,
+} from '@/app/actions/skills';
 import type { SkillResult, SkillFinding } from '@/lib/agent/skills/types';
 
 interface Props {
@@ -47,6 +51,7 @@ const INITIAL_STATE: SkillState = {
 export function AISkillSidebar({ orderId }: Props) {
   const [missing, setMissing] = useState<SkillState>(INITIAL_STATE);
   const [risk, setRisk] = useState<SkillState>(INITIAL_STATE);
+  const [emailInsights, setEmailInsights] = useState<SkillState>(INITIAL_STATE);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // 权限由 server action 内部判断（订单创建者/跟单/节点负责人/admin）
@@ -54,9 +59,10 @@ export function AISkillSidebar({ orderId }: Props) {
   useEffect(() => {
     let cancelled = false;
 
-    // 并行加载两个 Skill
+    // 并行加载三个 Skill
     setMissing({ ...INITIAL_STATE, loading: true });
     setRisk({ ...INITIAL_STATE, loading: true });
+    setEmailInsights({ ...INITIAL_STATE, loading: true });
 
     runMissingInfoCheck(orderId).then(res => {
       if (cancelled) return;
@@ -78,14 +84,24 @@ export function AISkillSidebar({ orderId }: Props) {
       });
     });
 
+    runCustomerEmailInsights(orderId).then(res => {
+      if (cancelled) return;
+      setEmailInsights({
+        result: res.result || null,
+        error: res.error || null,
+        shadow: !!res.shadow,
+        loading: false,
+      });
+    });
+
     return () => { cancelled = true; };
   }, [orderId, refreshKey]);
 
-  // 如果两个 Skill 都返回"无权"错误，整个侧栏隐藏（外部用户）
-  const bothNoPermission =
-    missing.error === '无权访问此订单的 AI Skill' &&
-    risk.error === '无权访问此订单的 AI Skill';
-  if (bothNoPermission) return null;
+  // 如果所有 Skill 都返回"无权"错误，整个侧栏隐藏（外部用户）
+  const NO_PERM = '无权访问此订单的 AI Skill';
+  const allNoPermission =
+    missing.error === NO_PERM && risk.error === NO_PERM && emailInsights.error === NO_PERM;
+  if (allNoPermission) return null;
 
   const refresh = () => setRefreshKey(k => k + 1);
 
@@ -113,11 +129,20 @@ export function AISkillSidebar({ orderId }: Props) {
         onRefresh={refresh}
       />
 
-      {/* Phase 1 占位：报价审核（下一波） */}
+      {/* Skill 4：客户邮件洞察 */}
+      <SkillCard
+        title="客户邮件洞察"
+        icon="✉️"
+        loading={emailInsights.loading}
+        error={emailInsights.error}
+        result={emailInsights.result}
+        shadow={emailInsights.shadow}
+        onRefresh={refresh}
+      />
+
+      {/* 下一批：报价审核 */}
       <div className="text-xs text-gray-400 text-center py-2 border border-dashed border-gray-200 rounded-lg">
         💡 报价审核 Skill 即将上线
-        <br />
-        <span className="text-[10px]">在订单详情页 / 新建订单时可见</span>
       </div>
     </div>
   );

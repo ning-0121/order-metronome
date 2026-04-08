@@ -148,10 +148,11 @@ const RULES: MissingRule[] = [
     label: '中查 QC 报告',
     blocksStep: 'mid_qc_check',
     blocksStepName: '跟单中查',
-    severity: 'medium',
+    severity: 'high',
     whoShouldFix: 'merchandiser',
     isMissing: ctx => ctx.isStepActive('mid_qc_check') && !ctx.hasFile('qc_report'),
     suggestion: () => '中查阶段缺 QC 报告，工厂或第三方需提交',
+    // 中查阶段已经进入 in_progress 才会触发，不需要 urgentWithin
   },
   {
     id: 'missing_qc_report_final',

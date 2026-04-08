@@ -44,6 +44,7 @@ export const SKILL_FLAGS = {
   riskAssessment: () => process.env.SKILL_RISK_ASSESSMENT === 'true',
   missingInfo: () => process.env.SKILL_MISSING_INFO === 'true',
   quoteReview: () => process.env.SKILL_QUOTE_REVIEW === 'true',
+  customerEmailInsights: () => process.env.SKILL_CUSTOMER_EMAIL_INSIGHTS === 'true',
   // Phase 2
   delayPrediction: () => process.env.SKILL_DELAY_PREDICTION === 'true',
   customerConfirmation: () => process.env.SKILL_CUSTOMER_CONFIRMATION === 'true',

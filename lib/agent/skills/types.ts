@@ -8,6 +8,7 @@ export type SkillName =
   | 'risk_assessment'
   | 'missing_info'
   | 'quote_review'
+  | 'customer_email_insights'
   | 'delay_prediction'
   | 'customer_confirmation'
   | 'outsource_risk'

@@ -21,6 +21,10 @@ import type {
 } from './types';
 import { callClaudeJSON } from '@/lib/agent/anthropicClient';
 import { AGENT_FLAGS } from '@/lib/agent/featureFlags';
+import {
+  getKnowledgeByTags,
+  formatKnowledgeForPrompt,
+} from '@/lib/agent/professionalKnowledge';
 
 // ════════════════════════════════════════════════
 // 12 维度规则定义
@@ -442,57 +446,102 @@ const DIMENSIONS: RiskDimension[] = [
 ];
 
 // ════════════════════════════════════════════════
-// AI 增强层 — 让 Claude 给 Top 3 风险加自然语言解释
+// AI 叙事层 — 让 Claude 扮演 10 年外贸业务员，把规则输出转成"故事"
 // ════════════════════════════════════════════════
 
-async function enhanceWithAI(
-  order: any,
-  topFindings: SkillFinding[],
-): Promise<{ enhanced: SkillFinding[]; success: boolean }> {
-  if (!AGENT_FLAGS.aiEnhance() || topFindings.length === 0) {
-    return { enhanced: topFindings, success: false };
-  }
-
-  const prompt = `你是一个有 20 年外贸服装订单管理经验的 CEO。
-下面是一个订单的简要信息和系统识别出的 Top 风险点。
-请用最简练的语言（每条 1 句话，不超过 30 字）给出"该怎么处理"的建议。
-
-订单：${order.order_no || '?'} / 客户 ${order.customer_name || '?'} / 数量 ${order.quantity || '?'} 件
-
-风险点：
-${topFindings.map((f, i) => `${i + 1}. [${f.category}] ${f.label} — ${f.detail || ''}`).join('\n')}
-
-返回 JSON：
-{
-  "advice": [
-    { "index": 1, "action": "建议动作（30字内）" },
-    { "index": 2, "action": "..." },
-    ...
-  ]
+interface NarrativePayload {
+  /** 一句话：现在最危险的 1 件事 */
+  top_concern: string;
+  /** 未来 7 天必须解决的事（最多 3 条） */
+  week_ahead: Array<{
+    title: string;
+    reason: string;
+    action: string;
+    target_role: 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'admin';
+  }>;
+  /** 需要注意但可以等的事 */
+  watch_list: string[];
+  /** 业务员判断该订单是否"表面平静实际有坑" */
+  hidden_risk_warning: string | null;
 }
-只返回 JSON。`;
 
-  const result = await callClaudeJSON<{ advice: Array<{ index: number; action: string }> }>({
-    scene: 'risk_assessment_enhance',
-    prompt,
-    maxTokens: 500,
-    timeoutMs: 20_000,
-  });
+async function generateBusinessNarrative(
+  order: any,
+  findings: SkillFinding[],
+  customerStats: { totalOrders: number; avgDelayDays: number; hasEnoughData: boolean },
+  factoryStats: { totalOrders: number; avgDelayDays: number; hasEnoughData: boolean },
+): Promise<NarrativePayload | null> {
+  if (!AGENT_FLAGS.aiEnhance() || findings.length === 0) return null;
 
-  if (!result || !Array.isArray(result.advice)) {
-    return { enhanced: topFindings, success: false };
-  }
+  // 注入和该订单相关的专业知识
+  const tags: string[] = ['customer'];
+  const specialTags: string[] = Array.isArray(order.special_tags) ? order.special_tags : [];
+  if (order.incoterm === 'DDP') tags.push('ddp', 'shipping');
+  if (order.incoterm === 'FOB') tags.push('fob');
+  if (specialTags.some(t => t.includes('加急'))) tags.push('rush', '加急');
+  if (!order.skip_pre_production_sample) tags.push('sample', '打样');
+  tags.push('lifecycle', 'payment');
+  const knowledge = getKnowledgeByTags(tags, { maxItems: 6 });
+  const knowledgeBlock = formatKnowledgeForPrompt(knowledge);
 
-  // 把 AI 建议合并到 findings
-  const enhanced = topFindings.map((f, i) => {
-    const aiSuggest = result.advice.find(a => a.index === i + 1);
-    if (aiSuggest && aiSuggest.action) {
-      return { ...f, detail: f.detail ? `${f.detail} · ${aiSuggest.action}` : aiSuggest.action };
+  const systemPrompt = `你是一个 10 年经验的外贸服装业务员。你看问题的角度是"能不能安全交付 + 能不能守住利润"，不是机械规则。
+你的任务：接收系统规则引擎的打分结果，用业务员的语言重新组织输出。
+
+**专业经验参考**（用来支撑你的判断，但不要直接照抄）：
+${knowledgeBlock}
+
+**输出要求**：严格输出以下 JSON（不要 markdown 包装）：
+{
+  "top_concern": "一句话：现在最危险的 1 件事。必须具体到动作层面，不是抽象的'交期紧'而是'还剩 XX 天但 XX 还没做'",
+  "week_ahead": [
+    {
+      "title": "事项标题（10 字内）",
+      "reason": "为什么这是未来 7 天要做的（1 句话）",
+      "action": "具体动作 + 谁做 + 怎么做（20 字内）",
+      "target_role": "sales|merchandiser|finance|procurement|admin"
     }
-    return f;
-  });
+  ],
+  "watch_list": ["可以延后观察的风险点（每条 15 字内）"],
+  "hidden_risk_warning": "只有当你凭经验嗅到'规则没抓到但可能会爆'的隐藏风险时才填，否则 null"
+}
 
-  return { enhanced, success: true };
+**重要原则**：
+- 不要重复规则引擎的原话，用业务员的语气说人话
+- top_concern 只有一条，必须是最紧急的；如果订单真的没啥风险，就说"目前没有紧急问题，按节奏推进即可"
+- week_ahead 最多 3 条；如果订单刚起步或收尾，可能 0-1 条
+- watch_list 最多 3 条；不要把紧急的事放这里
+- 用中文，简短，像跟同事当面说话的口吻`;
+
+  const userPrompt = `订单信息：
+- 订单号 ${order.order_no || '?'}
+- 客户 ${order.customer_name || '?'}${order.is_new_customer ? '（新客户首单）' : ''}
+- 工厂 ${order.factory_name || '?'}${order.is_new_factory ? '（新工厂）' : ''}
+- 数量 ${order.quantity || '?'} 件，${order.style_count || '?'} 款 ${order.color_count || '?'} 色
+- 贸易条款 ${order.incoterm || '?'}
+- 下单日 ${order.order_date || '?'}，出厂日 ${order.factory_date || '?'}
+- 特殊标签 ${specialTags.length > 0 ? specialTags.join('、') : '无'}
+- 客户历史：${customerStats.hasEnoughData ? `${customerStats.totalOrders} 单，平均延期 ${Math.round(customerStats.avgDelayDays)} 天` : '历史数据不足'}
+- 工厂历史：${factoryStats.hasEnoughData ? `${factoryStats.totalOrders} 单，平均延期 ${Math.round(factoryStats.avgDelayDays)} 天` : '历史数据不足'}
+
+**规则引擎已识别的风险点**（按严重度排序）：
+${findings
+  .slice(0, 10)
+  .map(
+    (f, i) =>
+      `${i + 1}. [${f.severity === 'high' ? '🔴 高' : f.severity === 'medium' ? '🟡 中' : '⚪ 低'}][${f.category}] ${f.label}${f.detail ? ' — ' + f.detail : ''}${f.evidence ? '（证据：' + f.evidence + '）' : ''}`,
+  )
+  .join('\n')}
+
+请基于以上信息，用业务员视角输出 JSON。`;
+
+  return await callClaudeJSON<NarrativePayload>({
+    scene: 'risk_assessment_narrative',
+    model: 'claude-sonnet-4-20250514',
+    system: systemPrompt,
+    prompt: userPrompt,
+    maxTokens: 1500,
+    timeoutMs: 35_000,
+  });
 }
 
 // ════════════════════════════════════════════════
@@ -507,8 +556,8 @@ export const riskAssessmentSkill: SkillModule = {
   hashInput: (input: SkillInput) => {
     return JSON.stringify({
       orderId: input.orderId,
-      // v3：4 维度桶重构 + 数据不足显式 + 修复 evidence 透传
-      version: 'v3',
+      // v4：业务员视角叙事层 + 专业知识库注入
+      version: 'v4-narrative',
     });
   },
 
@@ -617,38 +666,96 @@ export const riskAssessmentSkill: SkillModule = {
       summary = `🟢 低风险订单 (${score}/100) — 按常规流程执行，无已识别风险点`;
     }
 
-    // 5. 按 score 倒序，取 Top 6（之前 5 太少，看不到全貌）
+    // 5. 按严重度倒序
     findings.sort((a, b) => {
       const order = { high: 3, medium: 2, low: 1 };
       return order[b.severity] - order[a.severity];
     });
     const topFindings = findings.slice(0, 6);
 
-    // 6. AI 增强（可选，失败不影响）
-    const { enhanced, success: aiSuccess } = await enhanceWithAI(order, topFindings.slice(0, 3));
-    // 合并：AI 增强过的 + 剩余原始 + 数据不足提醒（始终放最后）
-    const finalFindings = [
-      ...enhanced,
-      ...topFindings.slice(enhanced.length),
-      ...insufficientNotices,
-    ];
+    // 6. AI 叙事层 — 让业务员视角的 Claude 把规则结果重新组织
+    const narrative = await generateBusinessNarrative(
+      order,
+      findings,
+      riskCtx.customer,
+      riskCtx.factory,
+    );
+    const aiSuccess = narrative !== null;
+
+    // 把叙事层的 top_concern / week_ahead / watch_list / hidden_risk_warning
+    // 转换成 findings + suggestions，放在规则 findings 前面
+    const narrativeFindings: SkillFinding[] = [];
+    const narrativeSuggestions: Array<{ action: string; reason: string; targetRole?: string }> = [];
+
+    if (narrative) {
+      if (narrative.top_concern) {
+        narrativeFindings.push({
+          category: '🎯 当前最关键',
+          severity: level,
+          label: narrative.top_concern,
+          evidence: '基于规则引擎 + 业务员视角综合判断',
+        });
+      }
+      for (const wa of narrative.week_ahead || []) {
+        narrativeFindings.push({
+          category: '⏰ 7 天内要做',
+          severity: 'medium',
+          label: wa.title,
+          detail: `${wa.reason}\n→ ${wa.action}`,
+          whoShouldFix: wa.target_role,
+        });
+        narrativeSuggestions.push({
+          action: wa.action,
+          reason: wa.reason,
+          targetRole: wa.target_role,
+        });
+      }
+      if (narrative.hidden_risk_warning) {
+        narrativeFindings.push({
+          category: '👀 隐藏风险',
+          severity: 'medium',
+          label: '业务员嗅到的潜在风险',
+          detail: narrative.hidden_risk_warning,
+          evidence: 'AI 业务员视角判断（非规则）',
+        });
+      }
+      for (const wl of (narrative.watch_list || []).slice(0, 3)) {
+        narrativeFindings.push({
+          category: '👁 留意',
+          severity: 'low',
+          label: wl,
+        });
+      }
+    }
+
+    // 最终 findings 顺序：AI 叙事（第一视角）→ 规则原始 Top 3（细节支撑）→ 数据不足提醒
+    const finalFindings = narrative
+      ? [...narrativeFindings, ...topFindings.slice(0, 3), ...insufficientNotices]
+      : [...topFindings, ...insufficientNotices];
+
+    // summary 用叙事层的 top_concern，失败时 fallback 到规则 summary
+    const finalSummary = narrative?.top_concern
+      ? `${level === 'high' ? '🔴' : level === 'medium' ? '🟡' : '🟢'} ${narrative.top_concern}`
+      : summary;
 
     return {
       severity: level,
       score,
-      summary,
+      summary: finalSummary,
       findings: finalFindings,
-      suggestions: finalFindings
-        .filter(f => f.category !== '数据状态')
-        .slice(0, 3)
-        .map(f => ({
-          action: f.detail || f.label,
-          reason: `[${f.category}] ${f.label}`,
-        })),
+      suggestions:
+        narrativeSuggestions.length > 0
+          ? narrativeSuggestions
+          : finalFindings
+              .filter(f => f.category !== '数据状态')
+              .slice(0, 3)
+              .map(f => ({
+                action: f.detail || f.label,
+                reason: `[${f.category}] ${f.label}`,
+              })),
       // 置信度反映"可参考的真实数据有多少"
-      // 数据不足时降低置信度
       confidence: (() => {
-        let conf = aiSuccess ? 90 : 85;
+        let conf = aiSuccess ? 92 : 85;
         if (!riskCtx.customer.hasEnoughData) conf -= 15;
         if (!riskCtx.factory.hasEnoughData) conf -= 10;
         return Math.max(40, conf);
@@ -661,6 +768,7 @@ export const riskAssessmentSkill: SkillModule = {
         dimensionsEvaluated: DIMENSIONS.length,
         dimensionsTriggered: Object.keys(dimensionScores).length,
         aiEnhanced: aiSuccess,
+        narrativeGenerated: narrative !== null,
         customerDataSufficient: riskCtx.customer.hasEnoughData,
         factoryDataSufficient: riskCtx.factory.hasEnoughData,
         customerTotalOrders: riskCtx.customer.totalOrders,
