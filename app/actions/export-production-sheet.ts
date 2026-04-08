@@ -18,6 +18,9 @@ interface ExportRow {
   order_no: string;
   internal_order_no: string;
   customer: string;
+  style_no: string;
+  style_count: number | null;
+  color_count: number | null;
   quantity: number;
   delivery_date: string;
   sales: string;
@@ -51,7 +54,7 @@ export async function exportProductionTrackingSheet(): Promise<{
 
   let ordersQuery = (supabase.from('orders') as any)
     .select(
-      'id, order_no, internal_order_no, customer_name, quantity, factory_date, etd, cancel_date, special_tags, status, owner_user_id, created_by',
+      'id, order_no, internal_order_no, customer_name, style_no, style_count, color_count, colors, quantity, factory_date, etd, cancel_date, special_tags, status, owner_user_id, created_by',
     )
     .not('status', 'in', '("completed","archived","cancelled","已完成","已归档","已取消")')
     .order('factory_date', { ascending: true, nullsFirst: false });
@@ -95,10 +98,18 @@ export async function exportProductionTrackingSheet(): Promise<{
     const delivery = o.factory_date || o.etd || o.cancel_date || '';
     const tags: string[] = Array.isArray(o.special_tags) ? o.special_tags : [];
     const urgent = tags.includes('rush') || tags.includes('加急');
+
+    // 兜底：如果没存 color_count，直接从 colors jsonb 数组长度推断
+    const colorsArr = Array.isArray(o.colors) ? o.colors : [];
+    const colorCount = o.color_count ?? (colorsArr.length > 0 ? colorsArr.length : null);
+
     return {
       order_no: o.order_no || '',
       internal_order_no: o.internal_order_no || '',
       customer: o.customer_name || '',
+      style_no: o.style_no || '',
+      style_count: o.style_count ?? null,
+      color_count: colorCount,
       quantity: o.quantity || 0,
       delivery_date: delivery ? String(delivery).slice(0, 10) : '',
       sales: nameMap.get(o.created_by) || '',
@@ -114,7 +125,7 @@ export async function exportProductionTrackingSheet(): Promise<{
   const ws = wb.addWorksheet('生产订单一览', { views: [{ state: 'frozen', ySplit: 2 }] });
 
   // 标题
-  ws.mergeCells('A1:G1');
+  ws.mergeCells('A1:J1');
   const titleCell = ws.getCell('A1');
   titleCell.value = `生产订单一览 — ${new Date().toLocaleDateString('zh-CN')}（共 ${rows.length} 单）`;
   titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
@@ -123,7 +134,7 @@ export async function exportProductionTrackingSheet(): Promise<{
   ws.getRow(1).height = 28;
 
   // 表头
-  const headers = ['订单号', '内部单号', '客户', '数量(件)', '交期', '业务', '加急'];
+  const headers = ['订单号', '内部单号', '客户', '款号', '款数', '色数', '数量(件)', '交期', '业务', '加急'];
   const headerRow = ws.getRow(2);
   headerRow.values = headers;
   headerRow.height = 22;
@@ -146,6 +157,9 @@ export async function exportProductionTrackingSheet(): Promise<{
       r.order_no,
       r.internal_order_no,
       r.customer,
+      r.style_no,
+      r.style_count ?? '',
+      r.color_count ?? '',
       r.quantity,
       r.delivery_date,
       r.sales,
@@ -158,7 +172,7 @@ export async function exportProductionTrackingSheet(): Promise<{
       row.eachCell(cell => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
       });
-      row.getCell(7).font = { bold: true, color: { argb: 'FFDC2626' } };
+      row.getCell(10).font = { bold: true, color: { argb: 'FFDC2626' } };
     }
 
     row.eachCell(cell => {
@@ -172,7 +186,7 @@ export async function exportProductionTrackingSheet(): Promise<{
   });
 
   // 列宽
-  const widths = [16, 14, 20, 10, 12, 10, 10];
+  const widths = [16, 14, 20, 14, 7, 7, 10, 12, 10, 10];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   const buffer = await wb.xlsx.writeBuffer();
