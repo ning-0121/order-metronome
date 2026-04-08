@@ -54,6 +54,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
   // 更多菜单（低频入口）
   const moreLinks = isAdmin
     ? [
+        { href: '/quoter', label: '报价员', icon: '💰' },
         { href: '/customers', label: '客户管理', icon: '🤝' },
         { href: '/factories', label: '工厂管理', icon: '🏭' },
         { href: '/memos', label: '备忘录', icon: '📝' },
@@ -64,6 +65,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/guide', label: '操作说明', icon: '📖' },
       ]
     : [
+        { href: '/quoter', label: '报价员', icon: '💰' },
         { href: '/guide', label: '操作说明', icon: '📖' },
       ];
 

@@ -1756,3 +1756,161 @@ DROP POLICY IF EXISTS "order_notes_log_delete" ON public.order_notes_log;
 CREATE POLICY "order_notes_log_delete" ON public.order_notes_log FOR DELETE USING (
   auth.uid() = author_user_id OR public.user_can_see_all_orders(auth.uid())
 );
+
+-- ═══════════════════════════════════════════════════════════════
+-- 2026-04-09 报价员模块（独立，与节拍器解耦）
+-- 所有表以 quoter_ 前缀隔离；未来 DROP TABLE quoter_* 可一次清除
+-- ═══════════════════════════════════════════════════════════════
+
+-- 1. 历史单耗对照表（训练数据 + RAG 检索用）
+CREATE TABLE IF NOT EXISTS public.quoter_fabric_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- 款式分类
+  garment_type text NOT NULL,        -- knit_top/knit_bottom/woven_pants/woven_shorts
+  garment_subtype text,              -- tshirt/hoodie/sweatshirt/legging/shorts 等
+  style_no text,
+  -- 面料信息
+  fabric_type text,                  -- 单面/双面/毛圈/四面弹
+  fabric_composition text,           -- 95%棉 5%氨纶
+  fabric_width_cm numeric(6,1),      -- 幅宽（常见 150 / 175 / 180）
+  fabric_weight_gsm numeric(6,1),    -- 克重
+  -- 尺码分布
+  size_chart jsonb,                  -- { "S": {chest: 50, length: 68, sleeve: 20}, ... }
+  primary_size text,                 -- 主码（通常是 M 或 L）
+  -- 单耗数据
+  consumption_kg numeric(8,3) NOT NULL,   -- 实际单耗（KG / 件）
+  consumption_source text,           -- manual/excel_import/super_arp/quote_sheet
+  -- 元信息
+  customer_name text,                -- 源自哪个客户（有参考价值）
+  factory_name text,                 -- 源自哪个工厂
+  notes text,
+  created_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_quoter_fabric_records_type ON public.quoter_fabric_records(garment_type, garment_subtype);
+CREATE INDEX IF NOT EXISTS idx_quoter_fabric_records_fabric ON public.quoter_fabric_records(fabric_type);
+CREATE INDEX IF NOT EXISTS idx_quoter_fabric_records_customer ON public.quoter_fabric_records(customer_name);
+ALTER TABLE public.quoter_fabric_records ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "quoter_fabric_records_auth" ON public.quoter_fabric_records;
+CREATE POLICY "quoter_fabric_records_auth" ON public.quoter_fabric_records FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- 2. 工序库（CMT operations library）
+CREATE TABLE IF NOT EXISTS public.quoter_cmt_operations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  garment_type text NOT NULL,        -- 适用品类
+  operation_code text NOT NULL,      -- 工序代码（sew_shoulder/attach_collar 等）
+  operation_name text NOT NULL,      -- 中文名
+  category text,                     -- cutting/sewing/finishing/packing
+  base_rate_rmb numeric(6,2),        -- 基础工价（RMB / 件）
+  complexity_factor numeric(4,2) DEFAULT 1.0,  -- 难度系数（简单 0.8 / 标准 1.0 / 复杂 1.5）
+  is_default boolean DEFAULT true,   -- 是否默认包含该工序
+  display_order integer DEFAULT 0,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(garment_type, operation_code)
+);
+CREATE INDEX IF NOT EXISTS idx_quoter_cmt_operations_type ON public.quoter_cmt_operations(garment_type, display_order);
+ALTER TABLE public.quoter_cmt_operations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "quoter_cmt_operations_auth" ON public.quoter_cmt_operations;
+CREATE POLICY "quoter_cmt_operations_auth" ON public.quoter_cmt_operations FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- 3. 工价表（factory rates）
+CREATE TABLE IF NOT EXISTS public.quoter_cmt_rates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  factory_name text NOT NULL,
+  garment_type text NOT NULL,
+  base_rate_rmb numeric(8,2) NOT NULL,  -- 该工厂该品类的整件基准价
+  rate_tier text DEFAULT 'standard',    -- low/standard/premium
+  effective_from date,
+  effective_until date,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_quoter_cmt_rates_factory ON public.quoter_cmt_rates(factory_name, garment_type);
+ALTER TABLE public.quoter_cmt_rates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "quoter_cmt_rates_auth" ON public.quoter_cmt_rates;
+CREATE POLICY "quoter_cmt_rates_auth" ON public.quoter_cmt_rates FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- 4. 报价主表
+CREATE TABLE IF NOT EXISTS public.quoter_quotes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  quote_no text UNIQUE,               -- QT-20260409-001
+  -- 款式
+  customer_name text,
+  style_no text,
+  style_name text,
+  garment_type text NOT NULL,
+  garment_subtype text,
+  -- 数量与尺码分布
+  quantity integer NOT NULL DEFAULT 0,
+  size_distribution jsonb,            -- {S:10,M:30,L:40,XL:20}
+  -- 面料部分
+  fabric_type text,
+  fabric_composition text,
+  fabric_width_cm numeric(6,1),
+  fabric_price_per_kg numeric(8,2),   -- 面料单价（RMB/KG）
+  fabric_consumption_kg numeric(8,3), -- AI 计算的单耗
+  fabric_cost_per_piece numeric(8,2) GENERATED ALWAYS AS (
+    ROUND(COALESCE(fabric_consumption_kg, 0) * COALESCE(fabric_price_per_kg, 0), 2)
+  ) STORED,
+  -- 加工部分
+  cmt_factory text,
+  cmt_operations jsonb,               -- [{code, name, rate, complexity}]
+  cmt_cost_per_piece numeric(8,2),
+  -- 其他成本
+  trim_cost_per_piece numeric(8,2) DEFAULT 0,  -- 辅料费
+  packing_cost_per_piece numeric(8,2) DEFAULT 0,
+  logistics_cost_per_piece numeric(8,2) DEFAULT 0,
+  margin_rate numeric(5,2) DEFAULT 15.0,       -- 利润率 %
+  -- 最终
+  total_cost_per_piece numeric(8,2),
+  quote_price_per_piece numeric(8,2),
+  currency text DEFAULT 'USD',
+  exchange_rate numeric(6,3) DEFAULT 7.2,      -- RMB→USD
+  -- 状态
+  status text DEFAULT 'draft' CHECK (status IN ('draft','sent','won','lost','abandoned')),
+  -- 元信息
+  created_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  notes text
+);
+CREATE INDEX IF NOT EXISTS idx_quoter_quotes_created_by ON public.quoter_quotes(created_by, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quoter_quotes_customer ON public.quoter_quotes(customer_name);
+CREATE INDEX IF NOT EXISTS idx_quoter_quotes_status ON public.quoter_quotes(status);
+ALTER TABLE public.quoter_quotes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "quoter_quotes_read" ON public.quoter_quotes;
+-- 所有登录用户可读（CEO/业务/财务/采购都要看）
+CREATE POLICY "quoter_quotes_read" ON public.quoter_quotes FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS "quoter_quotes_insert" ON public.quoter_quotes;
+CREATE POLICY "quoter_quotes_insert" ON public.quoter_quotes FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS "quoter_quotes_update" ON public.quoter_quotes;
+CREATE POLICY "quoter_quotes_update" ON public.quoter_quotes FOR UPDATE USING (
+  auth.uid() = created_by OR public.user_can_see_all_orders(auth.uid())
+);
+DROP POLICY IF EXISTS "quoter_quotes_delete" ON public.quoter_quotes;
+CREATE POLICY "quoter_quotes_delete" ON public.quoter_quotes FOR DELETE USING (
+  auth.uid() = created_by OR public.user_can_see_all_orders(auth.uid())
+);
+
+-- 5. 训练反馈表（AI 学习闭环）
+CREATE TABLE IF NOT EXISTS public.quoter_training_feedback (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  quote_id uuid REFERENCES public.quoter_quotes(id) ON DELETE CASCADE,
+  feedback_type text NOT NULL CHECK (feedback_type IN ('fabric_consumption','cmt_cost','total_price')),
+  predicted_value numeric(10,3),
+  actual_value numeric(10,3),
+  error_pct numeric(6,2) GENERATED ALWAYS AS (
+    CASE WHEN COALESCE(predicted_value, 0) > 0
+      THEN ROUND(((actual_value - predicted_value) / predicted_value * 100)::numeric, 2)
+      ELSE NULL END
+  ) STORED,
+  reason text,
+  corrected_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_quoter_training_feedback_quote ON public.quoter_training_feedback(quote_id);
+CREATE INDEX IF NOT EXISTS idx_quoter_training_feedback_type ON public.quoter_training_feedback(feedback_type, created_at DESC);
+ALTER TABLE public.quoter_training_feedback ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "quoter_training_feedback_auth" ON public.quoter_training_feedback;
+CREATE POLICY "quoter_training_feedback_auth" ON public.quoter_training_feedback FOR ALL USING (auth.uid() IS NOT NULL);
