@@ -1,14 +1,24 @@
 /**
- * 每晚自动维护 — 22:00 北京时间运行
+ * 每晚系统维护 — 北京时间 22:00
  *
- * 1. 健康检查：检测卡壳状态、孤立数据、异常状态
- * 2. 数据清理：过期建议、旧通知、卡死状态
- * 3. 自动修复：可安全自动修复的问题
- * 4. 生成健康报告：通知管理员
+ * 调用 SystemGuardian 跑 6 个维度的健康检查：
+ *   1. 安全性
+ *   2. 稳定性
+ *   3. 节拍器准确性
+ *   4. 时间准确性
+ *   5. 权限稳定性
+ *   6. AI 进化稳定性
+ *
+ * 结果：
+ *   - 写入 system_health_reports 表
+ *   - 有问题时通知 admin（站内 + 微信）
+ *   - 可自动修复的问题自动修复
+ *   - AI 元审视层给出人类视角的总结
  */
 
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { runSystemGuardian, formatReportAsText } from '@/lib/agent/systemGuardian';
 
 export const maxDuration = 60;
 
@@ -22,177 +32,87 @@ export async function POST(req: Request) {
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' }, { status: 500 });
+    if (!url || !serviceKey)
+      return NextResponse.json({ error: 'Missing config' }, { status: 500 });
 
     const supabase = createClient(url, serviceKey);
-    const report: string[] = [];
-    let issuesFound = 0;
-    let autoFixed = 0;
 
-    report.push(`🔧 每晚维护报告 — ${new Date().toISOString().slice(0, 10)}`);
-    report.push('');
+    // 1. 跑 Guardian（autoFix + metaReview 都开）
+    const report = await runSystemGuardian(supabase, {
+      autoFix: true,
+      withMetaReview: true,
+    });
 
-    // ════ 1. 健康检查 ════
-    report.push('【健康检查】');
-
-    // 1a. 检测卡死的 executing 状态
-    const { data: stuckExecuting } = await supabase
-      .from('agent_actions')
+    // 2. 写入 system_health_reports 表
+    const { data: saved, error: saveErr } = await (supabase.from('system_health_reports') as any)
+      .insert({
+        ran_at: report.ranAt,
+        took_ms: report.tookMs,
+        total_checks: report.totalChecks,
+        passed_count: report.passedCount,
+        warning_count: report.warningCount,
+        critical_count: report.criticalCount,
+        auto_fixed_count: report.autoFixedCount,
+        checks: report.checks,
+        meta_review: report.metaReview,
+      })
       .select('id')
-      .eq('status', 'executing')
-      .lt('created_at', new Date(Date.now() - 10 * 60 * 1000).toISOString());
-    if (stuckExecuting && stuckExecuting.length > 0) {
-      report.push(`⚠ 发现 ${stuckExecuting.length} 个 Agent 动作卡在 executing 状态`);
-      // 自动修复：回退到 pending
-      await supabase.from('agent_actions')
-        .update({ status: 'pending' })
-        .eq('status', 'executing')
-        .lt('created_at', new Date(Date.now() - 10 * 60 * 1000).toISOString());
-      report.push(`  ✅ 已自动回退到 pending`);
-      autoFixed++;
-    } else {
-      report.push('✅ Agent 动作状态正常');
-    }
+      .single();
+    if (saveErr) console.error('[nightly-maintenance] 保存报告失败:', saveErr.message);
 
-    // 1b. 检测未分配负责人的进行中节点
-    const { data: unassigned } = await supabase
-      .from('milestones')
-      .select('id, name, owner_role, orders!inner(order_no)')
-      .in('status', ['in_progress', '进行中'])
-      .is('owner_user_id', null);
-    if (unassigned && unassigned.length > 0) {
-      report.push(`⚠ ${unassigned.length} 个进行中节点无负责人`);
-      const roles = [...new Set(unassigned.map((m: any) => m.owner_role))];
-      report.push(`  涉及角色：${roles.join('、')}`);
-      // 自动修复：尝试分配（如果该角色只有1人）
-      for (const role of roles) {
-        const { data: candidates } = await supabase
-          .from('profiles')
-          .select('user_id')
-          .or(`role.eq.${role},roles.cs.{${role}}`);
-        if (candidates && candidates.length === 1) {
-          const userId = candidates[0].user_id;
-          const roleNodes = unassigned.filter((m: any) => m.owner_role === role);
-          await supabase.from('milestones')
-            .update({ owner_user_id: userId })
-            .in('id', roleNodes.map((m: any) => m.id));
-          report.push(`  ✅ ${role} 角色自动分配 ${roleNodes.length} 个节点`);
-          autoFixed++;
-        }
-      }
-      issuesFound++;
-    } else {
-      report.push('✅ 所有进行中节点都有负责人');
-    }
+    // 3. 通知管理员（只有 warning/critical 才推）
+    const needsNotify = report.warningCount + report.criticalCount > 0;
+    if (needsNotify) {
+      const { data: admins } = await supabase
+        .from('profiles')
+        .select('user_id, wechat_push_key')
+        .or('role.eq.admin,roles.cs.{admin}');
 
-    // 1c. 检测订单状态异常（所有节点完成但订单未标记完成）
-    const { data: activeOrders } = await supabase
-      .from('orders')
-      .select('id, order_no')
-      .in('lifecycle_status', ['执行中', 'running', 'active']);
-    let staleOrders = 0;
-    for (const order of activeOrders || []) {
-      const { data: milestones } = await supabase
-        .from('milestones')
-        .select('status')
-        .eq('order_id', order.id);
-      if (milestones && milestones.length > 0) {
-        const allDone = milestones.every((m: any) => m.status === 'done' || m.status === '已完成');
-        if (allDone) {
-          staleOrders++;
-          report.push(`⚠ 订单 ${order.order_no} 所有节点已完成但状态仍为执行中`);
-          // 自动修复：更新订单状态
-          await supabase.from('orders')
-            .update({ lifecycle_status: '已完成' })
-            .eq('id', order.id);
-          report.push(`  ✅ 已自动标记为已完成`);
-          autoFixed++;
+      const reportText = formatReportAsText(report);
+      const title = `🛡 系统守护 — ${report.criticalCount > 0 ? `🔴 ${report.criticalCount} 严重` : `⚠ ${report.warningCount} 警告`}`;
+
+      for (const admin of (admins || []) as any[]) {
+        await supabase.from('notifications').insert({
+          user_id: admin.user_id,
+          type: 'system_health',
+          title,
+          message: reportText.slice(0, 1000),
+          status: 'unread',
+        });
+
+        if (admin.wechat_push_key) {
+          try {
+            const { sendWechatPush } = await import('@/lib/utils/wechat-push');
+            await sendWechatPush(admin.wechat_push_key, title, reportText);
+          } catch {}
         }
       }
     }
-    if (staleOrders === 0) report.push('✅ 订单状态与节点状态一致');
 
-    // ════ 2. 数据清理 ════
-    report.push('');
-    report.push('【数据清理】');
-
-    // 2a. 清理7天前的已执行/已忽略Agent建议
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-    const { count: oldActions } = await supabase
-      .from('agent_actions')
+    // 4. 清理：删除 90 天前的旧报告
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
+    await (supabase.from('system_health_reports') as any)
       .delete()
-      .in('status', ['executed', 'dismissed', 'expired'])
-      .lt('created_at', sevenDaysAgo)
-      .select('id', { count: 'exact', head: true });
-    report.push(`🗑 清理旧Agent建议：${oldActions || 0} 条`);
+      .lt('ran_at', ninetyDaysAgo);
 
-    // 2b. 清理30天前的已读通知
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
-    const { count: oldNotifs } = await supabase
-      .from('notifications')
-      .delete()
-      .eq('status', 'read')
-      .lt('created_at', thirtyDaysAgo)
-      .select('id', { count: 'exact', head: true });
-    report.push(`🗑 清理旧通知：${oldNotifs || 0} 条`);
-
-    // 2c. 过期Agent建议标记
-    const { count: expiredCount } = await supabase
-      .from('agent_actions')
-      .update({ status: 'expired' })
-      .eq('status', 'pending')
-      .lt('expires_at', new Date().toISOString())
-      .select('id', { count: 'exact', head: true });
-    report.push(`⏰ 过期建议标记：${expiredCount || 0} 条`);
-
-    // ════ 3. 系统统计 ════
-    report.push('');
-    report.push('【系统统计】');
-
-    const { count: totalOrders } = await supabase.from('orders').select('id', { count: 'exact', head: true });
-    const { count: activeCount } = await supabase.from('orders').select('id', { count: 'exact', head: true }).in('lifecycle_status', ['执行中', 'running', 'active', '已生效']);
-    const { count: overdueCount } = await supabase.from('milestones').select('id', { count: 'exact', head: true }).in('status', ['in_progress', '进行中']).lt('due_at', new Date().toISOString());
-    const { count: agentTotal } = await supabase.from('agent_actions').select('id', { count: 'exact', head: true });
-
-    report.push(`📦 总订单：${totalOrders || 0}，活跃：${activeCount || 0}`);
-    report.push(`🔴 超期节点：${overdueCount || 0}`);
-    report.push(`🤖 Agent 建议总计：${agentTotal || 0}`);
-
-    // ════ 4. 汇总 ════
-    report.push('');
-    report.push(`════ 汇总 ════`);
-    report.push(`问题发现：${issuesFound}`);
-    report.push(`自动修复：${autoFixed}`);
-    report.push(`状态：${issuesFound === 0 ? '✅ 系统健康' : '⚠ 有问题需关注'}`);
-
-    const reportText = report.join('\n');
-
-    // 通知管理员
-    const { data: admins } = await supabase
-      .from('profiles')
-      .select('user_id, wechat_push_key')
-      .or("role.eq.admin,roles.cs.{admin}");
-
-    for (const admin of admins || []) {
-      await supabase.from('notifications').insert({
-        user_id: admin.user_id,
-        type: 'nightly_maintenance',
-        title: `🔧 每晚维护完成 — ${issuesFound === 0 ? '系统健康' : `${autoFixed}项自动修复`}`,
-        message: reportText.slice(0, 500),
-        status: 'unread',
-      });
-
-      // 微信推送
-      if (admin.wechat_push_key) {
-        const { sendWechatPush } = await import('@/lib/utils/wechat-push');
-        await sendWechatPush(admin.wechat_push_key, '🔧 每晚维护报告', reportText).catch(() => {});
-      }
-    }
-
-    return NextResponse.json({ success: true, report: reportText, issuesFound, autoFixed });
+    return NextResponse.json({
+      success: true,
+      reportId: (saved as any)?.id,
+      summary: {
+        total: report.totalChecks,
+        passed: report.passedCount,
+        warning: report.warningCount,
+        critical: report.criticalCount,
+        autoFixed: report.autoFixedCount,
+        metaReview: report.metaReview?.summary,
+      },
+    });
   } catch (err: any) {
+    console.error('[nightly-maintenance]', err?.message);
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
 }
 
-export async function GET(req: Request) { return POST(req); }
+export async function GET(req: Request) {
+  return POST(req);
+}

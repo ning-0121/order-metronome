@@ -1709,3 +1709,26 @@ CREATE INDEX IF NOT EXISTS idx_order_attachments_production_report_id ON public.
 
 -- 允许 production_reports.qty_produced = 0（仅上传资料/照片时也能保存）
 -- 注意：现有 NOT NULL + DEFAULT 0 已经满足，这里只确保 check 约束不阻塞 qty=0
+
+-- ===== 2026-04-09 系统守护报告 =====
+-- SystemGuardian 每天凌晨跑一次，生成系统健康报告
+-- 保留 90 天供管理员回溯
+CREATE TABLE IF NOT EXISTS public.system_health_reports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ran_at timestamptz NOT NULL DEFAULT now(),
+  took_ms integer NOT NULL DEFAULT 0,
+  total_checks integer NOT NULL DEFAULT 0,
+  passed_count integer NOT NULL DEFAULT 0,
+  warning_count integer NOT NULL DEFAULT 0,
+  critical_count integer NOT NULL DEFAULT 0,
+  auto_fixed_count integer NOT NULL DEFAULT 0,
+  checks jsonb NOT NULL DEFAULT '[]',
+  meta_review jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_system_health_reports_ran_at ON public.system_health_reports(ran_at DESC);
+ALTER TABLE public.system_health_reports ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "system_health_reports_admin" ON public.system_health_reports;
+CREATE POLICY "system_health_reports_admin" ON public.system_health_reports FOR SELECT USING (
+  auth.uid() IS NOT NULL AND public.user_can_see_all_orders(auth.uid())
+);
