@@ -75,20 +75,27 @@ function getTodayDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
-/** 判断用户角色是否匹配里程碑 owner_role */
-function isMyMilestone(milestone: any, userRoles: string[]): boolean {
-  // 生产主管、行政督办看所有订单
-  if (userRoles.includes('production_manager') || userRoles.includes('admin_assistant')) return true;
-  if (!milestone.owner_role) return false;
-  const ownerRole = milestone.owner_role.toLowerCase();
-  return userRoles.some(r => {
-    const nr = r.toLowerCase();
-    return nr === ownerRole
-      || (ownerRole === 'qc' && nr === 'quality')
-      || (ownerRole === 'quality' && nr === 'qc')
-      || (ownerRole === 'sales' && nr === 'merchandiser')
-      || (ownerRole === 'merchandiser' && nr === 'sales');
-  });
+/**
+ * 判断一个里程碑是否属于"我的逾期"
+ *
+ * 定义（严格）：
+ * 1. owner_user_id === 当前用户 → 直接是我的
+ * 2. 他人负责的节点，但在某个我有未完成任务的订单里，
+ *    且序号 ≤ 我自己在该订单里最早未完成任务的序号 → 卡在我前面，影响我
+ *
+ * 说明：不再按 role 匹配（role 只是标签，不代表责任人），
+ *       生产主管/行政督办也用严格规则（他们不执行节点，就不背锅）。
+ */
+function isMyOrBlockingMe(
+  milestone: any,
+  userId: string,
+  myMinSeqByOrder: Record<string, number>,
+): boolean {
+  if (milestone.owner_user_id === userId) return true;
+  const myMinSeq = myMinSeqByOrder[milestone.order_id];
+  if (myMinSeq === undefined) return false; // 这个订单和我无关
+  if (milestone.sequence_number == null) return false;
+  return milestone.sequence_number <= myMinSeq;
 }
 
 export default async function DashboardPage() {
@@ -148,11 +155,25 @@ export default async function DashboardPage() {
   const { data: createdOrders } = await (supabase.from('orders') as any)
     .select('id').eq('owner_user_id', user.id);
   const { data: assignedMilestones } = await (supabase.from('milestones') as any)
-    .select('order_id').eq('owner_user_id', user.id);
+    .select('order_id, sequence_number, status')
+    .eq('owner_user_id', user.id);
   const myOrderIds = new Set([
     ...(createdOrders || []).map((o: any) => o.id),
     ...(assignedMilestones || []).map((m: any) => m.order_id),
   ]);
+
+  // 计算每个订单里「我自己最早的未完成节点序号」
+  // 用于判断：别人的逾期节点是否卡在我前面 → 影响我
+  const DONE_STATUSES = new Set(['done', '已完成', 'completed']);
+  const myMinSeqByOrder: Record<string, number> = {};
+  for (const m of (assignedMilestones || []) as any[]) {
+    if (DONE_STATUSES.has(m.status)) continue;
+    if (m.sequence_number == null) continue;
+    const cur = myMinSeqByOrder[m.order_id];
+    if (cur === undefined || m.sequence_number < cur) {
+      myMinSeqByOrder[m.order_id] = m.sequence_number;
+    }
+  }
 
   // 权限过滤：管理员/财务/行政/生产主管看所有订单，其他员工只看自己的
   const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager'].includes(r));
@@ -160,11 +181,13 @@ export default async function DashboardPage() {
   const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
   const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);
 
-  // 区分「我的逾期」和「他人逾期」
-  const myOverdue = isAdmin ? [] : filteredOverdue.filter((m: any) => isMyMilestone(m, userRoles));
+  // 区分「我的逾期」（我负责 or 卡在我前面的）与「他人逾期」（剩余的）
+  const myOverdue = isAdmin
+    ? []
+    : filteredOverdue.filter((m: any) => isMyOrBlockingMe(m, user.id, myMinSeqByOrder));
   const othersOverdue = isAdmin
     ? filteredOverdue
-    : filteredOverdue.filter((m: any) => !isMyMilestone(m, userRoles));
+    : filteredOverdue.filter((m: any) => !isMyOrBlockingMe(m, user.id, myMinSeqByOrder));
 
   // 查询所有超期节点对应的延期申请状态
   const overdueMilestoneIds = filteredOverdue.map((m: any) => m.id);
