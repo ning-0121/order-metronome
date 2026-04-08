@@ -39,6 +39,15 @@ interface MissingRule {
   /** 检查是否缺失（true = 缺失） */
   isMissing: (ctx: OrderContext) => boolean;
   suggestion: (ctx: OrderContext) => string;
+  /**
+   * 紧迫窗口（天）— 可选
+   * 如果设置，则：
+   *   - daysToBlocker > urgentWithin*2 → severity 降为 'low'（仅提醒）
+   *   - urgentWithin < daysToBlocker ≤ urgentWithin*2 → severity 降为 'medium'
+   *   - daysToBlocker ≤ urgentWithin → 保持原 severity
+   * 不设置则始终用原 severity。
+   */
+  urgentWithin?: number;
 }
 
 interface OrderContext {
@@ -119,6 +128,7 @@ const RULES: MissingRule[] = [
     isMissing: ctx =>
       !ctx.hasFile('packing_requirement') && !ctx.isStepDone('packing_method_confirmed'),
     suggestion: () => '上传包装资料（袋型/纸卡/吊牌/shipping mark）',
+    urgentWithin: 10, // 包装前 10 天还没确认才算严重
   },
   {
     id: 'missing_tech_pack',
@@ -130,6 +140,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.hasFile('tech_pack') && !ctx.isStepDone('pre_production_sample_ready'),
     suggestion: () => '上传客户提供的 Tech Pack（含尺寸表、工艺要求、面料规格）',
+    urgentWithin: 5, // 产前样准备前 5 天还没交就算严重
   },
   {
     id: 'missing_qc_report_mid',
@@ -282,7 +293,7 @@ export const missingInfoSkill: SkillModule = {
     return JSON.stringify({
       orderId: input.orderId,
       // version 用于规则更新时强制失效旧缓存
-      version: 'v1',
+      version: 'v2-urgentWithin',
     });
   },
 
@@ -341,15 +352,28 @@ export const missingInfoSkill: SkillModule = {
       },
     };
 
+    // 根据 urgentWithin 动态降级 severity — 距离卡死节点还远时只算提醒
+    function applyUrgency(
+      base: 'high' | 'medium' | 'low',
+      urgentWithin: number | undefined,
+      days: number | null,
+    ): 'high' | 'medium' | 'low' {
+      if (!urgentWithin || days === null) return base;
+      if (days > urgentWithin * 2) return 'low';
+      if (days > urgentWithin) return base === 'high' ? 'medium' : 'low';
+      return base;
+    }
+
     // 跑所有规则
     const findings: SkillFinding[] = [];
     for (const rule of RULES) {
       try {
         if (rule.isMissing(orderCtx)) {
           const stepDays = orderCtx.daysUntilStep(rule.blocksStep);
+          const effectiveSeverity = applyUrgency(rule.severity, rule.urgentWithin, stepDays);
           findings.push({
             category: rule.category,
-            severity: rule.severity,
+            severity: effectiveSeverity,
             label: rule.label,
             detail: rule.suggestion(orderCtx),
             blocksStep: rule.blocksStep,
@@ -371,6 +395,7 @@ export const missingInfoSkill: SkillModule = {
       return aDays - bDays;
     });
 
+    // 用动态降级后的 severity 统计（不是原始 rule.severity）
     const blockingCount = findings.filter(f => f.severity === 'high').length;
     const totalCount = findings.length;
 
