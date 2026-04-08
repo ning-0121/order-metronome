@@ -205,24 +205,35 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
     return () => { stale = true; };
   }, [expandedId]);
 
-  // 排序策略修复（2026-04-08）：优先按 due_at 排，sequence_number 做兜底
-  // 之前用 sequence_number 优先，导致老订单（template 改版前创建）显示顺序错乱
-  // 改为 due_at 优先后，无论 sequence_number 是新还是旧都能正确显示
+  // ════════ 节点显示顺序：永久固定 ════════
+  // 修复 2026-04-08：之前用 due_at 排序，但旧订单的 due_at 可能被手工改过
+  // 或排期 bug 留下了"客户确认 due_at < 准备完成 due_at"这种坏数据 →
+  // 按 due_at 排会出现"产前样客户确认排在产前样准备完成之前"的逻辑荒谬。
+  //
+  // 现在改为：阶段内的节点顺序 = MILESTONE_GROUPS.stepKeys 数组里的位置
+  // 这是模板硬编码的业务逻辑顺序，永远不会乱：
+  //   产前样准备完成 → 产前样寄出 → 产前样客户确认
+  //   永远不会反过来，无论 due_at 数据怎么坏。
+  //
+  // due_at 只用于"全局节点排序"（跨阶段），不影响阶段内顺序。
+
+  // 全局兜底排序（极少数节点不在 MILESTONE_GROUPS 时用）
   const sorted = [...milestones].sort((a, b) => {
-    if (a.due_at && b.due_at) {
-      const t = new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
-      if (t !== 0) return t;
-    }
-    // due_at 相同或缺失时，用 sequence_number 兜底
     const aN = (a as any).sequence_number ?? 99;
     const bN = (b as any).sequence_number ?? 99;
     return aN - bN;
   });
 
-  const grouped = MILESTONE_GROUPS.map(g => ({
-    ...g,
-    items: sorted.filter(m => g.stepKeys.includes((m as any).step_key)),
-  }));
+  // 阶段内：按 stepKeys 数组里的位置排序（永久固定的逻辑顺序）
+  const grouped = MILESTONE_GROUPS.map(g => {
+    const items = milestones.filter(m => g.stepKeys.includes((m as any).step_key));
+    items.sort((a, b) => {
+      const aIdx = g.stepKeys.indexOf((a as any).step_key);
+      const bIdx = g.stepKeys.indexOf((b as any).step_key);
+      return aIdx - bIdx;
+    });
+    return { ...g, items };
+  });
 
   return (
     <div className="space-y-6">
