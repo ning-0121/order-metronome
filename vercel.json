@@ -26,6 +26,10 @@
       "schedule": "5,20,35,50 * * * *"
     },
     {
+      "path": "/api/cron/email-backfill",
+      "schedule": "40 17 * * *"
+    },
+    {
       "path": "/api/cron/agent-learn",
       "schedule": "0 16 * * 0"
     },

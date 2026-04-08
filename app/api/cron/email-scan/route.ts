@@ -47,7 +47,8 @@ export async function POST(req: Request) {
     } else {
       try {
         console.log(`[email-scan] IMAP 连接 ${imapUser}...`);
-        const newEmails = await fetchNewEmails(30, 1); // 拉取最近1天
+        // 放宽窗口：最近 3 天 / 最近 80 封（防止高峰日漏邮件）
+        const newEmails = await fetchNewEmails(80, 3);
         imapStatus = `fetched_${newEmails.length}`;
         console.log(`[email-scan] IMAP 拉取到 ${newEmails.length} 封邮件`);
 
