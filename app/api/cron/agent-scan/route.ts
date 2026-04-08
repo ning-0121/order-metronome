@@ -287,24 +287,47 @@ export async function POST(req: Request) {
       for (const action of inserted || []) {
         if (autoExecThisOrder >= MAX_AUTO_PER_ORDER) break;
         if (action.action_type === 'send_nudge' && AGENT_FLAGS.autoNudge()) {
-          // 自动催办：发送通知给负责人
+          // 自动催办：点对点发送通知给节点负责人
           const payload = action.action_payload as any;
           if (payload?.target_user_id) {
+            // 🔴 CEO 2026-04-09：防止管理员被 Agent 催办刷屏
+            // 如果 target 恰好是 admin 角色 → 跳过（admin 不执行节点）
+            const { data: targetProfile } = await supabase
+              .from('profiles')
+              .select('role, roles')
+              .eq('user_id', payload.target_user_id)
+              .single();
+            const targetRoles: string[] = (targetProfile as any)?.roles?.length > 0
+              ? (targetProfile as any).roles
+              : [(targetProfile as any)?.role].filter(Boolean);
+            const targetIsAdmin = targetRoles.includes('admin')
+              && !targetRoles.some(r => ['sales', 'merchandiser', 'finance', 'procurement'].includes(r));
+            if (targetIsAdmin) {
+              // admin 单一角色 → 跳过，让 CEO 清静
+              console.log(`[agent-scan] 跳过 admin 催办 — ${order.order_no}`);
+              await supabase
+                .from('agent_actions')
+                .update({ status: 'dismissed', executed_at: new Date().toISOString() })
+                .eq('id', action.id);
+              continue;
+            }
+
+            // 标题包含订单号 + 节点名 → 责任明确
+            const nudgeTitle = `⏰ ${order.order_no} · ${action.milestone_name || '节点'} 已超期`;
+            const nudgeMsg = `您负责的「${action.milestone_name || '节点'}」已超期 ${payload.days_overdue || ''} 天\n订单：${order.order_no}（${order.customer_name || ''}）\n请尽快登录系统处理。`;
+
             await supabase.from('notifications').insert({
               user_id: payload.target_user_id,
               type: 'agent_nudge',
-              title: `[Agent] 节点超期提醒`,
-              message: `您负责的节点已超期${payload.days_overdue || ''}天，请尽快处理。订单：${order.order_no}`,
+              title: nudgeTitle,
+              message: nudgeMsg,
               related_order_id: order.id,
               related_milestone_id: action.milestone_id,
               status: 'unread',
             });
 
             // 微信推送
-            await pushToUsers(supabase, [payload.target_user_id],
-              `⏰ 节点超期提醒 — ${order.order_no}`,
-              `您负责的节点已超期${payload.days_overdue || ''}天，请尽快处理。`
-            ).catch(() => {});
+            await pushToUsers(supabase, [payload.target_user_id], nudgeTitle, nudgeMsg).catch(() => {});
 
             // 标记为已执行
             await supabase

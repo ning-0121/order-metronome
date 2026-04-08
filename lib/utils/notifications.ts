@@ -45,6 +45,13 @@ export async function sendEmailNotification(
   html: string
 ): Promise<boolean> {
   try {
+    // 🔴 全局邮件 kill-switch (CEO 2026-04-09：防止邮件爆炸)
+    // Vercel 环境变量设 EMAIL_NOTIFICATIONS_DISABLED=true 即可全量关停
+    if (process.env.EMAIL_NOTIFICATIONS_DISABLED === 'true') {
+      console.log('[SMTP] 已全局暂停（EMAIL_NOTIFICATIONS_DISABLED=true），跳过：', subject);
+      return false;
+    }
+
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
       console.error('[SMTP] SMTP_USER or SMTP_PASSWORD not configured');
       return false;

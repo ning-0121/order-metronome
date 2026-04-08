@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { sendEmailNotification, MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
+import { sendEmailNotification, escapeHtml } from '@/lib/utils/notifications';
 import { pushToUsers } from '@/lib/utils/wechat-push';
 import { getCurrentUserRole, isAdmin } from '@/lib/utils/user-role';
 
@@ -122,8 +122,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Send email
-    const ccEmails = MANAGER_CC_EMAILS;
+    // 🔴 CEO 2026-04-09：催办点对点，不再 CC 管理员
+    // 之前 CC MANAGER_CC_EMAILS 导致所有催办都刷爆 admin 收件箱、责任不明
     const messageHtml = customMessage
       ? `<div style="margin:12px 0;padding:12px 16px;background:#fef3c7;border-left:4px solid #d97706;border-radius:4px;"><p style="margin:0;font-size:14px;color:#92400e;"><strong>${escapeHtml(senderName)} 留言：</strong>${escapeHtml(customMessage)}</p></div>`
       : '';
@@ -152,8 +152,8 @@ export async function POST(request: NextRequest) {
       wecomSent = sentCount > 0;
     }
 
-    // 邮件通知（可能失败但不阻断）
-    const emailSent = await sendEmailNotification([recipientEmail, ...ccEmails], subject, html);
+    // 邮件通知 — 只发给被催的人本人（可能失败但不阻断）
+    const emailSent = await sendEmailNotification(recipientEmail, subject, html);
 
     const channels: string[] = ['系统通知'];
     if (wecomSent) channels.push('企业微信');
