@@ -18,11 +18,37 @@ export async function identifyCustomerFromEmail(
   subject: string,
   body: string,
 ): Promise<{ customerName: string | null; confidence: 'high' | 'medium' | 'low'; method: string }> {
-  const domain = fromEmail.split('@')[1]?.toLowerCase();
+  const normalizedEmail = fromEmail.trim().toLowerCase();
+  const domain = normalizedEmail.split('@')[1];
   if (!domain) return { customerName: null, confidence: 'low', method: 'no_domain' };
 
   // 跳过内部邮件
   if (domain === 'qimoclothing.com') return { customerName: null, confidence: 'high', method: 'internal' };
+
+  // 0. 业务手动补充的精确邮箱列表（最高优先级，绕过所有模糊匹配）
+  // customers.contact_emails text[] 由业务在「订单详情 → 邮件中心 → 客户联系邮箱」填写
+  // 同一域名下多个客户的场景（如 gmail.com 通用邮箱）必须靠这个精确匹配区分
+  try {
+    const { data: contactMatch } = await supabase
+      .from('customers')
+      .select('customer_name')
+      .contains('contact_emails', [normalizedEmail])
+      .limit(1)
+      .maybeSingle();
+
+    if (contactMatch?.customer_name) {
+      return {
+        customerName: contactMatch.customer_name,
+        confidence: 'high',
+        method: 'contact_email_exact',
+      };
+    }
+  } catch (err: any) {
+    // contact_emails 列还没迁移时静默回退
+    if (err?.code !== '42703') {
+      console.error('[identifyCustomerFromEmail] contact_emails query error:', err?.message);
+    }
+  }
 
   // 1. 查已建立的域名映射（最快）
   const { data: mapping } = await supabase
