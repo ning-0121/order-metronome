@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { updateUserRoles, adminResetPassword } from '@/app/actions/users';
+import { updateUserRoles, adminResetPassword, checkUserDeletable, deleteUser } from '@/app/actions/users';
 import { useRouter } from 'next/navigation';
 
 const ALL_ROLES = [
@@ -38,6 +38,50 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const [resetting, setResetting] = useState(false);
+
+  // 删除员工状态
+  const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
+  const [deleteChecking, setDeleteChecking] = useState(false);
+  const [deleteCheck, setDeleteCheck] = useState<{
+    canDelete?: boolean;
+    activeMilestones?: { id: string; name: string; order_no: string; status: string }[];
+    ownedOrders?: { id: string; order_no: string; customer_name: string }[];
+    error?: string;
+  } | null>(null);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  async function startDelete(user: UserProfile) {
+    setDeleteUserId(user.user_id);
+    setDeleteConfirmEmail('');
+    setDeleteCheck(null);
+    setDeleteChecking(true);
+    const result = await checkUserDeletable(user.user_id);
+    setDeleteCheck(result);
+    setDeleteChecking(false);
+  }
+
+  async function handleDelete(user: UserProfile) {
+    if (!deleteCheck?.canDelete) return;
+    if (deleteConfirmEmail.trim().toLowerCase() !== user.email.toLowerCase()) {
+      alert('输入的邮箱与该员工不一致');
+      return;
+    }
+    if (!confirm(`确认删除员工 ${user.name || user.email}？此操作不可恢复！`)) return;
+    setDeleting(true);
+    const result = await deleteUser(user.user_id, deleteConfirmEmail);
+    if (result.error) {
+      alert(result.error);
+      setDeleting(false);
+      return;
+    }
+    alert('员工已删除');
+    setDeleteUserId(null);
+    setDeleteCheck(null);
+    setDeleteConfirmEmail('');
+    setDeleting(false);
+    router.refresh();
+  }
 
   function startEdit(user: UserProfile) {
     setEditingUserId(user.user_id);
@@ -233,7 +277,111 @@ export function UserRoleManager({ users }: UserRoleManagerProps) {
                   >
                     编辑角色
                   </button>
+                  <button
+                    onClick={() => startDelete(user)}
+                    className="px-3 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 border border-red-200 transition-all"
+                    title="删除员工"
+                  >
+                    删除
+                  </button>
                 </div>
+              </div>
+            )}
+
+            {/* 删除员工面板 */}
+            {deleteUserId === user.user_id && (
+              <div className="mt-4 pt-4 border-t border-red-200 bg-red-50 -mx-5 -mb-5 px-5 pb-5 rounded-b-xl">
+                <p className="text-sm font-semibold text-red-800 mb-3">
+                  ⚠️ 删除员工 {user.name || user.email}
+                </p>
+
+                {deleteChecking && (
+                  <p className="text-xs text-red-600">正在检查该员工是否有进行中的工作...</p>
+                )}
+
+                {!deleteChecking && deleteCheck?.error && (
+                  <p className="text-xs text-red-700">{deleteCheck.error}</p>
+                )}
+
+                {!deleteChecking && deleteCheck && !deleteCheck.error && !deleteCheck.canDelete && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-red-700 font-medium">
+                      ❌ 无法删除：该员工仍有未完成的工作，请先改派
+                    </p>
+                    {(deleteCheck.activeMilestones?.length || 0) > 0 && (
+                      <div className="bg-white rounded-lg border border-red-200 p-3">
+                        <p className="text-xs font-medium text-red-700 mb-1">
+                          进行中的节点（{deleteCheck.activeMilestones!.length}）：
+                        </p>
+                        <ul className="text-xs text-gray-700 space-y-0.5 max-h-32 overflow-auto">
+                          {deleteCheck.activeMilestones!.slice(0, 10).map((m) => (
+                            <li key={m.id}>• {m.order_no} · {m.name}</li>
+                          ))}
+                          {deleteCheck.activeMilestones!.length > 10 && (
+                            <li className="text-gray-400">…还有 {deleteCheck.activeMilestones!.length - 10} 项</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                    {(deleteCheck.ownedOrders?.length || 0) > 0 && (
+                      <div className="bg-white rounded-lg border border-red-200 p-3">
+                        <p className="text-xs font-medium text-red-700 mb-1">
+                          负责/创建的活动订单（{deleteCheck.ownedOrders!.length}）：
+                        </p>
+                        <ul className="text-xs text-gray-700 space-y-0.5 max-h-32 overflow-auto">
+                          {deleteCheck.ownedOrders!.slice(0, 10).map((o) => (
+                            <li key={o.id}>• {o.order_no} · {o.customer_name}</li>
+                          ))}
+                          {deleteCheck.ownedOrders!.length > 10 && (
+                            <li className="text-gray-400">…还有 {deleteCheck.ownedOrders!.length - 10} 项</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => { setDeleteUserId(null); setDeleteCheck(null); }}
+                      className="mt-2 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 text-xs hover:bg-white transition-all"
+                    >
+                      关闭
+                    </button>
+                  </div>
+                )}
+
+                {!deleteChecking && deleteCheck?.canDelete && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-red-700">
+                      ✅ 该员工无进行中的工作。删除后将同时清除登录账号与档案，<strong className="text-red-800">此操作不可恢复</strong>。
+                    </p>
+                    <p className="text-xs text-red-700">
+                      请输入该员工邮箱 <code className="bg-white px-1.5 py-0.5 rounded border border-red-200 font-mono">{user.email}</code> 以确认：
+                    </p>
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        value={deleteConfirmEmail}
+                        onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                        placeholder="输入员工邮箱"
+                        className="flex-1 rounded-lg border border-red-300 px-3 py-2 text-sm bg-white focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                      />
+                      <button
+                        onClick={() => handleDelete(user)}
+                        disabled={
+                          deleting ||
+                          deleteConfirmEmail.trim().toLowerCase() !== user.email.toLowerCase()
+                        }
+                        className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-all"
+                      >
+                        {deleting ? '删除中...' : '确认删除'}
+                      </button>
+                      <button
+                        onClick={() => { setDeleteUserId(null); setDeleteCheck(null); setDeleteConfirmEmail(''); }}
+                        className="px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-white transition-all"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
