@@ -1732,3 +1732,27 @@ DROP POLICY IF EXISTS "system_health_reports_admin" ON public.system_health_repo
 CREATE POLICY "system_health_reports_admin" ON public.system_health_reports FOR SELECT USING (
   auth.uid() IS NOT NULL AND public.user_can_see_all_orders(auth.uid())
 );
+
+-- ===== 2026-04-08 订单备注日志 =====
+-- 让任何角色都可以给订单追加备注，形成完整沟通历史
+-- 注意：orders.notes 原字段保留（用于客户原始备注），新建 order_notes_log 存追加历史
+CREATE TABLE IF NOT EXISTS public.order_notes_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  author_user_id uuid REFERENCES auth.users(id),
+  author_name text,
+  content text NOT NULL,
+  category text DEFAULT 'general' CHECK (category IN ('general','delay','quality','customer','internal','other')),
+  related_milestone_id uuid REFERENCES public.milestones(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_order_notes_log_order_id ON public.order_notes_log(order_id, created_at DESC);
+ALTER TABLE public.order_notes_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "order_notes_log_read" ON public.order_notes_log;
+CREATE POLICY "order_notes_log_read" ON public.order_notes_log FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS "order_notes_log_insert" ON public.order_notes_log;
+CREATE POLICY "order_notes_log_insert" ON public.order_notes_log FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS "order_notes_log_delete" ON public.order_notes_log;
+CREATE POLICY "order_notes_log_delete" ON public.order_notes_log FOR DELETE USING (
+  auth.uid() = author_user_id OR public.user_can_see_all_orders(auth.uid())
+);

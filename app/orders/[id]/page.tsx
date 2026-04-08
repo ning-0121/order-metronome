@@ -26,6 +26,7 @@ import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
+import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
 import { BackButton } from '@/components/BackButton';
 // POVerifyButton removed - auto-verify at order creation
 
@@ -49,7 +50,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'email_center', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -247,6 +248,7 @@ export default async function OrderDetailPage({
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
               { key: 'email_center', label: '邮件中心' },
+              { key: 'notes', label: '📝 备注' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
@@ -650,6 +652,18 @@ export default async function OrderDetailPage({
             customerName={orderData.customer_name || ''}
             orderNo={orderData.order_no || ''}
           />
+        )}
+
+        {/* Tab: 备注（通用备注日志 — 所有角色可写） */}
+        {activeTab === 'notes' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">订单备注</h2>
+            <p className="text-xs text-gray-500 mb-5">
+              任何和这个订单相关的事都可以记在这里：延期原因、客户沟通、品质问题、内部协调...
+              所有人都能看到，形成完整沟通历史。
+            </p>
+            <OrderNotesTab orderId={id} currentUserId={user?.id} isAdmin={isAdmin} />
+          </div>
         )}
 
         {/* Tab: 执行评分 */}
