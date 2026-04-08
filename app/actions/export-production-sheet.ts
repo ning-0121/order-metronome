@@ -65,25 +65,54 @@ export async function exportProductionTrackingSheet(): Promise<{
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  // 权限：admin / production_manager / admin_assistant / merchandiser
+  // 权限：
+  //   - admin / finance / production_manager / admin_assistant / procurement → 全公司所有进行中订单
+  //   - merchandiser / sales → 只能下载自己相关的订单
+  //     （created_by=我 或 owner_user_id=我 或 在订单中有被分配的里程碑）
+  //   - 其他角色 → 无权导出
   const { data: profile } = await (supabase.from('profiles') as any)
     .select('role, roles')
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] =
     (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const allowed = userRoles.some((r: string) =>
-    ['admin', 'production_manager', 'admin_assistant', 'merchandiser', 'sales'].includes(r)
-  );
-  if (!allowed) return { error: '无权限导出' };
 
-  // 只导出进行中的订单
-  const { data: orders, error: orderErr } = await (supabase.from('orders') as any)
+  const canSeeAll = userRoles.some((r: string) =>
+    ['admin', 'finance', 'production_manager', 'admin_assistant', 'procurement'].includes(r)
+  );
+  const canSeeOwn = userRoles.some((r: string) => ['merchandiser', 'sales'].includes(r));
+
+  if (!canSeeAll && !canSeeOwn) {
+    return { error: '无权限导出 — 仅管理员/财务/采购/生产主管/行政督办/跟单/业务可下载' };
+  }
+
+  // 先取全部进行中订单
+  let ordersQuery = (supabase.from('orders') as any)
     .select(
       'id, order_no, internal_order_no, customer_name, style_no, quantity, colors, factory_name, special_tags, order_date, factory_date, etd, cancel_date, status, owner_user_id, created_by',
     )
     .not('status', 'in', '("completed","archived","cancelled","已完成","已归档","已取消")')
     .order('factory_date', { ascending: true, nullsFirst: false });
+
+  // 如果是 merchandiser/sales 不能 canSeeAll → 先查他参与的订单 id
+  if (!canSeeAll) {
+    const [{ data: createdRows }, { data: ownedRows }, { data: msRows }] = await Promise.all([
+      (supabase.from('orders') as any).select('id').eq('created_by', user.id),
+      (supabase.from('orders') as any).select('id').eq('owner_user_id', user.id),
+      (supabase.from('milestones') as any).select('order_id').eq('owner_user_id', user.id),
+    ]);
+    const myOrderIds = new Set<string>([
+      ...((createdRows || []) as any[]).map((r: any) => r.id),
+      ...((ownedRows || []) as any[]).map((r: any) => r.id),
+      ...((msRows || []) as any[]).map((r: any) => r.order_id),
+    ]);
+    if (myOrderIds.size === 0) {
+      return { error: '你当前没有任何进行中的订单可以导出' };
+    }
+    ordersQuery = ordersQuery.in('id', Array.from(myOrderIds));
+  }
+
+  const { data: orders, error: orderErr } = await ordersQuery;
 
   if (orderErr) return { error: orderErr.message };
   if (!orders || orders.length === 0) return { error: '当前没有进行中的订单' };
@@ -223,7 +252,7 @@ export async function exportProductionTrackingSheet(): Promise<{
 
   // 表头
   const headers = [
-    '订单号', '内部单号', '客户', '款号', '数量', '颜色', '工厂', '加急',
+    '订单号', '内部单号', '客户', '款号', '数量(件)', '颜色', '工厂', '加急',
     '下单日', '出厂日', 'ETD/交期', '取消日', '剩余天数',
     '生产启动', '中查', '尾查', '工厂完成', '验货放行',
     '累计产量', '进度%', '风险',
