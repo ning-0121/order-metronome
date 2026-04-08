@@ -181,13 +181,17 @@ export default async function DashboardPage() {
   const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
   const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);
 
-  // 区分「我的逾期」（我负责 or 卡在我前面的）与「他人逾期」（剩余的）
+  // 区分「我的逾期」（我负责 or 卡在我前面的）
+  // 与「他人逾期」（我参与的订单里、不算我的、但仍需关注的他人逾期）
   const myOverdue = isAdmin
     ? []
     : filteredOverdue.filter((m: any) => isMyOrBlockingMe(m, user.id, myMinSeqByOrder));
+  // 他人逾期：限定在"我参与的订单"范围内（admin 除外 — admin 看全局）
   const othersOverdue = isAdmin
     ? filteredOverdue
-    : filteredOverdue.filter((m: any) => !isMyOrBlockingMe(m, user.id, myMinSeqByOrder));
+    : filteredOverdue.filter((m: any) =>
+        myOrderIds.has(m.order_id) && !isMyOrBlockingMe(m, user.id, myMinSeqByOrder)
+      );
 
   // 查询所有超期节点对应的延期申请状态
   const overdueMilestoneIds = filteredOverdue.map((m: any) => m.id);
