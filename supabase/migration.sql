@@ -1698,3 +1698,14 @@ CREATE POLICY "ai_skill_circuit_state_admin" ON public.ai_skill_circuit_state FO
 -- ===== 2026-04-08 客户邮箱补充字段 =====
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS contact_emails text[] DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_customers_contact_emails ON public.customers USING GIN (contact_emails);
+
+-- ===== 2026-04-09 生产日报附件 + OCR 文本 =====
+-- 目标：跟单每天可以在"生产进度"Tab 上传图片/文件/手写稿，
+-- 并由 AI（Claude Vision）将手写稿识别为结构化文本供后续搜索/汇总
+ALTER TABLE public.order_attachments ADD COLUMN IF NOT EXISTS production_report_id uuid REFERENCES public.production_reports(id) ON DELETE CASCADE;
+ALTER TABLE public.order_attachments ADD COLUMN IF NOT EXISTS extracted_text text;
+ALTER TABLE public.order_attachments ADD COLUMN IF NOT EXISTS extracted_at timestamptz;
+CREATE INDEX IF NOT EXISTS idx_order_attachments_production_report_id ON public.order_attachments(production_report_id);
+
+-- 允许 production_reports.qty_produced = 0（仅上传资料/照片时也能保存）
+-- 注意：现有 NOT NULL + DEFAULT 0 已经满足，这里只确保 check 约束不阻塞 qty=0
