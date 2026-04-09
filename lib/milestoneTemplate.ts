@@ -56,6 +56,8 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "final_qc_check", name: "跟单尾查", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "final_qc_sales_check", name: "业务尾查", owner_role: "sales", is_critical: true, evidence_required: true },
   { step_key: "factory_completion", name: "工厂完成", owner_role: "merchandiser", is_critical: true, evidence_required: false },
+  { step_key: "leftover_collection", name: "剩余物料回收", owner_role: "merchandiser", is_critical: false, evidence_required: true, evidence_note: "提交剩余面料/辅料数量 + 废料数量" },
+  { step_key: "finished_goods_warehouse", name: "成品入库", owner_role: "logistics", is_critical: true, evidence_required: true, evidence_note: "提交入库单（成品数量/次品/余量/样品扣除）" },
   { step_key: "inspection_release", name: "验货/放行", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   // 阶段7：物流收款
   { step_key: "booking_done", name: "订舱完成", owner_role: "sales", is_critical: true, evidence_required: true },

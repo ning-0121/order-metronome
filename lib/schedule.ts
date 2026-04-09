@@ -156,6 +156,8 @@ const TIMELINE = {
   final_qc_check:                35,  // 跟单尾查 — 工厂完成前可修复
   final_qc_sales_check:          36,  // 业务尾查（跟单后 1 天复核）
   factory_completion:            38,  // 工厂完成（包装+尾查都通过后）
+  leftover_collection:           39,  // 剩余物料回收（工厂完成后 1 天）
+  finished_goods_warehouse:      39,  // 成品入库（与物料回收同期）
   inspection_release:            40,  // 预留2天：预约验货+验货+出结果
   booking_done:                  41,  // 放行后订舱
   customs_export:                43,
@@ -327,6 +329,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
     final_qc_sales_check:          cap(calc(TIMELINE.final_qc_sales_check)),
     packing_method_confirmed:      cap(calc(TIMELINE.packing_method_confirmed)),
     factory_completion:            cap(calc(TIMELINE.factory_completion)),
+    leftover_collection:           cap(calc(TIMELINE.leftover_collection)),
+    finished_goods_warehouse:      cap(calc(TIMELINE.finished_goods_warehouse)),
     inspection_release:            cap(calc(TIMELINE.inspection_release)),
     shipping_sample_send:          cap(shippingSample),
     booking_done:                  cap(calc(TIMELINE.booking_done)),

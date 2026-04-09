@@ -65,7 +65,7 @@ const MILESTONE_GROUPS = [
     key: 'stage6', emoji: '🟥',
     titleCn: '阶段 6：出货控制',
     // 顺序修复（2026-04-08）：船样寄送必须在包装确认后、工厂完成前
-    stepKeys: ['packing_method_confirmed', 'shipping_sample_send', 'factory_completion', 'inspection_release'],
+    stepKeys: ['packing_method_confirmed', 'shipping_sample_send', 'factory_completion', 'leftover_collection', 'finished_goods_warehouse', 'inspection_release'],
   },
   {
     key: 'stage7', emoji: '🟫',
