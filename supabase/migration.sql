@@ -1914,3 +1914,46 @@ CREATE INDEX IF NOT EXISTS idx_quoter_training_feedback_type ON public.quoter_tr
 ALTER TABLE public.quoter_training_feedback ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "quoter_training_feedback_auth" ON public.quoter_training_feedback;
 CREATE POLICY "quoter_training_feedback_auth" ON public.quoter_training_feedback FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 2026-04-09 报价员 Phase 3 — 工价单批量训练数据
+-- ═══════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS public.quoter_cmt_training_samples (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- 源文件
+  source_type text NOT NULL CHECK (source_type IN ('image','excel','pdf','manual')),
+  source_file_name text,
+  source_file_url text,
+  storage_path text,
+  -- 识别/提取后的结构化数据
+  garment_type text,          -- knit_top/knit_bottom/woven_pants/woven_shorts（AI 判断或人工选）
+  garment_subtype text,
+  style_no text,
+  customer_name text,
+  factory_name text,
+  -- 加工费数据
+  total_cmt_rmb numeric(8,2), -- 整件总价
+  operations jsonb,           -- [{name:'合肩', rate: 0.25}, ...]
+  -- AI 提取元数据
+  extraction_method text,     -- claude_vision/excel_parser/manual
+  ai_confidence numeric(4,1), -- 0-100
+  ai_raw_text text,           -- AI 返回的原始文本（供复核）
+  extraction_error text,
+  -- 审核状态
+  status text NOT NULL DEFAULT 'pending_review'
+    CHECK (status IN ('pending_review','confirmed','rejected','needs_edit')),
+  reviewed_by uuid REFERENCES auth.users(id),
+  reviewed_at timestamptz,
+  review_notes text,
+  -- 元信息
+  uploaded_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_quoter_training_status ON public.quoter_cmt_training_samples(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quoter_training_type ON public.quoter_cmt_training_samples(garment_type) WHERE status = 'confirmed';
+CREATE INDEX IF NOT EXISTS idx_quoter_training_customer ON public.quoter_cmt_training_samples(customer_name) WHERE status = 'confirmed';
+ALTER TABLE public.quoter_cmt_training_samples ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "quoter_cmt_training_auth" ON public.quoter_cmt_training_samples;
+CREATE POLICY "quoter_cmt_training_auth" ON public.quoter_cmt_training_samples FOR ALL USING (auth.uid() IS NOT NULL);
