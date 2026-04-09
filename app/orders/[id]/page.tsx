@@ -28,6 +28,7 @@ import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
+import { CostControlTab } from '@/components/tabs/CostControlTab';
 import { BackButton } from '@/components/BackButton';
 // POVerifyButton removed - auto-verify at order creation
 
@@ -51,7 +52,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -246,6 +247,7 @@ export default async function OrderDetailPage({
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料和包装' },
           { key: 'procurement', label: '采购对账' },
+          { key: 'cost_control', label: '💰 成本控制' },
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
@@ -654,6 +656,24 @@ export default async function OrderDetailPage({
             customerName={orderData.customer_name || ''}
             orderNo={orderData.order_no || ''}
           />
+        )}
+
+        {/* Tab: 成本控制 */}
+        {activeTab === 'cost_control' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">💰 成本控制</h2>
+            <p className="text-xs text-gray-500 mb-5">
+              上传内部成本核算单 → 自动建立成本基线 → 采购/加工费自动校验 → 标红通知财务+CEO
+            </p>
+            <CostControlTab
+              orderId={id}
+              orderNo={orderData.order_no}
+              styleNo={orderData.style_no}
+              quantity={orderData.quantity || 0}
+              isAdmin={isAdmin}
+              canEdit={isAdmin || currentRoles.some(r => ['sales', 'finance', 'merchandiser'].includes(r))}
+            />
+          </div>
         )}
 
         {/* Tab: 采购对账 */}

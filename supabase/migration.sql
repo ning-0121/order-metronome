@@ -2013,3 +2013,45 @@ CREATE INDEX IF NOT EXISTS idx_procurement_items_supplier ON public.procurement_
 ALTER TABLE public.procurement_line_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "procurement_items_auth" ON public.procurement_line_items;
 CREATE POLICY "procurement_items_auth" ON public.procurement_line_items FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 2026-04-09 财务成本控制 Phase 2 — 订单级成本基线
+-- ═══════════════════════════════════════════════════════════════
+
+-- 订单成本基线（从内部报价单解析后写入）
+-- 每个订单只有一条记录，是所有成本控制的"标尺"
+CREATE TABLE IF NOT EXISTS public.order_cost_baseline (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE UNIQUE,
+  -- 面料成本基线
+  fabric_area_m2 numeric(8,4),           -- 单件用量（平方）
+  fabric_weight_kg_m2 numeric(8,4),      -- 克重（KG/m²）
+  fabric_consumption_kg numeric(8,4),    -- 单件用量（公斤）= 平方×克重
+  fabric_price_per_kg numeric(10,3),     -- 净布价
+  waste_pct numeric(5,2) DEFAULT 3,      -- 损耗率（CEO定 3%）
+  -- 预算（自动计算：单耗 × 订单数量 × (1+损耗率)）
+  budget_fabric_kg numeric(12,2),        -- 面料预算用量 KG
+  budget_fabric_amount numeric(12,2),    -- 面料预算金额 RMB
+  -- 加工费基线
+  cmt_internal_estimate numeric(8,2),    -- 内部估价
+  cmt_factory_quote numeric(8,2),        -- 工厂实际报价（优先取"增富找加工厂报价"）
+  cmt_labor_rate numeric(8,2),           -- 工人工价
+  -- 总成本
+  total_cost_per_piece numeric(8,2),     -- 单件总成本
+  fob_price numeric(8,2),               -- FOB 报价
+  ddp_price numeric(8,2),               -- DDP 报价
+  -- 来源
+  source_file_name text,                 -- 内部报价单文件名
+  parsed_at timestamptz,                 -- 解析时间
+  parsed_by uuid REFERENCES auth.users(id),
+  -- 实际数据（生产后填入）
+  actual_fabric_used_kg numeric(12,2),   -- 实际用量（到货-剩余-废料）
+  actual_consumption_kg numeric(8,4),    -- 实际单耗（用量/件数）
+  -- 元信息
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_order_cost_baseline_order ON public.order_cost_baseline(order_id);
+ALTER TABLE public.order_cost_baseline ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "order_cost_baseline_auth" ON public.order_cost_baseline;
+CREATE POLICY "order_cost_baseline_auth" ON public.order_cost_baseline FOR ALL USING (auth.uid() IS NOT NULL);
