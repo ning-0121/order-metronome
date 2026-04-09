@@ -27,6 +27,7 @@ import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
+import { ProcurementTab } from '@/components/tabs/ProcurementTab';
 import { BackButton } from '@/components/BackButton';
 // POVerifyButton removed - auto-verify at order creation
 
@@ -50,7 +51,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -244,6 +245,7 @@ export default async function OrderDetailPage({
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料和包装' },
+          { key: 'procurement', label: '采购对账' },
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
@@ -652,6 +654,21 @@ export default async function OrderDetailPage({
             customerName={orderData.customer_name || ''}
             orderNo={orderData.order_no || ''}
           />
+        )}
+
+        {/* Tab: 采购对账 */}
+        {activeTab === 'procurement' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">采购对账</h2>
+            <p className="text-xs text-gray-500 mb-5">
+              采购下单时录入订购数据，原辅料到货时录入实收数量。系统自动计算差异，差异 &gt; 3% 标红。导出 Excel 给财务发给供应商对账。
+            </p>
+            <ProcurementTab
+              orderId={id}
+              isAdmin={isAdmin}
+              canEdit={isAdmin || currentRoles.some(r => ['sales', 'merchandiser', 'procurement', 'production_manager'].includes(r))}
+            />
+          </div>
         )}
 
         {/* Tab: 备注（通用备注日志 — 所有角色可写） */}

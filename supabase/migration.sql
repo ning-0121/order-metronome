@@ -1957,3 +1957,59 @@ CREATE INDEX IF NOT EXISTS idx_quoter_training_customer ON public.quoter_cmt_tra
 ALTER TABLE public.quoter_cmt_training_samples ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "quoter_cmt_training_auth" ON public.quoter_cmt_training_samples;
 CREATE POLICY "quoter_cmt_training_auth" ON public.quoter_cmt_training_samples FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 2026-04-09 采购对账：订购 vs 实收 → 财务对账单
+-- ═══════════════════════════════════════════════════════════════
+
+-- 采购明细行（每个订单每种原辅料一行）
+-- 跟单在"采购下单"时填订购数据，"原辅料到货"时填实收数据
+CREATE TABLE IF NOT EXISTS public.procurement_line_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  -- 物料信息
+  material_name text NOT NULL,           -- 面料名 / 辅料名
+  material_code text,                    -- 物料编号
+  specification text,                    -- 规格（幅宽/克重/颜色等）
+  supplier_name text,                    -- 供应商
+  category text DEFAULT 'fabric'
+    CHECK (category IN ('fabric','lining','trim','label','zipper','button','elastic','packing','other')),
+  -- 订购数据（采购下单时填）
+  ordered_qty numeric(12,2) NOT NULL DEFAULT 0,
+  ordered_unit text DEFAULT 'KG',        -- KG / M / PCS / ROLL / SET
+  unit_price numeric(10,3),              -- 单价（RMB）
+  ordered_amount numeric(12,2) GENERATED ALWAYS AS (
+    ROUND(ordered_qty * COALESCE(unit_price, 0), 2)
+  ) STORED,
+  ordered_by uuid REFERENCES auth.users(id),
+  ordered_at timestamptz,
+  -- 实收数据（原辅料到货时填）
+  received_qty numeric(12,2),
+  received_unit text,                    -- 通常和 ordered_unit 一致
+  received_at timestamptz,
+  received_by uuid REFERENCES auth.users(id),
+  -- 差异（自动计算）
+  difference_qty numeric(12,2) GENERATED ALWAYS AS (
+    COALESCE(received_qty, 0) - ordered_qty
+  ) STORED,
+  difference_pct numeric(6,2) GENERATED ALWAYS AS (
+    CASE WHEN ordered_qty > 0
+      THEN ROUND(((COALESCE(received_qty, 0) - ordered_qty) / ordered_qty * 100)::numeric, 2)
+      ELSE NULL END
+  ) STORED,
+  difference_amount numeric(12,2) GENERATED ALWAYS AS (
+    ROUND((COALESCE(received_qty, 0) - ordered_qty) * COALESCE(unit_price, 0), 2)
+  ) STORED,
+  -- 状态
+  status text DEFAULT 'ordered'
+    CHECK (status IN ('ordered','partial','complete','over','cancelled')),
+  -- 备注
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_procurement_items_order ON public.procurement_line_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_items_supplier ON public.procurement_line_items(supplier_name);
+ALTER TABLE public.procurement_line_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "procurement_items_auth" ON public.procurement_line_items;
+CREATE POLICY "procurement_items_auth" ON public.procurement_line_items FOR ALL USING (auth.uid() IS NOT NULL);
