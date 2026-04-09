@@ -20,6 +20,8 @@ export async function GET(request: Request) {
     let escalated = 0;
     // ── 行政督办：逾期/即将逾期通知 ──
     let supervisorAlerts = 0;
+    // ── 自动升级链：逾期 1/2/3/5 天分级上报 ──
+    let autoEscalated = 0;
     try {
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -27,6 +29,7 @@ export async function GET(request: Request) {
         const supabase = createClient(url, key);
         escalated = await checkUnassignedMerchandiser(supabase);
         supervisorAlerts = await notifyAdminAssistantOverdue(supabase);
+        autoEscalated = await runEscalationChain(supabase);
       }
     } catch (e: any) {
       console.error('[reminders] extra checks error:', e?.message);
@@ -39,6 +42,7 @@ export async function GET(request: Request) {
       memo_reminders: memoReminderResult,
       merchandiser_escalated: escalated,
       supervisor_alerts: supervisorAlerts,
+      auto_escalated: autoEscalated,
     });
   } catch (error: any) {
     console.error('Cron job error:', error);
@@ -252,4 +256,106 @@ async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
   } catch {}
 
   return overdueList.length + soonList.length;
+}
+
+/**
+ * 自动升级链 — 逾期节点分级上报
+ *
+ * Day +1: 催办责任人
+ * Day +2: 上报主管（production_manager）+ 订单创建者
+ * Day +3: 上报 CEO + 行政督办
+ * Day +5: 严重阻塞，CEO 仪表盘置顶
+ *
+ * 去重：每个节点每个级别只触发一次（用 notification type 去重）
+ */
+async function runEscalationChain(supabase: any): Promise<number> {
+  const { ESCALATION_CHAIN, getEscalationLevel, escalationDedupKey } = await import('@/lib/domain/escalation-chain');
+
+  const now = new Date();
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com';
+
+  // 查所有逾期的 in_progress 节点
+  const { data: overdue } = await supabase
+    .from('milestones')
+    .select('id, name, step_key, due_at, owner_user_id, owner_role, order_id, orders!inner(order_no, customer_name, created_by)')
+    .in('status', ['in_progress', '进行中'])
+    .lt('due_at', now.toISOString())
+    .order('due_at', { ascending: true })
+    .limit(100);
+
+  if (!overdue || overdue.length === 0) return 0;
+
+  // 预加载所有角色用户
+  const { data: allProfiles } = await supabase
+    .from('profiles')
+    .select('user_id, name, email, role, roles');
+  const profilesByRole: Record<string, string[]> = {};
+  for (const p of (allProfiles || []) as any[]) {
+    const roles: string[] = Array.isArray(p.roles) && p.roles.length > 0 ? p.roles : [p.role].filter(Boolean);
+    for (const r of roles) {
+      if (!profilesByRole[r]) profilesByRole[r] = [];
+      profilesByRole[r].push(p.user_id);
+    }
+  }
+  const nameMap = new Map((allProfiles || []).map((p: any) => [p.user_id, p.name || p.email?.split('@')[0] || '?']));
+
+  let escalatedCount = 0;
+
+  for (const m of overdue as any[]) {
+    const daysOverdue = Math.ceil((now.getTime() - new Date(m.due_at).getTime()) / 86400000);
+    const level = getEscalationLevel(daysOverdue);
+    if (!level) continue;
+
+    // 去重：这个节点这个级别是否已通知过
+    const dedupKey = escalationDedupKey(m.id, level.level);
+    const { data: existing } = await supabase
+      .from('notifications')
+      .select('id')
+      .eq('type', dedupKey)
+      .limit(1);
+    if (existing && existing.length > 0) continue;
+
+    // 收集通知对象
+    const recipients = new Set<string>();
+    if (level.notifyOwner && m.owner_user_id) recipients.add(m.owner_user_id);
+    if (level.notifyOrderCreator && m.orders?.created_by) recipients.add(m.orders.created_by);
+    for (const role of level.notifyRoles) {
+      for (const uid of (profilesByRole[role] || [])) recipients.add(uid);
+    }
+    if (recipients.size === 0) continue;
+
+    const ownerName = m.owner_user_id ? nameMap.get(m.owner_user_id) || '?' : '未分配';
+    const title = `${level.notificationPrefix} ${m.orders?.order_no} · ${m.name} 逾期 ${daysOverdue} 天`;
+    const message = [
+      `节点「${m.name}」已逾期 ${daysOverdue} 天`,
+      `订单：${m.orders?.order_no}（${m.orders?.customer_name || '?'}）`,
+      `负责人：${ownerName}`,
+      `升级级别：L${level.level} — ${level.label}`,
+      '',
+      `→ ${appUrl}/orders/${m.order_id}?tab=progress`,
+    ].join('\n');
+
+    // 给每个人发通知（用 dedupKey 作为 type 防重复）
+    for (const uid of recipients) {
+      await supabase.from('notifications').insert({
+        user_id: uid,
+        type: dedupKey,
+        title,
+        message,
+        related_order_id: m.order_id,
+        related_milestone_id: m.id,
+        status: 'unread',
+      });
+    }
+
+    // 微信推送
+    try {
+      const { pushToUsers } = await import('@/lib/utils/wechat-push');
+      await pushToUsers(supabase, Array.from(recipients), title, message).catch(() => {});
+    } catch {}
+
+    escalatedCount++;
+  }
+
+  return escalatedCount;
 }
