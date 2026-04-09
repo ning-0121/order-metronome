@@ -9,9 +9,11 @@ import type { QuoteInput, QuoteOutput } from './types';
 import { calculateFabricConsumption } from './fabric/calculator';
 import { calculateCmt } from './cmt/calculator';
 import { calculateCmtWithRAG } from './cmt/rag';
+import { calculateFabricWithRAG } from './fabric/rag';
 
 export * from './types';
 export { calculateFabricConsumption } from './fabric/calculator';
+export { calculateFabricWithRAG } from './fabric/rag';
 export { calculateCmt } from './cmt/calculator';
 export { calculateCmtWithRAG } from './cmt/rag';
 export { DEFAULT_SIZE_CHARTS, getChartOptions } from './fabric/defaultSizeCharts';
@@ -90,8 +92,8 @@ export async function generateQuoteWithRAG(
   supabase: any,
   input: QuoteInput,
 ): Promise<QuoteOutput> {
-  // 1. 面料单耗（公式，Phase 4 再加面料 RAG）
-  const fabric = calculateFabricConsumption({
+  // 1. 面料单耗 — RAG 优先（21 条 CEO 实测数据 + 公式兜底）
+  const fabric = await calculateFabricWithRAG(supabase, {
     garment_type: input.garment_type,
     subtype: input.subtype,
     size_chart: input.size_chart,
