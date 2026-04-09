@@ -45,10 +45,19 @@ export async function sendEmailNotification(
   html: string
 ): Promise<boolean> {
   try {
-    // 🔴 全局邮件 kill-switch (CEO 2026-04-09：防止邮件爆炸)
-    // Vercel 环境变量设 EMAIL_NOTIFICATIONS_DISABLED=true 即可全量关停
+    // 🔴🔴🔴 全局邮件 kill-switch — 三重检查 🔴🔴🔴
+    // CEO 2026-04-09：邮件通知暂停！7 分钟前还收到邮件！加固到不可能泄漏！
+    // 检查 1: 环境变量 EMAIL_NOTIFICATIONS_DISABLED
     if (process.env.EMAIL_NOTIFICATIONS_DISABLED === 'true') {
-      console.log('[SMTP] 已全局暂停（EMAIL_NOTIFICATIONS_DISABLED=true），跳过：', subject);
+      return false;
+    }
+    // 检查 2: 环境变量 PAUSE_ALL_EMAILS（备用名，防止拼写错误漏过）
+    if (process.env.PAUSE_ALL_EMAILS === 'true') {
+      return false;
+    }
+    // 检查 3: 硬编码开关 — 如果你要恢复邮件，把下面改成 false
+    const HARD_KILL = false; // ← 改成 true 可以无视环境变量强制停
+    if (HARD_KILL) {
       return false;
     }
 

@@ -86,6 +86,11 @@ export async function sendPasswordResetEmail(email: string): Promise<{ error?: s
     const resetLink = `${appUrl}/auth/reset-password?token=${token}`;
     const userName = user.user_metadata?.name || user.user_metadata?.full_name || email.split('@')[0];
 
+    // 全局 kill-switch 也适用于密码重置邮件
+    if (process.env.EMAIL_NOTIFICATIONS_DISABLED === 'true' || process.env.PAUSE_ALL_EMAILS === 'true') {
+      return { error: '邮件系统已全局暂停。请联系管理员手动重置密码（/admin/users → 重置密码）。' };
+    }
+
     // Step 4: Send email directly (not via shared function — we need the actual error)
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || 'smtp.exmail.qq.com',
