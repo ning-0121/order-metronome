@@ -8,7 +8,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { generateQuote } from '@/lib/quoter/api';
+import { generateQuoteWithRAG } from '@/lib/quoter/api';
 import type { QuoteInput, QuoteOutput } from '@/lib/quoter/types';
 
 const QUOTER_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement'];
@@ -40,7 +40,8 @@ export async function previewQuote(input: QuoteInput): Promise<{
   if (!auth.ok) return { error: auth.error };
 
   try {
-    const result = generateQuote(input);
+    const supabase = await createClient();
+    const result = await generateQuoteWithRAG(supabase, input);
     return { result };
   } catch (e: any) {
     return { error: '报价计算失败：' + (e?.message || e) };
