@@ -82,7 +82,7 @@ function getSearchDimensions(orders: any[]): {
   };
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string }> }) {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string }> }) {
   const params = await searchParams;
   const statusFilter = params?.status || 'active';
   const purposeFilter = params?.purpose || 'production';
@@ -91,6 +91,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const factoryFilter = params?.factory || '';
   const incotermFilter = params?.incoterm || '';
   const typeFilter = params?.type || '';
+  const sortOrder = (params?.sort || 'factory_asc') as
+    | 'factory_asc' | 'factory_desc'
+    | 'created_desc' | 'created_asc'
+    | 'qty_desc' | 'qty_asc';
 
   const { data: allOrders, error } = await getOrders();
 
@@ -132,15 +136,48 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   // 应用搜索
   const unsorted = filteredOrders.filter((o: any) => matchOrder(o, searchQuery));
 
-  // 按出厂日升序排序（空值放最后），同日内按订单号
+  // 计算"有效出厂日"：优先取 factory_date；如果只有 etd 则倒推 3 天（ETD ≈ factory_date + 2~4）
+  const effectiveFactoryDate = (o: any): string | null => {
+    if (o.factory_date) return String(o.factory_date).slice(0, 10);
+    if (o.etd) {
+      const d = new Date(String(o.etd).slice(0, 10) + 'T00:00:00+08:00');
+      d.setDate(d.getDate() - 3);
+      return d.toISOString().slice(0, 10);
+    }
+    return null;
+  };
+
+  // 排序 — 支持 6 种模式
   const orders = [...unsorted].sort((a: any, b: any) => {
-    const aDate = a.factory_date || a.etd || null;
-    const bDate = b.factory_date || b.etd || null;
-    if (!aDate && !bDate) return (a.order_no || '').localeCompare(b.order_no || '');
-    if (!aDate) return 1;
-    if (!bDate) return -1;
-    const cmp = String(aDate).localeCompare(String(bDate));
-    return cmp !== 0 ? cmp : (a.order_no || '').localeCompare(b.order_no || '');
+    let cmp = 0;
+    switch (sortOrder) {
+      case 'factory_asc':
+      case 'factory_desc': {
+        const aDate = effectiveFactoryDate(a);
+        const bDate = effectiveFactoryDate(b);
+        if (!aDate && !bDate) cmp = 0;
+        else if (!aDate) cmp = 1;  // 空值总是放最后
+        else if (!bDate) cmp = -1;
+        else cmp = String(aDate).localeCompare(String(bDate));
+        if (sortOrder === 'factory_desc' && cmp !== 0 && aDate && bDate) cmp = -cmp;
+        break;
+      }
+      case 'created_desc':
+      case 'created_asc': {
+        cmp = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+        if (sortOrder === 'created_desc') cmp = -cmp;
+        break;
+      }
+      case 'qty_desc':
+      case 'qty_asc': {
+        cmp = (a.quantity || 0) - (b.quantity || 0);
+        if (sortOrder === 'qty_desc') cmp = -cmp;
+        break;
+      }
+    }
+    // 同等级兜底：按订单号稳定排序
+    if (cmp === 0) cmp = (a.order_no || '').localeCompare(b.order_no || '');
+    return cmp;
   });
 
   // 搜索维度统计（基于 base orders，不受搜索关键词影响）
@@ -212,6 +249,46 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             {tab.label} ({tab.count})
           </Link>
         ))}
+      </div>
+
+      {/* 排序 — 6 种模式 */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-xs text-gray-500 shrink-0">排序：</span>
+        {([
+          { key: 'factory_asc', label: '出厂日 ↑', hint: '最紧的在最上' },
+          { key: 'factory_desc', label: '出厂日 ↓', hint: '最晚的在最上' },
+          { key: 'created_desc', label: '新建 ↓', hint: '最新创建的在最上' },
+          { key: 'created_asc', label: '新建 ↑', hint: '最早创建的在最上' },
+          { key: 'qty_desc', label: '数量 ↓', hint: '大单在最上' },
+          { key: 'qty_asc', label: '数量 ↑', hint: '小单在最上' },
+        ] as const).map(opt => {
+          const qsParts: string[] = [
+            `purpose=${purposeFilter}`,
+            `status=${statusFilter}`,
+            `sort=${opt.key}`,
+          ];
+          if (searchQuery) qsParts.push(`q=${encodeURIComponent(searchQuery)}`);
+          if (customerFilter) qsParts.push(`customer=${encodeURIComponent(customerFilter)}`);
+          if (factoryFilter) qsParts.push(`factory=${encodeURIComponent(factoryFilter)}`);
+          if (incotermFilter) qsParts.push(`incoterm=${incotermFilter}`);
+          if (typeFilter) qsParts.push(`type=${typeFilter}`);
+          const href = `/orders?${qsParts.join('&')}`;
+          const active = sortOrder === opt.key;
+          return (
+            <Link
+              key={opt.key}
+              href={href}
+              title={opt.hint}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
+                active
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </Link>
+          );
+        })}
       </div>
 
       {/* 搜索 + 维度筛选 */}
