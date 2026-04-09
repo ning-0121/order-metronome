@@ -48,6 +48,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
   const [formQty, setFormQty] = useState('');
   const [formUnit, setFormUnit] = useState('KG');
   const [formPrice, setFormPrice] = useState('');
+  const [formQtyPerPiece, setFormQtyPerPiece] = useState(''); // 辅料单件用量
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => { load(); }, [orderId]);
@@ -72,10 +73,11 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
       ordered_qty: Number(formQty),
       ordered_unit: formUnit,
       unit_price: formPrice ? Number(formPrice) : undefined,
+      qty_per_piece: formQtyPerPiece ? Number(formQtyPerPiece) : undefined,
     });
     if (res.error) alert(res.error);
     else {
-      setFormName(''); setFormSpec(''); setFormQty(''); setFormPrice('');
+      setFormName(''); setFormSpec(''); setFormQty(''); setFormPrice(''); setFormQtyPerPiece('');
       setShowAddForm(false);
       load();
     }
@@ -186,13 +188,19 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
               {CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <input type="number" step="0.01" value={formQty} onChange={e => setFormQty(e.target.value)} placeholder="订购数量 *" required className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             <select value={formUnit} onChange={e => setFormUnit(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">
               <option value="KG">KG</option><option value="M">米</option><option value="PCS">件/个</option><option value="ROLL">卷</option><option value="SET">套</option>
             </select>
             <input type="number" step="0.001" value={formPrice} onChange={e => setFormPrice(e.target.value)} placeholder="单价 ¥" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <input type="number" step="0.01" value={formQtyPerPiece} onChange={e => setFormQtyPerPiece(e.target.value)} placeholder="单件用量（选填）" className="rounded-lg border border-amber-300 px-3 py-2 text-sm" title="每件成品用多少这个辅料（例如：标签 2 个/件）" />
           </div>
+          {formQtyPerPiece && Number(formQtyPerPiece) > 0 && (
+            <p className="text-xs text-amber-600">
+              💡 单件用量 {formQtyPerPiece} × 订单数量 × 1.03 损耗 = 预算，到货时自动对比
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setShowAddForm(false)} className="text-xs px-3 py-1.5 text-gray-500 hover:bg-gray-100 rounded-lg">取消</button>
             <button type="submit" disabled={submitting} className="text-xs px-4 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
@@ -217,10 +225,11 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
                   <th className="px-3 py-2 font-medium text-gray-600">规格</th>
                   <th className="px-3 py-2 font-medium text-gray-600">供应商</th>
                   <th className="px-3 py-2 font-medium text-gray-600 text-center">类别</th>
+                  <th className="px-3 py-2 font-medium text-gray-500 text-right">单件用量</th>
+                  <th className="px-3 py-2 font-medium text-amber-600 text-right">预算</th>
                   <th className="px-3 py-2 font-medium text-indigo-600 text-right">订购数量</th>
                   <th className="px-3 py-2 font-medium text-gray-600 text-center">单位</th>
                   <th className="px-3 py-2 font-medium text-gray-600 text-right">单价</th>
-                  <th className="px-3 py-2 font-medium text-indigo-600 text-right">订购金额</th>
                   <th className="px-3 py-2 font-medium text-emerald-600 text-right">实收数量</th>
                   <th className="px-3 py-2 font-medium text-red-600 text-right">差异</th>
                   <th className="px-3 py-2 font-medium text-red-600 text-right">差异%</th>
@@ -241,10 +250,11 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
                           {CATEGORY_LABELS[item.category] || item.category}
                         </span>
                       </td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-400">{(item as any).qty_per_piece || '-'}</td>
+                      <td className="px-3 py-2 text-right font-mono text-amber-600">{(item as any).budget_qty || '-'}</td>
                       <td className="px-3 py-2 text-right font-mono text-indigo-700">{item.ordered_qty}</td>
                       <td className="px-3 py-2 text-center text-gray-500">{item.ordered_unit}</td>
                       <td className="px-3 py-2 text-right font-mono">{item.unit_price ?? '-'}</td>
-                      <td className="px-3 py-2 text-right font-mono text-indigo-700">{item.ordered_amount?.toFixed(2) ?? '-'}</td>
                       <td className="px-3 py-2 text-right">
                         {isEditingReceipt ? (
                           <div className="flex items-center gap-1 justify-end">

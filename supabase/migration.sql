@@ -2055,3 +2055,9 @@ CREATE INDEX IF NOT EXISTS idx_order_cost_baseline_order ON public.order_cost_ba
 ALTER TABLE public.order_cost_baseline ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "order_cost_baseline_auth" ON public.order_cost_baseline;
 CREATE POLICY "order_cost_baseline_auth" ON public.order_cost_baseline FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- ===== 2026-04-09 辅料单件用量字段 =====
+-- 跟单在采购时填"每件产品用多少"，系统按 单件用量×订单数量×(1+3%损耗) 算预算
+ALTER TABLE public.procurement_line_items ADD COLUMN IF NOT EXISTS qty_per_piece numeric(10,4);
+ALTER TABLE public.procurement_line_items ADD COLUMN IF NOT EXISTS order_quantity integer;
+ALTER TABLE public.procurement_line_items ADD COLUMN IF NOT EXISTS budget_qty numeric(12,2);

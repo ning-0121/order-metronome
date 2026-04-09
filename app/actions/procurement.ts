@@ -115,12 +115,26 @@ export async function addProcurementItem(
     ordered_qty: number;
     ordered_unit?: string;
     unit_price?: number;
+    qty_per_piece?: number; // 辅料：每件产品用多少（标签 2 个/件、拉链 1 条/件）
   },
 ): Promise<{ error?: string; data?: ProcurementLineItem }> {
   const auth = await checkAccess();
   if (!auth.ok || !auth.userId) return { error: auth.error };
 
   const supabase = await createClient();
+
+  // 如果填了单件用量，自动算预算（订单数量 × 单件用量 × 1.03 损耗）
+  let budgetQty: number | null = null;
+  let orderQuantity: number | null = null;
+  if (item.qty_per_piece && item.qty_per_piece > 0) {
+    const { data: order } = await (supabase.from('orders') as any)
+      .select('quantity').eq('id', orderId).single();
+    orderQuantity = (order as any)?.quantity || 0;
+    if (orderQuantity > 0) {
+      budgetQty = Number((item.qty_per_piece * orderQuantity * 1.03).toFixed(2));
+    }
+  }
+
   const { data, error } = await (supabase.from('procurement_line_items') as any)
     .insert({
       order_id: orderId,
@@ -132,6 +146,9 @@ export async function addProcurementItem(
       ordered_qty: item.ordered_qty,
       ordered_unit: item.ordered_unit || 'KG',
       unit_price: item.unit_price || null,
+      qty_per_piece: item.qty_per_piece || null,
+      order_quantity: orderQuantity,
+      budget_qty: budgetQty,
       ordered_by: auth.userId,
       ordered_at: new Date().toISOString(),
     })
@@ -139,6 +156,23 @@ export async function addProcurementItem(
     .single();
 
   if (error) return { error: error.message };
+
+  // 自动校验：采购数量 vs 预算
+  if (budgetQty && item.ordered_qty > budgetQty * 1.05) {
+    // 超预算 5% → 通知三方
+    try {
+      const { sendCostAlert } = await import('@/app/actions/cost-control');
+      const { data: order } = await (supabase.from('orders') as any)
+        .select('order_no').eq('id', orderId).single();
+      await sendCostAlert(
+        orderId,
+        'procurement_over_budget',
+        `${(order as any)?.order_no || '?'}: ${item.material_name} 采购 ${item.ordered_qty} ${item.ordered_unit || ''} 超出预算 ${budgetQty}（+${(((item.ordered_qty - budgetQty) / budgetQty) * 100).toFixed(1)}%）`,
+        auth.userId,
+      );
+    } catch {}
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return { data: data as ProcurementLineItem };
 }
@@ -225,6 +259,27 @@ export async function recordReceipt(
     .eq('id', itemId);
 
   if (error) return { error: error.message };
+
+  // 到货校验：实收 vs 预算（如果有预算的话）
+  const { data: fullItem } = await (supabase.from('procurement_line_items') as any)
+    .select('budget_qty, material_name, ordered_unit, order_id')
+    .eq('id', itemId)
+    .single();
+  if (fullItem?.budget_qty && Math.abs(receivedQty - fullItem.budget_qty) / fullItem.budget_qty > 0.05) {
+    try {
+      const { sendCostAlert } = await import('@/app/actions/cost-control');
+      const { data: order } = await (supabase.from('orders') as any)
+        .select('order_no').eq('id', orderId).single();
+      const pct = (((receivedQty - fullItem.budget_qty) / fullItem.budget_qty) * 100).toFixed(1);
+      await sendCostAlert(
+        orderId,
+        'procurement_over_budget',
+        `${order?.order_no || '?'}: ${fullItem.material_name} 实收 ${receivedQty} ${fullItem.ordered_unit || ''} vs 预算 ${fullItem.budget_qty}（偏差 ${pct}%）`,
+        auth.userId,
+      );
+    } catch {}
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return {};
 }
