@@ -24,6 +24,14 @@ export interface RagSample {
   ai_raw_text: string | null;
 }
 
+/**
+ * 工厂利润（加价到加工费）
+ *
+ * CEO 2026-04-09：Excel 里的是"工价"（工人拿到的），不是"加工费"（付给工厂的）。
+ * 加工费 = 工价 + 工厂利润（一般 ¥1~1.5，取中间值 ¥1.25）
+ */
+const DEFAULT_FACTORY_PROFIT_RMB = 1.25;
+
 export interface CmtRagResult extends CmtCalculationResult {
   /** RAG 匹配到的样本 */
   rag_samples?: Array<{
@@ -32,6 +40,10 @@ export interface CmtRagResult extends CmtCalculationResult {
     ops_count: number;
     description: string;
   }>;
+  /** 工价中位数（工人拿到的，不含工厂利润） */
+  labor_rate_median?: number;
+  /** 工厂利润加价 */
+  factory_profit?: number;
   /** 公式计算值（用于对比） */
   formula_total?: number;
   /** 公式 vs RAG 偏差 */
@@ -90,9 +102,13 @@ export async function calculateCmtWithRAG(
       input.complexity === 'complex' ? 1.25 : 1.0;
     const adjustedMedian = Number((median * complexityAdj).toFixed(2));
 
-    // 工厂档次调整
+    // 加工厂利润：工价 → 加工费
+    const factoryProfit = DEFAULT_FACTORY_PROFIT_RMB;
+    const withProfit = Number((adjustedMedian + factoryProfit).toFixed(2));
+
+    // 工厂档次调整（在加工费基础上微调）
     const factoryMult = input.factory_rate_multiplier || 1.0;
-    const finalPrice = Number((adjustedMedian * factoryMult).toFixed(2));
+    const finalPrice = Number((withProfit * factoryMult).toFixed(2));
 
     // 偏差：公式 vs RAG
     const deviationPct = formulaResult.total_rmb > 0
@@ -139,15 +155,15 @@ export async function calculateCmtWithRAG(
 
     const reasoning = [
       `📊 基于 ${sampleList.length} 条傲狐历史工价样本（RAG 检索）`,
-      `历史价格：P25 ¥${p25.toFixed(2)} / 中位数 ¥${median.toFixed(2)} / P75 ¥${p75.toFixed(2)} / 平均 ¥${avg.toFixed(2)}`,
+      `工价（工人拿到的）：P25 ¥${p25.toFixed(2)} / 中位数 ¥${median.toFixed(2)} / P75 ¥${p75.toFixed(2)}`,
       input.complexity !== 'standard'
-        ? `复杂度调整：${input.complexity}（×${complexityAdj}）→ ¥${adjustedMedian.toFixed(2)}`
+        ? `复杂度调整：${input.complexity}（×${complexityAdj}）→ 工价 ¥${adjustedMedian.toFixed(2)}`
         : '',
+      `+ 工厂利润 ¥${factoryProfit.toFixed(2)}（工价 → 加工费）`,
       factoryMult !== 1.0
         ? `工厂档次系数：×${factoryMult}`
         : '',
-      `🎯 RAG 推荐价：¥${finalPrice.toFixed(2)} / 件`,
-      `📐 公式计算价：¥${formulaResult.total_rmb.toFixed(2)}（偏差 ${deviationPct > 0 ? '+' : ''}${deviationPct}%）`,
+      `🎯 加工费（付给工厂的）：¥${finalPrice.toFixed(2)} / 件`,
       sampleList.length < 5
         ? `⚠ 样本偏少（${sampleList.length} 条），建议继续导入更多工价单`
         : '',
@@ -160,6 +176,8 @@ export async function calculateCmtWithRAG(
       confidence,
       source: 'rules+ai' as const,
       rag_samples: ragSamples,
+      labor_rate_median: median,
+      factory_profit: factoryProfit,
       formula_total: formulaResult.total_rmb,
       deviation_pct: deviationPct,
     };
