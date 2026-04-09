@@ -17,17 +17,19 @@ export async function GET(request: Request) {
     ]);
 
     // ── 跟单未指定 24h 升级检查 ──
-    // CEO 2026-04-09：新订单第二天还没指定跟单 → 再次提醒生产主管 + 上报 CEO
     let escalated = 0;
+    // ── 行政督办：逾期/即将逾期通知 ──
+    let supervisorAlerts = 0;
     try {
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
       if (url && key) {
         const supabase = createClient(url, key);
         escalated = await checkUnassignedMerchandiser(supabase);
+        supervisorAlerts = await notifyAdminAssistantOverdue(supabase);
       }
     } catch (e: any) {
-      console.error('[reminders] unassigned merchandiser check error:', e?.message);
+      console.error('[reminders] extra checks error:', e?.message);
     }
 
     return NextResponse.json({
@@ -36,6 +38,7 @@ export async function GET(request: Request) {
       delivery_alerts: deliveryResult,
       memo_reminders: memoReminderResult,
       merchandiser_escalated: escalated,
+      supervisor_alerts: supervisorAlerts,
     });
   } catch (error: any) {
     console.error('Cron job error:', error);
@@ -127,4 +130,126 @@ async function checkUnassignedMerchandiser(supabase: any): Promise<number> {
   }
 
   return escalatedCount;
+}
+
+/**
+ * 行政督办：每天汇总即将逾期 + 已逾期的节点，发给 admin_assistant
+ *
+ * 即将逾期 = 未完成 + due_at 在今天之后 3 天以内
+ * 已逾期 = in_progress + due_at < 今天
+ *
+ * 每天只推一次汇总（用日期去重 type='supervisor_daily_overdue'）
+ * 运行频率：每 15 分钟检查一次，但同一天只发一条
+ */
+async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
+  // 找 admin_assistant 用户
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('user_id, roles, role');
+  const assistants: string[] = [];
+  for (const p of (profiles || []) as any[]) {
+    const roles: string[] = Array.isArray(p.roles) && p.roles.length > 0 ? p.roles : [p.role].filter(Boolean);
+    if (roles.includes('admin_assistant')) assistants.push(p.user_id);
+  }
+  if (assistants.length === 0) return 0;
+
+  // 去重：今天是否已发过
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: existingToday } = await supabase
+    .from('notifications')
+    .select('id')
+    .eq('type', 'supervisor_daily_overdue')
+    .gte('created_at', `${today}T00:00:00Z`)
+    .in('user_id', assistants)
+    .limit(1);
+  if (existingToday && existingToday.length > 0) return 0; // 今天已发
+
+  const now = new Date();
+  const threeDaysLater = new Date(now.getTime() + 3 * 86400000).toISOString();
+  const todayStr = now.toISOString();
+
+  // 已逾期：in_progress + due_at < now
+  const { data: overdue } = await supabase
+    .from('milestones')
+    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name)')
+    .in('status', ['in_progress', '进行中'])
+    .lt('due_at', todayStr)
+    .order('due_at', { ascending: true })
+    .limit(50);
+
+  // 即将逾期：未完成 + due_at 在未来 3 天内
+  const { data: soonOverdue } = await supabase
+    .from('milestones')
+    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name)')
+    .in('status', ['in_progress', '进行中', 'pending', '未开始'])
+    .gte('due_at', todayStr)
+    .lte('due_at', threeDaysLater)
+    .order('due_at', { ascending: true })
+    .limit(30);
+
+  const overdueList = (overdue || []) as any[];
+  const soonList = (soonOverdue || []) as any[];
+  if (overdueList.length === 0 && soonList.length === 0) return 0;
+
+  // 拿负责人名字
+  const allUserIds = [...new Set([...overdueList, ...soonList].map(m => m.owner_user_id).filter(Boolean))];
+  const nameMap = new Map<string, string>();
+  if (allUserIds.length > 0) {
+    const { data: ownerProfiles } = await supabase
+      .from('profiles')
+      .select('user_id, name, email')
+      .in('user_id', allUserIds);
+    for (const p of (ownerProfiles || []) as any[]) {
+      nameMap.set(p.user_id, p.name || p.email?.split('@')[0] || '?');
+    }
+  }
+
+  // 组织消息
+  const lines: string[] = [];
+  lines.push(`📊 ${today} 督办日报\n`);
+
+  if (overdueList.length > 0) {
+    lines.push(`🔴 已逾期（${overdueList.length} 项）`);
+    for (const m of overdueList.slice(0, 15)) {
+      const days = Math.ceil((now.getTime() - new Date(m.due_at).getTime()) / 86400000);
+      const owner = m.owner_user_id ? nameMap.get(m.owner_user_id) || '?' : '未分配';
+      lines.push(`  • ${m.orders?.order_no} · ${m.name}（超 ${days} 天，${owner}）`);
+    }
+    if (overdueList.length > 15) lines.push(`  ...还有 ${overdueList.length - 15} 项`);
+    lines.push('');
+  }
+
+  if (soonList.length > 0) {
+    lines.push(`🟡 即将到期（${soonList.length} 项，3 天内）`);
+    for (const m of soonList.slice(0, 10)) {
+      const owner = m.owner_user_id ? nameMap.get(m.owner_user_id) || '?' : '未分配';
+      lines.push(`  • ${m.orders?.order_no} · ${m.name}（截止 ${String(m.due_at).slice(0, 10)}，${owner}）`);
+    }
+    if (soonList.length > 10) lines.push(`  ...还有 ${soonList.length - 10} 项`);
+  }
+
+  lines.push('');
+  lines.push('请督促相关人员尽快推进。');
+
+  const msg = lines.join('\n');
+  const title = `📊 督办日报 — ${overdueList.length} 项逾期 / ${soonList.length} 项即将到期`;
+
+  // 发给每个 admin_assistant
+  for (const userId of assistants) {
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      type: 'supervisor_daily_overdue',
+      title,
+      message: msg.slice(0, 1500),
+      status: 'unread',
+    });
+  }
+
+  // 微信推送
+  try {
+    const { pushToUsers } = await import('@/lib/utils/wechat-push');
+    await pushToUsers(supabase, assistants, title, msg).catch(() => {});
+  } catch {}
+
+  return overdueList.length + soonList.length;
 }
