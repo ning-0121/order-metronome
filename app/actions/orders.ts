@@ -371,17 +371,19 @@ export async function createOrder(
   };
 
   // ── 自动分配：查询各角色的默认负责人 ──
-  // 优先级 1: DEFAULT_ASSIGNEES 配置（财务=方圆，采购=Helen）
+  // 优先级 1: DEFAULT_ASSIGNEES 配置（财务=方圆，采购=Helen，生产主管=秦增富）
   // 优先级 2: 角色匹配且全公司只有一个用户 → 自动分配
   const roleUserMap: Record<string, string | null> = { sales: user.id };
+  // 固定由生产主管负责的 step_key → user_id 映射
+  const fixedStepOwnerMap: Record<string, string> = {};
   try {
-    const { DEFAULT_ASSIGNEES, findAssigneeUserId } = await import('@/lib/domain/default-assignees');
+    const { DEFAULT_ASSIGNEES, findAssigneeUserId, PRODUCTION_MANAGER_FIXED_STEPS } = await import('@/lib/domain/default-assignees');
     const { data: allProfiles } = await (supabase.from('profiles') as any)
       .select('user_id, name, email, role, roles');
 
     if (allProfiles) {
-      for (const roleToFind of ['procurement', 'finance', 'logistics']) {
-        // 1. 先按 DEFAULT_ASSIGNEES 配置精准匹配
+      // 先匹配生产主管（用于固定步骤）
+      for (const roleToFind of ['procurement', 'finance', 'logistics', 'production_manager']) {
         const matcher = (DEFAULT_ASSIGNEES as any)[roleToFind];
         if (matcher) {
           const userId = findAssigneeUserId(allProfiles as any, matcher);
@@ -390,13 +392,20 @@ export async function createOrder(
             continue;
           }
         }
-        // 2. 兜底：该角色全公司只有一个人 → 用 ta
+        // 兜底：该角色全公司只有一个人 → 用 ta
         const matched = (allProfiles as any[]).filter((p: any) => {
           const r: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
           return r.includes(roleToFind);
         });
         if (matched.length === 1) {
           roleUserMap[roleToFind] = matched[0].user_id;
+        }
+      }
+      // 生产主管固定步骤映射
+      const pmUserId = roleUserMap['production_manager'];
+      if (pmUserId && PRODUCTION_MANAGER_FIXED_STEPS) {
+        for (const stepKey of PRODUCTION_MANAGER_FIXED_STEPS) {
+          fixedStepOwnerMap[stepKey] = pmUserId;
         }
       }
     }
@@ -429,8 +438,12 @@ export async function createOrder(
       return { ok: false, error: `里程碑排期缺失：${template.step_key}（${template.name}）` };
     }
     const dbRole = ROLE_TO_DB[template.owner_role] || 'sales';
-    // 自动分配：业务=创建者，采购/财务/物流=角色唯一用户，跟单=管理员指定
-    const autoAssign = roleUserMap[dbRole] || null;
+    // 自动分配优先级：
+    //   1. 生产主管固定步骤（factory_confirmed / pre_production_sample_ready → 秦增富）
+    //   2. DEFAULT_ASSIGNEES（财务=方圆，采购=Helen）
+    //   3. 角色唯一用户
+    //   4. null（待管理员手动指定）
+    const autoAssign = fixedStepOwnerMap[template.step_key] || roleUserMap[dbRole] || null;
     const safeDue = clampNotBeforeT0(ensureBusinessDay(dueAt));
     milestonesData.push({
       step_key: template.step_key,

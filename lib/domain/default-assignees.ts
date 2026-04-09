@@ -39,7 +39,21 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
     nameMatches: ['Helen', 'helen', '海莲', '海莉', '王海莲'],
     emailContains: ['helen@', 'helen.'],
   },
+  production_manager: {
+    displayName: '秦增富',
+    nameMatches: ['秦增富', '增富', 'zengfu'],
+    emailContains: ['qzf@', 'qzf'],
+  },
 };
+
+/**
+ * 固定由生产主管负责的里程碑 step_key
+ * CEO 2026-04-09 拍板：工厂匹配确认 + 产前样准备完成 永远是生产主管的活
+ */
+export const PRODUCTION_MANAGER_FIXED_STEPS: string[] = [
+  'factory_confirmed',          // 工厂匹配确认
+  'pre_production_sample_ready', // 产前样准备完成
+];
 
 interface ProfileLite {
   user_id: string;

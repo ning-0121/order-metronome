@@ -854,10 +854,12 @@ export async function assignMilestoneOwner(milestoneId: string, userId: string) 
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
 
-  if (!userRoles.includes('admin')) {
-    return { error: '只有管理员可以指定执行人' };
+  // admin + production_manager 可以指定执行人
+  // CEO 2026-04-09：生产主管需要能指定跟单
+  if (!userRoles.includes('admin') && !userRoles.includes('production_manager')) {
+    return { error: '只有管理员或生产主管可以指定执行人' };
   }
-  
+
   // 使用 repository 更新
   const result = await updateMilestone(milestoneId, { owner_user_id: userId });
   
@@ -1176,8 +1178,8 @@ export async function updateMilestoneOwner(
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  if (!userRoles.includes('admin')) {
-    return { error: '只有管理员可以指定执行人' };
+  if (!userRoles.includes('admin') && !userRoles.includes('production_manager')) {
+    return { error: '只有管理员或生产主管可以指定执行人' };
   }
 
   // Get milestone to get order_id for logging
