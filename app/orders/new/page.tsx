@@ -814,12 +814,27 @@ function NewOrderWizard() {
               </div>
             )}
 
-            {/* 历史导入隐藏字段 */}
+            {/* 历史导入字段 */}
             {isImport && (
-              <>
+              <div className="space-y-3 rounded-lg bg-amber-50 border border-amber-200 p-4">
                 <input type="hidden" name="is_import" value="true" />
                 <input type="hidden" name="import_current_step" value={importCurrentStep} />
-              </>
+                <p className="text-xs font-semibold text-amber-800">
+                  ⚠ 进行中订单需要 CEO 审批后才能正式激活
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-amber-700 mb-1">
+                    导入原因 <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    name="import_reason"
+                    rows={2}
+                    required
+                    placeholder="说明为什么要导入这个进行中的订单（例如：系统上线前已在生产的订单 / 从旧系统迁移 / 其他原因）"
+                    className="w-full rounded-lg border border-amber-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
             )}
 
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">

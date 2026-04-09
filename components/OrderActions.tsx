@@ -97,7 +97,53 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
     setLoading(false);
   }
 
-  if (!canActivate && !canDelete && !canRequestCancel && !canDirectCancel) return null;
+  // CEO 可以强制标记完成（跳过节拍校验）
+  const canForceComplete = isAdmin && !isDraft && lifecycleStatus !== '已完成' && lifecycleStatus !== 'completed' && lifecycleStatus !== 'cancelled' && lifecycleStatus !== '已取消' && lifecycleStatus !== 'pending_approval';
+
+  // CEO 审批进行中导入订单
+  const canApproveImport = isAdmin && lifecycleStatus === 'pending_approval';
+
+  async function handleForceComplete() {
+    if (!confirm(`确定将「${orderNo}」强制标记为已完成？\n\n所有未完成的节拍将批量标为完成。此操作用于：\n• 客户取消但部分完成的订单\n• 历史导入订单不需要继续跟的\n• 特殊情况 CEO 直接结案`)) return;
+    if (!confirm('再次确认：真的要结案吗？')) return;
+    setLoading(true);
+    try {
+      const { forceCompleteOrderAction } = await import('@/app/actions/orders');
+      const res = await forceCompleteOrderAction(orderId);
+      if (res.error) alert(res.error);
+      else { alert(`✅ ${orderNo} 已标记完成`); router.refresh(); }
+    } catch {
+      alert('操作失败');
+    }
+    setLoading(false);
+  }
+
+  async function handleApproveImport() {
+    if (!confirm(`批准「${orderNo}」作为进行中订单导入？批准后将自动激活里程碑。`)) return;
+    setLoading(true);
+    try {
+      const { approveImportOrder } = await import('@/app/actions/orders');
+      const res = await approveImportOrder(orderId);
+      if (res.error) alert(res.error);
+      else { alert(`✅ ${orderNo} 已批准并激活`); router.refresh(); }
+    } catch { alert('操作失败'); }
+    setLoading(false);
+  }
+
+  async function handleRejectImport() {
+    const reason = prompt('拒绝原因（可选）：');
+    if (reason === null) return; // 用户点了取消
+    setLoading(true);
+    try {
+      const { rejectImportOrder } = await import('@/app/actions/orders');
+      const res = await rejectImportOrder(orderId, reason);
+      if (res.error) alert(res.error);
+      else { alert(`❌ ${orderNo} 已拒绝`); router.refresh(); }
+    } catch { alert('操作失败'); }
+    setLoading(false);
+  }
+
+  if (!canActivate && !canDelete && !canRequestCancel && !canDirectCancel && !canForceComplete && !canApproveImport) return null;
 
   return (
     <div className="flex items-center gap-2">
@@ -135,6 +181,37 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
           className="text-xs px-3 py-1.5 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50"
         >
           申请取消
+        </button>
+      )}
+
+      {/* CEO 审批进行中导入 */}
+      {canApproveImport && (
+        <>
+          <button
+            onClick={handleApproveImport}
+            disabled={loading}
+            className="text-xs px-4 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 font-medium disabled:opacity-50"
+          >
+            ✅ 批准导入
+          </button>
+          <button
+            onClick={handleRejectImport}
+            disabled={loading}
+            className="text-xs px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            ❌ 拒绝
+          </button>
+        </>
+      )}
+
+      {/* CEO：强制标记完成 */}
+      {canForceComplete && (
+        <button
+          onClick={handleForceComplete}
+          disabled={loading}
+          className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium disabled:opacity-50"
+        >
+          ✅ 标记完成
         </button>
       )}
 

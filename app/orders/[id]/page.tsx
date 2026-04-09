@@ -164,7 +164,7 @@ export default async function OrderDetailPage({
                 )}
                 {orderData.lifecycle_status && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
-                    {orderData.lifecycle_status === 'draft' ? '草稿' : orderData.lifecycle_status === 'active' ? '执行中' : orderData.lifecycle_status === 'completed' ? '已完成' : orderData.lifecycle_status === 'cancelled' ? '已取消' : orderData.lifecycle_status}
+                    {orderData.lifecycle_status === 'draft' ? '草稿' : orderData.lifecycle_status === 'active' ? '执行中' : orderData.lifecycle_status === 'completed' || orderData.lifecycle_status === '已完成' ? '已完成' : orderData.lifecycle_status === 'cancelled' || orderData.lifecycle_status === '已取消' ? '已取消' : orderData.lifecycle_status === 'pending_approval' ? '⏳ 待审批' : orderData.lifecycle_status}
                   </span>
                 )}
                 {orderData.order_type && (() => {

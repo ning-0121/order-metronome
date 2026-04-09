@@ -509,12 +509,73 @@ export async function createOrder(
   }
 
   // ── STEP 6: 历史导入模式处理 ──
+  // CEO 2026-04-09：进行中订单创建需要 CEO 审批
+  // → lifecycle_status 设为 'pending_approval'，不自动激活
+  // → 通知 CEO，等审批通过后再变 active
   const isImport = formData.get('is_import') === 'true';
   const importCurrentStep = formData.get('import_current_step') as string | null;
+  const importReason = formData.get('import_reason') as string | null;
 
   if (isImport && importCurrentStep) {
     try {
-      // 6a. 更新订单标记 + 自动激活（导入的订单阶段1已过，直接激活）
+      // 6a. 标记为待审批（不直接激活）
+      await (supabase.from('orders') as any)
+        .update({
+          imported_at: new Date().toISOString(),
+          import_current_step: importCurrentStep,
+          lifecycle_status: 'pending_approval',
+          notes: importReason
+            ? `[进行中导入] ${importReason}\n${orderData.notes || ''}`
+            : orderData.notes || null,
+        })
+        .eq('id', orderData.id);
+
+      // 6a2. 通知所有 admin — 等审批
+      try {
+        const { data: admins } = await (supabase.from('profiles') as any)
+          .select('user_id')
+          .or('role.eq.admin,roles.cs.{admin}');
+        const { data: creatorProfile } = await (supabase.from('profiles') as any)
+          .select('name, email').eq('user_id', user.id).single();
+        const creatorName = (creatorProfile as any)?.name || user.email?.split('@')[0] || '?';
+        for (const admin of (admins || []) as any[]) {
+          await (supabase.from('notifications') as any).insert({
+            user_id: admin.user_id,
+            type: 'import_order_approval',
+            title: `📋 进行中订单待审批 — ${orderData.order_no}`,
+            message: `${creatorName} 创建了一个进行中导入订单：\n客户 ${customer_name || '?'} · ${quantity || '?'} 件\n当前阶段：${importCurrentStep}\n原因：${importReason || '未填'}\n\n请到订单详情页审批。`,
+            related_order_id: orderData.id,
+            status: 'unread',
+          });
+        }
+        // 微信推送 admin
+        const adminIds = ((admins || []) as any[]).map(a => a.user_id);
+        if (adminIds.length > 0) {
+          const { pushToUsers } = await import('@/lib/utils/wechat-push');
+          await pushToUsers(supabase, adminIds,
+            `📋 待审批：${orderData.order_no} 进行中导入`,
+            `${creatorName} 导入订单，客户 ${customer_name || '?'}，${quantity || '?'} 件\n原因：${importReason || '未填'}`
+          ).catch(() => {});
+        }
+      } catch {}
+
+      // 6b: 不做后续的里程碑激活！等 CEO 审批通过后由 approveImportOrder 处理
+      // ↓ 直接跳过原来的 6b-6e 代码
+      revalidatePath('/orders');
+      return {
+        ok: true,
+        order: orderData,
+        pendingApproval: true,
+        message: `订单 ${orderData.order_no} 已提交，等待 CEO 审批。`,
+      };
+    } catch (importErr: any) {
+      console.warn('[createOrder] 导入模式处理失败:', importErr.message);
+    }
+  }
+
+  // 以下是原始 STEP 6 的后半段（仅非 import 路径才走到这里）
+  if (false) { // 旧的 import 激活逻辑已移到 approveImportOrder
+    try {
       await (supabase.from('orders') as any)
         .update({ imported_at: new Date().toISOString(), import_current_step: importCurrentStep, lifecycle_status: 'active' })
         .eq('id', orderData.id);
@@ -911,6 +972,174 @@ export async function completeOrderAction(orderId: string) {
   revalidatePath('/dashboard');
 
   return { data: result.data };
+}
+
+/**
+ * CEO 审批进行中导入订单
+ * — 把 pending_approval → active
+ * — 激活里程碑（标记已过步骤为 done，当前步骤为 in_progress）
+ */
+export async function approveImportOrder(orderId: string): Promise<{ error?: string; data?: any }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { error: '仅管理员可审批进行中订单' };
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('id, order_no, lifecycle_status, import_current_step, incoterm, etd, warehouse_due_date, eta')
+    .eq('id', orderId)
+    .single();
+  if (!order) return { error: '订单不存在' };
+  if (order.lifecycle_status !== 'pending_approval') {
+    return { error: `订单状态不是"待审批"（当前：${order.lifecycle_status}）` };
+  }
+
+  const importCurrentStep = order.import_current_step;
+  if (!importCurrentStep) return { error: '缺少导入当前步骤' };
+
+  // 激活订单
+  await (supabase.from('orders') as any)
+    .update({ lifecycle_status: 'active' })
+    .eq('id', orderId);
+
+  // 获取所有里程碑，标记已过步骤为 done，当前步骤为 in_progress
+  const templates = (await import('@/lib/milestoneTemplate')).MILESTONE_TEMPLATE_V1;
+  const currentIndex = templates.findIndex(t => t.step_key === importCurrentStep);
+
+  if (currentIndex >= 0) {
+    const { data: milestones } = await (supabase.from('milestones') as any)
+      .select('id, step_key, sequence_number')
+      .eq('order_id', orderId)
+      .order('sequence_number', { ascending: true });
+
+    if (milestones) {
+      const currentSeq = currentIndex + 1;
+      for (const ms of milestones as any[]) {
+        const updates: any = {};
+        if (ms.sequence_number < currentSeq) {
+          updates.status = 'done';
+          updates.actual_at = ms.due_at || new Date().toISOString();
+        } else if (ms.sequence_number === currentSeq) {
+          updates.status = 'in_progress';
+        }
+        if (Object.keys(updates).length > 0) {
+          await (supabase.rpc as any)('admin_update_milestone', {
+            _milestone_id: ms.id,
+            _updates: updates,
+          }).catch(() => {
+            // 兜底直接 update
+            (supabase.from('milestones') as any).update(updates).eq('id', ms.id);
+          });
+        }
+      }
+    }
+  }
+
+  // 通知创建者
+  await (supabase.from('notifications') as any).insert({
+    user_id: order.created_by || user.id,
+    type: 'import_order_approved',
+    title: `✅ 进行中订单已批准 — ${order.order_no}`,
+    message: `CEO 已批准你的进行中导入订单，现在可以正常跟单了。`,
+    related_order_id: orderId,
+    status: 'unread',
+  }).catch(() => {});
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/orders');
+  return { data: { order_no: order.order_no } };
+}
+
+/**
+ * CEO 拒绝进行中导入订单
+ */
+export async function rejectImportOrder(orderId: string, reason?: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { error: '仅管理员可拒绝' };
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('id, order_no, created_by')
+    .eq('id', orderId)
+    .single();
+  if (!order) return { error: '订单不存在' };
+
+  // 标记为 rejected（不删除，保留记录）
+  await (supabase.from('orders') as any)
+    .update({ lifecycle_status: 'cancelled', notes: `[CEO 拒绝] ${reason || '未说明原因'}` })
+    .eq('id', orderId);
+
+  // 通知创建者
+  await (supabase.from('notifications') as any).insert({
+    user_id: order.created_by,
+    type: 'import_order_rejected',
+    title: `❌ 进行中订单被拒绝 — ${order.order_no}`,
+    message: `原因：${reason || '未说明'}\n如有疑问请联系 CEO。`,
+    related_order_id: orderId,
+    status: 'unread',
+  }).catch(() => {});
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/orders');
+  return {};
+}
+
+/**
+ * CEO 强制标记订单为"已完成"
+ * — 不要求所有里程碑完成，直接结案
+ * — 未完成的里程碑批量标为 done
+ * — 仅 admin 可操作
+ */
+export async function forceCompleteOrderAction(orderId: string): Promise<{ error?: string; data?: any }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { error: '仅管理员可强制标记完成' };
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('id, order_no, lifecycle_status')
+    .eq('id', orderId)
+    .single();
+  if (!order) return { error: '订单不存在' };
+
+  // 批量把未完成节点标为 done
+  const now = new Date().toISOString();
+  await (supabase.from('milestones') as any)
+    .update({ status: 'done', actual_at: now })
+    .eq('order_id', orderId)
+    .not('status', 'in', '("done","已完成","completed")');
+
+  // 标记订单完成
+  await (supabase.from('orders') as any)
+    .update({ lifecycle_status: '已完成' })
+    .eq('id', orderId);
+
+  // 日志
+  await (supabase.from('milestone_logs') as any).insert({
+    order_id: orderId,
+    actor_user_id: user.id,
+    action: 'force_complete',
+    note: `CEO 强制标记订单 ${order.order_no} 为已完成`,
+  });
+
+  // 评分
+  try {
+    const { calculateOrderScore } = await import('@/app/actions/commissions');
+    await calculateOrderScore(orderId);
+  } catch {}
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/orders');
+  revalidatePath('/dashboard');
+
+  return { data: { order_no: order.order_no } };
 }
 
 /**
