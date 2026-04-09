@@ -477,6 +477,37 @@ export async function createOrder(
     await deleteOrder(orderData.id);
     return { ok: false, error: `里程碑初始化异常：${rpcEx.message}` };
   }
+  // ── STEP 5b: 跟单未指定 → 立即通知生产主管 ──
+  // CEO 2026-04-09：新订单如果没有指定跟单就要提醒生产主管
+  try {
+    const hasUnassignedMerch = milestonesData.some(
+      m => m.owner_role === 'merchandiser' && !m.owner_user_id,
+    );
+    if (hasUnassignedMerch) {
+      const pmUserId = roleUserMap['production_manager'];
+      if (pmUserId) {
+        await (supabase.from('notifications') as any).insert({
+          user_id: pmUserId,
+          type: 'unassigned_merchandiser',
+          title: `📋 新订单 ${orderData.order_no} 还没有指定跟单`,
+          message: `客户：${customer_name || '?'} · 数量：${quantity || '?'} 件\n请尽快在订单详情页指定跟单人员。`,
+          related_order_id: orderData.id,
+          status: 'unread',
+        });
+        // 微信推送
+        try {
+          const { pushToUsers } = await import('@/lib/utils/wechat-push');
+          await pushToUsers(supabase, [pmUserId],
+            `📋 新订单 ${orderData.order_no} 未指定跟单`,
+            `客户 ${customer_name || '?'}，${quantity || '?'} 件\n请尽快指定跟单人员`
+          );
+        } catch {}
+      }
+    }
+  } catch (notifErr: any) {
+    console.warn('[createOrder] 通知生产主管失败（不影响订单创建）:', notifErr?.message);
+  }
+
   // ── STEP 6: 历史导入模式处理 ──
   const isImport = formData.get('is_import') === 'true';
   const importCurrentStep = formData.get('import_current_step') as string | null;
