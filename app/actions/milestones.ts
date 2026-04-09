@@ -526,6 +526,37 @@ export async function markMilestoneDone(
     }
   }
 
+  // ── 采购下单完成 → 自动校验采购数量 vs 成本基线预算 ──
+  // CEO 2026-04-09：超预算 5% 通知责任人+财务+CEO
+  if (milestoneData.step_key === 'procurement_order_placed') {
+    try {
+      const { getCostControlSummary, sendCostAlert } = await import('@/app/actions/cost-control');
+      const costRes = await getCostControlSummary(milestoneData.order_id);
+      if (costRes.data?.alerts) {
+        for (const alert of costRes.data.alerts) {
+          if (alert.level === 'red') {
+            await sendCostAlert(
+              milestoneData.order_id,
+              alert.title.includes('面料') ? 'procurement_over_budget' : 'cmt_over_estimate',
+              `${orderForNotif?.order_no || '?'}: ${alert.message}`,
+              milestoneData.owner_user_id || undefined,
+            );
+          }
+        }
+      }
+    } catch (costErr: any) {
+      console.warn('[markMilestoneDone] cost control check failed:', costErr?.message);
+    }
+  }
+
+  // ── 剩余物料回收完成 → 计算真实单耗 → 反哺 Quoter RAG ──
+  if (milestoneData.step_key === 'leftover_collection') {
+    try {
+      // TODO Phase 3: 读取回收数据 → 计算 actual_fabric_used_kg → 写 baseline + quoter_fabric_records
+      console.log('[markMilestoneDone] leftover_collection completed — 真实单耗反哺待实现');
+    } catch {}
+  }
+
   // Auto-advance to next milestone
   await autoAdvanceNextMilestone(supabase, milestoneData.order_id);
 
