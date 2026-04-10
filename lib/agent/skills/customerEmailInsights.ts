@@ -71,18 +71,23 @@ export const customerEmailInsightsSkill: SkillModule = {
       .or(`customer_id.eq.${customerName},order_id.eq.${input.orderId}`)
       .gte('received_at', since)
       .order('received_at', { ascending: false })
-      .limit(50);
+      .limit(200);
 
     const emails = (mails || []) as any[];
     if (emails.length === 0) {
       return emptyResult(`最近 90 天没有 ${customerName} 的邮件记录`);
     }
 
-    // 3. 拼装邮件摘要给 AI（节省 tokens — 每封最多 800 字正文）
+    // 3. 拼装邮件摘要给 AI
+    // 最近 50 封：完整正文（每封最多 1200 字）
+    // 更早的：只传主题+日期（保留时间线但省 token）
     const emailDigest = emails
       .map((m, i) => {
-        const body = (m.raw_body || '').slice(0, 1200).replace(/\s+/g, ' ').trim();
-        return `#${i + 1} [${String(m.received_at).slice(0, 10)}] From: ${m.from_email}\nSubject: ${m.subject}\nBody: ${body}`;
+        if (i < 50) {
+          const body = (m.raw_body || '').slice(0, 1200).replace(/\s+/g, ' ').trim();
+          return `#${i + 1} [${String(m.received_at).slice(0, 10)}] From: ${m.from_email}\nSubject: ${m.subject}\nBody: ${body}`;
+        }
+        return `#${i + 1} [${String(m.received_at).slice(0, 10)}] From: ${m.from_email} | Subject: ${m.subject}`;
       })
       .join('\n\n---\n\n');
 
