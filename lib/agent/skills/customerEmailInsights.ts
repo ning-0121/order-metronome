@@ -47,7 +47,7 @@ export const customerEmailInsightsSkill: SkillModule = {
   cacheTtlMs: 2 * 60 * 60 * 1000, // 2h
 
   hashInput: (input: SkillInput) =>
-    JSON.stringify({ orderId: input.orderId, version: 'v1' }),
+    JSON.stringify({ orderId: input.orderId, version: 'v2-conservative' }),
 
   async run(input: SkillInput, ctx: SkillContext): Promise<SkillResult> {
     if (!input.orderId) throw new Error('customer_email_insights requires orderId');
@@ -81,7 +81,7 @@ export const customerEmailInsightsSkill: SkillModule = {
     // 3. 拼装邮件摘要给 AI（节省 tokens — 每封最多 800 字正文）
     const emailDigest = emails
       .map((m, i) => {
-        const body = (m.raw_body || '').slice(0, 800).replace(/\s+/g, ' ').trim();
+        const body = (m.raw_body || '').slice(0, 1200).replace(/\s+/g, ' ').trim();
         return `#${i + 1} [${String(m.received_at).slice(0, 10)}] From: ${m.from_email}\nSubject: ${m.subject}\nBody: ${body}`;
       })
       .join('\n\n---\n\n');
@@ -126,8 +126,9 @@ ${knowledgeBlock}
 - ignored_requests 最多 5 条，按重要度排序
 - 如果邮件里全都是你已经回复过的，ignored_requests 给空数组 []
 - 如果邮件太少（<3 封）或内容都不涉及这个订单，next_email 给 null
-- severity：涉及数量/交期/付款 → high；涉及颜色/工艺 → medium；寒暄 → low
-- 不要编造邮件里没说的事`;
+- severity：涉及数量/交期/付款 → high；涉及颜色/工艺/面料 → medium；寒暄/确认 → low
+- 如果无法确定请求是否被我方忽略（比如只有客户单方邮件、没有上下文），severity 标为 low 而非 medium
+- 不要编造邮件里没说的事，宁可漏报也不要误报`;
 
     const userPrompt = `订单号：${order.order_no}
 客户：${customerName}
@@ -193,7 +194,7 @@ ${emailDigest}`;
       summary,
       findings,
       suggestions,
-      confidence: aiResult.confidence ?? 80,
+      confidence: Math.min(85, aiResult.confidence ?? 80),
       source: 'rules+ai',
       meta: {
         emailsAnalyzed: emails.length,

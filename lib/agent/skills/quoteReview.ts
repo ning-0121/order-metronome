@@ -28,7 +28,7 @@ export const quoteReviewSkill: SkillModule = {
   cacheTtlMs: 60 * 60 * 1000, // 1h
 
   hashInput: (input: SkillInput) =>
-    JSON.stringify({ orderId: input.orderId, version: 'v1' }),
+    JSON.stringify({ orderId: input.orderId, version: 'v2-calibrated' }),
 
   async run(input: SkillInput, ctx: SkillContext): Promise<SkillResult> {
     if (!input.orderId) throw new Error('需要 orderId');
@@ -69,8 +69,26 @@ export const quoteReviewSkill: SkillModule = {
     const sellingPrice = order.incoterm === 'DDP'
       ? (baseline.ddp_price || 0)
       : (baseline.fob_price || 0);
-    const exchangeRate = 7.2; // 默认汇率
+    // 汇率：优先从成本基线读取，fallback 7.2
+    const exchangeRate = baseline.exchange_rate || 7.2;
     const sellingPriceRmb = sellingPrice * exchangeRate;
+
+    // 售价为 0 但有成本 → 可能没填报价
+    if (sellingPrice === 0 && costPerPiece > 0) {
+      return {
+        severity: 'medium',
+        summary: '⚠ 客户报价未录入，无法计算利润率',
+        findings: [{
+          category: '数据缺失',
+          severity: 'medium',
+          label: `成本 ¥${costPerPiece.toFixed(2)}/件，但 ${order.incoterm} 报价为 0`,
+          detail: '请在成本基线中录入客户报价（FOB/DDP Price）',
+        }],
+        suggestions: [{ action: '在"成本控制"Tab 补充客户报价', reason: '报价为空导致利润率无法计算' }],
+        confidence: 30,
+        source: 'rules',
+      };
+    }
     const profitPerPiece = sellingPriceRmb - costPerPiece;
     const profitRate = sellingPriceRmb > 0
       ? Number(((profitPerPiece / sellingPriceRmb) * 100).toFixed(1))
@@ -80,29 +98,29 @@ export const quoteReviewSkill: SkillModule = {
     // 利润率健康度
     let severity: 'high' | 'medium' | 'low' = 'low';
 
-    if (profitRate < 5) {
+    if (profitRate < 8) {
       severity = 'high';
       findings.push({
         category: '利润率',
         severity: 'high',
         label: `🔴 利润率仅 ${profitRate}% — 严重偏低`,
-        detail: `成本 ¥${costPerPiece.toFixed(2)}/件，售价 $${sellingPrice}/件（≈¥${sellingPriceRmb.toFixed(2)}），利润 ¥${profitPerPiece.toFixed(2)}/件`,
+        detail: `成本 ¥${costPerPiece.toFixed(2)}/件，售价 $${sellingPrice}/件（≈¥${sellingPriceRmb.toFixed(2)}，汇率 ${exchangeRate}），利润 ¥${profitPerPiece.toFixed(2)}/件`,
         evidence: `order_cost_baseline: total_cost=${costPerPiece}, ${order.incoterm}_price=${sellingPrice}`,
       });
-    } else if (profitRate < 12) {
+    } else if (profitRate < 15) {
       severity = 'medium';
       findings.push({
         category: '利润率',
         severity: 'medium',
-        label: `🟡 利润率 ${profitRate}% — 偏低`,
-        detail: `利润 ¥${profitPerPiece.toFixed(2)}/件，总利润 ¥${totalProfit.toFixed(0)}`,
+        label: `🟡 利润率 ${profitRate}% — 偏低但可接受`,
+        detail: `利润 ¥${profitPerPiece.toFixed(2)}/件，总利润 ¥${totalProfit.toFixed(0)}（汇率 ${exchangeRate}）`,
       });
     } else {
       findings.push({
         category: '利润率',
         severity: 'low',
         label: `🟢 利润率 ${profitRate}% — 健康`,
-        detail: `利润 ¥${profitPerPiece.toFixed(2)}/件，总利润 ¥${totalProfit.toFixed(0)}`,
+        detail: `利润 ¥${profitPerPiece.toFixed(2)}/件，总利润 ¥${totalProfit.toFixed(0)}（汇率 ${exchangeRate}）`,
       });
     }
 
@@ -121,10 +139,11 @@ export const quoteReviewSkill: SkillModule = {
       });
     }
 
-    // 加工费合理性
+    // 加工费合理性（小单允许更大偏差）
     if (baseline.cmt_internal_estimate && baseline.cmt_factory_quote) {
       const cmtDiff = ((baseline.cmt_factory_quote - baseline.cmt_internal_estimate) / baseline.cmt_internal_estimate * 100).toFixed(1);
-      if (Number(cmtDiff) > 10) {
+      const cmtThreshold = (order.quantity || 0) < 1000 ? 20 : 15; // 小单放宽到 20%
+      if (Number(cmtDiff) > cmtThreshold) {
         findings.push({
           category: '加工费',
           severity: 'medium',
@@ -169,9 +188,9 @@ export const quoteReviewSkill: SkillModule = {
       }
     } catch {}
 
-    const summary = profitRate < 5
+    const summary = profitRate < 8
       ? `🔴 利润率 ${profitRate}% 严重偏低 — 建议重新谈价`
-      : profitRate < 12
+      : profitRate < 15
       ? `🟡 利润率 ${profitRate}% — 可接受但偏低`
       : `🟢 利润率 ${profitRate}% — 健康`;
 
@@ -179,7 +198,7 @@ export const quoteReviewSkill: SkillModule = {
       severity,
       summary,
       findings,
-      suggestions: profitRate < 12
+      suggestions: profitRate < 15
         ? [{ action: `利润率 ${profitRate}%，建议和客户沟通提价或优化成本`, reason: '利润空间不足' }]
         : [],
       confidence: 90,

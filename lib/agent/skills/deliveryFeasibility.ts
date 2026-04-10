@@ -28,7 +28,7 @@ export const deliveryFeasibilitySkill: SkillModule = {
   cacheTtlMs: 30 * 60 * 1000, // 30min
 
   hashInput: (input: SkillInput) =>
-    JSON.stringify({ orderId: input.orderId, version: 'v1' }),
+    JSON.stringify({ orderId: input.orderId, version: 'v2-calibrated' }),
 
   async run(input: SkillInput, ctx: SkillContext): Promise<SkillResult> {
     if (!input.orderId) throw new Error('需要 orderId');
@@ -121,14 +121,15 @@ export const deliveryFeasibilitySkill: SkillModule = {
     let severity: 'high' | 'medium' | 'low' = 'low';
     let feasibility: string;
 
-    // 标准 45 天为基线，翻单可以 30 天
-    const baselineDays = order.order_type === 'repeat' ? 30 : 45;
+    // 行业标准基线：大货新单 50 天（含打样），翻单 35 天，打样单 21 天
+    const baselineDays = order.order_type === 'sample' ? 21
+      : order.order_type === 'repeat' ? 35 : 50;
     const effectiveBaseline = histMedian || baselineDays;
 
-    if (availableDays < effectiveBaseline * 0.6) {
+    if (availableDays < effectiveBaseline * 0.55) {
       severity = 'high';
       feasibility = `🔴 极高风险 — 仅 ${availableDays} 天，历史同类订单需 ${effectiveBaseline} 天`;
-    } else if (availableDays < effectiveBaseline * 0.85) {
+    } else if (availableDays < effectiveBaseline * 0.75) {
       severity = 'medium';
       feasibility = `🟡 偏紧 — ${availableDays} 天，历史需 ${effectiveBaseline} 天，需要加快节奏`;
     } else {
@@ -145,22 +146,22 @@ export const deliveryFeasibilitySkill: SkillModule = {
     });
 
     // 剩余天数提醒
-    if (remainingDays < 14) {
+    if (remainingDays < 10) {
       findings.push({
         category: '剩余时间',
-        severity: remainingDays < 7 ? 'high' : 'medium',
+        severity: remainingDays < 5 ? 'high' : 'medium',
         label: `距出厂仅剩 ${remainingDays} 天`,
-        detail: remainingDays < 7 ? '必须确认所有环节已就绪，否则延期风险极高' : '关注采购和产前样进度',
+        detail: remainingDays < 5 ? '必须确认所有环节已就绪，否则延期风险极高' : '关注生产进度和验货安排',
       });
     }
 
-    // 工厂负荷
-    if (factoryLoad > 5) {
+    // 工厂负荷（正常工厂同时 8-10 单是常态）
+    if (factoryLoad > 8) {
       findings.push({
         category: '工厂负荷',
-        severity: factoryLoad > 10 ? 'high' : 'medium',
+        severity: factoryLoad > 15 ? 'high' : 'medium',
         label: `${order.factory_name} 当前在手 ${factoryLoad} 个订单`,
-        detail: factoryLoad > 10 ? '产能可能不足，建议确认工厂排期' : '负荷中等，密切关注',
+        detail: factoryLoad > 15 ? '产能可能不足，建议确认工厂排期或分厂' : '负荷偏高，建议确认排期优先级',
       });
     }
 
@@ -178,7 +179,7 @@ export const deliveryFeasibilitySkill: SkillModule = {
         });
       }
     }
-    if (factoryLoad > 8) {
+    if (factoryLoad > 12) {
       suggestions.push({
         action: '评估是否需要分厂生产',
         reason: `${order.factory_name} 在手 ${factoryLoad} 单`,

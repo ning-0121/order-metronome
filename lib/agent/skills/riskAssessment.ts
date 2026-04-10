@@ -71,19 +71,19 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'new_customer',
     category: '客户',
     label: '新客户首单',
-    maxScore: 20,
+    maxScore: 12,
     evaluate: ctx => {
       // 证据：业务在创建订单时勾选了"新客户首单"标记 OR 系统查到该客户历史订单数=0
       if (ctx.order.is_new_customer === true) {
         return {
-          score: 20,
+          score: 12,
           reason: '该客户在系统内首单 — 沟通模式 / 付款节奏 / 验货标准都未知',
           evidence: '订单字段 is_new_customer = true（业务创建时手动勾选或系统自动检测）',
         };
       }
       if (ctx.customer.totalOrders === 0) {
         return {
-          score: 20,
+          score: 12,
           reason: '该客户在系统内首单',
           evidence: `查询 orders 表：customer_name='${ctx.order.customer_name}' 历史订单数 = 0`,
         };
@@ -127,18 +127,18 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'new_factory',
     category: '工厂',
     label: '新工厂首单',
-    maxScore: 15,
+    maxScore: 10,
     evaluate: ctx => {
       if (ctx.order.is_new_factory === true) {
         return {
-          score: 15,
+          score: 10,
           reason: '工厂在系统内前 3 单 — 必须提高 QC 频率，建议 100% 检验',
           evidence: '订单字段 is_new_factory = true',
         };
       }
       if (ctx.order.factory_id && ctx.factory.totalOrders === 0) {
         return {
-          score: 15,
+          score: 10,
           reason: '工厂在系统内首单 — 必须提高 QC 频率',
           evidence: `查询 orders 表：factory_id='${ctx.order.factory_id}' 历史订单数 = 0`,
         };
@@ -268,14 +268,14 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'small_complex',
     category: '数量',
     label: '小单 + 多款多色',
-    maxScore: 8,
+    maxScore: 5,
     evaluate: ctx => {
       const qty = ctx.order.quantity || 0;
       const styles = ctx.order.style_count || 0;
       const colors = ctx.order.color_count || 0;
       if (qty < 500 && styles >= 3 && colors >= 3) {
         return {
-          score: 8,
+          score: 5,
           reason: `仅 ${qty} 件分 ${styles} 款 ${colors} 色 — 工艺切换成本高，工厂可能不愿做`,
           evidence: `订单字段 quantity=${qty} / style_count=${styles} / color_count=${colors}`,
         };
@@ -289,7 +289,7 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'rush_order',
     category: '交期',
     label: '加急订单',
-    maxScore: 15,
+    maxScore: 18,
     evaluate: ctx => {
       const orderDate = ctx.order.order_date ? new Date(ctx.order.order_date) : null;
       const factoryDate = ctx.order.factory_date ? new Date(ctx.order.factory_date) : null;
@@ -297,7 +297,7 @@ const DIMENSIONS: RiskDimension[] = [
       const days = Math.ceil((factoryDate.getTime() - orderDate.getTime()) / 86400000);
       if (days <= 25) {
         return {
-          score: 15,
+          score: 18,
           reason: `仅 ${days} 天交期 — 极端紧迫，建议增加 buffer`,
           evidence: `订单字段：order_date=${ctx.order.order_date} → factory_date=${ctx.order.factory_date}（${days} 天）`,
         };
@@ -330,21 +330,21 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'peak_season',
     category: '交期',
     label: '跨旺季生产',
-    maxScore: 8,
+    maxScore: 5,
     evaluate: ctx => {
       const factoryDate = ctx.order.factory_date ? new Date(ctx.order.factory_date) : null;
       if (!factoryDate) return { score: 0 };
       const month = factoryDate.getMonth() + 1; // 1-12
       if (month >= 9 && month <= 11) {
         return {
-          score: 8,
+          score: 5,
           reason: '跨秋冬旺季（9-11月）— 工厂产能紧张，QC 和物流双高峰',
           evidence: `订单 factory_date=${ctx.order.factory_date}（${month} 月）`,
         };
       }
       if (month === 1 || month === 2) {
         return {
-          score: 8,
+          score: 5,
           reason: '跨春节前后 — 工人短缺 / 节后开工不齐',
           evidence: `订单 factory_date=${ctx.order.factory_date}（${month} 月，春节区间）`,
         };
@@ -358,11 +358,11 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'custom_packaging',
     category: '包装',
     label: '定制包装',
-    maxScore: 8,
+    maxScore: 4,
     evaluate: ctx => {
       if (ctx.order.packaging_type !== 'custom') return { score: 0 };
       return {
-        score: 8,
+        score: 4,
         reason: '非标准包装 — 必须客户多轮确认，常见拖期点',
         evidence: '订单字段 packaging_type = "custom"',
       };
@@ -374,14 +374,14 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'critical_files_missing',
     category: '文件',
     label: '关键文件缺失',
-    maxScore: 20,
+    maxScore: 12,
     evaluate: ctx => {
       const missing: string[] = [];
       if (!ctx.hasFile('customer_po')) missing.push('客户 PO');
       if (!ctx.hasFile('internal_quote')) missing.push('内部报价单');
       if (!ctx.hasFile('customer_quote')) missing.push('客户报价单');
       if (missing.length === 0) return { score: 0 };
-      const score = Math.min(20, missing.length * 7);
+      const score = Math.min(12, missing.length * 4);
       return {
         score,
         reason: `缺关键文件：${missing.join(' / ')}`,
@@ -395,13 +395,13 @@ const DIMENSIONS: RiskDimension[] = [
     id: 'skip_sample_new_factory',
     category: '流程',
     label: '跳过产前样 + 新工厂',
-    maxScore: 25,
+    maxScore: 30,
     evaluate: ctx => {
       const skipSample = ctx.order.skip_pre_production_sample === true;
       const newFactory = ctx.order.is_new_factory === true || (ctx.order.factory_id && ctx.factory.totalOrders === 0);
       if (skipSample && newFactory) {
         return {
-          score: 25,
+          score: 30,
           reason: '跳过产前样 + 新工厂 — 极高风险，强烈建议至少做 1 件确认样',
           evidence: 'skip_pre_production_sample=true 且 is_new_factory=true',
         };
@@ -557,7 +557,7 @@ export const riskAssessmentSkill: SkillModule = {
     return JSON.stringify({
       orderId: input.orderId,
       // v4：业务员视角叙事层 + 专业知识库注入
-      version: 'v4-narrative',
+      version: 'v5-calibrated',
     });
   },
 
@@ -616,7 +616,7 @@ export const riskAssessmentSkill: SkillModule = {
           dimensionScores[dim.id] = r.score;
           findings.push({
             category: dim.category,
-            severity: r.score >= 15 ? 'high' : r.score >= 8 ? 'medium' : 'low',
+            severity: r.score >= 12 ? 'high' : r.score >= 6 ? 'medium' : 'low',
             label: dim.label,
             detail: r.reason,
             evidence: r.evidence,  // ← 关键修复：透传证据
@@ -652,10 +652,10 @@ export const riskAssessmentSkill: SkillModule = {
     const score = Math.min(100, totalScore);
     let level: 'high' | 'medium' | 'low';
     let summary: string;
-    if (score >= 60) {
+    if (score >= 65) {
       level = 'high';
       summary = `🔴 高风险订单 (${score}/100) — 共 ${findings.length} 项风险，重点见下`;
-    } else if (score >= 30) {
+    } else if (score >= 35) {
       level = 'medium';
       summary = `🟡 中风险订单 (${score}/100) — 共 ${findings.length} 项需关注`;
     } else if (findings.length > 0) {
