@@ -15,6 +15,7 @@ import {
   runRiskAssessment,
   runCustomerEmailInsights,
   runDeliveryFeasibility,
+  runQuoteReview,
 } from '@/app/actions/skills';
 import type { SkillResult, SkillFinding } from '@/lib/agent/skills/types';
 
@@ -54,6 +55,7 @@ export function AISkillSidebar({ orderId }: Props) {
   const [risk, setRisk] = useState<SkillState>(INITIAL_STATE);
   const [emailInsights, setEmailInsights] = useState<SkillState>(INITIAL_STATE);
   const [delivery, setDelivery] = useState<SkillState>(INITIAL_STATE);
+  const [quoteRev, setQuoteRev] = useState<SkillState>(INITIAL_STATE);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // 权限由 server action 内部判断（订单创建者/跟单/节点负责人/admin）
@@ -66,6 +68,7 @@ export function AISkillSidebar({ orderId }: Props) {
     setRisk({ ...INITIAL_STATE, loading: true });
     setEmailInsights({ ...INITIAL_STATE, loading: true });
     setDelivery({ ...INITIAL_STATE, loading: true });
+    setQuoteRev({ ...INITIAL_STATE, loading: true });
 
     runMissingInfoCheck(orderId).then(res => {
       if (cancelled) return;
@@ -100,6 +103,16 @@ export function AISkillSidebar({ orderId }: Props) {
     runDeliveryFeasibility(orderId).then(res => {
       if (cancelled) return;
       setDelivery({
+        result: res.result || null,
+        error: res.error || null,
+        shadow: !!res.shadow,
+        loading: false,
+      });
+    });
+
+    runQuoteReview(orderId).then(res => {
+      if (cancelled) return;
+      setQuoteRev({
         result: res.result || null,
         error: res.error || null,
         shadow: !!res.shadow,
@@ -150,6 +163,17 @@ export function AISkillSidebar({ orderId }: Props) {
         error={emailInsights.error}
         result={emailInsights.result}
         shadow={emailInsights.shadow}
+        onRefresh={refresh}
+      />
+
+      {/* Skill 3：报价审核 */}
+      <SkillCard
+        title="报价审核"
+        icon="💰"
+        loading={quoteRev.loading}
+        error={quoteRev.error}
+        result={quoteRev.result}
+        shadow={quoteRev.shadow}
         onRefresh={refresh}
       />
 

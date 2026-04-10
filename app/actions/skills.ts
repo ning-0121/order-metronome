@@ -15,6 +15,7 @@ import { missingInfoSkill } from '@/lib/agent/skills/missingInfo';
 import { riskAssessmentSkill } from '@/lib/agent/skills/riskAssessment';
 import { customerEmailInsightsSkill } from '@/lib/agent/skills/customerEmailInsights';
 import { deliveryFeasibilitySkill } from '@/lib/agent/skills/deliveryFeasibility';
+import { quoteReviewSkill } from '@/lib/agent/skills/quoteReview';
 import type { SkillResult } from '@/lib/agent/skills/types';
 
 /**
@@ -185,6 +186,27 @@ export async function runCustomerEmailInsights(orderId: string): Promise<{
     console.error('[runCustomerEmailInsights] outer error:', err?.message);
     return { error: 'Skill 运行异常' };
   }
+}
+
+/**
+ * 跑「报价审核」Skill
+ */
+export async function runQuoteReview(orderId: string): Promise<{
+  result?: SkillResult;
+  error?: string;
+  shadow?: boolean;
+  cached?: boolean;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const allowed = await canAccessOrderSkill(supabase, orderId);
+  if (!allowed) return { error: '无权访问此订单的 AI Skill' };
+  try {
+    const output = await runSkill(quoteReviewSkill, { orderId }, { triggeredBy: 'user' });
+    if (output.circuitBroken) return { error: 'Skill 已熔断' };
+    return { result: output.displayResult || undefined, shadow: output.displayResult === null && output.internalResult !== null, cached: output.cacheHit };
+  } catch { return { error: 'Skill 运行异常' }; }
 }
 
 /**
