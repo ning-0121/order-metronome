@@ -549,12 +549,51 @@ export async function markMilestoneDone(
     }
   }
 
-  // ── 剩余物料回收完成 → 计算真实单耗 → 反哺 Quoter RAG ──
+  // ── 剩余物料回收完成 → 计算真实单耗 → 写入基线 + 反哺 Quoter RAG ──
   if (milestoneData.step_key === 'leftover_collection') {
     try {
-      // TODO Phase 3: 读取回收数据 → 计算 actual_fabric_used_kg → 写 baseline + quoter_fabric_records
-      console.log('[markMilestoneDone] leftover_collection completed — 真实单耗反哺待实现');
-    } catch {}
+      // 读取该订单的采购到货 + 剩余物料备注 → 计算真实用量
+      const { data: procItems } = await (supabase.from('procurement_line_items') as any)
+        .select('received_qty, category')
+        .eq('order_id', milestoneData.order_id)
+        .eq('category', 'fabric')
+        .not('received_qty', 'is', null);
+
+      const { data: orderForCalc } = await (supabase.from('orders') as any)
+        .select('quantity, style_no, customer_name, order_no')
+        .eq('id', milestoneData.order_id)
+        .single();
+
+      if (procItems && procItems.length > 0 && orderForCalc?.quantity > 0) {
+        const totalReceivedKg = (procItems as any[]).reduce((s, i) => s + (i.received_qty || 0), 0);
+        // 真实单耗 ≈ 到货量 / 订单数量（简化：假设剩余物料在备注里，后续可以精确化）
+        const actualConsumptionKg = Number((totalReceivedKg / orderForCalc.quantity).toFixed(4));
+
+        // 写入基线
+        await (supabase.from('order_cost_baseline') as any)
+          .update({
+            actual_fabric_used_kg: totalReceivedKg,
+            actual_consumption_kg: actualConsumptionKg,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('order_id', milestoneData.order_id);
+
+        // 反哺 Quoter RAG — 写入 quoter_fabric_records
+        if (actualConsumptionKg > 0) {
+          await (supabase.from('quoter_fabric_records') as any).insert({
+            garment_type: 'knit_bottom', // 默认，后续可从订单获取
+            style_no: orderForCalc.style_no || null,
+            customer_name: orderForCalc.customer_name || null,
+            consumption_kg: actualConsumptionKg,
+            consumption_source: 'actual_production',
+            notes: `${orderForCalc.order_no} 实际生产数据（${orderForCalc.quantity}件，到货 ${totalReceivedKg}KG）`,
+          });
+          console.log(`[markMilestoneDone] 真实单耗已反哺 RAG: ${actualConsumptionKg} KG/件`);
+        }
+      }
+    } catch (calcErr: any) {
+      console.warn('[markMilestoneDone] 核销计算失败（不影响节点完成）:', calcErr?.message);
+    }
   }
 
   // Auto-advance to next milestone

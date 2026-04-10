@@ -14,6 +14,7 @@ import {
   runMissingInfoCheck,
   runRiskAssessment,
   runCustomerEmailInsights,
+  runDeliveryFeasibility,
 } from '@/app/actions/skills';
 import type { SkillResult, SkillFinding } from '@/lib/agent/skills/types';
 
@@ -52,6 +53,7 @@ export function AISkillSidebar({ orderId }: Props) {
   const [missing, setMissing] = useState<SkillState>(INITIAL_STATE);
   const [risk, setRisk] = useState<SkillState>(INITIAL_STATE);
   const [emailInsights, setEmailInsights] = useState<SkillState>(INITIAL_STATE);
+  const [delivery, setDelivery] = useState<SkillState>(INITIAL_STATE);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // 权限由 server action 内部判断（订单创建者/跟单/节点负责人/admin）
@@ -63,6 +65,7 @@ export function AISkillSidebar({ orderId }: Props) {
     setMissing({ ...INITIAL_STATE, loading: true });
     setRisk({ ...INITIAL_STATE, loading: true });
     setEmailInsights({ ...INITIAL_STATE, loading: true });
+    setDelivery({ ...INITIAL_STATE, loading: true });
 
     runMissingInfoCheck(orderId).then(res => {
       if (cancelled) return;
@@ -94,13 +97,23 @@ export function AISkillSidebar({ orderId }: Props) {
       });
     });
 
+    runDeliveryFeasibility(orderId).then(res => {
+      if (cancelled) return;
+      setDelivery({
+        result: res.result || null,
+        error: res.error || null,
+        shadow: !!res.shadow,
+        loading: false,
+      });
+    });
+
     return () => { cancelled = true; };
   }, [orderId, refreshKey]);
 
   // 如果所有 Skill 都返回"无权"错误，整个侧栏隐藏（外部用户）
   const NO_PERM = '无权访问此订单的 AI Skill';
   const allNoPermission =
-    missing.error === NO_PERM && risk.error === NO_PERM && emailInsights.error === NO_PERM;
+    missing.error === NO_PERM && risk.error === NO_PERM && emailInsights.error === NO_PERM && delivery.error === NO_PERM;
   if (allNoPermission) return null;
 
   const refresh = () => setRefreshKey(k => k + 1);
@@ -140,10 +153,16 @@ export function AISkillSidebar({ orderId }: Props) {
         onRefresh={refresh}
       />
 
-      {/* 下一批：报价审核 */}
-      <div className="text-xs text-gray-400 text-center py-2 border border-dashed border-gray-200 rounded-lg">
-        💡 报价审核 Skill 即将上线
-      </div>
+      {/* Skill 5：交期可行性分析 */}
+      <SkillCard
+        title="交期可行性"
+        icon="📅"
+        loading={delivery.loading}
+        error={delivery.error}
+        result={delivery.result}
+        shadow={delivery.shadow}
+        onRefresh={refresh}
+      />
     </div>
   );
 }

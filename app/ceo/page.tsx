@@ -542,6 +542,37 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
+      {/* ===== 2.5 执行力快报 ===== */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚡</span>
+            <h2 className="text-base font-bold text-gray-900">执行力快报</h2>
+          </div>
+          <Link href="/analytics/execution" className="text-xs text-indigo-600 hover:text-indigo-700">
+            查看详情 →
+          </Link>
+        </div>
+        <div className="grid grid-cols-4 gap-3 text-center">
+          <div className="bg-indigo-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-indigo-600">{overdueCount}</div>
+            <div className="text-[10px] text-gray-500">逾期节点</div>
+          </div>
+          <div className="bg-amber-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-amber-600">{blockedCount}</div>
+            <div className="text-[10px] text-gray-500">阻塞节点</div>
+          </div>
+          <div className="bg-green-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-green-600">{analyticsSummary.thisWeekCompleted || 0}</div>
+            <div className="text-[10px] text-gray-500">本周完成</div>
+          </div>
+          <div className="bg-purple-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-purple-600">{analyticsSummary.completedOrders || 0}</div>
+            <div className="text-[10px] text-gray-500">累计完成订单</div>
+          </div>
+        </div>
+      </div>
+
       {/* ===== 3. AI 智能助手（合并 AI 分析建议 + Agent 智能建议） ===== */}
       <div className="bg-white rounded-xl border-2 border-indigo-200 shadow-md overflow-hidden">
         <div className="bg-gradient-to-r from-indigo-50 to-purple-50 px-5 py-3 border-b border-indigo-100">
