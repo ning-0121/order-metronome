@@ -285,3 +285,57 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
 }
+
+/* ═══════ 移动端优化 ═══════ */
+
+/* 手机上按钮更大、更容易点击 */
+@media (max-width: 768px) {
+  .btn-primary, .btn-secondary {
+    padding: 12px 20px;
+    font-size: 15px;
+    min-height: 44px; /* iOS 推荐最小触摸目标 */
+  }
+
+  /* 表格字体缩小 */
+  .table-modern th { font-size: 10px; padding: 8px 10px; }
+  .table-modern td { padding: 10px; font-size: 13px; }
+
+  /* 统计卡片紧凑 */
+  .stat-card { padding: 16px; border-radius: 12px; }
+  .stat-card .stat-value { font-size: 24px; }
+  .stat-card .stat-label { font-size: 11px; }
+
+  /* 底部固定操作栏 — 手机上常用操作置底 */
+  .mobile-bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid var(--border-color);
+    padding: 8px 16px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 40;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  /* 给底部栏留空间 */
+  body { padding-bottom: 72px; }
+}
+
+/* 安全区域适配（iPhone 刘海/底部条） */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* 禁止页面缩放（PWA 体验） */
+@media (max-width: 768px) {
+  html {
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+  }
+}

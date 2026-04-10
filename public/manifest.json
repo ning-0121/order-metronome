@@ -1,18 +1,34 @@
 {
   "name": "绮陌服饰智能系统",
   "short_name": "绮陌智能",
-  "description": "Qimo Activewear 智能订单管理系统",
-  "start_url": "/",
+  "description": "Qimo Activewear 智能订单管理系统 — 订单节拍器",
+  "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#4f46e5",
   "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "我的工作台",
+      "short_name": "工作台",
+      "url": "/dashboard",
+      "description": "查看今日待办和逾期"
+    },
+    {
+      "name": "订单列表",
+      "short_name": "订单",
+      "url": "/orders",
+      "description": "查看所有订单"
     }
   ]
 }
