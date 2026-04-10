@@ -11,10 +11,11 @@ interface OwnerAssignmentProps {
   milestoneId: string;
   currentOwnerUserId: string | null;
   isAdmin: boolean;
+  isProductionManager?: boolean;
   milestoneStatus?: string;
 }
 
-export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, milestoneStatus }: OwnerAssignmentProps) {
+export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, isProductionManager = false, milestoneStatus }: OwnerAssignmentProps) {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,11 +23,13 @@ export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, mile
   const [selectedUserId, setSelectedUserId] = useState<string>(currentOwnerUserId || '');
   const [error, setError] = useState<string | null>(null);
 
+  const canAssign = isAdmin || isProductionManager;
+
   useEffect(() => {
-    if (isAdmin) {
+    if (canAssign) {
       loadUsers();
     }
-  }, [isAdmin]);
+  }, [canAssign]);
 
   async function loadUsers() {
     setLoading(true);
@@ -55,9 +58,9 @@ export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, mile
     setSaving(false);
   }
 
-  // 非管理员不显示；已分配负责人的也不显示；已完成的不显示
+  // 非管理员且非生产主管不显示；已分配负责人的也不显示；已完成的不显示
   const isDone = isDoneStatus(milestoneStatus);
-  if (!isAdmin || currentOwnerUserId || isDone) return null;
+  if (!canAssign || currentOwnerUserId || isDone) return null;
 
   return (
     <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">

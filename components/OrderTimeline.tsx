@@ -428,6 +428,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           milestoneId={m.id}
                           currentOwnerUserId={m.owner_user_id}
                           isAdmin={isAdmin}
+                          isProductionManager={currentRoles.includes('production_manager')}
                           milestoneStatus={m.status}
                         />
 

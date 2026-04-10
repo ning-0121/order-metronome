@@ -1310,7 +1310,7 @@ export async function assignMerchandiser(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  // 权限：管理员 或 订单创建者
+  // 权限：管理员 / 生产主管 / 订单创建者
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, roles')
@@ -1318,14 +1318,15 @@ export async function assignMerchandiser(
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdmin = userRoles.includes('admin');
+  const isPM = userRoles.includes('production_manager');
 
-  if (!isAdmin) {
+  if (!isAdmin && !isPM) {
     const { data: order } = await (supabase.from('orders') as any)
       .select('owner_user_id')
       .eq('id', orderId)
       .single();
     if (!order || order.owner_user_id !== user.id) {
-      return { error: '只有管理员或订单负责人可以指定跟单' };
+      return { error: '只有管理员、生产主管或订单负责人可以指定跟单' };
     }
   }
 
