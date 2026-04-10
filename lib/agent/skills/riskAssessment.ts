@@ -443,6 +443,50 @@ const DIMENSIONS: RiskDimension[] = [
       return { score: 0 };
     },
   },
+
+  // 11. 动态交期维度 — 基于"当前剩余天数"和"未完成节点数"
+  {
+    id: 'deadline_crunch',
+    category: '交期',
+    label: '出厂倒计时风险',
+    maxScore: 25,
+    evaluate: ctx => {
+      const factoryDate = ctx.order.factory_date ? new Date(ctx.order.factory_date) : null;
+      if (!factoryDate) return { score: 0 };
+      const now = new Date();
+      const remainingDays = Math.ceil((factoryDate.getTime() - now.getTime()) / 86400000);
+      if (remainingDays > 14) return { score: 0 }; // 超过 14 天不触发
+
+      const DONE = new Set(['done', '已完成', 'completed']);
+      const total = ctx.milestones.length;
+      const done = ctx.milestones.filter(m => DONE.has(m.status)).length;
+      const remaining = total - done;
+      const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+
+      if (remainingDays <= 3 && remaining > 2) {
+        return {
+          score: 25,
+          reason: `仅剩 ${remainingDays} 天出厂，还有 ${remaining} 个节点未完成（进度 ${progress}%）— 极高延期风险`,
+          evidence: `factory_date=${ctx.order.factory_date}，里程碑 ${done}/${total} 完成`,
+        };
+      }
+      if (remainingDays <= 7 && remaining > 3) {
+        return {
+          score: 18,
+          reason: `剩 ${remainingDays} 天出厂，还有 ${remaining} 个节点未完成（进度 ${progress}%）— 必须加速`,
+          evidence: `factory_date=${ctx.order.factory_date}，里程碑 ${done}/${total} 完成`,
+        };
+      }
+      if (remainingDays <= 14 && remaining > 5) {
+        return {
+          score: 10,
+          reason: `剩 ${remainingDays} 天出厂，还有 ${remaining} 个节点未完成（进度 ${progress}%）`,
+          evidence: `factory_date=${ctx.order.factory_date}，里程碑 ${done}/${total} 完成`,
+        };
+      }
+      return { score: 0 };
+    },
+  },
 ];
 
 // ════════════════════════════════════════════════
@@ -468,6 +512,7 @@ interface NarrativePayload {
 async function generateBusinessNarrative(
   order: any,
   findings: SkillFinding[],
+  milestones: Array<{ step_key: string; status: string; due_at: string | null }>,
   customerStats: { totalOrders: number; avgDelayDays: number; hasEnoughData: boolean },
   factoryStats: { totalOrders: number; avgDelayDays: number; hasEnoughData: boolean },
 ): Promise<NarrativePayload | null> {
@@ -512,6 +557,19 @@ ${knowledgeBlock}
 - watch_list 最多 3 条；不要把紧急的事放这里
 - 用中文，简短，像跟同事当面说话的口吻`;
 
+  // 计算当前进度摘要给 AI
+  const DONE_STATUSES = new Set(['done', '已完成', 'completed']);
+  const ACTIVE_STATUSES = new Set(['in_progress', '进行中']);
+  const BLOCKED_STATUSES = new Set(['blocked', '卡单', '卡住']);
+  const totalMs = milestones.length;
+  const doneMs = milestones.filter((m: any) => DONE_STATUSES.has(m.status)).length;
+  const activeMs = milestones.filter((m: any) => ACTIVE_STATUSES.has(m.status));
+  const blockedMs = milestones.filter((m: any) => BLOCKED_STATUSES.has(m.status));
+  const overdueMs = milestones.filter((m: any) => ACTIVE_STATUSES.has(m.status) && m.due_at && new Date(m.due_at) < new Date());
+  const remainingDays = order.factory_date
+    ? Math.ceil((new Date(order.factory_date).getTime() - new Date().getTime()) / 86400000)
+    : null;
+
   const userPrompt = `订单信息：
 - 订单号 ${order.order_no || '?'}
 - 客户 ${order.customer_name || '?'}${order.is_new_customer ? '（新客户首单）' : ''}
@@ -519,6 +577,8 @@ ${knowledgeBlock}
 - 数量 ${order.quantity || '?'} 件，${order.style_count || '?'} 款 ${order.color_count || '?'} 色
 - 贸易条款 ${order.incoterm || '?'}
 - 下单日 ${order.order_date || '?'}，出厂日 ${order.factory_date || '?'}
+- ⏱ 距出厂还剩 ${remainingDays !== null ? `${remainingDays} 天` : '未知'}
+- 📊 当前进度：${doneMs}/${totalMs} 完成（${totalMs > 0 ? Math.round(doneMs / totalMs * 100) : 0}%），${activeMs.length} 个进行中${blockedMs.length > 0 ? `，${blockedMs.length} 个卡住` : ''}${overdueMs.length > 0 ? `，${overdueMs.length} 个已逾期` : ''}
 - 特殊标签 ${specialTags.length > 0 ? specialTags.join('、') : '无'}
 - 客户历史：${customerStats.hasEnoughData ? `${customerStats.totalOrders} 单，平均延期 ${Math.round(customerStats.avgDelayDays)} 天` : '历史数据不足'}
 - 工厂历史：${factoryStats.hasEnoughData ? `${factoryStats.totalOrders} 单，平均延期 ${Math.round(factoryStats.avgDelayDays)} 天` : '历史数据不足'}
@@ -557,7 +617,7 @@ export const riskAssessmentSkill: SkillModule = {
     return JSON.stringify({
       orderId: input.orderId,
       // v4：业务员视角叙事层 + 专业知识库注入
-      version: 'v5-calibrated',
+      version: 'v6-dynamic-progress',
     });
   },
 
@@ -677,6 +737,7 @@ export const riskAssessmentSkill: SkillModule = {
     const narrative = await generateBusinessNarrative(
       order,
       findings,
+      milestones,
       riskCtx.customer,
       riskCtx.factory,
     );
