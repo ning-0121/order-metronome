@@ -35,6 +35,15 @@ export interface ProductionAnalysis {
   riskLevel: 'green' | 'yellow' | 'red';
   riskLabel: string;
   suggestion: string;
+  // 增强字段
+  productionStarted: boolean;  // production_kickoff 是否已完成
+  shouldReport: boolean;       // 是否应该提交日报
+  daysSinceKickoff: number;    // 启动后多少天
+  trend: 'up' | 'flat' | 'down' | 'unknown';
+  trendDetail: string;
+  defectTrend: 'normal' | 'rising' | 'unknown';
+  efficiencyPerWorker: number; // 人均日产
+  warnings: string[];          // 具体风险警告列表
 }
 
 export async function getProductionReports(orderId: string) {
@@ -357,74 +366,155 @@ export async function getProductionAnalysis(orderId: string): Promise<{ data?: P
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '未登录' };
 
-  // 获取订单信息
-  const { data: order } = await (supabase.from('orders') as any)
-    .select('quantity, etd, warehouse_due_date, incoterm')
-    .eq('id', orderId)
-    .single();
-  if (!order) return { error: '订单不存在' };
+  // 并行加载订单 + 里程碑 + 日报
+  const [orderRes, msRes, reportsRes] = await Promise.all([
+    (supabase.from('orders') as any)
+      .select('quantity, etd, warehouse_due_date, incoterm')
+      .eq('id', orderId).single(),
+    (supabase.from('milestones') as any)
+      .select('step_key, due_at, actual_at, status')
+      .eq('order_id', orderId)
+      .in('step_key', ['production_kickoff', 'factory_completion']),
+    (supabase.from('production_reports') as any)
+      .select('qty_produced, qty_defect, workers_count, report_date')
+      .eq('order_id', orderId)
+      .order('report_date', { ascending: true }),
+  ]);
 
+  const order = orderRes.data;
+  if (!order) return { error: '订单不存在' };
   const totalQty = order.quantity || 0;
   if (totalQty === 0) return { error: '订单未设置数量，无法分析' };
 
-  // 获取生产启动和工厂完成关卡日期
-  const { data: milestones } = await (supabase.from('milestones') as any)
-    .select('step_key, due_at, status')
-    .eq('order_id', orderId)
-    .in('step_key', ['production_kickoff', 'factory_completion']);
-
-  const kickoff = (milestones || []).find((m: any) => m.step_key === 'production_kickoff');
-  const completion = (milestones || []).find((m: any) => m.step_key === 'factory_completion');
+  const milestones = (msRes.data || []) as any[];
+  const kickoff = milestones.find((m: any) => m.step_key === 'production_kickoff');
+  const completion = milestones.find((m: any) => m.step_key === 'factory_completion');
 
   if (!kickoff?.due_at || !completion?.due_at) return { error: '缺少生产启动或工厂完成日期' };
 
-  const startDate = new Date(kickoff.due_at);
+  // 生产启动状态检测
+  const DONE = new Set(['done', '已完成', 'completed']);
+  const ACTIVE = new Set(['in_progress', '进行中']);
+  const productionStarted = DONE.has(kickoff.status) || ACTIVE.has(kickoff.status);
+  const kickoffActual = kickoff.actual_at ? new Date(kickoff.actual_at) : null;
+
+  const startDate = kickoffActual || new Date(kickoff.due_at);
   const endDate = new Date(completion.due_at);
   const now = new Date();
 
   const totalProductionDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / 86400000));
   const daysUsed = Math.max(0, Math.ceil((now.getTime() - startDate.getTime()) / 86400000));
   const daysRemaining = Math.max(0, Math.ceil((endDate.getTime() - now.getTime()) / 86400000));
+  const daysSinceKickoff = kickoffActual
+    ? Math.max(0, Math.ceil((now.getTime() - kickoffActual.getTime()) / 86400000))
+    : daysUsed;
 
-  // 获取生产日报
-  const { data: reports } = await (supabase.from('production_reports') as any)
-    .select('qty_produced, qty_defect')
-    .eq('order_id', orderId);
+  const reports = (reportsRes.data || []) as any[];
+  const completedQty = reports.reduce((sum: number, r: any) => sum + (r.qty_produced || 0), 0);
+  const totalDefects = reports.reduce((sum: number, r: any) => sum + (r.qty_defect || 0), 0);
 
-  const completedQty = (reports || []).reduce((sum: number, r: any) => sum + (r.qty_produced || 0), 0);
-  const totalDefects = (reports || []).reduce((sum: number, r: any) => sum + (r.qty_defect || 0), 0);
-
-  const progressRate = Math.round((completedQty / totalQty) * 100);
+  const progressRate = totalQty > 0 ? Math.round((completedQty / totalQty) * 100) : 0;
   const timeProgressRate = Math.round((daysUsed / totalProductionDays) * 100);
   const dailyAvgOutput = daysUsed > 0 ? Math.round(completedQty / daysUsed) : 0;
   const requiredDailyOutput = daysRemaining > 0 ? Math.ceil((totalQty - completedQty) / daysRemaining) : 0;
   const avgDefectRate = completedQty > 0 ? Math.round((totalDefects / completedQty) * 1000) / 10 : 0;
 
-  // 风险评估
+  // ═══ 趋势分析 ═══
+  const recent5 = reports.slice(-5);
+  let trend: 'up' | 'flat' | 'down' | 'unknown' = 'unknown';
+  let trendDetail = '';
+  if (recent5.length >= 3) {
+    const firstHalf = recent5.slice(0, Math.floor(recent5.length / 2));
+    const secondHalf = recent5.slice(Math.floor(recent5.length / 2));
+    const avgFirst = firstHalf.reduce((s: number, r: any) => s + (r.qty_produced || 0), 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((s: number, r: any) => s + (r.qty_produced || 0), 0) / secondHalf.length;
+    if (avgSecond > avgFirst * 1.15) {
+      trend = 'up';
+      trendDetail = `最近产量上升（日均 ${Math.round(avgSecond)} 件 vs 前期 ${Math.round(avgFirst)} 件）`;
+    } else if (avgSecond < avgFirst * 0.85) {
+      trend = 'down';
+      trendDetail = `最近产量下降（日均 ${Math.round(avgSecond)} 件 vs 前期 ${Math.round(avgFirst)} 件）`;
+    } else {
+      trend = 'flat';
+      trendDetail = `产量稳定（日均约 ${Math.round(avgSecond)} 件）`;
+    }
+  }
+
+  // ═══ 不良率趋势 ═══
+  let defectTrend: 'normal' | 'rising' | 'unknown' = 'unknown';
+  const recent3 = reports.slice(-3);
+  if (recent3.length >= 3) {
+    const recent3Defects = recent3.reduce((s: number, r: any) => s + (r.qty_defect || 0), 0);
+    const recent3Qty = recent3.reduce((s: number, r: any) => s + (r.qty_produced || 0), 0);
+    const recentDefectRate = recent3Qty > 0 ? (recent3Defects / recent3Qty) * 100 : 0;
+    defectTrend = recentDefectRate > avgDefectRate * 1.5 && recentDefectRate > 3 ? 'rising' : 'normal';
+  }
+
+  // ═══ 人均效率 ═══
+  const reportsWithWorkers = reports.filter((r: any) => r.workers_count > 0 && r.qty_produced > 0);
+  const efficiencyPerWorker = reportsWithWorkers.length > 0
+    ? Math.round(reportsWithWorkers.reduce((s: number, r: any) => s + r.qty_produced / r.workers_count, 0) / reportsWithWorkers.length)
+    : 0;
+
+  // ═══ 风险评估 + 警告 ═══
   let riskLevel: 'green' | 'yellow' | 'red' = 'green';
   let riskLabel = '正常';
   let suggestion = '';
+  const warnings: string[] = [];
+  const shouldReport = productionStarted;
 
-  if (daysUsed === 0 || (reports || []).length === 0) {
+  if (!productionStarted) {
     riskLevel = 'green';
     riskLabel = '待开始';
-    suggestion = '生产尚未开始或未提交日报，请跟单及时更新进度。';
+    suggestion = '生产尚未启动，无需提交日报。启动后请每日更新进度。';
+  } else if (reports.length === 0) {
+    // 生产已启动但无日报
+    riskLevel = daysSinceKickoff >= 3 ? 'red' : 'yellow';
+    riskLabel = daysSinceKickoff >= 3 ? '失联' : '待报';
+    suggestion = daysSinceKickoff >= 3
+      ? `生产已启动 ${daysSinceKickoff} 天但无任何日报！请立即联系工厂确认生产状况，${daysRemaining} 天后需出厂。`
+      : `生产刚启动，请尽快提交第一份日报以便系统追踪进度。`;
+    if (daysSinceKickoff >= 3) warnings.push(`生产启动 ${daysSinceKickoff} 天无日报`);
   } else if (progressRate >= timeProgressRate) {
     riskLevel = 'green';
     riskLabel = '正常';
-    suggestion = `生产进度正常，完成率 ${progressRate}% 超过时间进度 ${timeProgressRate}%，继续保持。`;
+    suggestion = `进度正常 — 完成 ${progressRate}%，时间过 ${timeProgressRate}%。日均 ${dailyAvgOutput} 件，保持即可。`;
   } else if (progressRate >= timeProgressRate - 10) {
     riskLevel = 'yellow';
     riskLabel = '注意';
-    suggestion = `生产略有滞后，完成率 ${progressRate}% 低于时间进度 ${timeProgressRate}%。日均需 ${requiredDailyOutput} 件，当前日均 ${dailyAvgOutput} 件，需要加快。`;
+    const gap = requiredDailyOutput - dailyAvgOutput;
+    suggestion = `进度略滞后 — 需日均 ${requiredDailyOutput} 件，当前 ${dailyAvgOutput} 件，缺口 ${gap} 件/天。`;
+    warnings.push(`产能缺口 ${gap} 件/天`);
   } else {
     riskLevel = 'red';
     riskLabel = '危险';
-    suggestion = `生产严重滞后！完成率 ${progressRate}% 远低于时间进度 ${timeProgressRate}%。剩余 ${daysRemaining} 天需完成 ${totalQty - completedQty} 件（日均 ${requiredDailyOutput} 件），当前日均仅 ${dailyAvgOutput} 件，请立即协调！`;
+    suggestion = `严重滞后！剩 ${daysRemaining} 天要完成 ${totalQty - completedQty} 件（需日均 ${requiredDailyOutput} 件），当前日均仅 ${dailyAvgOutput} 件。`;
+    warnings.push(`需日均 ${requiredDailyOutput} 件，实际仅 ${dailyAvgOutput} 件`);
   }
 
-  if (avgDefectRate > 5) {
-    suggestion += ` 注意：不良率 ${avgDefectRate}% 偏高，请关注品质。`;
+  // 趋势下降 + 时间紧 → 加重警告
+  if (trend === 'down' && daysRemaining <= 10) {
+    if (riskLevel === 'yellow') riskLevel = 'red';
+    warnings.push('产量呈下降趋势且剩余时间不多');
+  }
+
+  // 不良率上升
+  if (defectTrend === 'rising') {
+    warnings.push(`不良率上升至 ${avgDefectRate}%，建议安排跟单盯品质`);
+  }
+
+  // 人效偏低
+  if (efficiencyPerWorker > 0 && efficiencyPerWorker < 20) {
+    warnings.push(`人均日产仅 ${efficiencyPerWorker} 件，效率偏低`);
+  }
+
+  // 工人减少
+  if (reportsWithWorkers.length >= 2) {
+    const lastWorkers = reportsWithWorkers[reportsWithWorkers.length - 1].workers_count;
+    const prevWorkers = reportsWithWorkers[reportsWithWorkers.length - 2].workers_count;
+    if (lastWorkers < prevWorkers * 0.7) {
+      warnings.push(`工人从 ${prevWorkers} 人减少到 ${lastWorkers} 人，产能可能不足`);
+    }
   }
 
   return {
@@ -434,6 +524,9 @@ export async function getProductionAnalysis(orderId: string): Promise<{ data?: P
       dailyAvgOutput, requiredDailyOutput,
       totalDefects, avgDefectRate,
       riskLevel, riskLabel, suggestion,
+      productionStarted, shouldReport, daysSinceKickoff,
+      trend, trendDetail, defectTrend,
+      efficiencyPerWorker, warnings,
     },
   };
 }
