@@ -52,7 +52,7 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
     title: 'PO确认检查清单',
     items: [
       { key: 'po_uploaded', label: '客户PO已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
-      { key: 'internal_quote_uploaded', label: '内部报价单已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
+      { key: 'internal_quote_uploaded', label: '内部成本核算单已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
       { key: 'customer_quote_uploaded', label: '客户最终报价单已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
       { key: 'style_no_verified', label: '款号核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
       { key: 'quantity_verified', label: '数量核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },

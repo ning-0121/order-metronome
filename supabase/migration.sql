@@ -2018,7 +2018,7 @@ CREATE POLICY "procurement_items_auth" ON public.procurement_line_items FOR ALL 
 -- 2026-04-09 财务成本控制 Phase 2 — 订单级成本基线
 -- ═══════════════════════════════════════════════════════════════
 
--- 订单成本基线（从内部报价单解析后写入）
+-- 订单成本基线（从内部成本核算单解析后写入）
 -- 每个订单只有一条记录，是所有成本控制的"标尺"
 CREATE TABLE IF NOT EXISTS public.order_cost_baseline (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2041,7 +2041,7 @@ CREATE TABLE IF NOT EXISTS public.order_cost_baseline (
   fob_price numeric(8,2),               -- FOB 报价
   ddp_price numeric(8,2),               -- DDP 报价
   -- 来源
-  source_file_name text,                 -- 内部报价单文件名
+  source_file_name text,                 -- 内部成本核算单文件名
   parsed_at timestamptz,                 -- 解析时间
   parsed_by uuid REFERENCES auth.users(id),
   -- 实际数据（生产后填入）

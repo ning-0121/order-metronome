@@ -65,7 +65,7 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
 
   return (
     <div className="space-y-5">
-      {/* 上传内部报价单 */}
+      {/* 上传内部成本核算单 */}
       {canEdit && (
         <div className="rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/30 p-5">
           <div className="flex items-center justify-between">

@@ -77,13 +77,13 @@ const RULES: MissingRule[] = [
   {
     id: 'missing_internal_quote',
     category: 'file',
-    label: '内部报价单',
+    label: '内部成本核算单',
     blocksStep: 'finance_approval',
     blocksStepName: '财务审核',
     severity: 'high',
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.hasFile('internal_quote'),
-    suggestion: () => '上传内部报价单（含加工费/面料/辅料/包装/物流明细）',
+    suggestion: () => '上传内部成本核算单（含加工费/面料/辅料/包装/物流明细）',
     urgentWithin: 7,
   },
   {

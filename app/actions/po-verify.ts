@@ -342,7 +342,7 @@ async function extractExcelToText(base64: string): Promise<string | null> {
 }
 
 // ══════════════════════════════════════════════
-// 三单比对：内部报价单 vs 客户报价单 vs 客户PO
+// 三单比对：内部成本核算单 vs 客户报价单 vs 客户PO
 // ══════════════════════════════════════════════
 
 export interface ThreeDocVerifyResult {
@@ -370,7 +370,7 @@ export interface ThreeDocVerifyResult {
 }
 
 /**
- * 三单比对：用 Claude 同时分析内部报价单、客户报价单、客户PO
+ * 三单比对：用 Claude 同时分析内部成本核算单、客户报价单、客户PO
  * 找出款号、价格、数量、交期、工艺等差异
  */
 export async function verifyThreeDocuments(
@@ -388,7 +388,7 @@ export async function verifyThreeDocuments(
     const content: Anthropic.ContentBlockParam[] = [];
 
     const docLabels: Record<string, string> = {
-      internal_quote: '内部报价单',
+      internal_quote: '内部成本核算单',
       customer_quote: '客户最终报价单',
       customer_po: '客户PO',
     };
@@ -419,11 +419,11 @@ export async function verifyThreeDocuments(
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1200,
-      system: `你是服装外贸订单审核专家。请比对内部报价单、客户报价单和客户PO这三份文件。
+      system: `你是服装外贸订单审核专家。请比对内部成本核算单、客户报价单和客户PO这三份文件。
 
 【最高优先级 — 价格一致性】
 首先必须严格检查"单价"是否三单一致。这是 CEO 强制的规则：
-- 内部报价单的单价 → 必须 = 我们给客户报价单的单价 → 必须 = 客户PO的单价
+- 内部成本核算单的单价 → 必须 = 我们给客户报价单的单价 → 必须 = 客户PO的单价
 - 任何币种、单价、起订量价格阶梯不一致 → 严重错误
 - 价格不一致的订单不允许创建，必须先和客户对齐 PO
 

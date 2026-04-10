@@ -363,7 +363,7 @@ export default async function OrderDetailPage({
                   {visibleAttachments.map((att: any) => {
                     const typeLabels: Record<string, string> = {
                       customer_po: '客户PO',
-                      internal_quote: '内部报价单',
+                      internal_quote: '内部成本核算单',
                       customer_quote: '客户报价单',
                       production_order: '生产制单',
                       trims_sheet: '辅料表',

@@ -378,7 +378,7 @@ const DIMENSIONS: RiskDimension[] = [
     evaluate: ctx => {
       const missing: string[] = [];
       if (!ctx.hasFile('customer_po')) missing.push('客户 PO');
-      if (!ctx.hasFile('internal_quote')) missing.push('内部报价单');
+      if (!ctx.hasFile('internal_quote')) missing.push('内部成本核算单');
       if (!ctx.hasFile('customer_quote')) missing.push('客户报价单');
       if (missing.length === 0) return { score: 0 };
       const score = Math.min(12, missing.length * 4);

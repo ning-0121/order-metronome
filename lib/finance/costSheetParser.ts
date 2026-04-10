@@ -176,7 +176,7 @@ export async function parseCostSheet(buffer: Buffer): Promise<CostSheetParseResu
 }
 
 /**
- * 计算原辅料预算（基于内部报价单单耗 + 订单数量）
+ * 计算原辅料预算（基于内部成本核算单单耗 + 订单数量）
  *
  * @param consumptionKg - 单件用量（KG/件）
  * @param quantity - 订单数量（件）
@@ -249,7 +249,7 @@ export function checkProcurementReasonability(
 /**
  * 加工费合理性验证
  *
- * @param internalEstimate - 内部报价单的加工费
+ * @param internalEstimate - 内部成本核算单的加工费
  * @param factoryQuote - 工厂实际报价
  */
 export function checkCmtReasonability(

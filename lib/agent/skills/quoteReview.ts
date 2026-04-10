@@ -4,7 +4,7 @@
  * 对比订单的内部成本 vs 客户报价，守护利润率。
  *
  * 数据来源：
- *   1. order_cost_baseline（内部报价单解析后的成本基线）
+ *   1. order_cost_baseline（内部成本核算单解析后的成本基线）
  *   2. orders 表的 FOB/DDP 报价
  *   3. 报价员 Quoter 的 RAG 数据（同品类历史利润率）
  *
@@ -55,7 +55,7 @@ export const quoteReviewSkill: SkillModule = {
         findings: [{
           category: '数据缺失',
           severity: 'medium',
-          label: '请先在"成本控制"Tab 上传内部报价单',
+          label: '请先在"成本控制"Tab 上传内部成本核算单',
           detail: '上传后系统会自动解析面料单耗、加工费、总成本，并对比客户报价',
         }],
         suggestions: [{ action: '去"成本控制"Tab 上传内部成本核算单', reason: '利润率审核需要成本基线' }],

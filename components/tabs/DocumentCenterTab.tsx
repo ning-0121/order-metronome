@@ -354,7 +354,7 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
 
 const FILE_TYPE_CONFIG: Array<{ type: string; label: string; icon: string; sensitive: boolean }> = [
   { type: 'customer_po', label: '客户PO', icon: '📋', sensitive: true },
-  { type: 'internal_quote', label: '内部报价单', icon: '💰', sensitive: true },
+  { type: 'internal_quote', label: '内部成本核算单', icon: '💰', sensitive: true },
   { type: 'customer_quote', label: '客户最终报价单', icon: '📄', sensitive: true },
   { type: 'production_order', label: '生产订单', icon: '🏭', sensitive: false },
   { type: 'trims_sheet', label: '原辅料单', icon: '🧵', sensitive: false },
