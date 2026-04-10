@@ -28,7 +28,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
       } catch {}
     };
     fetchCount();
-    const t = setInterval(fetchCount, 60000);
+    const t = setInterval(fetchCount, 120000);
     return () => { cancelled = true; clearInterval(t); };
   }, [isAdmin]);
 

@@ -3,7 +3,7 @@ import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { PWARegister } from "@/components/PWARegister";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentUserRole } from "@/lib/utils/user-role";
+import { getUserRoleFromEmail } from "@/lib/utils/user-role";
 
 // 去掉 Google Fonts — Vercel 构建时经常拉不到导致部署失败
 // 改用系统字体栈，视觉差异极小但部署 100% 稳定
@@ -30,7 +30,8 @@ export default async function RootLayout({
 }>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const { role, isAdmin } = user ? await getCurrentUserRole(supabase) : { role: undefined, isAdmin: false };
+  const role = user ? getUserRoleFromEmail(user.email) : undefined;
+  const isAdmin = role === 'admin';
 
   const currentYear = new Date().getFullYear();
 

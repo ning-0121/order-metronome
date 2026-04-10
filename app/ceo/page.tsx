@@ -41,15 +41,23 @@ export default async function CEOWarRoom() {
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const twoDaysLater = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-  // ===== 数据加载 =====
+  // ===== 数据加载（批量查询，避免 N+1） =====
   const { data: orders } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
-  const ordersWithMilestones: any[] = [];
-  if (orders) {
-    for (const o of orders as any[]) {
-      const { data: milestones } = await supabase.from('milestones').select('*').eq('order_id', o.id);
-      ordersWithMilestones.push({ ...o, milestones: milestones || [] });
-    }
+  const orderIds = (orders || []).map((o: any) => o.id);
+  const { data: allMilestones } = orderIds.length > 0
+    ? await supabase.from('milestones').select('*').in('order_id', orderIds)
+    : { data: [] };
+  // 按 order_id 分组
+  const milestonesByOrder = new Map<string, any[]>();
+  for (const m of (allMilestones || []) as any[]) {
+    const arr = milestonesByOrder.get(m.order_id) || [];
+    arr.push(m);
+    milestonesByOrder.set(m.order_id, arr);
   }
+  const ordersWithMilestones = (orders || []).map((o: any) => ({
+    ...o,
+    milestones: milestonesByOrder.get(o.id) || [],
+  }));
 
   // 风险分类（带详细原因）
   const orderStatusMap = new Map<string, ReturnType<typeof computeOrderStatus>>();

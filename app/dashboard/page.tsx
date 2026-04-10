@@ -126,37 +126,47 @@ export default async function DashboardPage() {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
-  // 待复盘订单
-  const { data: pendingRetroOrders } = await (supabase
-    .from('orders') as any)
-    .select('*')
-    .eq('retrospective_required', true)
-    .is('retrospective_completed_at', null)
-    .order('created_at', { ascending: false });
-
-  // 今日到期
-  const { data: todayDueMilestones } = await (supabase
-    .from('milestones') as any)
-    .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
-    .gte('due_at', `${today}T00:00:00`)
-    .lt('due_at', `${tomorrowStr}T00:00:00`)
-    .not('status', 'in', '("done","已完成","completed")')
-    .order('due_at', { ascending: true });
-
-  // 已超期（仅进行中的节点算逾期，未开始的不算）
-  const { data: allOverdueMilestones } = await (supabase
-    .from('milestones') as any)
-    .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
-    .lt('due_at', `${today}T00:00:00`)
-    .in('status', ['in_progress', '进行中'])
-    .order('due_at', { ascending: true });
-
-  // 获取当前用户涉及的订单 ID（创建的 + 被分配了关卡的）
-  const { data: createdOrders } = await (supabase.from('orders') as any)
-    .select('id').eq('owner_user_id', user.id);
-  const { data: assignedMilestones } = await (supabase.from('milestones') as any)
-    .select('order_id, sequence_number, status')
-    .eq('owner_user_id', user.id);
+  // 并行加载所有独立查询（避免串行等待）
+  const [
+    { data: pendingRetroOrders },
+    { data: todayDueMilestones },
+    { data: allOverdueMilestones },
+    { data: createdOrders },
+    { data: assignedMilestones },
+    { data: rawBlockedMilestones },
+  ] = await Promise.all([
+    // 待复盘订单
+    (supabase.from('orders') as any)
+      .select('*')
+      .eq('retrospective_required', true)
+      .is('retrospective_completed_at', null)
+      .order('created_at', { ascending: false }),
+    // 今日到期
+    (supabase.from('milestones') as any)
+      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
+      .gte('due_at', `${today}T00:00:00`)
+      .lt('due_at', `${tomorrowStr}T00:00:00`)
+      .not('status', 'in', '("done","已完成","completed")')
+      .order('due_at', { ascending: true }),
+    // 已超期（仅进行中的节点算逾期）
+    (supabase.from('milestones') as any)
+      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
+      .lt('due_at', `${today}T00:00:00`)
+      .in('status', ['in_progress', '进行中'])
+      .order('due_at', { ascending: true }),
+    // 当前用户涉及的订单
+    (supabase.from('orders') as any)
+      .select('id').eq('owner_user_id', user.id),
+    // 当前用户被分配的节点
+    (supabase.from('milestones') as any)
+      .select('order_id, sequence_number, status')
+      .eq('owner_user_id', user.id),
+    // 卡住清单
+    (supabase.from('milestones') as any)
+      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
+      .in('status', ['blocked', '卡单', '卡住'])
+      .order('created_at', { ascending: false }),
+  ]);
   const myOrderIds = new Set([
     ...(createdOrders || []).map((o: any) => o.id),
     ...(assignedMilestones || []).map((m: any) => m.order_id),
@@ -224,12 +234,7 @@ export default async function DashboardPage() {
     (m as any)._ownerName = m.owner_user_id ? ownerNameMap[m.owner_user_id] || null : null;
   }
 
-  // 卡住清单
-  const { data: rawBlockedMilestones } = await (supabase
-    .from('milestones') as any)
-    .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
-    .in('status', ['blocked', '卡单', '卡住'])
-    .order('created_at', { ascending: false });
+  // 卡住清单（已在 Promise.all 中加载）
   const blockedMilestones = filterByMyOrders(rawBlockedMilestones || []);
 
   const totalIssues =
