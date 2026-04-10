@@ -2061,3 +2061,13 @@ CREATE POLICY "order_cost_baseline_auth" ON public.order_cost_baseline FOR ALL U
 ALTER TABLE public.procurement_line_items ADD COLUMN IF NOT EXISTS qty_per_piece numeric(10,4);
 ALTER TABLE public.procurement_line_items ADD COLUMN IF NOT EXISTS order_quantity integer;
 ALTER TABLE public.procurement_line_items ADD COLUMN IF NOT EXISTS budget_qty numeric(12,2);
+
+-- ===== 2026-04-10 系统 KV 存储（邮件回补进度等） =====
+CREATE TABLE IF NOT EXISTS public.system_kv (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL DEFAULT '{}',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.system_kv ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "system_kv_service_only" ON public.system_kv;
+CREATE POLICY "system_kv_service_only" ON public.system_kv FOR ALL USING (auth.uid() IS NOT NULL);
