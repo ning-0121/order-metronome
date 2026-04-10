@@ -95,7 +95,71 @@ function NewOrderWizard() {
   const [selectedFactory, setSelectedFactory] = useState('');
   const [isImport, setIsImport] = useState(false);
   const [importCurrentStep, setImportCurrentStep] = useState('');
+  // PO AI 自动填表
+  const [poParsing, setPoParsing] = useState(false);
+  const [poParseResult, setPoParseResult] = useState<any>(null);
+  const [poAutoFilled, setPoAutoFilled] = useState(false);
   const isSampleOrder = searchParams.get('type') === 'sample';
+
+  // PO 上传后自动 AI 解析并填表
+  async function handlePOFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || file.size === 0) return;
+    setPoParsing(true);
+    setPoParseResult(null);
+    setPoAutoFilled(false);
+    try {
+      const { parsePO } = await import('@/app/actions/po-parser');
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await parsePO(fd);
+      if (res.ok && res.data) {
+        setPoParseResult(res.data);
+        // 自动填写表单字段
+        const form = e.target.closest('form');
+        if (form) {
+          const fill = (name: string, value: string | number) => {
+            const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null;
+            if (el && value) {
+              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+              )?.set || Object.getOwnPropertyDescriptor(
+                window.HTMLSelectElement.prototype, 'value'
+              )?.set;
+              nativeInputValueSetter?.call(el, String(value));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          };
+          const d = res.data;
+          if (d.customer_name) fill('customer_name', d.customer_name);
+          if (d.order_no) fill('customer_po_number', d.order_no);
+          if (d.order_date) fill('order_date', d.order_date.replace(/\./g, '-'));
+          // 算总数量
+          const totalQty = d.styles.reduce((sum: number, s: any) => sum + (s.total_qty || 0), 0);
+          if (totalQty > 0) fill('total_quantity', totalQty);
+          // 款数 = styles 数组长度
+          if (d.styles.length > 0) fill('style_count', d.styles.length);
+          // 颜色数 = 所有款的颜色去重
+          const allColors = d.styles.flatMap((s: any) => (s.colors || []).map((c: any) => c.color_en || c.color_cn));
+          const uniqueColors = new Set(allColors.filter(Boolean));
+          if (uniqueColors.size > 0) fill('color_count', uniqueColors.size);
+          // 交期
+          if (d.delivery_date) {
+            const deliveryDateFormatted = d.delivery_date.replace(/\./g, '-');
+            fill('etd', deliveryDateFormatted);
+            fill('warehouse_due_date', deliveryDateFormatted);
+            fill('factory_date', deliveryDateFormatted);
+          }
+          setPoAutoFilled(true);
+        }
+      }
+    } catch (err: any) {
+      console.error('[PO auto-parse]', err?.message);
+    } finally {
+      setPoParsing(false);
+    }
+  }
 
   useEffect(() => {
     const stepParam = searchParams.get('step');
@@ -779,14 +843,14 @@ function NewOrderWizard() {
               </h3>
               <div className="space-y-3">
                 {[
-                  { name: 'customer_po_file', label: '客户 PO（可多个）', required: true, multiple: true },
+                  { name: 'customer_po_file', label: '客户 PO（可多个）', required: true, multiple: true, onPOChange: handlePOFileChange },
                   { name: 'internal_quote_file', label: '内部成本核算单', required: true },
                   { name: 'customer_quote_file', label: '客户最终报价单', required: true },
                   { name: 'production_order_file', label: '生产制单', required: false, hint: '财务审核后2日内上传' },
                   { name: 'trims_sheet_file', label: '辅料表', required: false },
                   { name: 'packing_requirement_file', label: '装箱要求', required: false },
                   { name: 'tech_pack_file', label: '工艺单 Tech Pack', required: false },
-                ].map(({ name, label, required, hint, multiple }: any) => (
+                ].map(({ name, label, required, hint, multiple, onPOChange }: any) => (
                   <div key={name} className="flex items-center gap-4 p-3 rounded-lg border border-gray-200">
                     <div className="w-44 flex-shrink-0">
                       <span className="text-sm font-medium text-gray-700">{label}</span>
@@ -796,15 +860,64 @@ function NewOrderWizard() {
                         <span className="text-gray-400 ml-1 text-xs">可选</span>
                       )}
                       {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
+                      {name === 'customer_po_file' && poParsing && (
+                        <p className="text-xs text-indigo-600 mt-0.5 animate-pulse">AI 识别中...</p>
+                      )}
                     </div>
                     <input type="file" name={name}
                       multiple={!!multiple}
                       accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                      onChange={onPOChange || undefined}
                       className="flex-1 text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
                   </div>
                 ))}
               </div>
               <p className="text-xs text-gray-400 mt-2">支持 PDF、Excel、Word、JPG、PNG，单文件 ≤ 20MB（文件直传云存储，不影响订单创建）</p>
+
+              {/* PO AI 识别结果预览 */}
+              {poAutoFilled && poParseResult && (
+                <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-green-600 text-sm font-semibold">AI 已从 PO 自动填入表单</span>
+                    {poParseResult.confidence_notes?.length > 0 && (
+                      <span className="text-xs text-amber-600">（{poParseResult.confidence_notes.length} 项需确认）</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div><span className="text-gray-500">客户：</span><span className="font-medium">{poParseResult.customer_name || '—'}</span></div>
+                    <div><span className="text-gray-500">PO号：</span><span className="font-medium">{poParseResult.order_no || '—'}</span></div>
+                    <div><span className="text-gray-500">款数：</span><span className="font-medium">{poParseResult.styles?.length || 0}</span></div>
+                    <div>
+                      <span className="text-gray-500">总数：</span>
+                      <span className="font-medium">{poParseResult.styles?.reduce((s: number, st: any) => s + (st.total_qty || 0), 0) || 0} 件</span>
+                    </div>
+                  </div>
+                  {/* 款式明细 */}
+                  {poParseResult.styles?.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-green-200 space-y-1">
+                      {poParseResult.styles.map((s: any, i: number) => (
+                        <div key={i} className="text-xs text-gray-600">
+                          <span className="font-medium">{s.style_no || `款${i + 1}`}</span>
+                          {s.material && <span className="ml-2 text-gray-400">{s.material}</span>}
+                          <span className="ml-2">{s.total_qty} 件</span>
+                          <span className="ml-2 text-gray-400">
+                            {(s.colors || []).map((c: any) => `${c.color_cn || c.color_en}(${c.qty})`).join(' / ')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* 置信度备注 */}
+                  {poParseResult.confidence_notes?.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-green-200">
+                      {poParseResult.confidence_notes.map((n: string, i: number) => (
+                        <p key={i} className="text-xs text-amber-600">⚠ {n}</p>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-400 mt-2">请核对以上信息，如有错误请手动修正表单字段</p>
+                </div>
+              )}
             </div>
 
             {/* 提交按钮上方的错误提示（确保用户能看到） */}
