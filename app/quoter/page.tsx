@@ -130,8 +130,8 @@ export default async function QuoterHomePage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {quotes.map((q: any) => (
-                  <tr key={q.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 font-mono text-xs text-indigo-600">
+                  <tr key={q.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => window.location.href = `/quoter/${q.id}`}>
+                    <td className="px-4 py-2.5 font-mono text-xs text-indigo-600 hover:underline">
                       {q.quote_no}
                     </td>
                     <td className="px-4 py-2.5">{q.customer_name || '-'}</td>

@@ -18,6 +18,7 @@ export { calculateCmt } from './cmt/calculator';
 export { calculateCmtWithRAG } from './cmt/rag';
 export { DEFAULT_SIZE_CHARTS, getChartOptions } from './fabric/defaultSizeCharts';
 export { DEFAULT_OPERATIONS, getDefaultOperationsForType } from './cmt/defaultOperations';
+export { estimateTrims } from './trim/estimator';
 
 /**
  * 一次性计算完整报价（面料 + 加工 + 其他 + 利润 → 最终报价）

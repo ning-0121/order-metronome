@@ -158,6 +158,271 @@ export async function deleteQuote(id: string): Promise<{ error?: string; success
 }
 
 /**
+ * 导出报价单 Excel（发给客户的正式报价单）
+ */
+export async function exportQuoteSheet(quoteId: string): Promise<{
+  error?: string;
+  base64?: string;
+  fileName?: string;
+}> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok) return { error: auth.error };
+
+  const supabase = await createClient();
+  const { data: q } = await (supabase.from('quoter_quotes') as any)
+    .select('*').eq('id', quoteId).single();
+  if (!q) return { error: '报价不存在' };
+
+  const ExcelJS = await import('exceljs');
+  const wb = new ExcelJS.default.Workbook();
+  wb.creator = 'Qimo Activewear';
+  const ws = wb.addWorksheet('Quotation');
+
+  // 标题
+  ws.mergeCells('A1:F1');
+  const title = ws.getCell('A1');
+  title.value = 'YIWU QIMO CLOTHING CO., LTD — QUOTATION';
+  title.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+  title.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 32;
+
+  // 基本信息
+  const info = [
+    ['Quote No.', q.quote_no || '—'],
+    ['Date', new Date(q.created_at).toLocaleDateString('en-US')],
+    ['Customer', q.customer_name || '—'],
+    ['Style', `${q.style_no || ''} ${q.style_name || ''}`],
+    ['Quantity', `${q.quantity || 0} PCS`],
+    ['Currency', q.currency || 'USD'],
+  ];
+  info.forEach(([label, value], i) => {
+    const row = ws.getRow(i + 3);
+    row.getCell(1).value = label;
+    row.getCell(1).font = { bold: true, color: { argb: 'FF374151' } };
+    row.getCell(2).value = value;
+  });
+
+  // 报价明细
+  const detailStart = 10;
+  ws.getRow(detailStart).values = ['Item', 'Description', 'Unit Cost', 'Currency'];
+  ws.getRow(detailStart).font = { bold: true };
+  ws.getRow(detailStart).eachCell(c => {
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+    c.border = { bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } } };
+  });
+
+  const rate = q.exchange_rate || 7.2;
+  const currency = q.currency || 'USD';
+  const toC = (rmb: number) => currency === 'RMB' ? rmb : Number((rmb / rate).toFixed(3));
+
+  const items = [
+    ['Fabric', `${q.fabric_type || 'Main fabric'} (${q.fabric_consumption_kg?.toFixed(3) || '?'} KG/pc)`, toC(q.fabric_cost_per_piece || 0)],
+    ['CMT', 'Cut, Make & Trim', toC(q.cmt_cost_per_piece || 0)],
+    ['Trims', 'Labels, tags, accessories', toC(q.trim_cost_per_piece || 0)],
+    ['Packing', 'Polybag, hangtag, carton', toC(q.packing_cost_per_piece || 0)],
+    ['Logistics', 'Inland transport', toC(q.logistics_cost_per_piece || 0)],
+  ];
+  items.forEach(([item, desc, cost], i) => {
+    const row = ws.getRow(detailStart + 1 + i);
+    row.values = [item, desc, cost, currency];
+  });
+
+  // 合计
+  const totalRow = ws.getRow(detailStart + 7);
+  totalRow.values = ['', 'TOTAL PER PIECE', q.quote_price_per_piece || 0, currency];
+  totalRow.font = { bold: true, size: 12 };
+  totalRow.getCell(3).font = { bold: true, size: 14, color: { argb: 'FF4F46E5' } };
+
+  const grandRow = ws.getRow(detailStart + 8);
+  grandRow.values = ['', `TOTAL (${q.quantity || 0} PCS)`, Number(((q.quote_price_per_piece || 0) * (q.quantity || 0)).toFixed(2)), currency];
+  grandRow.font = { bold: true };
+
+  // 条款
+  const termsStart = detailStart + 10;
+  ws.getCell(`A${termsStart}`).value = 'Terms:';
+  ws.getCell(`A${termsStart}`).font = { bold: true };
+  ws.getCell(`A${termsStart + 1}`).value = '• Validity: 30 days from quote date';
+  ws.getCell(`A${termsStart + 2}`).value = '• MOQ: As per discussion';
+  ws.getCell(`A${termsStart + 3}`).value = '• Delivery: 45 days after PO confirmation';
+
+  // 列宽
+  [14, 30, 12, 8, 12, 12].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
+  const fileName = `Quotation_${q.quote_no || 'draft'}_${q.customer_name || ''}.xlsx`;
+
+  return { base64, fileName };
+}
+
+/**
+ * 复制报价（基于现有报价创建新报价）
+ */
+export async function duplicateQuote(quoteId: string): Promise<{
+  error?: string;
+  newQuoteId?: string;
+  newQuoteNo?: string;
+}> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok || !auth.userId) return { error: auth.error };
+
+  const supabase = await createClient();
+  const { data: original } = await (supabase.from('quoter_quotes') as any)
+    .select('*').eq('id', quoteId).single();
+  if (!original) return { error: '原报价不存在' };
+
+  // 生成新报价号
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const { count } = await (supabase.from('quoter_quotes') as any)
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  const seq = String((count || 0) + 1).padStart(3, '0');
+  const quoteNo = `QT-${today}-${seq}`;
+
+  const { id, quote_no, created_at, updated_at, fabric_cost_per_piece, ...fields } = original as any;
+
+  const { data: newQ, error } = await (supabase.from('quoter_quotes') as any)
+    .insert({
+      ...fields,
+      quote_no: quoteNo,
+      status: 'draft',
+      created_by: auth.userId,
+      notes: `复制自 ${(original as any).quote_no}`,
+    })
+    .select('id, quote_no')
+    .single();
+
+  if (error) return { error: error.message };
+  revalidatePath('/quoter');
+  return { newQuoteId: (newQ as any).id, newQuoteNo: (newQ as any).quote_no };
+}
+
+/**
+ * 报价转订单（成交后一键创建订单草稿）
+ */
+export async function convertQuoteToOrder(quoteId: string): Promise<{
+  error?: string;
+  orderId?: string;
+}> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok) return { error: auth.error };
+
+  const supabase = await createClient();
+  const { data: q } = await (supabase.from('quoter_quotes') as any)
+    .select('*').eq('id', quoteId).single();
+  if (!q) return { error: '报价不存在' };
+
+  // 更新报价状态为 won
+  await (supabase.from('quoter_quotes') as any)
+    .update({ status: 'won', updated_at: new Date().toISOString() })
+    .eq('id', quoteId);
+
+  revalidatePath('/quoter');
+  // 返回新建订单页 URL 带预填参数
+  return {
+    orderId: `/orders/new?customer=${encodeURIComponent((q as any).customer_name || '')}&style=${encodeURIComponent((q as any).style_no || '')}&qty=${(q as any).quantity || 0}&from_quote=${(q as any).quote_no}`,
+  };
+}
+
+/**
+ * 提交训练反馈（报价成交后对比实际成交价）
+ */
+export async function submitQuoteFeedback(
+  quoteId: string,
+  feedbackType: 'fabric_consumption' | 'cmt_cost' | 'total_price',
+  actualValue: number,
+): Promise<{ error?: string }> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok || !auth.userId) return { error: auth.error };
+
+  const supabase = await createClient();
+  const { data: q } = await (supabase.from('quoter_quotes') as any)
+    .select('fabric_consumption_kg, cmt_cost_per_piece, quote_price_per_piece')
+    .eq('id', quoteId).single();
+  if (!q) return { error: '报价不存在' };
+
+  const predictedMap: Record<string, number> = {
+    fabric_consumption: (q as any).fabric_consumption_kg || 0,
+    cmt_cost: (q as any).cmt_cost_per_piece || 0,
+    total_price: (q as any).quote_price_per_piece || 0,
+  };
+
+  const { error } = await (supabase.from('quoter_training_feedback') as any).insert({
+    quote_id: quoteId,
+    feedback_type: feedbackType,
+    predicted_value: predictedMap[feedbackType],
+    actual_value: actualValue,
+    corrected_by: auth.userId,
+  });
+
+  if (error) return { error: error.message };
+  revalidatePath('/quoter');
+  return {};
+}
+
+/**
+ * 多报价对比（最多 5 个）
+ */
+export async function compareQuotes(quoteIds: string[]): Promise<{
+  data?: any[];
+  error?: string;
+}> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok) return { error: auth.error };
+  if (quoteIds.length > 5) return { error: '最多对比 5 个报价' };
+
+  const supabase = await createClient();
+  const { data, error } = await (supabase.from('quoter_quotes') as any)
+    .select('*')
+    .in('id', quoteIds);
+  if (error) return { error: error.message };
+  return { data: data || [] };
+}
+
+/**
+ * 工价月度趋势（按品类）
+ */
+export async function getCmtTrend(garmentType?: string): Promise<{
+  data?: Array<{ month: string; avgRate: number; count: number }>;
+  error?: string;
+}> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok) return { error: auth.error };
+
+  const supabase = await createClient();
+  let query = (supabase.from('quoter_cmt_training_samples') as any)
+    .select('total_cmt_rmb, created_at, garment_type')
+    .eq('status', 'confirmed')
+    .not('total_cmt_rmb', 'is', null)
+    .order('created_at', { ascending: true });
+
+  if (garmentType) query = query.eq('garment_type', garmentType);
+
+  const { data, error } = await query;
+  if (error) return { error: error.message };
+
+  // 按月分组
+  const byMonth: Record<string, { total: number; count: number }> = {};
+  for (const r of (data || []) as any[]) {
+    const month = String(r.created_at).slice(0, 7); // YYYY-MM
+    if (!byMonth[month]) byMonth[month] = { total: 0, count: 0 };
+    byMonth[month].total += r.total_cmt_rmb;
+    byMonth[month].count++;
+  }
+
+  const trend = Object.entries(byMonth)
+    .map(([month, { total, count }]) => ({
+      month,
+      avgRate: Number((total / count).toFixed(2)),
+      count,
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  return { data: trend };
+}
+
+/**
  * 更新报价状态（sent/won/lost/abandoned）
  */
 export async function updateQuoteStatus(
