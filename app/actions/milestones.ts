@@ -1345,14 +1345,28 @@ export async function assignMerchandiser(
   // 批量更新 — 排除生产主管固定节点（工厂匹配确认 + 产前样准备完成）
   // CEO 2026-04-09：这两个节点永远绑定生产主管，指派跟单时不能覆盖
   const { PRODUCTION_MANAGER_FIXED_STEPS } = await import('@/lib/domain/default-assignees');
-  const { data: updated, error: updateErr } = await (supabase.from('milestones') as any)
-    .update({ owner_user_id: merchandiserUserId })
-    .eq('order_id', orderId)
-    .eq('owner_role', 'merchandiser')
-    .not('step_key', 'in', `(${PRODUCTION_MANAGER_FIXED_STEPS.map(s => `"${s}"`).join(',')})`)
-    .select('id');
 
-  if (updateErr) return { error: updateErr.message };
+  // 先查出所有该订单的 merchandiser 节点
+  const { data: allMerchMs } = await (supabase.from('milestones') as any)
+    .select('id, step_key')
+    .eq('order_id', orderId)
+    .eq('owner_role', 'merchandiser');
+
+  // 过滤掉生产主管固定节点
+  const pmFixedSet = new Set(PRODUCTION_MANAGER_FIXED_STEPS);
+  const toUpdate = ((allMerchMs || []) as any[])
+    .filter(m => !pmFixedSet.has(m.step_key))
+    .map(m => m.id);
+
+  let updated: any[] = [];
+  if (toUpdate.length > 0) {
+    const { data: upd, error: updateErr } = await (supabase.from('milestones') as any)
+      .update({ owner_user_id: merchandiserUserId })
+      .in('id', toUpdate)
+      .select('id');
+    if (updateErr) return { error: updateErr.message };
+    updated = upd || [];
+  }
 
   // 日志
   const updatedCount = (updated || []).length;
