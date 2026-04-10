@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
+import { PWARegister } from "@/components/PWARegister";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUserRole } from "@/lib/utils/user-role";
 
@@ -39,17 +40,10 @@ export default async function RootLayout({
         className="bg-white text-gray-900 antialiased flex flex-col min-h-screen font-sans"
       >
         <Navbar isAdmin={isAdmin} />
+        <PWARegister />
         <main className="container mx-auto bg-white px-4 py-8 flex-1">
           {children}
         </main>
-        {/* PWA Service Worker 注册 */}
-        <script dangerouslySetInnerHTML={{ __html: `
-          if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js').catch(function() {});
-            });
-          }
-        `}} />
         <footer className="border-t border-gray-200 bg-gray-50 py-6 mt-auto">
           <div className="container mx-auto px-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs text-gray-500">
