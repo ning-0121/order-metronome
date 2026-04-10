@@ -145,6 +145,16 @@ export default async function AnalyticsPage() {
           </div>
           <div className="text-sm text-indigo-600 font-medium">查看详情 →</div>
         </Link>
+        <Link href="/analytics/execution" className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all ring-2 ring-indigo-200">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-2xl">⚡</span>
+            <div>
+              <h3 className="font-bold text-gray-900">执行力看板</h3>
+              <p className="text-xs text-gray-500">响应速度、逾期率、被上报次数排名</p>
+            </div>
+          </div>
+          <div className="text-sm text-indigo-600 font-medium">查看详情 →</div>
+        </Link>
       </div>
 
       {/* ===== 各角色效率 ===== */}
