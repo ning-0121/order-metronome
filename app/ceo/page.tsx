@@ -71,6 +71,8 @@ export default async function CEOWarRoom() {
   const blockedMilestones = (allMilestonesWithOrders || []).filter((m: any) =>
     _isBlocked(m.status)
   );
+  const overdueCount = overdueMilestones.length;
+  const blockedCount = blockedMilestones.length;
 
   // 用户信息映射
   const allUserIds = [...new Set([
