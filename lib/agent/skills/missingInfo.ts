@@ -72,6 +72,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.hasFile('customer_po'),
     suggestion: () => '联系客户索要正式 PO 文件',
+    urgentWithin: 7,
   },
   {
     id: 'missing_internal_quote',
@@ -83,6 +84,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.hasFile('internal_quote'),
     suggestion: () => '上传内部报价单（含加工费/面料/辅料/包装/物流明细）',
+    urgentWithin: 7,
   },
   {
     id: 'missing_customer_quote',
@@ -94,6 +96,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.hasFile('customer_quote'),
     suggestion: () => '上传我们发给客户的最终报价单',
+    urgentWithin: 7,
   },
   {
     id: 'missing_production_order',
@@ -105,6 +108,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.hasFile('production_order') && !ctx.isStepDone('production_order_upload'),
     suggestion: () => '上传生产订单（可由 AI 生成或手动制作）',
+    urgentWithin: 7,
   },
   {
     id: 'missing_trims_sheet',
@@ -116,6 +120,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.hasFile('trims_sheet') && !ctx.isStepDone('production_order_upload'),
     suggestion: () => '上传原辅料单（面料/纽扣/拉链/线/标签等明细）',
+    urgentWithin: 7,
   },
   {
     id: 'missing_packing_requirement',
@@ -152,7 +157,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'merchandiser',
     isMissing: ctx => ctx.isStepActive('mid_qc_check') && !ctx.hasFile('qc_report'),
     suggestion: () => '中查阶段缺 QC 报告，工厂或第三方需提交',
-    // 中查阶段已经进入 in_progress 才会触发，不需要 urgentWithin
+    urgentWithin: 7, // 中查到期前 7 天才报严重
   },
   {
     id: 'missing_qc_report_final',
@@ -164,6 +169,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'merchandiser',
     isMissing: ctx => ctx.isStepActive('final_qc_check') && !ctx.hasFile('qc_report'),
     suggestion: () => '尾查必须有 QC 报告才能放行',
+    urgentWithin: 7,
   },
   {
     id: 'missing_packing_list',
@@ -175,6 +181,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => ctx.isStepActive('booking_done') && !ctx.hasFile('packing_list'),
     suggestion: () => '订舱前必须出装箱单',
+    urgentWithin: 10,
   },
 
   // ════════ 信息字段类规则 ════════
@@ -188,6 +195,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'merchandiser',
     isMissing: ctx => !ctx.order.factory_id && !ctx.order.factory_name,
     suggestion: () => '订单还未指定工厂，跟单需确认',
+    urgentWithin: 7,
   },
   {
     id: 'missing_factory_date',
@@ -199,6 +207,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.order.factory_date,
     suggestion: () => '订单未填出厂日期，影响整个排期',
+    urgentWithin: 7,
   },
   {
     id: 'missing_etd_for_ddp',
@@ -210,6 +219,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => ctx.order.incoterm === 'DDP' && !ctx.order.etd,
     suggestion: () => 'DDP 订单必须填 ETD（离港日）',
+    urgentWithin: 14,
   },
   {
     id: 'missing_eta_for_ddp',
@@ -221,6 +231,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => ctx.order.incoterm === 'DDP' && !ctx.order.warehouse_due_date,
     suggestion: () => 'DDP 订单必须填 ETA（到港 / 到仓日）',
+    urgentWithin: 14,
   },
   {
     id: 'missing_quantity',
@@ -232,6 +243,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.order.quantity || ctx.order.quantity <= 0,
     suggestion: () => '订单数量未填或为零',
+    urgentWithin: 5,
   },
   {
     id: 'missing_style_count',
@@ -243,6 +255,7 @@ const RULES: MissingRule[] = [
     whoShouldFix: 'sales',
     isMissing: ctx => !ctx.order.style_count || !ctx.order.color_count,
     suggestion: () => '款数 / 颜色数未填，影响产能评估',
+    urgentWithin: 7,
   },
 
   // ════════ 确认类规则 ════════
@@ -294,7 +307,7 @@ export const missingInfoSkill: SkillModule = {
     return JSON.stringify({
       orderId: input.orderId,
       // version 用于规则更新时强制失效旧缓存
-      version: 'v2-urgentWithin',
+      version: 'v3-urgentAll',
     });
   },
 
@@ -410,7 +423,7 @@ export const missingInfoSkill: SkillModule = {
     if (totalCount === 0) {
       summary = '✓ 当前阶段所有必需资料齐全';
     } else if (blockingCount > 0) {
-      summary = `${blockingCount} 项关键资料缺失，会卡住生产`;
+      summary = `${blockingCount} 项关键资料缺失，会卡住后续节点`;
     } else {
       summary = `${totalCount} 项资料待补充`;
     }

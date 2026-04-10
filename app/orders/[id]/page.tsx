@@ -8,8 +8,6 @@ import { DelayRequestsList } from '@/components/DelayRequestsList';
 import { OrderScoreCard } from '@/components/OrderScoreCard';
 import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
-import { OrderAIRisk } from '@/components/OrderAIRisk';
-import { OrderAgentSuggestions } from '@/components/OrderAgentSuggestions';
 import { LiveScorePreview } from '@/components/LiveScorePreview';
 import { DocumentCenterTab } from '@/components/tabs/DocumentCenterTab';
 import { normalizeMilestoneStatus, isDoneStatus, isActiveStatus } from '@/lib/domain/types';
@@ -348,34 +346,6 @@ export default async function OrderDetailPage({
                   </div>
                 )}
               </dl>
-            </div>
-
-            {/* AI 订单风险分析 */}
-            <div className="md:col-span-2">
-              <OrderAIRisk contextData={(() => {
-                const parts: string[] = [];
-                parts.push(`订单${orderData.order_no}，客户：${orderData.customer_name}，工厂：${orderData.factory_name || '未指定'}`);
-                parts.push(`类型：${orderData.order_type}，贸易：${orderData.incoterm}，数量：${orderData.quantity || '未知'}件`);
-                if (orderData.is_new_customer) parts.push('⚠ 新客户首单');
-                if (orderData.is_new_factory) parts.push('⚠ 新工厂首单');
-                if (orderData.special_tags?.length > 0) parts.push(`风险标签：${orderData.special_tags.join('、')}`);
-                const doneMilestones = (milestones as any[]).filter((m: any) => isDoneStatus(m.status)).length;
-                const totalMilestones = (milestones as any[]).length;
-                const overdueMilestones = (milestones as any[]).filter((m: any) => isActiveStatus(m.status) && m.due_at && new Date(m.due_at) < new Date());
-                parts.push(`进度：${doneMilestones}/${totalMilestones}完成`);
-                if (overdueMilestones.length > 0) parts.push(`逾期节点：${overdueMilestones.map((m: any) => m.name).join('、')}`);
-                const etdDate = orderData.etd || orderData.warehouse_due_date;
-                if (etdDate) {
-                  const daysLeft = Math.ceil((new Date(etdDate).getTime() - new Date().getTime()) / 86400000);
-                  parts.push(`交期${daysLeft > 0 ? `剩余${daysLeft}天` : `已超${Math.abs(daysLeft)}天`}`);
-                }
-                return parts.join('，');
-              })()} orderId={id} />
-            </div>
-
-            {/* Agent 可执行建议 */}
-            <div className="md:col-span-2">
-              <OrderAgentSuggestions orderId={id} />
             </div>
 
             {/* 订单资料 */}

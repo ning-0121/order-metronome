@@ -768,13 +768,23 @@ export async function updateOrder(id: string, formData: FormData) {
     updates.incoterm = incoterm;
     const etd = formData.get('etd') as string | null;
     const warehouse_due_date = formData.get('warehouse_due_date') as string | null;
-    
-    if (incoterm === 'FOB') {
+    const factory_date = formData.get('factory_date') as string | null;
+
+    if (incoterm === 'DDP') {
+      updates.etd = etd;
+      updates.warehouse_due_date = warehouse_due_date;
+      // 校验：ETA 必须晚于 ETD
+      if (etd && warehouse_due_date && new Date(warehouse_due_date) <= new Date(etd)) {
+        return { error: `ETA（${warehouse_due_date}）必须晚于 ETD（${etd}）` };
+      }
+      // 校验：ETD 必须晚于出厂日期
+      if (etd && factory_date && new Date(etd) < new Date(factory_date)) {
+        return { error: `ETD（${etd}）不能早于出厂日期（${factory_date}）` };
+      }
+    } else {
+      // FOB: 只用 factory_date 作为锚点
       updates.etd = etd;
       updates.warehouse_due_date = null;
-    } else {
-      updates.warehouse_due_date = warehouse_due_date;
-      updates.etd = null;
     }
   }
   
