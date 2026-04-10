@@ -47,7 +47,7 @@ export const customerEmailInsightsSkill: SkillModule = {
   cacheTtlMs: 2 * 60 * 60 * 1000, // 2h
 
   hashInput: (input: SkillInput) =>
-    JSON.stringify({ orderId: input.orderId, version: 'v2-conservative' }),
+    JSON.stringify({ orderId: input.orderId, version: 'v3-90days' }),
 
   async run(input: SkillInput, ctx: SkillContext): Promise<SkillResult> {
     if (!input.orderId) throw new Error('customer_email_insights requires orderId');
@@ -64,18 +64,18 @@ export const customerEmailInsightsSkill: SkillModule = {
       return emptyResult('订单未关联客户，无法分析邮件');
     }
 
-    // 2. 拉取最近 30 天该客户邮件（先按客户名匹配，兜底按该订单的 order_id）
-    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    // 2. 拉取最近 90 天该客户邮件（先按客户名匹配，兜底按该订单的 order_id）
+    const since = new Date(Date.now() - 90 * 86400000).toISOString();
     const { data: mails } = await (ctx.supabase.from('mail_inbox') as any)
       .select('id, from_email, subject, raw_body, received_at, processing_status, order_id')
       .or(`customer_id.eq.${customerName},order_id.eq.${input.orderId}`)
       .gte('received_at', since)
       .order('received_at', { ascending: false })
-      .limit(30);
+      .limit(50);
 
     const emails = (mails || []) as any[];
     if (emails.length === 0) {
-      return emptyResult(`最近 30 天没有 ${customerName} 的邮件记录`);
+      return emptyResult(`最近 90 天没有 ${customerName} 的邮件记录`);
     }
 
     // 3. 拼装邮件摘要给 AI（节省 tokens — 每封最多 800 字正文）
@@ -135,7 +135,7 @@ ${knowledgeBlock}
 贸易条款：${order.incoterm}
 出厂日：${order.factory_date || '未填'}
 
-**最近 30 天邮件（${emails.length} 封，从新到旧）**：
+**最近 90 天邮件（${emails.length} 封，从新到旧）**：
 
 ${emailDigest}`;
 
