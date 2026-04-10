@@ -269,6 +269,49 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* ⚡ 今日行动 — 最优先的 3 件事 */}
+      {myOverdue.length + (filteredTodayDue?.length || 0) > 0 && (
+        <div className="bg-gradient-to-r from-red-50 to-amber-50 rounded-xl border border-red-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">⚡</span>
+            <h2 className="text-sm font-bold text-red-800">今天必须做的事</h2>
+          </div>
+          <div className="space-y-2">
+            {myOverdue.slice(0, 3).map((m: any, i: number) => {
+              const days = Math.ceil((new Date().getTime() - new Date(m.due_at).getTime()) / 86400000);
+              return (
+                <a key={m.id} href={`/orders/${m.order_id || m.orders?.id}?tab=progress`}
+                  className="flex items-center gap-3 p-3 bg-white rounded-lg border border-red-100 hover:border-red-300 transition-all">
+                  <span className="text-lg">🔴</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate">
+                      {m.orders?.order_no} · {m.name}
+                    </div>
+                    <div className="text-xs text-red-600">
+                      逾期 {days} 天 · {m.orders?.customer_name} · {(m as any)._ownerName || ''}
+                    </div>
+                  </div>
+                  <span className="text-xs text-indigo-600 shrink-0">处理 →</span>
+                </a>
+              );
+            })}
+            {filteredTodayDue?.slice(0, 2).map((m: any) => (
+              <a key={m.id} href={`/orders/${m.order_id || m.orders?.id}?tab=progress`}
+                className="flex items-center gap-3 p-3 bg-white rounded-lg border border-amber-100 hover:border-amber-300 transition-all">
+                <span className="text-lg">🟠</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-900 truncate">
+                    {m.orders?.order_no} · {m.name}
+                  </div>
+                  <div className="text-xs text-amber-600">今天截止 · {m.orders?.customer_name}</div>
+                </div>
+                <span className="text-xs text-indigo-600 shrink-0">处理 →</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* AI 今日建议 */}
       <DashboardAIAdvice contextData={(() => {
         const parts: string[] = [];
