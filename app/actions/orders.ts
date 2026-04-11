@@ -658,6 +658,12 @@ export async function createOrder(
     }
   } catch {} // 通知失败不阻断订单创建
 
+  // ── 推送到财务系统 ──
+  try {
+    const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+    await syncOrderToFinance(orderData, 'order.created');
+  } catch {} // 财务推送失败不阻断订单创建
+
   // ── DONE ──
   revalidatePath('/orders');
   revalidatePath('/dashboard');
@@ -833,15 +839,21 @@ export async function activateOrderAction(orderId: string) {
   }
 
   const result = await activateOrder(orderId);
-  
+
   if (result.error) {
     return { error: result.error };
   }
-  
+
+  // 推送到财务系统
+  try {
+    const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+    if (result.data) await syncOrderToFinance(result.data as Record<string, unknown>, 'order.activated');
+  } catch {}
+
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/orders');
   revalidatePath('/dashboard');
-  
+
   return { data: result.data };
 }
 

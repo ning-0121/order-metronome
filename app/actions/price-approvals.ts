@@ -56,6 +56,25 @@ export async function requestPriceApproval(payload: {
 
   if (error) return { error: error.message };
 
+  // 推送到财务系统
+  try {
+    const { pushPriceApprovalToFinance } = await import('@/lib/integration/finance-sync');
+    const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
+    await pushPriceApprovalToFinance({
+      id: (data as any).id,
+      order_no: '',
+      customer_name: payload.customer_name || '',
+      po_number: payload.po_number || '',
+      requested_by: user.id,
+      requester_name: (profile as any)?.name || user.email?.split('@')[0] || '',
+      price_diffs: payload.price_diffs,
+      summary: payload.summary || '',
+      form_snapshot: payload.form_snapshot,
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+      created_at: new Date().toISOString(),
+    });
+  } catch {} // 推送失败不阻断
+
   revalidatePath('/admin/price-approvals');
   return { id: (data as any).id };
 }
