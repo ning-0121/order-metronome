@@ -119,15 +119,9 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
                 </p>
               </div>
               {alert.level === 'red' && (
-                <button
-                  onClick={() => handleSendAlert(
-                    alert.title.includes('面料') ? 'procurement_over_budget' : 'cmt_over_estimate',
-                    `${orderNo}: ${alert.message}`,
-                  )}
-                  className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 ml-3"
-                >
-                  🔔 通知三方
-                </button>
+                <span className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-red-100 text-red-700 ml-3">
+                  已自动通知财务+CEO
+                </span>
               )}
             </div>
           ))}
@@ -263,6 +257,25 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
                   summary.cmt.cmtCheck.status === 'warning' ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'
                 }`}>
                   {summary.cmt.cmtCheck.message}
+                </div>
+              )}
+              {/* 加工费进度条 */}
+              {b.cmt_internal_estimate && b.cmt_factory_quote && (
+                <div className="mt-3 space-y-1">
+                  <div className="flex gap-1 text-[10px] text-gray-400">
+                    <span className="flex-1">内部估价 ¥{b.cmt_internal_estimate}</span>
+                    <span>工厂报价 ¥{b.cmt_factory_quote}</span>
+                  </div>
+                  <div className="relative h-3 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="absolute left-0 top-0 h-full bg-indigo-200 rounded-full" style={{ width: '100%' }} />
+                    <div
+                      className={`absolute left-0 top-0 h-full rounded-full ${
+                        summary?.cmt.cmtCheck?.status === 'over_limit' ? 'bg-red-500' :
+                        summary?.cmt.cmtCheck?.status === 'warning' ? 'bg-amber-500' : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${Math.min(120, (b.cmt_factory_quote / b.cmt_internal_estimate) * 100)}%` }}
+                    />
+                  </div>
                 </div>
               )}
               <div className="border-t border-gray-100 pt-2">

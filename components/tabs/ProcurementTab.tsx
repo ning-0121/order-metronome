@@ -75,8 +75,12 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
       unit_price: formPrice ? Number(formPrice) : undefined,
       qty_per_piece: formQtyPerPiece ? Number(formQtyPerPiece) : undefined,
     });
-    if (res.error) alert(res.error);
-    else {
+    if (res.error) {
+      alert(res.error);
+    } else {
+      if (res.warning) {
+        alert('⚠ 预算预警：' + res.warning);
+      }
       setFormName(''); setFormSpec(''); setFormQty(''); setFormPrice(''); setFormQtyPerPiece('');
       setShowAddForm(false);
       load();

@@ -123,15 +123,40 @@ export async function addProcurementItem(
 
   const supabase = await createClient();
 
-  // 如果填了单件用量，自动算预算（订单数量 × 单件用量 × 1.03 损耗）
+  // 预算计算 — 分面料和辅料两种逻辑
   let budgetQty: number | null = null;
   let orderQuantity: number | null = null;
-  if (item.qty_per_piece && item.qty_per_piece > 0) {
-    const { data: order } = await (supabase.from('orders') as any)
-      .select('quantity').eq('id', orderId).single();
-    orderQuantity = (order as any)?.quantity || 0;
-    if (orderQuantity > 0) {
-      budgetQty = Number((item.qty_per_piece * orderQuantity * 1.03).toFixed(2));
+  let budgetWarning: string | null = null;
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('quantity, order_no').eq('id', orderId).single();
+  orderQuantity = (order as any)?.quantity || 0;
+  const orderNo = (order as any)?.order_no || '?';
+
+  // 辅料：单件用量 × 订单数量 × 1.03 损耗
+  if (item.qty_per_piece && item.qty_per_piece > 0 && orderQuantity > 0) {
+    budgetQty = Number((item.qty_per_piece * orderQuantity * 1.03).toFixed(2));
+  }
+
+  // 面料：从成本基线读取预算
+  if (item.category === 'fabric' || (!item.category && !item.qty_per_piece)) {
+    const { data: baseline } = await (supabase.from('order_cost_baseline') as any)
+      .select('budget_fabric_kg').eq('order_id', orderId).maybeSingle();
+
+    if (baseline?.budget_fabric_kg) {
+      // 查已有面料采购总量
+      const { data: existingFabric } = await (supabase.from('procurement_line_items') as any)
+        .select('ordered_qty').eq('order_id', orderId).eq('category', 'fabric');
+      const existingTotal = (existingFabric || []).reduce((s: number, r: any) => s + (r.ordered_qty || 0), 0);
+      const newTotal = existingTotal + item.ordered_qty;
+      budgetQty = baseline.budget_fabric_kg;
+
+      const overPct = ((newTotal - budgetQty) / budgetQty) * 100;
+      if (overPct > 15) {
+        budgetWarning = `面料采购累计 ${newTotal.toFixed(1)} KG，超出预算 ${budgetQty.toFixed(1)} KG 的 ${overPct.toFixed(1)}%`;
+      } else if (overPct > 5) {
+        budgetWarning = `面料采购累计 ${newTotal.toFixed(1)} KG，超出预算 ${budgetQty.toFixed(1)} KG 的 ${overPct.toFixed(1)}%（注意控制）`;
+      }
     }
   }
 
@@ -157,24 +182,21 @@ export async function addProcurementItem(
 
   if (error) return { error: error.message };
 
-  // 自动校验：采购数量 vs 预算
-  if (budgetQty && item.ordered_qty > budgetQty * 1.05) {
-    // 超预算 5% → 通知三方
+  // 自动告警：超预算时通知财务+CEO
+  const shouldAlert = budgetWarning ||
+    (budgetQty && item.ordered_qty > budgetQty * 1.05);
+
+  if (shouldAlert) {
     try {
       const { sendCostAlert } = await import('@/app/actions/cost-control');
-      const { data: order } = await (supabase.from('orders') as any)
-        .select('order_no').eq('id', orderId).single();
-      await sendCostAlert(
-        orderId,
-        'procurement_over_budget',
-        `${(order as any)?.order_no || '?'}: ${item.material_name} 采购 ${item.ordered_qty} ${item.ordered_unit || ''} 超出预算 ${budgetQty}（+${(((item.ordered_qty - budgetQty) / budgetQty) * 100).toFixed(1)}%）`,
-        auth.userId,
-      );
+      const alertMsg = budgetWarning ||
+        `${orderNo}: ${item.material_name} 采购 ${item.ordered_qty} ${item.ordered_unit || ''} 超出预算 ${budgetQty}（+${(((item.ordered_qty - (budgetQty || 0)) / (budgetQty || 1)) * 100).toFixed(1)}%）`;
+      await sendCostAlert(orderId, 'procurement_over_budget', alertMsg, auth.userId);
     } catch {}
   }
 
   revalidatePath(`/orders/${orderId}`);
-  return { data: data as ProcurementLineItem };
+  return { data: data as ProcurementLineItem, warning: budgetWarning || undefined };
 }
 
 /**
