@@ -4,6 +4,7 @@ import { formatDate } from '@/lib/utils/date';
 import { computeOrderStatus } from '@/lib/utils/order-status';
 import { OrderSearchBar } from '@/components/OrderSearchBar';
 import { ExportProductionSheetButton } from '@/components/ExportProductionSheetButton';
+import { InlineEditField } from '@/components/InlineEditField';
 
 // 阶段进度计算
 const PHASE_KEYS = [
@@ -452,9 +453,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       </div>
                     </td>
                     <td>
-                      <span className="text-xs text-gray-600 font-mono">
-                        {(order as any).internal_order_no || '-'}
-                      </span>
+                      <InlineEditField
+                        orderId={order.id}
+                        field="internal_order_no"
+                        value={(order as any).internal_order_no}
+                        placeholder="填写"
+                        locked={true}
+                        lockedMessage="内部单号已填写，修改需要财务审批。请联系财务或管理员。"
+                      />
                     </td>
                     <td>
                       <Link href={`/orders?status=${statusFilter}&customer=${encodeURIComponent(order.customer_name)}`}

@@ -23,6 +23,7 @@ import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
+import { InlineEditField } from '@/components/InlineEditField';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
@@ -288,7 +289,7 @@ export default async function OrderDetailPage({
                   { label: '订单号', value: orderData.order_no },
                   { label: '客户', value: orderData.customer_name },
                   { label: '客户PO号', value: orderData.po_number },
-                  { label: '内部订单号', value: orderData.internal_order_no },
+                  { label: '内部订单号', value: '__INLINE_EDIT__' },
                   { label: '负责业务/理单', value: ownerName },
                   { label: '贸易条款', value: ({ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' } as any)[orderData.incoterm] || orderData.incoterm },
                   ...(orderData.incoterm === 'DDP' ? [
@@ -298,9 +299,20 @@ export default async function OrderDetailPage({
                   { label: '订单类型', value: ({ trial: '新品试单', bulk: '正常', repeat: '翻单', urgent: '加急订单', sample: '样品' } as Record<string,string>)[orderData.order_type] || orderData.order_type },
                   { label: '包装类型', value: orderData.packaging_type === 'standard' ? '标准' : '定制' },
                 ].map(({ label, value }) => (
-                  <div key={label} className="flex justify-between">
+                  <div key={label} className="flex justify-between items-center">
                     <dt className="text-sm text-gray-500">{label}</dt>
-                    <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
+                    <dd className="text-sm font-medium text-gray-900">
+                      {value === '__INLINE_EDIT__' ? (
+                        <InlineEditField
+                          orderId={id}
+                          field="internal_order_no"
+                          value={orderData.internal_order_no}
+                          placeholder="点击填写"
+                          locked={true}
+                          lockedMessage="内部单号已填写，修改需要财务审批。请联系财务或管理员。"
+                        />
+                      ) : (value || '—')}
+                    </dd>
                   </div>
                 ))}
                 {/* 跟单负责人 — 管理员/订单创建者/生产主管可指定 */}

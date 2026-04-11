@@ -808,6 +808,53 @@ export async function updateOrder(id: string, formData: FormData) {
   return { data: order };
 }
 
+/**
+ * 快捷更新订单单个字段（用于内联编辑）
+ * 仅允许安全字段：internal_order_no, notes, style_no
+ */
+export async function updateOrderField(
+  orderId: string,
+  field: 'internal_order_no' | 'notes' | 'style_no',
+  value: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '请先登录' };
+
+  const ALLOWED_FIELDS = ['internal_order_no', 'notes', 'style_no'];
+  if (!ALLOWED_FIELDS.includes(field)) return { ok: false, error: '不允许修改此字段' };
+
+  // 内部单号特殊规则：已有值时不允许修改（需要走财务审批）
+  if (field === 'internal_order_no') {
+    const { data: order } = await (supabase.from('orders') as any)
+      .select('internal_order_no')
+      .eq('id', orderId)
+      .single();
+    if (order?.internal_order_no) {
+      // 检查是否是 admin/finance 角色
+      const { data: profile } = await (supabase.from('profiles') as any)
+        .select('role, roles')
+        .eq('user_id', user.id)
+        .single();
+      const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
+      const canModify = roles.some(r => ['admin', 'finance'].includes(r));
+      if (!canModify) {
+        return { ok: false, error: '内部单号已填写，修改需要财务审批。请联系财务或管理员。' };
+      }
+    }
+  }
+
+  const { error } = await (supabase.from('orders') as any)
+    .update({ [field]: value || null, updated_at: new Date().toISOString() })
+    .eq('id', orderId);
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/orders');
+  return { ok: true };
+}
+
 // =========================
 // 订单生命周期管理 Actions (V1.6)
 // =========================
