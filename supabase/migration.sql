@@ -1055,6 +1055,9 @@ CREATE POLICY "order_attachments_insert" ON public.order_attachments
 
 -- 1. 添加 merchandiser 到 user_role 枚举
 ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'merchandiser';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'production_manager';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'admin_assistant';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'logistics';
 
 -- 2. 修复历史数据：之前 merchandiser 被映射为 sales 入库
 --    现在跟单节点应该存为 merchandiser
