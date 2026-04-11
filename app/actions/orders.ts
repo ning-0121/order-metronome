@@ -664,6 +664,12 @@ export async function createOrder(
     await syncOrderToFinance(orderData, 'order.created');
   } catch {} // 财务推送失败不阻断订单创建
 
+  // ── STEP 7: 初始化经营数据 + 确认链 ──
+  try {
+    const { initOrderFinancials } = await import('@/app/actions/order-financials');
+    await initOrderFinancials(orderData.id);
+  } catch {} // 初始化失败不阻断订单创建
+
   // ── DONE ──
   revalidatePath('/orders');
   revalidatePath('/dashboard');

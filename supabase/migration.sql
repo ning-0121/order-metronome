@@ -2078,3 +2078,93 @@ CREATE POLICY "system_kv_service_only" ON public.system_kv FOR ALL USING (auth.u
 -- ===== 2026-04-11 报价员训练数据关联订单 =====
 ALTER TABLE public.quoter_cmt_training_samples ADD COLUMN IF NOT EXISTS source_order_id uuid REFERENCES public.orders(id);
 CREATE INDEX IF NOT EXISTS idx_quoter_cmt_source_order ON public.quoter_cmt_training_samples(source_order_id) WHERE source_order_id IS NOT NULL;
+
+-- ===== 2026-04-11 订单经营闭环 V1 =====
+
+-- 表1: 订单经营数据（利润 + 收款 + 控制开关）
+CREATE TABLE IF NOT EXISTS public.order_financials (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE UNIQUE,
+
+  -- 收入
+  sale_price_per_piece numeric(10,2),
+  sale_currency text DEFAULT 'USD',
+  sale_total numeric(12,2),
+  exchange_rate numeric(8,4) DEFAULT 7.2,
+
+  -- 成本（从 cost_baseline + procurement 汇总）
+  cost_material numeric(12,2) DEFAULT 0,
+  cost_cmt numeric(12,2) DEFAULT 0,
+  cost_shipping numeric(12,2) DEFAULT 0,
+  cost_other numeric(12,2) DEFAULT 0,
+  cost_total numeric(12,2) GENERATED ALWAYS AS
+    (COALESCE(cost_material,0) + COALESCE(cost_cmt,0) + COALESCE(cost_shipping,0) + COALESCE(cost_other,0)) STORED,
+
+  -- 利润
+  gross_profit_rmb numeric(12,2),
+  margin_pct numeric(5,2),
+  min_margin_alert boolean DEFAULT false,
+
+  -- 定金
+  deposit_rate numeric(5,2),
+  deposit_amount numeric(12,2),
+  deposit_received numeric(12,2) DEFAULT 0,
+  deposit_received_at timestamptz,
+  deposit_status text DEFAULT 'pending',
+
+  -- 尾款
+  balance_amount numeric(12,2),
+  balance_received numeric(12,2) DEFAULT 0,
+  balance_received_at timestamptz,
+  balance_due_date date,
+  balance_status text DEFAULT 'pending',
+
+  -- 控制开关
+  payment_hold boolean DEFAULT false,
+  allow_production boolean DEFAULT false,
+  allow_shipment boolean DEFAULT false,
+
+  updated_by uuid REFERENCES auth.users(id),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.order_financials ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "order_financials_auth" ON public.order_financials;
+CREATE POLICY "order_financials_auth" ON public.order_financials FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- 表2: 订单确认链（面料/尺码/Logo/包装 4 个模块）
+CREATE TABLE IF NOT EXISTS public.order_confirmations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  module text NOT NULL,
+  status text NOT NULL DEFAULT 'not_started',
+  data jsonb NOT NULL DEFAULT '{}',
+
+  -- 审批
+  confirmed_by uuid REFERENCES auth.users(id),
+  confirmed_at timestamptz,
+  customer_confirmed boolean DEFAULT false,
+  customer_evidence_url text,
+  internal_approved_by uuid REFERENCES auth.users(id),
+  internal_approved_at timestamptz,
+  rejected_by uuid REFERENCES auth.users(id),
+  rejected_reason text,
+
+  -- 附件
+  attachments jsonb DEFAULT '[]',
+
+  -- 审计
+  history jsonb DEFAULT '[]',
+  notes text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+
+  UNIQUE(order_id, module)
+);
+
+ALTER TABLE public.order_confirmations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "order_confirmations_auth" ON public.order_confirmations;
+CREATE POLICY "order_confirmations_auth" ON public.order_confirmations FOR ALL USING (auth.uid() IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_order_confirmations_order ON public.order_confirmations(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_confirmations_status ON public.order_confirmations(order_id, status);
