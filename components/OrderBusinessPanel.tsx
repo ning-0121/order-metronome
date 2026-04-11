@@ -3,6 +3,14 @@
 import { useState, useEffect } from 'react';
 import { getOrderBusinessState } from '@/app/actions/order-business-state';
 import type { OrderBusinessState, StatusLevel } from '@/lib/engine/orderBusinessEngine';
+import {
+  getProfitNextAction,
+  getPaymentNextAction,
+  getRiskNextAction,
+  getConfirmationNextAction,
+  EMPTY_STATE_TEXT,
+  type NextAction,
+} from '@/lib/engine/nextActions';
 
 interface Props {
   orderId: string;
@@ -52,24 +60,44 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
       {/* 利润卡 */}
       {canSeeFinancials ? (
-        <ProfitCard state={state} />
+        <ProfitCard state={state} orderId={orderId} />
       ) : (
         <ProfitCardLite state={state} />
       )}
       {/* 收款卡 */}
-      <PaymentCard state={state} canSeeFinancials={canSeeFinancials} />
+      <PaymentCard state={state} canSeeFinancials={canSeeFinancials} orderId={orderId} />
       {/* 风险卡 */}
-      <RiskCard state={state} />
+      <RiskCard state={state} orderId={orderId} />
       {/* 确认链 */}
-      <ConfirmationCard state={state} />
+      <ConfirmationCard state={state} orderId={orderId} />
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// Next Action 按钮
+// ═══════════════════════════════════════════════
+function NextActionBtn({ action }: { action: NextAction | null }) {
+  if (!action) return null;
+  const colors = action.priority === 'high'
+    ? 'bg-red-600 hover:bg-red-700 text-white'
+    : action.priority === 'medium'
+    ? 'bg-amber-600 hover:bg-amber-700 text-white'
+    : 'bg-gray-200 hover:bg-gray-300 text-gray-700';
+  return (
+    <button
+      className={`mt-2 w-full text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors ${colors}`}
+      title={action.explain}
+    >
+      {action.label}
+    </button>
   );
 }
 
 // ═══════════════════════════════════════════════
 // 利润卡（完整版 — admin/finance）
 // ═══════════════════════════════════════════════
-function ProfitCard({ state }: { state: OrderBusinessState }) {
+function ProfitCard({ state, orderId }: { state: OrderBusinessState; orderId: string }) {
   const s = LEVEL_STYLES[state.order_profit_status.level];
   return (
     <div className={`rounded-xl border p-4 ${s.bg} ${s.border}`}>
@@ -93,6 +121,7 @@ function ProfitCard({ state }: { state: OrderBusinessState }) {
         <div className="text-sm text-gray-400 mt-2">待录入销售额</div>
       )}
       <p className={`text-[11px] mt-2 leading-relaxed ${s.text}`}>{state.order_profit_status.explain}</p>
+      <NextActionBtn action={getProfitNextAction(state, orderId)} />
     </div>
   );
 }
@@ -120,7 +149,7 @@ function ProfitCardLite({ state }: { state: OrderBusinessState }) {
 // ═══════════════════════════════════════════════
 // 收款卡
 // ═══════════════════════════════════════════════
-function PaymentCard({ state, canSeeFinancials }: { state: OrderBusinessState; canSeeFinancials: boolean }) {
+function PaymentCard({ state, canSeeFinancials, orderId }: { state: OrderBusinessState; canSeeFinancials: boolean; orderId: string }) {
   const s = LEVEL_STYLES[state.payment_status.level];
   return (
     <div className={`rounded-xl border p-4 ${s.bg} ${s.border}`}>
@@ -150,6 +179,7 @@ function PaymentCard({ state, canSeeFinancials }: { state: OrderBusinessState; c
           explain={state.can_ship.explain}
         />
       </div>
+      <NextActionBtn action={getPaymentNextAction(state, orderId)} />
     </div>
   );
 }
@@ -171,7 +201,7 @@ function ControlBadge({ label, allowed, overridden, explain }: {
 // ═══════════════════════════════════════════════
 // 风险卡
 // ═══════════════════════════════════════════════
-function RiskCard({ state }: { state: OrderBusinessState }) {
+function RiskCard({ state, orderId }: { state: OrderBusinessState; orderId: string }) {
   const s = LEVEL_STYLES[state.hidden_risk_level.level];
   return (
     <div className={`rounded-xl border p-4 ${s.bg} ${s.border}`}>
@@ -210,6 +240,7 @@ function RiskCard({ state }: { state: OrderBusinessState }) {
       {state.risk_factors.length === 0 && (
         <p className="text-xs text-green-600">当前无明显风险</p>
       )}
+      <NextActionBtn action={getRiskNextAction(state, orderId)} />
     </div>
   );
 }
@@ -217,7 +248,7 @@ function RiskCard({ state }: { state: OrderBusinessState }) {
 // ═══════════════════════════════════════════════
 // 确认链进度卡
 // ═══════════════════════════════════════════════
-function ConfirmationCard({ state }: { state: OrderBusinessState }) {
+function ConfirmationCard({ state, orderId }: { state: OrderBusinessState; orderId: string }) {
   const rate = state.confirmation_completion_rate;
   const barColor = rate === 100 ? 'bg-green-500' : rate >= 50 ? 'bg-amber-500' : rate > 0 ? 'bg-red-500' : 'bg-gray-300';
 
@@ -262,6 +293,7 @@ function ConfirmationCard({ state }: { state: OrderBusinessState }) {
           缺失：{state.missing_confirmation_items.join('、')}
         </p>
       )}
+      <NextActionBtn action={getConfirmationNextAction(state, orderId)} />
     </div>
   );
 }

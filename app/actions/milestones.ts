@@ -222,6 +222,32 @@ export async function markMilestoneDone(
       .eq('id', milestoneId);
   }
 
+  // ── 经营控制门禁：确认链 + 付款状态阻塞（管理员可绕过）──
+  if (!isAdmin) {
+    try {
+      const { getBlockedReasons } = await import('@/lib/engine/blockRules');
+      const [confRes, finRes] = await Promise.all([
+        (supabase.from('order_confirmations') as any)
+          .select('module, status')
+          .eq('order_id', milestone.order_id),
+        (supabase.from('order_financials') as any)
+          .select('deposit_status, balance_status, payment_hold, allow_production, allow_shipment')
+          .eq('order_id', milestone.order_id)
+          .maybeSingle(),
+      ]);
+
+      const blockResult = getBlockedReasons(
+        milestone.step_key,
+        confRes.data || [],
+        finRes.data || null,
+      );
+
+      if (blockResult.blocked) {
+        return { error: `无法完成此节点：${blockResult.hardBlocks[0]}` };
+      }
+    } catch {} // 阻塞检查失败不阻断（降级）
+  }
+
   // Check checklist completion (if milestone has a checklist)
   const { hasChecklistForStep, validateChecklistComplete } = await import('@/lib/domain/checklist');
   if (hasChecklistForStep(milestone.step_key)) {

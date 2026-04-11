@@ -2168,3 +2168,37 @@ DROP POLICY IF EXISTS "order_confirmations_auth" ON public.order_confirmations;
 CREATE POLICY "order_confirmations_auth" ON public.order_confirmations FOR ALL USING (auth.uid() IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_order_confirmations_order ON public.order_confirmations(order_id);
 CREATE INDEX IF NOT EXISTS idx_order_confirmations_status ON public.order_confirmations(order_id, status);
+
+-- ===== 2026-04-11 经营闭环 V2 — 表增强 =====
+
+-- order_financials 增强字段
+ALTER TABLE public.order_financials ADD COLUMN IF NOT EXISTS cost_trim numeric(12,2) DEFAULT 0;
+ALTER TABLE public.order_financials ADD COLUMN IF NOT EXISTS cost_tax numeric(12,2) DEFAULT 0;
+ALTER TABLE public.order_financials ADD COLUMN IF NOT EXISTS deposit_due_date date;
+ALTER TABLE public.order_financials ADD COLUMN IF NOT EXISTS overdue_days integer DEFAULT 0;
+ALTER TABLE public.order_financials ADD COLUMN IF NOT EXISTS override_reason text;
+ALTER TABLE public.order_financials ADD COLUMN IF NOT EXISTS override_at timestamptz;
+ALTER TABLE public.order_financials ADD COLUMN IF NOT EXISTS blocked_reason text;
+
+-- order_confirmations 增强字段
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS requires_customer_confirmation boolean DEFAULT true;
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS requires_internal_confirmation boolean DEFAULT true;
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS attachment_required boolean DEFAULT false;
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS version_no integer DEFAULT 1;
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS missing_items text[];
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS last_changed_by uuid REFERENCES auth.users(id);
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS last_changed_at timestamptz;
+ALTER TABLE public.order_confirmations ADD COLUMN IF NOT EXISTS blocked_milestones text[];
+
+-- updated_at 触发器
+CREATE TRIGGER set_order_financials_updated_at
+  BEFORE UPDATE ON public.order_financials
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TRIGGER set_order_confirmations_updated_at
+  BEFORE UPDATE ON public.order_confirmations
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_order_financials_payment ON public.order_financials(payment_hold, deposit_status, balance_status);
+CREATE INDEX IF NOT EXISTS idx_order_financials_margin ON public.order_financials(margin_pct) WHERE margin_pct IS NOT NULL;
