@@ -5,6 +5,7 @@ import {
   uploadCostSheet,
   getCostControlSummary,
   sendCostAlert,
+  autoParseExistingCostSheet,
   type CostControlSummary,
 } from '@/app/actions/cost-control';
 
@@ -27,6 +28,8 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
 
   async function load() {
     setLoading(true);
+    // 先尝试自动解析已上传的内部成本核算单（业务员创建订单时已传）
+    await autoParseExistingCostSheet(orderId).catch(() => {});
     const res = await getCostControlSummary(orderId);
     if (res.data) setSummary(res.data);
     setLoading(false);

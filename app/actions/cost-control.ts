@@ -261,3 +261,97 @@ export async function sendCostAlert(
     await pushToUsers(supabase, Array.from(recipientIds), title, message).catch(() => {});
   } catch {}
 }
+
+// ════════════════════════════════════════════════
+// 4. 自动从已上传的内部成本核算单建立基线
+// ════════════════════════════════════════════════
+
+/**
+ * 检查订单是否已上传内部成本核算单（internal_quote）但未建立成本基线。
+ * 如果是 → 自动下载附件并解析写入 order_cost_baseline。
+ * 在 getCostControlSummary 或页面加载时调用。
+ */
+export async function autoParseExistingCostSheet(orderId: string): Promise<{
+  parsed: boolean;
+  error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { parsed: false, error: '未登录' };
+
+  // 检查是否已有基线
+  const { data: existing } = await (supabase.from('order_cost_baseline') as any)
+    .select('id')
+    .eq('order_id', orderId)
+    .maybeSingle();
+  if (existing) return { parsed: false }; // 已有基线，不重复解析
+
+  // 查找已上传的内部成本核算单附件（Excel）
+  const { data: attachments } = await (supabase.from('order_attachments') as any)
+    .select('id, file_name, storage_path, mime_type')
+    .eq('order_id', orderId)
+    .eq('file_type', 'internal_quote')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (!attachments || attachments.length === 0) return { parsed: false };
+
+  const att = attachments[0];
+  const isExcel = /\.(xlsx|xls)$/i.test(att.file_name || '') ||
+    att.mime_type?.includes('spreadsheet') ||
+    att.mime_type?.includes('excel');
+  if (!isExcel) return { parsed: false }; // 非 Excel 格式无法解析
+
+  // 从 Supabase Storage 下载文件
+  const { data: fileData, error: dlError } = await supabase.storage
+    .from('order-docs')
+    .download(att.storage_path);
+  if (dlError || !fileData) {
+    return { parsed: false, error: '下载附件失败' };
+  }
+
+  const buffer = Buffer.from(await fileData.arrayBuffer());
+  const result = await parseCostSheet(buffer);
+  if (result.rows.length === 0) {
+    return { parsed: false, error: '解析失败：' + (result.warnings.join('; ') || '未识别到成本数据') };
+  }
+
+  // 取第一行数据
+  const matched = result.rows[0];
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('quantity')
+    .eq('id', orderId)
+    .single();
+  const quantity = (order as any)?.quantity || 0;
+
+  const consumptionKg = matched.fabric_consumption_kg || 0;
+  const budget = consumptionKg > 0 && quantity > 0
+    ? calculateMaterialBudget(consumptionKg, quantity, 3)
+    : null;
+
+  const baselineData: any = {
+    order_id: orderId,
+    fabric_area_m2: matched.fabric_area_m2 || null,
+    fabric_weight_kg_m2: matched.fabric_weight_kg_m2 || null,
+    fabric_consumption_kg: matched.fabric_consumption_kg || null,
+    fabric_price_per_kg: matched.fabric_price_per_kg || null,
+    waste_pct: 3,
+    budget_fabric_kg: budget?.grossUsage || null,
+    budget_fabric_amount: budget ? Number((budget.grossUsage * (matched.fabric_price_per_kg || 0)).toFixed(2)) : null,
+    cmt_internal_estimate: matched.cmt_price || null,
+    cmt_factory_quote: matched.factory_cmt_quote || null,
+    cmt_labor_rate: matched.labor_rate || null,
+    total_cost_per_piece: matched.total_cost || null,
+    fob_price: matched.fob_price || null,
+    ddp_price: matched.ddp_price || null,
+    source_file_name: att.file_name || 'auto-parsed',
+    parsed_at: new Date().toISOString(),
+    parsed_by: user.id,
+    updated_at: new Date().toISOString(),
+  };
+
+  await (supabase.from('order_cost_baseline') as any).insert(baselineData);
+  revalidatePath(`/orders/${orderId}`);
+
+  return { parsed: true };
+}
