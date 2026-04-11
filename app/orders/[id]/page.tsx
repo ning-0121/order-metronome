@@ -27,6 +27,7 @@ import { InlineEditField } from '@/components/InlineEditField';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
+import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
 import { CostControlTab } from '@/components/tabs/CostControlTab';
 import { BackButton } from '@/components/BackButton';
 // POVerifyButton removed - auto-verify at order creation
@@ -236,6 +237,9 @@ export default async function OrderDetailPage({
               )}
             </div>
           </div>
+
+          {/* 经营面板 — CEO/财务一眼看到是否需要干预 */}
+          <OrderBusinessPanel orderId={id} isAdmin={isAdmin} userRoles={currentRoles} />
 
           {/* Tab 导航（移动端可横向滚动） */}
           <div className="flex gap-1 mt-4 -mb-px overflow-x-auto scrollbar-hide">
