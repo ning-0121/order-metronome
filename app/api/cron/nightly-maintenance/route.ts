@@ -95,6 +95,15 @@ export async function POST(req: Request) {
       .delete()
       .lt('ran_at', ninetyDaysAgo);
 
+    // 5. 报价员自动学习：从完成订单导入训练数据
+    let trainingSync = { imported: 0, skipped: 0 };
+    try {
+      const { syncOrdersToTraining } = await import('@/app/actions/quoter-training');
+      trainingSync = await syncOrdersToTraining();
+    } catch (e: any) {
+      console.error('[nightly-maintenance] training sync error:', e?.message);
+    }
+
     return NextResponse.json({
       success: true,
       reportId: (saved as any)?.id,

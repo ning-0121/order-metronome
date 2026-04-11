@@ -479,6 +479,38 @@ export function NewQuoteForm() {
                     </tfoot>
                   </table>
                 </div>
+                {/* 历史依据 — 展示匹配的历史订单 */}
+                {(result.cmt as any).rag_samples?.length > 0 && (
+                  <div className="mt-3 rounded-lg bg-blue-50 border border-blue-200 p-3">
+                    <p className="text-xs font-semibold text-blue-800 mb-2">📋 历史依据（同类款式加工费参考）</p>
+                    <div className="space-y-1.5">
+                      {(result.cmt as any).rag_samples.map((s: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between text-xs">
+                          <span className="text-blue-700">
+                            {s.source_order_id ? (
+                              <a href={`/orders/${s.source_order_id}`} className="hover:underline" target="_blank">
+                                {s.style_no}
+                              </a>
+                            ) : s.style_no}
+                            {s.customer_name && <span className="text-blue-500 ml-1">({s.customer_name})</span>}
+                            {s.factory_name && <span className="text-blue-400 ml-1">· {s.factory_name}</span>}
+                          </span>
+                          <span className="font-mono font-semibold text-blue-800">
+                            ¥{s.total_rmb.toFixed(2)}
+                            {s.created_at && <span className="text-blue-400 ml-1 font-normal">{s.created_at}</span>}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {(result.cmt as any).labor_rate_median && (
+                      <p className="text-[10px] text-blue-500 mt-2 pt-2 border-t border-blue-200">
+                        工价中位数 ¥{(result.cmt as any).labor_rate_median.toFixed(2)} + 工厂利润 ¥{((result.cmt as any).factory_profit || 1.25).toFixed(2)} = 加工费基准
+                        {(result.cmt as any).formula_total && ` · 公式参考 ¥${(result.cmt as any).formula_total.toFixed(2)}`}
+                        {(result.cmt as any).deviation_pct != null && ` · 偏差 ${(result.cmt as any).deviation_pct}%`}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <pre className="whitespace-pre-wrap text-xs text-gray-600 font-sans leading-relaxed bg-gray-50 p-3 rounded-lg mt-2">
                   {result.cmt.reasoning}
                 </pre>

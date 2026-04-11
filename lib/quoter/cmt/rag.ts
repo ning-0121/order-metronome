@@ -22,6 +22,10 @@ export interface RagSample {
   total_cmt_rmb: number;
   operations: any[];
   ai_raw_text: string | null;
+  customer_name: string | null;
+  factory_name: string | null;
+  source_order_id: string | null;
+  created_at: string | null;
 }
 
 /**
@@ -39,6 +43,10 @@ export interface CmtRagResult extends CmtCalculationResult {
     total_rmb: number;
     ops_count: number;
     description: string;
+    customer_name?: string;
+    factory_name?: string;
+    source_order_id?: string;
+    created_at?: string;
   }>;
   /** 工价中位数（工人拿到的，不含工厂利润） */
   labor_rate_median?: number;
@@ -71,7 +79,7 @@ export async function calculateCmtWithRAG(
     // 查询同品类已确认样本
     const { data: samples, error } = await supabase
       .from('quoter_cmt_training_samples')
-      .select('id, style_no, garment_type, total_cmt_rmb, operations, ai_raw_text')
+      .select('id, style_no, garment_type, total_cmt_rmb, operations, ai_raw_text, customer_name, factory_name, source_order_id, created_at')
       .eq('status', 'confirmed')
       .eq('garment_type', input.garment_type)
       .not('total_cmt_rmb', 'is', null)
@@ -115,12 +123,16 @@ export async function calculateCmtWithRAG(
       ? Math.round(((finalPrice - formulaResult.total_rmb) / formulaResult.total_rmb) * 100)
       : 0;
 
-    // 构建 RAG 样本列表（显示前 5）
+    // 构建 RAG 样本列表（显示前 5，含历史订单信息作为依据）
     const ragSamples = sampleList.slice(0, 5).map(s => ({
       style_no: s.style_no || '?',
       total_rmb: s.total_cmt_rmb,
       ops_count: Array.isArray(s.operations) ? s.operations.length : 0,
       description: (s.ai_raw_text || '').slice(0, 60),
+      customer_name: s.customer_name || undefined,
+      factory_name: s.factory_name || undefined,
+      source_order_id: s.source_order_id || undefined,
+      created_at: s.created_at ? String(s.created_at).slice(0, 7) : undefined, // YYYY-MM
     }));
 
     // 置信度

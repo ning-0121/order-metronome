@@ -470,3 +470,75 @@ export async function reExtractSample(id: string): Promise<{ error?: string; suc
   revalidatePath('/quoter/training');
   return { success: true };
 }
+
+// ════════════════════════════════════════════════
+// 从已完成订单自动导入训练数据
+// ════════════════════════════════════════════════
+
+/**
+ * 将已完成订单的实际加工费导入为训练样本
+ * 数据来源：order_cost_baseline.cmt_factory_quote + orders 表
+ * 自动标记 status='confirmed'（信任实际生产数据）
+ */
+export async function syncOrdersToTraining(): Promise<{
+  imported: number;
+  skipped: number;
+  error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { imported: 0, skipped: 0, error: '未登录' };
+
+  // 查有成本基线且有加工费的订单
+  const { data: baselines } = await (supabase.from('order_cost_baseline') as any)
+    .select('order_id, cmt_factory_quote, cmt_internal_estimate, fabric_consumption_kg');
+
+  if (!baselines || baselines.length === 0) return { imported: 0, skipped: 0 };
+
+  // 查已导入的订单 ID（去重）
+  const { data: existingSamples } = await (supabase.from('quoter_cmt_training_samples') as any)
+    .select('source_order_id')
+    .eq('source_type', 'order_actual')
+    .not('source_order_id', 'is', null);
+  const importedOrderIds = new Set((existingSamples || []).map((s: any) => s.source_order_id));
+
+  const orderIds = baselines
+    .filter((b: any) => b.cmt_factory_quote && b.cmt_factory_quote > 0)
+    .map((b: any) => b.order_id)
+    .filter((id: string) => !importedOrderIds.has(id));
+
+  if (orderIds.length === 0) return { imported: 0, skipped: baselines.length };
+
+  const { data: orders } = await (supabase.from('orders') as any)
+    .select('id, order_no, customer_name, factory_name, style_no, order_type')
+    .in('id', orderIds);
+
+  const orderMap = new Map((orders || []).map((o: any) => [o.id, o]));
+  let imported = 0;
+
+  for (const baseline of baselines as any[]) {
+    if (!baseline.cmt_factory_quote || baseline.cmt_factory_quote <= 0) continue;
+    if (importedOrderIds.has(baseline.order_id)) continue;
+
+    const order = orderMap.get(baseline.order_id);
+    if (!order) continue;
+
+    const { error } = await (supabase.from('quoter_cmt_training_samples') as any).insert({
+      source_type: 'order_actual',
+      source_order_id: baseline.order_id,
+      garment_type: 'knit_top', // 默认，后续可从订单元数据推断
+      style_no: order.style_no || order.order_no,
+      customer_name: order.customer_name,
+      factory_name: order.factory_name,
+      total_cmt_rmb: baseline.cmt_factory_quote,
+      operations: [],
+      status: 'confirmed',
+      uploaded_by: user.id,
+    });
+
+    if (!error) imported++;
+  }
+
+  revalidatePath('/quoter/training');
+  return { imported, skipped: baselines.length - imported };
+}

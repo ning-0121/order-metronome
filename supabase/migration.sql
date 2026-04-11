@@ -2074,3 +2074,7 @@ CREATE TABLE IF NOT EXISTS public.system_kv (
 ALTER TABLE public.system_kv ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "system_kv_service_only" ON public.system_kv;
 CREATE POLICY "system_kv_service_only" ON public.system_kv FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- ===== 2026-04-11 报价员训练数据关联订单 =====
+ALTER TABLE public.quoter_cmt_training_samples ADD COLUMN IF NOT EXISTS source_order_id uuid REFERENCES public.orders(id);
+CREATE INDEX IF NOT EXISTS idx_quoter_cmt_source_order ON public.quoter_cmt_training_samples(source_order_id) WHERE source_order_id IS NOT NULL;

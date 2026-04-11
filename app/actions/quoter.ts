@@ -441,3 +441,115 @@ export async function updateQuoteStatus(
   revalidatePath('/quoter');
   return { success: true };
 }
+
+// ════════════════════════════════════════════════
+// 询价文件 AI 解析 → 自动填表
+// ════════════════════════════════════════════════
+
+/**
+ * 解析客户询价文件（Excel/图片/PDF），提取面料、尺码、款号等
+ */
+export async function parseInquiryFile(file: File): Promise<{
+  ok: boolean;
+  data?: {
+    customer_name?: string;
+    style_no?: string;
+    style_name?: string;
+    garment_type?: string;
+    fabric_composition?: string;
+    fabric_weight_gsm?: number;
+    fabric_width_cm?: number;
+    quantity?: number;
+    colors?: string[];
+    sizes?: string[];
+    packaging?: string;
+    notes?: string;
+    confidence_notes?: string[];
+  };
+  error?: string;
+}> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { ok: false, error: 'AI 服务未配置' };
+
+  try {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const client = new Anthropic({ apiKey });
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const fileName = file.name.toLowerCase();
+
+    const systemPrompt = `你是服装外贸报价专家。从客户询价资料中提取关键信息，返回严格 JSON（不要 markdown 包裹）：
+{
+  "customer_name": "客户名",
+  "style_no": "款号",
+  "style_name": "款名（中文）",
+  "garment_type": "knit_top|knit_bottom|woven_pants|woven_shorts|dress|outerwear|other",
+  "fabric_composition": "面料成分（如 95%棉5%氨纶）",
+  "fabric_weight_gsm": 280,
+  "fabric_width_cm": 160,
+  "quantity": 5000,
+  "colors": ["黑色", "白色"],
+  "sizes": ["S", "M", "L", "XL"],
+  "packaging": "包装要求",
+  "notes": "其他要求或备注",
+  "confidence_notes": ["未找到面料克重"]
+}
+找不到的字段留空或不填。不要猜测。`;
+
+    let messages: any[];
+
+    if (file.type.startsWith('image/')) {
+      const base64 = buffer.toString('base64');
+      const mediaType = file.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+      messages = [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: '请从这份询价资料中提取信息。' }
+        ]
+      }];
+    } else if (fileName.endsWith('.pdf')) {
+      const base64 = buffer.toString('base64');
+      messages = [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+          { type: 'text', text: '请从这份询价文件中提取信息。' }
+        ]
+      }];
+    } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.default.Workbook();
+      if (fileName.endsWith('.csv')) {
+        messages = [{ role: 'user', content: `请从以下询价内容中提取信息：\n\n${buffer.toString('utf-8')}` }];
+      } else {
+        await workbook.xlsx.load(buffer);
+        const lines: string[] = [];
+        workbook.eachSheet((sheet) => {
+          lines.push(`=== ${sheet.name} ===`);
+          sheet.eachRow((row) => {
+            const vals = (row.values as any[]).slice(1).map(v => v?.text ?? v?.result ?? v ?? '').map(String);
+            lines.push(vals.join(' | '));
+          });
+        });
+        messages = [{ role: 'user', content: `请从以下询价内容中提取信息：\n\n${lines.join('\n')}` }];
+      }
+    } else {
+      return { ok: false, error: '不支持的文件格式，请上传 Excel/PDF/图片' };
+    }
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages,
+    });
+
+    const text = response.content.filter(b => b.type === 'text').map(b => (b as any).text).join('');
+    let jsonStr = text.trim();
+    if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
+    return { ok: true, data: JSON.parse(jsonStr) };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || '解析失败' };
+  }
+}
