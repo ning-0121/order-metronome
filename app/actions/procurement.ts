@@ -152,10 +152,10 @@ export async function addProcurementItem(
       budgetQty = baseline.budget_fabric_kg;
 
       const overPct = ((newTotal - budgetQty) / budgetQty) * 100;
-      if (overPct > 15) {
-        budgetWarning = `面料采购累计 ${newTotal.toFixed(1)} KG，超出预算 ${budgetQty.toFixed(1)} KG 的 ${overPct.toFixed(1)}%`;
+      if (overPct > 10) {
+        budgetWarning = `🔴 面料采购累计 ${newTotal.toFixed(1)} KG，超出预算 ${budgetQty.toFixed(1)} KG 的 ${overPct.toFixed(1)}%`;
       } else if (overPct > 5) {
-        budgetWarning = `面料采购累计 ${newTotal.toFixed(1)} KG，超出预算 ${budgetQty.toFixed(1)} KG 的 ${overPct.toFixed(1)}%（注意控制）`;
+        budgetWarning = `🟡 面料采购累计 ${newTotal.toFixed(1)} KG，超出预算 ${budgetQty.toFixed(1)} KG 的 ${overPct.toFixed(1)}%（注意控制）`;
       }
     }
   }

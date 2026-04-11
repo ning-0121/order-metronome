@@ -64,6 +64,7 @@ export async function POST(req: Request) {
         if (totalFabricKg > 0) {
           const overPct = ((totalFabricKg - baseline.budget_fabric_kg) / baseline.budget_fabric_kg) * 100;
           if (overPct > 5) {
+            const alertIcon = overPct > 10 ? '🔴' : '🟡';
             // 去重：24 小时内同一订单不重复
             const { count } = await supabase
               .from('notifications')
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
               .gte('created_at', oneDayAgo);
             if (!count || count === 0) {
               await notifyStakeholders(supabase, orderId, orderNo, 'cost_alert_fabric',
-                `🔴 ${orderNo} 面料采购超预算 ${overPct.toFixed(1)}%`,
+                `${alertIcon} ${orderNo} 面料采购超预算 ${overPct.toFixed(1)}%`,
                 `面料采购 ${totalFabricKg.toFixed(1)} KG，预算 ${baseline.budget_fabric_kg.toFixed(1)} KG`);
               alertsSent++;
             }

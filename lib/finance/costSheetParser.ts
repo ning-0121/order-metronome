@@ -218,18 +218,25 @@ export function checkProcurementReasonability(
   if (budgetKg <= 0) return { status: 'ok', deviationPct: 0, message: '无预算数据' };
   const deviationPct = Number((((orderedKg - budgetKg) / budgetKg) * 100).toFixed(1));
 
-  if (deviationPct > 5) {
+  if (deviationPct > 10) {
     return {
       status: 'over_limit',
       deviationPct,
-      message: `🔴 采购超出预算 ${deviationPct}%（超 5% 红线）— 需 CEO 审批`,
+      message: `🔴 采购超出预算 ${deviationPct}%（超 10% 红线）— 需 CEO 审批`,
+    };
+  }
+  if (deviationPct > 5) {
+    return {
+      status: 'warning',
+      deviationPct,
+      message: `🟡 采购超出预算 ${deviationPct}%（超 5% 黄线，注意控制）`,
     };
   }
   if (deviationPct > 0) {
     return {
-      status: 'warning',
+      status: 'ok',
       deviationPct,
-      message: `🟡 采购略超预算 ${deviationPct}%（在 5% 以内）`,
+      message: `✅ 采购略超预算 ${deviationPct}%（在 5% 以内，正常）`,
     };
   }
   if (deviationPct < -10) {
