@@ -8,14 +8,23 @@ import { createClient } from '@/lib/supabase/server'
 import { syncOrderToFinance } from '@/lib/integration/finance-sync'
 
 export async function POST(request: Request) {
-  // 简单鉴权
+  // 鉴权：CRON_SECRET 或 INTEGRATION_API_KEY 或 登录用户
   const authHeader = request.headers.get('authorization')
+  const apiKey = request.headers.get('x-api-key')
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    // 也允许登录用户调用
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+  const integrationKey = process.env.INTEGRATION_API_KEY
+
+  const hasValidCron = cronSecret && authHeader === `Bearer ${cronSecret}`
+  const hasValidApiKey = integrationKey && apiKey === integrationKey
+
+  if (!hasValidCron && !hasValidApiKey) {
+    try {
+      const supabase = await createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        return NextResponse.json({ error: 'Unauthorized. Use x-api-key header or login.' }, { status: 401 })
+      }
+    } catch {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   }
