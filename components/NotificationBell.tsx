@@ -92,37 +92,46 @@ export function NotificationBell() {
               {notifications.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">暂无新通知</p>
               ) : (
-                notifications.map(n => (
-                  <div key={n.id} className="px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                notifications.map(n => {
+                  const targetUrl = n.related_order_id
+                    ? `/orders/${n.related_order_id}?tab=progress`
+                    : n.type === 'new_user' ? '/admin/users'
+                    : null;
+
+                  const content = (
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{n.title}</p>
                         <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          {n.related_order_id && (
-                            <Link
-                              href={`/orders/${n.related_order_id}?tab=progress`}
-                              onClick={() => { handleMarkRead(n.id); setOpen(false); }}
-                              className="text-xs text-indigo-600 hover:text-indigo-700"
-                            >
-                              查看订单 →
-                            </Link>
-                          )}
-                          <span className="text-xs text-gray-300">
-                            {new Date(n.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
+                        <span className="text-xs text-gray-300 mt-1 block">
+                          {new Date(n.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
                       </div>
                       <button
-                        onClick={() => handleMarkRead(n.id)}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleMarkRead(n.id); }}
                         className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
                         title="标记已读"
                       >
                         ✕
                       </button>
                     </div>
-                  </div>
-                ))
+                  );
+
+                  return targetUrl ? (
+                    <Link
+                      key={n.id}
+                      href={targetUrl}
+                      onClick={() => { handleMarkRead(n.id); setOpen(false); }}
+                      className="block px-4 py-3 border-b border-gray-50 hover:bg-indigo-50 transition-colors cursor-pointer"
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <div key={n.id} className="px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                      {content}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
