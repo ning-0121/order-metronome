@@ -38,7 +38,8 @@ export async function middleware(request: NextRequest) {
   const isCronApi = request.nextUrl.pathname.startsWith('/api/cron/');
   const isMailApi = request.nextUrl.pathname.startsWith('/api/mail-');
   const isBackupApi = request.nextUrl.pathname === '/api/backup';
-  const isPublicApi = isCronApi || isMailApi || isBackupApi;
+  const isIntegrationApi = request.nextUrl.pathname.startsWith('/api/integration/');
+  const isPublicApi = isCronApi || isMailApi || isBackupApi || isIntegrationApi;
 
   if (!user && !isLoginPage && !isAuthPage && !isAuthApi && !isPublicApi) {
     return NextResponse.redirect(new URL('/login', request.url));
