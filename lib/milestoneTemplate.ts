@@ -15,7 +15,8 @@ export type OwnerRole =
  * 角色分工：
  * - sales: 业务（客户沟通、生产单制作、原辅料单制作、原辅料验收、产前样验收/寄送、包装确认、船样、订舱、报关）
  * - merchandiser: 跟单（生产单执行、工厂报价产能协调、产前样安排、产前会、生产进度跟进、中查尾查、验货放行）
- * - finance: 财务（PO审核、原辅料成本审核、加工费确认、货代费用审核、收款和出货许可）
+ * - finance: 财务（PO审核、原辅料成本审核、货代费用审核、收款和出货许可）
+ * - production_manager: 生产主管（加工费确认、生产协调）
  * - procurement: 采购（原辅料审核对比、价格谈判、采购计划、采购单下达、供应商跟进、大货品质确认）
  * - logistics: 物流（出货装货与运输事宜安排）
  */
@@ -35,7 +36,7 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "order_docs_bom_complete", name: "BOM/采购预评估", owner_role: "procurement", is_critical: true, evidence_required: false },
   { step_key: "bulk_materials_confirmed", name: "生产预评估", owner_role: "merchandiser", is_critical: true, evidence_required: false },
   // 阶段3：工厂匹配 & 产前样
-  { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "finance", is_critical: true, evidence_required: true },
+  { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "production_manager", is_critical: true, evidence_required: true },
   { step_key: "factory_confirmed", name: "工厂匹配确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "pre_production_sample_ready", name: "产前样准备完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "sales", is_critical: true, evidence_required: false },
