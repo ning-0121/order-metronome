@@ -126,6 +126,36 @@ export async function uploadEvidence(
     await logEvidenceUpload(milestoneId, orderId, file.name);
   } catch {}
 
+  // 推送文件到财务系统
+  try {
+    const FINANCE_URL = process.env.FINANCE_SYSTEM_URL;
+    const API_KEY = process.env.INTEGRATION_API_KEY;
+    const WEBHOOK_SECRET = process.env.INTEGRATION_WEBHOOK_SECRET;
+    if (FINANCE_URL && API_KEY) {
+      const { data: orderInfo } = await (supabase.from('orders') as any).select('order_no, customer_name').eq('id', orderId).single();
+      const docRow = {
+        id: row.id,
+        file_name: file.name,
+        file_type: file.type?.includes('pdf') ? 'pdf' : file.type?.includes('image') ? 'image' : file.name.match(/\.(xlsx?|csv)$/i) ? 'excel' : 'image',
+        file_size: file.size,
+        file_url: publicUrl,
+        status: 'confirmed',
+        extracted_fields: { _source: 'order_metronome', _order_no: orderInfo?.order_no || '', _customer: orderInfo?.customer_name || '' },
+        matched_customer: orderInfo?.customer_name || null,
+        created_at: new Date().toISOString(),
+      };
+      const { createHmac } = await import('crypto');
+      const body = JSON.stringify({ event: 'file.uploaded', timestamp: new Date().toISOString(), source: 'order-metronome', request_id: `file-${row.id}`, data: docRow, signature: '' });
+      const signature = createHmac('sha256', WEBHOOK_SECRET || '').update(body).digest('hex');
+      await fetch(`${FINANCE_URL}/api/integration/webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY, 'x-webhook-signature': signature },
+        body,
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+    }
+  } catch {}
+
   return { data: mapRow(row), error: null };
 }
 

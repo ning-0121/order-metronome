@@ -622,6 +622,15 @@ export async function markMilestoneDone(
   revalidatePath('/dashboard');
   revalidatePath('/orders');
 
+  // 如果是财务相关里程碑，推送到财务系统
+  if (['finance', 'cashier'].includes(milestoneData.owner_role)) {
+    try {
+      const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+      const { data: orderData } = await (supabase.from('orders') as any).select('*').eq('id', milestoneData.order_id).single();
+      if (orderData) await syncOrderToFinance(orderData, 'order.updated');
+    } catch {}
+  }
+
   return { data: updatedMilestone };
   } catch (err: any) {
     // 捕获所有未处理异常，返回可读错误而非 Next.js 通用错误

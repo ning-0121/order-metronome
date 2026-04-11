@@ -925,6 +925,15 @@ export async function decideCancelAction(
     return { error: result.error };
   }
   
+  // 推送到财务系统
+  if (decision === 'approved') {
+    try {
+      const { notifyOrderCancelled } = await import('@/lib/integration/finance-sync');
+      const cancelReq = result.data && typeof result.data === 'object' && 'cancelRequest' in result.data ? (result.data as any).cancelRequest : null;
+      if (cancelReq) await notifyOrderCancelled({ id: cancelReq.order_id, lifecycle_status: '已取消' } as Record<string, unknown>);
+    } catch {}
+  }
+
   // 获取订单ID以便revalidate（从result中获取）
   if (result.data && typeof result.data === 'object' && 'cancelRequest' in result.data) {
     const cancelRequest = (result.data as any).cancelRequest;
@@ -988,6 +997,12 @@ export async function completeOrderAction(orderId: string) {
   } catch (e) {
     console.warn('[completeOrder] 评分计算失败（不影响订单完成）:', e);
   }
+
+  // 推送到财务系统
+  try {
+    const { notifyOrderCompleted } = await import('@/lib/integration/finance-sync');
+    if (result.data) await notifyOrderCompleted(result.data as Record<string, unknown>);
+  } catch {}
 
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/orders');
