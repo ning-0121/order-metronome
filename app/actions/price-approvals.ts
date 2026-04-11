@@ -170,16 +170,32 @@ export async function listPendingPriceApprovals() {
   if (!isAdmin) return { error: '仅管理员可查看', data: null };
 
   const { data, error } = await (supabase.from('pre_order_price_approvals') as any)
-    .select(`
-      id, customer_name, po_number, form_snapshot, price_diffs, summary,
-      status, created_at, expires_at, review_note, reviewed_at,
-      requester:profiles!pre_order_price_approvals_requested_by_fkey(name, email)
-    `)
+    .select('id, customer_name, po_number, form_snapshot, price_diffs, summary, status, created_at, expires_at, review_note, reviewed_at, requested_by')
     .order('created_at', { ascending: false })
     .limit(100);
 
   if (error) return { error: error.message, data: null };
-  return { data: data || [], error: null };
+
+  // 查询申请人姓名（两步查询，避免外键关联报错）
+  const requesterIds = [...new Set((data || []).map((d: any) => d.requested_by).filter(Boolean))];
+  let requesterMap: Record<string, { name: string; email: string }> = {};
+  if (requesterIds.length > 0) {
+    const { data: profiles } = await (supabase.from('profiles') as any)
+      .select('user_id, name, email')
+      .in('user_id', requesterIds);
+    if (profiles) {
+      requesterMap = (profiles as any[]).reduce((m, p) => {
+        m[p.user_id] = { name: p.name, email: p.email };
+        return m;
+      }, {} as Record<string, any>);
+    }
+  }
+  const enriched = (data || []).map((d: any) => ({
+    ...d,
+    requester: requesterMap[d.requested_by] || null,
+  }));
+
+  return { data: enriched, error: null };
 }
 
 /**
