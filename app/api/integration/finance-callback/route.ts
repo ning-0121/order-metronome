@@ -102,6 +102,23 @@ export async function POST(request: Request) {
       if (error) throw new Error(`Cancel approval update failed: ${error.message}`)
     }
 
+    // 里程碑审批（财务确认加工费/核准出运/收款等）
+    if (approval_type === 'milestone') {
+      const newStatus = decision === 'approved' ? '已完成' : '阻塞'
+      const { error } = await supabase
+        .from('milestones')
+        .update({
+          status: newStatus,
+          actual_at: decision === 'approved' ? new Date().toISOString() : null,
+          notes: decision_note
+            ? `[财务系统-${decider_name}] ${decision_note}`
+            : `[财务系统-${decider_name}] ${decision === 'approved' ? '财务已确认' : '财务驳回'}`,
+        })
+        .eq('id', approval_id)
+
+      if (error) throw new Error(`Milestone update failed: ${error.message}`)
+    }
+
     console.log(`[FinanceCallback] ${approval_type} ${approval_id}: ${decision} by ${decider_name}`)
 
     return NextResponse.json({
