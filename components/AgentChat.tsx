@@ -12,12 +12,16 @@ interface Message {
 const QUICK_QUESTIONS = [
   { label: '📋 今日待办', q: '今天有哪些待办？' },
   { label: '⚠ 超期风险', q: '哪些订单有超期风险？' },
-  { label: '🧵 面料知识', q: '常见面料的缩水率和色牢度标准是什么？' },
-  { label: '📦 FOB vs DDP', q: 'FOB 和 DDP 的区别是什么？我们报价时要注意什么？' },
+  { label: '🏷 RN号是什么', q: '客户要求提供RN号，RN号是什么？怎么查询？洗标上怎么标注？' },
+  { label: '📦 FOB vs DDP', q: 'FOB和DDP的区别？报价时分别要包含哪些费用？' },
   { label: '✉ 帮我写邮件', q: '客户问交期能不能提前一周，请帮我写一封专业的回复邮件' },
-  { label: '💰 利润分析', q: '怎么判断一个订单的利润是否健康？' },
-  { label: '🏭 工厂产能', q: '我们合作的工厂产能情况如何？' },
-  { label: '📐 尺码知识', q: '欧码和美码的对应关系是什么？Plus size 一般从哪个码开始？' },
+  { label: '🧵 面料术语', q: 'GSM、纱支、色牢度分别是什么？客户问到怎么专业回答？' },
+  { label: '📐 尺码对照', q: '美码/欧码/日码的对照关系？Plus size从哪个码开始？' },
+  { label: '🔍 验货标准', q: 'AQL 2.5是什么意思？中查和尾查分别检查什么？' },
+  { label: '📄 洗标要求', q: '美国市场的洗标要求是什么？必须标注哪些信息？' },
+  { label: '🚢 集装箱规格', q: '20GP/40GP/40HQ分别能装多少件衣服？怎么计算？' },
+  { label: '💳 付款方式', q: 'T/T、L/C、D/P的区别？各自的风险是什么？' },
+  { label: '👶 童装法规', q: '出口美国的童装需要什么认证？CPSIA是什么？' },
 ];
 
 export function AgentChat({ userName }: { userName: string }) {
@@ -64,7 +68,7 @@ export function AgentChat({ userName }: { userName: string }) {
         {messages.length === 0 && (
           <div className="text-center py-12">
             <p className="text-gray-500 mb-6">你好 {userName}，有什么我可以帮你的？</p>
-            <div className="grid grid-cols-2 gap-2 max-w-md mx-auto">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-w-lg mx-auto">
               {QUICK_QUESTIONS.map(item => (
                 <button key={item.q} onClick={() => handleSend(item.q)}
                   className="px-3 py-2.5 text-xs rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors text-left">
