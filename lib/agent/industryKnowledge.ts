@@ -334,6 +334,112 @@ export const TRIM_BRANDS = {
   },
 };
 
+// ════════════════════════════════════════════════
+// 客户国别 — 报价与出运影响
+// ════════════════════════════════════════════════
+
+export const COUNTRY_TRADE_PROFILES: Record<string, {
+  region: string;
+  currency: string;
+  tariff_note: string;
+  certification: string[];
+  label_requirements: string;
+  shipping_note: string;
+  payment_habit: string;
+  special_note: string;
+}> = {
+  '美国/US': {
+    region: '北美',
+    currency: 'USD',
+    tariff_note: '服装关税5-32%（视面料和款式），可能有Section 301额外关税（当前对中国加征）。HS编码61章（针织）/62章（梭织）',
+    certification: ['CPSIA（儿童）', 'Prop 65（加州）', 'ASTM标准', 'FTC RN号'],
+    label_requirements: '必须标注：RN号或公司名、纤维含量（英文）、产地（Made in China）、洗涤说明（ASTM D5489）。永久性洗标',
+    shipping_note: '西海岸（LA/Long Beach）海运约14-18天，东海岸（NY/Savannah）约25-30天。旺季（8-10月）舱位紧张加价',
+    payment_habit: '大客户常用O/A 60-90天或L/C。中小客户T/T 30%+70%',
+    special_note: 'FDA可能抽检纺织品。ISF（10+2申报）必须在装船前24小时提交',
+  },
+  '欧盟/EU': {
+    region: '欧洲',
+    currency: 'EUR',
+    tariff_note: '服装关税约8-12%。中国无GSP优惠（2014年取消）。注意：欧盟各国清关点不同，建议走汉堡/鹿特丹',
+    certification: ['REACH', 'OEKO-TEX', 'CE（PPE类）', 'GOTS（有机）'],
+    label_requirements: '纤维含量需符合EU 1007/2011（可用当地语言或英文）。洗涤符号GINETEX标准。产地标注推荐但非强制',
+    shipping_note: '海运到欧洲主港约25-30天。铁路（中欧班列）约15-18天，价格介于海运和空运之间',
+    payment_habit: 'L/C较常见（特别是新客户）。老客户可O/A 30-60天',
+    special_note: '碳边境税（CBAM）未来可能影响纺织品。VAT（增值税）各国不同（德国19%/法国20%/意大利22%）',
+  },
+  '英国/UK': {
+    region: '欧洲',
+    currency: 'GBP',
+    tariff_note: '脱欧后独立关税制度，服装约6.5-12%。有UK-中国的发展中国家优惠（DCTS），部分品类可享低税率',
+    certification: ['UKCA（取代CE）', 'REACH UK版'],
+    label_requirements: '类似欧盟但需单独合规。产地标注"Made in China"',
+    shipping_note: '海运到Felixstowe/Southampton约28-32天',
+    payment_habit: 'T/T或L/C均有',
+    special_note: '脱欧后英国和欧盟是两个独立市场，不能共用CE/UKCA标志',
+  },
+  '日本/JP': {
+    region: '亚洲',
+    currency: 'JPY',
+    tariff_note: '服装关税约5-11%（RCEP协定后可逐步减免）。EPA原产地规则较严',
+    certification: ['JIS标准', '甲醛限量（最严）'],
+    label_requirements: '必须用日文标注纤维含量和洗涤方式。2016年起采用新JIS洗涤符号（与ISO一致）。标签信息必须极其准确',
+    shipping_note: '海运约5-7天（最近），空运1-2天。日本客户对交期准时率要求极高',
+    payment_habit: 'L/C at sight或T/T。付款信誉好但流程严格',
+    special_note: '日本客户品质要求全球最高。尺码偏小（日本L≈国际M）。包装细节要求苛刻',
+  },
+  '韩国/KR': {
+    region: '亚洲',
+    currency: 'KRW',
+    tariff_note: '服装关税约8-13%。中韩FTA部分品类可减免',
+    certification: ['KC认证（儿童）', 'KS标准'],
+    label_requirements: '必须韩文标注。纤维含量、洗涤方式、制造商/进口商信息',
+    shipping_note: '海运约3-5天，最快的出口市场之一',
+    payment_habit: 'T/T较多，韩国客户习惯快速决策快速下单',
+    special_note: '韩国市场时尚周期短，款式更新快，常要求小批量多款',
+  },
+  '澳大利亚/AU': {
+    region: '大洋洲',
+    currency: 'AUD',
+    tariff_note: '中澳FTA（ChAFTA）后大部分服装关税为0%',
+    certification: ['ACCC安全标准（儿童）'],
+    label_requirements: '纤维含量、产地、洗涤说明（英文）。儿童睡衣有特殊阻燃要求',
+    shipping_note: '海运约15-20天（到悉尼/墨尔本）',
+    payment_habit: 'T/T 30%+70%为主',
+    special_note: '季节相反——北半球冬季是澳洲夏季。排单时注意季节差',
+  },
+  '中东/ME': {
+    region: '中东',
+    currency: 'USD/AED',
+    tariff_note: 'GCC国家（阿联酋/沙特等）关税约5%。自贸区转口贸易发达',
+    certification: ['SASO（沙特）', 'ESMA（阿联酋）'],
+    label_requirements: '部分国家要求阿拉伯语标注。注意：某些宗教文化限制（图案/颜色）',
+    shipping_note: '海运到迪拜约15-20天。迪拜是重要的转口贸易中心',
+    payment_habit: 'L/C较常见（特别是沙特/伊拉克）。阿联酋可T/T',
+    special_note: '尺码偏大（中东客户体型偏大）。深色/保守款需求大。斋月期间业务放缓',
+  },
+  '南美/LATAM': {
+    region: '南美',
+    currency: 'USD/BRL',
+    tariff_note: '巴西关税极高（可达35%+税中税）。智利/秘鲁与中国有FTA',
+    certification: ['INMETRO（巴西）'],
+    label_requirements: '巴西必须葡萄牙语标注，其他国家西班牙语',
+    shipping_note: '海运到巴西Santos约30-35天。南美清关速度慢',
+    payment_habit: '巴西常用L/C。其他国家T/T',
+    special_note: '巴西市场大但清关复杂，建议找当地进口商合作。汇率波动大，报价注意锁汇',
+  },
+  '非洲/AF': {
+    region: '非洲',
+    currency: 'USD',
+    tariff_note: '各国差异大。南非关税约15-45%。东非（肯尼亚/坦桑尼亚）相对较低',
+    certification: ['SONCAP（尼日利亚）', 'PVOC（肯尼亚）'],
+    label_requirements: '通常英文或法文，视殖民历史',
+    shipping_note: '海运到西非约25-30天，东非约20-25天。港口效率低，延误常见',
+    payment_habit: '建议T/T全款或高比例预付。L/C需确认开证行信誉',
+    special_note: '非洲市场价格敏感，重性价比。注意：部分国家禁止进口二手衣服',
+  },
+};
+
 /** 常见面料成分缩写 */
 export const FIBER_ABBREVIATIONS: Record<string, string> = {
   'C': 'Cotton 棉',
@@ -448,6 +554,15 @@ ${Object.entries(CONTAINER_SPECS).map(([k, v]) => `- ${k}: 内尺${v.internal}, 
 - 规格：#3(裤门襟) #5(常规夹克) #8(厚外套) #10(箱包)
 - 纽扣：树脂（最常用）/金属（牛仔工装）/贝壳（高端衬衫）/椰壳（休闲风）
 - 缝纫线：Coats（全球最大）/Amann（德国）/兄弟/金象（国内）
+
+【客户国别影响报价和出运】
+- 美国：关税5-32%+301关税，必须RN号+CPSIA（儿童），海运西海岸14-18天/东海岸25-30天
+- 欧盟：关税8-12%，REACH+OEKO-TEX，海运25-30天，中欧班列15-18天
+- 日本：品质要求最高，尺码偏小，海运5-7天，甲醛标准最严
+- 澳洲：ChAFTA后关税0%，季节相反（北半球冬=澳洲夏）
+- 中东：尺码偏大，深色保守款为主，迪拜转口贸易中心
+- 南美：巴西关税极高（35%+），清关复杂慢，汇率波动大
+- 非洲：价格敏感，建议高比例预付，港口效率低
 
 【面料成分缩写】
 C=棉 P=涤纶 N=尼龙 SP=氨纶 R=人造丝 T=天丝 L=亚麻 W=羊毛 CVC=涤棉(棉>50%) TC=涤棉(涤>50%)
