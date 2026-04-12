@@ -188,8 +188,168 @@ export const SIZE_CHARTS = {
   '国际码对照': 'XXS=00, XS=0-2, S=4-6, M=8-10, L=12-14, XL=16-18, 2XL=20-22, 3XL=24-26',
   '欧码对照': 'XS=34, S=36, M=38, L=40, XL=42, 2XL=44',
   '日码注意': '日本码普遍偏小1-2个码，日本L≈国际M',
-  'Plus Size定义': '美国市场Plus Size一般从1X/14W开始，国内对应2XL以上',
-  '童装分段': 'Infant(0-24M), Toddler(2T-5T), Kids(4-6X), Youth(7-16)',
+  // 美国市场尺码分类体系
+  'Missy/标准女装码': 'US 0-18，标准身材比例。最大市场，大部分品牌默认 Missy 码。胸腰差约10英寸',
+  'Junior/少女码': 'US 0-13（奇数码1/3/5/7/9/11/13），身材偏瘦偏短。Forever21/H&M 年轻线常用',
+  'Plus Size/大码': 'US 14W-28W 或 1X-4X。腰围比 Missy 宽 2-3 英寸。市场增长最快。Torrid/Lane Bryant 专做大码',
+  'Petite/小码': '身高5\'4"（163cm）以下，衣长袖长裤长比标准短1-2英寸。Missy 码+P后缀（如 MP/LP）',
+  'Tall/高码': '身高5\'8"（173cm）以上，衣长袖长裤长加长。后缀T（如 MT/LT）',
+  'Women/女装码': 'US 14W-26W，和 Plus Size 重叠但更正式。百货商场用 Women 而非 Plus',
+  '男装码系统': 'S/M/L/XL（上衣），腰围×裤长如 32×30/34×32（裤子），领围×袖长如 15.5×34（衬衫）',
+  '童装分段': 'Infant(0-24M), Toddler(2T-5T), Kids(4-6X), Youth(7-16)。注意：T码和月龄码不混用',
+  '尺码常见陷阱': '同一品牌不同品类尺码可能不同。下单前必须确认客户的 Size Spec（尺码规格表），不能默认用自己的标准',
+};
+
+// ════════════════════════════════════════════════
+// 验货标准
+// ════════════════════════════════════════════════
+
+export const INSPECTION_STANDARDS = {
+  AQL_LEVELS: {
+    '1.0': '最严格 — 高端品牌/婴幼儿产品。每100件抽检最多允许1件次品',
+    '1.5': '严格 — 中高端品牌。每200件允许约5件次品',
+    '2.5': '标准 — 大多数订单默认。每200件允许约10件次品（General Inspection Level II）',
+    '4.0': '宽松 — 低价大货/促销品。每200件允许约14件次品',
+    '6.5': '最宽松 — 尾货/清仓',
+  },
+  INSPECTION_TYPES: {
+    'Inline/中查': '生产完成30-50%时。重点：尺寸、做工、面料问题。发现问题还能纠正',
+    'Final/尾查': '生产完成80-100%时。全面检查：外观、尺寸、功能、包装、标签。决定是否放行',
+    'Pre-shipment': '装箱完成后、出货前。抽箱检查：数量、包装完整性、唛头',
+    'During Production': '生产全程驻厂检查，适用于新工厂或高风险订单',
+  },
+  DEFECT_CLASSIFICATION: {
+    'Critical/致命缺陷': '影响安全或违反法规。如：断针残留、有害化学物超标、尖锐配件。AQL=0，零容忍',
+    'Major/主要缺陷': '影响产品使用或外观严重。如：色差>4级、尺寸超标>2cm、功能失效、破洞。默认AQL=2.5',
+    'Minor/次要缺陷': '轻微外观问题，不影响使用。如：线头<3cm、轻微污渍可清洗、缝线略歪。默认AQL=4.0',
+  },
+  MEASUREMENT_TOLERANCE: {
+    '关键部位（胸围/腰围/臀围）': '±1cm（严格客户±0.5cm）',
+    '次要部位（袖长/衣长/裤长）': '±1.5cm',
+    '领口/袖口': '±0.5cm',
+    '对称部位（左右袖长差）': '≤0.5cm',
+  },
+  COMMON_TESTS: {
+    '缩水率测试': '水洗3次后测量变化。针织≤±5%，梭织≤±3%。方法：AATCC 135（美国）/ISO 6330（国际）',
+    '色牢度-水洗': '≥4级。方法：AATCC 61/ISO 105-C06',
+    '色牢度-摩擦': '干摩≥4级，湿摩≥3级。方法：AATCC 8/ISO 105-X12',
+    '色牢度-汗渍': '≥4级。方法：AATCC 15/ISO 105-E04',
+    '起球测试': '≥3.5级（马丁代尔法）。方法：ASTM D4970/ISO 12945-2',
+    '拉伸强力': '梭织≥180N，针织≥80N。方法：ASTM D5034/ISO 13934',
+    '撕裂强力': '梭织≥15N。方法：ASTM D1424/ISO 13937',
+    '甲醛含量': '婴幼儿≤20mg/kg，直接接触皮肤≤75mg/kg，非直接≤300mg/kg',
+    '偶氮染料': '禁用偶氮（致癌芳香胺）≤30mg/kg',
+    'pH值': '婴幼儿4.0-7.5，直接接触4.0-8.5',
+  },
+};
+
+// ════════════════════════════════════════════════
+// 验厂标准
+// ════════════════════════════════════════════════
+
+export const FACTORY_AUDIT_STANDARDS = {
+  SOCIAL_COMPLIANCE: {
+    'BSCI': 'Business Social Compliance Initiative。欧洲零售商认可，审核劳工权益/工时/工资/安全。等级A-E，C以上合格',
+    'SEDEX/SMETA': 'Supplier Ethical Data Exchange。英国体系，4 pillars审核（劳工/健康安全/环境/商业道德）',
+    'WRAP': 'Worldwide Responsible Accredited Production。美国体系，12条原则。金/银/铜证书',
+    'SA8000': 'Social Accountability 8000。最严格的社会责任标准，认证有效期3年',
+    'Disney FAMA': '迪士尼工厂授权制造协议。必须通过ITS/SGS/BV验厂。重点：童工/消防/工时',
+    'Walmart/沃尔玛': 'ES审核（Ethical Sourcing）。绿/黄/橙/红灯。橙灯限期整改，红灯终止合作',
+  },
+  QUALITY_SYSTEMS: {
+    'ISO 9001': '质量管理体系。证明工厂有标准化生产流程',
+    'ISO 14001': '环境管理体系。证明工厂有环保措施',
+    'OEKO-TEX STeP': '可持续纺织生产认证。从原材料到成品的环保标准',
+    'GRS': 'Global Recycled Standard。再生纤维认证，使用回收材料',
+    'OCS': 'Organic Content Standard。有机纤维认证',
+    'GOTS': 'Global Organic Textile Standard。最严格的有机纺织品标准，从纤维到成品全链路',
+  },
+  FACTORY_CAPACITY_CALC: '月产能估算：工人数 × 日产件数 × 26天（每月工作日）。例：50人 × 40件/天 × 26 = 52,000件/月',
+};
+
+// ════════════════════════════════════════════════
+// 面料品名大全
+// ════════════════════════════════════════════════
+
+export const FABRIC_DIRECTORY: Record<string, { en: string; desc: string; typical_gsm: string; common_use: string }> = {
+  // 针织
+  '单面平纹/汗布': { en: 'Single Jersey', desc: '最基础的针织面料，一面光滑一面有小线圈', typical_gsm: '120-200g', common_use: 'T恤、打底衫' },
+  '双面棉毛': { en: 'Interlock', desc: '两面都光滑，比单面厚实稳定，不卷边', typical_gsm: '180-280g', common_use: 'Polo衫、中高端T恤' },
+  '罗纹': { en: 'Rib (1×1/2×2)', desc: '有纵向条纹，弹性好', typical_gsm: '200-300g', common_use: '领口、袖口、修身上衣' },
+  '毛圈布': { en: 'French Terry', desc: '外面平纹，里面毛圈。不倒毛', typical_gsm: '250-380g', common_use: '卫衣、运动裤' },
+  '抓绒/摇粒绒': { en: 'Fleece/Polar Fleece', desc: '起绒面料，保暖轻便', typical_gsm: '180-380g', common_use: '外套、保暖内衣' },
+  '卫衣布/磨毛': { en: 'Brushed Fleece', desc: '毛圈布经磨毛处理，里面更柔软', typical_gsm: '280-400g', common_use: '冬季卫衣、运动套装' },
+  '网眼布': { en: 'Mesh/Piqué', desc: '有透气孔洞的针织面料', typical_gsm: '120-220g', common_use: 'Polo衫、运动服' },
+  '莱卡棉': { en: 'Cotton Spandex Jersey', desc: '棉+氨纶混纺，有弹性', typical_gsm: '180-250g', common_use: '瑜伽裤、紧身衣' },
+  '天竺棉': { en: 'Combed Cotton Jersey', desc: '精梳棉，纱线光洁柔软', typical_gsm: '150-200g', common_use: '高品质T恤、内衣' },
+  '华夫格': { en: 'Waffle Knit', desc: '方格状凹凸纹理，透气性好', typical_gsm: '180-280g', common_use: '家居服、休闲上衣' },
+
+  // 梭织
+  '府绸/细布': { en: 'Poplin', desc: '经纬密度高，紧密轻薄有光泽', typical_gsm: '80-130g', common_use: '衬衫、连衣裙' },
+  '斜纹布': { en: 'Twill', desc: '斜纹组织，比平纹厚实耐磨', typical_gsm: '150-300g', common_use: '裤子、工装、夹克' },
+  '牛仔布': { en: 'Denim', desc: '靛蓝染色的粗斜纹棉布', typical_gsm: '200-450g（按盎司：4oz-14oz）', common_use: '牛仔裤、牛仔夹克' },
+  '帆布': { en: 'Canvas', desc: '厚实紧密的平纹或斜纹面料', typical_gsm: '200-600g', common_use: '包袋、工装裤、帽子' },
+  '卡其布': { en: 'Chino/Khaki', desc: '轻量斜纹面料，比牛仔薄', typical_gsm: '180-280g', common_use: '休闲裤、短裤' },
+  '灯芯绒': { en: 'Corduroy', desc: '表面有纵向绒条（条数：8条/14条/21条宽）', typical_gsm: '200-350g', common_use: '裤子、夹克、裙子' },
+  '涤塔夫': { en: 'Polyester Taffeta', desc: '涤纶平纹面料，轻薄防风', typical_gsm: '40-80g', common_use: '里衬、轻便外套' },
+  '尼龙塔斯隆': { en: 'Nylon Taslan', desc: '尼龙空变纱面料，有棉感', typical_gsm: '100-180g', common_use: '户外服、风衣' },
+  '记忆布': { en: 'Memory Fabric', desc: '涤纶面料，折叠后能恢复原形', typical_gsm: '100-150g', common_use: '风衣、夹克' },
+  '色丁/缎面': { en: 'Satin/Charmeuse', desc: '缎纹组织，一面光滑有光泽', typical_gsm: '80-150g', common_use: '晚装、衬衫、内衣' },
+};
+
+// ════════════════════════════════════════════════
+// 辅料品牌与规格
+// ════════════════════════════════════════════════
+
+export const TRIM_BRANDS = {
+  拉链: {
+    'YKK': '日本品牌，全球第一。品质最好价格最高。美国大客户（Nike/Adidas/Gap）通常指定YKK',
+    'SBS': '中国品牌，国内最大。品质稳定，价格约YKK的60-70%。大部分中等订单选用',
+    'YBS': '中国品牌，价格低，适合低价位订单',
+    'RIRI': '瑞士品牌，奢侈品级别。用于LV/Gucci等高端品牌',
+    '常见规格': '#3（薄面料/裤门襟）、#5（常规夹克/卫衣）、#8（厚外套）、#10（帐篷/箱包）。类型：金属/尼龙/树脂/隐形',
+  },
+  纽扣: {
+    '材质分类': '树脂扣（最常用）、金属扣（牛仔/工装）、贝壳扣（高端衬衫）、椰壳扣（休闲/自然风）、牛角扣（大衣）',
+    '尺寸': '衬衫常用10-12mm，外套常用15-20mm，大衣30-40mm。四眼扣/两眼扣/暗扣/啪扣',
+    '品�GPO牌': 'Set（意大ger大利高端）、Leaderform（中高端）、国内东莞/温州产（性价比）',
+  },
+  松紧带: {
+    '材质': '涤纶+橡筋（最常见）、全棉+橡筋（贴身穿）、硅胶防滑带（运动服腰头）',
+    '宽度': '裤腰常用25-40mm，袖口/裤脚常用10-15mm，内衣常用8-12mm',
+  },
+  织带: {
+    '材质': '涤纶（最常见）、尼龙（光滑有光泽）、棉（自然感）、PP带（廉价替代）',
+    '品牌': 'Bekaert（比利时）、国内浙江/广东产',
+  },
+  衬布: {
+    '类型': '有纺衬（稳定性好，用于领子/门襟）、无纺衬（经济型，用于大面积）、针织衬（有弹性，用于弹力面料）',
+    '品牌': '南亚衬布（台湾，高端）、常熟衬布（国内主流）',
+    '温度': '粘合温度通常130-160°C，低温衬100-120°C（用于易变形面料）',
+  },
+  线: {
+    '品牌': 'Coats（英国，全球最大缝纫线品牌）、Amann（德国）、国内：兄弟/金象',
+    '规格': '涤纶线最常用。粗细：20s（粗/牛仔明线）、40s（中等/常规）、60s（细/薄面料）',
+    '颜色': '必须和面料严格对色，建议用Pantone色号指定',
+  },
+};
+
+/** 常见面料成分缩写 */
+export const FIBER_ABBREVIATIONS: Record<string, string> = {
+  'C': 'Cotton 棉',
+  'P/PES': 'Polyester 涤纶',
+  'N/PA': 'Nylon/Polyamide 尼龙/锦纶',
+  'SP/EL': 'Spandex/Elastane 氨纶/弹性纤维',
+  'R/VS': 'Rayon/Viscose 人造丝/粘胶',
+  'T/TE': 'Tencel/Lyocell 天丝',
+  'L/LI': 'Linen 亚麻',
+  'W/WO': 'Wool 羊毛',
+  'S/SE': 'Silk 丝绸',
+  'A/AC': 'Acrylic 腈纶',
+  'MD': 'Modal 莫代尔',
+  'CVC': 'Chief Value Cotton 棉为主的涤棉混纺（棉>50%）',
+  'TC': 'Tetron Cotton 涤棉混纺（涤>50%）',
+  'TR': 'Tetron Rayon 涤粘混纺',
 };
 
 /**
@@ -260,8 +420,37 @@ ${Object.entries(INCOTERMS).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 【集装箱规格】
 ${Object.entries(CONTAINER_SPECS).map(([k, v]) => `- ${k}: 内尺${v.internal}, 容积${v.volume}, 载重${v.maxWeight}, 约装${v.typical}`).join('\n')}
 
-【尺码对照】
-${Object.entries(SIZE_CHARTS).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
+【美国尺码分类体系】
+- Missy: 标准女装 US 0-18，最大市场
+- Junior: 少女码 US 1-13（奇数），偏瘦偏短
+- Plus Size: 大码 US 14W-28W / 1X-4X，增长最快
+- Petite: 小码，身高<163cm，加P后缀
+- Tall: 高码，身高>173cm，加T后缀
+- 男装：上衣S/M/L/XL，裤子腰围×裤长（32×30），衬衫领围×袖长（15.5×34）
+- 童装：Infant(0-24M), Toddler(2T-5T), Kids(4-6X), Youth(7-16)
+
+【验货标准】
+- AQL 2.5 = 标准，每200件允许约10件次品
+- 致命缺陷(Critical) AQL=0 零容忍：断针、有害化学物
+- 主要缺陷(Major) AQL=2.5：色差>4级、尺寸超标>2cm、破洞
+- 次要缺陷(Minor) AQL=4.0：线头<3cm、轻微污渍
+- 关键部位尺寸公差 ±1cm，对称部位差≤0.5cm
+
+【验厂认证】
+- BSCI: 欧洲零售商认可，C级以上合格
+- SEDEX/SMETA: 英国体系，4大支柱审核
+- WRAP: 美国体系，金/银/铜证书
+- Disney FAMA: 迪士尼必须通过ITS/SGS/BV验厂
+- GOTS: 有机纺织品最严标准
+
+【辅料品牌】
+- 拉链：YKK（日本第一，Nike/Adidas指定）> SBS（国内最大，性价比）> YBS（低价）> RIRI（奢侈品级）
+- 规格：#3(裤门襟) #5(常规夹克) #8(厚外套) #10(箱包)
+- 纽扣：树脂（最常用）/金属（牛仔工装）/贝壳（高端衬衫）/椰壳（休闲风）
+- 缝纫线：Coats（全球最大）/Amann（德国）/兄弟/金象（国内）
+
+【面料成分缩写】
+C=棉 P=涤纶 N=尼龙 SP=氨纶 R=人造丝 T=天丝 L=亚麻 W=羊毛 CVC=涤棉(棉>50%) TC=涤棉(涤>50%)
 
 【服装专业术语（部分）】
 - GSM: ${GARMENT_TERMS['GSM']}
