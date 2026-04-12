@@ -10,10 +10,14 @@ interface Message {
 }
 
 const QUICK_QUESTIONS = [
-  '今天有哪些待办？',
-  '哪些订单有超期风险？',
-  '客户情况怎么样？',
-  '工厂产能如何？',
+  { label: '📋 今日待办', q: '今天有哪些待办？' },
+  { label: '⚠ 超期风险', q: '哪些订单有超期风险？' },
+  { label: '🧵 面料知识', q: '常见面料的缩水率和色牢度标准是什么？' },
+  { label: '📦 FOB vs DDP', q: 'FOB 和 DDP 的区别是什么？我们报价时要注意什么？' },
+  { label: '✉ 帮我写邮件', q: '客户问交期能不能提前一周，请帮我写一封专业的回复邮件' },
+  { label: '💰 利润分析', q: '怎么判断一个订单的利润是否健康？' },
+  { label: '🏭 工厂产能', q: '我们合作的工厂产能情况如何？' },
+  { label: '📐 尺码知识', q: '欧码和美码的对应关系是什么？Plus size 一般从哪个码开始？' },
 ];
 
 export function AgentChat({ userName }: { userName: string }) {
@@ -50,9 +54,9 @@ export function AgentChat({ userName }: { userName: string }) {
       <div className="text-center mb-4">
         <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 rounded-full">
           <span className="text-lg">🤖</span>
-          <span className="text-sm font-medium text-indigo-700">Agent 助手</span>
+          <span className="text-sm font-medium text-indigo-700">小绮 · AI 业务助手</span>
         </div>
-        <p className="text-xs text-gray-400 mt-2">可以询问订单状态、超期风险、客户情况、工厂产能</p>
+        <p className="text-xs text-gray-400 mt-2">订单查询 · 行业知识 · 客户回复建议 · 面料/工艺/贸易专业咨询</p>
       </div>
 
       {/* 消息区 */}
@@ -60,11 +64,11 @@ export function AgentChat({ userName }: { userName: string }) {
         {messages.length === 0 && (
           <div className="text-center py-12">
             <p className="text-gray-500 mb-6">你好 {userName}，有什么我可以帮你的？</p>
-            <div className="flex flex-wrap gap-2 justify-center">
-              {QUICK_QUESTIONS.map(q => (
-                <button key={q} onClick={() => handleSend(q)}
-                  className="px-4 py-2 text-sm rounded-full border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors">
-                  {q}
+            <div className="grid grid-cols-2 gap-2 max-w-md mx-auto">
+              {QUICK_QUESTIONS.map(item => (
+                <button key={item.q} onClick={() => handleSend(item.q)}
+                  className="px-3 py-2.5 text-xs rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors text-left">
+                  {item.label}
                 </button>
               ))}
             </div>
@@ -78,7 +82,7 @@ export function AgentChat({ userName }: { userName: string }) {
                 ? 'bg-indigo-600 text-white'
                 : 'bg-white border border-gray-200 text-gray-900'
             }`}>
-              {msg.role === 'agent' && <span className="text-xs text-indigo-500 font-medium block mb-1">🤖 Agent</span>}
+              {msg.role === 'agent' && <span className="text-xs text-indigo-500 font-medium block mb-1">🤖 小绮</span>}
               <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
               <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-indigo-200' : 'text-gray-300'}`}>
                 {msg.timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
@@ -90,7 +94,7 @@ export function AgentChat({ userName }: { userName: string }) {
         {loading && (
           <div className="flex justify-start">
             <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
-              <span className="text-xs text-indigo-500 font-medium block mb-1">🤖 Agent</span>
+              <span className="text-xs text-indigo-500 font-medium block mb-1">🤖 小绮</span>
               <div className="flex gap-1">
                 <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
