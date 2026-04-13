@@ -110,13 +110,15 @@ export function getBlockedReasons(
   const hardBlocks: string[] = [];
   const warnings: string[] = [];
 
-  // 确认链规则
-  for (const rule of CONFIRMATION_BLOCK_RULES) {
-    if (!rule.blocks_milestones.includes(stepKey)) continue;
-    const conf = confirmations.find(c => c.module === rule.confirmation_type);
-    if (!conf || conf.status !== 'confirmed') {
-      if (rule.severity === 'hard') hardBlocks.push(rule.block_reason);
-      else warnings.push(rule.block_reason);
+  // 确认链规则（仅当订单有确认链记录时才检查，老订单跳过）
+  if (confirmations.length > 0) {
+    for (const rule of CONFIRMATION_BLOCK_RULES) {
+      if (!rule.blocks_milestones.includes(stepKey)) continue;
+      const conf = confirmations.find(c => c.module === rule.confirmation_type);
+      if (!conf || conf.status !== 'confirmed') {
+        if (rule.severity === 'hard') hardBlocks.push(rule.block_reason);
+        else warnings.push(rule.block_reason);
+      }
     }
   }
 

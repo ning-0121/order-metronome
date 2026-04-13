@@ -309,3 +309,58 @@ export async function updateConfirmation(
   revalidatePath(`/orders/${orderId}`);
   return {};
 }
+
+/**
+ * 批量初始化所有老订单的确认链（状态设为 confirmed）
+ * 用于确认链功能上线后，给已有订单补数据，避免阻塞
+ */
+export async function backfillConfirmationsForExistingOrders(): Promise<{
+  processed: number;
+  skipped: number;
+  error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { processed: 0, skipped: 0, error: '未登录' };
+
+  const { data: orders } = await (supabase.from('orders') as any)
+    .select('id').not('lifecycle_status', 'in', '("cancelled","已取消")');
+
+  if (!orders) return { processed: 0, skipped: 0 };
+
+  let processed = 0;
+  let skipped = 0;
+
+  for (const order of orders as any[]) {
+    const { count } = await (supabase.from('order_confirmations') as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('order_id', order.id);
+
+    if (count && count >= 4) { skipped++; continue; }
+
+    for (const mod of CONFIRM_MODULES) {
+      await (supabase.from('order_confirmations') as any).upsert({
+        order_id: order.id,
+        module: mod,
+        status: 'confirmed',
+        customer_confirmed: true,
+        confirmed_at: new Date().toISOString(),
+        confirmed_by: user.id,
+        data: {},
+        notes: '系统自动补建（老订单默认已确认）',
+      }, { onConflict: 'order_id,module' });
+    }
+
+    const { data: existingFin } = await (supabase.from('order_financials') as any)
+      .select('id').eq('order_id', order.id).maybeSingle();
+    if (!existingFin) {
+      await (supabase.from('order_financials') as any).insert({
+        order_id: order.id, allow_production: true, allow_shipment: true,
+      });
+    }
+
+    processed++;
+  }
+
+  return { processed, skipped };
+}
