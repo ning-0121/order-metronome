@@ -21,6 +21,8 @@ interface Props {
     factories: Dimension[];
     incoterms: Dimension[];
     types: (Dimension & { label: string })[];
+    merchandisers?: Dimension[];
+    salespeople?: Dimension[];
   };
 }
 
@@ -87,6 +89,8 @@ export function OrderSearchBar({
     { key: 'factory', label: '按工厂', icon: '🏭', items: dimensions.factories, active: currentFactory },
     { key: 'incoterm', label: '按贸易条款', icon: '🚢', items: dimensions.incoterms, active: currentIncoterm },
     { key: 'type', label: '按订单类型', icon: '📋', items: dimensions.types.map(t => ({ ...t, name: t.name, displayName: t.label })), active: currentType },
+    ...(dimensions.merchandisers?.length ? [{ key: 'merchandiser', label: '按跟单', icon: '👔', items: dimensions.merchandisers, active: '' }] : []),
+    ...(dimensions.salespeople?.length ? [{ key: 'sales', label: '按业务', icon: '💼', items: dimensions.salespeople, active: '' }] : []),
   ];
 
   return (

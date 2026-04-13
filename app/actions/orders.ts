@@ -695,10 +695,30 @@ export async function getOrders() {
 
   if (canSeeAll) {
     const { data: orders, error } = await (supabase.from('orders') as any)
-      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
+      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
       .order('created_at', { ascending: false });
     if (error) return { error: error.message };
-    return { data: orders };
+    // 解析跟单和业务员名称
+    const userIds = new Set<string>();
+    for (const o of (orders || []) as any[]) {
+      if (o.owner_user_id) userIds.add(o.owner_user_id);
+      if (o.created_by) userIds.add(o.created_by);
+    }
+    let nameMap: Record<string, string> = {};
+    if (userIds.size > 0) {
+      const { data: profiles } = await (supabase.from('profiles') as any)
+        .select('user_id, name, email').in('user_id', Array.from(userIds));
+      nameMap = (profiles || []).reduce((m: any, p: any) => {
+        m[p.user_id] = p.name || p.email?.split('@')[0] || '';
+        return m;
+      }, {} as Record<string, string>);
+    }
+    const enriched = (orders || []).map((o: any) => ({
+      ...o,
+      merchandiser_name: o.owner_user_id ? nameMap[o.owner_user_id] || null : null,
+      sales_name: o.created_by ? nameMap[o.created_by] || null : null,
+    }));
+    return { data: enriched };
   }
 
   // 普通员工：只看自己创建的 + 被分配了关卡的订单

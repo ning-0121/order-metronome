@@ -106,7 +106,11 @@ export function getBlockedReasons(
   stepKey: string,
   confirmations: Array<{ module: string; status: string }>,
   financials: { deposit_status: string; balance_status: string; payment_hold: boolean; allow_production: boolean; allow_shipment: boolean } | null,
+  incoterm?: string,
 ): { blocked: boolean; hardBlocks: string[]; warnings: string[] } {
+  // 国内单（非 DDP）跳过出运相关的包装阻塞
+  const isDomestic = incoterm && incoterm !== 'DDP';
+  const DOMESTIC_SKIP_MILESTONES = ['booking_done', 'shipment_execute'];
   const hardBlocks: string[] = [];
   const warnings: string[] = [];
 
@@ -114,6 +118,8 @@ export function getBlockedReasons(
   if (confirmations.length > 0) {
     for (const rule of CONFIRMATION_BLOCK_RULES) {
       if (!rule.blocks_milestones.includes(stepKey)) continue;
+      // 国内单跳过出运相关的包装阻塞（国内不走订舱/出运）
+      if (isDomestic && DOMESTIC_SKIP_MILESTONES.includes(stepKey) && rule.confirmation_type === 'packaging_label') continue;
       const conf = confirmations.find(c => c.module === rule.confirmation_type);
       if (!conf || conf.status !== 'confirmed') {
         if (rule.severity === 'hard') hardBlocks.push(rule.block_reason);

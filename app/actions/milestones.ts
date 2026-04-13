@@ -226,7 +226,7 @@ export async function markMilestoneDone(
   if (!isAdmin) {
     try {
       const { getBlockedReasons } = await import('@/lib/engine/blockRules');
-      const [confRes, finRes] = await Promise.all([
+      const [confRes, finRes, orderRes] = await Promise.all([
         (supabase.from('order_confirmations') as any)
           .select('module, status')
           .eq('order_id', milestone.order_id),
@@ -234,12 +234,17 @@ export async function markMilestoneDone(
           .select('deposit_status, balance_status, payment_hold, allow_production, allow_shipment')
           .eq('order_id', milestone.order_id)
           .maybeSingle(),
+        (supabase.from('orders') as any)
+          .select('incoterm')
+          .eq('id', milestone.order_id)
+          .single(),
       ]);
 
       const blockResult = getBlockedReasons(
         milestone.step_key,
         confRes.data || [],
         finRes.data || null,
+        orderRes.data?.incoterm,
       );
 
       if (blockResult.blocked) {

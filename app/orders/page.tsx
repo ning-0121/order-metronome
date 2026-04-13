@@ -60,17 +60,23 @@ function getSearchDimensions(orders: any[]): {
   factories: { name: string; count: number }[];
   incoterms: { name: string; count: number }[];
   types: { name: string; label: string; count: number }[];
+  merchandisers: { name: string; count: number }[];
+  salespeople: { name: string; count: number }[];
 } {
   const customerMap: Record<string, number> = {};
   const factoryMap: Record<string, number> = {};
   const incotermMap: Record<string, number> = {};
   const typeMap: Record<string, number> = {};
+  const merchMap: Record<string, number> = {};
+  const salesMap: Record<string, number> = {};
 
   for (const o of orders) {
     if (o.customer_name) customerMap[o.customer_name] = (customerMap[o.customer_name] || 0) + 1;
     if (o.factory_name) factoryMap[o.factory_name] = (factoryMap[o.factory_name] || 0) + 1;
     if (o.incoterm) incotermMap[o.incoterm] = (incotermMap[o.incoterm] || 0) + 1;
     if (o.order_type) typeMap[o.order_type] = (typeMap[o.order_type] || 0) + 1;
+    if (o.merchandiser_name) merchMap[o.merchandiser_name] = (merchMap[o.merchandiser_name] || 0) + 1;
+    if (o.sales_name) salesMap[o.sales_name] = (salesMap[o.sales_name] || 0) + 1;
   }
 
   const typeLabels: Record<string, string> = { trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' };
@@ -80,16 +86,20 @@ function getSearchDimensions(orders: any[]): {
     factories: Object.entries(factoryMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
     incoterms: Object.entries(incotermMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
     types: Object.entries(typeMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, label: typeLabels[name] || name, count })),
+    merchandisers: Object.entries(merchMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
+    salespeople: Object.entries(salesMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
   };
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string }> }) {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string }> }) {
   const params = await searchParams;
   const statusFilter = params?.status || 'active';
   const purposeFilter = params?.purpose || 'production';
   const searchQuery = params?.q || '';
   const customerFilter = params?.customer || '';
   const factoryFilter = params?.factory || '';
+  const merchandiserFilter = params?.merchandiser || '';
+  const salesFilter = params?.sales || '';
   const incotermFilter = params?.incoterm || '';
   const typeFilter = params?.type || '';
   const sortOrder = (params?.sort || 'factory_asc') as
@@ -133,6 +143,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   if (factoryFilter) filteredOrders = filteredOrders.filter((o: any) => o.factory_name === factoryFilter);
   if (incotermFilter) filteredOrders = filteredOrders.filter((o: any) => o.incoterm === incotermFilter);
   if (typeFilter) filteredOrders = filteredOrders.filter((o: any) => o.order_type === typeFilter);
+  if (merchandiserFilter) filteredOrders = filteredOrders.filter((o: any) => o.merchandiser_name === merchandiserFilter);
+  if (salesFilter) filteredOrders = filteredOrders.filter((o: any) => o.sales_name === salesFilter);
 
   // 应用搜索
   const unsorted = filteredOrders.filter((o: any) => matchOrder(o, searchQuery));
