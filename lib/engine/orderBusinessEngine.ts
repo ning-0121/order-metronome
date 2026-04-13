@@ -130,8 +130,16 @@ export function calculatePaymentStatus(input: EngineInput): StatusResult<'receiv
     return { value: 'hold', level: 'red', explain: '付款问题暂停 — 财务已标记 payment_hold' };
   }
 
-  const depositOk = f.deposit_status === 'received' || !f.deposit_amount;
-  const balanceOk = f.balance_status === 'received' || !f.balance_amount;
+  // 没有录入金额 = 还没设置收款计划，不能当作"已收齐"
+  const depositNotSet = !f.deposit_amount || f.deposit_amount <= 0;
+  const balanceNotSet = !f.balance_amount || f.balance_amount <= 0;
+
+  if (depositNotSet && balanceNotSet) {
+    return { value: 'pending', level: 'yellow', explain: '收款计划未设置 — 请财务录入定金和尾款金额' };
+  }
+
+  const depositOk = f.deposit_status === 'received';
+  const balanceOk = f.balance_status === 'received' || balanceNotSet;
 
   if (depositOk && balanceOk) {
     return { value: 'received', level: 'green', explain: '定金和尾款均已收齐' };
