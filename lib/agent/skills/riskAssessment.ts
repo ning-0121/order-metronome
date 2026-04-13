@@ -617,7 +617,7 @@ export const riskAssessmentSkill: SkillModule = {
     return JSON.stringify({
       orderId: input.orderId,
       // v4：业务员视角叙事层 + 专业知识库注入
-      version: 'v6-dynamic-progress',
+      version: 'v7-evidence-verified',
     });
   },
 
@@ -749,12 +749,18 @@ export const riskAssessmentSkill: SkillModule = {
     const narrativeSuggestions: Array<{ action: string; reason: string; targetRole?: string }> = [];
 
     if (narrative) {
+      // AI 输出校验：top_concern 必须引用规则引擎的真实 findings 作为依据
       if (narrative.top_concern) {
+        // 从规则引擎 findings 里找最严重的作为依据
+        const topRule = topFindings[0];
+        const evidenceText = topRule
+          ? `依据：[${topRule.category}] ${topRule.label}${topRule.evidence ? '（' + topRule.evidence + '）' : ''}`
+          : '⚠ AI 判断，未匹配到规则依据';
         narrativeFindings.push({
           category: '🎯 当前最关键',
           severity: level,
           label: narrative.top_concern,
-          evidence: '基于规则引擎 + 业务员视角综合判断',
+          evidence: evidenceText,
         });
       }
       for (const wa of narrative.week_ahead || []) {
@@ -763,6 +769,7 @@ export const riskAssessmentSkill: SkillModule = {
           severity: 'medium',
           label: wa.title,
           detail: `${wa.reason}\n→ ${wa.action}`,
+          evidence: '基于规则引擎风险点推导',
           whoShouldFix: wa.target_role,
         });
         narrativeSuggestions.push({
@@ -773,11 +780,10 @@ export const riskAssessmentSkill: SkillModule = {
       }
       if (narrative.hidden_risk_warning) {
         narrativeFindings.push({
-          category: '👀 隐藏风险',
-          severity: 'medium',
-          label: '业务员嗅到的潜在风险',
-          detail: narrative.hidden_risk_warning,
-          evidence: 'AI 业务员视角判断（非规则）',
+          category: '👀 AI 推测（未验证）',
+          severity: 'low', // 降级为 low — 未验证的不能标 medium
+          label: narrative.hidden_risk_warning,
+          evidence: '⚠ AI 推测，非规则验证，仅供参考。建议人工确认后再行动',
         });
       }
       for (const wl of (narrative.watch_list || []).slice(0, 3)) {
