@@ -529,33 +529,37 @@ async function generateBusinessNarrative(
   const knowledge = getKnowledgeByTags(tags, { maxItems: 6 });
   const knowledgeBlock = formatKnowledgeForPrompt(knowledge);
 
-  const systemPrompt = `你是一个 10 年经验的外贸服装业务员。你看问题的角度是"能不能安全交付 + 能不能守住利润"，不是机械规则。
-你的任务：接收系统规则引擎的打分结果，用业务员的语言重新组织输出。
+  const systemPrompt = `你是订单节拍器的风险分析引擎。你的工作是把系统检测到的事实数据用简洁的业务语言表达出来。
 
-**专业经验参考**（用来支撑你的判断，但不要直接照抄）：
-${knowledgeBlock}
+**核心原则：只说有数据支撑的话，不编造、不猜测、不推测。**
+
+你会收到两类数据：
+1. 规则引擎检测到的风险点（每条都有证据）
+2. 订单当前进度和经营状态（来自系统实时数据）
 
 **输出要求**：严格输出以下 JSON（不要 markdown 包装）：
 {
-  "top_concern": "一句话：现在最危险的 1 件事。必须具体到动作层面，不是抽象的'交期紧'而是'还剩 XX 天但 XX 还没做'",
+  "top_concern": "基于数据的一句话总结。格式：'[具体事实] → [具体后果]'。例如：'距出厂仅3天但还有6个节点未完成 → 100%会延期'。如果没有严重问题就说'当前按计划推进中，无紧急风险'",
   "week_ahead": [
     {
-      "title": "事项标题（10 字内）",
-      "reason": "为什么这是未来 7 天要做的（1 句话）",
-      "action": "具体动作 + 谁做 + 怎么做（20 字内）",
+      "title": "事项标题（10字内）",
+      "reason": "基于什么数据得出的（引用系统数据）",
+      "action": "具体动作：谁 + 做什么 + 什么时候前（20字内）",
       "target_role": "sales|merchandiser|finance|procurement|admin"
     }
   ],
-  "watch_list": ["可以延后观察的风险点（每条 15 字内）"],
-  "hidden_risk_warning": "只有当你凭经验嗅到'规则没抓到但可能会爆'的隐藏风险时才填，否则 null"
+  "watch_list": ["基于数据的观察点，不是猜测（每条15字内）"],
+  "hidden_risk_warning": null
 }
 
-**重要原则**：
-- 不要重复规则引擎的原话，用业务员的语气说人话
-- top_concern 只有一条，必须是最紧急的；如果订单真的没啥风险，就说"目前没有紧急问题，按节奏推进即可"
-- week_ahead 最多 3 条；如果订单刚起步或收尾，可能 0-1 条
-- watch_list 最多 3 条；不要把紧急的事放这里
-- 用中文，简短，像跟同事当面说话的口吻`;
+**严格禁止**：
+- 禁止说"客户习惯延期X天" — 除非系统数据里明确给了客户历史延期天数
+- 禁止说"已收款/未收款" — 除非系统数据里明确标注了收款状态
+- 禁止说"建议和客户沟通" — 必须说清楚"沟通什么、谁去沟通、什么时候前"
+- 禁止编造任何系统数据里没有的信息
+- hidden_risk_warning 永远填 null — 不猜测隐藏风险
+- 如果数据不足，直接说"数据不足，无法判断"，不要凑字数
+- week_ahead 只列有明确数据支撑的事项，宁少勿编`;
 
   // 计算当前进度摘要给 AI
   const DONE_STATUSES = new Set(['done', '已完成', 'completed']);
@@ -570,18 +574,59 @@ ${knowledgeBlock}
     ? Math.ceil((new Date(order.factory_date).getTime() - new Date().getTime()) / 86400000)
     : null;
 
-  const userPrompt = `订单信息：
+  // 查询经营数据（收款/利润/确认链）
+  let bizContext = '';
+  try {
+    const [finRes, confRes] = await Promise.all([
+      (ctx.supabase.from('order_financials') as any)
+        .select('margin_pct, deposit_status, deposit_amount, balance_status, balance_amount, balance_due_date, payment_hold, allow_production, allow_shipment')
+        .eq('order_id', input.orderId).maybeSingle(),
+      (ctx.supabase.from('order_confirmations') as any)
+        .select('module, status')
+        .eq('order_id', input.orderId),
+    ]);
+    const fin = finRes.data;
+    const confs = confRes.data || [];
+    const pendingConfs = confs.filter((c: any) => c.status !== 'confirmed');
+
+    if (fin) {
+      const parts = [];
+      if (fin.margin_pct !== null) parts.push(`毛利率 ${fin.margin_pct}%${fin.margin_pct < 8 ? '（低于8%底线）' : ''}`);
+      else parts.push('毛利率：未录入');
+
+      if (fin.deposit_amount > 0) parts.push(`定金：${fin.deposit_status === 'received' ? '已收' : '未收'}（¥${fin.deposit_amount}）`);
+      else parts.push('定金：未设置');
+
+      if (fin.balance_amount > 0) parts.push(`尾款：${fin.balance_status === 'received' ? '已收' : fin.balance_status === 'overdue' ? '已逾期' : '未收'}（¥${fin.balance_amount}）`);
+      else parts.push('尾款：未设置');
+
+      if (fin.payment_hold) parts.push('⚠ 付款已暂停');
+      if (!fin.allow_production) parts.push('⚠ 生产未放行');
+      if (!fin.allow_shipment) parts.push('⚠ 出货未放行');
+
+      bizContext += `\n- 💰 经营状态：${parts.join(' | ')}`;
+    }
+
+    if (pendingConfs.length > 0) {
+      const labels: Record<string, string> = { fabric_color: '面料颜色', size_breakdown: '尺码配比', logo_print: 'Logo/印花', packaging_label: '包装唛头' };
+      bizContext += `\n- ✅ 确认链：${pendingConfs.length} 项未确认（${pendingConfs.map((c: any) => labels[c.module] || c.module).join('、')}）`;
+    } else if (confs.length > 0) {
+      bizContext += '\n- ✅ 确认链：全部已确认';
+    }
+  } catch {}
+
+  const userPrompt = `订单信息（全部来自系统实时数据）：
 - 订单号 ${order.order_no || '?'}
 - 客户 ${order.customer_name || '?'}${order.is_new_customer ? '（新客户首单）' : ''}
 - 工厂 ${order.factory_name || '?'}${order.is_new_factory ? '（新工厂）' : ''}
 - 数量 ${order.quantity || '?'} 件，${order.style_count || '?'} 款 ${order.color_count || '?'} 色
 - 贸易条款 ${order.incoterm || '?'}
 - 下单日 ${order.order_date || '?'}，出厂日 ${order.factory_date || '?'}
-- ⏱ 距出厂还剩 ${remainingDays !== null ? `${remainingDays} 天` : '未知'}
-- 📊 当前进度：${doneMs}/${totalMs} 完成（${totalMs > 0 ? Math.round(doneMs / totalMs * 100) : 0}%），${activeMs.length} 个进行中${blockedMs.length > 0 ? `，${blockedMs.length} 个卡住` : ''}${overdueMs.length > 0 ? `，${overdueMs.length} 个已逾期` : ''}
+- ⏱ 距出厂还剩 ${remainingDays !== null ? `${remainingDays} 天` : '未设置'}
+- 📊 当前进度：${doneMs}/${totalMs} 完成（${totalMs > 0 ? Math.round(doneMs / totalMs * 100) : 0}%），${activeMs.length} 个进行中${blockedMs.length > 0 ? `，${blockedMs.length} 个卡住` : ''}${overdueMs.length > 0 ? `，${overdueMs.length} 个已逾期` : ''}${bizContext}
 - 特殊标签 ${specialTags.length > 0 ? specialTags.join('、') : '无'}
-- 客户历史：${customerStats.hasEnoughData ? `${customerStats.totalOrders} 单，平均延期 ${Math.round(customerStats.avgDelayDays)} 天` : '历史数据不足'}
-- 工厂历史：${factoryStats.hasEnoughData ? `${factoryStats.totalOrders} 单，平均延期 ${Math.round(factoryStats.avgDelayDays)} 天` : '历史数据不足'}
+- 客户历史：${customerStats.hasEnoughData ? `${customerStats.totalOrders} 单，平均延期 ${Math.round(customerStats.avgDelayDays)} 天` : '历史数据不足，无法判断'}
+- 工厂历史：${factoryStats.hasEnoughData ? `${factoryStats.totalOrders} 单，平均延期 ${Math.round(factoryStats.avgDelayDays)} 天` : '历史数据不足，无法判断'}
 
 **规则引擎已识别的风险点**（按严重度排序）：
 ${findings
@@ -617,7 +662,7 @@ export const riskAssessmentSkill: SkillModule = {
     return JSON.stringify({
       orderId: input.orderId,
       // v4：业务员视角叙事层 + 专业知识库注入
-      version: 'v7-evidence-verified',
+      version: 'v8-facts-only',
     });
   },
 
@@ -778,14 +823,7 @@ export const riskAssessmentSkill: SkillModule = {
           targetRole: wa.target_role,
         });
       }
-      if (narrative.hidden_risk_warning) {
-        narrativeFindings.push({
-          category: '👀 AI 推测（未验证）',
-          severity: 'low', // 降级为 low — 未验证的不能标 medium
-          label: narrative.hidden_risk_warning,
-          evidence: '⚠ AI 推测，非规则验证，仅供参考。建议人工确认后再行动',
-        });
-      }
+      // hidden_risk_warning 已禁用 — AI 不允许猜测隐藏风险
       for (const wl of (narrative.watch_list || []).slice(0, 3)) {
         narrativeFindings.push({
           category: '👁 留意',
