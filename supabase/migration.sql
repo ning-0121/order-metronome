@@ -2202,3 +2202,13 @@ CREATE TRIGGER set_order_confirmations_updated_at
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_order_financials_payment ON public.order_financials(payment_hold, deposit_status, balance_status);
 CREATE INDEX IF NOT EXISTS idx_order_financials_margin ON public.order_financials(margin_pct) WHERE margin_pct IS NOT NULL;
+
+-- ===== 2026-04-12 附件删除 RLS 策略 =====
+DROP POLICY IF EXISTS "order_attachments_delete" ON public.order_attachments;
+CREATE POLICY "order_attachments_delete" ON public.order_attachments
+  FOR DELETE USING (auth.uid() IS NOT NULL);
+
+-- 同时确保 UPDATE 策略也有（用于更新 extracted_text 等）
+DROP POLICY IF EXISTS "order_attachments_update" ON public.order_attachments;
+CREATE POLICY "order_attachments_update" ON public.order_attachments
+  FOR UPDATE USING (auth.uid() IS NOT NULL);
