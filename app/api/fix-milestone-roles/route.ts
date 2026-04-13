@@ -45,7 +45,20 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({ success: true, fixed: totalFixed });
+    // 同时修复：草稿订单批量激活
+    let activatedDrafts = 0;
+    const { data: drafts } = await (supabase.from('orders') as any)
+      .select('id')
+      .in('lifecycle_status', ['draft', '草稿', 'pending_approval']);
+    if (drafts && drafts.length > 0) {
+      const ids = drafts.map((d: any) => d.id);
+      await (supabase.from('orders') as any)
+        .update({ lifecycle_status: 'active', updated_at: new Date().toISOString() })
+        .in('id', ids);
+      activatedDrafts = ids.length;
+    }
+
+    return NextResponse.json({ success: true, fixed_roles: totalFixed, activated_drafts: activatedDrafts });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
