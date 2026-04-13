@@ -756,18 +756,28 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange 
           <div className="space-y-2">
             {group.items.map(item => {
               const val = responses[item.key];
+              // 双签：如果 item 有 role 限制，且当前用户角色不匹配 → 禁用
+              const roleRestricted = item.role && !currentRoles.includes(item.role) && !currentRoles.includes('admin');
+              const alreadyDone = !!val?.value; // 别人已经勾了
               return (
                 <div key={item.key} className="flex items-start gap-2 bg-white rounded-md p-2 border border-amber-100">
                   {item.type === 'checkbox' && (
-                    <label className="flex items-center gap-2 cursor-pointer flex-1">
+                    <label className={`flex items-center gap-2 flex-1 ${roleRestricted ? 'opacity-60' : 'cursor-pointer'}`}>
                       <input
                         type="checkbox"
                         checked={!!val?.value}
                         onChange={e => handleChange(item.key, e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-amber-600"
+                        disabled={roleRestricted && !alreadyDone}
+                        className="w-4 h-4 rounded border-gray-300 text-amber-600 disabled:opacity-50"
                       />
                       <span className="text-sm text-gray-700">{item.label}</span>
                       {item.required && <span className="text-red-500 text-xs">*</span>}
+                      {roleRestricted && !alreadyDone && (
+                        <span className="text-xs text-gray-400 ml-1">（等待{item.role === 'admin' ? 'CEO' : '业务'}确认）</span>
+                      )}
+                      {alreadyDone && roleRestricted && (
+                        <span className="text-xs text-green-600 ml-1">✓ 已确认</span>
+                      )}
                     </label>
                   )}
 
