@@ -472,9 +472,15 @@ export async function activateOrder(
     return { error: getError?.message || 'Order not found' };
   }
   
-  // 激活订单：直接记录日志和更新里程碑
-  const updated = order;
-  
+  // 激活订单：更新 lifecycle_status
+  const { data: updated, error: updateErr } = await (supabase
+    .from('orders') as any)
+    .update({ lifecycle_status: 'active', updated_at: new Date().toISOString() })
+    .eq('id', orderId)
+    .select('*')
+    .single();
+  if (updateErr) return { error: updateErr.message };
+
   // 记录日志
   await logOrderEvent(
     supabase,
@@ -533,11 +539,12 @@ export async function startExecution(
     return { error: getError?.message || 'Order not found' };
   }
   
-  // startExecution 不再需要更新任何字段，只是逻辑上的开始执行
+  // 更新 lifecycle_status 为执行中
   const { data: updated, error: updateError } = await (supabase
     .from('orders') as any)
-    .select('*')
+    .update({ lifecycle_status: 'active', updated_at: new Date().toISOString() })
     .eq('id', orderId)
+    .select('*')
     .single();
   
   if (updateError) {
