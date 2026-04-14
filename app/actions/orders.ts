@@ -148,6 +148,7 @@ export async function createOrder(
   const styleCount = formData.get('style_count') as string | null;
   const colorCount = formData.get('color_count') as string | null;
 
+  if (!internal_order_no?.trim()) return { ok: false, error: '请填写内部订单号（订单册编号），财务需要此编号进行核算' };
   if (!etd && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETD（离港日）' };
   if (!warehouse_due_date && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETA（到港/到仓日）' };
   if (!factory_date) return { ok: false, error: '请填写出厂日期' };

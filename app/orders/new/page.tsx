@@ -617,11 +617,11 @@ function NewOrderWizard() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    内部订单号（订单册编号）
+                    内部订单号（订单册编号）<span className="text-red-500">*</span>
                   </label>
-                  <input type="text" name="internal_order_no"
-                    placeholder="如已有可填写，也可在财务审核时填写"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+                  <input type="text" name="internal_order_no" required
+                    placeholder="订单册编号（必填）"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

@@ -60,6 +60,10 @@
     {
       "path": "/api/cron/cost-monitoring",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/order-audit",
+      "schedule": "30 0 * * *"
     }
   ]
 }
