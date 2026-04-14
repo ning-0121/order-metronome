@@ -103,6 +103,22 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'trims_confirmed', label: '吊牌/洗标/贴纸/包装袋/纸箱等辅料确认', type: 'checkbox', required: true, role: 'sales', group: '包装辅料' },
       { key: 'unconfirmed_note', label: '未确认项备注', type: 'text', required: false, role: 'sales',
         helpText: '如有未确认项，说明具体内容和跟进计划' },
+      // ── 时间节点（评审会后填写，用于纠正排期） ──
+      { key: 'procurement_days', label: '采购预计天数', type: 'text', required: true, role: 'sales', group: '⏱ 时间节点规划',
+        helpText: '原辅料采购预计需要多少天（如：面料15天+辅料10天）' },
+      { key: 'production_days', label: '生产预计天数', type: 'text', required: true, role: 'sales', group: '⏱ 时间节点规划',
+        helpText: '大货生产预计需要多少天（含裁剪+车缝+后整理）' },
+      { key: 'target_completion_date', label: '预计完成日期', type: 'pending_date', required: true, role: 'sales', group: '⏱ 时间节点规划',
+        affectsSchedule: true, helpText: '根据采购+生产天数倒推的完成日期，系统将据此调整排期' },
+      { key: 'schedule_note', label: '排期说明', type: 'text', required: false, role: 'sales', group: '⏱ 时间节点规划',
+        helpText: '特殊排期说明（如：面料需等客户确认色号后才能下单）' },
+      // ── 风险与注意事项（评审会讨论记录） ──
+      { key: 'risk_items', label: '风险与注意事项', type: 'text', required: true, role: 'sales', group: '⚠ 风险与注意事项',
+        helpText: '评审会讨论发现的风险点和注意事项（如：面料缩水率需测试、新工厂首单需加验、深色面料注意色差）' },
+      { key: 'quality_focus', label: '品质重点关注', type: 'text', required: false, role: 'sales', group: '⚠ 风险与注意事项',
+        helpText: '生产过程中品质需要重点关注的内容' },
+      { key: 'customer_special_requirements', label: '客户特殊要求', type: 'text', required: false, role: 'sales', group: '⚠ 风险与注意事项',
+        helpText: '客户的特殊要求或注意事项（如：验货标准、包装细节、交期强调）' },
       // ── 双签：业务 + CEO 必须双方共同确认 ──
       { key: 'sales_signed', label: '业务确认评审会已召开并完成', type: 'checkbox', required: true, role: 'sales', group: '✍️ 双签确认',
         helpText: '业务在评审会结束后勾选，确认已完成评审' },

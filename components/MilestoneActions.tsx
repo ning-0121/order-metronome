@@ -279,11 +279,26 @@ export function MilestoneActions({
   const isInProgress = isActiveStatus(milestone.status);
   const isPending = isPendingStatus(milestone.status);
   const isPendingOverdue = isPending && milestone.due_at && new Date(milestone.due_at) < new Date();
+  const isDone = isDoneStatus(milestone.status);
   const isActive = isInProgress || (isPending && canModify);
-  if (!isActive) return null;
+  // 生产单上传：完成后仍允许补传文件
+  const allowSupplementUpload = isDone && milestone.step_key === 'production_order_upload' && canModify;
+  if (!isActive && !allowSupplementUpload) return null;
 
   const blockers = getBlockers();
   const isBlocked = blockers.length > 0;
+
+  // 补传模式：生产单已完成，只显示上传区
+  if (allowSupplementUpload && !isActive) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+          <p className="text-xs text-blue-700">✅ 此节点已完成。可继续补传资料文件。</p>
+        </div>
+        <SupplementaryUpload milestoneId={milestone.id} orderId={orderId || ''} stepKey={milestone.step_key} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -970,6 +985,71 @@ function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload
           {uploading && <p className="text-xs text-indigo-500 text-center">上传中...</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ══════ 补传文件组件（节点完成后仍可上传） ══════
+
+function SupplementaryUpload({ milestoneId, orderId, stepKey }: { milestoneId: string; orderId: string; stepKey: string }) {
+  const [files, setFiles] = useState<any[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    loadFiles();
+  }, [milestoneId]);
+
+  async function loadFiles() {
+    const supabase = createClient();
+    const { data } = await (supabase.from('order_attachments') as any)
+      .select('id, file_name, file_url, file_type, created_at')
+      .eq('order_id', orderId)
+      .eq('milestone_id', milestoneId)
+      .order('created_at', { ascending: false });
+    setFiles(data || []);
+  }
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const supabase = createClient();
+    const ext = file.name.split('.').pop() || 'bin';
+    const path = `${orderId}/milestones/${stepKey}_supplement_${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type, upsert: true });
+    if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
+    const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
+    const { data: { user } } = await supabase.auth.getUser();
+    await (supabase.from('order_attachments') as any).insert({
+      order_id: orderId, milestone_id: milestoneId,
+      uploaded_by: user?.id || null,
+      file_name: file.name, file_url: urlData?.publicUrl || path,
+      storage_path: path,
+      file_type: 'production_order', mime_type: file.type || null,
+    });
+    await loadFiles();
+    setUploading(false);
+    router.refresh();
+  }
+
+  return (
+    <div className="space-y-2">
+      {files.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-gray-600">已上传 {files.length} 个文件：</p>
+          {files.map(f => (
+            <div key={f.id} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1.5 border border-gray-100">
+              <a href={f.file_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline truncate">{f.file_name}</a>
+              <span className="text-gray-400 shrink-0 ml-2">{new Date(f.created_at).toLocaleDateString('zh-CN')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <label className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-dashed border-indigo-300 text-sm text-indigo-600 hover:bg-indigo-50 cursor-pointer">
+        {uploading ? '上传中...' : '+ 补传文件'}
+        <input type="file" className="hidden" onChange={handleUpload} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" disabled={uploading} />
+      </label>
     </div>
   );
 }
