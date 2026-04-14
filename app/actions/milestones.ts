@@ -226,7 +226,7 @@ export async function markMilestoneDone(
   if (!isAdmin) {
     try {
       const { getBlockedReasons } = await import('@/lib/engine/blockRules');
-      const [confRes, finRes, orderRes] = await Promise.all([
+      const [confRes, finRes, orderRes, milestonesRes] = await Promise.all([
         (supabase.from('order_confirmations') as any)
           .select('module, status')
           .eq('order_id', milestone.order_id),
@@ -238,11 +238,41 @@ export async function markMilestoneDone(
           .select('incoterm')
           .eq('id', milestone.order_id)
           .single(),
+        (supabase.from('milestones') as any)
+          .select('step_key, status')
+          .eq('order_id', milestone.order_id)
+          .in('step_key', ['order_kickoff_meeting', 'materials_received_inspected', 'bulk_materials_confirmed']),
       ]);
+
+      // 智能补偿：如果前置里程碑已完成，视为对应确认链已确认
+      // 解决老数据中确认链未同步的问题
+      const confirmations: Array<{ module: string; status: string }> = confRes.data || [];
+      const doneSteps = new Set(
+        ((milestonesRes.data || []) as any[])
+          .filter(m => m.status === 'done' || m.status === '已完成')
+          .map(m => m.step_key)
+      );
+      const IMPLICIT_CONFIRMATIONS: Record<string, string[]> = {
+        order_kickoff_meeting: ['fabric_color', 'size_breakdown', 'logo_print', 'packaging_label'],
+        materials_received_inspected: ['fabric_color'],
+        bulk_materials_confirmed: ['fabric_color', 'size_breakdown'],
+      };
+      for (const [stepKey, modules] of Object.entries(IMPLICIT_CONFIRMATIONS)) {
+        if (doneSteps.has(stepKey)) {
+          for (const mod of modules) {
+            const existing = confirmations.find(c => c.module === mod);
+            if (!existing) {
+              confirmations.push({ module: mod, status: 'confirmed' });
+            } else if (existing.status !== 'confirmed') {
+              existing.status = 'confirmed';
+            }
+          }
+        }
+      }
 
       const blockResult = getBlockedReasons(
         milestone.step_key,
-        confRes.data || [],
+        confirmations,
         finRes.data || null,
         orderRes.data?.incoterm,
       );
@@ -492,6 +522,49 @@ export async function markMilestoneDone(
 
   const updatedMilestone = directUpdate;
   const milestoneData = milestone as any;
+
+  // ── 里程碑完成 → 自动同步确认链状态 ──
+  // 订单评审会 checklist 包含面料/颜色/印花/包装等确认项，完成后自动更新 order_confirmations
+  // 原辅料到货验收完成 → 说明面料颜色已确认（否则不可能到货验收通过）
+  const MILESTONE_TO_CONFIRMATIONS: Record<string, string[]> = {
+    order_kickoff_meeting: ['fabric_color', 'size_breakdown', 'logo_print', 'packaging_label'],
+    materials_received_inspected: ['fabric_color'],
+    bulk_materials_confirmed: ['fabric_color', 'size_breakdown'],
+  };
+  const autoConfirmModules = MILESTONE_TO_CONFIRMATIONS[milestoneData.step_key];
+  if (autoConfirmModules && milestoneData.order_id) {
+    try {
+      for (const module of autoConfirmModules) {
+        const { data: existing } = await (supabase.from('order_confirmations') as any)
+          .select('status')
+          .eq('order_id', milestoneData.order_id)
+          .eq('module', module)
+          .maybeSingle();
+        // 只在未确认时自动确认，不覆盖已有状态
+        if (existing && existing.status !== 'confirmed') {
+          await (supabase.from('order_confirmations') as any)
+            .update({
+              status: 'confirmed',
+              confirmed_by: user.id,
+              confirmed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              history: [{
+                from: existing.status,
+                to: 'confirmed',
+                by: user.id,
+                at: new Date().toISOString(),
+                reason: `节点「${milestoneData.name}」完成后自动确认`,
+              }],
+            })
+            .eq('order_id', milestoneData.order_id)
+            .eq('module', module);
+        }
+      }
+    } catch (confErr: any) {
+      console.warn('[markMilestoneDone] auto-confirm failed:', confErr?.message);
+      // 不阻断主流程
+    }
+  }
 
   // 财务审核完成 → 动态更新"生产单上传"截止日为 now + 2 工作日
   if (milestoneData.step_key === 'finance_approval') {
