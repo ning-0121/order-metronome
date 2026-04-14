@@ -114,6 +114,7 @@ export async function createOrder(
   const cancel_date = formData.get('cancel_date') as string | null;
   const factory_date = formData.get('factory_date') as string | null;
   const eta = formData.get('eta') as string | null;
+  const customer_email = formData.get('customer_email') as string | null;
   const shipping_sample_required = formData.get('shipping_sample_required') === 'true';
   const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
   const factory_name = formData.get('factory_name') as string | null;
@@ -276,6 +277,7 @@ export async function createOrder(
   const insertPayload: Record<string, any> = {
     customer_name,
     customer_id,
+    customer_email: customer_email || null,
     po_number: po_number || null,
     internal_order_no: internal_order_no || null,
     owner_user_id: user.id,

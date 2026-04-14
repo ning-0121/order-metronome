@@ -608,6 +608,15 @@ function NewOrderWizard() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
+                    客户邮箱
+                  </label>
+                  <input type="email" name="customer_email"
+                    placeholder="客户联系邮箱（非邮箱沟通可留空）"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <p className="text-xs text-gray-400 mt-0.5">用于邮件智能匹配。微信沟通的客户可留空</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     内部订单号（订单册编号）
                   </label>
                   <input type="text" name="internal_order_no"

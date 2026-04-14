@@ -2212,3 +2212,6 @@ CREATE POLICY "order_attachments_delete" ON public.order_attachments
 DROP POLICY IF EXISTS "order_attachments_update" ON public.order_attachments;
 CREATE POLICY "order_attachments_update" ON public.order_attachments
   FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+-- ===== 2026-04-13 客户邮箱字段 =====
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_email text;

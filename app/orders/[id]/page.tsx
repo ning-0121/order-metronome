@@ -370,7 +370,8 @@ export default async function OrderDetailPage({
               {(() => {
                 const sensitiveTypes = ['customer_po', 'internal_quote', 'customer_quote'];
                 const isMerchandiser = user ? orderData.merchandiser_user_id === user.id : false;
-                const canSeeSensitive = isAdmin || isOrderOwner || isMerchandiser || currentRoles.includes('finance');
+                // 价格文件权限：只有 admin + 财务 + 订单创建者（业务）可以看，跟单/生产部不能看
+                const canSeeSensitive = isAdmin || isOrderOwner || currentRoles.includes('finance');
                 const visibleAttachments = attachments.filter((att: any) =>
                   !sensitiveTypes.includes(att.file_type) || canSeeSensitive
                 );
