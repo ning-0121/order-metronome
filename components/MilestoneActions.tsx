@@ -289,27 +289,28 @@ export function MilestoneActions({
     <div className="space-y-3">
 
       {/* 阻断提示 */}
-      {isBlocked && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3">
-          <p className="text-sm font-semibold text-red-800 mb-1">⛔ 前置节点未完成，当前节点被锁定</p>
+      {isBlocked && canModify && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
+          <p className="text-sm font-semibold text-amber-800 mb-1">⚠ 以下前置节点尚未完成：</p>
           <ul className="space-y-0.5">
             {blockers.map(b => (
-              <li key={b} className="text-xs text-red-700">· {b}</li>
+              <li key={b} className="text-xs text-amber-700">· {b}（逾期）</li>
             ))}
           </ul>
+          <p className="text-xs text-amber-600 mt-1">可以继续操作，但请尽快推进前置节点</p>
         </div>
       )}
 
       {/* 凭证说明 */}
-      {milestone.evidence_note && !showSubmitForm && !isBlocked && (
+      {milestone.evidence_note && !showSubmitForm && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
           <p className="text-xs font-medium text-amber-800 mb-1">📋 需要提交的凭证：</p>
           <p className="text-xs text-amber-700">{milestone.evidence_note}</p>
         </div>
       )}
 
-      {/* 操作按钮 */}
-      {canModify && !isBlocked && (
+      {/* 操作按钮 — 前置未完成也允许操作，只显示警告 */}
+      {canModify && (
         <div className="flex gap-2">
           <button
             onClick={() => { setShowSubmitForm(!showSubmitForm); setShowBlockForm(false); }}
@@ -370,7 +371,7 @@ export function MilestoneActions({
       )}
 
       {/* 「去处理」表单 */}
-      {showSubmitForm && canModify && !isBlocked && (
+      {showSubmitForm && canModify && (
         <form onSubmit={handleSubmitEvidence}
           className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 space-y-4">
           <p className="text-sm font-semibold text-indigo-900">提交处理凭证</p>

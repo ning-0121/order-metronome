@@ -277,9 +277,8 @@ export async function markMilestoneDone(
         orderRes.data?.incoterm,
       );
 
-      if (blockResult.blocked) {
-        return { error: `无法完成此节点：${blockResult.hardBlocks[0]}` };
-      }
+      // 确认链阻塞改为警告，不再硬阻止（业务可以并行推进）
+      // 只有 SEQUENTIAL_REQUIREMENTS 里的硬约束才阻止
     } catch {} // 阻塞检查失败不阻断（降级）
   }
 
