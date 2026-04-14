@@ -12,31 +12,37 @@
  * 结果通知管理员
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient as createServiceClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
   try {
+    // 支持两种认证：Cron secret 或浏览器登录态
     const authHeader = req.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
+
+    let supabase: any;
+    if (isCron) {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' }, { status: 500 });
+      supabase = createServiceClient(url, serviceKey);
+    } else {
+      // 浏览器访问：用登录态
+      supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return NextResponse.json({ error: 'Please login first' }, { status: 401 });
     }
-
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' }, { status: 500 });
-
-    const supabase = createClient(url, serviceKey);
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
-    // 查所有进行中订单
-    const { data: orders } = await supabase
-      .from('orders')
-      .select('id, order_no, customer_name, factory_name, internal_order_no, quantity, factory_date, owner_user_id, lifecycle_status, updated_at, incoterm')
+    // 查所有进行中订单（含创建者和跟单）
+    const { data: orders } = await (supabase.from('orders') as any)
+      .select('id, order_no, customer_name, factory_name, internal_order_no, quantity, factory_date, owner_user_id, created_by, lifecycle_status, updated_at, incoterm')
       .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")');
 
     if (!orders || orders.length === 0) {
@@ -47,19 +53,43 @@ export async function POST(req: Request) {
       severity: 'high' | 'medium' | 'low';
       order_no: string;
       order_id: string;
+      customer: string;
+      sales: string;
+      merchandiser: string;
       issue: string;
       action: string;
+    }
+
+    // 解析所有用户名
+    const userIds = new Set<string>();
+    for (const o of (orders || []) as any[]) {
+      if (o.created_by) userIds.add(o.created_by);
+      if (o.owner_user_id) userIds.add(o.owner_user_id);
+    }
+    let nameMap: Record<string, string> = {};
+    if (userIds.size > 0) {
+      const { data: profiles } = await (supabase.from('profiles') as any)
+        .select('user_id, name, email').in('user_id', Array.from(userIds));
+      nameMap = (profiles || []).reduce((m: any, p: any) => {
+        m[p.user_id] = p.name || p.email?.split('@')[0] || '';
+        return m;
+      }, {} as Record<string, string>);
     }
 
     const issues: AuditIssue[] = [];
 
     for (const order of orders as any[]) {
+      const salesName = order.created_by ? (nameMap[order.created_by] || '未知') : '未知';
+      const merchName = order.owner_user_id ? (nameMap[order.owner_user_id] || '未指定') : '未指定';
       // 1. 缺内部单号
       if (!order.internal_order_no?.trim()) {
         issues.push({
           severity: 'medium',
           order_no: order.order_no,
           order_id: order.id,
+          customer: order.customer_name || '?',
+          sales: salesName,
+          merchandiser: merchName,
           issue: '缺内部单号',
           action: '请业务补填内部订单号（订单册编号）',
         });
@@ -71,6 +101,9 @@ export async function POST(req: Request) {
           severity: 'high',
           order_no: order.order_no,
           order_id: order.id,
+          customer: order.customer_name || '?',
+          sales: salesName,
+          merchandiser: merchName,
           issue: '未指定工厂',
           action: '请跟单确认生产工厂',
         });
@@ -82,6 +115,9 @@ export async function POST(req: Request) {
           severity: 'high',
           order_no: order.order_no,
           order_id: order.id,
+          customer: order.customer_name || '?',
+          sales: salesName,
+          merchandiser: merchName,
           issue: '未指定跟单负责人',
           action: '请生产主管指派跟单',
         });
@@ -93,6 +129,9 @@ export async function POST(req: Request) {
           severity: 'high',
           order_no: order.order_no,
           order_id: order.id,
+          customer: order.customer_name || '?',
+          sales: salesName,
+          merchandiser: merchName,
           issue: '订单数量为 0 或未填',
           action: '请业务确认订单数量',
         });
