@@ -628,11 +628,18 @@ export async function createOrder(
             }
 
             if (Object.keys(updates).length > 0) {
-              // 用 RPC 更新（SECURITY DEFINER 绕过 RLS）
-              await (supabase.rpc as any)('admin_update_milestone', {
-                _milestone_id: ms.id,
-                _updates: updates,
-              });
+              // 用 RPC 更新（SECURITY DEFINER 绕过 RLS），失败则直接更新
+              try {
+                await (supabase.rpc as any)('admin_update_milestone', {
+                  _milestone_id: ms.id,
+                  _updates: updates,
+                });
+              } catch {
+                // RPC 失败时直接更新（可能是枚举类型问题）
+                await (supabase.from('milestones') as any)
+                  .update(updates)
+                  .eq('id', ms.id);
+              }
             }
           }
         }
