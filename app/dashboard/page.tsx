@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { UnblockButton } from '@/components/UnblockButton';
 import { NudgeButton } from '@/components/NudgeButton';
 import { DashboardAIAdvice } from '@/components/DashboardAIAdvice';
+import { ExpandableList } from '@/components/ExpandableList';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -508,14 +509,16 @@ export default async function DashboardPage() {
             </div>
           </div>
           <div className="space-y-3">
-            {filteredTodayDue.slice(0, 5).map((milestone: any) => (
-              <MilestoneCard
-                key={milestone.id}
-                milestone={milestone}
-                variant="info"
-                badge="今日"
-              />
-            ))}
+            <ExpandableList initialCount={5}>
+              {filteredTodayDue.map((milestone: any) => (
+                <MilestoneCard
+                  key={milestone.id}
+                  milestone={milestone}
+                  variant="info"
+                  badge="今日"
+                />
+              ))}
+            </ExpandableList>
           </div>
         </div>
       )}
@@ -533,9 +536,11 @@ export default async function DashboardPage() {
             </div>
           </div>
           <div className="space-y-3">
-            {blockedMilestones.slice(0, 5).map((milestone: any) => (
-              <BlockedMilestoneCard key={milestone.id} milestone={milestone} />
-            ))}
+            <ExpandableList initialCount={10}>
+              {blockedMilestones.map((milestone: any) => (
+                <BlockedMilestoneCard key={milestone.id} milestone={milestone} />
+              ))}
+            </ExpandableList>
           </div>
         </div>
       )}
@@ -553,23 +558,25 @@ export default async function DashboardPage() {
             </div>
           </div>
           <div className="space-y-3">
-            {pendingRetroOrders.slice(0, 5).map((order: any) => (
-              <div key={order.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:border-purple-300 transition-colors">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900">{order.order_no}</span>
-                    <span className="badge badge-info">待复盘</span>
+            <ExpandableList initialCount={5}>
+              {pendingRetroOrders.map((order: any) => (
+                <div key={order.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:border-purple-300 transition-colors">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-900">{order.order_no}</span>
+                      <span className="badge badge-info">待复盘</span>
+                    </div>
+                    <p className="text-sm text-gray-500 mt-1">客户: {order.customer_name}</p>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">客户: {order.customer_name}</p>
+                  <Link
+                    href={`/orders/${order.id}/retrospective`}
+                    className="btn-primary text-sm py-2"
+                  >
+                    去复盘
+                  </Link>
                 </div>
-                <Link
-                  href={`/orders/${order.id}/retrospective`}
-                  className="btn-primary text-sm py-2"
-                >
-                  去复盘
-                </Link>
-              </div>
-            ))}
+              ))}
+            </ExpandableList>
           </div>
         </div>
       )}
