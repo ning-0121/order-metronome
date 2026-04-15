@@ -729,6 +729,38 @@ export async function createOrder(
     } catch {} // 回顾存储失败不阻断订单创建
   }
 
+  // ── STEP 9: 交期已过订单处理 ──
+  const pastDateStatus = formData.get('past_date_status') as string | null;
+  const pastDateReason = formData.get('past_date_reason') as string | null;
+  if (pastDateStatus) {
+    try {
+      if (pastDateStatus === 'shipped') {
+        // 已发货：标记所有节点完成 + 订单完成
+        const now = new Date().toISOString();
+        await (supabase.from('milestones') as any)
+          .update({ status: 'done', actual_at: now })
+          .eq('order_id', orderData.id);
+        await (supabase.from('orders') as any)
+          .update({ lifecycle_status: 'completed', notes: (orderData.notes || '') + '\n\n【补录】已发货订单，系统自动标记完成' })
+          .eq('id', orderData.id);
+      } else if (pastDateStatus === 'problem') {
+        // 有问题：记录原因到订单备注 + 标记为 blocked
+        await (supabase.from('orders') as any)
+          .update({
+            lifecycle_status: 'active',
+            notes: (orderData.notes || '') + `\n\n【交期已过未发货】原因：${pastDateReason || '未说明'}`,
+            special_tags: [...(orderData.special_tags || []), '交期逾期'],
+          })
+          .eq('id', orderData.id);
+      } else {
+        // pending（在途）：正常激活
+        await (supabase.from('orders') as any)
+          .update({ lifecycle_status: 'active' })
+          .eq('id', orderData.id);
+      }
+    } catch {} // 处理失败不阻断
+  }
+
   // ── DONE ──
   revalidatePath('/orders');
   revalidatePath('/dashboard');

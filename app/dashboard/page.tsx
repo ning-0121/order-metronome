@@ -627,6 +627,13 @@ function MilestoneCard({ milestone, variant, badge, isMine, delayStatus }: { mil
             <span>负责: <span className="font-medium text-gray-700">{milestone._ownerName || ROLE_LABELS[milestone.owner_role] || milestone.owner_role}{milestone._ownerName ? `（${ROLE_LABELS[milestone.owner_role] || milestone.owner_role}）` : ''}</span></span>
             {order?.internal_order_no && <span>内部号: {order.internal_order_no}</span>}
           </div>
+          {/* 逾期>3天且未申请延期：强制要求更新执行计划 */}
+          {daysOverdue >= 3 && !delayStatus && (
+            <div className="mt-2 rounded-lg bg-red-50 border border-red-200 p-2">
+              <p className="text-xs font-semibold text-red-800">🚨 逾期 {daysOverdue} 天未处理 — 请立即更新执行计划</p>
+              <p className="text-xs text-red-600 mt-0.5">请申请延期并填写：原料预计到货时间、生产天数、新的预计完成日</p>
+            </div>
+          )}
         </Link>
         <div className="flex items-center gap-2 ml-3 flex-shrink-0">
           {isMine === true && (
@@ -634,7 +641,7 @@ function MilestoneCard({ milestone, variant, badge, isMine, delayStatus }: { mil
               href={`/orders/${order?.id}?tab=progress#milestone-${milestone.id}`}
               className="text-xs px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 font-medium"
             >
-              去处理
+              {daysOverdue >= 3 && !delayStatus ? '更新计划' : '去处理'}
             </Link>
           )}
           {isMine === false && (

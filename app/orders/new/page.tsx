@@ -95,6 +95,9 @@ function NewOrderWizard() {
   const [selectedFactory, setSelectedFactory] = useState('');
   const [isImport, setIsImport] = useState(false);
   const [importCurrentStep, setImportCurrentStep] = useState('');
+  // 交期已过检测
+  const [showPastDateDialog, setShowPastDateDialog] = useState(false);
+  const [pastDateChoice, setPastDateChoice] = useState<'shipped' | 'pending' | 'problem' | ''>('');
   // PO AI 自动填表
   const [poParsing, setPoParsing] = useState(false);
   const [poParseResult, setPoParseResult] = useState<any>(null);
@@ -213,6 +216,42 @@ function NewOrderWizard() {
     }
 
     const rawFormData = new FormData(e.currentTarget);
+
+    // ── 交期已过检测：如果出厂日/交期已过，让业务确认订单状态 ──
+    const incotermCheck = rawFormData.get('incoterm') as string;
+    const etdCheck = rawFormData.get('etd') as string;
+    const factoryDateCheck = rawFormData.get('factory_date') as string;
+    const whDueDateCheck = rawFormData.get('warehouse_due_date') as string;
+    const deliveryDateCheck = etdCheck || factoryDateCheck || whDueDateCheck;
+    if (deliveryDateCheck && !rawFormData.get('past_date_confirmed')) {
+      const deliveryTime = new Date(deliveryDateCheck + 'T23:59:59').getTime();
+      const now = Date.now();
+      if (deliveryTime < now) {
+        // 交期已过 — 弹窗确认
+        const choice = prompt(
+          `⚠ 交期 ${deliveryDateCheck} 已过！请选择订单状态：\n\n` +
+          `1 — 已发货（补录历史数据）\n` +
+          `2 — 未发货，在途中\n` +
+          `3 — 未发货，有问题\n\n` +
+          `请输入 1、2 或 3：`
+        );
+        if (!choice || !['1', '2', '3'].includes(choice.trim())) {
+          showError('请选择订单状态（1/2/3）后再创建');
+          return;
+        }
+        const choiceMap: Record<string, string> = { '1': 'shipped', '2': 'pending', '3': 'problem' };
+        rawFormData.set('past_date_status', choiceMap[choice.trim()]);
+        rawFormData.set('past_date_confirmed', 'true');
+        if (choice.trim() === '3') {
+          const reason = prompt('请填写未发货原因（如：客户暂停、面料问题、品质返工等）：');
+          if (!reason?.trim()) {
+            showError('请填写未发货原因');
+            return;
+          }
+          rawFormData.set('past_date_reason', reason.trim());
+        }
+      }
+    }
 
     // 提取文件
     const filesToUpload: { file: File; fileType: string; label: string }[] = [];
