@@ -115,6 +115,10 @@ export async function createOrder(
   const factory_date = formData.get('factory_date') as string | null;
   const eta = formData.get('eta') as string | null;
   const customer_email = formData.get('customer_email') as string | null;
+  // 翻单回顾
+  const repeat_prev_order_no = formData.get('repeat_prev_order_no') as string | null;
+  const repeat_issues = formData.get('repeat_issues') as string | null;
+  const repeat_attention = formData.get('repeat_attention') as string | null;
   const shipping_sample_required = formData.get('shipping_sample_required') === 'true';
   const shipping_sample_deadline = formData.get('shipping_sample_deadline') as string | null;
   const factory_name = formData.get('factory_name') as string | null;
@@ -679,6 +683,39 @@ export async function createOrder(
     const { initOrderFinancials } = await import('@/app/actions/order-financials');
     await initOrderFinancials(orderData.id);
   } catch {} // 初始化失败不阻断订单创建
+
+  // ── STEP 8: 翻单回顾存入客户画像 ──
+  if (order_type === 'repeat' && repeat_issues) {
+    try {
+      const content = [
+        `翻单回顾（上一单：${repeat_prev_order_no || '未填写'}）`,
+        `问题：${repeat_issues}`,
+        repeat_attention ? `注意事项：${repeat_attention}` : null,
+      ].filter(Boolean).join('\n');
+
+      // 存入客户画像
+      await (supabase.from('customer_memory') as any).insert({
+        customer_id: customer_name,
+        order_id: orderData.id,
+        source_type: 'repeat_order_review',
+        content,
+        category: 'quality',
+        risk_level: 'medium',
+        created_by: user.id,
+      });
+
+      // 同步写入订单备注，方便在订单详情里直接看到
+      if (orderData.notes) {
+        await (supabase.from('orders') as any)
+          .update({ notes: `${orderData.notes}\n\n【翻单回顾】${content}` })
+          .eq('id', orderData.id);
+      } else {
+        await (supabase.from('orders') as any)
+          .update({ notes: `【翻单回顾】${content}` })
+          .eq('id', orderData.id);
+      }
+    } catch {} // 回顾存储失败不阻断订单创建
+  }
 
   // ── DONE ──
   revalidatePath('/orders');

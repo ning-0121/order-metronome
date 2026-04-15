@@ -118,6 +118,16 @@ export async function createDelayRequest(
     return { error: 'Must provide either new anchor date or new due date' };
   }
   
+  // 防重复：同一 milestone 不允许有多条 pending 延期请求
+  const { data: existingPending } = await (supabase.from('delay_requests') as any)
+    .select('id')
+    .eq('milestone_id', milestoneId)
+    .eq('status', 'pending')
+    .limit(1);
+  if (existingPending && existingPending.length > 0) {
+    return { error: '该节点已有待审批的延期申请，请等待审批后再提交' };
+  }
+
   // 使用延期规则引擎校验
   const { validateDelayRequest, DELAY_CATEGORIES } = await import('@/lib/domain/delay-rules');
   const category = reasonCategory || 'internal';
@@ -359,7 +369,7 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
   const delayRequestData = delayRequest as any;
 
   if (delayRequestData.status !== 'pending') {
-    return { error: 'Delay request already processed' };
+    return { error: `该延期申请已${delayRequestData.status === 'approved' ? '批准' : '处理'}，请刷新页面` };
   }
 
   // Get milestone and order separately
@@ -513,6 +523,8 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
 
   revalidatePath(`/orders/${orderData.id}`);
   revalidatePath('/admin');
+  revalidatePath('/dashboard');
+  revalidatePath('/');
 
   return { data: updatedRequest };
   } catch (err: any) {
@@ -634,6 +646,8 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
 
   revalidatePath(`/orders/${orderData.id}`);
   revalidatePath('/admin');
+  revalidatePath('/dashboard');
+  revalidatePath('/');
 
   return { data: updatedRequest };
 }
