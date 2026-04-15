@@ -91,15 +91,17 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'pending_items', label: '待确认项', type: 'text', required: false, role: 'sales', group: '确认状态',
         helpText: '列出未确认的项（如：色号待定、尺码表客户修改中、包装方式待确认）' },
       // ── 时间 ──
-      { key: 'target_completion_date', label: '预计完成日期', type: 'pending_date', required: false, role: 'sales', group: '时间',
-        affectsSchedule: true, helpText: '如与系统自动排期不一致，填写实际预计完成日期' },
+      { key: 'procurement_days', label: '采购预计天数', type: 'text', required: true, role: 'sales', group: '时间',
+        helpText: '原辅料采购预计多少天（如：面料15天+辅料10天）' },
+      { key: 'production_days', label: '生产预计天数', type: 'text', required: true, role: 'sales', group: '时间',
+        helpText: '大货生产预计多少天（含裁剪+车缝+后整理）' },
       // ── 风险 ──
       { key: 'risk_items', label: '风险与注意事项', type: 'text', required: true, role: 'sales', group: '风险',
         helpText: '如：面料缩水率需测试、新工厂首单需加验、深色面料注意色差、客户交期强调' },
-      // ── 双签 ──
+      // ── 双签：业务 + 行政督察 ──
       { key: 'sales_signed', label: '业务确认评审会已召开', type: 'checkbox', required: true, role: 'sales', group: '双签确认' },
-      { key: 'ceo_signed', label: 'CEO确认评审会到位', type: 'checkbox', required: true, role: 'admin', group: '双签确认',
-        helpText: '必须由管理员账号操作' },
+      { key: 'admin_assistant_signed', label: '行政督察确认评审会到位', type: 'checkbox', required: true, role: 'admin_assistant', group: '双签确认',
+        helpText: '由行政督察账号操作（会议由行政督察约定）' },
     ],
   },
 
