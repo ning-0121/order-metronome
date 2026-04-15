@@ -55,6 +55,8 @@ export function MilestoneActions({
     // 生产/质检/品控 → 跟单
     const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
     if (merchGroup.includes(ownerRole) && merchGroup.includes(nr)) return true;
+    // 行政督察可操作需要双签的节点（如评审会）
+    if (nr === 'admin_assistant' && ownerRole === 'sales') return true;
     return false;
   });
 

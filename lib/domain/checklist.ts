@@ -196,63 +196,187 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
     ],
   },
 
-  // ── 阶段4：生产启动/开裁 ────────────────────
+  // ══════ 跟单流程报告模板（7 个关键环节） ══════
 
+  // ── ① 封样交付 ──
+  pre_production_sample_ready: {
+    title: '封样交付报告',
+    items: [
+      { key: 'sample_type', label: '封样类型', type: 'select', required: true, role: 'merchandiser', group: '封样制作',
+        options: ['头样', '确认样', '产前样'] },
+      { key: 'sample_fabric', label: '实际使用面料', type: 'text', required: true, role: 'merchandiser', group: '封样制作',
+        helpText: '面料成分/克重/色号' },
+      { key: 'sample_qty', label: '封样数量', type: 'number', required: true, role: 'merchandiser', group: '封样制作' },
+      { key: 'size_check', label: '尺寸复核', type: 'checkbox', required: true, role: 'merchandiser', group: '品质检查',
+        helpText: '按尺码表逐项测量，偏差≤1cm' },
+      { key: 'workmanship_check', label: '做工检查', type: 'checkbox', required: true, role: 'merchandiser', group: '品质检查',
+        helpText: '车缝/拼接/印花/绣花 无明显瑕疵' },
+      { key: 'color_check', label: '颜色对比', type: 'checkbox', required: true, role: 'merchandiser', group: '品质检查',
+        helpText: '与色卡/标准样对比，无明显色差' },
+      { key: 'photos_uploaded', label: '封样照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '交付',
+        helpText: '正面/背面/细节/尺寸测量照片' },
+      { key: 'delivery_date', label: '交付日期', type: 'pending_date', required: true, role: 'merchandiser', group: '交付',
+        affectsSchedule: true },
+    ],
+  },
+
+  // ── ② 大货面料验收 ──
+  materials_received_inspected: {
+    title: '大货面料验收报告',
+    items: [
+      { key: 'arrival_date', label: '到货日期', type: 'text', required: true, role: 'merchandiser', group: '到货信息' },
+      { key: 'fabric_batch', label: '面料批号/缸号', type: 'text', required: true, role: 'merchandiser', group: '到货信息' },
+      { key: 'arrival_qty', label: '到货数量（米/公斤）', type: 'number', required: true, role: 'merchandiser', group: '到货信息' },
+      { key: 'color_match', label: '颜色对比', type: 'select', required: true, role: 'merchandiser', group: '品质检验',
+        options: ['合格', '轻微偏差(可接受)', '不合格'] },
+      { key: 'weight_check', label: '克重检测', type: 'select', required: true, role: 'merchandiser', group: '品质检验',
+        options: ['合格(偏差≤5%)', '偏差较大(需确认)', '不合格'] },
+      { key: 'hand_feel', label: '手感对比', type: 'select', required: true, role: 'merchandiser', group: '品质检验',
+        options: ['与封样一致', '有差异(需确认)', '不合格'] },
+      { key: 'shrinkage', label: '缩水率', type: 'select', required: true, role: 'merchandiser', group: '品质检验',
+        options: ['合格(≤3%)', '偏差较大(需确认)', '不合格'] },
+      { key: 'defect_check', label: '疵点检查', type: 'select', required: true, role: 'merchandiser', group: '品质检验',
+        options: ['无明显疵点', '有少量(可用)', '大面积疵点(需退换)'] },
+      { key: 'fail_note', label: '不合格项说明', type: 'text', required: false, role: 'merchandiser', group: '品质检验' },
+      { key: 'merch_confirmed', label: '跟单确认面料可用', type: 'checkbox', required: true, role: 'merchandiser', group: '双确认（确认后才能开裁）' },
+      { key: 'sales_confirmed', label: '业务确认面料可用', type: 'checkbox', required: true, role: 'sales', group: '双确认（确认后才能开裁）' },
+      { key: 'customer_confirm_needed', label: '是否需要客户确认', type: 'select', required: true, role: 'sales', group: '双确认（确认后才能开裁）',
+        options: ['不需要', '已寄样等客户确认', '客户已确认'] },
+    ],
+  },
+
+  // ── ③ 上线工艺确认（开裁） ──
   production_kickoff: {
-    title: '开裁前单耗确认',
+    title: '上线工艺确认报告',
     items: [
-      { key: 'quote_consumption', label: '报价单耗（米/件）', type: 'number', required: true, role: 'merchandiser', group: '单耗对比',
-        helpText: '内部报价时的面料单耗' },
+      // 单耗对比（保留原有）
+      { key: 'quote_consumption', label: '报价单耗（米/件）', type: 'number', required: true, role: 'merchandiser', group: '单耗对比' },
       { key: 'actual_consumption', label: '工厂排料实际单耗（米/件）', type: 'number', required: true, role: 'merchandiser', group: '单耗对比',
-        helpText: '工厂排料后的实际单耗，必须 ≤ 报价单耗才可开裁' },
-      { key: 'consumption_pass', label: '单耗核验通过', type: 'checkbox', required: true, role: 'merchandiser', group: '单耗对比',
-        helpText: '确认实际单耗 ≤ 报价单耗，允许开裁' },
+        helpText: '实际单耗必须 ≤ 报价单耗才可开裁' },
+      { key: 'consumption_pass', label: '单耗核验通过', type: 'checkbox', required: true, role: 'merchandiser', group: '单耗对比' },
+      // 工艺确认（新增）
+      { key: 'cut_piece_check', label: '首件裁片尺寸与纸样一致', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
+      { key: 'sewing_check', label: '车缝密度/针距/线头符合要求', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
+      { key: 'print_check', label: '印花/绣花位置大小颜色与确认样一致', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
+      { key: 'trims_check', label: '辅料核对（拉链/纽扣/织带等）', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
+      { key: 'first_piece_photo', label: '首件确认照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
     ],
   },
 
-  // ── 阶段5：中查 ────────────────────────────
-
+  // ── ④ 中查报告 ──
   mid_qc_check: {
-    title: '中查检查清单',
+    title: '中期验货报告',
     items: [
-      // 跟单填写
-      { key: 'qc_date', label: '验货日期', type: 'text', required: true, role: 'merchandiser', group: '跟单验货' },
-      { key: 'qc_qty_inspected', label: '抽检数量', type: 'number', required: true, role: 'merchandiser', group: '跟单验货' },
-      { key: 'qc_defect_found', label: '发现不良', type: 'select', required: true, role: 'merchandiser', group: '跟单验货',
-        options: ['无不良', '轻微（可接受）', '一般（需整改）', '严重（需停产整改）'] },
-      { key: 'qc_defect_detail', label: '不良问题描述', type: 'text', required: false, role: 'merchandiser', group: '跟单验货',
-        helpText: '如有不良，说明具体问题' },
-      { key: 'qc_progress_pct', label: '生产完成进度（%）', type: 'number', required: true, role: 'merchandiser', group: '跟单验货',
+      // 基本信息
+      { key: 'qc_date', label: '验货日期', type: 'text', required: true, role: 'merchandiser', group: '基本信息' },
+      { key: 'qty_completed', label: '已完成数量', type: 'number', required: true, role: 'merchandiser', group: '基本信息' },
+      { key: 'qc_progress_pct', label: '完成进度（%）', type: 'number', required: true, role: 'merchandiser', group: '基本信息',
         helpText: '如：30、50、70' },
-      { key: 'qc_report_uploaded', label: '中查报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '跟单验货' },
+      // 尺寸检验
+      { key: 'size_pass_rate', label: '尺寸符合率', type: 'select', required: true, role: 'merchandiser', group: '尺寸检验（抽检5件）',
+        options: ['100%合格', '90%以上', '80%以上', '低于80%'] },
+      { key: 'size_deviation', label: '超差部位', type: 'text', required: false, role: 'merchandiser', group: '尺寸检验（抽检5件）',
+        helpText: '如：胸围偏大1.5cm、袖长偏短' },
+      // 外观检验
+      { key: 'color_diff', label: '色差', type: 'select', required: true, role: 'merchandiser', group: '外观检验',
+        options: ['无色差', '件间轻微色差', '与封样有色差'] },
+      { key: 'workmanship', label: '做工', type: 'select', required: true, role: 'merchandiser', group: '外观检验',
+        options: ['优良', '一般(有小问题)', '较差(问题较多)'] },
+      { key: 'main_issues', label: '主要问题', type: 'text', required: false, role: 'merchandiser', group: '外观检验',
+        helpText: '如：跳针、线头多、拼缝不齐' },
+      // 功能检验
+      { key: 'zipper_button', label: '拉链/纽扣', type: 'select', required: true, role: 'merchandiser', group: '功能检验',
+        options: ['正常', '有问题', '不适用'] },
+      { key: 'print_embroidery', label: '印花/绣花', type: 'select', required: true, role: 'merchandiser', group: '功能检验',
+        options: ['正常', '有脱落风险', '不适用'] },
+      // 判定
+      { key: 'mid_qc_result', label: '中查结果', type: 'select', required: true, role: 'merchandiser', group: '判定',
+        options: ['继续生产', '需整改后继续', '需停产整改'] },
+      { key: 'rectification', label: '整改要求', type: 'text', required: false, role: 'merchandiser', group: '判定' },
+      { key: 'qc_report_uploaded', label: '中查报告照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '判定' },
       // 业务确认
-      { key: 'sales_mid_qc_reviewed', label: '业务已审阅中查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
-      { key: 'sales_mid_qc_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
-        options: ['同意继续生产', '需要整改后继续', '需要与客户沟通'] },
-      { key: 'sales_mid_qc_note', label: '业务备注', type: 'text', required: false, role: 'sales', group: '业务确认' },
+      { key: 'sales_reviewed', label: '业务已审阅中查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
+      { key: 'sales_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
+        options: ['同意继续生产', '需整改后继续', '需与客户沟通'] },
     ],
   },
 
-  // ── 阶段5：尾查 ────────────────────────────
-
+  // ── ⑤ 尾查报告（AQL 验货） ──
   final_qc_check: {
-    title: '尾查检查清单',
+    title: '尾期验货报告（AQL）',
     items: [
-      // 跟单填写
-      { key: 'final_qc_date', label: '验货日期', type: 'text', required: true, role: 'merchandiser', group: '跟单验货' },
-      { key: 'final_qc_qty', label: '验货数量', type: 'number', required: true, role: 'merchandiser', group: '跟单验货' },
-      { key: 'final_qc_aql', label: 'AQL标准', type: 'select', required: true, role: 'merchandiser', group: '跟单验货',
+      // 验货信息
+      { key: 'final_qc_date', label: '验货日期', type: 'text', required: true, role: 'merchandiser', group: '验货信息' },
+      { key: 'total_qty', label: '验货总数', type: 'number', required: true, role: 'merchandiser', group: '验货信息' },
+      { key: 'aql_standard', label: 'AQL标准', type: 'select', required: true, role: 'merchandiser', group: '验货信息',
         options: ['AQL 1.5', 'AQL 2.5', 'AQL 4.0', '客户指定标准'] },
-      { key: 'final_qc_result', label: '验货结果', type: 'select', required: true, role: 'merchandiser', group: '跟单验货',
+      { key: 'sample_qty', label: '抽检数量', type: 'number', required: true, role: 'merchandiser', group: '验货信息' },
+      // 检验项目
+      { key: 'check_size', label: '尺寸', type: 'select', required: true, role: 'merchandiser', group: '检验项目',
+        options: ['合格', '不合格'] },
+      { key: 'check_workmanship', label: '做工', type: 'select', required: true, role: 'merchandiser', group: '检验项目',
+        options: ['合格', '不合格'] },
+      { key: 'check_appearance', label: '外观', type: 'select', required: true, role: 'merchandiser', group: '检验项目',
+        options: ['合格', '不合格'] },
+      { key: 'check_color', label: '颜色', type: 'select', required: true, role: 'merchandiser', group: '检验项目',
+        options: ['合格', '不合格'] },
+      { key: 'check_function', label: '功能', type: 'select', required: true, role: 'merchandiser', group: '检验项目',
+        options: ['合格', '不合格', '不适用'] },
+      // 缺陷统计
+      { key: 'critical_defects', label: '严重缺陷数', type: 'number', required: true, role: 'merchandiser', group: '缺陷统计',
+        helpText: '危及安全或无法使用' },
+      { key: 'major_defects', label: '主要缺陷数', type: 'number', required: true, role: 'merchandiser', group: '缺陷统计',
+        helpText: '影响使用或外观严重' },
+      { key: 'minor_defects', label: '次要缺陷数', type: 'number', required: true, role: 'merchandiser', group: '缺陷统计',
+        helpText: '轻微外观问题' },
+      { key: 'defect_desc', label: '缺陷描述', type: 'text', required: false, role: 'merchandiser', group: '缺陷统计' },
+      // 判定
+      { key: 'final_result', label: '尾查结果', type: 'select', required: true, role: 'merchandiser', group: '判定',
         options: ['PASS', 'PENDING（待整改复验）', 'FAIL（不通过）'] },
-      { key: 'final_qc_defect_detail', label: '不良问题描述', type: 'text', required: false, role: 'merchandiser', group: '跟单验货' },
-      { key: 'final_qc_report_uploaded', label: '尾查报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '跟单验货' },
+      { key: 'rectification', label: '整改要求', type: 'text', required: false, role: 'merchandiser', group: '判定' },
+      { key: 'report_uploaded', label: '尾查报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '判定' },
       // 业务确认
-      { key: 'sales_final_qc_reviewed', label: '业务已审阅尾查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
-      { key: 'sales_final_qc_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
-        options: ['同意出货', '需要整改后复验', '需要与客户沟通', '拒绝出货'] },
-      { key: 'sales_final_qc_note', label: '业务备注', type: 'text', required: false, role: 'sales', group: '业务确认',
-        helpText: '如有特殊情况说明' },
+      { key: 'sales_reviewed', label: '业务已审阅尾查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
+      { key: 'sales_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
+        options: ['同意出货', '需整改复验', '需与客户沟通', '拒绝出货'] },
+    ],
+  },
+
+  // ── ⑥ 包装确认 ──
+  packing_method_confirmed: {
+    title: '包装跟单报告',
+    items: [
+      { key: 'inner_packing', label: '内包装', type: 'select', required: true, role: 'merchandiser', group: '包装核对',
+        options: ['符合要求', '有偏差需确认', '不合格'] },
+      { key: 'carton_marks', label: '外箱唛头', type: 'select', required: true, role: 'merchandiser', group: '包装核对',
+        options: ['正确', '有错误(需重印)', '不适用'] },
+      { key: 'labels_barcodes', label: '吊牌/洗标/条码', type: 'select', required: true, role: 'merchandiser', group: '包装核对',
+        options: ['正确', '有错误', '不适用'] },
+      { key: 'packing_method', label: '装箱方式', type: 'select', required: true, role: 'merchandiser', group: '包装核对',
+        options: ['与客户确认一致', '有调整(已告知客户)'] },
+      { key: 'pcs_per_carton', label: '每箱件数', type: 'number', required: true, role: 'merchandiser', group: '装箱数据' },
+      { key: 'total_cartons', label: '总箱数', type: 'number', required: true, role: 'merchandiser', group: '装箱数据' },
+      { key: 'weight', label: '净重/毛重(KG)', type: 'text', required: true, role: 'merchandiser', group: '装箱数据' },
+      { key: 'packing_photos', label: '包装照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '确认',
+        helpText: '内包装+外箱+唛头照片' },
+      { key: 'packing_pass', label: '所有包装项目符合客户要求', type: 'checkbox', required: true, role: 'merchandiser', group: '确认' },
+    ],
+  },
+
+  // ── ⑦ 验货放行 ──
+  inspection_release: {
+    title: '出货前验货报告',
+    items: [
+      { key: 'qty_check', label: '实际装箱数量与订单一致', type: 'checkbox', required: true, role: 'merchandiser', group: '出货前最终检查' },
+      { key: 'quality_recheck', label: '品质复检', type: 'select', required: true, role: 'merchandiser', group: '出货前最终检查',
+        options: ['合格', '有遗留问题(已记录)'] },
+      { key: 'packing_intact', label: '外箱无破损、封箱牢固', type: 'checkbox', required: true, role: 'merchandiser', group: '出货前最终检查' },
+      { key: 'marks_check', label: '外箱唛头与客户要求一致', type: 'checkbox', required: true, role: 'merchandiser', group: '出货前最终检查' },
+      { key: 'packing_list_check', label: '装箱单数据与实际一致', type: 'checkbox', required: true, role: 'merchandiser', group: '出货前最终检查' },
+      { key: 'release_result', label: '验货结果', type: 'select', required: true, role: 'merchandiser', group: '放行',
+        options: ['放行', '有条件放行(附说明)', '不放行'] },
+      { key: 'release_note', label: '条件说明', type: 'text', required: false, role: 'merchandiser', group: '放行' },
+      { key: 'final_report_uploaded', label: '最终验货报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '放行' },
     ],
   },
 

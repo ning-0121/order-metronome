@@ -65,9 +65,8 @@ const INSERT_WHITELIST = [
   'factory_names',
   // 价格审批追溯（2026-04-08）
   'price_approval_id',
-  // 样品阶段（2026-04-14）
+  // 样品阶段（2026-04-15）
   'sample_phase',
-  'customer_email',
 ] as const;
 
 const UPDATE_WHITELIST = [

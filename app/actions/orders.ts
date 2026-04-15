@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
-import type { SamplePhase } from '@/lib/milestoneTemplate';
 import { calcDueDates, recalcRemainingDueDates } from '@/lib/schedule';
 import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
 import { 
@@ -147,7 +146,7 @@ export async function createOrder(
   const sample_phase_raw = formData.get('sample_phase') as string | null;
   const validPhases = ['confirmed', 'dev_sample', 'dev_sample_with_revision', 'skip_all'];
   const sample_phase = (sample_phase_raw && validPhases.includes(sample_phase_raw))
-    ? sample_phase_raw as SamplePhase
+    ? sample_phase_raw
     : undefined;
   // 兼容旧表单的 checkbox（如果有 sample_phase 则忽略旧字段）
   const skip_pre_production_sample = sample_phase
