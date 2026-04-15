@@ -656,11 +656,12 @@ function BlockedMilestoneCard({ milestone }: { milestone: any }) {
     <div className="p-4 rounded-xl border border-orange-200 hover:border-orange-300 transition-all">
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-medium text-gray-900 truncate">{order?.order_no}</span>
+            {order?.internal_order_no && <span className="text-xs text-gray-500">({order.internal_order_no})</span>}
             <span className="badge badge-warning">阻塞</span>
           </div>
-          <p className="text-sm text-gray-700 mb-2">{milestone.name}</p>
+          <p className="text-sm text-gray-700">{milestone.name} · {order?.customer_name}</p>
           <div className="text-xs text-orange-700 bg-orange-50 rounded-lg px-3 py-2">
             原因: {blockedReason}
           </div>
