@@ -121,7 +121,7 @@ function ProfitCard({ state, orderId }: { state: OrderBusinessState; orderId: st
         <div className="text-sm text-gray-400 mt-2">待录入销售额</div>
       )}
       <p className={`text-[11px] mt-2 leading-relaxed ${s.text}`}>{state.order_profit_status.explain}</p>
-      <NextActionBtn action={getProfitNextAction(state, orderId)} />
+      {/* NextAction 按钮已移除 */}
     </div>
   );
 }
@@ -179,7 +179,7 @@ function PaymentCard({ state, canSeeFinancials, orderId }: { state: OrderBusines
           explain={state.can_ship.explain}
         />
       </div>
-      <NextActionBtn action={getPaymentNextAction(state, orderId)} />
+      {/* NextAction 按钮已移除 */}
     </div>
   );
 }
@@ -240,7 +240,7 @@ function RiskCard({ state, orderId }: { state: OrderBusinessState; orderId: stri
       {state.risk_factors.length === 0 && (
         <p className="text-xs text-green-600">当前无明显风险</p>
       )}
-      <NextActionBtn action={getRiskNextAction(state, orderId)} />
+      {/* NextAction 按钮已移除 */}
     </div>
   );
 }
@@ -293,7 +293,7 @@ function ConfirmationCard({ state, orderId }: { state: OrderBusinessState; order
           缺失：{state.missing_confirmation_items.join('、')}
         </p>
       )}
-      <NextActionBtn action={getConfirmationNextAction(state, orderId)} />
+      {/* NextAction 按钮已移除 */}
     </div>
   );
 }
