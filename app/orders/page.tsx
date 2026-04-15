@@ -199,8 +199,54 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   // 是否有活跃的筛选条件
   const hasFilters = !!(searchQuery || customerFilter || factoryFilter || incotermFilter || typeFilter);
 
+  // 统计超出交期的订单
+  const now = Date.now();
+  const overdueOrders = orders.filter((o: any) => {
+    const keyDate = o.incoterm === 'DDP' ? o.etd : (o.factory_date || o.etd);
+    if (!keyDate) return false;
+    const daysOver = Math.ceil((now - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
+    const allDone = (o.milestones || []).every((m: any) => {
+      const s = String(m.status || '').toLowerCase();
+      return s === 'done' || s === '已完成' || s === 'completed';
+    });
+    return daysOver > 0 && !allDone;
+  });
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* 超期订单警告 */}
+      {overdueOrders.length > 0 && statusFilter === 'active' && (
+        <div className="mb-4 rounded-xl bg-red-50 border border-red-200 p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">🚨</span>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-red-900">
+                {overdueOrders.length} 个订单已超出交期！
+              </p>
+              <div className="mt-2 space-y-1">
+                {overdueOrders.slice(0, 5).map((o: any) => {
+                  const keyDate = o.incoterm === 'DDP' ? o.etd : (o.factory_date || o.etd);
+                  const daysOver = Math.ceil((now - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
+                  return (
+                    <a key={o.id} href={`/orders/${o.id}?tab=progress`}
+                      className="flex items-center gap-2 text-xs text-red-700 hover:text-red-900">
+                      <span className="font-mono font-semibold">{o.order_no}</span>
+                      {o.internal_order_no && <span className="text-red-400">({o.internal_order_no})</span>}
+                      <span>· {o.customer_name}</span>
+                      <span className="font-bold">超期 {daysOver} 天</span>
+                      <span className="text-red-400">→ 请责任人更新执行计划</span>
+                    </a>
+                  );
+                })}
+                {overdueOrders.length > 5 && (
+                  <p className="text-xs text-red-500">还有 {overdueOrders.length - 5} 个超期订单...</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -495,15 +541,25 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       <span className="badge badge-neutral">{{ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' }[order.incoterm as string] || order.incoterm}</span>
                     </td>
                     <td>
-                      <span className="text-gray-600 text-xs">
-                        {order.incoterm === 'DDP'
-                          ? `ETD ${order.etd ? formatDate(order.etd) : '—'}`
-                          : (order as any).factory_date
-                            ? `出厂 ${formatDate((order as any).factory_date)}`
-                            : order.etd
-                              ? `ETD ${formatDate(order.etd)}`
-                              : '—'}
-                      </span>
+                      {(() => {
+                        const keyDate = order.incoterm === 'DDP'
+                          ? order.etd
+                          : ((order as any).factory_date || order.etd);
+                        const dateLabel = order.incoterm === 'DDP' ? 'ETD' : '出厂';
+                        if (!keyDate) return <span className="text-gray-400 text-xs">—</span>;
+                        const daysOver = Math.ceil((Date.now() - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
+                        const isOverdue = daysOver > 0 && !milestones.every((m: any) => _isDone(m.status));
+                        return (
+                          <div>
+                            <span className={`text-xs ${isOverdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
+                              {dateLabel} {formatDate(keyDate)}
+                            </span>
+                            {isOverdue && (
+                              <div className="text-xs text-red-500 font-medium">⚠ 超期 {daysOver} 天</div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td>
                       <span className={`badge ${order.order_type === 'sample' ? 'badge-info' : 'badge-neutral'}`}>
