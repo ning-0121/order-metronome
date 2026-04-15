@@ -85,14 +85,11 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   order_kickoff_meeting: {
     title: '订单评审会',
     items: [
-      // ── 客户确认状态（一个总选择 + 待确认项说明） ──
-      { key: 'customer_confirmation_status', label: '客户确认情况', type: 'select', required: true, role: 'sales', group: '确认状态',
-        options: ['全部已确认', '部分未确认（需填写待确认项）'] },
-      { key: 'pending_items', label: '待确认项', type: 'text', required: false, role: 'sales', group: '确认状态',
-        helpText: '列出未确认的项（如：色号待定、尺码表客户修改中、包装方式待确认）' },
+      { key: 'pending_items', label: '客户重要待确认项', type: 'text', required: false, role: 'sales', group: '确认',
+        helpText: '如：色号待定、尺码表修改中、包装方式待确认。全部已确认可留空' },
       // ── 时间 ──
-      { key: 'procurement_days', label: '采购预计天数', type: 'text', required: true, role: 'sales', group: '时间',
-        helpText: '原辅料采购预计多少天（如：面料15天+辅料10天）' },
+      { key: 'procurement_days', label: '原料采购天数', type: 'text', required: true, role: 'sales', group: '时间',
+        helpText: '面料采购预计多少天' },
       { key: 'production_days', label: '生产预计天数', type: 'text', required: true, role: 'sales', group: '时间',
         helpText: '大货生产预计多少天（含裁剪+车缝+后整理）' },
       // ── 风险 ──
