@@ -6,6 +6,14 @@ import { createClient } from '@/lib/supabase/client';
 import { isDoneStatus, isActiveStatus, isPendingStatus } from '@/lib/domain/types';
 import { AIAdviceBox } from '@/components/AIAdviceBox';
 import { getChecklistForStep, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
+import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
+import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
+
+const QC_STEPS = new Set([
+  'pre_production_sample_ready', 'materials_received_inspected', 'production_kickoff',
+  'mid_qc_check', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check',
+  'packing_method_confirmed', 'inspection_release',
+]);
 
 interface MilestoneActionsProps {
   milestone: any;
@@ -38,6 +46,10 @@ export function MilestoneActions({
   const [submitError, setSubmitError] = useState('');
   // 检查清单响应数据的引用，供提交时自动保存
   const checklistResponsesRef = useRef<Record<string, { value: any; pending_date?: string }> | null>(null);
+  // AI 质检
+  const [aiQcLoading, setAiQcLoading] = useState(false);
+  const [aiQcResult, setAiQcResult] = useState<DefectDetectionResult | null>(null);
+  const showAiQc = QC_STEPS.has(milestone.step_key);
 
   // 多角色匹配：用户任一角色匹配节点 owner_role 即可操作
   // 管理员不在此列（管理员监督不替代执行，与服务端权限一致）
@@ -648,6 +660,84 @@ export function MilestoneActions({
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-indigo-400"
             />
           </div>
+
+          {/* AI 质检按钮 — QC节点显示 */}
+          {showAiQc && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={aiQcLoading}
+                onClick={async () => {
+                  if (!orderId) return;
+                  setAiQcLoading(true);
+                  setAiQcResult(null);
+                  try {
+                    const res = await detectDefectsForMilestone(orderId, milestone.id);
+                    if (res.error) {
+                      setSubmitError(`AI质检: ${res.error}`);
+                    } else if (res.data) {
+                      setAiQcResult(res.data);
+                    }
+                  } catch (e: any) {
+                    setSubmitError(`AI质检失败: ${e?.message || '未知错误'}`);
+                  }
+                  setAiQcLoading(false);
+                }}
+                className="w-full rounded-lg bg-purple-600 px-4 py-2 text-sm text-white font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {aiQcLoading ? (
+                  <><span className="animate-spin">⏳</span> AI 正在分析照片...</>
+                ) : (
+                  <><span>🔍</span> AI 智能质检（分析已上传照片）</>
+                )}
+              </button>
+
+              {/* AI 质检结果 */}
+              {aiQcResult && (
+                <div className={`rounded-lg border p-3 space-y-2 ${
+                  aiQcResult.overall === 'pass' ? 'bg-green-50 border-green-200' :
+                  aiQcResult.overall === 'warning' ? 'bg-amber-50 border-amber-200' :
+                  'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">
+                      {aiQcResult.overall === 'pass' ? '✅ 质检通过' :
+                       aiQcResult.overall === 'warning' ? '⚠️ 发现问题' :
+                       '❌ 质检不通过'}
+                    </span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                      aiQcResult.quality_score >= 80 ? 'bg-green-100 text-green-700' :
+                      aiQcResult.quality_score >= 60 ? 'bg-amber-100 text-amber-700' :
+                      'bg-red-100 text-red-700'
+                    }`}>
+                      {aiQcResult.quality_score}/100
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600">{aiQcResult.summary}</p>
+
+                  {aiQcResult.defects.length > 0 && (
+                    <div className="space-y-1.5 mt-1">
+                      {aiQcResult.defects.map((defect, i) => (
+                        <div key={i} className={`text-xs rounded p-2 ${
+                          defect.severity === 'critical' ? 'bg-red-100 border-l-2 border-red-500' :
+                          defect.severity === 'major' ? 'bg-amber-100 border-l-2 border-amber-500' :
+                          'bg-gray-100 border-l-2 border-gray-300'
+                        }`}>
+                          <div className="flex items-center gap-1 font-semibold">
+                            <span>{defect.severity === 'critical' ? '🔴' : defect.severity === 'major' ? '🟡' : '⚪'}</span>
+                            <span>{defect.type}</span>
+                            <span className="text-gray-400">— {defect.location}</span>
+                          </div>
+                          <p className="text-gray-600 mt-0.5">{defect.description}</p>
+                          <p className="text-indigo-600 mt-0.5">💡 {defect.suggestion}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {submitError && (
             <div className="rounded-lg bg-red-50 border border-red-200 p-3">
