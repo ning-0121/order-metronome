@@ -21,6 +21,7 @@ import { RecalcButton } from '@/components/RecalcButton';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
+import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { InlineEditField } from '@/components/InlineEditField';
@@ -238,7 +239,25 @@ export default async function OrderDetailPage({
             </div>
           </div>
 
-          {/* 经营面板已移除 */}
+          {/* 超期订单强制确认 */}
+          {(() => {
+            const keyDate = orderData.incoterm === 'DDP'
+              ? orderData.etd
+              : (orderData.factory_date || orderData.etd);
+            if (!keyDate || allMilestonesCompleted) return null;
+            const daysOver = Math.ceil((Date.now() - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
+            if (daysOver <= 0) return null;
+            return (
+              <OverdueOrderGate
+                orderId={id}
+                orderNo={orderData.order_no}
+                customerName={orderData.customer_name}
+                keyDate={keyDate}
+                daysOverdue={daysOver}
+                isAdmin={isAdmin}
+              />
+            );
+          })()}
 
           {/* Tab 导航（移动端可横向滚动） */}
           <div className="flex gap-1 mt-4 -mb-px overflow-x-auto scrollbar-hide">
