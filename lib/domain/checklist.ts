@@ -83,47 +83,23 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   },
 
   order_kickoff_meeting: {
-    title: '订单评审会检查清单',
+    title: '订单评审会',
     items: [
-      { key: 'style_confirmed', label: '客户最终确认款式', type: 'select', required: true, role: 'sales', group: '款式确认',
-        options: ['已确认', '未确认'] },
-      { key: 'style_confirm_date', label: '款式预计确认日期', type: 'pending_date', required: false, role: 'sales', group: '款式确认',
-        affectsSchedule: true, helpText: '未确认时填写预计日期，将影响后续排期' },
-      { key: 'fabric_confirmed', label: '面料/材质确认', type: 'checkbox', required: true, role: 'sales', group: '原辅料确认' },
-      { key: 'color_confirmed', label: '颜色确认', type: 'checkbox', required: true, role: 'sales', group: '原辅料确认' },
-      { key: 'hand_feel_confirmed', label: '手感确认', type: 'checkbox', required: true, role: 'sales', group: '原辅料确认' },
-      { key: 'print_craft_confirmed', label: '印花/工艺确认', type: 'checkbox', required: true, role: 'sales', group: '原辅料确认' },
-      { key: 'size_chart_confirmed', label: '尺码表确认', type: 'checkbox', required: true, role: 'sales', group: '规格确认' },
-      { key: 'cut_ratio_confirmed', label: '裁剪配比确认', type: 'checkbox', required: true, role: 'sales', group: '规格确认' },
-      { key: 'proto_sample_confirmed', label: '头样确认状态', type: 'select', required: true, role: 'sales', group: '样品确认',
-        options: ['已确认', '未确认', '无需头样'] },
-      { key: 'proto_confirm_date', label: '头样预计确认日期', type: 'pending_date', required: false, role: 'sales', group: '样品确认',
-        affectsSchedule: true },
-      { key: 'packing_confirmed', label: '包装方式确认', type: 'checkbox', required: true, role: 'sales', group: '包装辅料' },
-      { key: 'trims_confirmed', label: '吊牌/洗标/贴纸/包装袋/纸箱等辅料确认', type: 'checkbox', required: true, role: 'sales', group: '包装辅料' },
-      { key: 'unconfirmed_note', label: '未确认项备注', type: 'text', required: false, role: 'sales',
-        helpText: '如有未确认项，说明具体内容和跟进计划' },
-      // ── 时间节点（评审会后填写，用于纠正排期） ──
-      { key: 'procurement_days', label: '采购预计天数', type: 'text', required: true, role: 'sales', group: '⏱ 时间节点规划',
-        helpText: '原辅料采购预计需要多少天（如：面料15天+辅料10天）' },
-      { key: 'production_days', label: '生产预计天数', type: 'text', required: true, role: 'sales', group: '⏱ 时间节点规划',
-        helpText: '大货生产预计需要多少天（含裁剪+车缝+后整理）' },
-      { key: 'target_completion_date', label: '预计完成日期', type: 'pending_date', required: true, role: 'sales', group: '⏱ 时间节点规划',
-        affectsSchedule: true, helpText: '根据采购+生产天数倒推的完成日期，系统将据此调整排期' },
-      { key: 'schedule_note', label: '排期说明', type: 'text', required: false, role: 'sales', group: '⏱ 时间节点规划',
-        helpText: '特殊排期说明（如：面料需等客户确认色号后才能下单）' },
-      // ── 风险与注意事项（评审会讨论记录） ──
-      { key: 'risk_items', label: '风险与注意事项', type: 'text', required: true, role: 'sales', group: '⚠ 风险与注意事项',
-        helpText: '评审会讨论发现的风险点和注意事项（如：面料缩水率需测试、新工厂首单需加验、深色面料注意色差）' },
-      { key: 'quality_focus', label: '品质重点关注', type: 'text', required: false, role: 'sales', group: '⚠ 风险与注意事项',
-        helpText: '生产过程中品质需要重点关注的内容' },
-      { key: 'customer_special_requirements', label: '客户特殊要求', type: 'text', required: false, role: 'sales', group: '⚠ 风险与注意事项',
-        helpText: '客户的特殊要求或注意事项（如：验货标准、包装细节、交期强调）' },
-      // ── 双签：业务 + CEO 必须双方共同确认 ──
-      { key: 'sales_signed', label: '业务确认评审会已召开并完成', type: 'checkbox', required: true, role: 'sales', group: '✍️ 双签确认',
-        helpText: '业务在评审会结束后勾选，确认已完成评审' },
-      { key: 'ceo_signed', label: 'CEO/管理员确认评审会到位', type: 'checkbox', required: true, role: 'admin', group: '✍️ 双签确认',
-        helpText: 'CEO 出席评审会后勾选 — 必须由管理员账号操作，业务无法替代' },
+      // ── 客户确认状态（一个总选择 + 待确认项说明） ──
+      { key: 'customer_confirmation_status', label: '客户确认情况', type: 'select', required: true, role: 'sales', group: '确认状态',
+        options: ['全部已确认', '部分未确认（需填写待确认项）'] },
+      { key: 'pending_items', label: '待确认项', type: 'text', required: false, role: 'sales', group: '确认状态',
+        helpText: '列出未确认的项（如：色号待定、尺码表客户修改中、包装方式待确认）' },
+      // ── 时间 ──
+      { key: 'target_completion_date', label: '预计完成日期', type: 'pending_date', required: false, role: 'sales', group: '时间',
+        affectsSchedule: true, helpText: '如与系统自动排期不一致，填写实际预计完成日期' },
+      // ── 风险 ──
+      { key: 'risk_items', label: '风险与注意事项', type: 'text', required: true, role: 'sales', group: '风险',
+        helpText: '如：面料缩水率需测试、新工厂首单需加验、深色面料注意色差、客户交期强调' },
+      // ── 双签 ──
+      { key: 'sales_signed', label: '业务确认评审会已召开', type: 'checkbox', required: true, role: 'sales', group: '双签确认' },
+      { key: 'ceo_signed', label: 'CEO确认评审会到位', type: 'checkbox', required: true, role: 'admin', group: '双签确认',
+        helpText: '必须由管理员账号操作' },
     ],
   },
 
