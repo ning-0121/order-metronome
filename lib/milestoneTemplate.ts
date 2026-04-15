@@ -113,13 +113,25 @@ export const SAMPLE_MILESTONE_TEMPLATE: Array<{
   owner_role: OwnerRole;
   is_critical: boolean;
   evidence_required: boolean;
+  evidence_note?: string;
 }> = [
-  { step_key: "sample_confirm", name: "打样确认", owner_role: "sales", is_critical: true, evidence_required: false },
+  // 阶段1：打样启动
+  { step_key: "sample_confirm", name: "打样单确认", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传客户打样需求（Tech Pack/参考图/尺码表/面料要求）" },
+  // 阶段2：面料与制作
   { step_key: "sample_material", name: "打样面料采购", owner_role: "procurement", is_critical: true, evidence_required: false },
   { step_key: "sample_making", name: "打样制作", owner_role: "merchandiser", is_critical: true, evidence_required: false },
-  { step_key: "sample_qc", name: "打样检验", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "sample_sent", name: "样品寄出", owner_role: "sales", is_critical: true, evidence_required: true },
-  { step_key: "sample_customer_confirm", name: "客户确认样品", owner_role: "sales", is_critical: true, evidence_required: true },
+  // 阶段3：检验
+  { step_key: "sample_qc", name: "打样检验", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "上传样品照片（正面/背面/细节/尺寸测量）" },
+  // 阶段4：寄样
+  { step_key: "sample_shipping_arrange", name: "寄样安排", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传快递单号。⚠ 国际快递必须确认：DHL/FedEx/UPS + DDP（完税交货）还是 DDU。DDP 必须含税，否则客户投诉！" },
+  { step_key: "sample_sent", name: "样品寄出", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传快递面单照片 + 跟踪号" },
+  // 阶段5：客户确认
+  { step_key: "sample_customer_confirm", name: "客户确认样品", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传客户确认邮件/消息截图。如需修改请记录修改点" },
   { step_key: "sample_complete", name: "打样完成", owner_role: "sales", is_critical: true, evidence_required: false },
 ];
 

@@ -26,7 +26,7 @@ console.log('\n🔍 部署前回归检查\n');
 // ════ 1. 里程碑模板完整性 ════
 console.log('📋 里程碑模板');
 assert(MILESTONE_TEMPLATE_V1.length >= 20, `生产模板有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥20)`);
-assert(SAMPLE_MILESTONE_TEMPLATE.length === 7, `打样模板有 ${SAMPLE_MILESTONE_TEMPLATE.length} 个节点 (=7)`);
+assert(SAMPLE_MILESTONE_TEMPLATE.length === 8, `打样模板有 ${SAMPLE_MILESTONE_TEMPLATE.length} 个节点 (=7)`);
 
 // 生产模板必须包含关键节点（含跟单/业务双重验货）
 const requiredSteps = [
@@ -56,7 +56,7 @@ assert(domesticMilestones.some(m => m.step_key === 'domestic_delivery'), 'domest
 assert(!domesticMilestones.some(m => m.step_key === 'booking_done'), 'domestic不包含 booking_done');
 
 const sampleMilestones = getApplicableMilestones('sample', false, 'domestic', 'sample');
-assert(sampleMilestones.length === 7, `sample订单返回 ${sampleMilestones.length} 个节点 (=7)`);
+assert(sampleMilestones.length === 8, `sample订单返回 ${sampleMilestones.length} 个节点 (=7)`);
 
 // 跳过产前样：3 个产前样节点应被过滤掉
 const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);

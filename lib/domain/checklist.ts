@@ -280,6 +280,50 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
         helpText: '如有特殊情况说明' },
     ],
   },
+
+  // ══════ 打样流程检查清单 ══════
+
+  sample_confirm: {
+    title: '打样单确认检查清单',
+    items: [
+      { key: 'tech_pack_received', label: '客户 Tech Pack / 参考图已收到', type: 'checkbox', required: true, role: 'sales', group: '客户资料' },
+      { key: 'size_chart_confirmed', label: '尺码表已确认', type: 'checkbox', required: true, role: 'sales', group: '客户资料' },
+      { key: 'fabric_requirement', label: '面料要求已明确（成分/克重/颜色）', type: 'checkbox', required: true, role: 'sales', group: '客户资料' },
+      { key: 'sample_qty', label: '打样数量已确认', type: 'checkbox', required: true, role: 'sales', group: '打样要求' },
+      { key: 'sample_type', label: '样品类型', type: 'select', required: true, role: 'sales', group: '打样要求',
+        options: ['头样/开发样', '确认样/PP Sample', '产前样', '船样/SMS', '改款样'] },
+      { key: 'sample_deadline', label: '客户要求交样日期', type: 'pending_date', required: true, role: 'sales', group: '打样要求',
+        affectsSchedule: true },
+      { key: 'sample_cost_who_pays', label: '打样费用', type: 'select', required: true, role: 'sales', group: '费用',
+        options: ['公司承担', '客户承担', '面料客户承担+加工费公司承担', '待确认'] },
+    ],
+  },
+
+  sample_shipping_arrange: {
+    title: '寄样安排检查清单',
+    items: [
+      { key: 'courier_company', label: '快递公司', type: 'select', required: true, role: 'sales', group: '快递信息',
+        options: ['DHL', 'FedEx', 'UPS', 'TNT', 'EMS', '顺丰国际', '其他'] },
+      { key: 'shipping_terms', label: '寄样条款', type: 'select', required: true, role: 'sales', group: '快递信息',
+        options: ['DDP（含税到门 — 推荐国际客户）', 'DDU（不含税 — 客户自清关）', '到付（客户账号）'] },
+      { key: 'ddp_warning_confirmed', label: '⚠ 已确认：国际客户必须选 DDP 含税，否则客户需自付关税会投诉', type: 'checkbox', required: true, role: 'sales', group: '⚠ 重要提醒' },
+      { key: 'tracking_number', label: '快递单号', type: 'text', required: true, role: 'sales', group: '快递信息' },
+      { key: 'recipient_address_confirmed', label: '收件地址已和客户确认', type: 'checkbox', required: true, role: 'sales', group: '地址确认' },
+      { key: 'packing_photos', label: '包装照片已拍（样品+快递面单）', type: 'checkbox', required: true, role: 'sales', group: '证据' },
+    ],
+  },
+
+  sample_customer_confirm: {
+    title: '客户确认样品检查清单',
+    items: [
+      { key: 'customer_received', label: '客户已收到样品', type: 'checkbox', required: true, role: 'sales', group: '确认状态' },
+      { key: 'customer_feedback', label: '客户反馈', type: 'select', required: true, role: 'sales', group: '确认状态',
+        options: ['✅ 通过（可下大货）', '⚠ 需修改（记录修改点）', '❌ 不通过（需重新打样）'] },
+      { key: 'modification_notes', label: '修改点记录', type: 'text', required: false, role: 'sales', group: '修改记录',
+        helpText: '如客户要求修改，详细记录修改内容（颜色/尺寸/工艺/面料等）' },
+      { key: 'customer_evidence', label: '客户确认证据已上传（邮件/消息截图）', type: 'checkbox', required: true, role: 'sales', group: '证据' },
+    ],
+  },
 };
 
 // ══════ 工具函数 ══════
