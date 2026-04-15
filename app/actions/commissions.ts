@@ -69,7 +69,7 @@ export async function calculateOrderScore(
 
   // 获取延期申请
   const { data: delays } = await (supabase.from('delay_requests') as any)
-    .select('id, milestone_id, requested_by, status')
+    .select('id, milestone_id, requested_by, status, reason_category')
     .eq('order_id', orderId);
 
   // 获取 milestone_logs 中的阻塞记录
@@ -162,16 +162,21 @@ export async function calculateOrderScore(
     }
     const noBlockScore = Math.max(0, 20 - blockedSteps.length * 10);
 
-    // 延期控制 — 该角色关卡的延期申请数
+    // 延期控制 — 只有内部/供应商原因的延期才扣分
+    // 客户原因（customer）和不可抗力（force_majeure）有证据的不扣分
     const roleDelays = (delays || []).filter((d: any) =>
       roleMilestones.some((m: any) => m.id === d.milestone_id)
     );
-    const noDelayScore = Math.max(0, 15 - roleDelays.length * 5);
+    const penaltyDelays = roleDelays.filter((d: any) => {
+      const cat = d.reason_category || 'internal';
+      return cat === 'internal' || cat === 'supplier'; // 只有内部和供应商原因扣分
+    });
+    const noDelayScore = Math.max(0, 15 - penaltyDelays.length * 5);
 
     return {
       ontime: { score: ontimeScore, max: 40, overdueSteps },
       noBlock: { score: noBlockScore, max: 20, blockedSteps },
-      noDelay: { score: noDelayScore, max: 15, delayCount: roleDelays.length },
+      noDelay: { score: noDelayScore, max: 15, delayCount: penaltyDelays.length, totalDelays: roleDelays.length, exemptDelays: roleDelays.length - penaltyDelays.length },
       quality: qualityDetail,
       delivery: deliveryDetail,
     };
