@@ -217,7 +217,8 @@ export function MilestoneActions({
       const DUAL_SIGN_STEPS = ['order_kickoff_meeting'];
       if (DUAL_SIGN_STEPS.includes(milestone.step_key) && checklistPayload) {
         // 合并已有 checklist_data 和当前提交的数据
-        const existing: Array<{ key: string; value: any }> = milestone.checklist_data || [];
+        const rawData = milestone.checklist_data;
+        const existing: Array<{ key: string; value: any }> = Array.isArray(rawData) ? rawData : [];
         const merged = new Map(existing.map((r: any) => [r.key, r.value]));
         for (const item of checklistPayload) {
           merged.set(item.key, item.value);
