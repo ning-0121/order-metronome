@@ -232,34 +232,6 @@ export function MilestoneActions({
         if (checklistPayload.length === 0) checklistPayload = null;
       }
 
-      // 双签节点特殊处理：如果只有一方签了，先保存签名，不标记完成
-      const DUAL_SIGN_STEPS = ['order_kickoff_meeting'];
-      if (DUAL_SIGN_STEPS.includes(milestone.step_key) && checklistPayload) {
-        // 合并已有 checklist_data 和当前提交的数据
-        const rawData = milestone.checklist_data;
-        const existing: Array<{ key: string; value: any }> = Array.isArray(rawData) ? rawData : [];
-        const merged = new Map(existing.map((r: any) => [r.key, r.value]));
-        for (const item of checklistPayload) {
-          merged.set(item.key, item.value);
-        }
-        const salesSigned = merged.get('sales_signed');
-        const adminAsstSigned = merged.get('admin_assistant_signed');
-        if (!salesSigned || !adminAsstSigned) {
-          // 只有一方签了 → 只保存 checklist，不标记完成
-          const saveResult = await saveChecklistData(milestone.id, checklistPayload);
-          if (saveResult.error) {
-            setSubmitError(saveResult.error);
-          } else {
-            setSubmitError('');
-            setShowSubmitForm(false);
-            alert('✅ 签名已保存。等另一方也签名后，即可标记完成。');
-            router.refresh();
-          }
-          setLoading(false);
-          return;
-        }
-      }
-
       // 标记完成（服务端会先保存清单再验证）
       const result = await markMilestoneDone(milestone.id, checklistPayload);
       if (result.error) {
@@ -680,13 +652,6 @@ export function MilestoneActions({
           {submitError && (
             <div className="rounded-lg bg-red-50 border border-red-200 p-3">
               <p className="text-xs text-red-700 whitespace-pre-line">{submitError}</p>
-            </div>
-          )}
-
-          {/* 双签提示 */}
-          {milestone.step_key === 'order_kickoff_meeting' && (
-            <div className="rounded-lg bg-blue-50 border border-blue-200 p-2">
-              <p className="text-xs text-blue-700">订单评审会必须业务和行政督察双方都勾选才能完成</p>
             </div>
           )}
 
