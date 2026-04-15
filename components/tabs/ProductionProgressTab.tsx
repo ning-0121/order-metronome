@@ -17,6 +17,83 @@ import type {
   ProductionReportAttachment,
 } from '@/app/actions/production-progress';
 import { useRouter } from 'next/navigation';
+import { getMilestonesByOrder } from '@/app/actions/milestones';
+
+// ── 跟单时间线定义 ──
+// 评审会完成后，系统生成跟单的工厂拜访计划和关键检查节点
+const MERCH_TIMELINE_STEPS: Array<{
+  step_key: string;
+  label: string;
+  action: string;        // 跟单要做什么
+  deliverable: string;   // 需要带回什么
+  timing: string;        // 时间要求
+  icon: string;
+}> = [
+  {
+    step_key: 'pre_production_sample_ready',
+    label: '① 封样交付',
+    action: '跟进工厂出封样，检查尺寸/做工/颜色/面料，拍照记录',
+    deliverable: '封样照片（正面/背面/细节/测量）',
+    timing: '工厂确认后 2 天内必须交付',
+    icon: '👔',
+  },
+  {
+    step_key: 'materials_received_inspected',
+    label: '② 面料到货验收',
+    action: '到布后第一时间去工厂：检验品质、比对颜色、确认克重缩水率。跟单+业务双确认后才能开裁',
+    deliverable: '面料检验报告 + 布样带回（如需寄客户确认）',
+    timing: '面料到货当天或次日',
+    icon: '🧵',
+  },
+  {
+    step_key: 'production_kickoff',
+    label: '③ 上线工艺确认',
+    action: '开裁后 2 天内去工厂：确认首件裁片尺寸、车缝工艺、印花绣花、辅料。确认组长正确理解工艺、工人按要求执行、有正确样衣参照',
+    deliverable: '首件确认照片 + 工艺确认表',
+    timing: '开裁后 2 天内',
+    icon: '✂️',
+  },
+  {
+    step_key: 'mid_qc_check',
+    label: '④ 中期验货（中查）',
+    action: '生产完成 30-50% 时去工厂：抽检 5 件量尺寸，检查色差/做工/功能，记录问题要求整改',
+    deliverable: '中查报告（含尺寸数据+外观照片+问题清单）',
+    timing: '生产进度达 30-50%',
+    icon: '🔍',
+  },
+  {
+    step_key: 'packing_method_confirmed',
+    label: '⑤ 包装确认',
+    action: '去工厂核对：内包装/外箱唛头/吊牌洗标条码/装箱方式。拍照记录',
+    deliverable: '包装照片（内包装+外箱+唛头）+ 装箱数据',
+    timing: '尾查前完成',
+    icon: '📦',
+  },
+  {
+    step_key: 'final_qc_check',
+    label: '⑥ 尾期验货（尾查）',
+    action: '按 AQL 标准抽检：尺寸/做工/外观/颜色/功能逐项检查，统计严重/主要/次要缺陷数',
+    deliverable: 'AQL 尾查报告（含缺陷统计+照片）',
+    timing: '生产完成 80% 以上',
+    icon: '✅',
+  },
+  {
+    step_key: 'inspection_release',
+    label: '⑦ 出货前验货',
+    action: '最终检查：数量核对、品质复检、包装完整、唛头核对、箱单核对',
+    deliverable: '出货验货报告',
+    timing: '出货前 2-3 天',
+    icon: '🚛',
+  },
+];
+
+interface MerchMilestone {
+  step_key: string;
+  name: string;
+  status: string;
+  due_at: string | null;
+  actual_at: string | null;
+}
 
 interface Props {
   orderId: string;
@@ -35,6 +112,8 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [analysis, setAnalysis] = useState<ProductionAnalysis | null>(null);
   const [attachments, setAttachments] = useState<ProductionReportAttachment[]>([]);
+  const [merchMilestones, setMerchMilestones] = useState<MerchMilestone[]>([]);
+  const [showTimeline, setShowTimeline] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -57,14 +136,23 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
 
   async function loadData() {
     setLoading(true);
-    const [reportsRes, analysisRes, attRes] = await Promise.all([
+    const [reportsRes, analysisRes, attRes, msRes] = await Promise.all([
       getProductionReports(orderId),
       getProductionAnalysis(orderId),
       getProductionReportAttachments(orderId),
+      getMilestonesByOrder(orderId),
     ]);
     if (reportsRes.data) setReports(reportsRes.data);
     if (analysisRes.data) setAnalysis(analysisRes.data);
     if (attRes.data) setAttachments(attRes.data);
+    if (msRes.data) {
+      const stepKeys = new Set(MERCH_TIMELINE_STEPS.map(s => s.step_key));
+      setMerchMilestones(
+        (msRes.data as any[])
+          .filter(m => stepKeys.has(m.step_key))
+          .map(m => ({ step_key: m.step_key, name: m.name, status: m.status, due_at: m.due_at, actual_at: m.actual_at }))
+      );
+    }
     setLoading(false);
   }
 
@@ -161,8 +249,126 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
     attByReport.set(a.production_report_id, list);
   }
 
+  // 跟单时间线数据：匹配 milestones 到 timeline steps
+  const timelineData = MERCH_TIMELINE_STEPS.map(step => {
+    const ms = merchMilestones.find(m => m.step_key === step.step_key);
+    const isDone = ms && (ms.status === 'done' || ms.status === '已完成');
+    const isInProgress = ms && (ms.status === 'in_progress' || ms.status === '进行中');
+    const isOverdue = ms?.due_at && !isDone && new Date(ms.due_at) < new Date();
+    const dueStr = ms?.due_at ? new Date(ms.due_at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '—';
+    return { ...step, ms, isDone, isInProgress, isOverdue, dueStr };
+  });
+  const completedCount = timelineData.filter(t => t.isDone).length;
+  // 评审会是否完成（控制时间线是否显示）
+  const kickoffDone = merchMilestones.length > 0; // 有跟单节点数据说明订单已创建
+
   return (
     <div className="space-y-5">
+      {/* ── 跟单流程时间线 ── */}
+      {kickoffDone && (
+        <div className="rounded-xl border border-indigo-200 bg-white overflow-hidden">
+          <button
+            onClick={() => setShowTimeline(!showTimeline)}
+            className="w-full flex items-center justify-between px-5 py-3 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-lg">📋</span>
+              <span className="text-sm font-bold text-indigo-900">跟单流程单</span>
+              <span className="text-xs text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
+                {completedCount}/{timelineData.length} 完成
+              </span>
+            </div>
+            <span className="text-indigo-400 text-sm">{showTimeline ? '收起 ▲' : '展开 ▼'}</span>
+          </button>
+
+          {showTimeline && (
+            <div className="px-5 py-4">
+              {/* 进度条 */}
+              <div className="mb-4">
+                <div className="w-full bg-gray-100 rounded-full h-2">
+                  <div
+                    className="bg-indigo-500 h-2 rounded-full transition-all"
+                    style={{ width: `${(completedCount / timelineData.length) * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* 时间线 */}
+              <div className="relative">
+                {timelineData.map((item, idx) => {
+                  const statusColor = item.isDone
+                    ? 'bg-green-500'
+                    : item.isOverdue
+                      ? 'bg-red-500'
+                      : item.isInProgress
+                        ? 'bg-indigo-500 animate-pulse'
+                        : 'bg-gray-300';
+                  const textColor = item.isDone
+                    ? 'text-green-700'
+                    : item.isOverdue
+                      ? 'text-red-700'
+                      : item.isInProgress
+                        ? 'text-indigo-700'
+                        : 'text-gray-500';
+
+                  return (
+                    <div key={item.step_key} className="flex gap-3 mb-0">
+                      {/* 竖线 + 圆点 */}
+                      <div className="flex flex-col items-center w-6 shrink-0">
+                        <div className={`w-3 h-3 rounded-full ${statusColor} z-10 mt-1.5`} />
+                        {idx < timelineData.length - 1 && (
+                          <div className={`w-0.5 flex-1 min-h-[40px] ${item.isDone ? 'bg-green-200' : 'bg-gray-200'}`} />
+                        )}
+                      </div>
+
+                      {/* 内容 */}
+                      <div className={`flex-1 pb-4 ${item.isDone ? 'opacity-60' : ''}`}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-base">{item.icon}</span>
+                          <span className={`text-sm font-semibold ${textColor}`}>
+                            {item.label}
+                          </span>
+                          {item.isDone && (
+                            <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">✓ 已完成</span>
+                          )}
+                          {item.isOverdue && (
+                            <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">⚠ 逾期</span>
+                          )}
+                          {item.isInProgress && (
+                            <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">● 进行中</span>
+                          )}
+                          <span className="text-xs text-gray-400 ml-auto">
+                            截止 {item.dueStr}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1 leading-relaxed">{item.action}</p>
+                        <div className="flex items-center gap-1 mt-1">
+                          <span className="text-xs text-indigo-500">📎</span>
+                          <span className="text-xs text-indigo-600">{item.deliverable}</span>
+                        </div>
+                        <p className="text-xs text-amber-600 mt-0.5">⏰ {item.timing}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 额外工厂拜访建议 */}
+              <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                <p className="text-xs font-semibold text-amber-800 mb-1">📅 其他关键拜访时间</p>
+                <ul className="text-xs text-amber-700 space-y-0.5">
+                  <li>• <strong>采购下单后 3 天</strong> — 确认工厂已收到面料订单，核实交期</li>
+                  <li>• <strong>面料到货前 2 天</strong> — 提前与工厂确认仓库准备，安排验布时间</li>
+                  <li>• <strong>生产进度 60-70%</strong> — 补充巡检，确认中查问题已整改</li>
+                  <li>• <strong>包装完成后</strong> — 抽查成品包装，确认唛头/箱单无误</li>
+                  <li>• <strong>装柜/出货当天</strong> — 现场监装（如大货/重要客户），拍照留底</li>
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 生产已启动但无日报 — 红色警告 */}
       {analysis?.productionStarted && analysis?.shouldReport && reports.length === 0 && (
         <div className="rounded-xl p-4 bg-red-50 border border-red-200 flex items-center justify-between">
