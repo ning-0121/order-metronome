@@ -278,7 +278,7 @@ export async function createOrder(
   const insertPayload: Record<string, any> = {
     customer_name,
     customer_id,
-    customer_email: customer_email || null,
+    ...(customer_email ? { customer_email } : {}),
     po_number: po_number || null,
     internal_order_no: internal_order_no || null,
     owner_user_id: user.id,
