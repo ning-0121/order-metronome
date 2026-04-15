@@ -346,7 +346,17 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
                           <span className="text-xs text-indigo-500">📎</span>
                           <span className="text-xs text-indigo-600">{item.deliverable}</span>
                         </div>
-                        <p className="text-xs text-amber-600 mt-0.5">⏰ {item.timing}</p>
+                        <div className="flex items-center justify-between mt-1">
+                          <p className="text-xs text-amber-600">⏰ {item.timing}</p>
+                          {!item.isDone && item.ms && (
+                            <a
+                              href={`/orders/${orderId}?tab=progress#milestone-${item.ms.step_key}`}
+                              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                            >
+                              去执行 →
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
