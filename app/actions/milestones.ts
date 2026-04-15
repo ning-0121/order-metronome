@@ -327,20 +327,7 @@ export async function markMilestoneDone(
       return { error: `检查清单未完成，缺少：${checkResult.missing.join('、')}` };
     }
 
-    // 双签校验：order_kickoff_meeting 必须 sales 和 admin_assistant 是不同的人
-    if (milestone.step_key === 'order_kickoff_meeting') {
-      const checklistArr = Array.isArray(msWithChecklist?.checklist_data)
-        ? msWithChecklist!.checklist_data
-        : [];
-      const salesEntry = checklistArr.find((r: any) => r.key === 'sales_signed');
-      const adminAsstEntry = checklistArr.find((r: any) => r.key === 'admin_assistant_signed');
-      if (!salesEntry?.value || !adminAsstEntry?.value) {
-        return { error: '订单评审会必须业务和行政督察双方都勾选才能完成' };
-      }
-      if (salesEntry.updated_by && adminAsstEntry.updated_by && salesEntry.updated_by === adminAsstEntry.updated_by) {
-        return { error: '订单评审会双签必须由两个不同账号操作（业务 + 行政督察不能是同一人）' };
-      }
-    }
+    // 评审会：业务确认即可完成（已取消行政督察双签）
   }
 
   // 质量门禁：出运相关节点必须在尾查通过后才能操作
@@ -1533,7 +1520,7 @@ export async function saveChecklistData(
   const { getChecklistForStep } = await import('@/lib/domain/checklist');
   const checklistConfig = getChecklistForStep(milestone.step_key);
   const STRICT_ROLE_FIELDS: Record<string, string[]> = {
-    order_kickoff_meeting: ['sales_signed', 'admin_assistant_signed'],
+    order_kickoff_meeting: ['sales_signed'],
   };
   const strictKeys = STRICT_ROLE_FIELDS[milestone.step_key] || [];
   if (checklistConfig) {

@@ -95,10 +95,8 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       // ── 风险 ──
       { key: 'risk_items', label: '风险与注意事项', type: 'text', required: true, role: 'sales', group: '风险',
         helpText: '如：面料缩水率需测试、新工厂首单需加验、深色面料注意色差、客户交期强调' },
-      // ── 双签：业务 + 行政督察 ──
-      { key: 'sales_signed', label: '业务确认评审会已召开', type: 'checkbox', required: true, role: 'sales', group: '双签确认' },
-      { key: 'admin_assistant_signed', label: '行政督察确认评审会到位', type: 'checkbox', required: true, role: 'admin_assistant', group: '双签确认',
-        helpText: '由行政督察账号操作（会议由行政督察约定）' },
+      // ── 确认 ──
+      { key: 'sales_signed', label: '业务确认评审会已召开', type: 'checkbox', required: true, role: 'sales', group: '确认' },
     ],
   },
 
