@@ -2215,3 +2215,8 @@ CREATE POLICY "order_attachments_update" ON public.order_attachments
 
 -- ===== 2026-04-13 客户邮箱字段 =====
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_email text;
+
+-- ===== 2026-04-14 样品阶段字段 =====
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS sample_phase text DEFAULT 'confirmed';
+COMMENT ON COLUMN orders.sample_phase IS '样品阶段：confirmed(头样已确认)/dev_sample(需要做头样)/dev_sample_with_revision(头样+二次样)/skip_all(不需要产前样)';
+

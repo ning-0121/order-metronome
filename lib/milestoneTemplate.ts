@@ -92,6 +92,54 @@ const PRE_PRODUCTION_SAMPLE_STEPS = new Set([
 ]);
 
 /**
+ * 样品阶段类型
+ * confirmed     — 头样已确认，直接走产前样（默认流程）
+ * dev_sample    — 需要先做头样，客户确认后再做产前样
+ * dev_sample_with_revision — 需要做头样 + 预计可能需要二次样
+ * skip_all      — 不需要产前样（翻单/老款/客户用设计样直接做大货）
+ */
+export type SamplePhase = 'confirmed' | 'dev_sample' | 'dev_sample_with_revision' | 'skip_all';
+
+/**
+ * 头样节点（插入在 factory_confirmed 之后、pre_production_sample_ready 之前）
+ * 场景：客户下了PO但头样还没确认，需要先出头样给客户看
+ */
+const DEV_SAMPLE_MILESTONES: Array<{
+  step_key: string;
+  name: string;
+  owner_role: OwnerRole;
+  is_critical: boolean;
+  evidence_required: boolean;
+  evidence_note?: string;
+}> = [
+  { step_key: "dev_sample_making", name: "头样制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "上传头样照片（正面/背面/细节/尺寸测量）" },
+  { step_key: "dev_sample_sent", name: "头样寄出", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传快递单号 + 面单照片" },
+  { step_key: "dev_sample_customer_confirm", name: "头样客户确认", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传客户确认邮件/消息截图。如客户不满意需安排二次样" },
+];
+
+/**
+ * 二次样节点（头样不通过时的修改重做流程）
+ */
+const DEV_SAMPLE_REVISION_MILESTONES: Array<{
+  step_key: string;
+  name: string;
+  owner_role: OwnerRole;
+  is_critical: boolean;
+  evidence_required: boolean;
+  evidence_note?: string;
+}> = [
+  { step_key: "dev_sample_revision", name: "二次样制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "上传二次样照片 + 与头样修改对比说明" },
+  { step_key: "dev_sample_revision_sent", name: "二次样寄出", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传快递单号 + 面单照片" },
+  { step_key: "dev_sample_revision_confirm", name: "二次样客户确认", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "上传客户确认邮件/消息截图。二次样必须通过才能安排产前样" },
+];
+
+/**
  * 国内送仓订单追加的节点（替代出运节点）
  */
 const DOMESTIC_MILESTONES: Array<{
@@ -144,7 +192,8 @@ export const SAMPLE_MILESTONE_TEMPLATE: Array<{
  *
  * @param deliveryType - 'export'(DDP出口) | 'domestic'(送仓)
  * @param orderPurpose - 'production' | 'sample'
- * @param skipPreProductionSample - 是否跳过产前样（客户直接用设计样）
+ * @param skipPreProductionSample - 是否跳过产前样（兼容旧调用，新流程用 samplePhase）
+ * @param samplePhase - 样品阶段：confirmed/dev_sample/dev_sample_with_revision/skip_all
  */
 export function getApplicableMilestones(
   _orderType?: string,
@@ -152,18 +201,34 @@ export function getApplicableMilestones(
   deliveryType?: string,
   orderPurpose?: string,
   skipPreProductionSample?: boolean,
+  samplePhase?: SamplePhase,
 ) {
   // 打样单用简化模板
   if (orderPurpose === 'sample') {
     return SAMPLE_MILESTONE_TEMPLATE;
   }
 
+  // 兼容：旧的 skipPreProductionSample 映射到 samplePhase
+  const phase: SamplePhase = samplePhase
+    || (skipPreProductionSample ? 'skip_all' : 'confirmed');
+
   let template = [...MILESTONE_TEMPLATE_V1];
 
-  // 跳过产前样节点（客户用设计样直接做大货 / 翻单 / 老款）
-  if (skipPreProductionSample) {
+  // ── 样品阶段处理 ──
+  if (phase === 'skip_all') {
+    // 跳过产前样（翻单/老款/客户用设计样直接做大货）
     template = template.filter(m => !PRE_PRODUCTION_SAMPLE_STEPS.has(m.step_key));
+  } else if (phase === 'dev_sample' || phase === 'dev_sample_with_revision') {
+    // 需要做头样：在 factory_confirmed 之后插入头样节点
+    const insertIdx = template.findIndex(m => m.step_key === 'pre_production_sample_ready');
+    if (insertIdx !== -1) {
+      const devNodes = phase === 'dev_sample_with_revision'
+        ? [...DEV_SAMPLE_MILESTONES, ...DEV_SAMPLE_REVISION_MILESTONES]
+        : [...DEV_SAMPLE_MILESTONES];
+      template.splice(insertIdx, 0, ...devNodes);
+    }
   }
+  // phase === 'confirmed' → 默认流程，不改动
 
   if (deliveryType !== 'export') {
     // 非出口（FOB / 人民币 / 国内送仓）：过滤出运节点，追加国内送仓节点

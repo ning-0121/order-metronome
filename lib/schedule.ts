@@ -133,6 +133,14 @@ const TIMELINE = {
   processing_fee_confirmed:      6,   // 加工费确认（财务）
   factory_confirmed:             8,   // 工厂匹配确认（跟单）
 
+  // ── 阶段 3.5：头样（如需，插在工厂匹配后、产前样前）──
+  dev_sample_making:             12,  // 头样制作（工厂确认后 4 天）
+  dev_sample_sent:               13,  // 头样寄出
+  dev_sample_customer_confirm:   18,  // 头样客户确认（寄出后 5 天）
+  dev_sample_revision:           22,  // 二次样制作（头样被拒后 4 天）
+  dev_sample_revision_sent:      23,  // 二次样寄出
+  dev_sample_revision_confirm:   28,  // 二次样客户确认
+
   // ── 阶段 4：采购下单 + 产前样准备（9-19 天）──
   procurement_order_placed:      9,   // 采购下单 — 工厂确认后立即下大货料
   pre_production_sample_ready:   14,
@@ -316,6 +324,13 @@ export function calcDueDates(params: CalcDueDatesParams) {
     bulk_materials_confirmed:      cap(calc(TIMELINE.bulk_materials_confirmed)),
     processing_fee_confirmed:      cap(calc(TIMELINE.processing_fee_confirmed)),
     factory_confirmed:             cap(calc(TIMELINE.factory_confirmed)),
+    // 头样/二次样（仅当 samplePhase 需要时，模板才包含这些节点）
+    dev_sample_making:             cap(calc(TIMELINE.dev_sample_making)),
+    dev_sample_sent:               cap(calc(TIMELINE.dev_sample_sent)),
+    dev_sample_customer_confirm:   cap(calc(TIMELINE.dev_sample_customer_confirm)),
+    dev_sample_revision:           cap(calc(TIMELINE.dev_sample_revision)),
+    dev_sample_revision_sent:      cap(calc(TIMELINE.dev_sample_revision_sent)),
+    dev_sample_revision_confirm:   cap(calc(TIMELINE.dev_sample_revision_confirm)),
     pre_production_sample_ready:   cap(calc(TIMELINE.pre_production_sample_ready)),
     pre_production_sample_sent:    cap(calc(TIMELINE.pre_production_sample_sent)),
     pre_production_sample_approved: cap(calc(sampleConfirmDays)),

@@ -100,6 +100,7 @@ function NewOrderWizard() {
   const [poParseResult, setPoParseResult] = useState<any>(null);
   const [poAutoFilled, setPoAutoFilled] = useState(false);
   const isSampleOrder = searchParams.get('type') === 'sample';
+  const [orderType, setOrderType] = useState('');
 
   // PO 上传后自动 AI 解析并填表
   async function handlePOFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -634,7 +635,8 @@ function NewOrderWizard() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     订单类型 <span className="text-red-500">*</span>
                   </label>
-                  <select name="order_type" required
+                  <select name="order_type" required value={orderType}
+                    onChange={e => setOrderType(e.target.value)}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                     <option value="">请选择</option>
                     <option value="trial">新品试单</option>
@@ -643,6 +645,31 @@ function NewOrderWizard() {
                     <option value="urgent">加急订单</option>
                   </select>
                 </div>
+                {/* 翻单回顾 — 仅当订单类型为"翻单"时显示 */}
+                {orderType === 'repeat' && (
+                  <div className="col-span-2 rounded-xl bg-amber-50 border border-amber-200 p-4 space-y-3">
+                    <h4 className="text-sm font-semibold text-amber-900 flex items-center gap-1.5">
+                      📋 翻单回顾（上一单总结）
+                    </h4>
+                    <p className="text-xs text-amber-700">请回顾上一单的执行情况，帮助本次订单避坑。此信息将纳入客户画像。</p>
+                    <div>
+                      <label className="text-xs text-gray-600">上一单订单号</label>
+                      <input type="text" name="repeat_prev_order_no" placeholder="如 QM-20260403-001"
+                        className="mt-1 block w-full rounded-lg border border-amber-300 px-3 py-2 text-sm bg-white" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">上一单存在的问题 <span className="text-red-500">*</span></label>
+                      <textarea name="repeat_issues" required rows={2} placeholder="如：面料缩水率偏高、交期延了5天、客户对颜色不满意..."
+                        className="mt-1 block w-full rounded-lg border border-amber-300 px-3 py-2 text-sm bg-white" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">本次需要特别注意的事项</label>
+                      <textarea name="repeat_attention" rows={2} placeholder="如：换工厂了注意品质、面料要提前测缩水、客户要求更严格的AQL..."
+                        className="mt-1 block w-full rounded-lg border border-amber-300 px-3 py-2 text-sm bg-white" />
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     预估总数量 <span className="text-red-500">*</span>
@@ -764,16 +791,21 @@ function NewOrderWizard() {
                   </label>
                 </div>
 
-                {/* 跳过产前样：客户用设计样直接做大货 / 翻单 */}
+                {/* 样品阶段选择 */}
                 <div className="col-span-2">
-                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50">
-                    <input type="checkbox" name="skip_pre_production_sample" value="true"
-                      className="w-4 h-4 rounded border-gray-300 text-indigo-600" />
-                    <div>
-                      <span className="text-sm font-medium text-gray-900">不需要产前样</span>
-                      <p className="text-xs text-gray-500 mt-0.5">客户用设计样直接做大货 / 翻单 / 老款 — 将跳过产前样准备/寄出/确认 3 个节点</p>
-                    </div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    样品阶段 <span className="text-red-500">*</span>
                   </label>
+                  <select name="sample_phase" defaultValue="confirmed"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    <option value="confirmed">头样已确认 — 直接安排产前样</option>
+                    <option value="dev_sample">需要做头样 — 头样确认后再做产前样</option>
+                    <option value="dev_sample_with_revision">需要做头样 + 可能需要二次样</option>
+                    <option value="skip_all">不需要产前样 — 翻单/老款/客户用设计样直接做大货</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {`选"需要做头样"会增加头样制作→寄出→确认节点；选"可能需要二次样"会额外增加二次样节点`}
+                  </p>
                 </div>
 
                 {/* 样品确认天数覆盖：针对慢确认客户 */}

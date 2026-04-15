@@ -58,7 +58,7 @@ assert(!domesticMilestones.some(m => m.step_key === 'booking_done'), 'domestic�
 const sampleMilestones = getApplicableMilestones('sample', false, 'domestic', 'sample');
 assert(sampleMilestones.length === 8, `sample订单返回 ${sampleMilestones.length} 个节点 (=7)`);
 
-// 跳过产前样：3 个产前样节点应被过滤掉
+// 跳过产前样（skip_all）：3 个产前样节点应被过滤掉
 const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);
 assert(
   !skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_ready'),
@@ -68,6 +68,41 @@ assert(
   skipSampleMilestones.length === prodMilestones.length - 3,
   `跳过产前样模式节点数(${skipSampleMilestones.length}) = 标准export(${prodMilestones.length}) - 3`
 );
+
+// 头样模式：增加 3 个头样节点
+const devSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', false, 'dev_sample');
+assert(
+  devSampleMilestones.some(m => m.step_key === 'dev_sample_making'),
+  '头样模式：包含 dev_sample_making'
+);
+assert(
+  devSampleMilestones.some(m => m.step_key === 'dev_sample_customer_confirm'),
+  '头样模式：包含 dev_sample_customer_confirm'
+);
+assert(
+  devSampleMilestones.length === prodMilestones.length + 3,
+  `头样模式节点数(${devSampleMilestones.length}) = 标准export(${prodMilestones.length}) + 3`
+);
+
+// 头样+二次样模式：增加 6 个节点
+const devRevisionMilestones = getApplicableMilestones('bulk', false, 'export', 'production', false, 'dev_sample_with_revision');
+assert(
+  devRevisionMilestones.some(m => m.step_key === 'dev_sample_revision'),
+  '二次样模式：包含 dev_sample_revision'
+);
+assert(
+  devRevisionMilestones.some(m => m.step_key === 'dev_sample_revision_confirm'),
+  '二次样模式：包含 dev_sample_revision_confirm'
+);
+assert(
+  devRevisionMilestones.length === prodMilestones.length + 6,
+  `二次样模式节点数(${devRevisionMilestones.length}) = 标准export(${prodMilestones.length}) + 6`
+);
+
+// 头样节点顺序正确：dev_sample → pre_production_sample
+const devIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'dev_sample_customer_confirm');
+const preIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'pre_production_sample_ready');
+assert(devIdx < preIdx, `头样确认(${devIdx}) 在产前样准备(${preIdx})之前`);
 
 // ════ 3. Agent 配置完整性 ════
 console.log('\n🤖 Agent 配置');

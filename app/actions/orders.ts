@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
+import { MILESTONE_TEMPLATE_V1, getApplicableMilestones, type SamplePhase } from '@/lib/milestoneTemplate';
 import { calcDueDates, recalcRemainingDueDates } from '@/lib/schedule';
 import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
 import { 
@@ -59,6 +59,7 @@ export async function createOrder(
   formData: FormData,
   preGeneratedOrderNo?: string
 ): Promise<{ ok: boolean; orderId?: string; error?: string; warning?: string }> {
+  try { // 全局 try-catch：防止未处理异常导致"Server Components render"
   // ── STEP 1: validate — 验证用户身份 ──
   let supabase;
   try {
@@ -140,8 +141,14 @@ export async function createOrder(
     }
   } catch {}
 
-  // 跳过产前样 + 样品确认天数覆盖
-  const skip_pre_production_sample = formData.get('skip_pre_production_sample') === 'true';
+  // 样品阶段（新）+ 兼容旧 checkbox
+  const sample_phase_raw = formData.get('sample_phase') as string | null;
+  const sample_phase: SamplePhase | undefined = (['confirmed', 'dev_sample', 'dev_sample_with_revision', 'skip_all'] as const)
+    .includes(sample_phase_raw as any) ? sample_phase_raw as SamplePhase : undefined;
+  // 兼容旧表单的 checkbox（如果有 sample_phase 则忽略旧字段）
+  const skip_pre_production_sample = sample_phase
+    ? sample_phase === 'skip_all'
+    : formData.get('skip_pre_production_sample') === 'true';
   const sampleConfirmRaw = formData.get('sample_confirm_days_override') as string | null;
   const sample_confirm_days_override = sampleConfirmRaw ? parseInt(sampleConfirmRaw, 10) : null;
   const totalQuantity = formData.get('total_quantity') as string | null;
@@ -299,6 +306,7 @@ export async function createOrder(
     factory_names: factory_names,
     price_approval_id: validatedApprovalId,
     skip_pre_production_sample: skip_pre_production_sample,
+    ...(sample_phase ? { sample_phase } : {}),
     sample_confirm_days_override: sample_confirm_days_override && !isNaN(sample_confirm_days_override)
       ? sample_confirm_days_override
       : null,
@@ -426,6 +434,7 @@ export async function createOrder(
     delivery_type,
     order_purpose,
     skip_pre_production_sample,
+    sample_phase,
   );
   // 防御性下限：任何节点 due_at 不能早于下单日（T0），
   // 否则 ensureBusinessDay 遇到连续节假日可能越界回退（历史 bug 防护）
@@ -721,6 +730,10 @@ export async function createOrder(
   revalidatePath('/orders');
   revalidatePath('/dashboard');
   return { ok: true, orderId: orderData.id };
+  } catch (globalErr: any) {
+    console.error('[createOrder] 全局异常:', globalErr?.message, globalErr?.stack);
+    return { ok: false, error: `创建订单失败：${globalErr?.message || '未知错误'}` };
+  }
 }
 
 export async function getOrders() {
