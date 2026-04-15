@@ -45,6 +45,31 @@ export async function GET() {
       }
     }
 
+    // ── 补分配：财务/采购/生产主管节点没有 owner_user_id 的补上 ──
+    let assignedCount = 0;
+    try {
+      const { DEFAULT_ASSIGNEES, findAssigneeUserId } = await import('@/lib/domain/default-assignees');
+      const { data: allProfiles } = await (supabase.from('profiles') as any)
+        .select('user_id, name, email, role, roles');
+      if (allProfiles) {
+        for (const [roleName, matcher] of Object.entries(DEFAULT_ASSIGNEES)) {
+          const userId = findAssigneeUserId(allProfiles as any, matcher);
+          if (!userId) continue;
+          // 找到该角色未分配的节点
+          const { data: unassigned } = await (supabase.from('milestones') as any)
+            .select('id')
+            .eq('owner_role', roleName)
+            .is('owner_user_id', null);
+          if (unassigned && unassigned.length > 0) {
+            await (supabase.from('milestones') as any)
+              .update({ owner_user_id: userId })
+              .in('id', unassigned.map((m: any) => m.id));
+            assignedCount += unassigned.length;
+          }
+        }
+      }
+    } catch {}
+
     // 同时修复：草稿订单批量激活
     let activatedDrafts = 0;
     const { data: drafts } = await (supabase.from('orders') as any)
@@ -58,7 +83,7 @@ export async function GET() {
       activatedDrafts = ids.length;
     }
 
-    return NextResponse.json({ success: true, fixed_roles: totalFixed, activated_drafts: activatedDrafts });
+    return NextResponse.json({ success: true, fixed_roles: totalFixed, assigned_owners: assignedCount, activated_drafts: activatedDrafts });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
