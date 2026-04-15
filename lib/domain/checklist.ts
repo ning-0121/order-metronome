@@ -213,7 +213,7 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
         helpText: '车缝/拼接/印花/绣花 无明显瑕疵' },
       { key: 'color_check', label: '颜色对比', type: 'checkbox', required: true, role: 'merchandiser', group: '品质检查',
         helpText: '与色卡/标准样对比，无明显色差' },
-      { key: 'photos_uploaded', label: '封样照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '交付',
+      { key: 'photos_uploaded', label: '封样照片已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '交付',
         helpText: '正面/背面/细节/尺寸测量照片' },
       { key: 'delivery_date', label: '交付日期', type: 'pending_date', required: true, role: 'merchandiser', group: '交付',
         affectsSchedule: true },
@@ -259,7 +259,7 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'sewing_check', label: '车缝密度/针距/线头符合要求', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
       { key: 'print_check', label: '印花/绣花位置大小颜色与确认样一致', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
       { key: 'trims_check', label: '辅料核对（拉链/纽扣/织带等）', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
-      { key: 'first_piece_photo', label: '首件确认照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },
+      { key: 'first_piece_photo', label: '首件确认照片已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '首件工艺确认' },
     ],
   },
 
@@ -293,7 +293,7 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'mid_qc_result', label: '中查结果', type: 'select', required: true, role: 'merchandiser', group: '判定',
         options: ['继续生产', '需整改后继续', '需停产整改'] },
       { key: 'rectification', label: '整改要求', type: 'text', required: false, role: 'merchandiser', group: '判定' },
-      { key: 'qc_report_uploaded', label: '中查报告照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '判定' },
+      { key: 'qc_report_uploaded', label: '中查报告照片已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '判定' },
       // 业务确认
       { key: 'sales_reviewed', label: '业务已审阅中查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
       { key: 'sales_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
@@ -334,7 +334,7 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'final_result', label: '尾查结果', type: 'select', required: true, role: 'merchandiser', group: '判定',
         options: ['PASS', 'PENDING（待整改复验）', 'FAIL（不通过）'] },
       { key: 'rectification', label: '整改要求', type: 'text', required: false, role: 'merchandiser', group: '判定' },
-      { key: 'report_uploaded', label: '尾查报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '判定' },
+      { key: 'report_uploaded', label: '尾查报告已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '判定' },
       // 业务确认
       { key: 'sales_reviewed', label: '业务已审阅尾查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
       { key: 'sales_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
@@ -357,7 +357,7 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'pcs_per_carton', label: '每箱件数', type: 'number', required: true, role: 'merchandiser', group: '装箱数据' },
       { key: 'total_cartons', label: '总箱数', type: 'number', required: true, role: 'merchandiser', group: '装箱数据' },
       { key: 'weight', label: '净重/毛重(KG)', type: 'text', required: true, role: 'merchandiser', group: '装箱数据' },
-      { key: 'packing_photos', label: '包装照片已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '确认',
+      { key: 'packing_photos', label: '包装照片已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '确认',
         helpText: '内包装+外箱+唛头照片' },
       { key: 'packing_pass', label: '所有包装项目符合客户要求', type: 'checkbox', required: true, role: 'merchandiser', group: '确认' },
     ],
@@ -376,7 +376,7 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'release_result', label: '验货结果', type: 'select', required: true, role: 'merchandiser', group: '放行',
         options: ['放行', '有条件放行(附说明)', '不放行'] },
       { key: 'release_note', label: '条件说明', type: 'text', required: false, role: 'merchandiser', group: '放行' },
-      { key: 'final_report_uploaded', label: '最终验货报告已上传', type: 'checkbox', required: true, role: 'merchandiser', group: '放行' },
+      { key: 'final_report_uploaded', label: '最终验货报告已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '放行' },
     ],
   },
 
