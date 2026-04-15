@@ -64,6 +64,14 @@
     {
       "path": "/api/cron/order-audit",
       "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/ai-self-improve",
+      "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/cron/proactive-fix",
+      "schedule": "0 */2 * * *"
     }
   ]
 }
