@@ -2,7 +2,8 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { MILESTONE_TEMPLATE_V1, getApplicableMilestones, type SamplePhase } from '@/lib/milestoneTemplate';
+import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
+import type { SamplePhase } from '@/lib/milestoneTemplate';
 import { calcDueDates, recalcRemainingDueDates } from '@/lib/schedule';
 import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
 import { 
@@ -60,6 +61,7 @@ export async function createOrder(
   preGeneratedOrderNo?: string
 ): Promise<{ ok: boolean; orderId?: string; error?: string; warning?: string }> {
   try { // 全局 try-catch：防止未处理异常导致"Server Components render"
+  console.log('[createOrder] START — preGeneratedOrderNo:', preGeneratedOrderNo);
   // ── STEP 1: validate — 验证用户身份 ──
   let supabase;
   try {
@@ -143,8 +145,10 @@ export async function createOrder(
 
   // 样品阶段（新）+ 兼容旧 checkbox
   const sample_phase_raw = formData.get('sample_phase') as string | null;
-  const sample_phase: SamplePhase | undefined = (['confirmed', 'dev_sample', 'dev_sample_with_revision', 'skip_all'] as const)
-    .includes(sample_phase_raw as any) ? sample_phase_raw as SamplePhase : undefined;
+  const validPhases = ['confirmed', 'dev_sample', 'dev_sample_with_revision', 'skip_all'];
+  const sample_phase = (sample_phase_raw && validPhases.includes(sample_phase_raw))
+    ? sample_phase_raw as SamplePhase
+    : undefined;
   // 兼容旧表单的 checkbox（如果有 sample_phase 则忽略旧字段）
   const skip_pre_production_sample = sample_phase
     ? sample_phase === 'skip_all'
