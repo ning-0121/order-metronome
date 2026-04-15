@@ -766,6 +766,10 @@ export async function getOrders() {
     for (const o of (orders || []) as any[]) {
       if (o.owner_user_id) userIds.add(o.owner_user_id);
       if (o.created_by) userIds.add(o.created_by);
+      // 从 milestones 里找跟单负责人
+      for (const m of (o.milestones || [])) {
+        if (m.owner_user_id) userIds.add(m.owner_user_id);
+      }
     }
     let nameMap: Record<string, string> = {};
     if (userIds.size > 0) {
@@ -776,11 +780,18 @@ export async function getOrders() {
         return m;
       }, {} as Record<string, string>);
     }
-    const enriched = (orders || []).map((o: any) => ({
-      ...o,
-      merchandiser_name: o.owner_user_id ? nameMap[o.owner_user_id] || null : null,
-      sales_name: o.created_by ? nameMap[o.created_by] || null : null,
-    }));
+    const enriched = (orders || []).map((o: any) => {
+      // 跟单负责人：从 merchandiser 角色的节点中找（取第一个有 user_id 的）
+      const merchMilestone = (o.milestones || []).find((m: any) =>
+        m.owner_role === 'merchandiser' && m.owner_user_id
+      );
+      const merchUserId = merchMilestone?.owner_user_id;
+      return {
+        ...o,
+        merchandiser_name: merchUserId ? nameMap[merchUserId] || null : null,
+        sales_name: o.created_by ? nameMap[o.created_by] || null : null,
+      };
+    });
     return { data: enriched };
   }
 
