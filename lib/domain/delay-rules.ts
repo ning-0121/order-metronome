@@ -20,7 +20,10 @@ export interface DelayCategoryInfo {
   description: string;
   impactsFinalDeliveryDate: boolean; // 是否影响最终交期
   requiresCustomerApproval: boolean; // 是否必须客户书面同意
+  affectsKPI: boolean;              // 是否影响员工 KPI
   color: string; // UI 颜色
+  sop: string;   // 延期申请 SOP
+  tags: string[]; // 常见标签
 }
 
 export const DELAY_CATEGORIES: Record<DelayCategory, DelayCategoryInfo> = {
@@ -29,32 +32,44 @@ export const DELAY_CATEGORIES: Record<DelayCategory, DelayCategoryInfo> = {
     emoji: '👤',
     description: '客户未确认样品 / 改款 / 改色 / 改尺码 / 未付款 / 延期验货 / 未提供必要资料',
     impactsFinalDeliveryDate: true,
-    requiresCustomerApproval: false, // 客户自己的原因，不需要重新确认
+    requiresCustomerApproval: false,
+    affectsKPI: false, // 客户原因不扣员工 KPI
     color: 'blue',
+    sop: '1. 截图/转发客户邮件或微信记录作为证据\n2. 填写延期天数和新到期日\n3. 选择"客户原因"分类\n4. 上传证据附件\n5. CEO 审批后自动顺延下游节点',
+    tags: ['客户改款', '客户改色', '客户未确认样品', '客户未付款', '客户延期验货', '客户未回复', '客户未提供资料'],
   },
   supplier: {
     label: '供应商原因',
     emoji: '🏭',
     description: '面料供应商延迟 / 辅料供应商延迟 / 原料品质不达标',
-    impactsFinalDeliveryDate: false, // 先尝试压缩下游，超限才能提升
+    impactsFinalDeliveryDate: false,
     requiresCustomerApproval: false,
+    affectsKPI: true, // 供应商原因扣 KPI（采购应提前安排）
     color: 'amber',
+    sop: '1. 联系供应商确认实际到货时间\n2. 评估是否需要换供应商\n3. 填写延期天数\n4. 附上供应商沟通记录\n5. 如影响交期需提前通知客户',
+    tags: ['面料延迟', '辅料延迟', '拉链延迟', '染色延迟', '网纱延迟', '原料品质不达标', '供应商交期延误'],
   },
   internal: {
     label: '内部原因',
     emoji: '🏢',
     description: '工厂排期 / 品质返工 / 生产设备故障 / 员工能力问题 / 管理疏漏',
-    impactsFinalDeliveryDate: false, // 内部问题不能影响客户交期
+    impactsFinalDeliveryDate: false,
     requiresCustomerApproval: false,
+    affectsKPI: true, // 内部原因扣 KPI
     color: 'red',
+    sop: '1. 明确延期根本原因\n2. 制定补救方案（加班/分厂/外协）\n3. 填写延期天数和补救措施\n4. 严格控制不超过节点最大延期天数\n5. 超限需 CEO 特批',
+    tags: ['工厂排期紧张', '品质返工', '裁剪错误', '车缝问题', '整烫问题', '包装延误', '排单失误', '人员不足'],
   },
   force_majeure: {
     label: '不可抗力',
     emoji: '⚡',
     description: '疫情 / 自然灾害 / 罢工 / 港口封锁 / 法规变化',
     impactsFinalDeliveryDate: true,
-    requiresCustomerApproval: true, // 必须客户书面同意
+    requiresCustomerApproval: true,
+    affectsKPI: false, // 不可抗力不扣 KPI
     color: 'purple',
+    sop: '1. 收集不可抗力证明材料\n2. 第一时间通知客户\n3. 获取客户书面同意延期\n4. 上传证明+客户同意件\n5. CEO 审批后顺延交期',
+    tags: ['疫情', '自然灾害', '台风', '地震', '罢工', '港口封锁', '政策变化', '限电停产'],
   },
 };
 
