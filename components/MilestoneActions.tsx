@@ -203,14 +203,33 @@ export function MilestoneActions({
           .eq('id', milestone.id);
       }
 
-      // 收集检查清单数据，连同标记完成一起发给服务端
+      // 收集检查清单数据 — 只提交当前用户角色能编辑的字段
       let checklistPayload: Array<{ key: string; value: any; pending_date?: string }> | null = null;
       if (checklistResponsesRef.current && Object.keys(checklistResponsesRef.current).length > 0) {
-        checklistPayload = Object.entries(checklistResponsesRef.current).map(([key, r]) => {
-          const item: { key: string; value: any; pending_date?: string } = { key, value: r.value ?? null };
-          if (r.pending_date) item.pending_date = r.pending_date;
-          return item;
-        });
+        const { getChecklistForStep } = await import('@/lib/domain/checklist');
+        const clConfig = getChecklistForStep(milestone.step_key);
+        const userRolesLower = allRoles.map((r: string) => r.toLowerCase());
+        const isAdminRole = userRolesLower.includes('admin');
+
+        checklistPayload = Object.entries(checklistResponsesRef.current)
+          .filter(([key]) => {
+            if (!clConfig) return true;
+            const itemDef = clConfig.items.find((i: any) => i.key === key);
+            if (!itemDef) return true;
+            // admin 可以编辑所有非严格字段
+            if (isAdminRole) return true;
+            // 只提交自己角色能编辑的字段
+            const itemRole = itemDef.role.toLowerCase();
+            return userRolesLower.includes(itemRole)
+              || (itemRole === 'sales' && userRolesLower.includes('merchandiser'))
+              || (itemRole === 'merchandiser' && userRolesLower.includes('sales'));
+          })
+          .map(([key, r]) => {
+            const item: { key: string; value: any; pending_date?: string } = { key, value: r.value ?? null };
+            if (r.pending_date) item.pending_date = r.pending_date;
+            return item;
+          });
+        if (checklistPayload.length === 0) checklistPayload = null;
       }
 
       // 双签节点特殊处理：如果只有一方签了，先保存签名，不标记完成
@@ -765,9 +784,28 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange 
 
   const handleSave = async () => {
     setSaving(true);
-    const data = Object.entries(responses).map(([key, r]) => ({
-      key, value: r.value, pending_date: r.pending_date,
-    }));
+    // 只保存当前用户角色能编辑的字段
+    const rolesLower = currentRoles.map(r => r.toLowerCase());
+    const isAdmin = rolesLower.includes('admin');
+    const data = Object.entries(responses)
+      .filter(([key]) => {
+        if (isAdmin) return true;
+        const itemDef = config?.items.find(i => i.key === key);
+        if (!itemDef) return true;
+        const itemRole = itemDef.role.toLowerCase();
+        return rolesLower.includes(itemRole)
+          || (itemRole === 'sales' && rolesLower.includes('merchandiser'))
+          || (itemRole === 'merchandiser' && rolesLower.includes('sales'))
+          || (itemRole === 'admin_assistant' && rolesLower.includes('admin_assistant'));
+      })
+      .map(([key, r]) => ({
+        key, value: r.value, pending_date: r.pending_date,
+      }));
+    if (data.length === 0) {
+      alert('没有可保存的字段（当前角色只能编辑自己负责的项目）');
+      setSaving(false);
+      return;
+    }
     const result = await saveChecklistData(milestone.id, data);
     if (result.error) {
       alert(result.error);
@@ -810,7 +848,13 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange 
             {group.items.map(item => {
               const val = responses[item.key];
               // 双签：如果 item 有 role 限制，且当前用户角色不匹配 → 禁用
-              const roleRestricted = item.role && !currentRoles.includes(item.role) && !currentRoles.includes('admin');
+              const rolesLower = currentRoles.map(r => r.toLowerCase());
+              const itemRole = (item.role || '').toLowerCase();
+              const canEdit = rolesLower.includes(itemRole)
+                || rolesLower.includes('admin')
+                || (itemRole === 'sales' && rolesLower.includes('merchandiser'))
+                || (itemRole === 'merchandiser' && rolesLower.includes('sales'));
+              const roleRestricted = !canEdit;
               const alreadyDone = !!val?.value; // 别人已经勾了
               return (
                 <div key={item.key} className="flex items-start gap-2 bg-white rounded-md p-2 border border-amber-100">
@@ -826,7 +870,13 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange 
                       <span className="text-sm text-gray-700">{item.label}</span>
                       {item.required && <span className="text-red-500 text-xs">*</span>}
                       {roleRestricted && !alreadyDone && (
-                        <span className="text-xs text-gray-400 ml-1">（等待{item.role === 'admin' ? 'CEO' : '业务'}确认）</span>
+                        <span className="text-xs text-gray-400 ml-1">（等待{
+                          item.role === 'admin' ? 'CEO' :
+                          item.role === 'admin_assistant' ? '行政督察' :
+                          item.role === 'sales' ? '业务' :
+                          item.role === 'merchandiser' ? '跟单' :
+                          item.role
+                        }确认）</span>
                       )}
                       {alreadyDone && roleRestricted && (
                         <span className="text-xs text-green-600 ml-1">✓ 已确认</span>
