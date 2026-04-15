@@ -72,6 +72,10 @@
     {
       "path": "/api/cron/proactive-fix",
       "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/cron/tech-scout",
+      "schedule": "0 18 * * 0"
     }
   ]
 }
