@@ -686,13 +686,26 @@ async function recalculateSchedule(
       .update(updates)
       .eq('id', orderData.id);
 
-    // Recalculate all milestones
+    // Recalculate all milestones（需要锚点日期，缺少时跳过全量重算）
+    const newEtd = orderData.incoterm === 'FOB' ? delayRequest.proposed_new_anchor_date : orderData.etd;
+    const newWh = orderData.incoterm === 'DDP' ? delayRequest.proposed_new_anchor_date : orderData.warehouse_due_date;
+    const anchorAvailable = !!(newEtd || newWh || orderData.factory_date);
+
+    if (!anchorAvailable) {
+      // 缺少锚点：只更新当前节点的 due_at，不做全量重算
+      if (delayRequest.proposed_new_due_at) {
+        await supabase.from('milestones').update({ due_at: delayRequest.proposed_new_due_at }).eq('id', milestoneData.id);
+      }
+      return;
+    }
+
     const createdAt = new Date(orderData.created_at);
+    const scheduleEtd = newEtd || orderData.factory_date; // FOB/RMB 用出厂日期兜底
     const dueMap = calcDueDates({
       createdAt,
       incoterm: orderData.incoterm as 'FOB' | 'DDP',
-      etd: orderData.incoterm === 'FOB' ? delayRequest.proposed_new_anchor_date : orderData.etd,
-      warehouseDueDate: orderData.incoterm === 'DDP' ? delayRequest.proposed_new_anchor_date : orderData.warehouse_due_date,
+      etd: scheduleEtd,
+      warehouseDueDate: newWh,
     });
 
     // Get all milestones for this order
@@ -826,13 +839,20 @@ export async function getImpactedMilestones(delayRequestId: string) {
   
   // If anchor date change, all milestones are impacted
   if (delayRequestData.proposed_new_anchor_date) {
+    const newEtd = orderData.incoterm === 'FOB' ? delayRequestData.proposed_new_anchor_date : orderData.etd;
+    const newWh = orderData.incoterm === 'DDP' ? delayRequestData.proposed_new_anchor_date : orderData.warehouse_due_date;
+    const scheduleEtd = newEtd || orderData.factory_date;
+    if (!scheduleEtd && !newWh) {
+      // 缺少锚点日期，无法预览全量重算
+      return { data: null, impactedMilestones: [], error: '订单缺少出厂日期/ETD，无法预览排期影响' };
+    }
     const createdAt = new Date(orderData.created_at);
     const { calcDueDates } = await import('@/lib/schedule');
     const dueMap = calcDueDates({
       createdAt,
       incoterm: orderData.incoterm as 'FOB' | 'DDP',
-      etd: orderData.incoterm === 'FOB' ? delayRequestData.proposed_new_anchor_date : orderData.etd,
-      warehouseDueDate: orderData.incoterm === 'DDP' ? delayRequestData.proposed_new_anchor_date : orderData.warehouse_due_date,
+      etd: scheduleEtd,
+      warehouseDueDate: newWh,
     });
     
     // Get all milestones
