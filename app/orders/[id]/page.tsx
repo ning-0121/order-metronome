@@ -238,8 +238,7 @@ export default async function OrderDetailPage({
             </div>
           </div>
 
-          {/* 经营面板 — CEO/财务一眼看到是否需要干预 */}
-          <OrderBusinessPanel orderId={id} isAdmin={isAdmin} userRoles={currentRoles} />
+          {/* 经营面板已移除 */}
 
           {/* Tab 导航（移动端可横向滚动） */}
           <div className="flex gap-1 mt-4 -mb-px overflow-x-auto scrollbar-hide">
