@@ -196,7 +196,7 @@ export const quoteReviewSkill: SkillModule = {
 
     // ── 步骤2：如果有成本基线，直接用（已解析的结构化数据更准确） ──
     if (baseline && baseline.total_cost_per_piece > 0) {
-      return runBaselineAnalysis(order, baseline, findings, foundFiles);
+      return await runBaselineAnalysis(order, baseline, findings, foundFiles);
     }
 
     // ── 步骤3：没有基线，尝试从文件提取 ──
@@ -272,11 +272,12 @@ export const quoteReviewSkill: SkillModule = {
       }
     }
 
-    // ── 步骤4：利润计算 ──
+    // ── 步骤4：利润计算（实时汇率） ──
+    const { getCurrencyToRmbRate } = await import('@/lib/utils/exchange-rate');
     const costPerPiece = costData?.cost_per_piece || 0;
     const sellingPrice = poData?.unit_price || quoteData?.unit_price || 0;
     const currency = poData?.currency || quoteData?.currency || 'USD';
-    const exchangeRate = currency === 'RMB' || currency === 'CNY' ? 1 : 7.2;
+    const exchangeRate = await getCurrencyToRmbRate(currency);
     const sellingPriceRmb = sellingPrice * exchangeRate;
 
     if (costPerPiece > 0 && sellingPrice > 0) {
@@ -371,7 +372,7 @@ export const quoteReviewSkill: SkillModule = {
 };
 
 // 使用已有 baseline 的分析（原有逻辑）
-function runBaselineAnalysis(
+async function runBaselineAnalysis(
   order: any,
   baseline: any,
   findings: SkillFinding[],
@@ -381,7 +382,8 @@ function runBaselineAnalysis(
   const sellingPrice = order.incoterm === 'DDP'
     ? (baseline.ddp_price || 0)
     : (baseline.fob_price || 0);
-  const exchangeRate = baseline.exchange_rate || 7.2;
+  const { getUsdToRmbRate } = await import('@/lib/utils/exchange-rate');
+  const exchangeRate = baseline.exchange_rate || await getUsdToRmbRate();
   const sellingPriceRmb = sellingPrice * exchangeRate;
 
   if (sellingPrice === 0 && costPerPiece > 0) {

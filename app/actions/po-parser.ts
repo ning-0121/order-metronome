@@ -53,6 +53,20 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
 7. 判断服装品类（pants/tops/dress/outerwear/other）
 8. 如果PO中包含尺寸表/测量数据（如腰围、臀围、胸围等各尺码的数值），请提取到measurements数组中
 
+日期解析规则（重要！）：
+- Excel的日期序列号（如46124）= 从1900-01-01起的天数，请转换为 YYYY.MM.DD
+- 美式日期 MM/DD/YYYY 转为 YYYY.MM.DD
+- 英式日期 DD/MM/YYYY 转为 YYYY.MM.DD（如果月份>12则按此格式）
+- "Jan 15, 2026" 转为 "2026.01.15"
+- 如不确定格式，在 confidence_notes 中注明
+
+价格提取（重要！）：
+- unit_price: 单价（数字），必须提取
+- currency: 货币（USD/EUR/GBP/RMB等）
+- total_amount: 总金额（如有）
+- incoterm: 贸易条款（FOB/DDP/CIF等，如PO中注明）
+- payment_terms: 付款条款（如T/T 30% deposit, 70% before shipment）
+
 返回严格的JSON格式（不要markdown代码块包裹）：
 {
   "order_no": "客户PO号",
@@ -88,6 +102,11 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
     { "name": "辅料名", "position": "位置说明", "notes": "备注" }
   ],
   "size_labels": ["S", "M", "L"],
+  "unit_price": 5.80,
+  "currency": "USD",
+  "total_amount": 29754.00,
+  "incoterm": "FOB",
+  "payment_terms": "T/T 30% deposit, 70% before shipment",
   "confidence_notes": ["PO中未找到面料克重信息", "交期日期可能需要确认"]
 }`;
 

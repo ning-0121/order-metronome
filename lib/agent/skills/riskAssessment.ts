@@ -487,6 +487,65 @@ const DIMENSIONS: RiskDimension[] = [
       return { score: 0 };
     },
   },
+
+  // 13. 季节性风险（旺季产能紧张）
+  {
+    id: 'seasonal_risk',
+    category: '季节',
+    label: '旺季产能风险',
+    maxScore: 10,
+    evaluate: ctx => {
+      // 服装行业旺季：8-10月（秋冬备货）、2-3月（春夏备货+年后复工）
+      const etd = ctx.order.etd || ctx.order.factory_date;
+      if (!etd) return { score: 0 };
+      const month = new Date(etd).getMonth() + 1; // 1-12
+      const peakMonths = [8, 9, 10]; // 出厂高峰
+      const prepMonths = [2, 3]; // 年后复工+春夏备货
+      if (peakMonths.includes(month)) {
+        return {
+          score: 10,
+          reason: `${month}月是出货旺季，工厂产能紧张，交期延误概率增加 30%`,
+          evidence: `订单出厂月份=${month}（行业旺季 8-10 月）`,
+        };
+      }
+      if (prepMonths.includes(month)) {
+        return {
+          score: 6,
+          reason: `${month}月年后复工期，工厂招工不稳定，产能恢复慢`,
+          evidence: `订单出厂月份=${month}（年后复工 2-3 月）`,
+        };
+      }
+      return { score: 0 };
+    },
+  },
+
+  // 14. 工厂并行订单负载
+  {
+    id: 'factory_load',
+    category: '工厂',
+    label: '工厂并行订单',
+    maxScore: 8,
+    evaluate: ctx => {
+      if (!ctx.factory.totalOrders) return { score: 0 };
+      // 同时进行中的订单数（不含已完成的）
+      const activeOrders = ctx.factory.totalOrders; // 已经是活跃订单数
+      if (activeOrders >= 8) {
+        return {
+          score: 8,
+          reason: `工厂同时有 ${activeOrders} 个活跃订单，产能分配风险高`,
+          evidence: `查询该工厂活跃订单数 = ${activeOrders}`,
+        };
+      }
+      if (activeOrders >= 5) {
+        return {
+          score: 4,
+          reason: `工厂同时有 ${activeOrders} 个活跃订单`,
+          evidence: `查询该工厂活跃订单数 = ${activeOrders}`,
+        };
+      }
+      return { score: 0 };
+    },
+  },
 ];
 
 // ════════════════════════════════════════════════
