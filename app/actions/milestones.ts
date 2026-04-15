@@ -191,13 +191,12 @@ export async function markMilestoneDone(
     return { error: '无权操作：只有对应角色的负责人或管理员可以标记完成' };
   }
 
-  // 顺序约束：某些节点必须等前置节点完成（管理员可绕过）
-  // 修复 2026-04-08：之前业务员可以"先寄出后准备"，逻辑荒谬
+  // 顺序约束：取消硬阻塞，所有节点可并行处理
+  // 2026-04-14：CEO要求各角色各自处理各自的节点，不互相卡
+  // 保留业务尾查依赖跟单尾查（同类双签逻辑），其余全部放开
   const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = {
-    pre_production_sample_sent: ['pre_production_sample_ready'],
-    pre_production_sample_approved: ['pre_production_sample_ready', 'pre_production_sample_sent'],
-    mid_qc_sales_check: ['mid_qc_check'],
-    final_qc_sales_check: ['final_qc_check'],
+    mid_qc_sales_check: ['mid_qc_check'],       // 业务中查必须在跟单中查之后
+    final_qc_sales_check: ['final_qc_check'],   // 业务尾查必须在跟单尾查之后
   };
   const prerequisites = SEQUENTIAL_REQUIREMENTS[milestone.step_key];
   if (prerequisites && !isAdmin) {
