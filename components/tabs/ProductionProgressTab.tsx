@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import {
   getProductionReports,
   addProductionReport,
@@ -346,15 +347,16 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
                           <span className="text-xs text-indigo-500">📎</span>
                           <span className="text-xs text-indigo-600">{item.deliverable}</span>
                         </div>
-                        <div className="flex items-center justify-between mt-1">
+                        <div className="flex items-center justify-between mt-1.5 gap-2">
                           <p className="text-xs text-amber-600">⏰ {item.timing}</p>
                           {!item.isDone && item.ms && (
-                            <a
-                              href={`/orders/${orderId}?tab=progress#milestone-${item.ms.step_key}`}
-                              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                            >
-                              去执行 →
-                            </a>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <TimelineUploadBtn orderId={orderId} milestoneId={item.ms?.step_key || ''} stepKey={item.step_key} onUploaded={() => loadData()} />
+                              <a href={`/orders/${orderId}?tab=progress#milestone-${item.ms.step_key}`}
+                                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                                去执行 →
+                              </a>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -710,5 +712,74 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── 跟单流程单内嵌上传按钮 ──
+function TimelineUploadBtn({ orderId, milestoneId, stepKey, onUploaded }: {
+  orderId: string; milestoneId: string; stepKey: string; onUploaded: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const ext = file.name.split('.').pop() || 'bin';
+      const path = `${orderId}/timeline/${stepKey}_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('order-docs')
+        .upload(path, file, { contentType: file.type, upsert: true });
+      if (upErr) {
+        alert('上传失败: ' + upErr.message);
+        setUploading(false);
+        return;
+      }
+      const { data: { publicUrl } } = supabase.storage.from('order-docs').getPublicUrl(path);
+
+      // 找到对应的 milestone id
+      const { data: ms } = await (supabase.from('milestones') as any)
+        .select('id')
+        .eq('order_id', orderId)
+        .eq('step_key', stepKey)
+        .limit(1);
+      const msId = ms?.[0]?.id || null;
+
+      await (supabase.from('order_attachments') as any).insert({
+        order_id: orderId,
+        milestone_id: msId,
+        uploaded_by: user?.id || null,
+        file_name: file.name,
+        file_url: publicUrl,
+        file_type: 'qc_report',
+        mime_type: file.type || null,
+        storage_path: path,
+      });
+      alert('✅ 上传成功: ' + file.name);
+      onUploaded();
+    } catch (err: any) {
+      alert('上传异常: ' + (err?.message || ''));
+    }
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  return (
+    <>
+      <input ref={fileRef} type="file" className="hidden"
+        accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
+        onChange={handleUpload} />
+      <button
+        onClick={() => fileRef.current?.click()}
+        disabled={uploading}
+        className="text-xs px-2 py-1 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 font-medium disabled:opacity-50"
+      >
+        {uploading ? '上传中...' : '📤 上传报告'}
+      </button>
+    </>
   );
 }
