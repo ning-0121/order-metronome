@@ -59,20 +59,25 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
     setLoading(true);
     const res = await getProcurementItems(orderId);
     if (res.data) setItems(res.data);
-    // 查找原始采购单文件
+    // 查找原始采购单文件 — 必须是 procurement_order_placed 节点下的附件
     try {
       const supabase = createClient();
-      const { data: files } = await (supabase.from('order_attachments') as any)
-        .select('file_name, file_url')
+      // 1. 先找到 procurement_order_placed 节点
+      const { data: ms } = await (supabase.from('milestones') as any)
+        .select('id')
         .eq('order_id', orderId)
-        .or('file_type.eq.procurement_order,file_type.eq.evidence')
-        .order('created_at', { ascending: false })
-        .limit(5);
-      // 模糊匹配采购单文件名
-      const match = (files || []).find((f: any) =>
-        /采购|procurement|purchase|下单/i.test(f.file_name || '')
-      ) || (files || [])[0];
-      if (match) setSourceFile({ name: match.file_name, url: match.file_url });
+        .eq('step_key', 'procurement_order_placed')
+        .maybeSingle();
+      if (ms?.id) {
+        // 2. 按 milestone_id 取该节点下最新附件
+        const { data: files } = await (supabase.from('order_attachments') as any)
+          .select('file_name, file_url, storage_path')
+          .eq('milestone_id', ms.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const match = (files || [])[0];
+        if (match) setSourceFile({ name: match.file_name, url: match.file_url });
+      }
     } catch {}
     setLoading(false);
   }
