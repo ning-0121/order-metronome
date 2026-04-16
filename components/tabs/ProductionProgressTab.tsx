@@ -57,7 +57,7 @@ const MERCH_TIMELINE_STEPS: Array<{
   {
     step_key: 'mid_qc_check',
     label: '④ 中期验货（中查）',
-    action: '生产完成 30-50% 时去工厂：抽检 3-5 件量尺寸，检查色差/做工/功能，记录问题要求整改',
+    action: '生产完成 30-50% 时去工厂：量尺寸，检查色差/做工/功能，记录问题要求整改',
     deliverable: '中查报告（含尺寸数据+外观照片+问题清单）',
     timing: '生产进度达 30-50%',
     icon: '🔍',
