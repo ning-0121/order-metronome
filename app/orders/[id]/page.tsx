@@ -22,6 +22,7 @@ import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
+import { ProcurementTrackingTab } from '@/components/tabs/ProcurementTrackingTab';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { InlineEditField } from '@/components/InlineEditField';
@@ -270,7 +271,7 @@ export default async function OrderDetailPage({
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料和包装' },
-          { key: 'procurement', label: '采购对账' },
+          { key: 'procurement', label: '📦 采购进度' },
           { key: 'cost_control', label: '💰 成本控制' },
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
@@ -684,9 +685,18 @@ export default async function OrderDetailPage({
           </div>
         )}
 
-        {/* Tab: 采购对账 */}
+        {/* Tab: 采购进度（共享表 + 对账） */}
         {activeTab === 'procurement' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="space-y-4">
+            {/* 采购进度共享表 */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <ProcurementTrackingTab
+                orderId={id}
+                canEdit={currentRoles.some(r => ['sales', 'merchandiser', 'procurement', 'admin', 'production_manager'].includes(r))}
+              />
+            </div>
+            {/* 采购对账 */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">采购对账</h2>
             <p className="text-xs text-gray-500 mb-5">
               采购下单时录入订购数据，原辅料到货时录入实收数量。系统自动计算差异，差异 &gt; 3% 标红。导出 Excel 给财务发给供应商对账。
@@ -696,6 +706,7 @@ export default async function OrderDetailPage({
               isAdmin={isAdmin}
               canEdit={isAdmin || currentRoles.some(r => ['sales', 'merchandiser', 'procurement', 'production_manager'].includes(r))}
             />
+          </div>
           </div>
         )}
 
