@@ -83,7 +83,39 @@ export async function GET() {
       activatedDrafts = ids.length;
     }
 
-    return NextResponse.json({ success: true, fixed_roles: totalFixed, assigned_owners: assignedCount, activated_drafts: activatedDrafts });
+    // ── 补建采购进度共享表（已有采购单下达节点完成的订单） ──
+    let procurementInited = 0;
+    try {
+      // 找到采购单下达已完成的订单
+      const { data: doneProc } = await (supabase.from('milestones') as any)
+        .select('order_id')
+        .eq('step_key', 'procurement_order_placed')
+        .in('status', ['done', '已完成']);
+      for (const m of (doneProc || [])) {
+        // 检查是否已有采购跟踪数据
+        const { data: existing } = await (supabase.from('procurement_tracking') as any)
+          .select('id').eq('order_id', m.order_id).limit(1);
+        if (existing && existing.length > 0) continue; // 已有
+
+        // 创建默认项
+        const defaults = [
+          { category: 'fabric', item_name: '大货面料', status: 'pending' },
+          { category: 'trims', item_name: '拉链/纽扣', status: 'pending' },
+          { category: 'trims', item_name: '吊牌/洗标', status: 'pending' },
+          { category: 'packaging', item_name: '包装袋/纸箱', status: 'pending' },
+        ];
+        for (const d of defaults) {
+          await (supabase.from('procurement_tracking') as any).insert({
+            order_id: m.order_id, ...d,
+            updated_by: user.id,
+            updated_by_name: '系统自动创建',
+          });
+        }
+        procurementInited++;
+      }
+    } catch {}
+
+    return NextResponse.json({ success: true, fixed_roles: totalFixed, assigned_owners: assignedCount, activated_drafts: activatedDrafts, procurement_inited: procurementInited });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message }, { status: 500 });
   }
