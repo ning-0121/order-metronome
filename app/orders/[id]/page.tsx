@@ -248,7 +248,7 @@ export default async function OrderDetailPage({
             const daysOver = Math.ceil((Date.now() - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
             if (daysOver <= 0) return null;
             // 只显示给：订单创建者（业务）或管理员
-            const isOrderOwner = orderData.created_by === userId || orderData.owner_user_id === userId;
+            const isOrderOwner = user && (orderData.created_by === user.id || orderData.owner_user_id === user.id);
             if (!isOrderOwner && !isAdmin) return null;
             return (
               <OverdueOrderGate
