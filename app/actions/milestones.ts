@@ -687,6 +687,14 @@ export async function markMilestoneDone(
     }
   }
 
+  // 评审会完成 → 自动初始化采购进度共享表
+  if (milestoneData.step_key === 'order_kickoff_meeting') {
+    try {
+      const { initDefaultProcurementItems } = await import('@/app/actions/procurement-tracking');
+      await initDefaultProcurementItems(milestoneData.order_id);
+    } catch {} // 初始化失败不阻断
+  }
+
   // Auto-advance to next milestone
   await autoAdvanceNextMilestone(supabase, milestoneData.order_id);
 

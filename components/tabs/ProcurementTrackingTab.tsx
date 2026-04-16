@@ -56,7 +56,16 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
   async function loadData() {
     setLoading(true);
     const res = await getProcurementItems(orderId);
-    if (res.data) setItems(res.data);
+    if (res.data) {
+      // 首次打开且无数据 → 自动初始化默认采购项
+      if (res.data.length === 0 && canEdit) {
+        await initDefaultProcurementItems(orderId);
+        const res2 = await getProcurementItems(orderId);
+        if (res2.data) setItems(res2.data);
+      } else {
+        setItems(res.data);
+      }
+    }
     setLoading(false);
   }
 
