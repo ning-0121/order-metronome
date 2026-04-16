@@ -80,6 +80,14 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
   // 上传文件
   const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
   const ALLOWED_EXTENSIONS = ['pdf', 'xlsx', 'xls', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'csv'];
+  // 部分正式单据拒收图片 — 必须是 Excel/PDF
+  const STRICT_DOC_TYPES: Record<string, string[]> = {
+    purchase_order: ['xlsx', 'xls', 'pdf'],       // 采购单
+    pi: ['pdf', 'xlsx', 'xls'],                   // PI
+    ci: ['pdf', 'xlsx', 'xls'],                   // CI
+    material_sheet: ['xlsx', 'xls', 'pdf'],       // 原辅料单
+    packing_list: ['xlsx', 'xls', 'pdf'],         // 装箱单
+  };
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -96,6 +104,18 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
       alert(`不支持的文件类型 .${ext}，仅支持: ${ALLOWED_EXTENSIONS.join(', ')}`);
+      e.target.value = '';
+      return;
+    }
+
+    // 严格文件类型白名单（正式单据拒收图片/截图）
+    const strictAllowed = STRICT_DOC_TYPES[activeDocType];
+    if (strictAllowed && !strictAllowed.includes(ext)) {
+      alert(
+        `⛔ ${DOCUMENT_TYPES[activeDocType].label}只接受 ${strictAllowed.map(e => '.' + e).join(' / ')} 文件，\n` +
+        `"${file.name}"（.${ext}）被拒绝。\n\n` +
+        `如有图片形式的单据，请先转成 PDF 或 Excel 后再上传。`
+      );
       e.target.value = '';
       return;
     }
@@ -314,9 +334,15 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
             <label className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 cursor-pointer">
               {uploading ? '📤 上传中...' : `📤 上传${DOCUMENT_TYPES[activeDocType].label}`}
               <input type="file" className="hidden" onChange={handleUpload} disabled={uploading}
-                accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" />
+                accept={(STRICT_DOC_TYPES[activeDocType] || ALLOWED_EXTENSIONS).map(e => '.' + e).join(',')} />
             </label>
           </div>
+          {/* 类型限制提示 */}
+          {STRICT_DOC_TYPES[activeDocType] && (
+            <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 inline-block">
+              ⚠️ {DOCUMENT_TYPES[activeDocType].label}只接受 {STRICT_DOC_TYPES[activeDocType].map(e => '.' + e).join(' / ')} 文件（图片/截图会被拒绝）
+            </div>
+          )}
           {/* 命名建议 */}
           {FILE_NAMING_BY_DOC_TYPE[activeDocType] && (
             <div className="text-[11px] text-gray-500 bg-gray-50 rounded px-2 py-1.5 border border-gray-200 inline-flex flex-wrap items-center gap-x-1.5">

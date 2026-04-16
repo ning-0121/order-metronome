@@ -8,7 +8,7 @@ import { AIAdviceBox } from '@/components/AIAdviceBox';
 import { getChecklistForStep, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
-import { getNamingHint } from '@/lib/domain/fileNaming';
+import { getNamingHint, getAcceptString, validateFileExt } from '@/lib/domain/fileNaming';
 import { FileNameCheck } from '@/components/FileNameCheck';
 
 const QC_STEPS = new Set([
@@ -571,26 +571,48 @@ export function MilestoneActions({
             {/* 命名建议 — 让业务/采购/跟单按规范命名 */}
             {(() => {
               const hint = getNamingHint(milestone.step_key, orderNo);
+              const { restricted } = validateFileExt('dummy.xxx', milestone.step_key);
               return (
-                <div className="mb-2 text-[11px] text-gray-500 flex flex-wrap items-center gap-x-1.5">
-                  <span className="text-gray-400">📝 建议命名：</span>
-                  <code className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-mono">{hint.example}</code>
-                  {hint.suffixHint && <span className="text-gray-400">（{hint.suffixHint}）</span>}
-                  <a href="/guide#naming" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">命名规范 ↗</a>
+                <div className="space-y-1 mb-2">
+                  <div className="text-[11px] text-gray-500 flex flex-wrap items-center gap-x-1.5">
+                    <span className="text-gray-400">📝 建议命名：</span>
+                    <code className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-mono">{hint.example}</code>
+                    {hint.suffixHint && <span className="text-gray-400">（{hint.suffixHint}）</span>}
+                    <a href="/guide#naming" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">命名规范 ↗</a>
+                  </div>
+                  {restricted && (
+                    <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      ⚠️ 此节点只接受 {restricted.map(e => '.' + e).join(' / ')} 文件（图片/截图会被拒绝，请上传正式文档）
+                    </div>
+                  )}
                 </div>
               );
             })()}
             <input
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
+              accept={getAcceptString(milestone.step_key)}
               multiple
               onChange={e => {
                 const files = e.target.files;
                 if (!files || files.length === 0) return;
+                // 文件类型白名单校验（节点级，如采购单拒收图片）
+                const picked = Array.from(files);
+                const typeViolations = picked
+                  .map(f => ({ file: f, check: validateFileExt(f.name, milestone.step_key) }))
+                  .filter(x => !x.check.ok);
+                if (typeViolations.length > 0) {
+                  const allowed = typeViolations[0].check.restricted!.map(e => '.' + e).join(' / ');
+                  setSubmitError(
+                    `⛔ 此节点只接受 ${allowed} 文件，以下文件被拒绝：\n` +
+                      typeViolations.map(v => `· ${v.file.name}（.${v.check.actualExt}）`).join('\n') +
+                      `\n\n如有图片形式的单据，请先转成 PDF 或 Excel 后再上传。`
+                  );
+                  e.target.value = '';
+                  return;
+                }
                 // 前端体积限制：单文件 20MB，总计 50MB — 避免 Supabase Storage 5xx
                 const MAX_SINGLE_MB = 20;
                 const MAX_TOTAL_MB = 50;
-                const picked = Array.from(files);
                 const oversized = picked.filter(f => f.size > MAX_SINGLE_MB * 1024 * 1024);
                 if (oversized.length > 0) {
                   setSubmitError(
@@ -1114,13 +1136,23 @@ function CompletedFileUpload({ milestoneId, orderId, orderNo, stepKey, isProduct
   /** 上传前做命名检查，不符合规范时让用户选择是否改名 */
   async function handleUpload(file: File, fileType: string) {
     // 动态 import 避免模块初始化问题
-    const { validateFileName, renameFile } = await import('@/lib/domain/fileNaming');
+    const { validateFileName, renameFile, validateFileExt } = await import('@/lib/domain/fileNaming');
     // 把 fileType 映射到对应节点的 stepKey（用于查命名标准）
     const stepKeyForCheck =
       fileType === 'production_order' ? 'production_order_upload' :
       fileType === 'trims_sheet' ? 'bulk_materials_confirmed' :
       fileType === 'packing_requirement' ? 'packing_method_confirmed' :
       stepKey;
+    // 文件类型白名单校验（节点级）
+    const extCheck = validateFileExt(file.name, stepKeyForCheck);
+    if (!extCheck.ok) {
+      alert(
+        `⛔ 此节点只接受 ${extCheck.restricted!.map(e => '.' + e).join(' / ')} 文件，\n` +
+        `"${file.name}"（.${extCheck.actualExt}）被拒绝。\n\n` +
+        `如有图片形式的单据，请先转成 PDF 或 Excel 后再上传。`
+      );
+      return;
+    }
     const check = validateFileName(file.name, stepKeyForCheck, orderNo);
     let finalFile = file;
     if (!check.ok) {
@@ -1258,8 +1290,18 @@ function SupplementaryUpload({ milestoneId, orderId, orderNo, stepKey }: { miles
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    // 命名检查 + 按节点决定 file_type
-    const { validateFileName, renameFile, getFileTypeForStep } = await import('@/lib/domain/fileNaming');
+    // 文件类型 + 命名检查 + 按节点决定 file_type
+    const { validateFileName, renameFile, getFileTypeForStep, validateFileExt } = await import('@/lib/domain/fileNaming');
+    const extCheck = validateFileExt(file.name, stepKey);
+    if (!extCheck.ok) {
+      alert(
+        `⛔ 此节点只接受 ${extCheck.restricted!.map(ex => '.' + ex).join(' / ')} 文件，\n` +
+        `"${file.name}"（.${extCheck.actualExt}）被拒绝。\n\n` +
+        `如有图片形式的单据，请先转成 PDF 或 Excel 后再上传。`
+      );
+      e.target.value = '';
+      return;
+    }
     const check = validateFileName(file.name, stepKey, orderNo);
     let finalFile = file;
     if (!check.ok) {

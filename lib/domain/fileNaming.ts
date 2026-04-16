@@ -126,6 +126,49 @@ export function getFileTypeForStep(stepKey: string | null | undefined): string {
   return FILE_TYPE_BY_STEP[stepKey] || 'evidence';
 }
 
+// ─────────────────────────────────────────────
+// 节点级文件类型白名单 — 拒收错类型文件
+// ─────────────────────────────────────────────
+
+/**
+ * 某些节点需要强制文件类型，避免用户错上传
+ *
+ * 例：采购单节点不允许传图片（微信截图等）— 2026-04-15 加
+ *
+ * 未列出的节点不限制，走默认允许集。
+ */
+export const FILE_EXT_RESTRICTIONS: Record<string, string[]> = {
+  // 采购单必须是正式文档（Excel/PDF），拒收图片
+  procurement_order_placed: ['xlsx', 'xls', 'pdf'],
+};
+
+/** 默认允许的扩展名 */
+const DEFAULT_ALLOWED_EXTS = ['pdf', 'jpg', 'jpeg', 'png', 'xlsx', 'xls', 'doc', 'docx'];
+
+/** 取节点允许的扩展名列表（未限制则返回 null，表示走默认） */
+export function getRestrictedExts(stepKey: string | null | undefined): string[] | null {
+  if (!stepKey) return null;
+  return FILE_EXT_RESTRICTIONS[stepKey] || null;
+}
+
+/** 生成 <input accept="..."> 字符串 */
+export function getAcceptString(stepKey: string | null | undefined): string {
+  const restricted = getRestrictedExts(stepKey);
+  const exts = restricted || DEFAULT_ALLOWED_EXTS;
+  return exts.map(e => '.' + e).join(',');
+}
+
+/** 校验文件扩展名是否被该节点允许 */
+export function validateFileExt(
+  fileName: string,
+  stepKey: string | null | undefined,
+): { ok: boolean; restricted: string[] | null; actualExt: string } {
+  const restricted = getRestrictedExts(stepKey);
+  const actualExt = (fileName.split('.').pop() || '').toLowerCase();
+  if (!restricted) return { ok: true, restricted: null, actualExt };
+  return { ok: restricted.includes(actualExt), restricted, actualExt };
+}
+
 /**
  * 单据中心的文档类型对应的命名关键词
  * DocumentCenterTab 使用，与 FILE_NAMING_BY_STEP 并列
