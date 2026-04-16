@@ -271,9 +271,9 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'qc_progress_pct', label: '完成进度（%）', type: 'number', required: true, role: 'merchandiser', group: '基本信息',
         helpText: '如：30、50、70' },
       // 尺寸检验
-      { key: 'size_pass_rate', label: '尺寸符合率', type: 'select', required: true, role: 'merchandiser', group: '尺寸检验（抽检5件）',
+      { key: 'size_pass_rate', label: '尺寸符合率', type: 'select', required: true, role: 'merchandiser', group: '尺寸检验（抽检3-5件）',
         options: ['100%合格', '90%以上', '80%以上', '低于80%'] },
-      { key: 'size_deviation', label: '超差部位', type: 'text', required: false, role: 'merchandiser', group: '尺寸检验（抽检5件）',
+      { key: 'size_deviation', label: '超差部位', type: 'text', required: false, role: 'merchandiser', group: '尺寸检验（抽检3-5件）',
         helpText: '如：胸围偏大1.5cm、袖长偏短' },
       // 外观检验
       { key: 'color_diff', label: '色差', type: 'select', required: true, role: 'merchandiser', group: '外观检验',
