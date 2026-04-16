@@ -2,12 +2,13 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
-import { calcDueDates, recalcRemainingDueDates } from '@/lib/schedule';
-import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
-import { 
-  createOrder as createOrderRepo, 
-  deleteOrder, 
+// 动态导入：避免模块初始化顺序问题（修复 Cannot access '_' before initialization）
+// import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
+// import { calcDueDates, recalcRemainingDueDates } from '@/lib/schedule';
+// import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
+import {
+  createOrder as createOrderRepo,
+  deleteOrder,
   generateOrderNo,
   activateOrder,
   startExecution,
@@ -60,7 +61,11 @@ export async function createOrder(
   preGeneratedOrderNo?: string
 ): Promise<{ ok: boolean; orderId?: string; error?: string; warning?: string }> {
   try { // 全局 try-catch：防止未处理异常导致"Server Components render"
-  console.log('[createOrder] START — preGeneratedOrderNo:', preGeneratedOrderNo);
+  // 动态导入（避免模块初始化顺序问题）
+  const { MILESTONE_TEMPLATE_V1, getApplicableMilestones } = await import('@/lib/milestoneTemplate');
+  const { calcDueDates, recalcRemainingDueDates } = await import('@/lib/schedule');
+  const { subtractWorkingDays, ensureBusinessDay } = await import('@/lib/utils/date');
+  console.log('[createOrder] START — imports OK, preGeneratedOrderNo:', preGeneratedOrderNo);
   // ── STEP 1: validate — 验证用户身份 ──
   let supabase;
   try {
@@ -350,7 +355,7 @@ export async function createOrder(
 
   // ── STEP 4: create milestones — 计算排期 ──
   // ── STEP 4: create milestones — 计算排期 ──
-  let dueDates: ReturnType<typeof calcDueDates>;
+  let dueDates: Record<string, Date>;
   try {
     // RMB不含税/RMB含税/FOB: 锚点=出厂日期（etd fallback factory_date）
     // DDP: 锚点=ETA-25天海运
