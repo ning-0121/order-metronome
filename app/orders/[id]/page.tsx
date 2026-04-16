@@ -239,7 +239,7 @@ export default async function OrderDetailPage({
             </div>
           </div>
 
-          {/* 超期订单强制确认 */}
+          {/* 超期订单强制确认 — 只显示给负责业务或管理员 */}
           {(() => {
             const keyDate = orderData.incoterm === 'DDP'
               ? orderData.etd
@@ -247,6 +247,9 @@ export default async function OrderDetailPage({
             if (!keyDate || allMilestonesCompleted) return null;
             const daysOver = Math.ceil((Date.now() - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
             if (daysOver <= 0) return null;
+            // 只显示给：订单创建者（业务）或管理员
+            const isOrderOwner = orderData.created_by === userId || orderData.owner_user_id === userId;
+            if (!isOrderOwner && !isAdmin) return null;
             return (
               <OverdueOrderGate
                 orderId={id}

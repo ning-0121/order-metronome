@@ -33,12 +33,12 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
 
   async function handleConfirm() {
     if (!choice) return;
-    if (choice === 'pending' && !newDate) {
-      alert('请填写预计发货日期');
+    if ((choice === 'pending' || choice === 'problem') && !reason.trim()) {
+      alert('请填写未发货原因');
       return;
     }
-    if (choice === 'problem' && !reason.trim()) {
-      alert('请填写未发货原因');
+    if ((choice === 'pending' || choice === 'problem') && !newDate) {
+      alert('请填写新预计发货日期');
       return;
     }
 
@@ -63,21 +63,22 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
         router.refresh();
         setDismissed(true);
       } else if (choice === 'pending') {
-        // 等待发货 → 更新出厂日期 + 重算排期
+        // 等待发货 → 更新出厂日期 + 记录原因
         await (supabase.from('orders') as any)
           .update({
             factory_date: newDate,
-            notes: `【超期确认】待发货，新预计发货日 ${newDate}`,
+            notes: `【超期确认】待发货\n原因：${reason}\n新预计发货日：${newDate}`,
           })
           .eq('id', orderId);
         router.refresh();
         setDismissed(true);
       } else if (choice === 'problem') {
-        // 有问题 → 记录原因
+        // 有问题 → 记录原因 + 更新日期
         await (supabase.from('orders') as any)
           .update({
+            factory_date: newDate,
             special_tags: ['交期逾期'],
-            notes: `【超期确认】未发货原因：${reason}${newDate ? `，新预计日期：${newDate}` : ''}`,
+            notes: `【超期确认】有问题无法发货\n原因：${reason}\n新预计发货日：${newDate}`,
           })
           .eq('id', orderId);
         router.refresh();
@@ -127,40 +128,34 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
             </label>
           </div>
 
-          {/* 动态表单 */}
+          {/* 动态表单 — pending 和 problem 都要填原因+日期 */}
           {(choice === 'pending' || choice === 'problem') && (
             <div className="mt-3 space-y-2 pl-6">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
-                  新预计发货日 {choice === 'pending' && <span className="text-red-500">*</span>}
+                  未发货原因 <span className="text-red-500">*</span>
+                </label>
+                <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+                  placeholder={choice === 'pending'
+                    ? '如：面料还在途中/等客户确认色号/工厂排期延后...'
+                    : '如：面料品质不合格需退换/客户暂停订单/品质返工...'}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  新预计发货日 <span className="text-red-500">*</span>
                 </label>
                 <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
               </div>
-              {choice === 'problem' && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    未发货原因 <span className="text-red-500">*</span>
-                  </label>
-                  <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
-                    placeholder="如：面料延迟/品质返工/客户暂停/等客户确认..."
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                </div>
-              )}
             </div>
           )}
 
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4">
             <button onClick={handleConfirm} disabled={!choice || submitting}
               className="px-5 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
               {submitting ? '处理中...' : '确认状态'}
             </button>
-            {isAdmin && (
-              <button onClick={() => setDismissed(true)}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">
-                暂时跳过
-              </button>
-            )}
           </div>
         </div>
       </div>
