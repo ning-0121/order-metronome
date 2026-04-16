@@ -6,9 +6,9 @@ import { revalidatePath } from 'next/cache';
 // import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
 // import { calcDueDates, recalcRemainingDueDates } from '@/lib/schedule';
 // import { subtractWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
+// 2026-04-15：把 ordersRepo 也纳入动态导入 — 修复进行中订单 Cannot access 'ac' before initialization
+// 其它外部入口（preGenerateOrderNo / activateOrderAction 等）继续静态导入，只在 createOrder 函数内部用动态
 import {
-  createOrder as createOrderRepo,
-  deleteOrder,
   generateOrderNo,
   activateOrder,
   startExecution,
@@ -61,10 +61,11 @@ export async function createOrder(
   preGeneratedOrderNo?: string
 ): Promise<{ ok: boolean; orderId?: string; error?: string; warning?: string }> {
   try { // 全局 try-catch：防止未处理异常导致"Server Components render"
-  // 动态导入（避免模块初始化顺序问题）
+  // 动态导入（避免模块初始化顺序问题 — 历次遇到 Cannot access 'X' before initialization 都是静态导入链路里出问题）
   const { MILESTONE_TEMPLATE_V1, getApplicableMilestones } = await import('@/lib/milestoneTemplate');
   const { calcDueDates, recalcRemainingDueDates } = await import('@/lib/schedule');
   const { subtractWorkingDays, ensureBusinessDay } = await import('@/lib/utils/date');
+  const { createOrder: createOrderRepo, deleteOrder } = await import('@/lib/repositories/ordersRepo');
   console.log('[createOrder] START — imports OK, preGeneratedOrderNo:', preGeneratedOrderNo);
   // ── STEP 1: validate — 验证用户身份 ──
   let supabase;
@@ -340,6 +341,7 @@ export async function createOrder(
     ].filter(Boolean),
   };
 
+  console.log('[createOrder] STAGE: before STEP 3 createOrderRepo');
   let orderData: any;
   try {
     const { data: order, error: orderError } = await createOrderRepo(insertPayload, preGeneratedOrderNo);
@@ -353,7 +355,7 @@ export async function createOrder(
     return { ok: false, error: `订单写入异常：${e.message}` };
   }
 
-  // ── STEP 4: create milestones — 计算排期 ──
+  console.log('[createOrder] STAGE: before STEP 4 calcDueDates');
   // ── STEP 4: create milestones — 计算排期 ──
   let dueDates: Record<string, Date>;
   try {
@@ -436,6 +438,7 @@ export async function createOrder(
     console.error('[createOrder] auto-assign error:', assignErr?.message);
   } // 查询失败不影响订单创建
 
+  console.log('[createOrder] STAGE: before getApplicableMilestones');
   const templates = getApplicableMilestones(
     order_type,
     shipping_sample_required,
@@ -485,6 +488,7 @@ export async function createOrder(
       sequence_number: index + 1,
     });
   }
+  console.log('[createOrder] STAGE: before STEP 5 init_order_milestones RPC');
   // ── STEP 5: create milestones — RPC 写入里程碑 ──
   try {
     const { error: rpcError } = await (supabase.rpc as any)('init_order_milestones', {
@@ -541,6 +545,7 @@ export async function createOrder(
   const importReason = formData.get('import_reason') as string | null;
 
   if (isImport && importCurrentStep) {
+    console.log('[createOrder] STAGE: STEP 6 isImport branch, step=', importCurrentStep);
     try {
       // 6a. 标记为待审批（不直接激活）
       await (supabase.from('orders') as any)
@@ -597,79 +602,9 @@ export async function createOrder(
     }
   }
 
-  // 以下是原始 STEP 6 的后半段（仅非 import 路径才走到这里）
-  if (false) { // 旧的 import 激活逻辑已移到 approveImportOrder
-    try {
-      await (supabase.from('orders') as any)
-        .update({ imported_at: new Date().toISOString(), import_current_step: importCurrentStep, lifecycle_status: 'active' })
-        .eq('id', orderData.id);
-
-      // 6b. 找到当前阶段在模板中的 index（校验 step_key 合法性）
-      const currentIndex = templates.findIndex(t => t.step_key === importCurrentStep);
-      if (currentIndex < 0) {
-        console.warn(`[createOrder] 导入模式：无效的 step_key "${importCurrentStep}"，跳过导入处理`);
-      }
-      if (currentIndex >= 0) {
-        // 获取刚创建的所有里程碑
-        const { data: createdMilestones } = await (supabase.from('milestones') as any)
-          .select('id, step_key, due_at, sequence_number')
-          .eq('order_id', orderData.id)
-          .order('sequence_number', { ascending: true });
-
-        if (createdMilestones && createdMilestones.length > 0) {
-          const currentSeq = currentIndex + 1; // sequence_number 从 1 开始
-
-          // 6c-6e: 用 RPC 绕过 RLS 批量更新（业务用户无法更新非自己角色的节点）
-          let anchorStr = incoterm === 'FOB' ? etd : (eta || warehouse_due_date);
-          const rawAnchor = anchorStr ? new Date(anchorStr + 'T00:00:00+08:00') : null;
-          const anchor = rawAnchor && incoterm === 'DDP' ? new Date(rawAnchor.getTime() - 25 * 86400000) : rawAnchor;
-          const today = new Date();
-          const newDates = anchor ? recalcRemainingDueDates(importCurrentStep, anchor, today) : null;
-
-          // 构建批量更新数据
-          for (const ms of createdMilestones) {
-            const updates: Record<string, any> = {};
-
-            if (ms.sequence_number < currentSeq) {
-              // 已完成节点
-              updates.status = 'done';
-              updates.actual_at = ms.due_at;
-            } else if (ms.sequence_number === currentSeq) {
-              // 当前节点
-              updates.status = 'in_progress';
-            }
-
-            // 重算当前及之后节点的排期
-            if (ms.sequence_number >= currentSeq && newDates) {
-              const newDate = newDates[ms.step_key];
-              if (newDate) {
-                const dateStr = ensureBusinessDay(newDate).toISOString();
-                updates.due_at = dateStr;
-                updates.planned_at = dateStr;
-              }
-            }
-
-            if (Object.keys(updates).length > 0) {
-              // 用 RPC 更新（SECURITY DEFINER 绕过 RLS），失败则直接更新
-              try {
-                await (supabase.rpc as any)('admin_update_milestone', {
-                  _milestone_id: ms.id,
-                  _updates: updates,
-                });
-              } catch {
-                // RPC 失败时直接更新（可能是枚举类型问题）
-                await (supabase.from('milestones') as any)
-                  .update(updates)
-                  .eq('id', ms.id);
-              }
-            }
-          }
-        }
-      }
-    } catch (importErr: any) {
-      console.warn('[createOrder] 导入模式处理失败（不影响订单创建）:', importErr.message);
-    }
-  }
+  // 旧的 import 激活逻辑已移到 approveImportOrder（ceo 审批通过后激活），
+  // 此处原来的 if(false) 死代码块已清理（含 templates / recalcRemainingDueDates 引用，
+  // 可能被打包器静态分析误处理，疑似 TDZ 原因）
 
   // ── 通知管理员：新订单已创建 ──
   try {
