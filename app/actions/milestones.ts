@@ -687,8 +687,8 @@ export async function markMilestoneDone(
     }
   }
 
-  // 评审会完成 → 自动初始化采购进度共享表
-  if (milestoneData.step_key === 'order_kickoff_meeting') {
+  // 采购单下达完成 → 自动初始化采购进度共享表
+  if (milestoneData.step_key === 'procurement_order_placed') {
     try {
       const { initDefaultProcurementItems } = await import('@/app/actions/procurement-tracking');
       await initDefaultProcurementItems(milestoneData.order_id);

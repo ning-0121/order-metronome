@@ -56,16 +56,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
   async function loadData() {
     setLoading(true);
     const res = await getProcurementItems(orderId);
-    if (res.data) {
-      // 首次打开且无数据 → 自动初始化默认采购项
-      if (res.data.length === 0 && canEdit) {
-        await initDefaultProcurementItems(orderId);
-        const res2 = await getProcurementItems(orderId);
-        if (res2.data) setItems(res2.data);
-      } else {
-        setItems(res.data);
-      }
-    }
+    if (res.data) setItems(res.data);
     setLoading(false);
   }
 
@@ -207,7 +198,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
       {/* 空状态 */}
       {items.length === 0 && !showAddForm && (
         <div className="text-center py-8 text-gray-400 text-sm">
-          暂无采购跟踪数据。{canEdit ? '点击"快速创建默认项"开始。' : ''}
+          暂无采购跟踪数据。{canEdit ? '采购单下达后自动生成，或点击"添加物料"手动创建。' : '采购单下达后自动生成。'}
         </div>
       )}
 
