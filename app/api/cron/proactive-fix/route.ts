@@ -195,6 +195,65 @@ export async function GET(req: Request) {
     fixes.push({ check: '逾期关键节点主动提醒', found: overdueNodes?.length || 0, fixed: reminded });
   } catch {}
 
+  // ═══════════════════════════════════════════
+  // 修复6：生产进度定期上报提醒（开裁后每3天）
+  // ═══════════════════════════════════════════
+  try {
+    // 找到已开裁但还没完成的订单
+    const { data: kickoffDone } = await (supabase.from('milestones') as any)
+      .select('order_id, actual_at')
+      .eq('step_key', 'production_kickoff')
+      .eq('status', 'done')
+      .limit(100);
+
+    let progressReminded = 0;
+    for (const kickoff of (kickoffDone || [])) {
+      if (!kickoff.actual_at) continue;
+      const daysSinceKickoff = Math.ceil((now.getTime() - new Date(kickoff.actual_at).getTime()) / 86400000);
+      // 每3天提醒一次（第3天、第6天、第9天...）
+      if (daysSinceKickoff < 3 || daysSinceKickoff % 3 !== 0) continue;
+
+      // 检查订单是否已完成
+      const { data: orderCheck } = await (supabase.from('orders') as any)
+        .select('id, order_no, lifecycle_status')
+        .eq('id', kickoff.order_id)
+        .single();
+      if (!orderCheck || orderCheck.lifecycle_status === 'completed') continue;
+
+      // 找跟单负责人
+      const { data: merchMs } = await (supabase.from('milestones') as any)
+        .select('owner_user_id')
+        .eq('order_id', kickoff.order_id)
+        .eq('owner_role', 'merchandiser')
+        .not('owner_user_id', 'is', null)
+        .limit(1);
+      const merchUserId = merchMs?.[0]?.owner_user_id;
+      if (!merchUserId) continue;
+
+      // 避免重复提醒（同一天不重复）
+      const todayStr = now.toISOString().slice(0, 10);
+      const { data: existing } = await (supabase.from('notifications') as any)
+        .select('id')
+        .eq('user_id', merchUserId)
+        .eq('type', 'progress_report_reminder')
+        .eq('related_order_id', kickoff.order_id)
+        .gte('created_at', todayStr + 'T00:00:00')
+        .limit(1);
+      if (existing && existing.length > 0) continue;
+
+      await (supabase.from('notifications') as any).insert({
+        user_id: merchUserId,
+        type: 'progress_report_reminder',
+        title: `📋 请上报 ${orderCheck.order_no} 生产进度（开裁第${daysSinceKickoff}天）`,
+        message: '请在「生产进度」Tab提交日报，包含当前产量、问题和照片。',
+        related_order_id: kickoff.order_id,
+        status: 'unread',
+      });
+      progressReminded++;
+    }
+    fixes.push({ check: '生产进度上报提醒(每3天)', found: kickoffDone?.length || 0, fixed: progressReminded });
+  } catch {}
+
   const totalFixed = fixes.reduce((s, f) => s + f.fixed, 0);
   const totalFound = fixes.reduce((s, f) => s + f.found, 0);
 

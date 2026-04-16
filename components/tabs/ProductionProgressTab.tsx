@@ -367,12 +367,28 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
               <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3">
                 <p className="text-xs font-semibold text-amber-800 mb-1">📅 其他关键拜访时间</p>
                 <ul className="text-xs text-amber-700 space-y-0.5">
-                  <li>• <strong>采购下单后 3 天</strong> — 确认工厂已收到面料订单，核实交期</li>
-                  <li>• <strong>面料到货前 2 天</strong> — 提前与工厂确认仓库准备，安排验布时间</li>
+                  <li>• <strong>面料到货前</strong> — 确认面料送货地址（送到哪个工厂），避免送错</li>
+                  <li>• <strong>面料到位后 2 天内</strong> — 确认是否已开裁。未开裁立刻上报，以免影响交期</li>
                   <li>• <strong>生产进度 60-70%</strong> — 补充巡检，确认中查问题已整改</li>
                   <li>• <strong>包装完成后</strong> — 抽查成品包装，确认唛头/箱单无误</li>
                   <li>• <strong>装柜/出货当天</strong> — 现场监装（如大货/重要客户），拍照留底</li>
                 </ul>
+              </div>
+
+              {/* 验货报告模板下载 + 进度上报要求 */}
+              <div className="mt-3 flex gap-3">
+                <a href="/templates/qc-report-template.xlsx" download
+                  className="flex-1 rounded-lg bg-indigo-50 border border-indigo-200 p-3 hover:bg-indigo-100 transition-colors text-center">
+                  <p className="text-sm font-semibold text-indigo-800">📥 下载验货报告模板</p>
+                  <p className="text-xs text-indigo-600 mt-0.5">中查报告 / 尾查报告(AQL) / 巡查记录</p>
+                </a>
+                <div className="flex-1 rounded-lg bg-orange-50 border border-orange-200 p-3">
+                  <p className="text-sm font-semibold text-orange-800">📋 进度上报要求</p>
+                  <p className="text-xs text-orange-600 mt-0.5">
+                    开裁后每 <strong>3 天</strong>上报一次生产进度<br/>
+                    中查/尾查后 <strong>当天</strong>上传验货报告
+                  </p>
+                </div>
               </div>
             </div>
           )}
