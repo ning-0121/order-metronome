@@ -228,7 +228,29 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                     const st = STATUS_MAP[item.status] || STATUS_MAP.pending;
                     return (
                       <tr key={item.id} className="border-b hover:bg-blue-50/30 transition-colors">
-                        <td className="px-3 py-2 font-medium text-gray-900">{item.item_name}</td>
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <div className="flex items-center gap-1">
+                              <input defaultValue={item.item_name}
+                                onBlur={e => { if (e.target.value !== item.item_name) handleUpdate(item.id, 'item_name', e.target.value); }}
+                                className="flex-1 px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-sm font-medium focus:border-indigo-400 focus:outline-none" />
+                              <button title="添加批次（拆分为多行分别跟踪）"
+                                onClick={async () => {
+                                  const batch = prompt('输入批次名（如颜色：黑色、白色，或辅料名：吊牌、烫标）：');
+                                  if (!batch?.trim()) return;
+                                  await addProcurementItem(orderId, {
+                                    category: item.category,
+                                    item_name: `${item.item_name}-${batch.trim()}`,
+                                    supplier: item.supplier || undefined,
+                                  });
+                                  await loadData();
+                                }}
+                                className="text-xs text-indigo-500 hover:text-indigo-700 shrink-0" >+批</button>
+                            </div>
+                          ) : (
+                            <span className="font-medium text-gray-900">{item.item_name}</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <input defaultValue={item.supplier || ''}
@@ -317,7 +339,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
       })}
 
       <p className="text-xs text-gray-400 text-center">
-        💡 所有人可查看采购进度。采购/业务/跟单可直接编辑日期和备注，修改后实时保存。
+        💡 所有人可查看。采购/业务/跟单直接编辑，修改实时保存。分批到货请点「+批」拆分（如面料按颜色拆、辅料按品种拆）。
       </p>
     </div>
   );
