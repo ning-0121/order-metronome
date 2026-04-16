@@ -87,15 +87,20 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
   }
 
   async function handleUpdate(id: string, field: string, value: string | null) {
-    await updateProcurementItem(id, { [field]: value || null });
+    const res = await updateProcurementItem(id, { [field]: value || null });
+    if (res.error) {
+      alert('保存失败: ' + res.error);
+      return;
+    }
     setItems(prev => prev.map(item =>
       item.id === id ? { ...item, [field]: value, updated_at: new Date().toISOString() } : item
     ));
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('确定删除？')) return;
-    await deleteProcurementItem(id);
+    if (!confirm('确定删除此采购项？')) return;
+    const res = await deleteProcurementItem(id);
+    if (res.error) { alert('删除失败: ' + res.error); return; }
     setItems(prev => prev.filter(item => item.id !== id));
   }
 
@@ -234,7 +239,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                               <input defaultValue={item.item_name}
                                 onBlur={e => { if (e.target.value !== item.item_name) handleUpdate(item.id, 'item_name', e.target.value); }}
                                 className="flex-1 px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-sm font-medium focus:border-indigo-400 focus:outline-none" />
-                              <button title="添加批次（拆分为多行分别跟踪）"
+                              <button title="分批到货（拆分为多行分别跟踪）"
                                 onClick={async () => {
                                   const batch = prompt('输入批次名（如颜色：黑色、白色，或辅料名：吊牌、烫标）：');
                                   if (!batch?.trim()) return;
@@ -245,7 +250,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                                   });
                                   await loadData();
                                 }}
-                                className="text-xs text-indigo-500 hover:text-indigo-700 shrink-0" >+批</button>
+                                className="text-xs text-indigo-500 hover:text-indigo-700 shrink-0 whitespace-nowrap" >+分批</button>
                             </div>
                           ) : (
                             <span className="font-medium text-gray-900">{item.item_name}</span>
@@ -254,7 +259,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <input defaultValue={item.supplier || ''}
-                              onBlur={e => handleUpdate(item.id, 'supplier', e.target.value)}
+                              onBlur={e => { if (e.target.value !== (item.supplier || '')) handleUpdate(item.id, 'supplier', e.target.value); }}
                               className="w-full px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-sm focus:border-indigo-400 focus:outline-none" />
                           ) : (
                             <span className="text-gray-600">{item.supplier || '—'}</span>
@@ -263,7 +268,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <input defaultValue={item.quantity || ''}
-                              onBlur={e => handleUpdate(item.id, 'quantity', e.target.value)}
+                              onBlur={e => { if (e.target.value !== (item.quantity || '')) handleUpdate(item.id, 'quantity', e.target.value); }}
                               className="w-20 px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-sm focus:border-indigo-400 focus:outline-none" />
                           ) : (
                             <span className="text-gray-600">{item.quantity || '—'}</span>
@@ -272,7 +277,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <input type="date" defaultValue={item.order_date || ''}
-                              onBlur={e => handleUpdate(item.id, 'order_date', e.target.value)}
+                              onBlur={e => { if (e.target.value !== (item.order_date || '')) handleUpdate(item.id, 'order_date', e.target.value); }}
                               className="px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-xs focus:border-indigo-400 focus:outline-none" />
                           ) : (
                             <span className="text-gray-600 text-xs">{item.order_date || '—'}</span>
@@ -281,7 +286,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <input type="date" defaultValue={item.expected_arrival || ''}
-                              onBlur={e => handleUpdate(item.id, 'expected_arrival', e.target.value)}
+                              onBlur={e => { if (e.target.value !== (item.expected_arrival || '')) handleUpdate(item.id, 'expected_arrival', e.target.value); }}
                               className="px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-xs focus:border-indigo-400 focus:outline-none" />
                           ) : (
                             <span className="text-gray-600 text-xs">{item.expected_arrival || '—'}</span>
@@ -291,8 +296,9 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                           {canEdit ? (
                             <input type="date" defaultValue={item.actual_arrival || ''}
                               onBlur={e => {
+                                if (e.target.value === (item.actual_arrival || '')) return; // 没变不更新
                                 handleUpdate(item.id, 'actual_arrival', e.target.value);
-                                if (e.target.value) handleUpdate(item.id, 'status', 'arrived');
+                                if (e.target.value && item.status !== 'problem') handleUpdate(item.id, 'status', 'arrived');
                               }}
                               className="px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-xs focus:border-indigo-400 focus:outline-none" />
                           ) : (
@@ -315,7 +321,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
                         <td className="px-3 py-2">
                           {canEdit ? (
                             <input defaultValue={item.notes || ''} placeholder="备注..."
-                              onBlur={e => handleUpdate(item.id, 'notes', e.target.value)}
+                              onBlur={e => { if (e.target.value !== (item.notes || '')) handleUpdate(item.id, 'notes', e.target.value); }}
                               className="w-full px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-xs focus:border-indigo-400 focus:outline-none" />
                           ) : (
                             <span className="text-gray-500 text-xs">{item.notes || ''}</span>
