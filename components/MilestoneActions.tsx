@@ -8,6 +8,8 @@ import { AIAdviceBox } from '@/components/AIAdviceBox';
 import { getChecklistForStep, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
+import { getNamingHint } from '@/lib/domain/fileNaming';
+import { FileNameCheck } from '@/components/FileNameCheck';
 
 const QC_STEPS = new Set([
   'pre_production_sample_ready', 'materials_received_inspected', 'production_kickoff',
@@ -24,6 +26,8 @@ interface MilestoneActionsProps {
   currentRoles?: string[];
   isAdmin?: boolean;
   orderId?: string;
+  /** 订单号（用于文件命名提示） */
+  orderNo?: string;
 }
 
 export function MilestoneActions({
@@ -33,6 +37,7 @@ export function MilestoneActions({
   currentRoles = [],
   isAdmin = false,
   orderId,
+  orderNo,
 }: MilestoneActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -300,6 +305,7 @@ export function MilestoneActions({
           <CompletedFileUpload
             milestoneId={milestone.id}
             orderId={orderId || ''}
+            orderNo={orderNo}
             stepKey={milestone.step_key}
             isProductionUpload={isProductionUpload}
           />
@@ -328,7 +334,7 @@ export function MilestoneActions({
         <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
           <p className="text-xs text-blue-700">✅ 此节点已完成。可继续补传资料文件。</p>
         </div>
-        <SupplementaryUpload milestoneId={milestone.id} orderId={orderId || ''} stepKey={milestone.step_key} />
+        <SupplementaryUpload milestoneId={milestone.id} orderId={orderId || ''} orderNo={orderNo} stepKey={milestone.step_key} />
       </div>
     );
   }
@@ -483,6 +489,31 @@ export function MilestoneActions({
                 {' · '}
                 {extraFiles.some((f: any) => f._fileType === 'trims_sheet') ? `✅ 原辅料单` : '⬜ 原辅料单：未选'}
               </p>
+              {/* 生产订单命名检查 */}
+              {evidenceFile && (
+                <FileNameCheck
+                  file={evidenceFile}
+                  stepKey="production_order_upload"
+                  orderNo={orderNo}
+                  onRename={(renamed) => {
+                    (renamed as any)._fileType = 'production_order';
+                    setEvidenceFile(renamed);
+                  }}
+                />
+              )}
+              {/* 原辅料单命名检查 */}
+              {extraFiles.filter((f: any) => f._fileType === 'trims_sheet').map((f, i) => (
+                <FileNameCheck
+                  key={i}
+                  file={f}
+                  stepKey="bulk_materials_confirmed"
+                  orderNo={orderNo}
+                  onRename={(renamed) => {
+                    (renamed as any)._fileType = 'trims_sheet';
+                    setExtraFiles(prev => prev.map((x: any) => x._fileType === 'trims_sheet' ? renamed : x));
+                  }}
+                />
+              ))}
               <p className="text-xs text-amber-600 mt-1">💡 包装资料可以晚些上传，最晚在「包装方式确认」节点前 1 周</p>
             </div>
           ) : milestone.step_key === 'packing_method_confirmed' ? (
@@ -504,6 +535,17 @@ export function MilestoneActions({
               <p className="text-xs text-gray-400 mt-2">
                 {evidenceFile ? `✅ 已选：${evidenceFile.name}` : '⬜ 未选'}
               </p>
+              {evidenceFile && (
+                <FileNameCheck
+                  file={evidenceFile}
+                  stepKey="packing_method_confirmed"
+                  orderNo={orderNo}
+                  onRename={(renamed) => {
+                    (renamed as any)._fileType = 'packing_requirement';
+                    setEvidenceFile(renamed);
+                  }}
+                />
+              )}
             </div>
           ) : (
           <div>
@@ -526,6 +568,18 @@ export function MilestoneActions({
               })()}
               {milestone.evidence_required && <span className="text-red-500 ml-1">*必传</span>}
             </label>
+            {/* 命名建议 — 让业务/采购/跟单按规范命名 */}
+            {(() => {
+              const hint = getNamingHint(milestone.step_key, orderNo);
+              return (
+                <div className="mb-2 text-[11px] text-gray-500 flex flex-wrap items-center gap-x-1.5">
+                  <span className="text-gray-400">📝 建议命名：</span>
+                  <code className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-mono">{hint.example}</code>
+                  {hint.suffixHint && <span className="text-gray-400">（{hint.suffixHint}）</span>}
+                  <a href="/guide#naming" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">命名规范 ↗</a>
+                </div>
+              );
+            })()}
             <input
               type="file"
               accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
@@ -578,38 +632,63 @@ export function MilestoneActions({
             {(evidenceFile || extraFiles.length > 0) && (
               <div className="mt-2 space-y-1">
                 {evidenceFile && (
-                  <div className="flex items-center justify-between text-xs bg-indigo-50 px-2 py-1 rounded border border-indigo-100">
-                    <span className="truncate text-indigo-700">
-                      📎 {evidenceFile.name} <span className="text-gray-400">({(evidenceFile.size / 1024).toFixed(0)}KB)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (extraFiles.length > 0) {
-                          setEvidenceFile(extraFiles[0]);
-                          setExtraFiles(extraFiles.slice(1));
-                        } else {
-                          setEvidenceFile(null);
-                        }
+                  <div>
+                    <div className="flex items-center justify-between text-xs bg-indigo-50 px-2 py-1 rounded border border-indigo-100">
+                      <span className="truncate text-indigo-700">
+                        📎 {evidenceFile.name} <span className="text-gray-400">({(evidenceFile.size / 1024).toFixed(0)}KB)</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (extraFiles.length > 0) {
+                            setEvidenceFile(extraFiles[0]);
+                            setExtraFiles(extraFiles.slice(1));
+                          } else {
+                            setEvidenceFile(null);
+                          }
+                        }}
+                        className="text-red-500 hover:text-red-700 ml-2 text-[10px]"
+                      >
+                        移除
+                      </button>
+                    </div>
+                    <FileNameCheck
+                      file={evidenceFile}
+                      stepKey={milestone.step_key}
+                      orderNo={orderNo}
+                      onRename={(renamed) => {
+                        // 保留 _fileType 等自定义属性
+                        const origType = (evidenceFile as any)._fileType;
+                        if (origType) (renamed as any)._fileType = origType;
+                        setEvidenceFile(renamed);
                       }}
-                      className="text-red-500 hover:text-red-700 ml-2 text-[10px]"
-                    >
-                      移除
-                    </button>
+                    />
                   </div>
                 )}
                 {extraFiles.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between text-xs bg-gray-50 px-2 py-1 rounded border border-gray-100">
-                    <span className="truncate text-gray-700">
-                      📎 {f.name} <span className="text-gray-400">({(f.size / 1024).toFixed(0)}KB)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setExtraFiles(prev => prev.filter((_, idx) => idx !== i))}
-                      className="text-red-500 hover:text-red-700 ml-2 text-[10px]"
-                    >
-                      移除
-                    </button>
+                  <div key={i}>
+                    <div className="flex items-center justify-between text-xs bg-gray-50 px-2 py-1 rounded border border-gray-100">
+                      <span className="truncate text-gray-700">
+                        📎 {f.name} <span className="text-gray-400">({(f.size / 1024).toFixed(0)}KB)</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setExtraFiles(prev => prev.filter((_, idx) => idx !== i))}
+                        className="text-red-500 hover:text-red-700 ml-2 text-[10px]"
+                      >
+                        移除
+                      </button>
+                    </div>
+                    <FileNameCheck
+                      file={f}
+                      stepKey={milestone.step_key}
+                      orderNo={orderNo}
+                      onRename={(renamed) => {
+                        const origType = (f as any)._fileType;
+                        if (origType) (renamed as any)._fileType = origType;
+                        setExtraFiles(prev => prev.map((x, idx) => idx === i ? renamed : x));
+                      }}
+                    />
                   </div>
                 ))}
               </div>
@@ -1015,8 +1094,8 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange 
 
 // ══════ 已完成节点补传文件 ══════
 
-function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload }: {
-  milestoneId: string; orderId: string; stepKey: string; isProductionUpload: boolean;
+function CompletedFileUpload({ milestoneId, orderId, orderNo, stepKey, isProductionUpload }: {
+  milestoneId: string; orderId: string; orderNo?: string; stepKey: string; isProductionUpload: boolean;
 }) {
   const [uploading, setUploading] = useState(false);
   const [files, setFiles] = useState<Array<{ id: string; file_name: string; file_url: string; file_type: string; created_at: string }>>([]);
@@ -1032,20 +1111,38 @@ function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload
       .then(({ data }: any) => setFiles(data || []));
   }, [milestoneId, orderId]);
 
+  /** 上传前做命名检查，不符合规范时让用户选择是否改名 */
   async function handleUpload(file: File, fileType: string) {
+    // 动态 import 避免模块初始化问题
+    const { validateFileName, renameFile } = await import('@/lib/domain/fileNaming');
+    // 把 fileType 映射到对应节点的 stepKey（用于查命名标准）
+    const stepKeyForCheck =
+      fileType === 'production_order' ? 'production_order_upload' :
+      fileType === 'trims_sheet' ? 'bulk_materials_confirmed' :
+      fileType === 'packing_requirement' ? 'packing_method_confirmed' :
+      stepKey;
+    const check = validateFileName(file.name, stepKeyForCheck, orderNo);
+    let finalFile = file;
+    if (!check.ok) {
+      const issueStr = check.issues.map(i => '· ' + i.message).join('\n');
+      const useRecommended = confirm(
+        `⚠️ 文件名不符合命名规范：\n${issueStr}\n\n推荐命名：\n${check.suggestion}\n\n点击"确定"使用推荐命名上传\n点击"取消"保持原文件名上传`
+      );
+      if (useRecommended) finalFile = renameFile(file, check.suggestion);
+    }
     setUploading(true);
     const supabase = createClient();
-    const ext = file.name.split('.').pop() || 'bin';
+    const ext = finalFile.name.split('.').pop() || 'bin';
     const path = `${orderId}/milestones/${stepKey}_${fileType}_${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type, upsert: true });
+    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: finalFile.type, upsert: true });
     if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
     const { data: { user } } = await supabase.auth.getUser();
     await (supabase.from('order_attachments') as any).insert({
       order_id: orderId, milestone_id: milestoneId,
       uploaded_by: user?.id || null,
-      file_name: file.name, file_url: urlData?.publicUrl || path,
-      file_type: fileType, mime_type: file.type || null,
+      file_name: finalFile.name, file_url: urlData?.publicUrl || path,
+      file_type: fileType, mime_type: finalFile.type || null,
     });
     const { data } = await (supabase.from('order_attachments') as any)
       .select('id, file_name, file_url, file_type, created_at')
@@ -1096,6 +1193,12 @@ function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload
       )}
       {showUpload && (
         <div className="space-y-2">
+          {/* 命名提示 */}
+          <div className="text-[11px] text-gray-500 bg-gray-50 rounded px-2 py-1.5 border border-gray-200">
+            <span className="text-gray-400">📝 建议命名：</span>{' '}
+            <code className="font-mono text-gray-700">{getNamingHint(stepKey, orderNo).example}</code>
+            <a href="/guide#naming" target="_blank" rel="noopener noreferrer" className="ml-1.5 text-indigo-600 hover:underline">规范 ↗</a>
+          </div>
           {isProductionUpload ? (
             <>
               <div className="grid grid-cols-3 gap-2">
@@ -1133,7 +1236,7 @@ function CompletedFileUpload({ milestoneId, orderId, stepKey, isProductionUpload
 
 // ══════ 补传文件组件（节点完成后仍可上传） ══════
 
-function SupplementaryUpload({ milestoneId, orderId, stepKey }: { milestoneId: string; orderId: string; stepKey: string }) {
+function SupplementaryUpload({ milestoneId, orderId, orderNo, stepKey }: { milestoneId: string; orderId: string; orderNo?: string; stepKey: string }) {
   const [files, setFiles] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const router = useRouter();
@@ -1155,20 +1258,32 @@ function SupplementaryUpload({ milestoneId, orderId, stepKey }: { milestoneId: s
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    // 命名检查 + 按节点决定 file_type
+    const { validateFileName, renameFile, getFileTypeForStep } = await import('@/lib/domain/fileNaming');
+    const check = validateFileName(file.name, stepKey, orderNo);
+    let finalFile = file;
+    if (!check.ok) {
+      const issueStr = check.issues.map(i => '· ' + i.message).join('\n');
+      const useRecommended = confirm(
+        `⚠️ 文件名不符合命名规范：\n${issueStr}\n\n推荐命名：\n${check.suggestion}\n\n点击"确定"使用推荐命名上传\n点击"取消"保持原文件名上传`
+      );
+      if (useRecommended) finalFile = renameFile(file, check.suggestion);
+    }
+    const fileType = getFileTypeForStep(stepKey);
     setUploading(true);
     const supabase = createClient();
-    const ext = file.name.split('.').pop() || 'bin';
-    const path = `${orderId}/milestones/${stepKey}_supplement_${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type, upsert: true });
+    const ext = finalFile.name.split('.').pop() || 'bin';
+    const path = `${orderId}/milestones/${stepKey}_${fileType}_supplement_${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: finalFile.type, upsert: true });
     if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
     const { data: { user } } = await supabase.auth.getUser();
     await (supabase.from('order_attachments') as any).insert({
       order_id: orderId, milestone_id: milestoneId,
       uploaded_by: user?.id || null,
-      file_name: file.name, file_url: urlData?.publicUrl || path,
+      file_name: finalFile.name, file_url: urlData?.publicUrl || path,
       storage_path: path,
-      file_type: 'production_order', mime_type: file.type || null,
+      file_type: fileType, mime_type: finalFile.type || null,
     });
     await loadFiles();
     setUploading(false);
@@ -1188,6 +1303,11 @@ function SupplementaryUpload({ milestoneId, orderId, stepKey }: { milestoneId: s
           ))}
         </div>
       )}
+      <div className="text-[11px] text-gray-500 bg-gray-50 rounded px-2 py-1.5 border border-gray-200">
+        <span className="text-gray-400">📝 建议命名：</span>{' '}
+        <code className="font-mono text-gray-700">{getNamingHint(stepKey, orderNo).example}</code>
+        <a href="/guide#naming" target="_blank" rel="noopener noreferrer" className="ml-1.5 text-indigo-600 hover:underline">规范 ↗</a>
+      </div>
       <label className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg border-2 border-dashed border-indigo-300 text-sm text-indigo-600 hover:bg-indigo-50 cursor-pointer">
         {uploading ? '上传中...' : '+ 补传文件'}
         <input type="file" className="hidden" onChange={handleUpload} accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" disabled={uploading} />

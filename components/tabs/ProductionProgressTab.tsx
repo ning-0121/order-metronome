@@ -98,6 +98,7 @@ interface MerchMilestone {
 
 interface Props {
   orderId: string;
+  orderNo?: string;
   isAdmin: boolean;
   canReport: boolean;
 }
@@ -108,7 +109,7 @@ const RISK_STYLES = {
   red: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', bar: 'bg-red-500', label: '危险' },
 };
 
-export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
+export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: Props) {
   const router = useRouter();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [analysis, setAnalysis] = useState<ProductionAnalysis | null>(null);
@@ -351,7 +352,7 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
                           <p className="text-xs text-amber-600">⏰ {item.timing}</p>
                           {!item.isDone && item.ms && (
                             <div className="flex items-center gap-2 shrink-0">
-                              <TimelineUploadBtn orderId={orderId} milestoneId={item.ms?.step_key || ''} stepKey={item.step_key} onUploaded={() => loadData()} />
+                              <TimelineUploadBtn orderId={orderId} orderNo={orderNo} milestoneId={item.ms?.step_key || ''} stepKey={item.step_key} onUploaded={() => loadData()} />
                               <a href={`/orders/${orderId}?tab=progress#milestone-${item.ms.step_key}`}
                                 className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
                                 去执行 →
@@ -716,8 +717,8 @@ export function ProductionProgressTab({ orderId, isAdmin, canReport }: Props) {
 }
 
 // ── 跟单流程单内嵌上传按钮 ──
-function TimelineUploadBtn({ orderId, milestoneId, stepKey, onUploaded }: {
-  orderId: string; milestoneId: string; stepKey: string; onUploaded: () => void;
+function TimelineUploadBtn({ orderId, orderNo, milestoneId, stepKey, onUploaded }: {
+  orderId: string; orderNo?: string; milestoneId: string; stepKey: string; onUploaded: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -725,15 +726,26 @@ function TimelineUploadBtn({ orderId, milestoneId, stepKey, onUploaded }: {
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    // 命名规范检查
+    const { validateFileName, renameFile } = await import('@/lib/domain/fileNaming');
+    const check = validateFileName(file.name, stepKey, orderNo);
+    let finalFile = file;
+    if (!check.ok) {
+      const issueStr = check.issues.map(i => '· ' + i.message).join('\n');
+      const useRecommended = confirm(
+        `⚠️ 文件名不符合命名规范：\n${issueStr}\n\n推荐命名：\n${check.suggestion}\n\n点击"确定"使用推荐命名上传\n点击"取消"保持原文件名上传`
+      );
+      if (useRecommended) finalFile = renameFile(file, check.suggestion);
+    }
     setUploading(true);
     try {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      const ext = file.name.split('.').pop() || 'bin';
+      const ext = finalFile.name.split('.').pop() || 'bin';
       const path = `${orderId}/timeline/${stepKey}_${Date.now()}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from('order-docs')
-        .upload(path, file, { contentType: file.type, upsert: true });
+        .upload(path, finalFile, { contentType: finalFile.type, upsert: true });
       if (upErr) {
         alert('上传失败: ' + upErr.message);
         setUploading(false);
@@ -753,13 +765,13 @@ function TimelineUploadBtn({ orderId, milestoneId, stepKey, onUploaded }: {
         order_id: orderId,
         milestone_id: msId,
         uploaded_by: user?.id || null,
-        file_name: file.name,
+        file_name: finalFile.name,
         file_url: publicUrl,
         file_type: 'qc_report',
-        mime_type: file.type || null,
+        mime_type: finalFile.type || null,
         storage_path: path,
       });
-      alert('✅ 上传成功: ' + file.name);
+      alert('✅ 上传成功: ' + finalFile.name);
       onUploaded();
     } catch (err: any) {
       alert('上传异常: ' + (err?.message || ''));

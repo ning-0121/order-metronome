@@ -1,6 +1,7 @@
 import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
 import { SOP_MAP } from '@/lib/domain/sop';
 import { getRoleLabel } from '@/lib/utils/i18n';
+import { FILE_NAMING_FORMAT, FILE_NAMING_RULES, FILE_NAMING_BY_STEP } from '@/lib/domain/fileNaming';
 
 /* ── 阶段定义（与 milestone template 完全对应） ── */
 const STAGE_NAMES: Record<string, string> = {
@@ -172,6 +173,7 @@ export default function GuidePage() {
             { href: '#roles', label: '角色 SOP' },
             { href: '#status', label: '节点状态' },
             { href: '#operations', label: '常用操作' },
+            { href: '#naming', label: '文件命名规范' },
             { href: '#milestones', label: '全部节点 SOP' },
             { href: '#kpi', label: 'KPI 说明' },
             { href: '#updates', label: 'v3.2 更新' },
@@ -426,12 +428,13 @@ export default function GuidePage() {
             <div className="px-5 py-4 bg-gray-50 border-t border-gray-200 space-y-2">
               <div className="space-y-1.5 text-sm text-gray-700">
                 <p>1. 在节点详情区找到<strong>蓝色底色的"凭证上传"区域</strong></p>
-                <p>2. 点击上传按钮，选择文件（支持图片、PDF、Excel 等）</p>
-                <p>3. 上传成功后文件会显示在下方列表</p>
-                <p>4. 可以点击文件名预览/下载，也可以删除重新上传</p>
+                <p>2. <strong>按规范重命名文件</strong>再上传（见 <a href="#naming" className="text-indigo-600 hover:underline font-medium">文件命名规范</a>）。上传区会显示该节点的建议命名，直接复制即可。</p>
+                <p>3. 点击上传按钮选择文件（支持图片、PDF、Excel 等）</p>
+                <p>4. 上传成功后文件会显示在下方列表</p>
+                <p>5. 可以点击文件名预览/下载，也可以删除重新上传</p>
               </div>
               <div className="bg-amber-50 rounded-lg p-3 mt-2">
-                <p className="text-xs text-amber-800 font-medium">凭证是 KPI 考核和问题追溯的依据，请确保上传正确、清晰的文件。</p>
+                <p className="text-xs text-amber-800 font-medium">凭证是 KPI 考核和问题追溯的依据，请确保上传正确、清晰、命名规范的文件。错误命名或挂错节点会导致采购共享表、导出报表取值混乱。</p>
               </div>
             </div>
           </details>
@@ -524,10 +527,148 @@ export default function GuidePage() {
         </div>
       </section>
 
-      {/* ====== 6. 全部节点 SOP ====== */}
-      <section id="milestones" className="mb-10">
+      {/* ====== 6. 文件命名规范 ====== */}
+      <section id="naming" className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
           <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
+          文件命名规范（业务 / 采购 / 跟单必读）
+        </h2>
+        <p className="text-sm text-gray-500 mb-4">
+          所有上传到系统的文件（客户PO、采购单、BOM、验货报告等）都要按这个规范命名。这样文件一眼能看出属于哪个订单、哪个节点、哪一版，也避免把文件挂错节点。
+        </p>
+
+        {/* 命名格式 */}
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-5 mb-4">
+          <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider mb-2">命名格式</p>
+          <p className="text-base font-mono font-semibold text-indigo-900 mb-3">
+            {FILE_NAMING_FORMAT}
+          </p>
+          <div className="space-y-1.5 text-xs text-indigo-800">
+            <p className="font-medium">常见例子：</p>
+            <ul className="space-y-1 ml-4">
+              <li>· <code className="px-1.5 py-0.5 rounded bg-white">QM-20260415-001_客户PO.pdf</code></li>
+              <li>· <code className="px-1.5 py-0.5 rounded bg-white">QM-20260415-001_采购单_面料.xlsx</code>（面料/辅料/包装分开上传）</li>
+              <li>· <code className="px-1.5 py-0.5 rounded bg-white">QM-20260415-001_产前样照片_正面.jpg</code>（多张照片时加部位后缀）</li>
+              <li>· <code className="px-1.5 py-0.5 rounded bg-white">QM-20260415-001_客户确认_20260420.png</code>（有版本时加日期）</li>
+              <li>· <code className="px-1.5 py-0.5 rounded bg-white">QM-20260415-001_中查报告_v2.pdf</code>（修正重传时加 v2）</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* 命名原则 */}
+        <div className="grid md:grid-cols-2 gap-3 mb-4">
+          <div className="rounded-xl border border-green-200 bg-green-50/50 p-4">
+            <p className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-2">✅ 必须遵守</p>
+            <ul className="space-y-1.5 text-xs text-green-900">
+              {FILE_NAMING_RULES.map((rule, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="text-green-600 flex-shrink-0">·</span>
+                  <span>{rule}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-xl border border-red-200 bg-red-50/50 p-4">
+            <p className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-2">❌ 常见错误</p>
+            <ul className="space-y-1.5 text-xs text-red-900">
+              <li className="flex gap-2">
+                <span className="text-red-500 flex-shrink-0">·</span>
+                <span><code className="px-1 rounded bg-white">采购单.xlsx</code> — 没带订单号，找不到归属</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-red-500 flex-shrink-0">·</span>
+                <span><code className="px-1 rounded bg-white">2款瑜伽裤下单数量0228.xlsx</code> — 没订单号，含歧义词</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-red-500 flex-shrink-0">·</span>
+                <span><code className="px-1 rounded bg-white">客户PO(最终版).pdf</code> — 含括号和「最终」歧义词</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-red-500 flex-shrink-0">·</span>
+                <span><code className="px-1 rounded bg-white">采购单 new.xlsx</code> — 含空格和「new」</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-red-500 flex-shrink-0">·</span>
+                <span>一个文件挂到错误的节点（比如采购单传到产前样节点）</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        {/* 推荐命名对照表 */}
+        <div className="rounded-xl border border-gray-200 overflow-hidden mb-4">
+          <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200">
+            <p className="text-xs font-semibold text-gray-700">推荐命名对照表（按节点查）</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr className="text-left text-gray-500">
+                  <th className="px-3 py-2 font-medium">节点名称</th>
+                  <th className="px-3 py-2 font-medium">负责角色</th>
+                  <th className="px-3 py-2 font-medium">文档类型</th>
+                  <th className="px-3 py-2 font-medium">命名示例</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {MILESTONE_TEMPLATE_V1.map(m => {
+                  const hint = FILE_NAMING_BY_STEP[m.step_key];
+                  if (!hint) return null;
+                  return (
+                    <tr key={m.step_key} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 text-gray-900 font-medium whitespace-nowrap">
+                        {m.name}
+                        {m.evidence_required && <span className="text-red-500 ml-1" title="必传凭证">*</span>}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{getRoleLabel(m.owner_role)}</td>
+                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{hint.label}</td>
+                      <td className="px-3 py-2">
+                        <code className="text-[11px] text-indigo-700 font-mono">{hint.example}</code>
+                        {hint.suffixHint && (
+                          <div className="text-[10px] text-gray-400 mt-0.5">{hint.suffixHint}</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="bg-amber-50 border-t border-amber-200 px-4 py-2.5">
+            <p className="text-xs text-amber-800">
+              <span className="font-medium">* 必传</span> — 节点名后带红色 * 的表示此节点凭证必传，没传无法点「标记完成」。
+            </p>
+          </div>
+        </div>
+
+        {/* 什么时候加后缀 */}
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">什么时候需要加后缀？</p>
+          <div className="space-y-2.5 text-sm text-gray-700">
+            <div className="flex gap-3">
+              <span className="flex-shrink-0 px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 text-xs font-medium h-fit">分类后缀</span>
+              <p>同一节点分几份文件上传时用，如 <code className="text-xs bg-gray-100 px-1 rounded">_面料</code>/<code className="text-xs bg-gray-100 px-1 rounded">_辅料</code>/<code className="text-xs bg-gray-100 px-1 rounded">_包装</code>、<code className="text-xs bg-gray-100 px-1 rounded">_正面</code>/<code className="text-xs bg-gray-100 px-1 rounded">_背面</code>/<code className="text-xs bg-gray-100 px-1 rounded">_细节</code></p>
+            </div>
+            <div className="flex gap-3">
+              <span className="flex-shrink-0 px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-medium h-fit">版本后缀</span>
+              <p>同一份文件修改后重新上传时用：<code className="text-xs bg-gray-100 px-1 rounded">_v1</code>、<code className="text-xs bg-gray-100 px-1 rounded">_v2</code>、<code className="text-xs bg-gray-100 px-1 rounded">_v3</code></p>
+            </div>
+            <div className="flex gap-3">
+              <span className="flex-shrink-0 px-2 py-0.5 rounded bg-green-100 text-green-700 text-xs font-medium h-fit">日期后缀</span>
+              <p>时间敏感的记录（如客户确认截图）用日期标明：<code className="text-xs bg-gray-100 px-1 rounded">_20260420</code>（YYYYMMDD）</p>
+            </div>
+            <div className="flex gap-3">
+              <span className="flex-shrink-0 px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-xs font-medium h-fit">不加后缀</span>
+              <p>只有一份文件、无版本变化时直接用基础命名：<code className="text-xs bg-gray-100 px-1 rounded">QM-20260415-001_客户PO.pdf</code></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ====== 7. 全部节点 SOP ====== */}
+      <section id="milestones" className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">7</span>
           全部节点详细 SOP
         </h2>
         <p className="text-sm text-gray-500 mb-4">点击每个阶段查看该阶段所有节点的标准操作规程。</p>
@@ -597,10 +738,10 @@ export default function GuidePage() {
         </div>
       </section>
 
-      {/* ====== 7. 执行评分与提成 ====== */}
+      {/* ====== 8. 执行评分与提成 ====== */}
       <section id="kpi" className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">7</span>
+          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">8</span>
           执行评分与提成
         </h2>
 
@@ -684,10 +825,10 @@ export default function GuidePage() {
         </div>
       </section>
 
-      {/* ====== 8. v3.2 更新说明 (2026-03-31) ====== */}
+      {/* ====== 9. v3.2 更新说明 (2026-03-31) ====== */}
       <section id="updates" className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600 text-sm font-bold">8</span>
+          <span className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600 text-sm font-bold">9</span>
           v3.2 更新说明（2026-03-31）
         </h2>
         <div className="space-y-4">
@@ -835,10 +976,10 @@ export default function GuidePage() {
         </div>
       </section>
 
-      {/* ====== 9. 常见问题 ====== */}
+      {/* ====== 10. 常见问题 ====== */}
       <section id="faq" className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">9</span>
+          <span className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold">10</span>
           常见问题
         </h2>
         <div className="space-y-2">

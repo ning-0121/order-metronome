@@ -81,7 +81,7 @@ export default async function OrderDetailPage({
     getDelayRequestsByOrder(id),
     getOrderLogs(id),
     (supabase.from('order_attachments') as any)
-      .select('id, file_type, file_name, file_url, storage_path, file_size, mime_type, uploaded_by, created_at')
+      .select('id, milestone_id, file_type, file_name, file_url, storage_path, file_size, mime_type, uploaded_by, created_at')
       .eq('order_id', id)
       .order('created_at', { ascending: true }),
   ]);
@@ -386,89 +386,162 @@ export default async function OrderDetailPage({
               </dl>
             </div>
 
-            {/* 订单资料 */}
+            {/* 订单资料 — 按节点分组展示，清晰看出每个附件属于哪个节点 */}
             <div className="md:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">📎 订单资料</h2>
               {(() => {
                 const sensitiveTypes = ['customer_po', 'internal_quote', 'customer_quote'];
-                const isMerchandiser = user ? orderData.merchandiser_user_id === user.id : false;
                 // 价格文件权限：只有 admin + 财务 + 订单创建者（业务）可以看，跟单/生产部不能看
                 const canSeeSensitive = isAdmin || isOrderOwner || currentRoles.includes('finance');
                 const visibleAttachments = attachments.filter((att: any) =>
                   !sensitiveTypes.includes(att.file_type) || canSeeSensitive
                 );
-                return visibleAttachments.length > 0 ? (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {visibleAttachments.map((att: any) => {
-                    const typeLabels: Record<string, string> = {
-                      customer_po: '客户PO',
-                      internal_quote: '内部成本核算单',
-                      customer_quote: '客户报价单',
-                      production_order: '生产制单',
-                      trims_sheet: '辅料表',
-                      packing_requirement: '装箱要求',
-                      tech_pack: 'Tech Pack',
-                      qc_report: 'QC报告',
-                      packing_list: '装箱单',
-                    };
-                    const label = typeLabels[att.file_type] || att.file_type || '附件';
-                    const sizeKB = att.file_size ? Math.round(att.file_size / 1024) : null;
-                    const downloadUrl = att.file_url || (att.storage_path
-                      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/order-docs/${att.storage_path}`
-                      : null);
 
-                    return (
-                      <div key={att.id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors">
-                        <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-bold">
-                          {label.charAt(0)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-indigo-700">{label}</p>
-                          <p className="text-xs text-gray-500 truncate">{att.file_name || '未命名'}</p>
-                          <p className="text-xs text-gray-400">
-                            {formatDate(att.created_at)}
-                            {sizeKB !== null && <span className="ml-2">{sizeKB}KB</span>}
-                          </p>
-                        </div>
-                        {downloadUrl && (() => {
-                          const ext = (att.file_name || '').split('.').pop()?.toLowerCase();
-                          const canPreviewInBrowser = ['pdf','png','jpg','jpeg','gif','svg','webp','txt'].includes(ext || '');
-                          const isOfficeFile = ['xlsx','xls','doc','docx','ppt','pptx'].includes(ext || '');
-                          const canPreviewOnline = isOfficeFile || ['csv'].includes(ext || '');
-                          const previewUrl = isOfficeFile
-                            ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(downloadUrl)}`
-                            : canPreviewOnline
-                              ? `https://docs.google.com/gview?url=${encodeURIComponent(downloadUrl)}&embedded=true`
-                              : downloadUrl;
-                          return (
-                            <div className="flex gap-1.5 flex-shrink-0">
-                              <a
-                                href={previewUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs px-2.5 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
-                              >
-                                {canPreviewInBrowser || canPreviewOnline ? '预览' : '查看'}
-                              </a>
-                              {(canPreviewOnline || !canPreviewInBrowser) && (
-                                <a
-                                  href={downloadUrl}
-                                  download={att.file_name}
-                                  className="text-xs px-2.5 py-1.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100"
-                                >
-                                  下载
-                                </a>
-                              )}
-                            </div>
-                          );
-                        })()}
+                // file_type → 友好标签（覆盖 FILE_TYPE_BY_STEP 里所有节点）
+                const typeLabels: Record<string, string> = {
+                  // 订单级（无 milestone_id）
+                  customer_po: '客户PO',
+                  internal_quote: '内部成本核算单',
+                  customer_quote: '客户报价单',
+                  // 里程碑级
+                  finance_approval: '财务审批',
+                  kickoff_meeting: '订单评审纪要',
+                  production_order: '生产制单',
+                  bom: 'BOM',
+                  trims_sheet: '原辅料单',
+                  processing_fee_confirm: '加工费确认',
+                  factory_confirm: '工厂确认书',
+                  pre_production_sample: '产前样照片',
+                  sample_shipping: '产前样快递',
+                  customer_approval: '客户确认',
+                  procurement_order: '采购单',
+                  materials_inspection: '原辅料验收',
+                  pre_production_meeting: '产前会纪要',
+                  production_kickoff: '开裁通知',
+                  qc_report: 'QC报告',
+                  packing_requirement: '装箱要求',
+                  shipping_sample: '船样',
+                  factory_completion: '完工证明',
+                  leftover_list: '剩余物料',
+                  warehouse_receipt: '成品入库',
+                  inspection_release: '验货放行',
+                  booking_confirm: '订舱确认',
+                  customs_doc: '报关单',
+                  shipment_approval: '核准出运',
+                  bill_of_lading: '提单',
+                  payment_receipt: '收款凭证',
+                  tech_pack: 'Tech Pack',
+                  packing_list: '装箱单',
+                  evidence: '凭证',
+                };
+
+                // 建立 milestone_id → {name, step_key, stageIdx} 查询表
+                const msMap = new Map<string, { name: string; stepKey: string; order: number }>();
+                (milestones || []).forEach((m: any, idx: number) => {
+                  msMap.set(m.id, { name: m.name || m.step_key, stepKey: m.step_key, order: idx });
+                });
+
+                // 分组：order-level（无 milestone_id）+ 按 milestone 分组
+                const orderLevel: any[] = [];
+                const byMilestone = new Map<string, any[]>();
+                for (const att of visibleAttachments) {
+                  if (!att.milestone_id) {
+                    orderLevel.push(att);
+                  } else {
+                    const arr = byMilestone.get(att.milestone_id) || [];
+                    arr.push(att);
+                    byMilestone.set(att.milestone_id, arr);
+                  }
+                }
+                // milestones 按节点顺序排序
+                const sortedMilestoneGroups = Array.from(byMilestone.entries()).sort((a, b) => {
+                  const oa = msMap.get(a[0])?.order ?? 999;
+                  const ob = msMap.get(b[0])?.order ?? 999;
+                  return oa - ob;
+                });
+
+                if (visibleAttachments.length === 0) {
+                  return <p className="text-sm text-gray-400 text-center py-4">暂无上传资料</p>;
+                }
+
+                const AttachmentCard = ({ att }: { att: any }) => {
+                  const label = typeLabels[att.file_type] || att.file_type || '附件';
+                  const sizeKB = att.file_size ? Math.round(att.file_size / 1024) : null;
+                  const downloadUrl = att.file_url || (att.storage_path
+                    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/order-docs/${att.storage_path}`
+                    : null);
+                  const ext = (att.file_name || '').split('.').pop()?.toLowerCase();
+                  const canPreviewInBrowser = ['pdf','png','jpg','jpeg','gif','svg','webp','txt'].includes(ext || '');
+                  const isOfficeFile = ['xlsx','xls','doc','docx','ppt','pptx'].includes(ext || '');
+                  const canPreviewOnline = isOfficeFile || ['csv'].includes(ext || '');
+                  const previewUrl = isOfficeFile
+                    ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(downloadUrl || '')}`
+                    : canPreviewOnline
+                      ? `https://docs.google.com/gview?url=${encodeURIComponent(downloadUrl || '')}&embedded=true`
+                      : downloadUrl;
+                  return (
+                    <div className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors">
+                      <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-bold">
+                        {label.charAt(0)}
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-400 text-center py-4">暂无上传资料</p>
-              );
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-indigo-700">{label}</p>
+                        <p className="text-xs text-gray-500 truncate">{att.file_name || '未命名'}</p>
+                        <p className="text-xs text-gray-400">
+                          {formatDate(att.created_at)}
+                          {sizeKB !== null && <span className="ml-2">{sizeKB}KB</span>}
+                        </p>
+                      </div>
+                      {downloadUrl && (
+                        <div className="flex gap-1.5 flex-shrink-0">
+                          <a href={previewUrl || downloadUrl} target="_blank" rel="noopener noreferrer"
+                             className="text-xs px-2.5 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700">
+                            {canPreviewInBrowser || canPreviewOnline ? '预览' : '查看'}
+                          </a>
+                          {(canPreviewOnline || !canPreviewInBrowser) && (
+                            <a href={downloadUrl} download={att.file_name}
+                               className="text-xs px-2.5 py-1.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100">
+                              下载
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                };
+
+                return (
+                  <div className="space-y-5">
+                    {/* 订单级附件（新建订单时上传的 PO/生产单/报价单等） */}
+                    {orderLevel.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1.5">
+                          <span className="w-1 h-3.5 rounded-sm bg-indigo-500" />
+                          订单级附件
+                        </p>
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          {orderLevel.map(att => <AttachmentCard key={att.id} att={att} />)}
+                        </div>
+                      </div>
+                    )}
+                    {/* 按节点分组 */}
+                    {sortedMilestoneGroups.map(([msId, files]) => {
+                      const ms = msMap.get(msId);
+                      return (
+                        <div key={msId}>
+                          <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1.5">
+                            <span className="w-1 h-3.5 rounded-sm bg-blue-500" />
+                            <span>{ms?.name || '未知节点'}</span>
+                            <span className="text-gray-400 font-normal">({files.length} 个文件)</span>
+                          </p>
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            {files.map(att => <AttachmentCard key={att.id} att={att} />)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
               })()}
             </div>
 
@@ -514,6 +587,7 @@ export default async function OrderDetailPage({
               <OrderTimeline
                 milestones={milestones}
                 orderId={id}
+                orderNo={orderData.order_no}
                 orderIncoterm={orderData.incoterm as 'FOB' | 'DDP'}
                 currentRole={currentRole}
                 currentRoles={currentRoles}
@@ -615,6 +689,7 @@ export default async function OrderDetailPage({
             </div>
             <ProductionProgressTab
               orderId={id}
+              orderNo={orderData.order_no}
               isAdmin={isAdmin}
               canReport={currentRoles.some(r => ['sales', 'merchandiser'].includes(r))}
             />

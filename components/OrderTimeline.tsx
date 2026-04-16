@@ -3,7 +3,6 @@ import { formatDate, isOverdue } from '@/lib/utils/date';
 import { isDoneStatus, isActiveStatus, isPendingStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import { MilestoneActions } from './MilestoneActions';
 import { DelayRequestForm } from './DelayRequestForm';
-import { EvidenceUpload } from './EvidenceUpload';
 import { OwnerAssignment } from './OwnerAssignment';
 import { SOPButton } from './SOPModal';
 import { getSOPForStep } from '@/lib/domain/sop';
@@ -25,6 +24,7 @@ const ACTUAL_DATE_EDITABLE_KEYS = [
 interface OrderTimelineProps {
   milestones: Milestone[];
   orderId: string;
+  orderNo?: string;
   orderIncoterm: 'FOB' | 'DDP';
   currentRole?: string;
   currentRoles?: string[];
@@ -170,7 +170,7 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   );
 }
 
-export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole, currentRoles = [], currentUserId, isAdmin = false }: OrderTimelineProps) {
+export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, currentRole, currentRoles = [], currentUserId, isAdmin = false }: OrderTimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
   const [showPOParser, setShowPOParser] = useState(false);
@@ -472,6 +472,7 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           currentRoles={currentRoles}
                           isAdmin={isAdmin}
                           orderId={orderId}
+                          orderNo={orderNo}
                         />
 
                         {/* 催办提醒按钮：管理员或任何相关人员都可催办进行中/逾期节点 */}
@@ -502,22 +503,8 @@ export function OrderTimeline({ milestones, orderId, orderIncoterm, currentRole,
                           </div>
                         )}
 
-                        {/* 凭证上传：仅关卡对应角色可上传（管理员只看不传） */}
-                        {(() => {
-                          const uploadRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
-                          const mRole = (m.owner_role || '').toLowerCase();
-                          const canUpload = !isAdmin && uploadRoles.some(r => {
-                            const nr = r.toLowerCase();
-                            return nr === mRole || (mRole === 'qc' && nr === 'quality') || (mRole === 'sales' && nr === 'merchandiser') || (mRole === 'merchandiser' && nr === 'sales');
-                          });
-                          return canUpload ? (
-                            <EvidenceUpload
-                              milestoneId={m.id}
-                              orderId={orderId}
-                              evidenceRequired={m.evidence_required || false}
-                            />
-                          ) : null;
-                        })()}
+                        {/* 凭证上传统一在 MilestoneActions 的「提交进度」表单里完成
+                            （之前此处的 EvidenceUpload 双入口已于 2026-04-15 合并） */}
 
                         {!_isDone(m.status) && !isAdmin &&
                           (currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : [])).some(r => {

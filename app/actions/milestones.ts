@@ -1213,14 +1213,6 @@ export async function addExecutionNote(
   return { data: {} };
 }
 
-/**
- * Log evidence upload action
- */
-export async function logEvidenceUpload(milestoneId: string, orderId: string, fileName: string) {
-  const supabase = await createClient();
-  await logMilestoneAction(supabase, milestoneId, orderId, 'upload_evidence', `已上传凭证：${fileName}`);
-}
-
 /** 允许用户填写 actual_at 的节点 */
 const ACTUAL_DATE_EDITABLE_KEYS = [
   'materials_received_inspected',

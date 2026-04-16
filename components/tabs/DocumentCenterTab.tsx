@@ -4,6 +4,7 @@ import { useState, useEffect, useTransition } from 'react';
 import { getOrderDocuments, uploadDocument, aiGenerateDocument, submitForReview, approveDocument, rejectDocument } from '@/app/actions/documents';
 import { DOCUMENT_TYPES, SOURCE_MODES, DOCUMENT_STATUSES, type DocumentType } from '@/lib/domain/document-templates';
 import { createClient } from '@/lib/supabase/client';
+import { FILE_NAMING_BY_DOC_TYPE, validateFileNameForLabel, renameFile } from '@/lib/domain/fileNaming';
 
 interface Props {
   orderId: string;
@@ -99,18 +100,32 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
       return;
     }
 
+    // 命名规范检查
+    const docHint = FILE_NAMING_BY_DOC_TYPE[activeDocType];
+    let finalFile = file;
+    if (docHint) {
+      const check = validateFileNameForLabel(file.name, docHint.label, orderContext?.orderNo);
+      if (!check.ok) {
+        const issueStr = check.issues.map(i => '· ' + i.message).join('\n');
+        const useRecommended = confirm(
+          `⚠️ 文件名不符合命名规范：\n${issueStr}\n\n推荐命名：\n${check.suggestion}\n\n点击"确定"使用推荐命名上传\n点击"取消"保持原文件名上传`
+        );
+        if (useRecommended) finalFile = renameFile(file, check.suggestion);
+      }
+    }
+
     setUploading(true);
 
     try {
       const supabase = createClient();
       const path = `${orderId}/documents/${activeDocType}_${Date.now()}.${ext}`;
 
-      const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type, upsert: false });
+      const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: finalFile.type, upsert: false });
       if (uploadErr) { alert('文件上传失败: ' + uploadErr.message); setUploading(false); return; }
 
       const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
 
-      const result = await uploadDocument(orderId, activeDocType, file.name, path, urlData?.publicUrl || path);
+      const result = await uploadDocument(orderId, activeDocType, finalFile.name, path, urlData?.publicUrl || path);
       if (result.error) alert(result.error);
       else await loadDocs();
     } catch (err: any) {
@@ -294,12 +309,27 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
 
       {/* 上传按钮（生产部不可见，AI生成移至各节点SOP中） */}
       {canUpload && (
-        <div className="flex gap-3 flex-wrap">
-          <label className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 cursor-pointer">
-            {uploading ? '📤 上传中...' : `📤 上传${DOCUMENT_TYPES[activeDocType].label}`}
-            <input type="file" className="hidden" onChange={handleUpload} disabled={uploading}
-              accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" />
-          </label>
+        <div className="space-y-2">
+          <div className="flex gap-3 flex-wrap items-center">
+            <label className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 cursor-pointer">
+              {uploading ? '📤 上传中...' : `📤 上传${DOCUMENT_TYPES[activeDocType].label}`}
+              <input type="file" className="hidden" onChange={handleUpload} disabled={uploading}
+                accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png" />
+            </label>
+          </div>
+          {/* 命名建议 */}
+          {FILE_NAMING_BY_DOC_TYPE[activeDocType] && (
+            <div className="text-[11px] text-gray-500 bg-gray-50 rounded px-2 py-1.5 border border-gray-200 inline-flex flex-wrap items-center gap-x-1.5">
+              <span className="text-gray-400">📝 建议命名：</span>
+              <code className="font-mono text-gray-700">
+                {FILE_NAMING_BY_DOC_TYPE[activeDocType].example.replace(
+                  'QM-20260415-001',
+                  orderContext?.orderNo || 'QM-订单号',
+                )}
+              </code>
+              <a href="/guide#naming" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">规范 ↗</a>
+            </div>
+          )}
         </div>
       )}
 
