@@ -15,6 +15,7 @@ import {
   type ProcurementItem,
 } from '@/app/actions/procurement-tracking';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 
 interface Props {
   orderId: string;
@@ -43,6 +44,7 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [sourceFile, setSourceFile] = useState<{ name: string; url: string } | null>(null);
 
   // 新增表单
   const [newCategory, setNewCategory] = useState('fabric');
@@ -57,6 +59,21 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
     setLoading(true);
     const res = await getProcurementItems(orderId);
     if (res.data) setItems(res.data);
+    // 查找原始采购单文件
+    try {
+      const supabase = createClient();
+      const { data: files } = await (supabase.from('order_attachments') as any)
+        .select('file_name, file_url')
+        .eq('order_id', orderId)
+        .or('file_type.eq.procurement_order,file_type.eq.evidence')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      // 模糊匹配采购单文件名
+      const match = (files || []).find((f: any) =>
+        /采购|procurement|purchase|下单/i.test(f.file_name || '')
+      ) || (files || [])[0];
+      if (match) setSourceFile({ name: match.file_name, url: match.file_url });
+    } catch {}
     setLoading(false);
   }
 
@@ -119,6 +136,21 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* 原始采购单文件 */}
+      {sourceFile && (
+        <div className="flex items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2">
+          <span className="text-sm">📄</span>
+          <div className="flex-1 min-w-0">
+            <span className="text-xs text-blue-800 font-medium">原始采购单：</span>
+            <span className="text-xs text-blue-600 truncate">{sourceFile.name}</span>
+          </div>
+          <a href={sourceFile.url} target="_blank" rel="noopener noreferrer"
+            className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 shrink-0">
+            查看原件
+          </a>
+        </div>
+      )}
+
       {/* 概览 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
