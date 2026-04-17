@@ -47,6 +47,90 @@ export const QUALITY_ISSUES = [
   { issue: '配件错误', frequency: 'low', prevention: '包装前核对配件清单，分色分码独立备料', rootCause: '多款混线、标签打错' },
 ];
 
+/**
+ * 物料采购周期表 — 可被规则引擎直接调用
+ * 用于预测"原辅料到货验收"节点的合理预留时间
+ */
+export const MATERIAL_LEAD_TIMES: Record<string, {
+  minDays: number;
+  maxDays: number;
+  notes: string;
+}> = {
+  '梭织面料':       { minDays: 10, maxDays: 20, notes: '备货款7-10天，订染款15-20天' },
+  '针织面料':       { minDays: 7,  maxDays: 15, notes: '成品色现货快，特殊色需染色' },
+  '拉链_普通':      { minDays: 3,  maxDays: 7,  notes: 'YKK/SBS现货色3天，配色5-7天' },
+  '拉链_配色':      { minDays: 7,  maxDays: 12, notes: '需用布样/小样提前配色，不可等大货面料' },
+  '网纱_配色':      { minDays: 7,  maxDays: 12, notes: '同拉链配色，须同步下单' },
+  '纽扣':           { minDays: 3,  maxDays: 7,  notes: '常规现货3天，特殊打logo 7天' },
+  '吊牌_标签':      { minDays: 5,  maxDays: 10, notes: '客户提供文件后起印' },
+  '外箱':           { minDays: 5,  maxDays: 10, notes: '印刷纸箱7-10天，白箱3-5天' },
+  '胶袋':           { minDays: 3,  maxDays: 7,  notes: '普通胶袋现货，印刷胶袋5-7天' },
+  '松紧带':         { minDays: 3,  maxDays: 7,  notes: '常规色现货，特殊色配色7天' },
+  '绣花/印花':      { minDays: 5,  maxDays: 10, notes: '开版3天，确认后批量' },
+};
+
+/**
+ * 节点风险矩阵 — 各里程碑 step_key 的历史阻塞风险
+ * risk: 'low' | 'medium' | 'high'
+ * commonCauses: 最常见的阻塞原因（用于 AI 建议）
+ */
+export const MILESTONE_RISK_MATRIX: Record<string, {
+  risk: 'low' | 'medium' | 'high';
+  commonCauses: string[];
+  preventionTips: string[];
+}> = {
+  'bom_confirmed': {
+    risk: 'high',
+    commonCauses: ['采购清单不完整', '供应商价格未确认', '新款辅料无货'],
+    preventionTips: ['产前会当天完成BOM初版', '辅料和面料同步询价', '提前备货常用辅料'],
+  },
+  'procurement_order_placed': {
+    risk: 'high',
+    commonCauses: ['面料供应商缺货', '辅料配色周期长', '采购审批流程慢'],
+    preventionTips: ['辅料配色用布样提前启动', '面料辅料同步下单', '建立备用供应商'],
+  },
+  'material_inspection': {
+    risk: 'high',
+    commonCauses: ['面料色差超标', '数量短缺', '物流延误'],
+    preventionTips: ['到货24小时内完成验收', '短缺立即联系供应商补货', '色差问题当天上报'],
+  },
+  'pre_production_sample_confirm': {
+    risk: 'high',
+    commonCauses: ['客户内部审批流程慢', '海外时差', '客户要求修改'],
+    preventionTips: ['产前样寄出后立即邮件+微信双渠道通知', '提前3天催促确认', '告知客户不确认将阻塞生产'],
+  },
+  'production_kickoff': {
+    risk: 'high',
+    commonCauses: ['原辅料未到齐', '产前样未确认', '工厂产能调度'],
+    preventionTips: ['原辅料到货后立即安排产前会', '确保产前样确认后24小时内开裁'],
+  },
+  'mid_qc_check': {
+    risk: 'medium',
+    commonCauses: ['跟单未及时跟进进度', '工厂配合度低', '品质问题返工'],
+    preventionTips: ['生产30%时主动约验', '中查发现问题当天出报告', '问题件<3%允许继续生产'],
+  },
+  'final_qc_check': {
+    risk: 'medium',
+    commonCauses: ['工厂未完成包装', '品质问题未解决', '数量不足'],
+    preventionTips: ['尾查前确认工厂完成率>90%', '提前1天确认包装进度'],
+  },
+  'booking_done': {
+    risk: 'high',
+    commonCauses: ['验货未放行', '舱位紧张', '文件不齐'],
+    preventionTips: ['验货放行后立即订舱', '旺季（3-5月/9-11月）提前7天订舱', '提前准备装箱单/发票'],
+  },
+  'processing_fee_confirmed': {
+    risk: 'medium',
+    commonCauses: ['报价单未及时提交', '财务审批流程', '价格分歧'],
+    preventionTips: ['下单同时发加工费报价给财务', '不超过报价3天完成确认'],
+  },
+  'payment_received': {
+    risk: 'medium',
+    commonCauses: ['客户账期内延迟支付', '对账差异', '买手汇率问题'],
+    preventionTips: ['出货后3天内发催款邮件', '30天内未到账升级处理', '确认银行信息无误'],
+  },
+};
+
 /** 外贸最佳实践 */
 export const BEST_PRACTICES = {
   orderConfirmation: '收到PO后24小时内回复确认，注明交期、价格、付款方式',
