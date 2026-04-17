@@ -123,6 +123,9 @@ export async function createOrder(
   const factory_date = formData.get('factory_date') as string | null;
   const eta = formData.get('eta') as string | null;
   const customer_email = formData.get('customer_email') as string | null;
+  // ⚠️ 必须在 line 171 校验之前提取（否则 const TDZ → Cannot access 'xx' before initialization）
+  const po_number = formData.get('customer_po_number') as string | null;
+  const internal_order_no = formData.get('internal_order_no') as string | null;
   // 翻单回顾
   const repeat_prev_order_no = formData.get('repeat_prev_order_no') as string | null;
   const repeat_issues = formData.get('repeat_issues') as string | null;
@@ -218,10 +221,6 @@ export async function createOrder(
       return { ok: false, error: `Cancel Date（${cancel_date}）不能早于出厂日期（${factory_date}）` };
     }
   }
-  // 提前提取 PO 号和内部订单号（重复检测需要用到）
-  const po_number = formData.get('customer_po_number') as string | null;
-  const internal_order_no = formData.get('internal_order_no') as string | null;
-
   // ── 价格审批闸门校验（CEO 强制规则） ──
   // 1) 如果业务员持有 price_approval_id，必须验证它有效（防止伪造 ID）
   // 2) 如果该客户+PO 有 24h 内的 pending 价格审批且未提供 ID，禁止创建（防止绕过审批）
@@ -593,9 +592,9 @@ export async function createOrder(
       revalidatePath('/orders');
       return {
         ok: true,
-        order: orderData,
-        pendingApproval: true,
-        message: `订单 ${orderData.order_no} 已提交，等待 CEO 审批。`,
+        orderId: orderData.id,
+        warning: 'pending_approval',
+        error: `订单 ${orderData.order_no} 已提交，等待 CEO 审批。`,
       };
     } catch (importErr: any) {
       console.warn('[createOrder] 导入模式处理失败:', importErr.message);
