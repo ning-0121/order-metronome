@@ -574,6 +574,8 @@ async function generateBusinessNarrative(
   milestones: Array<{ step_key: string; status: string; due_at: string | null }>,
   customerStats: { totalOrders: number; avgDelayDays: number; hasEnoughData: boolean },
   factoryStats: { totalOrders: number; avgDelayDays: number; hasEnoughData: boolean },
+  supabase: any,
+  orderId: string,
 ): Promise<NarrativePayload | null> {
   if (!AGENT_FLAGS.aiEnhance() || findings.length === 0) return null;
 
@@ -637,12 +639,12 @@ async function generateBusinessNarrative(
   let bizContext = '';
   try {
     const [finRes, confRes] = await Promise.all([
-      (ctx.supabase.from('order_financials') as any)
+      (supabase.from('order_financials') as any)
         .select('margin_pct, deposit_status, deposit_amount, balance_status, balance_amount, balance_due_date, payment_hold, allow_production, allow_shipment')
-        .eq('order_id', input.orderId).maybeSingle(),
-      (ctx.supabase.from('order_confirmations') as any)
+        .eq('order_id', orderId).maybeSingle(),
+      (supabase.from('order_confirmations') as any)
         .select('module, status')
-        .eq('order_id', input.orderId),
+        .eq('order_id', orderId),
     ]);
     const fin = finRes.data;
     const confs = confRes.data || [];
@@ -844,6 +846,8 @@ export const riskAssessmentSkill: SkillModule = {
       milestones,
       riskCtx.customer,
       riskCtx.factory,
+      ctx.supabase,
+      input.orderId,
     );
     const aiSuccess = narrative !== null;
 

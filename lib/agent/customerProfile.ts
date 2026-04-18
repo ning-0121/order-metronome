@@ -6,6 +6,10 @@
  * - 客户历史延期率多少？→ 高延期客户提前预警
  * - 客户订单规模？→ 大客户优先处理
  * - 客户付款习惯？→ 影响出货审批建议
+ *
+ * V1.2 更新：
+ * - avgPaymentDays 改为从 order_financials 真实数据计算
+ * - 新增付款行为标签：'准时付款' / '付款拖延' / '尾款难收'
  */
 
 export interface CustomerProfile {
@@ -15,14 +19,14 @@ export interface CustomerProfile {
   totalQuantity: number;
   avgOrderQuantity: number;
   // 时间行为
-  avgSampleConfirmDays: number;   // 产前样平均确认天数
-  avgPaymentDays: number;         // 平均付款天数
+  avgSampleConfirmDays: number;   // 产前样平均确认天数（从寄出到确认）
+  avgPaymentDays: number;         // 平均尾款到账天数（从出货到收款）
   // 风险指标
   delayRate: number;              // 延期申请率(%)
   overdueRate: number;            // 超期率(%)
   // 分类
   riskLevel: 'low' | 'medium' | 'high';
-  tags: string[];                 // 如：'慢确认', '大客户', '新客户', '准时付款'
+  tags: string[];                 // 如：'慢确认', '大客户', '新客户', '准时付款', '付款拖延'
 }
 
 /**
@@ -117,10 +121,59 @@ export async function buildCustomerProfile(
   }
   profile.overdueRate = completedCount > 0 ? Math.round((overdueCount / completedCount) * 100) : 0;
 
-  // 风险等级
-  if (profile.delayRate > 40 || profile.overdueRate > 30) profile.riskLevel = 'high';
-  else if (profile.delayRate > 20 || profile.overdueRate > 15) profile.riskLevel = 'medium';
-  else profile.riskLevel = 'low';
+  // ── 付款行为：从 order_financials + 出货里程碑反算实际付款天数 ──
+  try {
+    const { data: financials } = await supabase
+      .from('order_financials')
+      .select('order_id, balance_status, balance_received_at, balance_due_date')
+      .in('order_id', orderIds)
+      .eq('balance_status', 'received')
+      .not('balance_received_at', 'is', null);
+
+    if (financials && financials.length >= 2) {
+      // 用收款日 - 账期截止日 计算超/准时情况
+      const paymentDelays: number[] = [];
+      for (const fin of financials) {
+        if (fin.balance_received_at && fin.balance_due_date) {
+          const d = Math.ceil(
+            (new Date(fin.balance_received_at).getTime() - new Date(fin.balance_due_date).getTime()) / 86400000
+          );
+          paymentDelays.push(d); // 正值 = 逾期天数，负值 = 提前
+        }
+      }
+      if (paymentDelays.length >= 2) {
+        const avgDelay = paymentDelays.reduce((a, b) => a + b, 0) / paymentDelays.length;
+        profile.avgPaymentDays = Math.round(avgDelay); // 相对账期的偏移天数
+        if (avgDelay > 15) {
+          profile.tags.push('尾款难收');
+        } else if (avgDelay > 5) {
+          profile.tags.push('付款拖延');
+        } else if (avgDelay <= 0) {
+          profile.tags.push('准时付款');
+        }
+      }
+    } else {
+      // 数据不足：检查是否有逾期状态
+      const { count: overduePayCount } = await supabase
+        .from('order_financials')
+        .select('id', { count: 'exact', head: true })
+        .in('order_id', orderIds)
+        .eq('balance_status', 'overdue');
+      if ((overduePayCount || 0) > 0) {
+        profile.tags.push('尾款难收');
+      }
+    }
+  } catch {}
+
+  // 风险等级（综合延期率 + 超期率 + 付款行为）
+  const hasPaymentRisk = profile.tags.includes('尾款难收') || profile.tags.includes('付款拖延');
+  if (profile.delayRate > 40 || profile.overdueRate > 30 || profile.tags.includes('尾款难收')) {
+    profile.riskLevel = 'high';
+  } else if (profile.delayRate > 20 || profile.overdueRate > 15 || hasPaymentRisk) {
+    profile.riskLevel = 'medium';
+  } else {
+    profile.riskLevel = 'low';
+  }
 
   return profile;
 }
