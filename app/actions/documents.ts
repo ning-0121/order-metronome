@@ -163,26 +163,97 @@ export async function aiGenerateDocument(
     .select('*').eq('id', orderId).single();
   if (!order) return { error: '订单不存在' };
 
-  // 构建上下文
-  const orderContext = `订单号:${order.order_no}, 客户:${order.customer_name}, 工厂:${order.factory_name || ''}, PO号:${order.po_number || ''}, 数量:${order.quantity}件, 贸易条款:${order.incoterm}, 出厂日期:${order.factory_date || ''}, ETD:${order.etd || ''}, 订单类型:${order.order_type}`;
+  // ── 尝试读取 PO 提取缓存（一次提取，多次复用）──────────────────────────
+  let poData: any = null;
+  try {
+    const { getOrderExtraction } = await import('@/app/actions/po-extract');
+    poData = await getOrderExtraction(orderId, 'customer_po');
+  } catch {}
+
+  const today = new Date().toISOString().slice(0, 10);
+  const currency = poData?.header?.currency || 'USD';
+  const poNumber = poData?.header?.po_number || order.po_number || '';
+
+  // 从 PO 提取数据构建行项目（如有）；否则用订单基本信息生成占位
+  const lineItemsFromPO = poData?.line_items?.map((item: any, idx: number) => ({
+    line_no: idx + 1,
+    style_no: item.style_no || order.style_no || '',
+    description: item.description || '',
+    color: item.color || '',
+    sizes: item.sizes || {},
+    quantity: item.total_quantity || order.quantity,
+    unit_price: 0,   // 价格由业务手动填写，AI 不填
+    amount: 0,
+  })) || [{
+    line_no: 1,
+    style_no: order.style_no || '',
+    description: order.customer_name || '',
+    color: '',
+    sizes: {},
+    quantity: order.quantity,
+    unit_price: 0,
+    amount: 0,
+  }];
+
+  const packagingInfo = poData?.packaging_requirements
+    ? Object.entries(poData.packaging_requirements)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('\n')
+    : '';
+  const productionNotes = poData?.production_notes?.join('\n') || '';
+  const qualityReqs = poData?.quality_requirements?.join('\n') || '';
 
   const prompts: Record<string, string> = {
-    pi: `根据以下订单信息生成 PI (Proforma Invoice) 草稿JSON。
-公司信息: ${COMPANY_INFO.name_en}, ${COMPANY_INFO.address}
-${orderContext}
-返回JSON格式: {"pi_no":"自动","date":"今天","buyer":"客户名","items":[{"style_no":"","description":"","quantity":数量,"unit_price":0,"amount":0}],"subtotal":0,"freight":0,"total":0,"currency":"USD","payment_terms":"","delivery_terms":"贸易条款","port_of_loading":"","port_of_destination":"","remarks":""}`,
+    pi: `根据以下信息生成标准 Proforma Invoice（PI）草稿，严格遵循正规外贸单据格式。
+以下数据均来自系统，不要修改，直接填入：
+- 卖方（Seller）: ${COMPANY_INFO.name_en}, ${COMPANY_INFO.address}
+- 买方（Buyer）: ${order.customer_name}
+- PI编号（PI No.）: PI-${order.order_no}
+- 日期（Date）: ${today}
+- PO号: ${poNumber}
+- 贸易条款（Trade Terms）: ${order.incoterm}
+- 装货港（Port of Loading）: 广州, CHINA
+- 目的港（Port of Destination）: 根据incoterm和客户位置推断，如不确定填空
+- 付款条款（Payment Terms）: T/T 30% DEPOSIT, BALANCE BEFORE SHIPMENT（可留空由业务修改）
+- 货币（Currency）: ${currency}
+- 出运日期（Shipment Date）: ${order.etd || order.factory_date || ''}
+- 行项目：${JSON.stringify(lineItemsFromPO)}
 
-    production_sheet: `根据以下订单信息生成生产单草稿JSON。
-${orderContext}
-返回JSON: {"po_no":"PO号","style_no":"","customer":"客户","factory":"工厂","quantity":数量,"delivery_date":"出厂日期","fabric":"","color_breakdown":"","size_breakdown":"","craft_requirements":"","packing_requirements":"","trims":"","special_notes":""}`,
+返回JSON（unit_price和amount填0，由业务核对后填写）：
+{"pi_no":"PI-${order.order_no}","date":"${today}","seller":{"name":"${COMPANY_INFO.name_en}","address":"${COMPANY_INFO.address}"},"buyer":"${order.customer_name}","po_no":"${poNumber}","currency":"${currency}","trade_terms":"${order.incoterm}","payment_terms":"T/T 30% DEPOSIT, BALANCE BEFORE SHIPMENT","port_of_loading":"GUANGZHOU, CHINA","port_of_destination":"","shipment_date":"${order.etd || ''}","items":${JSON.stringify(lineItemsFromPO.map(i => ({...i, unit_price:0, amount:0})))},"subtotal":0,"freight":0,"total":0,"bank_info":{"bank_name":"","account_no":"","swift_code":""},"remarks":""}`,
 
-    packing_list: `根据以下订单信息生成装箱单草稿JSON。
-${orderContext}
-返回JSON: {"pl_no":"自动","items":[{"carton_no":"1-","style_no":"","color":"","size_breakdown":"","qty_per_carton":0,"carton_count":0,"total_qty":0,"nw_per_carton":0,"gw_per_carton":0,"carton_size":"","cbm":0}],"total_cartons":0,"total_qty":数量,"total_nw":0,"total_gw":0,"total_cbm":0}`,
+    production_sheet: `根据以下信息生成完整生产单草稿JSON，包含所有必要字段。
+订单信息：
+- 订单号: ${order.order_no} | 客户: ${order.customer_name} | 工厂: ${order.factory_name || ''}
+- PO号: ${poNumber} | 数量: ${order.quantity}件 | 出厂日: ${order.factory_date || ''}
+- 贸易条款: ${order.incoterm} | 订单类型: ${order.order_type}
+PO行项目: ${JSON.stringify(lineItemsFromPO)}
+包装要求（来自PO，如有）: ${packagingInfo}
+生产注意事项（来自PO，如有）: ${productionNotes}
+品质要求（来自PO，如有）: ${qualityReqs}
 
-    ci: `根据以下订单信息生成 CI (Commercial Invoice) 草稿JSON。
-${orderContext}
-返回JSON: {"ci_no":"自动","date":"今天","items":[{"style_no":"","description":"","quantity":数量,"unit_price":0,"amount":0}],"total_amount":0,"currency":"USD","port_of_loading":"","port_of_destination":"","vessel_voyage":"","bl_no":"","hs_code":"","remarks":""}`,
+返回JSON：{"po_no":"${poNumber}","internal_no":"${order.order_no}","customer":"${order.customer_name}","factory":"${order.factory_name || ''}","quantity":${order.quantity},"delivery_date":"${order.factory_date || ''}","etd":"${order.etd || ''}","line_items":${JSON.stringify(lineItemsFromPO)},"fabric_requirements":"","color_breakdown":"${lineItemsFromPO.map((i:any)=>i.color).filter(Boolean).join(' / ')}","size_breakdown":${JSON.stringify(lineItemsFromPO.map((i:any) => ({style: i.style_no, color: i.color, sizes: i.sizes})))},"craft_requirements":"","packing_requirements":"${packagingInfo.replace(/"/g, '\\"')}","production_notes":"${productionNotes.replace(/"/g, '\\"')}","quality_requirements":"${qualityReqs.replace(/"/g, '\\"')}","trims":"","special_notes":""}`,
+
+    packing_list: `根据以下信息生成装箱单草稿JSON，装箱方案由业务根据实际装箱情况填写。
+- 订单号: ${order.order_no} | 客户: ${order.customer_name} | 总件数: ${order.quantity}件
+- 出运日期: ${order.etd || ''} | 贸易条款: ${order.incoterm}
+- 行项目（颜色/尺码参考）: ${JSON.stringify(lineItemsFromPO)}
+- 包装规格（来自PO）: ${packagingInfo}
+
+返回JSON（carton_count、sizes等数字暂填0或空，业务完成装箱后填写）：{"pl_no":"PL-${order.order_no}","date":"${today}","customer":"${order.customer_name}","po_no":"${poNumber}","items":${JSON.stringify(lineItemsFromPO.map((i:any,idx:number)=>({line_no:idx+1,style_no:i.style_no,color:i.color,size_breakdown:i.sizes,qty_per_carton:0,carton_count:0,total_qty:i.quantity,carton_size:"",nw_per_carton:0,gw_per_carton:0,cbm:0})))},"total_cartons":0,"total_qty":${order.quantity},"total_nw":0,"total_gw":0,"total_cbm":0,"marks":"CARTON NO. 1-UP\\n${order.customer_name}\\n${poNumber}\\nMADE IN CHINA","remarks":""}`,
+
+    ci: `根据以下信息生成标准 Commercial Invoice（CI）草稿，所有价格字段填0由业务在审批时填写。
+- 卖方: ${COMPANY_INFO.name_en}, ${COMPANY_INFO.address}
+- 买方: ${order.customer_name}
+- CI编号: CI-${order.order_no}
+- 日期: ${today}
+- PO号: ${poNumber}
+- 贸易条款: ${order.incoterm}
+- 货币: ${currency}
+- 行项目: ${JSON.stringify(lineItemsFromPO)}
+
+返回JSON：{"ci_no":"CI-${order.order_no}","date":"${today}","seller":{"name":"${COMPANY_INFO.name_en}","address":"${COMPANY_INFO.address}"},"buyer":"${order.customer_name}","po_no":"${poNumber}","currency":"${currency}","trade_terms":"${order.incoterm}","port_of_loading":"GUANGZHOU, CHINA","port_of_destination":"","vessel_voyage":"","bl_no":"","items":${JSON.stringify(lineItemsFromPO.map((i:any)=>({...i,unit_price:0,amount:0})))},"total_qty":${order.quantity},"total_amount":0,"hs_code":"","country_of_origin":"CHINA","remarks":""}`,
   };
 
   const prompt = prompts[documentType];
@@ -192,8 +263,14 @@ ${orderContext}
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: '你是外贸单据专家。根据订单信息生成单据草稿JSON。只返回JSON，不要其他内容。',
+      max_tokens: 2000,
+      system: `你是外贸单据专家，擅长生成标准、规范的外贸单据。
+规则：
+1. 只返回 JSON，不加 markdown 包装
+2. 价格/金额字段统一填 0（由业务审核时填写）
+3. 字段值使用系统提供的真实数据，不编造
+4. 格式要规范，符合国际贸易惯例
+5. 中文注意事项字段保留原文，英文字段用英文`,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -203,6 +280,15 @@ ${orderContext}
 
     let parsed: any;
     try { parsed = JSON.parse(jsonStr); } catch { return { error: 'AI 返回格式异常，请重试' }; }
+
+    // 追加 PO 提取元数据到生成结果（用于审核页面展示数据来源）
+    if (poData) {
+      parsed._po_source = {
+        po_number: poData.header?.po_number,
+        confidence: poData.extraction_meta?.confidence,
+        note: 'LINE ITEMS PRE-FILLED FROM PO EXTRACTION — PLEASE VERIFY UNIT PRICES BEFORE APPROVING',
+      };
+    }
 
     // 获取版本号
     const { data: existing } = await (supabase.from('order_documents') as any)
@@ -216,6 +302,16 @@ ${orderContext}
     const prefix = DOCUMENT_TYPES[documentType]?.prefix || 'DOC';
     const docNo = `${prefix}-${order.order_no}-V${nextVersion}`;
 
+    // 查找最新 extraction_id（用于记录数据来源）
+    let extractionId: string | null = null;
+    try {
+      const { data: ext } = await (supabase.from('document_extractions') as any)
+        .select('id').eq('order_id', orderId)
+        .in('review_status', ['confirmed', 'modified', 'pending_review'])
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      extractionId = ext?.id || null;
+    } catch {}
+
     const { data: doc, error } = await (supabase.from('order_documents') as any)
       .insert({
         order_id: orderId,
@@ -225,6 +321,8 @@ ${orderContext}
         status: 'draft',
         document_no: docNo,
         editable_json: parsed,
+        extraction_id: extractionId,
+        template_version: 'v2',
         created_by: user.id,
         is_current: true,
       })
@@ -233,7 +331,19 @@ ${orderContext}
 
     if (error) return { error: error.message };
 
-    await logDocAction(supabase, doc.id, orderId, 'created', user.id, { source: 'ai_generated', documentType });
+    // 标记 PO 提取已用于 PI/CI 生成
+    if (extractionId) {
+      await (supabase.from('document_extractions') as any)
+        .update({ used_for_pi_ci: true })
+        .eq('id', extractionId);
+    }
+
+    await logDocAction(supabase, doc.id, orderId, 'created', user.id, {
+      source: 'ai_generated',
+      documentType,
+      po_data_used: !!poData,
+      template_version: 'v2',
+    });
 
     revalidatePath(`/orders/${orderId}`);
     return { data: doc };

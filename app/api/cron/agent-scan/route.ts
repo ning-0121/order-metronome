@@ -114,7 +114,7 @@ export async function POST(req: Request) {
     // 2. 获取执行中订单（限制200单防OOM，按创建时间倒序优先处理新单）
     const { data: orders } = await supabase
       .from('orders')
-      .select('id, order_no, customer_name, factory_name, quantity, lifecycle_status, incoterm, order_type, factory_date, is_new_customer, is_new_factory, special_tags')
+      .select('id, order_no, customer_name, factory_name, quantity, lifecycle_status, incoterm, order_type, factory_date, is_new_customer, is_new_factory, special_tags, ai_scan_date, owner_user_id')
       .in('lifecycle_status', ['执行中', 'running', 'active', '已生效'])
       .order('created_at', { ascending: false })
       .limit(200);
@@ -185,7 +185,17 @@ export async function POST(req: Request) {
       if (suggestions.length === 0) continue;
 
       // Phase 2: AI 增强
-      const hasHighSeverity = AGENT_FLAGS.aiEnhance() && suggestions.some(s => s.severity === 'high');
+      // ── 每日缓存机制 ──────────────────────────────────────────────────
+      // 规则引擎每小时运行（dedup 防重复）；AI 增强每单每天最多 1 次，
+      // 避免对同一订单重复调用 Claude，降低 ~20x token 消耗。
+      // 判断依据：orders.ai_scan_date（新字段）是否等于今日日期
+      const todayDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const alreadyAIScannedToday = order.ai_scan_date === todayDate;
+
+      const hasHighSeverity = AGENT_FLAGS.aiEnhance()
+        && !alreadyAIScannedToday          // ← 今天已跑过 AI 增强则跳过
+        && suggestions.some(s => s.severity === 'high');
+
       if (hasHighSeverity) {
         try {
           const memory = await getEnhancementContext(supabase, order.id, order.customer_name, order.factory_name);
@@ -223,6 +233,14 @@ export async function POST(req: Request) {
             orderNo: order.order_no, customerName: order.customer_name,
             factoryName: order.factory_name, quantity: order.quantity,
           }, milestonesCtx, memory);
+
+          // ── 写回 AI 扫描日期（下次同日跳过 AI 增强） ──
+          await supabase.from('orders')
+            .update({
+              ai_scan_date: todayDate,
+              ai_scan_suggestion_count: suggestions.length,
+            })
+            .eq('id', order.id);
         } catch { /* AI失败不影响，用规则引擎原始建议 */ }
       }
 
