@@ -13,6 +13,9 @@ import { SmartInsightsPanel } from '@/components/SmartInsightsPanel';
 import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
 import Link from 'next/link';
 import { isDoneStatus, isActiveStatus } from '@/lib/domain/types';
+import { getActiveOrderTemplates } from '@/app/actions/order-templates';
+import type { OrderTemplate } from '@/app/actions/order-templates';
+import { FileNameCheck } from '@/components/FileNameCheck';
 
 /** 客户端直传文件到 Supabase Storage（绕过 Vercel 4.5MB 限制） */
 async function uploadFilesToStorage(
@@ -104,6 +107,67 @@ function NewOrderWizard() {
   const [poAutoFilled, setPoAutoFilled] = useState(false);
   const isSampleOrder = searchParams.get('type') === 'sample';
   const [orderType, setOrderType] = useState('');
+
+  // 模板相关状态
+  const [templates, setTemplates] = useState<OrderTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  // 追踪文件选择（用于命名检查）
+  const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
+
+  // 加载模板列表
+  useEffect(() => {
+    getActiveOrderTemplates().then(res => {
+      if (res.data) setTemplates(res.data);
+    });
+  }, []);
+
+  /** 套用模板到表单 */
+  function applyTemplate(templateId: string) {
+    const tpl = templates.find(t => t.id === templateId);
+    if (!tpl) return;
+    const form = document.querySelector('form');
+    if (!form) return;
+
+    const setField = (name: string, value: string) => {
+      const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null;
+      if (!el || !value) return;
+      const nativeSet = Object.getOwnPropertyDescriptor(
+        el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value'
+      )?.set;
+      nativeSet?.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    if (tpl.incoterm) setField('incoterm', tpl.incoterm);
+    if (tpl.order_type) setField('order_type', tpl.order_type);
+    if (tpl.sample_phase) setField('sample_phase', tpl.sample_phase);
+    if (tpl.sample_confirm_days_override) setField('sample_confirm_days_override', String(tpl.sample_confirm_days_override));
+    if (tpl.default_notes) setField('notes', tpl.default_notes);
+
+    // delivery_type 是由 hidden input + select 组成，通过 React state
+    if (tpl.incoterm === 'DDP') {
+      setIncoterm('DDP');
+      setDeliveryType('export');
+    } else if (tpl.incoterm) {
+      setIncoterm(tpl.incoterm);
+      setDeliveryType(tpl.delivery_type || 'domestic');
+    }
+    if (tpl.order_type) setOrderType(tpl.order_type);
+    if (tpl.shipping_sample_required !== undefined) setShippingSampleRequired(tpl.shipping_sample_required);
+
+    // 风险标记：勾选模板里指定的 checkbox
+    for (const flag of (tpl.risk_flags || [])) {
+      const cb = form.querySelector(`input[name="${flag}"]`) as HTMLInputElement | null;
+      if (cb && !cb.checked) {
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+
+    setSelectedTemplateId(templateId);
+    alert(`✅ 已套用模板「${tpl.name}」，请检查表单并补填缺少的字段`);
+  }
 
   // PO 上传后自动 AI 解析并填表
   async function handlePOFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -540,6 +604,41 @@ function NewOrderWizard() {
           <h2 className="text-xl font-bold text-gray-900 mb-1">{isSampleOrder ? '新建样品单' : '新建订单'}</h2>
           <p className="text-sm text-gray-500 mb-6">以客户 PO 为单位录入，系统将自动生成执行节拍</p>
 
+          {/* 模板选择器 */}
+          {templates.length > 0 && (
+            <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold text-purple-800">📋 使用订单模板</span>
+                <span className="text-xs text-purple-500">（管理员预设的常用参数）</span>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={selectedTemplateId}
+                  onChange={e => {
+                    setSelectedTemplateId(e.target.value);
+                  }}
+                  className="flex-1 rounded-lg border border-purple-300 bg-white px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+                >
+                  <option value="">— 选择模板（可选）—</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}{t.description ? `  ${t.description}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!selectedTemplateId}
+                  onClick={() => selectedTemplateId && applyTemplate(selectedTemplateId)}
+                  className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  套用
+                </button>
+              </div>
+              <p className="text-xs text-purple-500 mt-1">套用后会自动填入贸易条款、样品阶段、风险标记等字段，可手动修改</p>
+            </div>
+          )}
+
           {/* 系统单号 */}
           <div className="mb-6 p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center gap-3">
             <span className="text-sm font-medium text-indigo-700">系统单号：</span>
@@ -922,33 +1021,50 @@ function NewOrderWizard() {
                 文件上传
               </h3>
               <div className="space-y-3">
-                {[
-                  { name: 'customer_po_file', label: '客户 PO（可多个）', required: true, multiple: true, onPOChange: handlePOFileChange },
-                  { name: 'internal_quote_file', label: '内部成本核算单', required: true },
-                  { name: 'customer_quote_file', label: '客户最终报价单', required: true },
-                  { name: 'production_order_file', label: '生产制单', required: false, hint: '财务审核后2日内上传' },
-                  { name: 'trims_sheet_file', label: '辅料表', required: false },
-                  { name: 'packing_requirement_file', label: '装箱要求', required: false },
-                  { name: 'tech_pack_file', label: '工艺单 Tech Pack', required: false },
-                ].map(({ name, label, required, hint, multiple, onPOChange }: any) => (
-                  <div key={name} className="flex items-center gap-4 p-3 rounded-lg border border-gray-200">
-                    <div className="w-44 flex-shrink-0">
-                      <span className="text-sm font-medium text-gray-700">{label}</span>
-                      {required ? (
-                        <span className="text-red-500 ml-1 text-xs">必传</span>
-                      ) : (
-                        <span className="text-gray-400 ml-1 text-xs">可选</span>
-                      )}
-                      {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
-                      {name === 'customer_po_file' && poParsing && (
-                        <p className="text-xs text-indigo-600 mt-0.5 animate-pulse">AI 识别中...</p>
-                      )}
+                {([
+                  { name: 'customer_po_file',        label: '客户 PO（可多个）',  required: true,  multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
+                  { name: 'internal_quote_file',     label: '内部成本核算单',     required: true,  stepKey: 'finance_approval' },
+                  { name: 'customer_quote_file',     label: '客户最终报价单',     required: true,  stepKey: 'finance_approval' },
+                  { name: 'production_order_file',   label: '生产制单',          required: false, stepKey: 'production_order_upload', hint: '财务审核后2日内上传' },
+                  { name: 'trims_sheet_file',        label: '辅料表',            required: false, stepKey: 'bulk_materials_confirmed' },
+                  { name: 'packing_requirement_file',label: '装箱要求',          required: false, stepKey: 'packing_method_confirmed' },
+                  { name: 'tech_pack_file',          label: '工艺单 Tech Pack',  required: false, stepKey: 'order_docs_bom_complete' },
+                ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
+                  .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (
+                  <div key={name} className="rounded-lg border border-gray-200 p-3">
+                    <div className="flex items-center gap-4">
+                      <div className="w-44 flex-shrink-0">
+                        <span className="text-sm font-medium text-gray-700">{label}</span>
+                        {required ? (
+                          <span className="text-red-500 ml-1 text-xs">必传</span>
+                        ) : (
+                          <span className="text-gray-400 ml-1 text-xs">可选</span>
+                        )}
+                        {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
+                        {name === 'customer_po_file' && poParsing && (
+                          <p className="text-xs text-indigo-600 mt-0.5 animate-pulse">AI 识别中...</p>
+                        )}
+                      </div>
+                      <input type="file" name={name}
+                        multiple={!!multiple}
+                        accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
+                        onChange={e => {
+                          // 记录文件用于命名检查
+                          const file = e.target.files?.[0] || null;
+                          setSelectedFiles(prev => ({ ...prev, [name]: file }));
+                          onPOChange?.(e);
+                        }}
+                        className="flex-1 text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
                     </div>
-                    <input type="file" name={name}
-                      multiple={!!multiple}
-                      accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.jpeg,.png"
-                      onChange={onPOChange || undefined}
-                      className="flex-1 text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
+                    {/* 命名检查 — 仅显示提示，不阻塞（此处不支持直接重命名，上传时保留原名） */}
+                    {selectedFiles[name] && (
+                      <FileNameCheck
+                        file={selectedFiles[name]!}
+                        stepKey={stepKey}
+                        orderNo={preGeneratedOrderNo}
+                        compact={false}
+                      />
+                    )}
                   </div>
                 ))}
               </div>

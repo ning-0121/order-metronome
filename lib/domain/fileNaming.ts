@@ -185,6 +185,36 @@ export const FILE_NAMING_BY_DOC_TYPE: Record<
   ci:               { label: 'CI',          example: 'QM-20260415-001_CI.pdf' },
 };
 
+/**
+ * 文件 fileType 值（order_attachments.file_type）→ 节点 stepKey 映射
+ * 用于「新建订单」等没有明确 stepKey 的上传场景回查命名标准
+ */
+export const STEP_KEY_BY_FILE_TYPE: Record<string, string> = {
+  customer_po:          'po_confirmed',
+  finance_approval:     'finance_approval',
+  internal_quote:       'finance_approval',
+  customer_quote:       'finance_approval',
+  production_order:     'production_order_upload',
+  trims_sheet:          'bulk_materials_confirmed',
+  packing_requirement:  'packing_method_confirmed',
+  bom:                  'order_docs_bom_complete',
+  tech_pack:            'order_docs_bom_complete',
+  procurement_order:    'procurement_order_placed',
+  materials_inspection: 'materials_received_inspected',
+  qc_report:            'mid_qc_check',
+  packing_requirement_doc: 'packing_method_confirmed',
+  booking_confirm:      'booking_done',
+  bill_of_lading:       'shipment_execute',
+  customs_doc:          'customs_export',
+  payment_receipt:      'payment_received',
+};
+
+/** 从 fileType 反查 stepKey，找不到返回 null */
+export function getStepKeyForFileType(fileType: string | null | undefined): string | null {
+  if (!fileType) return null;
+  return STEP_KEY_BY_FILE_TYPE[fileType] || null;
+}
+
 /** 通用命名校验入口：可传 stepKey 或 docType */
 export function validateFileNameForLabel(
   fileName: string,

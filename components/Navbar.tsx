@@ -62,6 +62,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/admin/mail-monitor', label: '今日邮件晨报', icon: '📧' },
         { href: '/admin/price-approvals', label: '价格审批', icon: '💰' },
         { href: '/admin/system-health', label: '系统守护', icon: '🛡' },
+        { href: '/admin/order-templates', label: '订单模板', icon: '📋' },
         { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
         { href: '/guide', label: '操作说明', icon: '📖' },
       ]
