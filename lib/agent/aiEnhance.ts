@@ -14,6 +14,7 @@
  */
 
 import type { AgentSuggestion } from './types';
+import { callClaude } from './anthropicClient';
 
 interface OrderContext {
   orderNo: string;
@@ -64,9 +65,6 @@ export async function enhanceSuggestionsWithAI(
   if (highSuggestions.length === 0) return baseSuggestions;
 
   try {
-    const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    const client = new Anthropic();
-
     // 构建上下文
     const overdueMilestones = milestones.filter(m => m.daysOverdue && m.daysOverdue > 0);
     const contextParts = [
@@ -90,15 +88,12 @@ export async function enhanceSuggestionsWithAI(
 
     const { buildIndustryPrompt } = await import('./industryKnowledge');
 
-    const prompt = `你是外贸服装订单管理 Agent，负责分析订单风险并给出可执行的建议。
+    // ── Prompt Cache 分层策略 ──────────────────────────────────
+    // system（静态）：外贸行业知识 + Agent 角色定义 → 加 cache_control，5分钟内重复调用只收 10%
+    // user（动态）：订单上下文 + 当前建议 → 每次不同，不缓存
+    const systemPrompt = `你是外贸服装订单管理 Agent，负责分析订单风险并给出可执行的建议。
 
 ${buildIndustryPrompt()}
-
-## 订单上下文
-${contextParts}
-
-## 当前建议
-${suggestionsText}
 
 ## 你的任务
 1. 优化每条建议，使其更精准、更可执行
@@ -112,16 +107,17 @@ ${suggestionsText}
 如有额外洞察：{"extra_insight":"..."}
 只返回JSON。`;
 
-    const response = await client.messages.create(
-      {
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 800,
-        messages: [{ role: 'user', content: prompt }],
-      },
-      { signal: AbortSignal.timeout(30_000) }, // P1 修复：30s 超时防止拖死 cron
-    );
+    const userPrompt = `## 订单上下文\n${contextParts}\n\n## 当前建议\n${suggestionsText}`;
 
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    const raw = await callClaude({
+      scene: 'aiEnhance',
+      system: systemPrompt,    // ← 静态部分走 cache
+      prompt: userPrompt,      // ← 动态部分每次不同
+      maxTokens: 800,
+      cacheSystem: true,       // ← 开启 ephemeral cache
+      timeoutMs: 30_000,
+    });
+    const text = raw?.text ?? '';
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       const enhanced = JSON.parse(jsonMatch[0]);

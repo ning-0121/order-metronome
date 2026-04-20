@@ -257,16 +257,21 @@ export async function askAgent(
       context.push(`系统共 ${total} 个订单，${active} 个进行中。`);
     }
 
-    // ═══ 调用 Claude（多轮对话） ═══
+    // ═══ 调用 Claude（多轮对话 + Prompt Cache） ═══
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const client = new Anthropic();
 
     const { buildIndustryPrompt } = await import('@/lib/agent/industryKnowledge');
 
-    // 角色专属提示
+    // 角色专属提示（动态，按用户不同）
     const rolePromptExtra = getRolePrompt(primaryRole);
 
-    const systemPrompt = `你是「绮陌服饰智能系统」的 AI 业务助手，名字叫"小绮"。
+    // ── Prompt Cache 分层策略 ────────────────────────────────────
+    // 静态层（可缓存）：小绮角色定义 + 行业知识 + 回复规则
+    //   → 这部分所有用户共用，5 分钟内命中 cache 只收 10%
+    // 动态层（不缓存）：用户角色信息 → 追加到第一条 user message
+    //   → 每个用户不同，不值得缓存
+    const staticSystemPrompt = `你是「绮陌服饰智能系统」的 AI 业务助手，名字叫"小绮"。
 
 **你的身份**：10年外贸服装行业专家 + 公司内部知识专家。
 
@@ -285,11 +290,21 @@ export async function askAgent(
 - 回复要有行业深度，让用户感受到专业性
 - 回复要简明，重要结论放最前面
 
-${rolePromptExtra}
+${buildIndustryPrompt()}`;
 
-${buildIndustryPrompt()}
-
-当前用户：${userName}，角色：${userRoles.join('/')}`;
+    // system 用数组格式，对静态部分加 cache_control
+    const systemBlocks: any[] = [
+      {
+        type: 'text',
+        text: staticSystemPrompt,
+        cache_control: { type: 'ephemeral' }, // ← Prompt Cache 核心
+      },
+      // 动态部分（角色 + 用户名）紧跟在后，不缓存
+      {
+        type: 'text',
+        text: `${rolePromptExtra ? rolePromptExtra + '\n\n' : ''}当前用户：${userName}，角色：${userRoles.join('/')}`,
+      },
+    ];
 
     // 构建多轮对话消息
     const recentHistory = (history || []).slice(-8); // 最近 8 条
@@ -313,9 +328,15 @@ ${buildIndustryPrompt()}
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1600,
-      system: systemPrompt,
+      system: systemBlocks,
       messages: claudeMessages,
     });
+
+    // 打印 cache 命中日志
+    const usage = response.usage as any;
+    if (usage?.cache_read_input_tokens > 0) {
+      console.log(`[askAgent] 💰 cache HIT ${usage.cache_read_input_tokens} tokens`);
+    }
 
     const answer = response.content[0].type === 'text' ? response.content[0].text : '无法回答';
     return { answer };
