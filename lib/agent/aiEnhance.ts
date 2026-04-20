@@ -11,6 +11,11 @@
  * - AI 失败时 graceful fallback 到规则引擎原始建议
  * - 24小时缓存避免重复调用
  * - 每次调用 <$0.02
+ *
+ * ══ 2026-04-19 Batch API 优化 ══
+ * 新增 buildEnhancementPrompts / applyEnhancementText，
+ * 供 agent-scan 批量提交 Anthropic Batch，节省 50% 费用。
+ * enhanceSuggestionsWithAI 保留用于实时（非 Batch）场景。
  */
 
 import type { AgentSuggestion } from './types';
@@ -47,51 +52,55 @@ interface MemoryContext {
   unifiedContext?: string;  // 统一知识图谱上下文
 }
 
+// ── 内部工具函数 ──────────────────────────────────────────────
+
+function buildContextParts(
+  order: OrderContext,
+  milestones: MilestoneContext[],
+  memory: MemoryContext,
+): string {
+  const overdueMilestones = milestones.filter(m => m.daysOverdue && m.daysOverdue > 0);
+  return [
+    `订单 ${order.orderNo}，客户：${order.customerName}，工厂：${order.factoryName || '未指定'}`,
+    `数量：${order.quantity || '?'}件，条款：${order.incoterm}，类型：${order.orderType}`,
+    order.isNewCustomer ? '⚠ 新客户首单' : '',
+    order.isNewFactory ? '⚠ 新工厂首单' : '',
+    order.factoryDate ? `出厂日期：${order.factoryDate}` : '',
+    overdueMilestones.length > 0 ? `超期节点：${overdueMilestones.map(m => `${m.name}(超${m.daysOverdue}天)`).join('、')}` : '',
+    memory.customerMemories.length > 0 ? `客户历史：${memory.customerMemories.slice(0, 3).join('；')}` : '',
+    memory.historicalOnTimeRate !== undefined ? `工厂历史准时率：${memory.historicalOnTimeRate}%` : '',
+    memory.factoryCapacity ? `工厂月产能：${memory.factoryCapacity}件` : '',
+    memory.historicalPattern || '',
+    memory.agentFeedback || '',
+    memory.unifiedContext || '',
+  ].filter(Boolean).join('\n');
+}
+
+// ── 公开 API ──────────────────────────────────────────────────
+
 /**
- * 用 Claude 增强 Agent 建议
- * 输入：规则引擎生成的基础建议 + 订单上下文 + 客户/工厂记忆
- * 输出：增强后的建议（title/description/reason 更具体）
+ * 构建 AI 增强所需的 system / userPrompt
+ * 不调用 Claude，供 Batch API 批量提交使用
+ * 返回 null 表示没有需要增强的 high 建议
  */
-export async function enhanceSuggestionsWithAI(
+export async function buildEnhancementPrompts(
   baseSuggestions: AgentSuggestion[],
   order: OrderContext,
   milestones: MilestoneContext[],
   memory: MemoryContext,
-): Promise<AgentSuggestion[]> {
-  if (baseSuggestions.length === 0) return baseSuggestions;
-
-  // 只对 high severity 的建议做 AI 增强（控制成本）
+): Promise<{ system: string; userPrompt: string } | null> {
   const highSuggestions = baseSuggestions.filter(s => s.severity === 'high');
-  if (highSuggestions.length === 0) return baseSuggestions;
+  if (highSuggestions.length === 0) return null;
 
-  try {
-    // 构建上下文
-    const overdueMilestones = milestones.filter(m => m.daysOverdue && m.daysOverdue > 0);
-    const contextParts = [
-      `订单 ${order.orderNo}，客户：${order.customerName}，工厂：${order.factoryName || '未指定'}`,
-      `数量：${order.quantity || '?'}件，条款：${order.incoterm}，类型：${order.orderType}`,
-      order.isNewCustomer ? '⚠ 新客户首单' : '',
-      order.isNewFactory ? '⚠ 新工厂首单' : '',
-      order.factoryDate ? `出厂日期：${order.factoryDate}` : '',
-      overdueMilestones.length > 0 ? `超期节点：${overdueMilestones.map(m => `${m.name}(超${m.daysOverdue}天)`).join('、')}` : '',
-      memory.customerMemories.length > 0 ? `客户历史：${memory.customerMemories.slice(0, 3).join('；')}` : '',
-      memory.historicalOnTimeRate !== undefined ? `工厂历史准时率：${memory.historicalOnTimeRate}%` : '',
-      memory.factoryCapacity ? `工厂月产能：${memory.factoryCapacity}件` : '',
-      memory.historicalPattern || '',
-      memory.agentFeedback || '',
-      memory.unifiedContext || '',
-    ].filter(Boolean).join('\n');
+  const contextParts = buildContextParts(order, milestones, memory);
+  const suggestionsText = highSuggestions.map((s, i) =>
+    `建议${i + 1}[${s.actionType}]: ${s.title}\n描述: ${s.description}\n推理: ${s.reason}`
+  ).join('\n\n');
 
-    const suggestionsText = highSuggestions.map((s, i) =>
-      `建议${i + 1}[${s.actionType}]: ${s.title}\n描述: ${s.description}\n推理: ${s.reason}`
-    ).join('\n\n');
+  const { buildIndustryPrompt } = await import('./industryKnowledge');
 
-    const { buildIndustryPrompt } = await import('./industryKnowledge');
-
-    // ── Prompt Cache 分层策略 ──────────────────────────────────
-    // system（静态）：外贸行业知识 + Agent 角色定义 → 加 cache_control，5分钟内重复调用只收 10%
-    // user（动态）：订单上下文 + 当前建议 → 每次不同，不缓存
-    const systemPrompt = `你是外贸服装订单管理 Agent，负责分析订单风险并给出可执行的建议。
+  // system（静态）：外贸行业知识 + Agent 角色定义 → 走 Prompt Cache / Batch 共享
+  const system = `你是外贸服装订单管理 Agent，负责分析订单风险并给出可执行的建议。
 
 ${buildIndustryPrompt()}
 
@@ -107,53 +116,83 @@ ${buildIndustryPrompt()}
 如有额外洞察：{"extra_insight":"..."}
 只返回JSON。`;
 
-    const userPrompt = `## 订单上下文\n${contextParts}\n\n## 当前建议\n${suggestionsText}`;
+  const userPrompt = `## 订单上下文\n${contextParts}\n\n## 当前建议\n${suggestionsText}`;
+
+  return { system, userPrompt };
+}
+
+/**
+ * 将 Claude 返回的增强文本解析并合并回原始建议
+ * 供实时调用（enhanceSuggestionsWithAI）和 Batch 结果回填共用
+ */
+export function applyEnhancementText(
+  baseSuggestions: AgentSuggestion[],
+  rawText: string,
+): AgentSuggestion[] {
+  const highSuggestions = baseSuggestions.filter(s => s.severity === 'high');
+
+  const jsonMatch = rawText.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return baseSuggestions;
+
+  try {
+    const enhanced = JSON.parse(jsonMatch[0]);
+
+    const result = baseSuggestions.map(s => {
+      const highIdx = highSuggestions.indexOf(s);
+      if (highIdx === -1) return s; // 非 high severity，保持不变
+
+      const aiVersion = enhanced.find((e: any) => e.index === highIdx);
+      if (!aiVersion) return s;
+
+      return {
+        ...s,
+        title: aiVersion.title || s.title,
+        description: aiVersion.description || s.description,
+        reason: `🤖 ${aiVersion.reason || s.reason}`,
+      };
+    });
+
+    const extraMatch = rawText.match(/"extra_insight"\s*:\s*"([^"]+)"/);
+    if (extraMatch) {
+      console.log('[Agent AI] Extra insight:', extraMatch[1]);
+    }
+
+    return result;
+  } catch {
+    return baseSuggestions;
+  }
+}
+
+/**
+ * 实时 AI 增强（直接调用 Claude，适合小量高优先请求）
+ * Batch 场景请用 buildEnhancementPrompts + submitBatch
+ */
+export async function enhanceSuggestionsWithAI(
+  baseSuggestions: AgentSuggestion[],
+  order: OrderContext,
+  milestones: MilestoneContext[],
+  memory: MemoryContext,
+): Promise<AgentSuggestion[]> {
+  if (baseSuggestions.length === 0) return baseSuggestions;
+
+  try {
+    const prompts = await buildEnhancementPrompts(baseSuggestions, order, milestones, memory);
+    if (!prompts) return baseSuggestions; // 没有 high 建议
 
     const raw = await callClaude({
       scene: 'aiEnhance',
-      system: systemPrompt,    // ← 静态部分走 cache
-      prompt: userPrompt,      // ← 动态部分每次不同
+      system: prompts.system,    // ← 静态部分走 cache
+      prompt: prompts.userPrompt, // ← 动态部分每次不同
       maxTokens: 800,
-      cacheSystem: true,       // ← 开启 ephemeral cache
+      cacheSystem: true,
       timeoutMs: 30_000,
     });
-    const text = raw?.text ?? '';
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const enhanced = JSON.parse(jsonMatch[0]);
 
-      // 合并增强结果到原始建议
-      const result = baseSuggestions.map(s => {
-        const highIdx = highSuggestions.indexOf(s);
-        if (highIdx === -1) return s; // 非 high severity，保持不变
-
-        const aiVersion = enhanced.find((e: any) => e.index === highIdx);
-        if (!aiVersion) return s;
-
-        return {
-          ...s,
-          title: aiVersion.title || s.title,
-          description: aiVersion.description || s.description,
-          reason: `🤖 ${aiVersion.reason || s.reason}`,
-        };
-      });
-
-      // 检查是否有额外洞察
-      const extraMatch = text.match(/"extra_insight"\s*:\s*"([^"]+)"/);
-      if (extraMatch) {
-        // 额外洞察作为 add_note 类型的低优先级建议附加
-        // 不影响原始建议，只是额外信息
-        console.log('[Agent AI] Extra insight:', extraMatch[1]);
-      }
-
-      return result;
-    }
+    return applyEnhancementText(baseSuggestions, raw?.text ?? '');
   } catch (err: any) {
-    // AI 失败，graceful fallback
     console.warn('[Agent AI] Enhancement failed, using rule-based suggestions:', err?.message);
+    return baseSuggestions;
   }
-
-  return baseSuggestions;
 }
 
 /**
@@ -201,20 +240,21 @@ export async function getEnhancementContext(
         const orderIds = factoryOrders.map((o: any) => o.id);
         const { data: completions } = await supabase
           .from('milestones')
-          .select('order_id, completed_at')
+          .select('order_id, actual_at')
           .in('order_id', orderIds)
           .eq('step_key', 'factory_completion');
 
         let onTime = 0;
         for (const o of factoryOrders) {
           const cm = completions?.find((c: any) => c.order_id === o.id);
-          if (cm?.completed_at && o.factory_date) {
-            if (new Date(cm.completed_at) <= new Date(o.factory_date + 'T23:59:59')) onTime++;
+          if (cm?.actual_at && o.factory_date) {
+            if (new Date(cm.actual_at) <= new Date(o.factory_date + 'T23:59:59')) onTime++;
           }
         }
         context.historicalOnTimeRate = Math.round((onTime / factoryOrders.length) * 100);
       }
     }
+
     // Agent 历史决策反馈（该客户的建议执行率）
     const { data: agentHistory } = await supabase
       .from('agent_actions')

@@ -12,7 +12,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { generateSuggestionsForOrder } from '@/lib/agent/generateSuggestions';
-import { enhanceSuggestionsWithAI, getEnhancementContext } from '@/lib/agent/aiEnhance';
+import { buildEnhancementPrompts, applyEnhancementText, getEnhancementContext } from '@/lib/agent/aiEnhance';
+import { submitBatch, pollBatchResults, type BatchRequest } from '@/lib/agent/anthropicClient';
 import { CIRCUIT_BREAKER } from '@/lib/agent/types';
 import { pushToUsers } from '@/lib/utils/wechat-push';
 import { buildCustomerProfile, type CustomerProfile } from '@/lib/agent/customerProfile';
@@ -22,6 +23,13 @@ import { AGENT_FLAGS } from '@/lib/agent/featureFlags';
 import { executeMultiStepReasoning } from '@/lib/agent/multiStepReasoning';
 import { analyzeChainImpact } from '@/lib/agent/chainImpact';
 import { NextResponse } from 'next/server';
+
+// Batch job 中每个订单的映射数据
+interface BatchJobItem {
+  customId: string;     // `order-{orderId}`
+  orderId: string;
+  highActionIds: string[]; // agent_actions.id，按 highSuggestions 顺序排列
+}
 
 export const maxDuration = 60; // Vercel 最大60秒
 
@@ -41,6 +49,70 @@ export async function POST(req: Request) {
     }
 
     const supabase = createClient(url, serviceKey);
+
+    // ── 0.A Batch 结果回填 ────────────────────────────────────────
+    // 拉取上一轮提交的 Anthropic Batch，若已完成则将增强文案写回 agent_actions
+    let batchApplied = 0;
+    try {
+      const { data: submittedJobs } = await supabase
+        .from('agent_batch_jobs')
+        .select('id, batch_id, job_data')
+        .eq('status', 'submitted')
+        .order('submitted_at', { ascending: true })
+        .limit(5); // 每次最多处理5个历史 Batch
+
+      for (const job of submittedJobs || []) {
+        // 非阻塞轮询（maxWaitMs=0）：batch 还没好就跳过，下次再试
+        const results = await pollBatchResults(job.batch_id, 0);
+        if (!results) continue; // 还在处理中
+
+        const jobItems: BatchJobItem[] = job.job_data || [];
+        for (const result of results) {
+          if (!result.text) continue;
+          const item = jobItems.find(j => j.customId === result.customId);
+          if (!item || item.highActionIds.length === 0) continue;
+
+          // 解析 Claude 返回的增强 JSON
+          const jsonMatch = result.text.match(/\[[\s\S]*\]/);
+          if (!jsonMatch) continue;
+          try {
+            const enhanced: { index: number; title: string; description: string; reason: string }[] =
+              JSON.parse(jsonMatch[0]);
+            for (const e of enhanced) {
+              const actionId = item.highActionIds[e.index];
+              if (!actionId) continue;
+              await supabase
+                .from('agent_actions')
+                .update({
+                  title: e.title,
+                  description: e.description,
+                  reason: `🤖 ${e.reason}`,
+                })
+                .eq('id', actionId)
+                .eq('status', 'pending'); // 只更新还未处理的建议
+              batchApplied++;
+            }
+          } catch {
+            // 解析失败跳过，不影响主流程
+          }
+        }
+
+        // 标记此 Batch 已处理完成
+        await supabase
+          .from('agent_batch_jobs')
+          .update({ status: 'applied', applied_at: new Date().toISOString() })
+          .eq('id', job.id);
+
+        console.log(`[agent-scan] Batch ${job.batch_id} applied, ${batchApplied} actions enhanced`);
+      }
+    } catch (batchErr: any) {
+      // Batch 回填失败不影响主扫描流程
+      console.warn('[agent-scan] Batch apply error:', batchErr?.message);
+    }
+
+    // ── Batch 收集容器（本轮扫描结束后统一提交） ────────────────
+    const batchRequests: BatchRequest[] = [];
+    const batchJobItems: BatchJobItem[] = [];
 
     // 0. 链式动作
     if (AGENT_FLAGS.chainActions()) {
@@ -214,12 +286,12 @@ export async function POST(req: Request) {
           if (industryTips.length > 0) {
             memory.customerMemories = [...(memory.customerMemories || []), ...industryTips.map(t => `[行业] ${t}`)];
           }
-          // 注入历史模式到AI上下文
+          // 注入历史模式
           const histPattern = await analyzeHistoricalPattern(supabase, order.customer_name, order.factory_name, order.quantity).catch(() => null);
           if (histPattern) {
             memory.historicalPattern = `历史分析(${histPattern.similarOrderCount}单)：超期率${histPattern.overdueRate}%，常超期节点：${histPattern.commonDelayNodes.join('、')}，${histPattern.riskPrediction}`;
           }
-          // 注入工厂产能数据到AI上下文
+          // 注入工厂产能数据
           if (factProfile) {
             memory.factoryCapacity = factProfile.monthlyCapacity || undefined;
             memory.historicalOnTimeRate = factProfile.historicalOnTimeRate;
@@ -230,24 +302,50 @@ export async function POST(req: Request) {
               ];
             }
           }
-          suggestions = await enhanceSuggestionsWithAI(suggestions, {
+
+          const orderCtx = {
             orderNo: order.order_no, customerName: order.customer_name,
             factoryName: order.factory_name, quantity: order.quantity,
-          }, milestonesCtx, memory);
+          };
 
-          // ── 写回 AI 扫描日期（下次同日跳过 AI 增强） ──
+          // ── Batch API：收集 prompt，不同步等 Claude 返回 ──────
+          // inserted 是当前订单刚插入的 agent_actions 行（按 suggestions 顺序）
+          // 构建 dedup_key → actionId 映射，定位 high severity 对应的行
+          const insertedMap = new Map<string, string>();
+          for (const ins of inserted || []) {
+            const dk = (ins.action_payload as any)?.dedup_key;
+            if (dk) insertedMap.set(dk, ins.id);
+          }
+          // highActionIds[i] = highSuggestions[i] 对应的 agent_actions.id
+          const highActionIds: string[] = suggestions
+            .filter(s => s.severity === 'high')
+            .map(s => insertedMap.get(s.payload?.dedup_key ?? '') ?? '')
+            .filter(Boolean);
+
+          if (highActionIds.length > 0) {
+            const prompts = await buildEnhancementPrompts(suggestions, orderCtx, milestonesCtx, memory);
+            if (prompts) {
+              const customId = `order-${order.id}`;
+              batchRequests.push({
+                customId,
+                system: prompts.system,
+                prompt: prompts.userPrompt,
+                maxTokens: 800,
+                cacheSystem: true,
+              });
+              batchJobItems.push({ customId, orderId: order.id, highActionIds });
+            }
+          }
+
+          // ── 写回 AI 扫描日期（下次同日跳过重复入队） ──────────
           const { error: updateErr } = await supabase.from('orders')
-            .update({
-              ai_scan_date: todayDate,
-              ai_scan_suggestion_count: suggestions.length,
-            })
+            .update({ ai_scan_date: todayDate, ai_scan_suggestion_count: suggestions.length })
             .eq('id', order.id);
           if (updateErr) {
             console.warn(`[agent-scan] 更新 ai_scan_date 失败 order=${order.id}:`, updateErr.message);
           }
         } catch (aiErr: any) {
-          console.warn(`[agent-scan] AI 增强失败 order=${order.id}:`, aiErr?.message || aiErr);
-          /* AI失败不影响，用规则引擎原始建议 */
+          console.warn(`[agent-scan] AI 增强入队失败 order=${order.id}:`, aiErr?.message || aiErr);
         }
       }
 
@@ -476,6 +574,27 @@ export async function POST(req: Request) {
       }
     }
 
+    // ── 7.5 提交 AI 增强 Batch ────────────────────────────────────
+    // 把本轮所有需要 AI 增强的订单打包成一个 Anthropic Batch 提交
+    // 下一轮 cron 运行时（约1小时后）拉取结果，费用比实时调用少 50%
+    let batchSubmitted = 0;
+    if (batchRequests.length > 0) {
+      try {
+        const batchId = await submitBatch(batchRequests);
+        if (batchId) {
+          await supabase.from('agent_batch_jobs').insert({
+            batch_id: batchId,
+            status: 'submitted',
+            job_data: batchJobItems,
+          });
+          batchSubmitted = batchRequests.length;
+          console.log(`[agent-scan] Batch submitted: ${batchId}, ${batchSubmitted} orders queued`);
+        }
+      } catch (batchSubmitErr: any) {
+        console.warn('[agent-scan] Batch submit failed:', batchSubmitErr?.message);
+      }
+    }
+
     // 8. 跨订单协调（Feature Flag）
     if (AGENT_FLAGS.crossOrderAnalysis()) {
     // 跨订单协调：同一工厂多订单延期 → 整体建议
@@ -559,6 +678,8 @@ export async function POST(req: Request) {
       autoExecuted: totalAutoExecuted,
       crossOrderSuggestions,
       expiredCleaned: expiredCount || 0,
+      batchSubmitted,        // 本轮新提交的 AI 增强任务数
+      batchApplied,          // 本轮从历史 Batch 回填的增强数
       timestamp: new Date().toISOString(),
     });
   } catch (err: any) {
