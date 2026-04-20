@@ -189,7 +189,8 @@ export async function POST(req: Request) {
       // 规则引擎每小时运行（dedup 防重复）；AI 增强每单每天最多 1 次，
       // 避免对同一订单重复调用 Claude，降低 ~20x token 消耗。
       // 判断依据：orders.ai_scan_date（新字段）是否等于今日日期
-      const todayDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      // 使用业务时区（东8区）计算"今天"，避免 UTC 跨天误差导致同一天跑2次 AI 增强
+      const todayDate = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).slice(0, 10); // YYYY-MM-DD
       const alreadyAIScannedToday = order.ai_scan_date === todayDate;
 
       const hasHighSeverity = AGENT_FLAGS.aiEnhance()
@@ -235,13 +236,19 @@ export async function POST(req: Request) {
           }, milestonesCtx, memory);
 
           // ── 写回 AI 扫描日期（下次同日跳过 AI 增强） ──
-          await supabase.from('orders')
+          const { error: updateErr } = await supabase.from('orders')
             .update({
               ai_scan_date: todayDate,
               ai_scan_suggestion_count: suggestions.length,
             })
             .eq('id', order.id);
-        } catch { /* AI失败不影响，用规则引擎原始建议 */ }
+          if (updateErr) {
+            console.warn(`[agent-scan] 更新 ai_scan_date 失败 order=${order.id}:`, updateErr.message);
+          }
+        } catch (aiErr: any) {
+          console.warn(`[agent-scan] AI 增强失败 order=${order.id}:`, aiErr?.message || aiErr);
+          /* AI失败不影响，用规则引擎原始建议 */
+        }
       }
 
       // 存入数据库

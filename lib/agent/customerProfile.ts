@@ -70,17 +70,17 @@ export async function buildCustomerProfile(
   // 产前样确认时间（从寄出到确认的天数）
   const { data: sampleMilestones } = await supabase
     .from('milestones')
-    .select('order_id, step_key, completed_at')
+    .select('order_id, step_key, actual_at')
     .in('order_id', orderIds)
     .in('step_key', ['pre_production_sample_sent', 'pre_production_sample_approved'])
-    .not('completed_at', 'is', null);
+    .not('actual_at', 'is', null);
 
   if (sampleMilestones && sampleMilestones.length > 0) {
     const sentMap = new Map<string, string>();
     const approvedMap = new Map<string, string>();
     for (const m of sampleMilestones) {
-      if (m.step_key === 'pre_production_sample_sent') sentMap.set(m.order_id, m.completed_at);
-      if (m.step_key === 'pre_production_sample_approved') approvedMap.set(m.order_id, m.completed_at);
+      if (m.step_key === 'pre_production_sample_sent') sentMap.set(m.order_id, m.actual_at);
+      if (m.step_key === 'pre_production_sample_approved') approvedMap.set(m.order_id, m.actual_at);
     }
     const confirmDays: number[] = [];
     for (const [orderId, sentAt] of sentMap) {
@@ -107,16 +107,16 @@ export async function buildCustomerProfile(
   // 超期率
   const { data: allMilestones } = await supabase
     .from('milestones')
-    .select('due_at, completed_at')
+    .select('due_at, actual_at')
     .in('order_id', orderIds)
-    .not('completed_at', 'is', null);
+    .not('actual_at', 'is', null);
 
   let overdueCount = 0;
   let completedCount = 0;
   for (const m of allMilestones || []) {
-    if (m.due_at && m.completed_at) {
+    if (m.due_at && m.actual_at) {
       completedCount++;
-      if (new Date(m.completed_at) > new Date(m.due_at)) overdueCount++;
+      if (new Date(m.actual_at) > new Date(m.due_at)) overdueCount++;
     }
   }
   profile.overdueRate = completedCount > 0 ? Math.round((overdueCount / completedCount) * 100) : 0;

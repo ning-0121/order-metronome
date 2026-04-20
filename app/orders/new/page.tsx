@@ -17,6 +17,50 @@ import { getActiveOrderTemplates } from '@/app/actions/order-templates';
 import type { OrderTemplate } from '@/app/actions/order-templates';
 import { FileNameCheck } from '@/components/FileNameCheck';
 
+/**
+ * 将 AI 返回的各种日期格式统一为 YYYY-MM-DD（HTML date input 要求）
+ * 支持：2026-04-18 / 2026.04.18 / 18/04/2026 / April 18, 2026 / Apr 18 2026 等
+ */
+function normalizeToISODate(raw: string): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const s = raw.trim();
+
+  // 已经是 YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // YYYY.MM.DD 或 YYYY/MM/DD
+  const ymd = s.match(/^(\d{4})[./](\d{1,2})[./](\d{1,2})$/);
+  if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+
+  // DD/MM/YYYY 或 DD-MM-YYYY（欧式）
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+
+  // "April 18, 2026" 或 "Apr 18 2026"
+  const months: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+  };
+  const written = s.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (written) {
+    const mon = months[written[1].toLowerCase().slice(0, 3)];
+    if (mon) return `${written[3]}-${mon}-${written[2].padStart(2, '0')}`;
+  }
+  // "18 April 2026" 或 "18 Apr 2026"
+  const dwritten = s.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (dwritten) {
+    const mon = months[dwritten[2].toLowerCase().slice(0, 3)];
+    if (mon) return `${dwritten[3]}-${mon}-${dwritten[1].padStart(2, '0')}`;
+  }
+
+  // 最后兜底：尝试 Date 构造（不可靠，但总比 null 强）
+  try {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  } catch {}
+  return null;
+}
+
 /** 客户端直传文件到 Supabase Storage（绕过 Vercel 4.5MB 限制） */
 async function uploadFilesToStorage(
   orderId: string,
@@ -121,31 +165,20 @@ function NewOrderWizard() {
     });
   }, []);
 
-  /** 套用模板到表单 */
+  /** 套用模板到表单
+   *
+   *  受控字段（incoterm / orderType / deliveryType / shippingSampleRequired）
+   *  只通过 React state setter 更新，不直接操作 DOM，避免双写冲突。
+   *
+   *  非受控字段（sample_phase / sample_confirm_days_override / notes / 风险标记）
+   *  通过原生 input setter + dispatchEvent 触发，React 只在下次 render 读 defaultValue，
+   *  不会覆盖非受控 input 的当前值，安全。
+   */
   function applyTemplate(templateId: string) {
     const tpl = templates.find(t => t.id === templateId);
     if (!tpl) return;
-    const form = document.querySelector('form');
-    if (!form) return;
 
-    const setField = (name: string, value: string) => {
-      const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null;
-      if (!el || !value) return;
-      const nativeSet = Object.getOwnPropertyDescriptor(
-        el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value'
-      )?.set;
-      nativeSet?.call(el, value);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-
-    if (tpl.incoterm) setField('incoterm', tpl.incoterm);
-    if (tpl.order_type) setField('order_type', tpl.order_type);
-    if (tpl.sample_phase) setField('sample_phase', tpl.sample_phase);
-    if (tpl.sample_confirm_days_override) setField('sample_confirm_days_override', String(tpl.sample_confirm_days_override));
-    if (tpl.default_notes) setField('notes', tpl.default_notes);
-
-    // delivery_type 是由 hidden input + select 组成，通过 React state
+    // ── 受控字段：纯 React state ──────────────────────────
     if (tpl.incoterm === 'DDP') {
       setIncoterm('DDP');
       setDeliveryType('export');
@@ -156,14 +189,35 @@ function NewOrderWizard() {
     if (tpl.order_type) setOrderType(tpl.order_type);
     if (tpl.shipping_sample_required !== undefined) setShippingSampleRequired(tpl.shipping_sample_required);
 
-    // 风险标记：勾选模板里指定的 checkbox
-    for (const flag of (tpl.risk_flags || [])) {
-      const cb = form.querySelector(`input[name="${flag}"]`) as HTMLInputElement | null;
-      if (cb && !cb.checked) {
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
+    // ── 非受控字段：通过原生 setter 触发 ─────────────────
+    // 需要在 React 完成本次 render 后再设 DOM 值，用 setTimeout 0 推迟
+    setTimeout(() => {
+      const form = document.querySelector('form');
+      if (!form) return;
+
+      const setUncontrolled = (name: string, value: string) => {
+        const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null;
+        if (!el || !value) return;
+        const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        nativeSetter?.call(el, value);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+
+      if (tpl.sample_phase) setUncontrolled('sample_phase', tpl.sample_phase);
+      if (tpl.sample_confirm_days_override) setUncontrolled('sample_confirm_days_override', String(tpl.sample_confirm_days_override));
+      if (tpl.default_notes) setUncontrolled('notes', tpl.default_notes);
+
+      // 风险标记：非受控 checkbox，直接设 checked
+      for (const flag of (tpl.risk_flags || [])) {
+        const cb = form.querySelector(`input[name="${flag}"][type="checkbox"]`) as HTMLInputElement | null;
+        if (cb && !cb.checked) {
+          cb.checked = true;
+          cb.dispatchEvent(new Event('change', { bubbles: true }));
+        }
       }
-    }
+    }, 0);
 
     setSelectedTemplateId(templateId);
     alert(`✅ 已套用模板「${tpl.name}」，请检查表单并补填缺少的字段`);
@@ -202,7 +256,7 @@ function NewOrderWizard() {
           const d = res.data;
           if (d.customer_name) fill('customer_name', d.customer_name);
           if (d.order_no) fill('customer_po_number', d.order_no);
-          if (d.order_date) fill('order_date', d.order_date.replace(/\./g, '-'));
+          // order_date 在下面统一用 normalizeToISODate 处理，这里跳过
           // 算总数量
           const totalQty = d.styles.reduce((sum: number, s: any) => sum + (s.total_qty || 0), 0);
           if (totalQty > 0) fill('total_quantity', totalQty);
@@ -212,13 +266,16 @@ function NewOrderWizard() {
           const allColors = d.styles.flatMap((s: any) => (s.colors || []).map((c: any) => c.color_en || c.color_cn));
           const uniqueColors = new Set(allColors.filter(Boolean));
           if (uniqueColors.size > 0) fill('color_count', uniqueColors.size);
-          // 交期
+          // 交期 — 容错解析多种日期格式
           if (d.delivery_date) {
-            const deliveryDateFormatted = d.delivery_date.replace(/\./g, '-');
-            fill('etd', deliveryDateFormatted);
-            fill('warehouse_due_date', deliveryDateFormatted);
-            fill('factory_date', deliveryDateFormatted);
+            const deliveryDateFormatted = normalizeToISODate(d.delivery_date);
+            if (deliveryDateFormatted) {
+              fill('etd', deliveryDateFormatted);
+              fill('warehouse_due_date', deliveryDateFormatted);
+              fill('factory_date', deliveryDateFormatted);
+            }
           }
+          if (d.order_date) fill('order_date', normalizeToISODate(d.order_date) || d.order_date.replace(/\./g, '-'));
           setPoAutoFilled(true);
         }
       }

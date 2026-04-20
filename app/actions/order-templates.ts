@@ -144,19 +144,24 @@ export async function deleteOrderTemplate(
   return { ok: true };
 }
 
-/** 记录模板使用次数（新建订单时套用模板时调用） */
+/** 记录模板使用次数（新建订单时套用模板时调用）
+ *  用原生 SQL 原子自增，避免并发竞态导致计数偏低
+ */
 export async function incrementTemplateUsage(id: string): Promise<void> {
   try {
     const supabase = await createClient();
-    const { data: tpl } = await (supabase.from('order_templates') as any)
-      .select('usage_count')
-      .eq('id', id)
-      .single();
-    if (tpl) {
-      await (supabase.from('order_templates') as any)
-        .update({ usage_count: (tpl.usage_count || 0) + 1 })
-        .eq('id', id);
-    }
+    // 单条 UPDATE 原子操作，多并发安全
+    await (supabase as any).rpc('exec_sql', {
+      sql: `UPDATE order_templates SET usage_count = usage_count + 1 WHERE id = '${id.replace(/'/g, "''")}'`,
+    }).catch(async () => {
+      // rpc 不可用时降级：read-modify-write（不完美但可接受，usage_count 仅供统计）
+      const { data: tpl } = await (supabase.from('order_templates') as any)
+        .select('usage_count').eq('id', id).single();
+      if (tpl) {
+        await (supabase.from('order_templates') as any)
+          .update({ usage_count: (tpl.usage_count || 0) + 1 }).eq('id', id);
+      }
+    });
   } catch {
     // 静默失败：usage_count 是统计字段，失败不影响主流程
   }
