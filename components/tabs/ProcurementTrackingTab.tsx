@@ -58,8 +58,12 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
   async function loadData() {
     setLoading(true);
     const res = await getProcurementItems(orderId);
-    if (res.data) setItems(res.data);
-    // 查找原始采购单文件 — 必须是 procurement_order_placed 节点下的附件
+    const currentItems = res.data || [];
+    setItems(currentItems);
+
+    // 查找原始采购单文件 — 优先取 procurement_order_placed 节点下的附件，
+    // 兜底：按 file_type 匹配订单级别的采购文件
+    let fileFound = false;
     try {
       const supabase = createClient();
       // 1. 先找到 procurement_order_placed 节点
@@ -68,17 +72,46 @@ export function ProcurementTrackingTab({ orderId, canEdit }: Props) {
         .eq('order_id', orderId)
         .eq('step_key', 'procurement_order_placed')
         .maybeSingle();
+
+      let match: { file_name: string; file_url: string } | null = null;
+
       if (ms?.id) {
-        // 2. 按 milestone_id 取该节点下最新附件
+        // 2a. 按 milestone_id 取该节点下最新附件
         const { data: files } = await (supabase.from('order_attachments') as any)
-          .select('file_name, file_url, storage_path')
+          .select('file_name, file_url')
           .eq('milestone_id', ms.id)
           .order('created_at', { ascending: false })
           .limit(1);
-        const match = (files || [])[0];
-        if (match) setSourceFile({ name: match.file_name, url: match.file_url });
+        match = (files || [])[0] ?? null;
+      }
+
+      if (!match) {
+        // 2b. 兜底：按 file_type 匹配订单级别（覆盖未绑定 milestone 的上传场景）
+        const { data: files2 } = await (supabase.from('order_attachments') as any)
+          .select('file_name, file_url')
+          .eq('order_id', orderId)
+          .in('file_type', ['production_order', 'procurement_order', 'trims_sheet'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+        match = (files2 || [])[0] ?? null;
+      }
+
+      if (match) {
+        setSourceFile({ name: match.file_name, url: match.file_url });
+        fileFound = true;
       }
     } catch {}
+
+    // ✨ 自动初始化：检测到采购文件 + 还没有跟踪条目 → 静默创建默认项
+    // 无需手动点"快速创建默认项"，上传采购单后自动生效
+    if (fileFound && currentItems.length === 0) {
+      try {
+        await initDefaultProcurementItems(orderId);
+        const res2 = await getProcurementItems(orderId);
+        if (res2.data) setItems(res2.data);
+      } catch {}
+    }
+
     setLoading(false);
   }
 
