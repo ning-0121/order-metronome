@@ -63,6 +63,7 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/admin/price-approvals', label: '价格审批', icon: '💰' },
         { href: '/admin/system-health', label: '系统守护', icon: '🛡' },
         { href: '/admin/overdue', label: '逾期治理', icon: '🚨' },
+        { href: '/admin/delay-hotspots', label: '延误排行榜', icon: '📉' },
         { href: '/admin/order-templates', label: '订单模板', icon: '📋' },
         { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
         { href: '/guide', label: '操作说明', icon: '📖' },
