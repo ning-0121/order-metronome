@@ -368,6 +368,18 @@ export async function createOrder(
       return { ok: false, error: '排期计算错误：缺少锚点日期。人民币/FOB订单需填出厂日期，DDP需填ETD。' };
     }
 
+    // 查询客户节奏偏好（如 RAG 要求离厂前 1 天寄船样）
+    let customerScheduleOverrides: any = {};
+    try {
+      const { getOverridesForCustomer } = await import('@/app/actions/customer-schedules');
+      customerScheduleOverrides = await getOverridesForCustomer(customer_name);
+      if (Object.keys(customerScheduleOverrides).length > 0) {
+        console.log(`[createOrder] applied ${Object.keys(customerScheduleOverrides).length} customer schedule overrides for ${customer_name}`);
+      }
+    } catch (e) {
+      console.warn('[createOrder] failed to load customer schedule overrides:', e);
+    }
+
     dueDates = calcDueDates({
       orderDate: order_date,
       createdAt: new Date(orderData.created_at),
@@ -380,6 +392,7 @@ export async function createOrder(
       shippingSampleDeadline: shipping_sample_deadline,
       sampleConfirmDaysOverride: sample_confirm_days_override,
       skipPreProductionSample: skip_pre_production_sample,
+      customerScheduleOverrides,
     });
   } catch (scheduleErr: any) {
     console.error('[createOrder] STEP 4 FAIL: calcDueDates —', scheduleErr.message);

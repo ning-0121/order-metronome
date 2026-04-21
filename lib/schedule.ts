@@ -208,6 +208,12 @@ export interface CalcDueDatesParams {
   sampleConfirmDaysOverride?: number | null;
   /** 跳过产前样（不计算这些节点的截止日期） */
   skipPreProductionSample?: boolean;
+  /**
+   * 客户节奏偏好（每个客户的自定义排期规则）
+   * 形如 { "shipping_sample_send": { anchor: "factory_date", offset_days: -1 } }
+   * 优先级高于 TIMELINE，覆盖对应节点的默认计算
+   */
+  customerScheduleOverrides?: Record<string, { anchor: 'factory_date' | 'order_date' | 'eta'; offset_days: number; note?: string }>;
 }
 
 /**
@@ -273,6 +279,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
   } = params;
 
   const T0 = parseDate(orderDate) ?? createdAt ?? new Date();
+  const customerScheduleOverrides = params.customerScheduleOverrides || {};
 
   // 计算实际锚点
   // FOB/RMB: 锚点 = ETD 或 出厂日期（factory_date 通过 etd 参数传入）
@@ -286,9 +293,21 @@ export function calcDueDates(params: CalcDueDatesParams) {
   if (!anchorStr) throw new Error('缺少锚点日期：请填写出厂日期');
 
   const rawAnchor = new Date(anchorStr + 'T00:00:00+08:00');
+  const etaDate = eta ? new Date(eta + 'T00:00:00+08:00') : null;
 
   // DDP 需要减去海运时间得到实际出运截止日
   const A = incoterm === 'DDP' ? addDays(rawAnchor, -DDP_TRANSIT_DAYS) : rawAnchor;
+
+  /** 客户覆盖优先：若 step_key 有客户自定义节奏，直接按锚点+偏移计算 */
+  const applyOverride = (stepKey: string, fallback: Date): Date => {
+    const rule = customerScheduleOverrides[stepKey];
+    if (!rule) return fallback;
+    let anchor: Date;
+    if (rule.anchor === 'order_date') anchor = T0;
+    else if (rule.anchor === 'eta') anchor = etaDate || rawAnchor;
+    else /* factory_date / ETD */ anchor = rawAnchor;
+    return addDays(anchor, rule.offset_days);
+  };
 
   // 实际可用天数
   const availableDays = Math.ceil((A.getTime() - T0.getTime()) / 86400000);
@@ -331,23 +350,23 @@ export function calcDueDates(params: CalcDueDatesParams) {
     dev_sample_revision:           cap(calc(TIMELINE.dev_sample_revision)),
     dev_sample_revision_sent:      cap(calc(TIMELINE.dev_sample_revision_sent)),
     dev_sample_revision_confirm:   cap(calc(TIMELINE.dev_sample_revision_confirm)),
-    pre_production_sample_ready:   cap(calc(TIMELINE.pre_production_sample_ready)),
-    pre_production_sample_sent:    cap(calc(TIMELINE.pre_production_sample_sent)),
-    pre_production_sample_approved: cap(calc(sampleConfirmDays)),
+    pre_production_sample_ready:   cap(applyOverride('pre_production_sample_ready', calc(TIMELINE.pre_production_sample_ready))),
+    pre_production_sample_sent:    cap(applyOverride('pre_production_sample_sent', calc(TIMELINE.pre_production_sample_sent))),
+    pre_production_sample_approved: cap(applyOverride('pre_production_sample_approved', calc(sampleConfirmDays))),
     procurement_order_placed:      cap(calc(TIMELINE.procurement_order_placed)),
     materials_received_inspected:  cap(calc(TIMELINE.materials_received_inspected)),
     pre_production_meeting:        cap(calc(TIMELINE.pre_production_meeting)),
     production_kickoff:            cap(calc(TIMELINE.production_kickoff)),
-    mid_qc_check:                  cap(calc(TIMELINE.mid_qc_check)),
+    mid_qc_check:                  cap(applyOverride('mid_qc_check', calc(TIMELINE.mid_qc_check))),
     mid_qc_sales_check:            cap(calc(TIMELINE.mid_qc_sales_check)),
-    final_qc_check:                cap(calc(TIMELINE.final_qc_check)),
+    final_qc_check:                cap(applyOverride('final_qc_check', calc(TIMELINE.final_qc_check))),
     final_qc_sales_check:          cap(calc(TIMELINE.final_qc_sales_check)),
-    packing_method_confirmed:      cap(calc(TIMELINE.packing_method_confirmed)),
+    packing_method_confirmed:      cap(applyOverride('packing_method_confirmed', calc(TIMELINE.packing_method_confirmed))),
     factory_completion:            cap(calc(TIMELINE.factory_completion)),
     leftover_collection:           cap(calc(TIMELINE.leftover_collection)),
     finished_goods_warehouse:      cap(calc(TIMELINE.finished_goods_warehouse)),
-    inspection_release:            cap(calc(TIMELINE.inspection_release)),
-    shipping_sample_send:          cap(shippingSample),
+    inspection_release:            cap(applyOverride('inspection_release', calc(TIMELINE.inspection_release))),
+    shipping_sample_send:          cap(applyOverride('shipping_sample_send', shippingSample)),
     booking_done:                  cap(calc(TIMELINE.booking_done)),
     customs_export:                cap(calc(TIMELINE.customs_export)),
     finance_shipment_approval:     cap(calc(TIMELINE.finance_shipment_approval)),
@@ -363,7 +382,10 @@ export function calcDueDates(params: CalcDueDatesParams) {
     sample_customer_confirm:       cap(calc(TIMELINE.sample_customer_confirm)),
     sample_complete:               cap(calc(TIMELINE.sample_complete)),
     // FOB：默认出货前付款（ETD当天）| DDP：到港后10天（ETA+10）
-    payment_received:              incoterm === 'FOB' ? new Date(rawAnchor) : addDays(rawAnchor, 10),
+    payment_received:              applyOverride(
+      'payment_received',
+      incoterm === 'FOB' ? new Date(rawAnchor) : addDays(rawAnchor, 10),
+    ),
   };
 
   // ══════ 四重校验 ══════
