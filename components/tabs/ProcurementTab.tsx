@@ -7,13 +7,15 @@ import {
   recordReceipt,
   deleteProcurementItem,
   exportReconciliationSheet,
+  syncFromProcurementTracking,
   type ProcurementLineItem,
 } from '@/app/actions/procurement';
 
 interface Props {
   orderId: string;
   isAdmin: boolean;
-  canEdit: boolean; // merchandiser/procurement/sales/admin
+  canEdit: boolean;        // 可以添加/删除采购明细（merchandiser/procurement/sales/admin）
+  canRecordReceipt: boolean; // 只有跟单/admin 可录入实到数量
 }
 
 const CATEGORY_OPTIONS = [
@@ -30,7 +32,7 @@ const CATEGORY_OPTIONS = [
 
 const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(CATEGORY_OPTIONS.map(o => [o.value, o.label]));
 
-export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
+export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: Props) {
   const [items, setItems] = useState<ProcurementLineItem[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
   const [receiptQty, setReceiptQty] = useState('');
   const [receiptNotes, setReceiptNotes] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // 新增表单
   const [formName, setFormName] = useState('');
@@ -106,6 +109,19 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
     load();
   }
 
+  async function handleSync() {
+    if (!confirm('从采购进度同步数据到对账明细？已存在的物料会跳过，不会重复添加。')) return;
+    setSyncing(true);
+    const res = await syncFromProcurementTracking(orderId);
+    if (res.error && res.added === 0) {
+      alert(res.error);
+    } else {
+      alert(`同步完成 ✅\n新增 ${res.added} 条，跳过 ${res.skipped} 条（已存在）`);
+      load();
+    }
+    setSyncing(false);
+  }
+
   async function handleExport() {
     setExporting(true);
     const res = await exportReconciliationSheet(orderId);
@@ -161,13 +177,22 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
       )}
 
       {/* 操作栏 */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {canEdit && (
           <button
             onClick={() => setShowAddForm(!showAddForm)}
             className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
           >
             + 添加采购明细
+          </button>
+        )}
+        {canEdit && (
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="text-xs px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 font-medium disabled:opacity-50"
+          >
+            {syncing ? '同步中...' : '🔄 从采购进度同步'}
           </button>
         )}
         {items.length > 0 && (
@@ -277,7 +302,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
                         ) : (
                           <span className={`font-mono ${item.received_qty !== null ? 'text-emerald-700' : 'text-gray-300'}`}>
                             {item.received_qty ?? (
-                              canEdit ? (
+                              canRecordReceipt ? (
                                 <button
                                   onClick={() => { setEditingReceiptId(item.id); setReceiptQty(String(item.ordered_qty)); }}
                                   className="text-emerald-500 hover:text-emerald-700 hover:underline"
@@ -297,7 +322,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit }: Props) {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
-                          {canEdit && item.received_qty === null && !isEditingReceipt && (
+                          {canRecordReceipt && item.received_qty === null && !isEditingReceipt && (
                             <button
                               onClick={() => { setEditingReceiptId(item.id); setReceiptQty(String(item.ordered_qty)); }}
                               className="text-emerald-500 hover:text-emerald-700"

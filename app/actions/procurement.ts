@@ -241,6 +241,71 @@ export async function batchAddProcurementItems(
 }
 
 /**
+ * 从采购进度（procurement_tracking）同步到对账明细
+ * 将采购进度里的条目转为对账明细的"订购数量"，跳过已存在的物料名（去重）
+ */
+export async function syncFromProcurementTracking(
+  orderId: string,
+): Promise<{ added: number; skipped: number; error?: string }> {
+  const auth = await checkAccess();
+  if (!auth.ok || !auth.userId) return { added: 0, skipped: 0, error: auth.error };
+
+  const supabase = await createClient();
+
+  // 只有跟单/采购/管理员可以同步
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('roles')
+    .eq('id', auth.userId)
+    .maybeSingle();
+  const roles: string[] = (profile as any)?.roles || [];
+  const canSync = roles.some(r => ['merchandiser', 'procurement', 'admin'].includes(r));
+  if (!canSync) return { added: 0, skipped: 0, error: '仅跟单/采购/管理员可同步' };
+
+  // 取采购进度里的条目
+  const { data: tracking, error: tErr } = await (supabase.from('procurement_tracking') as any)
+    .select('item_name, supplier, quantity, category, notes')
+    .eq('order_id', orderId)
+    .eq('is_supplement', false)
+    .not('quantity', 'is', null);
+  if (tErr) return { added: 0, skipped: 0, error: tErr.message };
+  if (!tracking || tracking.length === 0) return { added: 0, skipped: 0, error: '采购进度里暂无数据' };
+
+  // 取已有对账明细（去重用）
+  const { data: existing } = await (supabase.from('procurement_line_items') as any)
+    .select('material_name')
+    .eq('order_id', orderId);
+  const existingNames = new Set((existing || []).map((e: any) => e.material_name));
+
+  const CATEGORY_MAP: Record<string, string> = {
+    fabric: 'fabric', trims: 'trim', packaging: 'packing', other: 'other',
+  };
+
+  const toInsert = (tracking as any[])
+    .filter(t => !existingNames.has(t.item_name))
+    .map(t => ({
+      order_id: orderId,
+      material_name: t.item_name,
+      supplier_name: t.supplier || null,
+      category: CATEGORY_MAP[t.category] || 'other',
+      ordered_qty: Number(t.quantity) || 0,
+      ordered_unit: 'KG',
+      notes: t.notes || null,
+      ordered_by: auth.userId,
+      ordered_at: new Date().toISOString(),
+    }));
+
+  const skipped = tracking.length - toInsert.length;
+  if (toInsert.length === 0) return { added: 0, skipped, error: '所有采购进度条目已存在于对账明细中' };
+
+  const { error: iErr } = await (supabase.from('procurement_line_items') as any).insert(toInsert);
+  if (iErr) return { added: 0, skipped, error: iErr.message };
+
+  revalidatePath(`/orders/${orderId}`);
+  return { added: toInsert.length, skipped };
+}
+
+/**
  * 录入实收数据（原辅料到货时）
  */
 export async function recordReceipt(

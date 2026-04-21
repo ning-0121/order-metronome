@@ -781,6 +781,7 @@ export default async function OrderDetailPage({
               orderId={id}
               isAdmin={isAdmin}
               canEdit={isAdmin || currentRoles.some(r => ['sales', 'merchandiser', 'procurement', 'production_manager'].includes(r))}
+              canRecordReceipt={isAdmin || currentRoles.some(r => ['merchandiser'].includes(r))}
             />
           </div>
           </div>
