@@ -768,6 +768,7 @@ export default async function OrderDetailPage({
               <ProcurementTrackingTab
                 orderId={id}
                 canEdit={currentRoles.some(r => ['sales', 'merchandiser', 'procurement', 'admin', 'production_manager'].includes(r))}
+                canApprove={currentRoles.some(r => ['sales', 'merchandiser', 'admin', 'finance'].includes(r))}
               />
             </div>
             {/* 采购对账 */}
