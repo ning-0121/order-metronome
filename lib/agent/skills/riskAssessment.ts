@@ -815,8 +815,9 @@ export const riskAssessmentSkill: SkillModule = {
       });
     }
 
-    // 4. 总分映射等级
-    const score = Math.min(100, totalScore);
+    // 4. 总分归一化（所有维度 maxScore 之和 = 229，映射到 0-100）
+    const MAX_TOTAL_SCORE = 229;
+    const score = Math.round(Math.min(100, (totalScore / MAX_TOTAL_SCORE) * 100));
     let level: 'high' | 'medium' | 'low';
     let summary: string;
     if (score >= 65) {

@@ -181,6 +181,7 @@ export function MilestoneActions({
           uploaded_by: user?.id || null,
           file_name: evidenceFile.name,
           file_url: publicUrl,
+          storage_path: path,
           file_type: fileType,
           mime_type: evidenceFile.type || null,
         });
@@ -199,6 +200,7 @@ export function MilestoneActions({
           await (supabase2.from('order_attachments') as any).insert({
             order_id: orderId, milestone_id: milestone.id,
             uploaded_by: u2?.id || null, file_name: file.name, file_url: url2,
+            storage_path: path2,
             file_type: fileType, mime_type: file.type || null,
           });
         }

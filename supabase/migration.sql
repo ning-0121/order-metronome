@@ -2254,3 +2254,16 @@ CREATE INDEX IF NOT EXISTS idx_procurement_tracking_order ON public.procurement_
 ALTER TABLE public.customers
   ADD COLUMN IF NOT EXISTS schedule_overrides jsonb DEFAULT '{}'::jsonb;
 COMMENT ON COLUMN public.customers.schedule_overrides IS '按 step_key 映射的客户自定义节奏规则。优先级高于通用 TIMELINE。';
+
+-- ===== 2026-04-21 补全 order_attachments.storage_path（历史数据回填）=====
+-- 从 file_url 中提取 storage_path（适用于 Supabase Storage 公开 URL 格式）
+-- URL 格式：https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
+UPDATE public.order_attachments
+SET storage_path = regexp_replace(
+  file_url,
+  '^https?://[^/]+/storage/v1/object/public/[^/]+/',
+  ''
+)
+WHERE storage_path IS NULL
+  AND file_url IS NOT NULL
+  AND file_url LIKE '%/storage/v1/object/public/%';

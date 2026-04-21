@@ -238,7 +238,7 @@ export function recalcRemainingDueDates(
 
   // 收集当前及之后的所有节点，按标准天数排序
   const remainingEntries = Object.entries(TIMELINE)
-    .filter(([, day]) => day >= currentDay)
+    .filter(([, day]) => day > currentDay)  // 严格大于：不重算已完成的当前节点
     .sort(([, a], [, b]) => a - b);
 
   if (remainingEntries.length <= 1) {
