@@ -87,6 +87,83 @@ export async function updateCustomerScheduleOverrides(
   return {};
 }
 
+/** 批量重算指定客户所有进行中订单的未完成里程碑排期 */
+export async function batchRecalcCustomerMilestones(
+  customerName: string,
+): Promise<{ updated: number; skipped: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { updated: 0, skipped: 0, error: '请先登录' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { updated: 0, skipped: 0, error: '仅管理员可批量重算排期' };
+
+  // 1. 取客户节奏偏好
+  const { data: customer } = await (supabase.from('customers') as any)
+    .select('schedule_overrides')
+    .eq('customer_name', customerName)
+    .is('deleted_at', null)
+    .maybeSingle();
+  const overrides: Record<string, { anchor: 'factory_date' | 'order_date' | 'eta'; offset_days: number; note?: string }>
+    = (customer as any)?.schedule_overrides || {};
+  if (Object.keys(overrides).length === 0) {
+    return { updated: 0, skipped: 0, error: `客户「${customerName}」尚未配置任何节奏偏好` };
+  }
+
+  // 2. 取该客户所有进行中的大货订单
+  const { data: orders, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_date, created_at, incoterm, etd, warehouse_due_date, eta, shipping_sample_required, shipping_sample_deadline, skip_pre_production_sample, sample_confirm_days_override, lifecycle_status')
+    .eq('customer_name', customerName)
+    .in('lifecycle_status', ['active', 'in_progress', 'draft'])
+    .eq('order_type', 'bulk');
+  if (oErr) return { updated: 0, skipped: 0, error: oErr.message };
+  if (!orders || orders.length === 0) return { updated: 0, skipped: 0, error: `未找到「${customerName}」的进行中订单` };
+
+  const { calcDueDates } = await import('@/lib/schedule');
+
+  let updated = 0;
+  let skipped = 0;
+
+  for (const order of orders as any[]) {
+    try {
+      const dueDates = calcDueDates({
+        orderDate: order.order_date,
+        createdAt: new Date(order.created_at),
+        incoterm: order.incoterm,
+        etd: order.etd,
+        warehouseDueDate: order.warehouse_due_date,
+        eta: order.eta,
+        shippingSampleRequired: order.shipping_sample_required ?? false,
+        shippingSampleDeadline: order.shipping_sample_deadline,
+        skipPreProductionSample: order.skip_pre_production_sample ?? false,
+        sampleConfirmDaysOverride: order.sample_confirm_days_override ?? undefined,
+        customerScheduleOverrides: overrides,
+      });
+
+      // 只更新覆盖规则涉及的 step_key、且该里程碑尚未完成
+      for (const stepKey of Object.keys(overrides)) {
+        const newDueAt = (dueDates as any)[stepKey];
+        if (!newDueAt) continue;
+
+        const { error: uErr } = await supabase
+          .from('milestones')
+          .update({ due_at: newDueAt.toISOString(), planned_at: newDueAt.toISOString() })
+          .eq('order_id', order.id)
+          .eq('step_key', stepKey)
+          .is('actual_at', null); // 未完成的
+        if (uErr) { skipped++; continue; }
+        updated++;
+      }
+    } catch {
+      skipped++;
+    }
+  }
+
+  revalidatePath('/admin/customer-schedules');
+  return { updated, skipped };
+}
+
 /** 根据客户名查询节奏偏好（供 orders.ts 创建订单时使用）*/
 export async function getOverridesForCustomer(
   customerName: string | null,

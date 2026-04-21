@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   updateCustomerScheduleOverrides,
+  batchRecalcCustomerMilestones,
   type CustomerWithOverrides,
 } from '@/app/actions/customer-schedules';
 import {
@@ -26,6 +27,7 @@ export function CustomerSchedulesClient({ initialRows, initialError }: Props) {
   const [overrides, setOverrides] = useState<Record<string, ScheduleOverrideRule>>({});
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [recalcPending, setRecalcPending] = useState<string | null>(null); // customer_name being recalculated
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -66,6 +68,22 @@ export function CustomerSchedulesClient({ initialRows, initialError }: Props) {
       ...prev,
       [stepKey]: { ...prev[stepKey], ...patch },
     }));
+  };
+
+  const recalc = async (customerName: string) => {
+    if (!confirm(`确认批量重算「${customerName}」所有进行中订单的未完成里程碑？\n（仅更新已配置节奏偏好的关卡，且跳过已完成节点）`)) return;
+    setRecalcPending(customerName);
+    try {
+      const result = await batchRecalcCustomerMilestones(customerName);
+      if (result.error) {
+        alert(`重算失败：${result.error}`);
+      } else {
+        alert(`重算完成 ✅\n更新里程碑：${result.updated} 条\n跳过：${result.skipped} 条`);
+        router.refresh();
+      }
+    } finally {
+      setRecalcPending(null);
+    }
   };
 
   const save = () => {
@@ -151,12 +169,23 @@ export function CustomerSchedulesClient({ initialRows, initialError }: Props) {
                   )}
                 </td>
                 <td className="px-3 py-3">
-                  <button
-                    onClick={() => openEditor(row)}
-                    className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
-                  >
-                    {row.overrides_count > 0 ? '✏️ 编辑节奏' : '➕ 配置节奏'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => openEditor(row)}
+                      className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      {row.overrides_count > 0 ? '✏️ 编辑节奏' : '➕ 配置节奏'}
+                    </button>
+                    {row.overrides_count > 0 && (
+                      <button
+                        onClick={() => recalc(row.customer_name)}
+                        disabled={recalcPending === row.customer_name}
+                        className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        {recalcPending === row.customer_name ? '重算中…' : '🔄 批量重算'}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

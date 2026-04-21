@@ -2248,3 +2248,9 @@ ALTER TABLE public.procurement_tracking ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "procurement_tracking_authenticated" ON public.procurement_tracking FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE INDEX IF NOT EXISTS idx_procurement_tracking_order ON public.procurement_tracking(order_id);
 
+
+
+-- ===== 2026-04-21 客户节奏偏好 =====
+ALTER TABLE public.customers
+  ADD COLUMN IF NOT EXISTS schedule_overrides jsonb DEFAULT '{}'::jsonb;
+COMMENT ON COLUMN public.customers.schedule_overrides IS '按 step_key 映射的客户自定义节奏规则。优先级高于通用 TIMELINE。';
