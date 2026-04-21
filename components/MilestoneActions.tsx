@@ -8,7 +8,7 @@ import { AIAdviceBox } from '@/components/AIAdviceBox';
 import { getChecklistForStep, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
-import { getNamingHint, getAcceptString, validateFileExt } from '@/lib/domain/fileNaming';
+import { getNamingHint, getAcceptString, validateFileExt, getFileTypeForStep } from '@/lib/domain/fileNaming';
 import { FileNameCheck } from '@/components/FileNameCheck';
 
 const QC_STEPS = new Set([
@@ -157,7 +157,7 @@ export function MilestoneActions({
       // 上传凭证文件（同时写入 storage + attachments 表）
       if (evidenceFile && orderId) {
         const supabase = createClient();
-        const fileType = (evidenceFile as any)._fileType || 'evidence';
+        const fileType = (evidenceFile as any)._fileType || getFileTypeForStep(milestone.step_key);
         const ext = evidenceFile.name.split('.').pop() || 'bin';
         const path = orderId + '/milestones/' + milestone.step_key + '_' + fileType + '_' + Date.now() + '.' + ext;
         const { error: uploadError } = await supabase.storage
@@ -191,7 +191,7 @@ export function MilestoneActions({
         const supabase2 = createClient();
         const { data: { user: u2 } } = await supabase2.auth.getUser();
         for (const file of extraFiles) {
-          const fileType = (file as any)._fileType || 'evidence';
+          const fileType = (file as any)._fileType || getFileTypeForStep(milestone.step_key);
           const ext2 = file.name.split('.').pop() || 'bin';
           const path2 = orderId + '/milestones/' + milestone.step_key + '_' + fileType + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext2;
           await supabase2.storage.from('order-docs').upload(path2, file, { contentType: file.type, upsert: true });

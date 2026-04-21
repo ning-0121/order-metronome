@@ -377,9 +377,10 @@ const DIMENSIONS: RiskDimension[] = [
     maxScore: 12,
     evaluate: ctx => {
       const missing: string[] = [];
-      if (!ctx.hasFile('customer_po')) missing.push('客户 PO');
-      if (!ctx.hasFile('internal_quote')) missing.push('内部成本核算单');
-      if (!ctx.hasFile('customer_quote')) missing.push('客户报价单');
+      const isDone = (key: string) => ctx.milestones.some(m => m.step_key === key && (m.status === 'done' || m.status === 'completed'));
+      if (!ctx.hasFile('customer_po') && !isDone('po_confirmed')) missing.push('客户 PO');
+      if (!ctx.hasFile('internal_quote') && !isDone('finance_approval')) missing.push('内部成本核算单');
+      if (!ctx.hasFile('customer_quote') && !isDone('finance_approval')) missing.push('客户报价单');
       if (missing.length === 0) return { score: 0 };
       const score = Math.min(12, missing.length * 4);
       return {
