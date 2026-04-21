@@ -287,20 +287,29 @@ export async function autoParseExistingCostSheet(orderId: string): Promise<{
   if (existing) return { parsed: false }; // 已有基线，不重复解析
 
   // 查找已上传的内部成本核算单附件（Excel）
-  const { data: attachments } = await (supabase.from('order_attachments') as any)
-    .select('id, file_name, storage_path, mime_type')
+  // 兼容多种 file_type：正式标记 internal_quote、财务审批节点上传的 finance_approval、及历史 evidence 标记
+  const { data: allAttachments } = await (supabase.from('order_attachments') as any)
+    .select('id, file_name, storage_path, mime_type, file_type')
     .eq('order_id', orderId)
-    .eq('file_type', 'internal_quote')
-    .order('created_at', { ascending: false })
-    .limit(1);
+    .in('file_type', ['internal_quote', 'finance_approval', 'kickoff_meeting', 'evidence'])
+    .order('created_at', { ascending: false });
+
+  // 优先找明确标记的，其次找文件名含"成本"/"核算"/"cost"的 Excel
+  const attachments = (allAttachments || []).filter((a: any) => {
+    const isExcelFile = /\.(xlsx|xls)$/i.test(a.file_name || '') ||
+      a.mime_type?.includes('spreadsheet') || a.mime_type?.includes('excel');
+    if (!isExcelFile) return false;
+    if (a.file_type === 'internal_quote') return true;
+    const name = (a.file_name || '').toLowerCase();
+    return name.includes('成本') || name.includes('核算') || name.includes('cost') || name.includes('quote');
+  }).sort((a: any, b: any) => {
+    const priority = (f: any) => f.file_type === 'internal_quote' ? 0 : 1;
+    return priority(a) - priority(b);
+  });
 
   if (!attachments || attachments.length === 0) return { parsed: false };
 
   const att = attachments[0];
-  const isExcel = /\.(xlsx|xls)$/i.test(att.file_name || '') ||
-    att.mime_type?.includes('spreadsheet') ||
-    att.mime_type?.includes('excel');
-  if (!isExcel) return { parsed: false }; // 非 Excel 格式无法解析
 
   // 从 Supabase Storage 下载文件
   const { data: fileData, error: dlError } = await supabase.storage
