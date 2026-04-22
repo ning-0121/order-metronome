@@ -2255,6 +2255,12 @@ ALTER TABLE public.customers
   ADD COLUMN IF NOT EXISTS schedule_overrides jsonb DEFAULT '{}'::jsonb;
 COMMENT ON COLUMN public.customers.schedule_overrides IS '按 step_key 映射的客户自定义节奏规则。优先级高于通用 TIMELINE。';
 
+-- ===== 2026-04-21 生产日报增加 report_subtype（专项报告标识）=====
+ALTER TABLE public.production_reports
+  ADD COLUMN IF NOT EXISTS report_subtype text;
+COMMENT ON COLUMN public.production_reports.report_subtype IS
+  '专项报告类型（为空=日常日报），取值与 milestone.step_key 对应：mid_qc_check/final_qc_check/packing_method_confirmed 等';
+
 -- ===== 2026-04-21 补全 order_attachments.storage_path（历史数据回填）=====
 -- 从 file_url 中提取 storage_path（适用于 Supabase Storage 公开 URL 格式）
 -- URL 格式：https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>

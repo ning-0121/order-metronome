@@ -17,8 +17,26 @@ export interface ProductionReport {
   efficiency_rate: number | null;
   issues: string | null;
   notes: string | null;
+  report_subtype: string | null;  // 专项报告类型（空=日常日报）
   created_at: string;
 }
+
+// 专项报告类型定义（step_key → 显示标签）
+export const STEP_REPORT_TYPES: Array<{
+  value: string;           // step_key
+  label: string;           // 选项显示标签
+  icon: string;
+  fileType: string;        // 存入 order_attachments.file_type
+}> = [
+  { value: '', label: '日常进度', icon: '📊', fileType: 'production_report' },
+  { value: 'pre_production_sample_ready', label: '封样交付', icon: '👔', fileType: 'sample_photo' },
+  { value: 'materials_received_inspected', label: '面料验收', icon: '🧵', fileType: 'fabric_inspection_report' },
+  { value: 'production_kickoff', label: '上线确认', icon: '✂️', fileType: 'kickoff_photo' },
+  { value: 'mid_qc_check', label: '中查报告', icon: '🔍', fileType: 'mid_qc_report' },
+  { value: 'packing_method_confirmed', label: '包装确认', icon: '📦', fileType: 'packing_photo' },
+  { value: 'final_qc_check', label: '尾查报告', icon: '✅', fileType: 'final_qc_report' },
+  { value: 'inspection_release', label: '出货验货', icon: '🚛', fileType: 'inspection_report' },
+];
 
 export interface ProductionAnalysis {
   totalQty: number;
@@ -52,7 +70,7 @@ export async function getProductionReports(orderId: string) {
   if (!user) return { error: '未登录' };
 
   const { data, error } = await (supabase.from('production_reports') as any)
-    .select('*')
+    .select('id, order_id, report_date, reported_by, qty_produced, qty_cumulative, qty_defect, defect_rate, workers_count, efficiency_rate, issues, notes, report_subtype, created_at')
     .eq('order_id', orderId)
     .order('report_date', { ascending: false });
 
@@ -85,6 +103,7 @@ export async function addProductionReport(
     workers_count?: number;
     issues?: string;
     notes?: string;
+    report_subtype?: string;  // 专项报告类型（空=日常日报）
   }
 ): Promise<{ error?: string; success?: boolean; reportId?: string }> {
   const supabase = await createClient();
@@ -116,6 +135,7 @@ export async function addProductionReport(
     workers_count: report.workers_count || null,
     issues: report.issues || null,
     notes: report.notes || null,
+    report_subtype: report.report_subtype || null,
   }).select('id').single();
 
   if (error) {
@@ -154,6 +174,10 @@ export async function uploadProductionReportFile(
   orderId: string,
   reportId: string,
   file: File,
+  options?: {
+    milestoneId?: string;   // 关联到具体步骤里程碑（专项报告时传入）
+    fileType?: string;      // 覆盖默认 'production_report'（专项报告时传入对应类型）
+  }
 ): Promise<{ error?: string; data?: ProductionReportAttachment }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -178,10 +202,11 @@ export async function uploadProductionReportFile(
     .insert({
       order_id: orderId,
       production_report_id: reportId,
+      milestone_id: options?.milestoneId || null,   // 专项报告关联步骤
       file_url: publicUrl,
       storage_path: storagePath,
       file_name: file.name,
-      file_type: 'production_report',
+      file_type: options?.fileType || 'production_report',  // 专项报告用对应类型
       file_size: file.size,
       mime_type: file.type || null,
       uploaded_by: user.id,
@@ -196,6 +221,70 @@ export async function uploadProductionReportFile(
 
   revalidatePath(`/orders/${orderId}`);
   return { data: row as any };
+}
+
+/**
+ * 获取跟单流程单各步骤的已上传文件数量
+ * 用于进度条同步：有上传报告的步骤在进度条里算"已报"
+ */
+export async function getTimelineStepAttachmentCounts(
+  orderId: string,
+  stepKeys: string[]
+): Promise<{ data?: Record<string, number>; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  // 获取这些步骤对应的里程碑 ID
+  const { data: ms } = await (supabase.from('milestones') as any)
+    .select('id, step_key')
+    .eq('order_id', orderId)
+    .in('step_key', stepKeys);
+
+  if (!ms || ms.length === 0) return { data: {} };
+
+  const msIdToKey: Record<string, string> = {};
+  const msIds: string[] = [];
+  for (const m of ms) {
+    msIdToKey[m.id] = m.step_key;
+    msIds.push(m.id);
+  }
+
+  // 查这些里程碑下的所有附件
+  const { data: atts } = await (supabase.from('order_attachments') as any)
+    .select('milestone_id')
+    .eq('order_id', orderId)
+    .in('milestone_id', msIds);
+
+  const counts: Record<string, number> = {};
+  for (const a of (atts || [])) {
+    if (a.milestone_id && msIdToKey[a.milestone_id]) {
+      const key = msIdToKey[a.milestone_id];
+      counts[key] = (counts[key] || 0) + 1;
+    }
+  }
+  return { data: counts };
+}
+
+/**
+ * 查找某个步骤对应的里程碑 ID（提交专项报告时关联用）
+ */
+export async function getMilestoneIdForStep(
+  orderId: string,
+  stepKey: string
+): Promise<{ data?: string; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data } = await (supabase.from('milestones') as any)
+    .select('id')
+    .eq('order_id', orderId)
+    .eq('step_key', stepKey)
+    .limit(1)
+    .single();
+
+  return { data: data?.id };
 }
 
 /**

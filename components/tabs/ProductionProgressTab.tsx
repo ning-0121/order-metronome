@@ -11,6 +11,9 @@ import {
   getProductionReportAttachments,
   deleteProductionReportFile,
   extractTextFromAttachment,
+  getTimelineStepAttachmentCounts,
+  getMilestoneIdForStep,
+  STEP_REPORT_TYPES,
 } from '@/app/actions/production-progress';
 import type {
   ProductionReport,
@@ -89,6 +92,7 @@ const MERCH_TIMELINE_STEPS: Array<{
 ];
 
 interface MerchMilestone {
+  id: string;          // milestone uuid，关联附件用
   step_key: string;
   name: string;
   status: string;
@@ -115,6 +119,7 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
   const [analysis, setAnalysis] = useState<ProductionAnalysis | null>(null);
   const [attachments, setAttachments] = useState<ProductionReportAttachment[]>([]);
   const [merchMilestones, setMerchMilestones] = useState<MerchMilestone[]>([]);
+  const [stepUploadCounts, setStepUploadCounts] = useState<Record<string, number>>({}); // 各步骤已上传数量
   const [showTimeline, setShowTimeline] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -130,6 +135,7 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
   const [formIssues, setFormIssues] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formFiles, setFormFiles] = useState<File[]>([]);
+  const [formReportType, setFormReportType] = useState(''); // '' = 日常日报，其他 = step_key
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -138,21 +144,24 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
 
   async function loadData() {
     setLoading(true);
-    const [reportsRes, analysisRes, attRes, msRes] = await Promise.all([
+    const stepKeys = MERCH_TIMELINE_STEPS.map(s => s.step_key);
+    const [reportsRes, analysisRes, attRes, msRes, uploadCountsRes] = await Promise.all([
       getProductionReports(orderId),
       getProductionAnalysis(orderId),
       getProductionReportAttachments(orderId),
       getMilestonesByOrder(orderId),
+      getTimelineStepAttachmentCounts(orderId, stepKeys),
     ]);
     if (reportsRes.data) setReports(reportsRes.data);
     if (analysisRes.data) setAnalysis(analysisRes.data);
     if (attRes.data) setAttachments(attRes.data);
+    if (uploadCountsRes.data) setStepUploadCounts(uploadCountsRes.data);
     if (msRes.data) {
-      const stepKeys = new Set(MERCH_TIMELINE_STEPS.map(s => s.step_key));
+      const stepKeySet = new Set(stepKeys);
       setMerchMilestones(
         (msRes.data as any[])
-          .filter(m => stepKeys.has(m.step_key))
-          .map(m => ({ step_key: m.step_key, name: m.name, status: m.status, due_at: m.due_at, actual_at: m.actual_at }))
+          .filter(m => stepKeySet.has(m.step_key))
+          .map(m => ({ id: m.id, step_key: m.step_key, name: m.name, status: m.status, due_at: m.due_at, actual_at: m.actual_at }))
       );
     }
     setLoading(false);
@@ -160,12 +169,28 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    // 允许 qty=0 时必须有附件，否则没意义
-    if (formQty <= 0 && formFiles.length === 0) {
+    const isStepReport = formReportType !== '';
+
+    // 专项报告必须有附件；日常日报要求产量或附件二选一
+    if (isStepReport && formFiles.length === 0) {
+      alert('专项报告请至少上传一份对应文件（如验货报告/照片）');
+      return;
+    }
+    if (!isStepReport && formQty <= 0 && formFiles.length === 0) {
       alert('请填写当日产量或至少上传一份资料');
       return;
     }
+
     setSubmitting(true);
+
+    // 如果是专项报告，获取对应步骤的里程碑 ID
+    let stepMilestoneId: string | undefined;
+    if (isStepReport) {
+      const msRes = await getMilestoneIdForStep(orderId, formReportType);
+      stepMilestoneId = msRes.data;
+    }
+
+    const stepType = STEP_REPORT_TYPES.find(t => t.value === formReportType);
 
     const result = await addProductionReport(orderId, {
       report_date: formDate,
@@ -174,6 +199,7 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
       workers_count: formWorkers || undefined,
       issues: formIssues || undefined,
       notes: formNotes || undefined,
+      report_subtype: isStepReport ? formReportType : undefined,
     });
 
     if (result.error || !result.reportId) {
@@ -182,10 +208,13 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
       return;
     }
 
-    // 上传附件
+    // 上传附件，专项报告附件同时关联里程碑
     const uploadErrors: string[] = [];
     for (const file of formFiles) {
-      const up = await uploadProductionReportFile(orderId, result.reportId, file);
+      const up = await uploadProductionReportFile(orderId, result.reportId, file, isStepReport ? {
+        milestoneId: stepMilestoneId,
+        fileType: stepType?.fileType,
+      } : undefined);
       if (up.error) uploadErrors.push(`${file.name}: ${up.error}`);
     }
     if (uploadErrors.length > 0) {
@@ -199,6 +228,7 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
     setFormIssues('');
     setFormNotes('');
     setFormFiles([]);
+    setFormReportType('');
     if (fileInputRef.current) fileInputRef.current.value = '';
     loadData();
     router.refresh();
@@ -251,16 +281,19 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
     attByReport.set(a.production_report_id, list);
   }
 
-  // 跟单时间线数据：匹配 milestones 到 timeline steps
+  // 跟单时间线数据：匹配 milestones + 已上传报告数量
   const timelineData = MERCH_TIMELINE_STEPS.map(step => {
     const ms = merchMilestones.find(m => m.step_key === step.step_key);
     const isDone = ms && (ms.status === 'done' || ms.status === '已完成');
     const isInProgress = ms && (ms.status === 'in_progress' || ms.status === '进行中');
     const isOverdue = ms?.due_at && !isDone && new Date(ms.due_at) < new Date();
     const dueStr = ms?.due_at ? new Date(ms.due_at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '—';
-    return { ...step, ms, isDone, isInProgress, isOverdue, dueStr };
+    const uploadCount = stepUploadCounts[step.step_key] || 0;
+    const hasReport = uploadCount > 0; // 已上传报告（即使里程碑未正式完成）
+    return { ...step, ms, isDone, isInProgress, isOverdue, dueStr, uploadCount, hasReport };
   });
-  const completedCount = timelineData.filter(t => t.isDone).length;
+  // 进度条计算：正式完成 OR 已上传报告的步骤都算"已报"
+  const completedCount = timelineData.filter(t => t.isDone || t.hasReport).length;
   // 评审会是否完成（控制时间线是否显示）
   const kickoffDone = merchMilestones.length > 0; // 有跟单节点数据说明订单已创建
 
@@ -333,10 +366,15 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
                           {item.isDone && (
                             <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">✓ 已完成</span>
                           )}
-                          {item.isOverdue && (
+                          {item.hasReport && !item.isDone && (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                              📤 已上传 {item.uploadCount > 1 ? `${item.uploadCount}份` : ''}
+                            </span>
+                          )}
+                          {item.isOverdue && !item.hasReport && (
                             <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">⚠ 逾期</span>
                           )}
-                          {item.isInProgress && (
+                          {item.isInProgress && !item.hasReport && (
                             <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">● 进行中</span>
                           )}
                           <span className="text-xs text-gray-400 ml-auto">
@@ -522,7 +560,33 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
 
       {showForm && (
         <form onSubmit={handleSubmit} className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-5 space-y-4">
-          <p className="text-sm font-semibold text-gray-800">提交生产日报</p>
+          {/* 报告类型选择 */}
+          <div>
+            <label className="text-xs font-semibold text-gray-700 mb-2 block">记录类型</label>
+            <div className="flex flex-wrap gap-2">
+              {STEP_REPORT_TYPES.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setFormReportType(opt.value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    formReportType === opt.value
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-300 hover:text-indigo-600'
+                  }`}
+                >
+                  {opt.icon} {opt.label}
+                </button>
+              ))}
+            </div>
+            {formReportType !== '' && (
+              <p className="mt-2 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+                💡 此次上传将关联到「{STEP_REPORT_TYPES.find(t => t.value === formReportType)?.label}」步骤，自动同步进度条
+              </p>
+            )}
+          </div>
+
+          {/* 日期 + 产量（专项报告时产量为可选） */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="text-xs text-gray-500">日期</label>
@@ -530,7 +594,9 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
                 className="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm" />
             </div>
             <div>
-              <label className="text-xs text-gray-500">当日产量（件）</label>
+              <label className="text-xs text-gray-500">
+                当日产量（件）{formReportType !== '' && <span className="text-gray-400 font-normal"> 可选</span>}
+              </label>
               <input type="number" min="0" value={formQty || ''} onChange={e => setFormQty(Number(e.target.value))}
                 className="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm" placeholder="0" />
             </div>
@@ -553,12 +619,17 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
           <div>
             <label className="text-xs text-gray-500">备注（选填）</label>
             <textarea value={formNotes} onChange={e => setFormNotes(e.target.value)} rows={2}
-              className="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm" placeholder="今日备注、跟单观察等" />
+              className="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+              placeholder={formReportType !== '' ? '验货结论、整改要求、跟进事项等' : '今日备注、跟单观察等'} />
           </div>
 
           {/* 文件/图片上传区 */}
           <div>
-            <label className="text-xs text-gray-500">上传资料 / 图片 / 手写稿（可多选）</label>
+            <label className="text-xs text-gray-500">
+              {formReportType !== ''
+                ? `上传${STEP_REPORT_TYPES.find(t => t.value === formReportType)?.label}文件（必填）`
+                : '上传资料 / 图片 / 手写稿（可多选）'}
+            </label>
             <div className="mt-1 flex items-center gap-2">
               <input
                 ref={fileInputRef}
@@ -590,10 +661,15 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
           </div>
 
           <div className="flex gap-2 justify-end pt-2 border-t border-indigo-100">
-            <button type="button" onClick={() => { setShowForm(false); setFormFiles([]); }} className="px-4 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">取消</button>
-            <button type="submit" disabled={submitting || (formQty <= 0 && formFiles.length === 0)}
+            <button type="button"
+              onClick={() => { setShowForm(false); setFormFiles([]); setFormReportType(''); }}
+              className="px-4 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">取消</button>
+            <button type="submit"
+              disabled={submitting || (formReportType !== '' ? formFiles.length === 0 : (formQty <= 0 && formFiles.length === 0))}
               className="px-4 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
-              {submitting ? '提交中...' : '提交日报'}
+              {submitting ? '提交中...' : formReportType !== ''
+                ? `提交${STEP_REPORT_TYPES.find(t => t.value === formReportType)?.label}`
+                : '提交日报'}
             </button>
           </div>
         </form>
@@ -618,10 +694,20 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
                     {isExpanded ? '▼' : '▶'}
                   </button>
                   <span className="text-sm font-medium text-gray-900 w-24">{r.report_date}</span>
-                  <span className="text-sm">
-                    产量 <span className="font-semibold text-indigo-600">{r.qty_produced}</span>
-                  </span>
-                  <span className="text-xs text-gray-500">累计 {r.qty_cumulative}</span>
+                  {/* 专项报告 badge */}
+                  {r.report_subtype ? (() => {
+                    const stepType = STEP_REPORT_TYPES.find(t => t.value === r.report_subtype);
+                    return stepType ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-medium">
+                        {stepType.icon} {stepType.label}
+                      </span>
+                    ) : null;
+                  })() : (
+                    <span className="text-sm">
+                      产量 <span className="font-semibold text-indigo-600">{r.qty_produced}</span>
+                    </span>
+                  )}
+                  {!r.report_subtype && <span className="text-xs text-gray-500">累计 {r.qty_cumulative}</span>}
                   {r.qty_defect > 0 && (
                     <span className="text-xs text-red-500">不良 {r.qty_defect}（{r.defect_rate}%）</span>
                   )}
