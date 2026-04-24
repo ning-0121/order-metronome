@@ -607,9 +607,9 @@ export async function markMilestoneDone(
               user_id: admin.user_id,
               type: 'delivery_risk',
               title: `🚨 交期风险预警：${(orderData as any).order_no}`,
-              content: `订单 ${(orderData as any).order_no}（${(orderData as any).customer_name}）原料到货日期超出安全线 ${delayDays} 天。需决策：压缩生产赶货 或 与客户推交期。`,
-              order_id: milestoneData.order_id,
-              is_read: false,
+              message: `订单 ${(orderData as any).order_no}（${(orderData as any).customer_name}）原料到货日期超出安全线 ${delayDays} 天。需决策：压缩生产赶货 或 与客户推交期。`,
+              related_order_id: milestoneData.order_id,
+              related_milestone_id: milestoneId,
             });
           }
         }
@@ -629,7 +629,7 @@ export async function markMilestoneDone(
             await sendCostAlert(
               milestoneData.order_id,
               alert.title.includes('面料') ? 'procurement_over_budget' : 'cmt_over_estimate',
-              `${orderForNotif?.order_no || '?'}: ${alert.message}`,
+              alert.message,
               milestoneData.owner_user_id || undefined,
             );
           }
@@ -986,8 +986,10 @@ export async function updateMilestoneStatus(
 
   // 生命周期校验（管理员可强制）
   if (milestone) {
+    const { data: { user: userLc } } = await supabase.auth.getUser();
+    if (!userLc) return { error: '请先登录' };
     const { data: profileLc } = await supabase
-      .from('profiles').select('role, roles').eq('user_id', user.id).single();
+      .from('profiles').select('role, roles').eq('user_id', userLc.id).single();
     const lcRoles: string[] = (profileLc as any)?.roles?.length > 0 ? (profileLc as any).roles : [(profileLc as any)?.role].filter(Boolean);
     const lcErr = await checkOrderModifiable(supabase, (milestone as any).order_id, lcRoles.includes('admin'));
     if (lcErr) return { error: lcErr };
