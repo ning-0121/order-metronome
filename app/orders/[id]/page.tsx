@@ -28,6 +28,8 @@ import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { InlineEditField } from '@/components/InlineEditField';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
+import { RootCausesPanel } from '@/components/RootCausesPanel';
+import { rootCauseEngineEnabled } from '@/lib/engine/featureFlags';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
 import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
 import { CostControlTab } from '@/components/tabs/CostControlTab';
@@ -279,6 +281,8 @@ export default async function OrderDetailPage({
               { key: 'email_center', label: '邮件中心' },
               { key: 'notes', label: '📝 备注' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
+              // 根因分析（仅 admin + 引擎启用时显示）
+              ...(isAdmin && rootCauseEngineEnabled() ? [{ key: 'root_causes', label: '🔬 根因' }] : []),
             ].map(t => (
               <Link
                 key={t.key}
@@ -804,6 +808,12 @@ export default async function OrderDetailPage({
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">执行评分</h2>
             <LiveScorePreview orderId={id} />
+          </div>
+        )}
+
+        {activeTab === 'root_causes' && isAdmin && rootCauseEngineEnabled() && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <RootCausesPanel orderId={id} isAdmin={isAdmin} />
           </div>
         )}
 

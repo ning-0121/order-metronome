@@ -1,27 +1,24 @@
 /**
  * Root Cause 规则注册中心
  *
- * Step 1（当前）：空注册表，引擎可调用但不会触发任何规则。
- * Step 2（下次）：在此 import 各 domain 的规则文件并注册。
- *
- * 规则文件按 domain 分组：
- *   - delayCauses.ts
- *   - profitCauses.ts
- *   - paymentCauses.ts
- *   - confirmationCauses.ts
- *   - qualityCauses.ts
+ * Step 2 已注册 5 条核心规则（覆盖付款/利润/确认链/质量/延期五大领域）。
+ * 后续按 domain 追加规则。
  */
 
 import type { CauseRule } from '@/lib/engine/types';
+import { paymentCauseRules } from './paymentCauses';
+import { profitCauseRules } from './profitCauses';
+import { confirmationCauseRules } from './confirmationCauses';
+import { qualityCauseRules } from './qualityCauses';
+import { delayCauseRules } from './delayCauses';
 
 /** 全部已注册的规则列表 */
 export const ALL_CAUSE_RULES: CauseRule[] = [
-  // Step 2 在此追加：
-  // ...delayCauseRules,
-  // ...profitCauseRules,
-  // ...paymentCauseRules,
-  // ...confirmationCauseRules,
-  // ...qualityCauseRules,
+  ...paymentCauseRules,
+  ...profitCauseRules,
+  ...confirmationCauseRules,
+  ...qualityCauseRules,
+  ...delayCauseRules,
 ];
 
 export function getRuleByCode(code: string): CauseRule | undefined {
