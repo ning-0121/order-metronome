@@ -144,27 +144,32 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
 
   async function loadData() {
     setLoading(true);
-    const stepKeys = MERCH_TIMELINE_STEPS.map(s => s.step_key);
-    const [reportsRes, analysisRes, attRes, msRes, uploadCountsRes] = await Promise.all([
-      getProductionReports(orderId),
-      getProductionAnalysis(orderId),
-      getProductionReportAttachments(orderId),
-      getMilestonesByOrder(orderId),
-      getTimelineStepAttachmentCounts(orderId, stepKeys),
-    ]);
-    if (reportsRes.data) setReports(reportsRes.data);
-    if (analysisRes.data) setAnalysis(analysisRes.data);
-    if (attRes.data) setAttachments(attRes.data);
-    if (uploadCountsRes.data) setStepUploadCounts(uploadCountsRes.data);
-    if (msRes.data) {
-      const stepKeySet = new Set(stepKeys);
-      setMerchMilestones(
-        (msRes.data as any[])
-          .filter(m => stepKeySet.has(m.step_key))
-          .map(m => ({ id: m.id, step_key: m.step_key, name: m.name, status: m.status, due_at: m.due_at, actual_at: m.actual_at }))
-      );
+    try {
+      const stepKeys = MERCH_TIMELINE_STEPS.map(s => s.step_key);
+      const [reportsRes, analysisRes, attRes, msRes, uploadCountsRes] = await Promise.all([
+        getProductionReports(orderId),
+        getProductionAnalysis(orderId),
+        getProductionReportAttachments(orderId),
+        getMilestonesByOrder(orderId),
+        getTimelineStepAttachmentCounts(orderId, stepKeys),
+      ]);
+      if (reportsRes.data) setReports(reportsRes.data);
+      if (analysisRes.data) setAnalysis(analysisRes.data);
+      if (attRes.data) setAttachments(attRes.data);
+      if (uploadCountsRes.data) setStepUploadCounts(uploadCountsRes.data);
+      if (msRes.data) {
+        const stepKeySet = new Set(stepKeys);
+        setMerchMilestones(
+          (msRes.data as any[])
+            .filter(m => stepKeySet.has(m.step_key))
+            .map(m => ({ id: m.id, step_key: m.step_key, name: m.name, status: m.status, due_at: m.due_at, actual_at: m.actual_at }))
+        );
+      }
+    } catch (err) {
+      console.error('[ProductionProgressTab] loadData error:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleSubmit(e: React.FormEvent) {
