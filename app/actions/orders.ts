@@ -55,6 +55,11 @@ export async function preGenerateOrderNo() {
  * 约束：
  * - order_no 必须由系统生成（通过 preGenerateOrderNo 预生成）
  * - 禁止从 formData 读取 order_no
+ *
+ * TODO(Sprint-1): 迁移到 ActionResult<{ orderId: string; warning?: string }>。
+ *   现状：665 行，多 return 点，副作用包括 milestone 生成、邮件、AI 抽取、附件移交。
+ *   迁移路径：先抽 Core 函数返回 ActionResult，再用 toLegacyResult/toLegacyOkResult 包装。
+ *   调用方：app/orders/new/page.tsx:576（期望 result.ok / result.error / result.orderId）
  */
 export async function createOrder(
   formData: FormData,
@@ -921,6 +926,8 @@ export async function updateOrderField(
         .eq('user_id', user.id)
         .single();
       const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
+      // TODO(Sprint-1): ['admin','finance'] 不完全匹配 ROLE_GROUPS 任一组（最接近的 MANAGEMENT 多含 admin_assistant）
+      //                 待评估后整合，本轮保留行为
       const canModify = roles.some(r => ['admin', 'finance'].includes(r));
       if (!canModify) {
         return { ok: false, error: '内部单号已填写，修改需要财务审批。请联系财务或管理员。' };
