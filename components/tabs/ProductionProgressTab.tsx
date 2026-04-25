@@ -13,8 +13,8 @@ import {
   extractTextFromAttachment,
   getTimelineStepAttachmentCounts,
   getMilestoneIdForStep,
-  STEP_REPORT_TYPES,
 } from '@/app/actions/production-progress';
+import { STEP_REPORT_TYPES } from '@/lib/constants/production-report';
 import type {
   ProductionReport,
   ProductionAnalysis,
