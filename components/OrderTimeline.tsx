@@ -315,8 +315,9 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           {m.is_critical && !isDone && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
                           )}
-                          {overdue && isActive && (() => {
+                          {overdue && !isDone && !isBlocked && (() => {
                             // 严格按 owner_user_id 判断 — 否则同 role 的同事会被误标成"我的逾期"
+                            // 改动：pending（未开始）但已过截止日期也要显示逾期 badge，让责任人能看到
                             const isMineOverdue = !isAdmin && !!currentUserId && (m as any).owner_user_id === currentUserId;
                             const roleName = getRoleLabel(m.owner_role);
                             return isMineOverdue
@@ -344,7 +345,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           <span>责任人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || `未分配（${getRoleLabel(m.owner_role)}）`}</span>
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (() => {
-                            if (!overdue || !isActive) return <span>截止：{formatDate(m.due_at)}</span>;
+                            if (!overdue || isDone || isBlocked) return <span>截止：{formatDate(m.due_at)}</span>;
                             const isMineOverdue = !isAdmin && !!currentUserId && (m as any).owner_user_id === currentUserId;
                             return (
                               <span className={isMineOverdue ? 'text-red-600 font-semibold' : 'text-orange-500 font-medium'}>
@@ -470,6 +471,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           allMilestones={sorted}
                           currentRole={currentRole}
                           currentRoles={currentRoles}
+                          currentUserId={currentUserId}
                           isAdmin={isAdmin}
                           orderId={orderId}
                           orderNo={orderNo}

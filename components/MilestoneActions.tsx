@@ -24,6 +24,8 @@ interface MilestoneActionsProps {
   currentRole?: string;
   /** 多角色支持 */
   currentRoles?: string[];
+  /** 当前登录用户 ID（owner_user_id 匹配时即使角色不符也允许操作） */
+  currentUserId?: string;
   isAdmin?: boolean;
   orderId?: string;
   /** 订单号（用于文件命名提示） */
@@ -35,6 +37,7 @@ export function MilestoneActions({
   allMilestones = [],
   currentRole,
   currentRoles = [],
+  currentUserId,
   isAdmin = false,
   orderId,
   orderNo,
@@ -61,9 +64,12 @@ export function MilestoneActions({
   const allRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
   const isAdminOnly = allRoles.includes('admin');
   const ownerRole = (milestone.owner_role || '').toLowerCase();
+  // ⭐ 修复：被显式指派为 owner_user_id 的用户，即使角色不匹配也能操作
+  // 场景：加工费确认节点 owner_role=production_manager 但实际指派给了财务方圆
+  const isExplicitOwner = !!currentUserId && (milestone as any).owner_user_id === currentUserId;
   // 角色合并：production/qc/quality 都归入 merchandiser
   // 管理员禁止标记完成（与服务端一致）
-  const canModify = !isAdminOnly && allRoles.some(r => {
+  const canModify = !isAdminOnly && (isExplicitOwner || allRoles.some(r => {
     const nr = r.toLowerCase();
     if (nr === 'admin') return false; // 跳过admin角色
     if (nr === ownerRole) return true;
@@ -72,10 +78,16 @@ export function MilestoneActions({
     // 生产/质检/品控 → 跟单
     const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
     if (merchGroup.includes(ownerRole) && merchGroup.includes(nr)) return true;
+    // 生产主管 → 也归入 merchandiser/production 圈
+    if ((ownerRole === 'production_manager' && (merchGroup.includes(nr) || nr === 'production_manager')) ||
+        (nr === 'production_manager' && (merchGroup.includes(ownerRole) || ownerRole === 'production_manager'))) return true;
     // 行政督察可操作需要双签的节点（如评审会）
     if (nr === 'admin_assistant' && ownerRole === 'sales') return true;
+    // 财务也可操作 production_manager 类的"加工费/成本审批"节点（owner 通常是 production_manager 但实际由财务定夺）
+    const financeApprovalSteps = ['processing_fee_confirmed', 'finance_approval', 'shipment_approval', 'procurement_approval'];
+    if (nr === 'finance' && financeApprovalSteps.includes(milestone.step_key)) return true;
     return false;
-  });
+  }));
 
   // ── 阻断校验 ──────────────────────────────────────────────────
   function getBlockers(): string[] {

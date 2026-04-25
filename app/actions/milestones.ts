@@ -389,21 +389,25 @@ export async function markMilestoneDone(
       .eq('milestone_id', milestoneId)
       .limit(1);
     // 检查3: 按 order_id + file_type 匹配（订单资料区上传的文件）
+    // 兼容生产进度 tab 的专项报告 file_type 变体（STEP_REPORT_TYPES）
     const stepToFileType: Record<string, string[]> = {
       po_confirmed: ['customer_po'],
-      production_order_upload: ['production_order', 'trims_sheet'], // 包装资料拆分到 packing_method_confirmed
+      production_order_upload: ['production_order', 'trims_sheet'],
       finance_approval: ['internal_quote', 'customer_quote'],
       processing_fee_confirmed: ['internal_quote'],
       procurement_order_placed: ['procurement_order'],
-      mid_qc_check: ['qc_report'],
-      final_qc_check: ['qc_report'],
-      inspection_release: ['qc_report'],
-      packing_method_confirmed: ['packing_requirement'], // 包装资料移到这里
+      mid_qc_check: ['qc_report', 'mid_qc_report'],
+      final_qc_check: ['qc_report', 'final_qc_report'],
+      inspection_release: ['qc_report', 'inspection_report'],
+      packing_method_confirmed: ['packing_requirement', 'packing_photo'],
       booking_done: ['packing_list'],
       customs_export: ['packing_list'],
       shipment_execute: ['packing_list'],
       sample_qc: ['qc_report'],
       sample_sent: ['tech_pack'],
+      pre_production_sample_ready: ['sample_photo'],
+      materials_received_inspected: ['fabric_inspection_report'],
+      production_kickoff: ['kickoff_photo'],
     };
     let att3: any[] = [];
     const expectedTypes = stepToFileType[milestone.step_key];
