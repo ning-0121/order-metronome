@@ -38,6 +38,9 @@ export interface ProcurementLineItem {
   notes: string | null;
 }
 
+// TODO(Sprint-1): 此清单与 lib/domain/roles.ts 任一现成 group 都不完全等价（缺 sales 的 group 没有，
+//                 含 production_manager 的 EXECUTION 没有 finance/sales）。
+//                 保留本地常量，待评估后整合到 ROLE_GROUPS（建议命名 CAN_VIEW_PROCUREMENT）。
 const ALLOWED_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement', 'production_manager'];
 
 async function checkAccess(): Promise<{ ok: boolean; userId?: string; error?: string }> {

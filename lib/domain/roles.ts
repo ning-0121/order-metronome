@@ -140,3 +140,74 @@ export function isValidDbRole(role: string): role is DbUserRole {
 export function isValidAppRole(role: string): role is AppRole {
   return role in ROLE_MAP_TO_DB;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// 权限分组单一来源（Sprint 0 加固）
+// ════════════════════════════════════════════════════════════════════
+//
+// ⚠️ 任何代码不得再硬编码 ['admin','finance',...] 这样的角色数组。
+// 所有权限判断必须通过本表，便于审计、防止漂移。
+//
+// 命名约定：
+// - ALL_*       — 包含某能力的全部角色
+// - CAN_*       — 能做某动作的角色集合
+// - MANAGEMENT  — 管理类（财务/行政/admin）
+// - EXECUTION   — 执行类（跟单/生产/质检/品控/生产主管）
+//
+// 注意：与 lib/domain/scoring-constants.ts 中的 ROLE_GROUPS 不同。
+//   - scoring-constants.ROLE_GROUPS：评分维度分组
+//   - 本文件 ROLE_GROUPS：权限/可见性分组
+//
+// 维护规则：
+// 1. 新加 group 必须在此文件统一命名
+// 2. 修改任一组都要在 PR 描述里说明影响面
+// 3. 不允许在业务代码中临时拼角色数组
+// ════════════════════════════════════════════════════════════════════
+
+export const ROLE_GROUPS = {
+  /** 仅管理员，最高权限 */
+  ALL_ADMIN: ['admin'] as const,
+
+  /** 管理类角色：admin / 财务 / 行政督察 */
+  MANAGEMENT: ['admin', 'finance', 'admin_assistant'] as const,
+
+  /** 执行类角色：跟单 / 生产 / 质检 / 品控 / 生产主管 */
+  EXECUTION: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
+
+  /** 可看所有订单（跨负责人）：管理类 + 生产主管 */
+  CAN_SEE_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager'] as const,
+
+  /** 可看金额/利润等敏感财务数据：admin / finance / 业务（仅自己订单） */
+  CAN_SEE_FINANCIALS: ['admin', 'finance', 'sales'] as const,
+
+  /** 可审批延期申请 */
+  CAN_APPROVE_DELAY: ['admin'] as const,
+
+  /** 可绕过经营门禁（付款锁、确认链阻塞等） */
+  CAN_OVERRIDE_BUSINESS_BLOCK: ['admin'] as const,
+
+  /** 可执行里程碑（去处理/完成节点） */
+  CAN_OPERATE_MILESTONES: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
+} as const;
+
+export type RoleGroupKey = keyof typeof ROLE_GROUPS;
+
+/**
+ * 检查 user 的任一角色是否落在指定 group 中
+ *
+ * @example
+ *   if (hasRoleInGroup(currentRoles, 'CAN_SEE_ALL_ORDERS')) { ... }
+ */
+export function hasRoleInGroup(userRoles: string[] | null | undefined, group: RoleGroupKey): boolean {
+  if (!userRoles || userRoles.length === 0) return false;
+  const target = ROLE_GROUPS[group] as readonly string[];
+  return userRoles.some(r => target.includes(r));
+}
+
+/**
+ * 判定是否为管理员（admin role 包含在 roles 数组中）
+ * 任何 admin 判断都应通过此函数，避免再写 .includes('admin')
+ */
+export function isAdminRole(userRoles: string[] | null | undefined): boolean {
+  return hasRoleInGroup(userRoles, 'ALL_ADMIN');
+}

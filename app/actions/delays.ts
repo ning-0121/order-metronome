@@ -6,6 +6,8 @@ import { calcDueDates } from '@/lib/schedule';
 import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 import { updateMilestone, updateMilestones } from '@/lib/repositories/milestonesRepo';
 import { sendEmailNotification } from '@/lib/utils/notifications';
+import { isAdminRole } from '@/lib/domain/roles';
+import { type ActionResult, success, failure, toLegacyResult } from '@/lib/types/action-result';
 import { isBlockedStatus } from '@/lib/domain/types';
 
 type MilestoneLogAction =
@@ -346,14 +348,28 @@ export async function createDelayRequest(
   return { data: delayRequest };
 }
 
+/**
+ * 审批延期申请
+ *
+ * Sprint 0 加固：返回类型保持 `{error?, data?}` 旧契约（前端兼容），
+ * 但内部使用 ActionResult helpers 统一构造逻辑。
+ *
+ * 调用方（前端）：DelayRequestDetail / DelayRequestsList / DelayRequestActions
+ * 期望形态：result.error → 报错；result.data → 成功
+ */
 export async function approveDelayRequest(delayRequestId: string, decisionNote?: string) {
+  return toLegacyResult(await approveDelayRequestCore(delayRequestId, decisionNote));
+}
+
+async function approveDelayRequestCore(
+  delayRequestId: string,
+  decisionNote?: string,
+): Promise<ActionResult<any>> {
   try {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: 'Unauthorized' };
-  }
+  if (!user) return failure('Unauthorized', 'AUTH_REQUIRED');
 
   // Get delay request
   const { data: delayRequest } = await supabase
@@ -362,14 +378,15 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
     .eq('id', delayRequestId)
     .single();
 
-  if (!delayRequest) {
-    return { error: 'Delay request not found' };
-  }
+  if (!delayRequest) return failure('Delay request not found', 'NOT_FOUND');
 
   const delayRequestData = delayRequest as any;
 
   if (delayRequestData.status !== 'pending') {
-    return { error: `该延期申请已${delayRequestData.status === 'approved' ? '批准' : '处理'}，请刷新页面` };
+    return failure(
+      `该延期申请已${delayRequestData.status === 'approved' ? '批准' : '处理'}，请刷新页面`,
+      'CONFLICT',
+    );
   }
 
   // Get milestone and order separately
@@ -378,20 +395,16 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
     .select('*')
     .eq('id', delayRequestData.milestone_id)
     .single();
-  
-  if (!milestone) {
-    return { error: 'Milestone not found' };
-  }
-  
+
+  if (!milestone) return failure('Milestone not found', 'NOT_FOUND');
+
   const { data: order } = await supabase
     .from('orders')
     .select('*')
     .eq('id', delayRequestData.order_id)
     .single();
-  
-  if (!order) {
-    return { error: 'Order not found' };
-  }
+
+  if (!order) return failure('Order not found', 'NOT_FOUND');
 
   const orderData = order as any;
   const milestoneData = milestone as any;
@@ -403,11 +416,9 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdmin = userRoles.includes('admin');
+  const isAdmin = isAdminRole(userRoles);
 
-  if (!isAdmin) {
-    return { error: '无权操作：只有管理员可以审批延期申请' };
-  }
+  if (!isAdmin) return failure('无权操作：只有管理员可以审批延期申请', 'PERMISSION_DENIED');
 
   // Update delay request
   const updatePayload: any = {
@@ -423,9 +434,7 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
     .select()
     .single();
 
-  if (updateError) {
-    return { error: updateError.message };
-  }
+  if (updateError) return failure(updateError.message, 'DB_ERROR');
 
   // Log action
   await logMilestoneAction(
@@ -526,10 +535,10 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
   revalidatePath('/dashboard');
   revalidatePath('/');
 
-  return { data: updatedRequest };
+  return success(updatedRequest);
   } catch (err: any) {
     console.error('[approveDelayRequest] 异常:', err?.message);
-    return { error: `审批异常：${err?.message || '未知错误'}` };
+    return failure(`审批异常：${err?.message || '未知错误'}`, 'UNKNOWN');
   }
 }
 

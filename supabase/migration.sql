@@ -1578,8 +1578,29 @@ CREATE POLICY "pre_order_price_approvals_authenticated" ON public.pre_order_pric
 -- 订单关联到价格审批 — 用于审计追溯
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS price_approval_id uuid REFERENCES public.pre_order_price_approvals(id);
 
+-- ════════════════════════════════════════════════════════════════════
+-- ⚠️  WARNING — 此段 SQL 已被以下 migration 覆盖修复，请勿单独重跑！
+-- ════════════════════════════════════════════════════════════════════
+--
+--   supabase/migrations/20260425_fix_rls_infinite_recursion.sql
+--
+--   重跑 migration.sql 全文会通过 CREATE OR REPLACE 覆盖修复版本，
+--   导致 milestones 表的 RLS infinite recursion 重新出现。
+--
+-- 已知问题位置（本段下方）：
+--   1) user_can_access_order() 函数体内仍含 `EXISTS ... FROM milestones`
+--   2) orders_select_v2 policy 仍含 `EXISTS ... FROM milestones`
+--
+-- 上线状态（2026-04-25）：生产 DB 已应用 20260425 修复，函数体已不含
+-- milestones 子查询。本文件保留旧版仅为历史参考，不应再被全量执行。
+--
+-- 修复方法：如必须重跑此文件，跑完后立即追加执行
+--   supabase/migrations/20260425_fix_rls_infinite_recursion.sql
+-- ════════════════════════════════════════════════════════════════════
+
 -- ===== 2026-04-08 RLS 加固（P1 安全审计修复） =====
 -- 详见 supabase/migrations/20260408_rls_hardening.sql
+-- ⚠️ 本段已被 20260425_fix_rls_infinite_recursion.sql 覆盖（见上方警告）
 CREATE OR REPLACE FUNCTION public.user_can_see_all_orders(uid uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   -- 注意：role 是 user_role enum，必须 ::text 转换；roles 是 text[]/user_role[]，统一转 text[]

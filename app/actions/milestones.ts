@@ -11,6 +11,9 @@ import {
 import { normalizeMilestoneStatus, isDoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
+import { isAdminRole } from '@/lib/domain/roles';
+// TODO(Sprint-1): merchGroup (~L180) 应迁移到 ROLE_GROUPS.EXECUTION，但 EXECUTION 含 production_manager
+//                 而原 merchGroup 不含，直接迁移会改变权限（属 P0 候选 bug），等 P0 评估后再动
 
 type MilestoneLogAction =
   | 'mark_done'
@@ -137,6 +140,16 @@ export async function getUserMilestones(userId: string) {
   return { data: milestones };
 }
 
+/**
+ * 标记里程碑为已完成
+ *
+ * TODO(Sprint-1): 迁移到 ActionResult<MarkMilestoneDoneData>。
+ *   现状：函数 600+ 行，10+ 个 return 点，副作用多（通知/成本/RAG/ schedule recalc）。
+ *   迁移路径：先抽 Core 函数返回 ActionResult，再用 toLegacyResult 包装维持当前签名。
+ *   调用方：components/MilestoneActions.tsx:267（期望 result.error / result.success）
+ *
+ * 当前返回形态混合：{error?: string} | {success?: boolean; cleared?: boolean} | {data?: any}
+ */
 export async function markMilestoneDone(
   milestoneId: string,
   checklistData?: Array<{ key: string; value: any; pending_date?: string }> | null,
@@ -167,7 +180,7 @@ export async function markMilestoneDone(
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdmin = userRoles.includes('admin');
+  const isAdmin = isAdminRole(userRoles);
 
   // 生命周期校验：已完成/已取消的订单禁止操作（管理员可强制）
   const lifecycleError = await checkOrderModifiable(supabase, milestone.order_id, isAdmin);
@@ -772,7 +785,7 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdminUser = userRoles.includes('admin');
+  const isAdminUser = isAdminRole(userRoles);
   // 生命周期校验（管理员可强制）
   const lifecycleErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUser);
   if (lifecycleErr) return { error: lifecycleErr };
@@ -1078,7 +1091,7 @@ export async function markMilestoneUnblocked(milestoneId: string) {
   const userRoles: string[] = (profile as any)?.roles?.length > 0
     ? (profile as any).roles
     : [(profile as any)?.role].filter(Boolean);
-  const isAdmin = userRoles.includes('admin');
+  const isAdmin = isAdminRole(userRoles);
   const isPrivileged = isAdmin || userRoles.some((r: string) =>
     ['finance', 'production_manager', 'admin_assistant'].includes(r));
 
@@ -1423,7 +1436,7 @@ export async function assignMerchandiser(
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdmin = userRoles.includes('admin');
+  const isAdmin = isAdminRole(userRoles);
   const isPM = userRoles.includes('production_manager');
 
   if (!isAdmin && !isPM) {
@@ -1515,7 +1528,7 @@ export async function saveChecklistData(
   // 角色解析（先读，给生命周期校验和检查项校验复用）
   const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdminUserCl = userRoles.includes('admin');
+  const isAdminUserCl = isAdminRole(userRoles);
 
   // 生命周期校验（管理员可强制）
   const lcErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUserCl);
