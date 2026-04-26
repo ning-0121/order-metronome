@@ -18,7 +18,9 @@ interface ApprovalCallback {
   request_id: string
   data: {
     approval_id: string
-    approval_type: 'price' | 'delay' | 'cancel'
+    // P0-4 修复：补 'milestone'。L106 实际处理这种类型（财务确认加工费/核准出运/收款等里程碑）
+    // 但 union 之前漏写，导致 TS 判类型不重叠、IDE 提示死代码
+    approval_type: 'price' | 'delay' | 'cancel' | 'milestone'
     decision: 'approved' | 'rejected'
     decided_by: string
     decider_name: string
