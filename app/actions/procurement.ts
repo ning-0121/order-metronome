@@ -127,8 +127,10 @@ export async function addProcurementItem(
   const supabase = await createClient();
 
   // 预算计算 — 分面料和辅料两种逻辑
+  // P0-5 修复：orderQuantity 初始为 0 而非 null，避免 TS18047 'possibly null' 警告
+  // 业务上"未计算"和"数量=0"等价（未传 quantity 字段当作 0 处理）
   let budgetQty: number | null = null;
-  let orderQuantity: number | null = null;
+  let orderQuantity: number = 0;
   let budgetWarning: string | null = null;
 
   const { data: order } = await (supabase.from('orders') as any)
