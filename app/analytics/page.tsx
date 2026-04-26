@@ -10,12 +10,28 @@ export default async function AnalyticsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [summary, roles, distribution, aiCapacity] = await Promise.all([
+  // 防御性兜底：任意一个 fetch 失败不让整页 500，仅该区块降级显示
+  // 失败的 action 会在 Vercel logs 里留 console.error，便于定位
+  const SAFE_SUMMARY = {
+    totalOrders: 0, totalMilestones: 0, completedMilestones: 0, completionRate: 0,
+    onTimeCount: 0, onTimeRate: 0, overdueCount: 0, blockedCount: 0,
+    overdueOrderCount: 0, blockedOrderCount: 0,
+    thisWeekCompleted: 0, lastWeekCompleted: 0,
+  };
+  const [summaryRes, rolesRes, distributionRes, aiCapacityRes] = await Promise.allSettled([
     getAnalyticsSummary(),
     getRoleEfficiency(),
     getShipmentDistribution(),
-    getCapacityAIAnalysis().catch(() => null),
+    getCapacityAIAnalysis(),
   ]);
+  if (summaryRes.status === 'rejected') console.error('[AnalyticsPage] getAnalyticsSummary failed:', (summaryRes as any).reason?.message);
+  if (rolesRes.status === 'rejected') console.error('[AnalyticsPage] getRoleEfficiency failed:', (rolesRes as any).reason?.message);
+  if (distributionRes.status === 'rejected') console.error('[AnalyticsPage] getShipmentDistribution failed:', (distributionRes as any).reason?.message);
+  if (aiCapacityRes.status === 'rejected') console.error('[AnalyticsPage] getCapacityAIAnalysis failed:', (aiCapacityRes as any).reason?.message);
+  const summary = summaryRes.status === 'fulfilled' ? summaryRes.value : SAFE_SUMMARY;
+  const roles = rolesRes.status === 'fulfilled' ? rolesRes.value : [];
+  const distribution = distributionRes.status === 'fulfilled' ? distributionRes.value : [];
+  const aiCapacity = aiCapacityRes.status === 'fulfilled' ? aiCapacityRes.value : null;
   const currentMonth = new Date().toISOString().slice(0, 7);
 
   // 总览统计
