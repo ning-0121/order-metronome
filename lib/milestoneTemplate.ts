@@ -4,6 +4,8 @@ export type OwnerRole =
   | "finance"
   | "procurement"
   | "production"
+  | "production_manager"
+  | "admin_assistant"
   | "qc"
   | "logistics"
   | "admin";
@@ -26,6 +28,7 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   owner_role: OwnerRole;
   is_critical: boolean;
   evidence_required: boolean;
+  evidence_note?: string;
 }> = [
   // 阶段1：订单评审
   { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true },
