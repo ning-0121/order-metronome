@@ -360,14 +360,13 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           })()}
                           {m.actual_at && (
                             <span
-                              title={`完成时间：${formatDateTime(m.actual_at)}`}
                               className={
                                 computeDeliveryAlert(m.actual_at, m.due_at) === 'RED' ? 'text-red-600 font-semibold' :
                                 computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW' ? 'text-yellow-600 font-semibold' :
                                 'text-green-600'
                               }
                             >
-                              完成：{formatRelative(m.actual_at)}
+                              完成：{formatDateTime(m.actual_at)}
                             </span>
                           )}
                         </div>
@@ -543,7 +542,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                                   {log.note && <p className="text-gray-600 mt-0.5">{log.note}</p>}
                                   <p className="text-gray-400 mt-0.5">
                                     {log.actor_name && <span className="text-gray-500">{log.actor_name} · </span>}
-                                    <span title={formatDateTime(log.created_at)}>{formatRelative(log.created_at)}</span>
+                                    {formatDateTime(log.created_at)}
                                   </p>
                                 </div>
                               ))}
