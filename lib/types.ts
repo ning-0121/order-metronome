@@ -3,7 +3,9 @@
 
 export type UserRole = 'sales' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics' | 'admin';
 export type IncotermType = 'FOB' | 'DDP' | 'RMB_EX_TAX' | 'RMB_INC_TAX';
-export type OrderType = 'sample' | 'bulk';
+export type OrderType = 'sample' | 'bulk' | 'repeat';
+// 注意：DB 约束（migrations/20240127000000_fix_order_type_check.sql）允许 sample/bulk/repeat 三种。
+// UI 显示层面有 trial/urgent label 兼容代码（components/OrderDetail），但 DB 不存这两种。
 export type PackagingType = 'standard' | 'custom';
 // 状态类型：统一使用中文（兼容旧代码，但推荐使用 lib/domain/types.ts 中的类型）
 export type MilestoneStatus = '未开始' | '进行中' | '卡住' | '已完成';
