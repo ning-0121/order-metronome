@@ -472,7 +472,16 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
       )}
 
       {/* AI 分析概览 */}
-      {analysis && (
+      {analysis && (() => {
+        // F 修复（Sprint 1）：双口径区分，避免「产量 93%」和「跟单流程 0/N」并列时用户混淆
+        const flowTotal = timelineData.length;
+        const flowDone = completedCount;
+        const flowPct = flowTotal > 0 ? Math.round((flowDone / flowTotal) * 100) : 0;
+        const qtyPct = analysis.progressRate;
+        const flowQtyGap = Math.abs(qtyPct - flowPct);
+        const flowLagging = flowQtyGap > 30 && qtyPct > flowPct; // 产量跑得快但流程节点没跟上
+
+        return (
         <div className={`rounded-xl p-5 border ${risk?.bg} ${risk?.border}`}>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -481,13 +490,31 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
               </span>
               <span className="text-sm font-semibold text-gray-800">生产进度分析</span>
             </div>
-            <span className="text-2xl font-bold text-gray-800">{analysis.progressRate}%</span>
+            <span className="text-2xl font-bold text-gray-800">{qtyPct}%</span>
           </div>
 
-          <div className="relative h-3 bg-gray-200 rounded-full overflow-hidden mb-3">
-            <div className={`absolute left-0 top-0 h-full rounded-full transition-all ${risk?.bar}`} style={{ width: `${Math.min(100, analysis.progressRate)}%` }} />
+          <div className="relative h-3 bg-gray-200 rounded-full overflow-hidden mb-2">
+            <div className={`absolute left-0 top-0 h-full rounded-full transition-all ${risk?.bar}`} style={{ width: `${Math.min(100, qtyPct)}%` }} />
             <div className="absolute top-0 h-full w-0.5 bg-gray-600" style={{ left: `${Math.min(100, analysis.timeProgressRate)}%` }} title={`时间进度 ${analysis.timeProgressRate}%`} />
           </div>
+
+          {/* 三口径对照标签 */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 mb-3">
+            <span><span className="font-semibold text-gray-800">产量进度</span> {qtyPct}%（{analysis.completedQty}/{analysis.totalQty} 件）</span>
+            <span><span className="font-semibold text-gray-800">时间进度</span> {analysis.timeProgressRate}%</span>
+            <span><span className="font-semibold text-gray-800">流程节点</span> {flowDone}/{flowTotal}（{flowPct}%）</span>
+          </div>
+
+          {/* 双口径差距提醒 */}
+          {flowLagging && (
+            <div className="mb-3 rounded-lg bg-amber-50 border border-amber-300 p-3 text-xs text-amber-800">
+              <div className="font-semibold mb-1">⚠️ 流程节点更新滞后</div>
+              <div>
+                工厂产量已达 {qtyPct}%，但跟单流程单仅 {flowDone}/{flowTotal} 节点完成（差距 {flowQtyGap} 个百分点）。
+                请跟单及时补标已完成节点（如中查/包装/尾查），否则后续 AI 风险评估和经营决策的判断会失真。
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             <div className="text-center">
@@ -551,7 +578,8 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* 新增日报按钮/表单 */}
       {canReport && !showForm && (
