@@ -9,9 +9,11 @@ interface Props {
   lifecycleStatus: string;
   isAdmin: boolean;
   isOrderOwner: boolean;
+  /** Sprint 1 / A：批准导入按钮仅对财务显示 */
+  isFinance?: boolean;
 }
 
-export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrderOwner }: Props) {
+export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrderOwner, isFinance = false }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
@@ -100,8 +102,9 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   // CEO 可以强制标记完成（跳过节拍校验）
   const canForceComplete = isAdmin && !isDraft && lifecycleStatus !== '已完成' && lifecycleStatus !== 'completed' && lifecycleStatus !== 'cancelled' && lifecycleStatus !== '已取消' && lifecycleStatus !== 'pending_approval';
 
-  // CEO 审批进行中导入订单
-  const canApproveImport = isAdmin && lifecycleStatus === 'pending_approval';
+  // 批准导入：仅财务（Sprint 1 / A）
+  // admin 兜底方式：临时给账号加 finance role（profiles.roles），无需改代码
+  const canApproveImport = isFinance && lifecycleStatus === 'pending_approval';
 
   async function handleForceComplete() {
     if (!confirm(`确定将「${orderNo}」强制标记为已完成？\n\n所有未完成的节拍将批量标为完成。此操作用于：\n• 客户取消但部分完成的订单\n• 历史导入订单不需要继续跟的\n• 特殊情况 CEO 直接结案`)) return;

@@ -200,6 +200,7 @@ export default async function OrderDetailPage({
                   lifecycleStatus={orderData.lifecycle_status || 'draft'}
                   isAdmin={isAdmin}
                   isOrderOwner={isOrderOwner}
+                  isFinance={currentRoles.includes('finance')}
                 />
                 {isAdmin && <RecalcButton orderId={id} orderNo={orderData.order_no} />}
               </div>
