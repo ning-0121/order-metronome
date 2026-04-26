@@ -110,6 +110,51 @@ export function formatDate(date: string | Date, formatStr: string = 'yyyy-MM-dd'
 }
 
 /**
+ * 完整时间戳：'2026-04-26 14:32'
+ * 用于 hover title / 审计日志显示
+ */
+export function formatDateTime(date: string | Date | null | undefined): string {
+  if (!date) return '—';
+  return formatDate(date, 'yyyy-MM-dd HH:mm');
+}
+
+/**
+ * 相对时间：'2 小时前' / '昨天 14:32' / '3 天前' / '2026-04-20'
+ * GitHub / Notion 风格的紧凑显示
+ *
+ * 规则：
+ * - <60 秒：刚刚
+ * - <60 分钟：N 分钟前
+ * - <24 小时：N 小时前
+ * - 昨天：昨天 HH:mm
+ * - <7 天：N 天前
+ * - 更早：完整日期
+ */
+export function formatRelative(date: string | Date | null | undefined): string {
+  if (!date) return '—';
+  try {
+    const dateObj = typeof date === 'string' ? parseISO(date) : date;
+    if (isNaN(dateObj.getTime())) return '—';
+    const now = new Date();
+    const diffMs = now.getTime() - dateObj.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 0) return formatDate(dateObj); // 未来时间，直接显示日期
+    if (diffSec < 60) return '刚刚';
+    if (diffMin < 60) return `${diffMin} 分钟前`;
+    if (diffHour < 24) return `${diffHour} 小时前`;
+    if (diffDay === 1) return `昨天 ${format(dateObj, 'HH:mm')}`;
+    if (diffDay < 7) return `${diffDay} 天前`;
+    return formatDate(dateObj);
+  } catch {
+    return '—';
+  }
+}
+
+/**
  * Check if a date is overdue (day-level comparison, Beijing time)
  * 使用 startOfDay 比较，确保当天截止的不算超期
  */

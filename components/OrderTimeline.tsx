@@ -1,5 +1,5 @@
 'use client';
-import { formatDate, isOverdue } from '@/lib/utils/date';
+import { formatDate, formatDateTime, formatRelative, isOverdue } from '@/lib/utils/date';
 import { isDoneStatus, isActiveStatus, isPendingStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import { MilestoneActions } from './MilestoneActions';
 import { DelayRequestForm } from './DelayRequestForm';
@@ -345,21 +345,29 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           <span>责任人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || `未分配（${getRoleLabel(m.owner_role)}）`}</span>
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (() => {
-                            if (!overdue || isDone || isBlocked) return <span>截止：{formatDate(m.due_at)}</span>;
+                            if (!overdue || isDone || isBlocked) return (
+                              <span title={`截止：${formatDateTime(m.due_at)}`}>截止：{formatDate(m.due_at)}</span>
+                            );
                             const isMineOverdue = !isAdmin && !!currentUserId && (m as any).owner_user_id === currentUserId;
                             return (
-                              <span className={isMineOverdue ? 'text-red-600 font-semibold' : 'text-orange-500 font-medium'}>
+                              <span
+                                title={`截止：${formatDateTime(m.due_at)}`}
+                                className={isMineOverdue ? 'text-red-600 font-semibold' : 'text-orange-500 font-medium'}
+                              >
                                 截止：{formatDate(m.due_at)}
                               </span>
                             );
                           })()}
                           {m.actual_at && (
-                            <span className={
-                              computeDeliveryAlert(m.actual_at, m.due_at) === 'RED' ? 'text-red-600 font-semibold' :
-                              computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW' ? 'text-yellow-600 font-semibold' :
-                              'text-green-600'
-                            }>
-                              实际：{formatDate(m.actual_at)}
+                            <span
+                              title={`完成时间：${formatDateTime(m.actual_at)}`}
+                              className={
+                                computeDeliveryAlert(m.actual_at, m.due_at) === 'RED' ? 'text-red-600 font-semibold' :
+                                computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW' ? 'text-yellow-600 font-semibold' :
+                                'text-green-600'
+                              }
+                            >
+                              完成：{formatRelative(m.actual_at)}
                             </span>
                           )}
                         </div>
@@ -533,7 +541,10 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                                 <div key={log.id} className="text-xs border-l-2 border-indigo-200 pl-3 py-1">
                                   <p className="font-medium text-gray-900">{log.action}</p>
                                   {log.note && <p className="text-gray-600 mt-0.5">{log.note}</p>}
-                                  <p className="text-gray-400 mt-0.5">{log.actor_name && <span className="text-gray-500">{log.actor_name} · </span>}{formatDate(log.created_at)}</p>
+                                  <p className="text-gray-400 mt-0.5">
+                                    {log.actor_name && <span className="text-gray-500">{log.actor_name} · </span>}
+                                    <span title={formatDateTime(log.created_at)}>{formatRelative(log.created_at)}</span>
+                                  </p>
                                 </div>
                               ))}
                             </div>
