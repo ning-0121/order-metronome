@@ -8,6 +8,8 @@ import {
   autoParseExistingCostSheet,
   type CostControlSummary,
 } from '@/app/actions/cost-control';
+import { runQuoteReview } from '@/app/actions/skills';
+import type { SkillResult } from '@/lib/agent/skills/types';
 
 interface Props {
   orderId: string;
@@ -22,17 +24,42 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
   const [summary, setSummary] = useState<CostControlSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [quoteReview, setQuoteReview] = useState<SkillResult | null>(null);
+  const [quoteReviewLoading, setQuoteReviewLoading] = useState(false);
+  const [quoteReviewCached, setQuoteReviewCached] = useState(false);
+  const [quoteReviewError, setQuoteReviewError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { load(); }, [orderId]);
 
   async function load() {
     setLoading(true);
-    // 先尝试自动解析已上传的内部成本核算单（业务员创建订单时已传）
+    // 并发触发：自动解析 Excel 成本核算单（cost-control）+ 自动跑 AI 报价审核（quoteReview）
+    // 两者独立、互不阻塞、各有缓存（cost-control 检查 baseline 是否存在；quoteReview 1h cache by orderId）
+    // E（Sprint 1）：用户原话「上传文件后立刻比对一次，不改文件不重跑」
+    void runQuoteReviewAuto();
     await autoParseExistingCostSheet(orderId).catch(() => {});
     const res = await getCostControlSummary(orderId);
     if (res.data) setSummary(res.data);
     setLoading(false);
+  }
+
+  async function runQuoteReviewAuto() {
+    setQuoteReviewLoading(true);
+    setQuoteReviewError(null);
+    try {
+      const res = await runQuoteReview(orderId);
+      if (res.error) {
+        setQuoteReviewError(res.error);
+      } else if (res.result) {
+        setQuoteReview(res.result);
+        setQuoteReviewCached(!!res.cached);
+      }
+    } catch (e: any) {
+      setQuoteReviewError(e?.message || '未知错误');
+    } finally {
+      setQuoteReviewLoading(false);
+    }
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -97,6 +124,72 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
           )}
         </div>
       )}
+
+      {/* AI 报价审核 — 自动跑 quoteReviewSkill，1h 内幂等缓存 */}
+      <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-5">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🤖</span>
+            <h3 className="text-sm font-semibold text-gray-800">AI 报价审核</h3>
+            {quoteReviewCached && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500" title="此结果来自 1 小时内的缓存，未消耗 AI 调用">
+                缓存
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => runQuoteReviewAuto()}
+            disabled={quoteReviewLoading}
+            className="text-xs text-purple-600 hover:text-purple-800 disabled:opacity-50"
+          >
+            {quoteReviewLoading ? '分析中...' : '🔄 重新分析'}
+          </button>
+        </div>
+
+        {quoteReviewLoading && !quoteReview && (
+          <p className="text-xs text-gray-500">AI 正在识别订单中的成本核算单 / 报价单 / PO 并比对...</p>
+        )}
+        {quoteReviewError && (
+          <p className="text-xs text-red-600">分析失败：{quoteReviewError}</p>
+        )}
+        {quoteReview && (
+          <div className="space-y-2">
+            <p className={`text-sm font-semibold ${
+              quoteReview.severity === 'high' ? 'text-red-700' :
+              quoteReview.severity === 'medium' ? 'text-amber-700' : 'text-green-700'
+            }`}>
+              {quoteReview.summary}
+            </p>
+            {quoteReview.findings && quoteReview.findings.length > 0 && (
+              <div className="space-y-1.5 mt-2">
+                {quoteReview.findings.slice(0, 6).map((f, i) => (
+                  <div key={i} className={`text-xs rounded-md p-2 ${
+                    f.severity === 'high' ? 'bg-red-50 border-l-2 border-red-400' :
+                    f.severity === 'medium' ? 'bg-amber-50 border-l-2 border-amber-400' :
+                    'bg-white border-l-2 border-gray-300'
+                  }`}>
+                    <div className="font-medium text-gray-800">
+                      <span className="text-gray-400 mr-1">[{f.category}]</span>
+                      {f.label}
+                    </div>
+                    {f.detail && <div className="text-gray-600 mt-0.5">{f.detail}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {quoteReview.suggestions && quoteReview.suggestions.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-purple-100">
+                {quoteReview.suggestions.map((s, i) => (
+                  <p key={i} className="text-xs text-purple-700">💡 {s.action}</p>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-gray-400 mt-2">
+              来源：{quoteReview.source} · 置信度 {quoteReview.confidence}%
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* 警报 */}
       {summary?.alerts && summary.alerts.length > 0 && (
