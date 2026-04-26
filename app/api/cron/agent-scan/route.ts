@@ -114,6 +114,9 @@ export async function POST(req: Request) {
     const batchRequests: BatchRequest[] = [];
     const batchJobItems: BatchJobItem[] = [];
 
+    // P0-2 修复：chainGenerated 提到 if 块外，避免块作用域销毁后 L677 引用 ReferenceError
+    let chainGenerated = 0;
+
     // 0. 链式动作
     if (AGENT_FLAGS.chainActions()) {
     // 链式动作：检查已执行的链式建议，到时间后生成下一步
@@ -124,7 +127,6 @@ export async function POST(req: Request) {
       .not('action_payload->chain_next_type', 'is', null)
       .limit(50);
 
-    let chainGenerated = 0;
     for (const ca of chainActions || []) {
       const payload = ca.action_payload as any;
       if (!payload?.chain_next_type || !payload?.chain_delay_hours || !ca.executed_at) continue;
