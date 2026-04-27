@@ -54,6 +54,10 @@
       "schedule": "3 0 * * *"
     },
     {
+      "path": "/api/cron/daily",
+      "schedule": "0 0 * * *"
+    },
+    {
       "path": "/api/cron/monthly-report",
       "schedule": "5 1 1 * *"
     },
