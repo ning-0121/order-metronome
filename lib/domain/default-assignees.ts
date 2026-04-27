@@ -49,9 +49,12 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
 /**
  * 固定由生产主管负责的里程碑 step_key
  * CEO 2026-04-09 拍板：工厂匹配确认 + 产前样准备完成 永远是生产主管的活
+ * CEO 2026-04-27 补充：加工费确认 + 生产预评估 也是生产主管负责（修复模板错误）
  */
 export const PRODUCTION_MANAGER_FIXED_STEPS: string[] = [
-  'factory_confirmed',          // 工厂匹配确认
+  'processing_fee_confirmed',    // 加工费确认（生产主管与工厂谈加工费）
+  'bulk_materials_confirmed',    // 生产预评估
+  'factory_confirmed',           // 工厂匹配确认
   'pre_production_sample_ready', // 产前样准备完成
 ];
 

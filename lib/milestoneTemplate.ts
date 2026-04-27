@@ -39,7 +39,7 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "order_docs_bom_complete", name: "BOM/采购预评估", owner_role: "procurement", is_critical: true, evidence_required: false },
   { step_key: "bulk_materials_confirmed", name: "生产预评估", owner_role: "production_manager", is_critical: true, evidence_required: false },
   // 阶段3：工厂匹配 & 产前样
-  { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "finance", is_critical: true, evidence_required: true },
+  { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "production_manager", is_critical: true, evidence_required: true },
   { step_key: "factory_confirmed", name: "工厂匹配确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "pre_production_sample_ready", name: "产前样准备完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "sales", is_critical: true, evidence_required: false },

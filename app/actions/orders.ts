@@ -406,10 +406,20 @@ export async function createOrder(
   }
 
   // 角色映射：确保模板角色值 → DB 合法值
+  // ⚠️ 注意：此处必须列全所有 OwnerRole 值，漏掉任何一个都会 fallback 到 'sales'，
+  //    导致节点错误分配给下单人（已知 bug：production_manager 曾经漏掉）
   const ROLE_TO_DB: Record<string, string> = {
-    sales: 'sales', finance: 'finance', procurement: 'procurement',
-    production: 'production', qc: 'qc', logistics: 'logistics',
-    admin: 'admin', merchandiser: 'merchandiser', quality: 'qc',
+    sales: 'sales',
+    finance: 'finance',
+    procurement: 'procurement',
+    production: 'production',
+    production_manager: 'production_manager', // ← 修复：之前缺失导致生产主管节点 fallback 到 sales
+    qc: 'qc',
+    logistics: 'logistics',
+    admin: 'admin',
+    admin_assistant: 'admin_assistant',
+    merchandiser: 'merchandiser',
+    quality: 'qc',
   };
 
   // ── 自动分配：查询各角色的默认负责人 ──
