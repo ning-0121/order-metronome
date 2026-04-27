@@ -129,10 +129,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const totalProduction = (allOrders || []).filter((o: any) => (o.order_purpose || 'production') !== 'sample').length;
   const totalSample = (allOrders || []).filter((o: any) => o.order_purpose === 'sample').length;
 
-  // 按完成状态分组
+  // lifecycle_status 完成/取消集合（统一放这里，后面超期计算也用）
+  const DONE_LIFECYCLE = new Set(['completed', 'cancelled', '已完成', '已取消']);
+
+  // 按完成状态分组：milestone 全完成 OR lifecycle_status 已完成/已取消 → 都算完成
   const completedOrders = purposeOrders.filter((o: any) => {
     const ms = o.milestones || [];
-    return ms.length > 0 && ms.every((m: any) => _isDone(m.status));
+    const allMsDone = ms.length > 0 && ms.every((m: any) => _isDone(m.status));
+    const lifecycleDone = DONE_LIFECYCLE.has(o.lifecycle_status || '');
+    return allMsDone || lifecycleDone;
   });
   const activeOrders = purposeOrders.filter((o: any) => !completedOrders.includes(o));
   const baseOrders = statusFilter === 'completed' ? completedOrders : activeOrders;
@@ -218,9 +223,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   function hasPendingDelay(o: any): boolean {
     return (o.delay_requests || []).some((d: any) => d.status === 'pending');
   }
-
-  // lifecycle_status 为 completed / cancelled / 已完成 / 已取消 时，订单不算超期
-  const DONE_LIFECYCLE = new Set(['completed', 'cancelled', '已完成', '已取消']);
 
   type OverdueOrder = { order: any; daysOver: number; pendingDelay: boolean; approved: boolean };
   const overdueOrders: OverdueOrder[] = (orders as any[]).reduce((acc: OverdueOrder[], o: any) => {
