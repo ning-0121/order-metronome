@@ -755,9 +755,24 @@ export async function getOrders() {
   // 管理员/财务/行政/生产主管看全部订单
   const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager'].includes(r));
 
+  // 辅助：把 delay_requests 按 order_id 分组合并进 orders
+  async function attachDelayRequests(orderList: any[]): Promise<any[]> {
+    if (!orderList || orderList.length === 0) return orderList;
+    const orderIds = orderList.map((o: any) => o.id);
+    const { data: delayRows } = await (supabase.from('delay_requests') as any)
+      .select('id, order_id, status, proposed_new_anchor_date, created_at')
+      .in('order_id', orderIds);
+    const delayMap: Record<string, any[]> = {};
+    for (const d of (delayRows || [])) {
+      if (!delayMap[d.order_id]) delayMap[d.order_id] = [];
+      delayMap[d.order_id].push(d);
+    }
+    return orderList.map((o: any) => ({ ...o, delay_requests: delayMap[o.id] || [] }));
+  }
+
   if (canSeeAll) {
     const { data: orders, error } = await (supabase.from('orders') as any)
-      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number), delay_requests(id, status, proposed_new_anchor_date, created_at)')
+      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
       .order('created_at', { ascending: false });
     if (error) return { error: error.message };
     // 解析跟单和业务员名称
@@ -779,8 +794,7 @@ export async function getOrders() {
         return m;
       }, {} as Record<string, string>);
     }
-    const enriched = (orders || []).map((o: any) => {
-      // 跟单负责人：从 merchandiser 角色的节点中找（取第一个有 user_id 的）
+    const withNames = (orders || []).map((o: any) => {
       const merchMilestone = (o.milestones || []).find((m: any) =>
         m.owner_role === 'merchandiser' && m.owner_user_id
       );
@@ -791,6 +805,7 @@ export async function getOrders() {
         sales_name: o.created_by ? nameMap[o.created_by] || null : null,
       };
     });
+    const enriched = await attachDelayRequests(withNames);
     return { data: enriched };
   }
 
@@ -808,12 +823,13 @@ export async function getOrders() {
   if (myOrderIds.length === 0) return { data: [] };
 
   const { data: orders, error } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number), delay_requests(id, status, proposed_new_anchor_date, created_at)')
+    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
     .in('id', myOrderIds)
     .order('created_at', { ascending: false });
 
   if (error) return { error: error.message };
-  return { data: orders };
+  const enriched = await attachDelayRequests(orders || []);
+  return { data: enriched };
 }
 
 export async function getOrder(id: string) {
