@@ -23,7 +23,7 @@ interface Props {
 
 export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, daysOverdue, isAdmin }: Props) {
   const router = useRouter();
-  const [choice, setChoice] = useState<'' | 'shipped' | 'pending' | 'problem'>('');
+  const [choice, setChoice] = useState<'' | 'shipped' | 'waiting_customer' | 'pending' | 'problem'>('');
   const [newDate, setNewDate] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -37,7 +37,7 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
       alert('请填写未发货原因');
       return;
     }
-    if ((choice === 'pending' || choice === 'problem') && !newDate) {
+    if ((choice === 'pending' || choice === 'problem' || choice === 'waiting_customer') && !newDate) {
       alert('请填写新预计发货日期');
       return;
     }
@@ -58,6 +58,16 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
           .update({
             lifecycle_status: 'completed',
             notes: `【超期确认】已发货，系统自动标记完成（确认时间：${now}）`,
+          })
+          .eq('id', orderId);
+        router.refresh();
+        setDismissed(true);
+      } else if (choice === 'waiting_customer') {
+        // 等客户发货通知 → 更新出厂日期 + 特殊标记
+        await (supabase.from('orders') as any)
+          .update({
+            factory_date: newDate,
+            notes: `【超期确认】货已完成，等客户发货通知\n新预计发货日：${newDate}（客户通知后出运）`,
           })
           .eq('id', orderId);
         router.refresh();
@@ -111,11 +121,19 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
               </div>
             </label>
 
+            <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${choice === 'waiting_customer' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-white'}`}>
+              <input type="radio" name="overdue_choice" value="waiting_customer" checked={choice === 'waiting_customer'} onChange={() => setChoice('waiting_customer')} />
+              <div>
+                <span className="text-sm font-semibold text-blue-800">📦 货已完成，等客户发货通知</span>
+                <p className="text-xs text-gray-500">生产已完成/货已备好，等客户下发运指令 → 填写预计出运日</p>
+              </div>
+            </label>
+
             <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${choice === 'pending' ? 'border-amber-500 bg-amber-50' : 'border-gray-200 hover:bg-white'}`}>
               <input type="radio" name="overdue_choice" value="pending" checked={choice === 'pending'} onChange={() => setChoice('pending')} />
               <div>
                 <span className="text-sm font-semibold text-amber-800">⏳ 未发货，等待中</span>
-                <p className="text-xs text-gray-500">还在生产/等料/等客户确认 → 填写新的预计发货日</p>
+                <p className="text-xs text-gray-500">还在生产/等料/等工厂排期 → 填写新的预计发货日</p>
               </div>
             </label>
 
@@ -128,7 +146,18 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
             </label>
           </div>
 
-          {/* 动态表单 — pending 和 problem 都要填原因+日期 */}
+          {/* 动态表单 */}
+          {choice === 'waiting_customer' && (
+            <div className="mt-3 space-y-2 pl-6">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  预计出运日（客户通知后） <span className="text-red-500">*</span>
+                </label>
+                <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+            </div>
+          )}
           {(choice === 'pending' || choice === 'problem') && (
             <div className="mt-3 space-y-2 pl-6">
               <div>
