@@ -224,10 +224,18 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     return (o.delay_requests || []).some((d: any) => d.status === 'pending');
   }
 
+  // 出运关键节点：任意一个完成即视为已出货
+  const SHIPPED_STEP_KEYS = new Set(['shipment_execute', 'customs_export', 'booking_done']);
+
   type OverdueOrder = { order: any; daysOver: number; pendingDelay: boolean; approved: boolean };
   const overdueOrders: OverdueOrder[] = (orders as any[]).reduce((acc: OverdueOrder[], o: any) => {
-    // 订单 lifecycle_status 已完成/已取消 → 直接跳过
+    // 1. lifecycle_status 已完成/已取消 → 跳过
     if (DONE_LIFECYCLE.has(o.lifecycle_status || '')) return acc;
+    // 2. 出运关键节点已完成（实际已出货但数据未同步完）→ 跳过
+    const hasShipped = (o.milestones || []).some((m: any) =>
+      SHIPPED_STEP_KEYS.has(m.step_key) && (String(m.status || '').toLowerCase() === 'done' || m.status === '已完成')
+    );
+    if (hasShipped) return acc;
     const { date: effectiveDate, isDelayed } = getEffectiveDeliveryDate(o);
     if (!effectiveDate) return acc;
     const daysOver = Math.ceil((now - new Date(effectiveDate + 'T23:59:59').getTime()) / 86400000);
