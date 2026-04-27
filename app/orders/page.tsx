@@ -199,18 +199,45 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   // 是否有活跃的筛选条件
   const hasFilters = !!(searchQuery || customerFilter || factoryFilter || incotermFilter || typeFilter);
 
-  // 统计超出交期的订单
+  // 统计超出交期的订单（考虑已批准/待审批的延期申请）
   const now = Date.now();
-  const overdueOrders = orders.filter((o: any) => {
-    const keyDate = o.incoterm === 'DDP' ? o.etd : (o.factory_date || o.etd);
-    if (!keyDate) return false;
-    const daysOver = Math.ceil((now - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
+
+  // 辅助：获取订单的有效交期（已批准延期则用新日期）
+  function getEffectiveDeliveryDate(o: any): { date: string; isDelayed: boolean } {
+    const originalDate = o.incoterm === 'DDP' ? o.etd : (o.factory_date || o.etd);
+    const approvedDelay = (o.delay_requests || [])
+      .filter((d: any) => d.status === 'approved' && d.proposed_new_anchor_date)
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    if (approvedDelay) {
+      return { date: approvedDelay.proposed_new_anchor_date, isDelayed: true };
+    }
+    return { date: originalDate, isDelayed: false };
+  }
+
+  // 辅助：订单是否有待审批的延期申请
+  function hasPendingDelay(o: any): boolean {
+    return (o.delay_requests || []).some((d: any) => d.status === 'pending');
+  }
+
+  type OverdueOrder = { order: any; daysOver: number; pendingDelay: boolean; approved: boolean };
+  const overdueOrders: OverdueOrder[] = (orders as any[]).reduce((acc: OverdueOrder[], o: any) => {
+    const { date: effectiveDate, isDelayed } = getEffectiveDeliveryDate(o);
+    if (!effectiveDate) return acc;
+    const daysOver = Math.ceil((now - new Date(effectiveDate + 'T23:59:59').getTime()) / 86400000);
     const allDone = (o.milestones || []).every((m: any) => {
       const s = String(m.status || '').toLowerCase();
       return s === 'done' || s === '已完成' || s === 'completed';
     });
-    return daysOver > 0 && !allDone;
-  });
+    // 已批准新日期且新日期未过 → 不再超期
+    if (daysOver <= 0 || allDone) return acc;
+    // 进入超期列表，标注是否有待审批延期
+    acc.push({ order: o, daysOver, pendingDelay: hasPendingDelay(o), approved: isDelayed });
+    return acc;
+  }, []);
+
+  // 分组：真超期（需要行动） vs 延期申请中（等待审批）
+  const trueOverdue = overdueOrders.filter(x => !x.pendingDelay);
+  const pendingDelayOrders = overdueOrders.filter(x => x.pendingDelay);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -221,23 +248,30 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             <span className="text-2xl">🚨</span>
             <div className="flex-1">
               <p className="text-sm font-bold text-red-900">
-                {overdueOrders.length} 个订单已超出交期！
+                {overdueOrders.length} 个订单已超出交期
+                {pendingDelayOrders.length > 0 && (
+                  <span className="ml-2 text-amber-700 font-normal">
+                    （{pendingDelayOrders.length} 个延期申请待审批）
+                  </span>
+                )}
               </p>
               <div className="mt-2 space-y-1">
-                {overdueOrders.slice(0, 5).map((o: any) => {
-                  const keyDate = o.incoterm === 'DDP' ? o.etd : (o.factory_date || o.etd);
-                  const daysOver = Math.ceil((now - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
-                  return (
-                    <a key={o.id} href={`/orders/${o.id}?tab=progress`}
-                      className="flex items-center gap-2 text-xs text-red-700 hover:text-red-900">
-                      <span className="font-mono font-semibold">{o.order_no}</span>
-                      {o.internal_order_no && <span className="text-red-400">({o.internal_order_no})</span>}
-                      <span>· {o.customer_name}</span>
-                      <span className="font-bold">超期 {daysOver} 天</span>
-                      <span className="text-red-400">→ 请责任人更新执行计划</span>
-                    </a>
-                  );
-                })}
+                {overdueOrders.slice(0, 5).map(({ order: o, daysOver, pendingDelay, approved }) => (
+                  <a key={o.id} href={`/orders/${o.id}?tab=progress`}
+                    className={`flex items-center gap-2 text-xs hover:opacity-80 ${pendingDelay ? 'text-amber-700' : 'text-red-700'}`}>
+                    <span className="font-mono font-semibold">{o.order_no}</span>
+                    {o.internal_order_no && <span className="opacity-60">({o.internal_order_no})</span>}
+                    <span>· {o.customer_name}</span>
+                    {approved
+                      ? <span className="font-bold">延期后仍超 {daysOver} 天</span>
+                      : <span className="font-bold">超期 {daysOver} 天</span>
+                    }
+                    {pendingDelay
+                      ? <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-xs">延期申请中，待审批</span>
+                      : <span className="opacity-60">→ 请业务申请延期</span>
+                    }
+                  </a>
+                ))}
                 {overdueOrders.length > 5 && (
                   <p className="text-xs text-red-500">还有 {overdueOrders.length - 5} 个超期订单...</p>
                 )}
@@ -542,19 +576,29 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     </td>
                     <td>
                       {(() => {
-                        const keyDate = order.incoterm === 'DDP'
+                        const originalKeyDate = order.incoterm === 'DDP'
                           ? order.etd
                           : ((order as any).factory_date || order.etd);
                         const dateLabel = order.incoterm === 'DDP' ? 'ETD' : '出厂';
-                        if (!keyDate) return <span className="text-gray-400 text-xs">—</span>;
-                        const daysOver = Math.ceil((Date.now() - new Date(keyDate + 'T23:59:59').getTime()) / 86400000);
-                        const isOverdue = daysOver > 0 && !milestones.every((m: any) => _isDone(m.status));
+                        if (!originalKeyDate) return <span className="text-gray-400 text-xs">—</span>;
+                        // 检查是否有已批准的延期（用新日期计算超期）
+                        const approvedDelay = ((order as any).delay_requests || [])
+                          .filter((d: any) => d.status === 'approved' && d.proposed_new_anchor_date)
+                          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                        const effectiveDate = approvedDelay ? approvedDelay.proposed_new_anchor_date : originalKeyDate;
+                        const hasPending = ((order as any).delay_requests || []).some((d: any) => d.status === 'pending');
+                        const daysOver = Math.ceil((Date.now() - new Date(effectiveDate + 'T23:59:59').getTime()) / 86400000);
+                        const allMilestoneDone = milestones.every((m: any) => _isDone(m.status));
+                        const isOverdue = daysOver > 0 && !allMilestoneDone;
                         return (
                           <div>
                             <span className={`text-xs ${isOverdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
-                              {dateLabel} {formatDate(keyDate)}
+                              {dateLabel} {formatDate(originalKeyDate)}
                             </span>
-                            {isOverdue && (
+                            {isOverdue && hasPending && (
+                              <div className="text-xs text-amber-600 font-medium">⏳ 延期申请中</div>
+                            )}
+                            {isOverdue && !hasPending && (
                               <div className="text-xs text-red-500 font-medium">⚠ 超期 {daysOver} 天</div>
                             )}
                           </div>
