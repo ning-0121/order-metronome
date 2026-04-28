@@ -22,6 +22,7 @@ import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
+import { SplitShipmentTag } from '@/components/SplitShipmentTag';
 import { ProcurementTrackingTab } from '@/components/tabs/ProcurementTrackingTab';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
@@ -184,9 +185,18 @@ export default async function OrderDetailPage({
                 {orderData.is_new_factory && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">新工厂首单</span>
                 )}
-                {(orderData.special_tags || []).map((tag: string) => (
-                  <span key={tag} className="text-xs font-medium px-2.5 py-1 rounded-full bg-red-100 text-red-700">{tag}</span>
-                ))}
+                {(orderData.special_tags || [])
+                  .filter((tag: string) => tag !== '分批出货中')
+                  .map((tag: string) => (
+                    <span key={tag} className="text-xs font-medium px-2.5 py-1 rounded-full bg-red-100 text-red-700">{tag}</span>
+                  ))}
+                {/* 分批出货标签（独立组件，可点击切换） */}
+                <SplitShipmentTag
+                  orderId={id}
+                  orderNo={orderData.order_no}
+                  initialTags={orderData.special_tags || []}
+                  canEdit={isAdmin || isOrderOwner || currentRoles.includes('sales')}
+                />
               </div>
               <div className="flex items-center gap-3 mt-1">
                 <p className="text-gray-500 text-sm">
