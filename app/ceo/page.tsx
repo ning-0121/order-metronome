@@ -9,6 +9,7 @@ import { getRoleLabel } from '@/lib/utils/i18n';
 import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
 import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
 import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
+import { getPendingApprovalsCount } from '@/lib/services/pending-approvals.service';
 // RecalcButton removed from global — now per-order only
 
 import { isDoneStatus, isActiveStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
@@ -25,16 +26,22 @@ export default async function CEOWarRoom() {
   const { isAdmin } = await getCurrentUserRole(supabase);
   if (!isAdmin) redirect('/dashboard');
 
-  const { data: ceoProfile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
+  const { data: ceoProfile } = await supabase.from('profiles').select('name, role, roles').eq('user_id', user.id).single();
   const ceoName = (ceoProfile as any)?.name || user.email?.split('@')[0];
+  const ceoRoles: string[] =
+    Array.isArray((ceoProfile as any)?.roles) && (ceoProfile as any).roles.length > 0
+      ? (ceoProfile as any).roles
+      : [(ceoProfile as any)?.role].filter(Boolean);
 
-  // 效率分析数据
-  const [analyticsSummary, roleEfficiency, agentResult] = await Promise.all([
+  // 效率分析数据 + 待审批聚合
+  const [analyticsSummary, roleEfficiency, agentResult, approvalsResult] = await Promise.all([
     getAnalyticsSummary(),
     getRoleEfficiency(),
     getAllPendingAgentSuggestions().catch(() => ({ data: [] })),
+    getPendingApprovalsCount(supabase, { userId: user.id, roles: ceoRoles }).catch(() => ({ ok: false as const, error: '' })),
   ]);
   const agentSuggestions = agentResult.data || [];
+  const approvals = approvalsResult.ok ? approvalsResult.data : { total: 0, byCategory: {} as any, actionableCount: 0 };
 
   const now = new Date();
   const today = now.toISOString().split('T')[0];
@@ -514,10 +521,56 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
-      {/* ===== 2. 待审批延期 ===== */}
+      {/* ===== 2. 待审批聚合（延期 + CEO批 + 价格 + Agent + 订单确认 + 付款冻结） ===== */}
       <div id="delay-approvals" className="bg-white rounded-xl border border-yellow-200 shadow-sm overflow-hidden">
-        <div className="bg-yellow-50 px-5 py-3 border-b border-yellow-100">
-          <h2 className="text-lg font-bold text-yellow-900">⏳ 待审批延期（{(pendingDelays || []).length}）</h2>
+        <div className="bg-yellow-50 px-5 py-3 border-b border-yellow-100 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-yellow-900">
+            ⏳ 待审批 总览（共 {approvals.total} 项）
+          </h2>
+          <Link
+            href="/admin/pending-approvals"
+            className="text-sm text-blue-600 hover:underline font-medium"
+          >
+            进入待审批中心 →
+          </Link>
+        </div>
+        {/* 6 类计数 chip */}
+        {approvals.total > 0 && (
+          <div className="px-5 py-3 border-b border-gray-100 flex flex-wrap gap-2 bg-gradient-to-r from-purple-50/30 to-indigo-50/30">
+            {(approvals.byCategory.delay || 0) > 0 && (
+              <Link href="/admin/pending-approvals?category=delay" className="text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">
+                ⏳ 延期申请 {approvals.byCategory.delay}
+              </Link>
+            )}
+            {(approvals.byCategory.ceo_import || 0) > 0 && (
+              <Link href="/admin/pending-approvals?category=ceo_import" className="text-xs px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 font-semibold">
+                👨‍💼 CEO 批进行中订单 {approvals.byCategory.ceo_import}
+              </Link>
+            )}
+            {(approvals.byCategory.price || 0) > 0 && (
+              <Link href="/admin/pending-approvals?category=price" className="text-xs px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-200 hover:bg-green-100">
+                💰 价格审批 {approvals.byCategory.price}
+              </Link>
+            )}
+            {(approvals.byCategory.agent_action || 0) > 0 && (
+              <Link href="/admin/pending-approvals?category=agent_action" className="text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">
+                🤖 Agent 建议 {approvals.byCategory.agent_action}
+              </Link>
+            )}
+            {(approvals.byCategory.order_confirm || 0) > 0 && (
+              <Link href="/admin/pending-approvals?category=order_confirm" className="text-xs px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200 hover:bg-cyan-100">
+                📋 订单确认 {approvals.byCategory.order_confirm}
+              </Link>
+            )}
+            {(approvals.byCategory.payment_hold || 0) > 0 && (
+              <Link href="/admin/pending-approvals?category=payment_hold" className="text-xs px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100">
+                💳 付款冻结 {approvals.byCategory.payment_hold}
+              </Link>
+            )}
+          </div>
+        )}
+        <div className="bg-yellow-50/50 px-5 py-2 border-b border-yellow-100">
+          <h3 className="text-sm font-semibold text-yellow-900">⏳ 延期申请（{(pendingDelays || []).length}）</h3>
         </div>
         {!pendingDelays || pendingDelays.length === 0 ? (
           <div className="p-6 text-center text-gray-500 text-sm">暂无待审批延期</div>
