@@ -1,41 +1,22 @@
 /**
- * 邮件-订单执行对照 Cron — 每日07:30北京时间
+ * 邮件-订单执行对照 Cron
  *
- * 用 AI 对比业务员邮件 vs 系统订单状态，发现执行偏差
+ * ⛔ [2026-04-27 System Consolidation Sprint] 已禁用
+ * 原因：compliance 规则未明确定义，AI 对照结果噪音多，compliance_findings 无 UI 消费
+ * 回滚：git revert 此文件，并在 vercel.json crons 重新加入调度条目
  */
 
-import { createClient } from '@supabase/supabase-js';
-import { runComplianceChecks } from '@/lib/agent/complianceCheck';
 import { NextResponse } from 'next/server';
 
-export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request) {
-  try {
-    const authHeader = req.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' }, { status: 500 });
-
-    const supabase = createClient(url, serviceKey);
-
-    const result = await runComplianceChecks(supabase);
-
-    return NextResponse.json({
-      success: true,
-      totalFindings: result.findings.length,
-      inserted: result.inserted,
-      notified: result.notified,
-    });
-  } catch (err: any) {
-    console.error('[compliance-check]', err?.message);
-    return NextResponse.json({ error: err?.message }, { status: 500 });
-  }
+export async function GET() {
+  return NextResponse.json(
+    { disabled: true, reason: 'compliance-check disabled — rules undefined, high noise (System Consolidation Sprint 2026-04-27)' },
+    { status: 503 },
+  );
 }
 
-export async function GET(req: Request) { return POST(req); }
+export async function POST() {
+  return GET();
+}

@@ -14,14 +14,6 @@
       "schedule": "0 18 * * *"
     },
     {
-      "path": "/api/cron/agent-scan",
-      "schedule": "7 * * * *"
-    },
-    {
-      "path": "/api/cron/daily-summary",
-      "schedule": "30 0 * * *"
-    },
-    {
       "path": "/api/cron/email-scan",
       "schedule": "5,20,35,50 * * * *"
     },
@@ -30,28 +22,8 @@
       "schedule": "40 17 * * *"
     },
     {
-      "path": "/api/cron/agent-learn",
-      "schedule": "0 16 * * 0"
-    },
-    {
-      "path": "/api/cron/nightly-maintenance",
-      "schedule": "0 14 * * *"
-    },
-    {
-      "path": "/api/cron/compliance-check",
-      "schedule": "30 23 * * *"
-    },
-    {
       "path": "/api/cron/daily-briefing",
       "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/morning-briefing",
-      "schedule": "0 16 * * *"
-    },
-    {
-      "path": "/api/cron/daily-tasks",
-      "schedule": "3 0 * * *"
     },
     {
       "path": "/api/cron/daily",
@@ -68,18 +40,6 @@
     {
       "path": "/api/cron/order-audit",
       "schedule": "30 0 * * *"
-    },
-    {
-      "path": "/api/cron/ai-self-improve",
-      "schedule": "0 19 * * *"
-    },
-    {
-      "path": "/api/cron/proactive-fix",
-      "schedule": "0 */2 * * *"
-    },
-    {
-      "path": "/api/cron/tech-scout",
-      "schedule": "0 18 * * 0"
     }
   ]
 }

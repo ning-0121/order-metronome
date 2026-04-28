@@ -17,7 +17,9 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { callClaudeJSON } from '@/lib/agent/anthropicClient';
+// callClaudeJSON 保留用于 extractFromImage 内 dynamic import
+// extractFromExcel 已迁移到 aiGateway
+import { aiGateway } from '@/lib/ai/aiGateway';
 
 // ════════════════════════════════════════════════
 // 权限检查
@@ -285,7 +287,7 @@ async function extractFromExcel(sampleId: string, storagePath: string): Promise<
 
     const excelText = rows.slice(0, 100).join('\n'); // 最多前 100 行
 
-    // 让 Claude 解析文本
+    // 让 Claude 解析文本（通过 aiGateway 统一调用）
     const systemPrompt = `你是一个外贸服装加工费报价单解析专家。下面是从 Excel 提取的表格文本（Tab 分隔），请提取结构化数据。
 
 **输出格式**（严格 JSON）：
@@ -303,21 +305,24 @@ async function extractFromExcel(sampleId: string, storagePath: string): Promise<
 
 规则同图片识别。不要 markdown 包装。`;
 
-    const result = await callClaudeJSON<any>({
-      scene: 'quoter-cmt-excel-extract',
-      model: 'claude-sonnet-4-20250514',
-      maxTokens: 2500,
-      timeoutMs: 30_000,
+    const gatewayResult = await aiGateway.run<any>({
+      task: 'quoter_cmt_excel_extract',
       system: systemPrompt,
-      prompt: excelText,
+      input: excelText,
+      timeoutMs: 30_000,
+      maxTokens: 2500,
+      fallback: null,
+      cacheKey: `cmt_excel:${sampleId}`,
     });
 
-    if (!result) {
+    if (!gatewayResult.ok || !gatewayResult.data) {
       await (supabase.from('quoter_cmt_training_samples') as any)
-        .update({ extraction_error: 'Claude 解析 Excel 失败', ai_raw_text: excelText.slice(0, 3000) })
+        .update({ extraction_error: `Claude 解析 Excel 失败（${gatewayResult.reason ?? 'unknown'}）`, ai_raw_text: excelText.slice(0, 3000) })
         .eq('id', sampleId);
       return;
     }
+
+    const result = gatewayResult.data;
 
     const validTypes = ['knit_top', 'knit_bottom', 'woven_pants', 'woven_shorts'];
     if (result.garment_type && !validTypes.includes(result.garment_type)) {
