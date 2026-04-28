@@ -10,6 +10,8 @@ import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics'
 import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
 import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 import { getPendingApprovalsCount } from '@/lib/services/pending-approvals.service';
+import { getTodayBriefing as getTodayBriefingSvc } from '@/lib/services/briefing.service';
+import { MorningBriefingCard } from '@/components/MorningBriefingCard';
 // RecalcButton removed from global — now per-order only
 
 import { isDoneStatus, isActiveStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
@@ -33,15 +35,17 @@ export default async function CEOWarRoom() {
       ? (ceoProfile as any).roles
       : [(ceoProfile as any)?.role].filter(Boolean);
 
-  // 效率分析数据 + 待审批聚合
-  const [analyticsSummary, roleEfficiency, agentResult, approvalsResult] = await Promise.all([
+  // 效率分析数据 + 待审批聚合 + 今日晨报缓存
+  const [analyticsSummary, roleEfficiency, agentResult, approvalsResult, briefingResult] = await Promise.all([
     getAnalyticsSummary(),
     getRoleEfficiency(),
     getAllPendingAgentSuggestions().catch(() => ({ data: [] })),
     getPendingApprovalsCount(supabase, { userId: user.id, roles: ceoRoles }).catch(() => ({ ok: false as const, error: '' })),
+    getTodayBriefingSvc(supabase, user.id).catch(() => ({ ok: false as const, error: '' })),
   ]);
   const agentSuggestions = agentResult.data || [];
   const approvals = approvalsResult.ok ? approvalsResult.data : { total: 0, byCategory: {} as any, actionableCount: 0 };
+  const todayBriefing = briefingResult.ok ? briefingResult.data : null;
 
   const now = new Date();
   const today = now.toISOString().split('T')[0];
@@ -437,6 +441,12 @@ export default async function CEOWarRoom() {
           </div>
         );
       })()}
+
+      {/* ===== 今日邮件晨报（按需触发 + 缓存） ===== */}
+      <MorningBriefingCard
+        initialBriefing={todayBriefing as any}
+        userName={ceoName || '同学'}
+      />
 
       {/* ===== 状态概览卡片（点击进入独立页面） ===== */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
