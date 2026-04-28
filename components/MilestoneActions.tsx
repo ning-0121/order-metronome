@@ -187,7 +187,7 @@ export function MilestoneActions({
         const { data: { publicUrl } } = supabase.storage.from('order-docs').getPublicUrl(path);
         const { data: { user } } = await supabase.auth.getUser();
         // 写入 order_attachments 表（带 file_type 标记）
-        await (supabase.from('order_attachments') as any).insert({
+        const { error: insertError } = await (supabase.from('order_attachments') as any).insert({
           order_id: orderId,
           milestone_id: milestone.id,
           uploaded_by: user?.id || null,
@@ -197,6 +197,11 @@ export function MilestoneActions({
           file_type: fileType,
           mime_type: evidenceFile.type || null,
         });
+        if (insertError) {
+          setSubmitError(`文件已上传到存储，但记录写入失败：${insertError.message}（code: ${insertError.code}）。请截图此错误联系管理员。`);
+          setLoading(false);
+          return;
+        }
       }
 
       // 上传额外文件（多文件支持，带 file_type 标记）

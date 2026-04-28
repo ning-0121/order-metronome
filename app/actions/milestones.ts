@@ -433,6 +433,38 @@ export async function markMilestoneDone(
       att3 = data || [];
     }
 
+    // 检查4: 兜底 — 按 order_id + storage_path 前缀匹配（file_type 写入失败时的降级）
+    let att4: any[] = [];
+    if (att3.length === 0 && milestone.order_id && milestone.step_key) {
+      const { data } = await (supabase.from('order_attachments') as any)
+        .select('id')
+        .eq('order_id', milestone.order_id)
+        .ilike('storage_path', `%/${milestone.step_key}_%`)
+        .limit(1);
+      att4 = data || [];
+    }
+
+    // 检查5: 兜底 — 按 milestone_id 中的 storage 路径匹配任意文件
+    let att5: any[] = [];
+    if (att3.length === 0 && att4.length === 0 && milestone.order_id && milestone.step_key) {
+      // 最宽松：该订单下有任意文件，文件名包含节点关键字（如"中查"）
+      const stepNameMap: Record<string, string> = {
+        mid_qc_check: '中查',
+        final_qc_check: '尾查',
+        inspection_release: '验货',
+        booking_done: '订舱',
+      };
+      const keyword = stepNameMap[milestone.step_key];
+      if (keyword) {
+        const { data } = await (supabase.from('order_attachments') as any)
+          .select('id')
+          .eq('order_id', milestone.order_id)
+          .ilike('file_name', `%${keyword}%`)
+          .limit(1);
+        att5 = data || [];
+      }
+    }
+
     // 生产单上传：需要 生产订单 + 原辅料单 两个文件（包装资料可以晚点）
     if (milestone.step_key === 'production_order_upload' && milestone.order_id) {
       const requiredTypes = ['production_order', 'trims_sheet'];
@@ -450,7 +482,7 @@ export async function markMilestoneDone(
         return { error: `生产单上传需要两个文件：生产订单 + 原辅料单\n缺少：${missing.join('、')}\n（包装资料可以晚些上传，最晚在「包装方式确认」前 1 周）` };
       }
     } else {
-      const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0;
+      const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0 || att4.length > 0 || att5.length > 0;
       if (!hasEvidence) {
         const typeHint = expectedTypes ? `（需要：${expectedTypes.join(' 或 ')}）` : '';
         return { error: `此节点需要上传凭证后才能标记完成${typeHint}，请先上传对应文件` };
