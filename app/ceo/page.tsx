@@ -10,8 +10,8 @@ import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics'
 import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
 import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 import { getPendingApprovalsCount } from '@/lib/services/pending-approvals.service';
-import { getTodayBriefing as getTodayBriefingSvc } from '@/lib/services/briefing.service';
-import { MorningBriefingCard } from '@/components/MorningBriefingCard';
+// 邮件晨报（briefing.service / MorningBriefingCard）已下线 — 用户反馈"太费钱用处不大"
+// 服务代码保留在 lib/services/briefing.service.ts，仅移除 UI 入口
 // RecalcButton removed from global — now per-order only
 
 import { isDoneStatus, isActiveStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
@@ -35,17 +35,15 @@ export default async function CEOWarRoom() {
       ? (ceoProfile as any).roles
       : [(ceoProfile as any)?.role].filter(Boolean);
 
-  // 效率分析数据 + 待审批聚合 + 今日晨报缓存
-  const [analyticsSummary, roleEfficiency, agentResult, approvalsResult, briefingResult] = await Promise.all([
+  // 效率分析数据 + 待审批聚合
+  const [analyticsSummary, roleEfficiency, agentResult, approvalsResult] = await Promise.all([
     getAnalyticsSummary(),
     getRoleEfficiency(),
     getAllPendingAgentSuggestions().catch(() => ({ data: [] })),
     getPendingApprovalsCount(supabase, { userId: user.id, roles: ceoRoles }).catch(() => ({ ok: false as const, error: '' })),
-    getTodayBriefingSvc(supabase, user.id).catch(() => ({ ok: false as const, error: '' })),
   ]);
   const agentSuggestions = agentResult.data || [];
   const approvals = approvalsResult.ok ? approvalsResult.data : { total: 0, byCategory: {} as any, actionableCount: 0 };
-  const todayBriefing = briefingResult.ok ? briefingResult.data : null;
 
   const now = new Date();
   const today = now.toISOString().split('T')[0];
@@ -118,12 +116,15 @@ export default async function CEOWarRoom() {
     .lt('due_at', twoDaysLater.toISOString())
     .not('status', 'in', '("done","已完成","completed")');
 
-  // ===== 今日 Top 5 必须处理 =====
+  // ===== 今日待办（3 分类：紧急事项 / 风险预警 / 协作提醒） =====
+  // 设计原则：每条带 bucket 标签，前端按 bucket 分组渲染
+  type TodoBucket = 'urgent' | 'warning' | 'collab';
   interface TopItem {
     id: string;
     priority: number;
     type: 'overdue' | 'blocked' | 'delay' | 'risk_soon';
     typeLabel: string;
+    bucket: TodoBucket;
     orderId: string;
     orderNo: string;
     internalOrderNo?: string;
@@ -137,17 +138,20 @@ export default async function CEOWarRoom() {
   const topItems: TopItem[] = [];
   const orderFocusMs: Record<string, string> = {}; // orderId -> milestone_id 用于跳转定位
 
-  // 超期节点（优先级最高）
-  overdueMilestones.slice(0, 20).forEach((m: any) => {
+  // === 紧急事项（urgent）：超期 ≥3 天 / is_critical 卡住 ===
+  // === 风险预警（warning）：超期 1-2 天 / 普通卡住 / 即将到期 ===
+  overdueMilestones.slice(0, 30).forEach((m: any) => {
     const dueAt = new Date(m.due_at);
     const daysOver = Math.max(1, Math.ceil((now.getTime() - dueAt.getTime()) / (86400000)));
     const ownerProfile = m.owner_user_id ? userMap[m.owner_user_id] : null;
     if (!orderFocusMs[m.order_id]) orderFocusMs[m.order_id] = m.id;
+    const isUrgent = daysOver >= 3 || m.is_critical;
     topItems.push({
       id: `overdue-${m.id}`,
-      priority: daysOver * 10 + (m.is_critical ? 5 : 0),
+      priority: daysOver * 10 + (m.is_critical ? 50 : 0),
       type: 'overdue',
       typeLabel: '超期',
+      bucket: isUrgent ? 'urgent' : 'warning',
       orderId: m.order_id,
       orderNo: m.orders?.order_no || '',
       internalOrderNo: m.orders?.internal_order_no || '',
@@ -159,15 +163,16 @@ export default async function CEOWarRoom() {
     });
   });
 
-  // 卡住节点
+  // 卡住节点（is_critical → urgent，其他 → warning）
   blockedMilestones.forEach((m: any) => {
     const ownerProfile = m.owner_user_id ? userMap[m.owner_user_id] : null;
     if (!orderFocusMs[m.order_id]) orderFocusMs[m.order_id] = m.id;
     topItems.push({
       id: `blocked-${m.id}`,
-      priority: 50,
+      priority: m.is_critical ? 80 : 30,
       type: 'blocked',
       typeLabel: '卡住',
+      bucket: m.is_critical ? 'urgent' : 'warning',
       orderId: m.order_id,
       orderNo: m.orders?.order_no || '',
       internalOrderNo: m.orders?.internal_order_no || '',
@@ -179,7 +184,28 @@ export default async function CEOWarRoom() {
     });
   });
 
-  // 待审批延期
+  // 即将到期（48h 内 → 风险预警）
+  ((tomorrowRisk as any[]) || []).slice(0, 20).forEach((m: any) => {
+    if (!orderFocusMs[m.order_id]) orderFocusMs[m.order_id] = m.id;
+    const dueAt = new Date(m.due_at);
+    const hoursLeft = Math.max(1, Math.ceil((dueAt.getTime() - now.getTime()) / 3600000));
+    topItems.push({
+      id: `tomorrow-${m.id}`,
+      priority: 20 - hoursLeft / 24, // 越接近到期优先级越高
+      type: 'risk_soon',
+      typeLabel: '即将到期',
+      bucket: 'warning',
+      orderId: m.order_id,
+      orderNo: m.orders?.order_no || '',
+      customerName: m.orders?.customer_name || '',
+      description: m.name,
+      owner: getRoleLabel(m.owner_role || ''),
+      ownerRole: getRoleLabel(m.owner_role || ''),
+      daysInfo: hoursLeft <= 24 ? `${hoursLeft}h 后到期` : '明日到期',
+    });
+  });
+
+  // === 协作提醒（collab）：等待审批 / 上下游协作 ===
   (pendingDelays || []).forEach((d: any) => {
     const createdAt = d.created_at ? new Date(d.created_at) : now;
     const daysPending = Math.max(0, Math.ceil((now.getTime() - createdAt.getTime()) / 86400000));
@@ -187,7 +213,8 @@ export default async function CEOWarRoom() {
       id: `delay-${d.id}`,
       priority: 40 + daysPending * 5,
       type: 'delay',
-      typeLabel: '待审批',
+      typeLabel: '待审批延期',
+      bucket: 'collab',
       orderId: d.milestones?.order_id || '',
       orderNo: d.milestones?.orders?.order_no || '',
       customerName: d.milestones?.orders?.customer_name || '',
@@ -214,6 +241,7 @@ export default async function CEOWarRoom() {
         priority: 200 + overdueCount * 10, // 订单级别风险优先级最高
         type: 'overdue',
         typeLabel: '高危订单',
+        bucket: 'urgent',
         orderId: worstRedOrder.id,
         orderNo: worstRedOrder.order_no,
         internalOrderNo: worstRedOrder.internal_order_no || '',
@@ -226,7 +254,8 @@ export default async function CEOWarRoom() {
     }
   }
 
-  // 按订单聚合：同一订单合并显示所有问题
+  // 按订单聚合：同一订单合并显示所有问题（同订单按最高 bucket 归类）
+  const BUCKET_RANK: Record<TodoBucket, number> = { urgent: 3, warning: 2, collab: 1 };
   topItems.sort((a, b) => b.priority - a.priority);
   const orderMap = new Map<string, TopItem & { issues: string[]; issueCount: number }>();
   for (const item of topItems) {
@@ -236,6 +265,10 @@ export default async function CEOWarRoom() {
       existing.issues.push(`${item.typeLabel}：${item.description}`);
       existing.issueCount++;
       if (item.priority > existing.priority) existing.priority = item.priority;
+      // 同订单合并到最严重的 bucket
+      if (BUCKET_RANK[item.bucket] > BUCKET_RANK[existing.bucket]) {
+        existing.bucket = item.bucket;
+      }
     } else {
       orderMap.set(item.orderId, {
         ...item,
@@ -244,9 +277,16 @@ export default async function CEOWarRoom() {
       });
     }
   }
-  const top5 = Array.from(orderMap.values())
-    .sort((a, b) => b.priority - a.priority)
-    .slice(0, 5);
+
+  // 不再做 Top 5 限制，按 bucket 分组全部展示（最多每组 10 条）
+  const allTodos = Array.from(orderMap.values()).sort((a, b) => b.priority - a.priority);
+  const todosByBucket = {
+    urgent:  allTodos.filter(t => t.bucket === 'urgent').slice(0, 10),
+    warning: allTodos.filter(t => t.bucket === 'warning').slice(0, 10),
+    collab:  allTodos.filter(t => t.bucket === 'collab').slice(0, 10),
+  };
+  const totalTodos = todosByBucket.urgent.length + todosByBucket.warning.length + todosByBucket.collab.length;
+  const top5 = allTodos.slice(0, 5); // 保留旧变量给后面文案用
 
   // ===== 部门超期统计 =====
   const deptOverdue: Record<string, { count: number; items: any[] }> = {};
@@ -442,91 +482,161 @@ export default async function CEOWarRoom() {
         );
       })()}
 
-      {/* ===== 今日邮件晨报（按需触发 + 缓存） ===== */}
-      <MorningBriefingCard
-        initialBriefing={todayBriefing as any}
-        userName={ceoName || '同学'}
-      />
+      {/* 状态概览卡片已下线（2026-04-27）— 用户反馈"风险/阻塞/完成率"统计应在数据分析页查看，首页只展示行动 */}
 
-      {/* ===== 状态概览卡片（点击进入独立页面） ===== */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Link href="/risk-orders/red" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-red-300 hover:shadow-md transition-all cursor-pointer">
-          <div className="text-3xl font-bold text-red-600">{riskRed.length}</div>
-          <div className="text-xs text-gray-500 mt-1">🔴 红色风险</div>
-        </Link>
-        <Link href="/risk-orders/yellow" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-yellow-300 hover:shadow-md transition-all cursor-pointer">
-          <div className="text-3xl font-bold text-yellow-600">{riskYellow.length}</div>
-          <div className="text-xs text-gray-500 mt-1">🟡 黄色关注</div>
-        </Link>
-        <Link href="/risk-orders/green" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-green-300 hover:shadow-md transition-all cursor-pointer">
-          <div className="text-3xl font-bold text-green-600">{riskGreen.length}</div>
-          <div className="text-xs text-gray-500 mt-1">🟢 绿色正常</div>
-        </Link>
-        <Link href="/risk-orders/blocked" className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
-          <div className="text-3xl font-bold text-orange-600">{ordersWithBlocked.length}</div>
-          <div className="text-xs text-gray-500 mt-1">🔒 阻塞中</div>
-        </Link>
-        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-          <div className="text-3xl font-bold text-indigo-600">{completionRate}%</div>
-          <div className="text-xs text-gray-500 mt-1">📊 完成率</div>
+      {/* ===== 1. 今日待办 — 三分类（紧急 / 风险预警 / 协作提醒） ===== */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-3 border-b border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900">📋 今日待办（共 {totalTodos} 项）</h2>
+          <p className="text-xs text-gray-600 mt-0.5">按订单聚合 · 紧急事项 · 风险预警 · 协作提醒</p>
         </div>
-      </div>
 
-      {/* ===== 1. 今日必做 — 按订单聚合 ===== */}
-      <div className="bg-white rounded-xl border-2 border-red-200 shadow-md overflow-hidden">
-        <div className="bg-gradient-to-r from-red-50 to-orange-50 px-5 py-3 border-b border-red-100">
-          <h2 className="text-lg font-bold text-red-900">🎯 今日必做事项（Top {top5.length}）</h2>
-          <p className="text-xs text-red-700 mt-0.5">按订单聚合，每单一行，点击直接定位到要处理的节点</p>
-        </div>
-        {top5.length === 0 ? (
-          <div className="p-8 text-center">
+        {totalTodos === 0 ? (
+          <div className="p-10 text-center">
             <div className="text-4xl mb-2">🎉</div>
-            <div className="text-gray-600">今日暂无紧急事项，继续保持！</div>
+            <div className="text-gray-600">今日暂无待办，继续保持！</div>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {top5.map((item: any, i: number) => (
-              <div key={item.orderId} className="px-5 py-4 hover:bg-gray-50 transition-colors">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <span className="text-lg font-bold text-red-600 w-6 text-center flex-shrink-0">
-                      {i + 1}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
-                          {item.orderNo}
+            {/* === 紧急事项 === */}
+            {todosByBucket.urgent.length > 0 && (
+              <div>
+                <div className="bg-red-50 px-5 py-2 border-b border-red-100 flex items-center gap-2">
+                  <span className="text-base">🚨</span>
+                  <h3 className="text-sm font-bold text-red-900">紧急事项（{todosByBucket.urgent.length}）</h3>
+                  <span className="text-xs text-red-600/70">超期 ≥3 天 / 关键节点卡住 / 高危订单</span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {todosByBucket.urgent.map((item: any, i: number) => (
+                    <div key={item.orderId} className="px-5 py-3 hover:bg-red-50/30 transition-colors">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <span className="text-sm font-bold text-red-600 w-5 text-center flex-shrink-0">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
+                                {item.orderNo}
+                              </Link>
+                              <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
+                                {item.issueCount} 个问题
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1 space-y-0.5">
+                              {item.issues.slice(0, 2).map((issue: string, j: number) => (
+                                <div key={j}>• {issue}</div>
+                              ))}
+                              {item.issueCount > 2 && (
+                                <div className="text-gray-400">还有 {item.issueCount - 2} 个...</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <Link
+                          href={orderFocusMs[item.orderId]
+                            ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
+                            : `/orders/${item.orderId}?tab=progress&from=/ceo`}
+                          className="flex-shrink-0 bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-red-700"
+                        >
+                          去处理
                         </Link>
-                        <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
-                          {item.issueCount} 个问题
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-700 mt-1 space-y-0.5">
-                        {item.issues.slice(0, 3).map((issue: string, j: number) => (
-                          <div key={j} className="text-xs text-gray-600">• {issue}</div>
-                        ))}
-                        {item.issueCount > 3 && (
-                          <div className="text-xs text-gray-400">还有 {item.issueCount - 3} 个问题...</div>
-                        )}
                       </div>
                     </div>
-                  </div>
-                  <Link
-                    href={
-                      item.type === 'delay'
-                        ? `/ceo#delay-approvals`
-                        : orderFocusMs[item.orderId]
-                          ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
-                          : `/orders/${item.orderId}?tab=progress&from=/ceo`
-                    }
-                    className="flex-shrink-0 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
-                  >
-                    去处理
-                  </Link>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+
+            {/* === 风险预警 === */}
+            {todosByBucket.warning.length > 0 && (
+              <div>
+                <div className="bg-amber-50 px-5 py-2 border-b border-amber-100 flex items-center gap-2">
+                  <span className="text-base">⚠️</span>
+                  <h3 className="text-sm font-bold text-amber-900">风险预警（{todosByBucket.warning.length}）</h3>
+                  <span className="text-xs text-amber-600/70">48h 内到期 / 超期 1-2 天 / 普通卡住</span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {todosByBucket.warning.map((item: any, i: number) => (
+                    <div key={item.orderId} className="px-5 py-3 hover:bg-amber-50/30 transition-colors">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <span className="text-sm font-bold text-amber-600 w-5 text-center flex-shrink-0">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
+                                {item.orderNo}
+                              </Link>
+                              <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                                {item.issueCount} 项
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1 space-y-0.5">
+                              {item.issues.slice(0, 2).map((issue: string, j: number) => (
+                                <div key={j}>• {issue}</div>
+                              ))}
+                              {item.issueCount > 2 && (
+                                <div className="text-gray-400">还有 {item.issueCount - 2} 个...</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <Link
+                          href={orderFocusMs[item.orderId]
+                            ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
+                            : `/orders/${item.orderId}?tab=progress&from=/ceo`}
+                          className="flex-shrink-0 bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-amber-600"
+                        >
+                          查看
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* === 协作提醒 === */}
+            {todosByBucket.collab.length > 0 && (
+              <div>
+                <div className="bg-blue-50 px-5 py-2 border-b border-blue-100 flex items-center gap-2">
+                  <span className="text-base">🤝</span>
+                  <h3 className="text-sm font-bold text-blue-900">协作提醒（{todosByBucket.collab.length}）</h3>
+                  <span className="text-xs text-blue-600/70">等待审批 / 上下游协作</span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {todosByBucket.collab.map((item: any, i: number) => (
+                    <div key={item.orderId} className="px-5 py-3 hover:bg-blue-50/30 transition-colors">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <span className="text-sm font-bold text-blue-600 w-5 text-center flex-shrink-0">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
+                                {item.orderNo}
+                              </Link>
+                              <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
+                              <span className="text-xs text-gray-500">{item.daysInfo}</span>
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1">
+                              • {item.issues[0]}
+                            </div>
+                          </div>
+                        </div>
+                        <Link
+                          href={item.type === 'delay'
+                            ? `/admin/pending-approvals?category=delay`
+                            : `/orders/${item.orderId}?tab=progress&from=/ceo`}
+                          className="flex-shrink-0 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700"
+                        >
+                          去处理
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -615,63 +725,7 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
-      {/* ===== 2.5 执行力快报 ===== */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">⚡</span>
-            <h2 className="text-base font-bold text-gray-900">执行力快报</h2>
-          </div>
-          <Link href="/analytics/execution" className="text-xs text-indigo-600 hover:text-indigo-700">
-            查看详情 →
-          </Link>
-        </div>
-        <div className="grid grid-cols-4 gap-3 text-center">
-          <div className="bg-indigo-50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-indigo-600">{overdueCount}</div>
-            <div className="text-[10px] text-gray-500">逾期节点</div>
-          </div>
-          <div className="bg-amber-50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-amber-600">{blockedCount}</div>
-            <div className="text-[10px] text-gray-500">阻塞节点</div>
-          </div>
-          <div className="bg-green-50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-green-600">{analyticsSummary.thisWeekCompleted || 0}</div>
-            <div className="text-[10px] text-gray-500">本周完成</div>
-          </div>
-          <div className="bg-purple-50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-purple-600">{analyticsSummary.completedOrders || 0}</div>
-            <div className="text-[10px] text-gray-500">累计完成订单</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ===== 3. AI 智能助手（合并 AI 分析建议 + Agent 智能建议） ===== */}
-      <div className="bg-white rounded-xl border-2 border-indigo-200 shadow-md overflow-hidden">
-        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 px-5 py-3 border-b border-indigo-100">
-          <h2 className="text-lg font-bold text-indigo-900">🤖 AI 智能助手</h2>
-          <p className="text-xs text-indigo-600 mt-0.5">实时分析 + 可执行建议</p>
-        </div>
-        {aiInsights.length > 0 && (
-          <div className="p-5 space-y-2 border-b border-indigo-100">
-            {aiInsights.map((insight, i) => (
-              <div key={i} className="text-sm text-gray-800 leading-relaxed">{insight}</div>
-            ))}
-          </div>
-        )}
-        {agentSuggestions.length > 0 && (
-          <div className="p-2">
-            <AgentSuggestionsPanel
-              suggestions={agentSuggestions}
-              title=""
-              showOrder={true}
-            />
-          </div>
-        )}
-        {aiInsights.length === 0 && agentSuggestions.length === 0 && (
-          <div className="p-6 text-center text-gray-400 text-sm">✨ 当前无智能建议</div>
-        )}
-      </div>
+      {/* 执行力快报、AI 智能助手已下线（2026-04-27）— 数据请去 /analytics/execution 查看 */}
 
       {/* ===== 4. 订单三阶段分析 ===== */}
       <div className="grid md:grid-cols-3 gap-4">
