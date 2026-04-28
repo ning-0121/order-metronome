@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getDailyTasks, getTasksSummary, generateDailyTasks } from '@/lib/services/daily-tasks.service';
+import { getPendingApprovalsCount } from '@/lib/services/pending-approvals.service';
 import { TaskList } from '@/components/TaskList';
 
 export const dynamic = 'force-dynamic';
@@ -57,6 +58,15 @@ export default async function MyTodayPage() {
     .single();
 
   const displayName = profile?.display_name ?? '同学';
+  const userRoles: string[] =
+    Array.isArray((profile as any)?.roles) && (profile as any).roles.length > 0
+      ? (profile as any).roles
+      : [(profile as any)?.role].filter(Boolean);
+
+  // 待审批数量（聚合 6 个来源，仅展示 actionable 数）
+  const approvalsResult = await getPendingApprovalsCount(supabase, { userId: user.id, roles: userRoles });
+  const approvalsActionable = approvalsResult.ok ? approvalsResult.data.actionableCount : 0;
+  const approvalsTotal = approvalsResult.ok ? approvalsResult.data.total : 0;
 
   // 按需触发任务生成（今日首次访问时生成）
   // 先查有没有今日任务，没有就生成
@@ -115,6 +125,31 @@ export default async function MyTodayPage() {
               <p className="text-xs text-gray-500 mt-1">里程碑</p>
             </div>
           </div>
+        )}
+
+        {/* 待审批入口（仅当有待审批时显示） */}
+        {approvalsTotal > 0 && (
+          <a
+            href="/admin/pending-approvals"
+            className="block mb-4 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-xl p-4 hover:shadow-sm transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">⏳</span>
+                <div>
+                  <p className="text-sm font-semibold text-purple-900">
+                    {approvalsActionable > 0
+                      ? `你有 ${approvalsActionable} 项待审批`
+                      : `${approvalsTotal} 项待审批（暂无你能处理的）`}
+                  </p>
+                  <p className="text-xs text-purple-600 mt-0.5">
+                    点击查看延期 / CEO批 / 价格 / Agent 建议 / 付款冻结 / 订单确认
+                  </p>
+                </div>
+              </div>
+              <span className="text-purple-600 text-sm font-medium">→</span>
+            </div>
+          </a>
         )}
 
         {/* 任务列表 */}

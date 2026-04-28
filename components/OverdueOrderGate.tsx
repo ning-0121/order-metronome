@@ -50,7 +50,7 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
 
       if (choice === 'shipped') {
         // 已发货 → 标记所有节点完成 + 订单完成
-        // ⚠️ 注意：DB CHECK 约束 lifecycle_status 只允许中文值 ('草稿','已生效','执行中','已完成','已取消','待复盘','已复盘')
+        // 2026-04-27 复盘：CHECK 约束已被 drop，DB 主流是英文枚举 (active/completed/cancelled/draft)
         const { error: msErr } = await (supabase.from('milestones') as any)
           .update({ status: 'done', actual_at: now })
           .eq('order_id', orderId)
@@ -62,7 +62,7 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
         }
         const { error: ordErr } = await (supabase.from('orders') as any)
           .update({
-            lifecycle_status: '已完成', // ✅ 必须中文，匹配 CHECK 约束
+            lifecycle_status: 'completed', // ✅ 统一英文枚举
             notes: `【超期确认】已发货，系统自动标记完成（确认时间：${now}）`,
           })
           .eq('id', orderId);

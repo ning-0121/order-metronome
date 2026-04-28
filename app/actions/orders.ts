@@ -1326,8 +1326,9 @@ export async function forceCompleteOrderAction(orderId: string): Promise<{ error
     .not('status', 'in', '("done","已完成","completed")');
 
   // 标记订单完成
+  // ⚠️ 2026-04-27 统一为英文（清账：lifecycle_status 中英混用）
   await (supabase.from('orders') as any)
-    .update({ lifecycle_status: '已完成' })
+    .update({ lifecycle_status: 'completed' })
     .eq('id', orderId);
 
   // 日志
