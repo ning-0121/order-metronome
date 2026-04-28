@@ -37,7 +37,13 @@ tech_scout_reports, warehouse_items
 | `ai_collection_log` | 6 | ai-self-improve（已禁用） | 冻结写入，保留历史 |
 | `compliance_findings` | 39 | compliance-check（已禁用） | 冻结写入，保留历史 |
 | `system_health_reports` | 19 | nightly-maintenance（已禁用） | 冻结写入，保留历史 |
-| `order_model_analytics` | **0** | 无 | ✅ 真·空表，可执行 RENAME 归档 |
+| ~~`order_model_analytics`~~ | ~~0~~ | 无 | ✅ **2026-04-27 已归档** → `order_model_analytics_archived_20260427` |
+
+### 已执行的 DB 操作日志
+
+| 日期 | 操作 | 详情 | 回滚命令 |
+|------|------|------|----------|
+| 2026-04-27 | RENAME 归档 | `order_model_analytics` → `order_model_analytics_archived_20260427` | `ALTER TABLE order_model_analytics_archived_20260427 RENAME TO order_model_analytics;` |
 
 ---
 
