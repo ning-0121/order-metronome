@@ -16,6 +16,7 @@ import { isDoneStatus, isActiveStatus } from '@/lib/domain/types';
 import { getActiveOrderTemplates } from '@/app/actions/order-templates';
 import type { OrderTemplate } from '@/app/actions/order-templates';
 import { FileNameCheck } from '@/components/FileNameCheck';
+import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
 
 /**
  * 将 AI 返回的各种日期格式统一为 YYYY-MM-DD（HTML date input 要求）
@@ -393,6 +394,31 @@ function NewOrderWizard() {
     if (!filesToUpload.find(f => f.fileType === 'internal_quote')) { showError('请上传内部成本核算单（必传）'); return; }
     if (!filesToUpload.find(f => f.fileType === 'customer_quote')) { showError('请上传客户最终报价单（必传）'); return; }
 
+    // ═══════════════════════════════════════════════════════
+    // 入口把控（2026-04-28）— 所有上传文件必须命名合规才能创建
+    // 阻塞条件：缺订单号 / 缺文档类型关键词 / 含禁止字符 / 含歧义词（最终/new等）
+    // 软提示：含空格（不阻塞）
+    // ═══════════════════════════════════════════════════════
+    const namingErrors: string[] = [];
+    for (const f of filesToUpload) {
+      const stepKey = STEP_KEY_BY_FILE_TYPE[f.fileType];
+      if (!stepKey) continue; // 未定义命名标准的 fileType 跳过
+      const result = validateFileName(f.file.name, stepKey, preGeneratedOrderNo);
+      const blockingIssues = result.issues.filter(i => i.code !== 'has_space');
+      if (blockingIssues.length > 0) {
+        namingErrors.push(
+          `• ${f.label}「${f.file.name}」\n   ${blockingIssues.map(i => i.message).join('；')}\n   ✓ 推荐：${result.suggestion}`
+        );
+      }
+    }
+    if (namingErrors.length > 0) {
+      showError(
+        `${namingErrors.length} 个文件命名不合规，请修正后重新选择：\n\n${namingErrors.join('\n\n')}\n\n` +
+        `💡 命名格式：{订单号}_{文档类型}.{扩展名}`
+      );
+      return;
+    }
+
     // 文件验证可用格式
     const isVerifiable = (f: File) =>
       f.type === 'application/pdf' ||
@@ -650,7 +676,7 @@ function NewOrderWizard() {
       </div>
 
       {error && (
-        <div ref={errorRef} className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-800">
+        <div ref={errorRef} className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-800 whitespace-pre-line">
           <span className="font-medium">⚠ 创建失败：</span>{error}
         </div>
       )}
@@ -1175,7 +1201,7 @@ function NewOrderWizard() {
 
             {/* 提交按钮上方的错误提示（确保用户能看到） */}
             {error && (
-              <div ref={bottomErrorRef} className="rounded-lg bg-red-50 border border-red-300 p-4 text-sm text-red-800 animate-pulse">
+              <div ref={bottomErrorRef} className="rounded-lg bg-red-50 border border-red-300 p-4 text-sm text-red-800 whitespace-pre-line">
                 <span className="font-semibold">⚠ 创建失败：</span>{error}
               </div>
             )}

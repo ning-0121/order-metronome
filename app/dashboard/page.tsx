@@ -149,11 +149,12 @@ export default async function DashboardPage() {
       .lt('due_at', `${tomorrowStr}T00:00:00`)
       .not('status', 'in', '("done","已完成","completed")')
       .order('due_at', { ascending: true }),
-    // 已超期（仅进行中的节点算逾期）
+    // 已超期（凡是未完成且过了 due_at 的节点都算逾期，无论是否已启动）
+    // 修复（2026-04-28）：原仅限 in_progress 会漏掉新订单中"未开始"但已过期的节点
     (supabase.from('milestones') as any)
-      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
+      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no, lifecycle_status)`)
       .lt('due_at', `${today}T00:00:00`)
-      .in('status', ['in_progress', '进行中'])
+      .not('status', 'in', '("done","已完成","completed")')
       .order('due_at', { ascending: true }),
     // 当前用户涉及的订单
     (supabase.from('orders') as any)

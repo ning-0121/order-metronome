@@ -256,45 +256,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      {/* 超期订单警告 */}
-      {overdueOrders.length > 0 && statusFilter === 'active' && (
-        <div className="mb-4 rounded-xl bg-red-50 border border-red-200 p-4">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl">🚨</span>
-            <div className="flex-1">
-              <p className="text-sm font-bold text-red-900">
-                {overdueOrders.length} 个订单已超出交期
-                {pendingDelayOrders.length > 0 && (
-                  <span className="ml-2 text-amber-700 font-normal">
-                    （{pendingDelayOrders.length} 个延期申请待审批）
-                  </span>
-                )}
-              </p>
-              <div className="mt-2 space-y-1">
-                {overdueOrders.slice(0, 5).map(({ order: o, daysOver, pendingDelay, approved }) => (
-                  <a key={o.id} href={`/orders/${o.id}?tab=progress`}
-                    className={`flex items-center gap-2 text-xs hover:opacity-80 ${pendingDelay ? 'text-amber-700' : 'text-red-700'}`}>
-                    <span className="font-mono font-semibold">{o.order_no}</span>
-                    {o.internal_order_no && <span className="opacity-60">({o.internal_order_no})</span>}
-                    <span>· {o.customer_name}</span>
-                    {approved
-                      ? <span className="font-bold">延期后仍超 {daysOver} 天</span>
-                      : <span className="font-bold">超期 {daysOver} 天</span>
-                    }
-                    {pendingDelay
-                      ? <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-xs">延期申请中，待审批</span>
-                      : <span className="opacity-60">→ 请业务申请延期</span>
-                    }
-                  </a>
-                ))}
-                {overdueOrders.length > 5 && (
-                  <p className="text-xs text-red-500">还有 {overdueOrders.length - 5} 个超期订单...</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 超期订单警告已下线（2026-04-28）— 用户反馈"重复信息"，超期订单在 /ceo 待办区已聚合 */}
 
       {/* Page Header */}
       <div className="flex items-center justify-between mb-6">

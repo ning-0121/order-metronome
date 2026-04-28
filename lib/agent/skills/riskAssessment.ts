@@ -59,7 +59,16 @@ interface RiskContext {
     qcPassRate: number | null;
     hasEnoughData: boolean;
   };
-  milestones: Array<{ step_key: string; status: string; due_at: string | null }>;
+  milestones: Array<{
+    step_key: string;
+    status: string;
+    due_at: string | null;
+    actual_at?: string | null;
+    owner_user_id?: string | null;
+    is_critical?: boolean | null;
+    name?: string | null;
+    sequence_number?: number | null;
+  }>;
   attachments: Array<{ file_type: string }>;
   specialTags: string[];
   hasFile: (t: string) => boolean;
@@ -547,6 +556,248 @@ const DIMENSIONS: RiskDimension[] = [
       return { score: 0 };
     },
   },
+
+  // ════════════════════════════════════════════════
+  // 原辅料维度（2026-04-28 新增）
+  // 用户原话：风险要从客户/工厂/原辅料/团队执行综合来看
+  // ════════════════════════════════════════════════
+
+  // 15. 原辅料：到期前未确认
+  {
+    id: 'materials_not_confirmed_in_time',
+    category: '原辅料',
+    label: '原辅料确认滞后',
+    maxScore: 18,
+    evaluate: ctx => {
+      const factoryDate = ctx.order.factory_date ? new Date(ctx.order.factory_date) : null;
+      if (!factoryDate) return { score: 0 };
+      const daysToFactory = Math.ceil((factoryDate.getTime() - Date.now()) / 86400000);
+      if (daysToFactory > 35) return { score: 0 };
+
+      const DONE = new Set(['done', '已完成', 'completed']);
+      const ms = ctx.milestones.find(m => m.step_key === 'bulk_materials_confirmed');
+      if (!ms || DONE.has(ms.status)) return { score: 0 }; // 已确认或没该节点
+
+      if (daysToFactory <= 14) {
+        return {
+          score: 18,
+          reason: `距出厂仅 ${daysToFactory} 天，原辅料仍未确认 — 必然来不及备料`,
+          evidence: `milestones.bulk_materials_confirmed.status = ${ms.status}`,
+        };
+      }
+      if (daysToFactory <= 25) {
+        return {
+          score: 10,
+          reason: `距出厂 ${daysToFactory} 天，原辅料尚未确认 — 备料时间紧张`,
+          evidence: `milestones.bulk_materials_confirmed.status = ${ms.status}`,
+        };
+      }
+      return {
+        score: 4,
+        reason: `距出厂 ${daysToFactory} 天，原辅料确认未完成 — 建议本周推进`,
+        evidence: `milestones.bulk_materials_confirmed.status = ${ms.status}`,
+      };
+    },
+  },
+
+  // 16. 原辅料：采购未下单
+  {
+    id: 'procurement_not_placed_late',
+    category: '原辅料',
+    label: '采购下单滞后',
+    maxScore: 16,
+    evaluate: ctx => {
+      const factoryDate = ctx.order.factory_date ? new Date(ctx.order.factory_date) : null;
+      if (!factoryDate) return { score: 0 };
+      const daysToFactory = Math.ceil((factoryDate.getTime() - Date.now()) / 86400000);
+      if (daysToFactory > 30) return { score: 0 };
+
+      const DONE = new Set(['done', '已完成', 'completed']);
+      const ms = ctx.milestones.find(m => m.step_key === 'procurement_order_placed');
+      if (!ms || DONE.has(ms.status)) return { score: 0 };
+
+      if (daysToFactory <= 12) {
+        return {
+          score: 16,
+          reason: `距出厂 ${daysToFactory} 天，采购单仍未下 — 面/辅料无法按时到位`,
+          evidence: `milestones.procurement_order_placed.status = ${ms.status}`,
+        };
+      }
+      if (daysToFactory <= 20) {
+        return {
+          score: 9,
+          reason: `距出厂 ${daysToFactory} 天，采购单未下 — 国内料约需 7-15 天到货`,
+          evidence: `milestones.procurement_order_placed.status = ${ms.status}`,
+        };
+      }
+      return { score: 0 };
+    },
+  },
+
+  // 17. 原辅料：到货验收超期
+  {
+    id: 'materials_inspection_overdue',
+    category: '原辅料',
+    label: '原辅料验收超期',
+    maxScore: 12,
+    evaluate: ctx => {
+      const DONE = new Set(['done', '已完成', 'completed']);
+      const BLOCKED = new Set(['blocked', '卡单', '卡住', '阻塞']);
+      const ms = ctx.milestones.find(m => m.step_key === 'materials_received_inspected');
+      if (!ms || DONE.has(ms.status)) return { score: 0 };
+
+      // 超期或被阻塞
+      if (BLOCKED.has(ms.status)) {
+        return {
+          score: 12,
+          reason: '原辅料验收节点被标记为卡住 — 来料有质量问题或缺货',
+          evidence: `milestones.materials_received_inspected.status = ${ms.status}`,
+        };
+      }
+      if (ms.due_at) {
+        const overdueDays = Math.floor((Date.now() - new Date(ms.due_at).getTime()) / 86400000);
+        if (overdueDays >= 5) {
+          return {
+            score: 10,
+            reason: `原辅料验收超期 ${overdueDays} 天未完成 — 影响后续大货生产`,
+            evidence: `milestones.materials_received_inspected: due_at=${ms.due_at}, status=${ms.status}`,
+          };
+        }
+        if (overdueDays >= 1) {
+          return {
+            score: 5,
+            reason: `原辅料验收已超期 ${overdueDays} 天`,
+            evidence: `milestones.materials_received_inspected: due_at=${ms.due_at}`,
+          };
+        }
+      }
+      return { score: 0 };
+    },
+  },
+
+  // ════════════════════════════════════════════════
+  // 团队执行流程维度（2026-04-28 新增）
+  // ════════════════════════════════════════════════
+
+  // 18. 团队：关键节点未分配负责人
+  {
+    id: 'critical_milestones_unassigned',
+    category: '团队执行',
+    label: '关键节点无负责人',
+    maxScore: 14,
+    evaluate: ctx => {
+      const DONE = new Set(['done', '已完成', 'completed']);
+      // 关键节点：要么 is_critical=true，要么 step_key 在硬编码关键集合
+      const CRITICAL_KEYS = new Set([
+        'po_confirmed', 'finance_approval', 'production_order_upload',
+        'bulk_materials_confirmed', 'procurement_order_placed',
+        'pre_production_sample_approved', 'production_kickoff',
+        'final_qc_check', 'booking_done',
+      ]);
+      const unassigned = ctx.milestones.filter(m =>
+        !DONE.has(m.status) &&
+        !m.owner_user_id &&
+        (m.is_critical === true || CRITICAL_KEYS.has(m.step_key))
+      );
+      if (unassigned.length === 0) return { score: 0 };
+
+      const names = unassigned.slice(0, 3).map(m => m.name || m.step_key).join('、');
+      if (unassigned.length >= 3) {
+        return {
+          score: 14,
+          reason: `${unassigned.length} 个关键节点未分配负责人（${names}…）— 没人推进就一定卡住`,
+          evidence: `milestones 表：is_critical/关键 step + owner_user_id IS NULL，共 ${unassigned.length} 条`,
+        };
+      }
+      return {
+        score: 7,
+        reason: `${unassigned.length} 个关键节点未分配负责人（${names}）`,
+        evidence: `milestones 表：${unassigned.length} 条关键节点 owner_user_id 为空`,
+      };
+    },
+  },
+
+  // 19. 团队：上下游交接卡顿
+  {
+    id: 'team_handoff_stuck',
+    category: '团队执行',
+    label: '上下游交接停滞',
+    maxScore: 12,
+    evaluate: ctx => {
+      const DONE = new Set(['done', '已完成', 'completed']);
+      const PENDING = new Set(['pending', '未开始', 'not_started']);
+      const sorted = [...ctx.milestones].sort(
+        (a, b) => (a.sequence_number || 0) - (b.sequence_number || 0)
+      );
+      const stuckPairs: Array<{ from: string; to: string; days: number }> = [];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const cur = sorted[i];
+        const next = sorted[i + 1];
+        if (DONE.has(cur.status) && PENDING.has(next.status) && cur.actual_at) {
+          const days = Math.floor((Date.now() - new Date(cur.actual_at).getTime()) / 86400000);
+          if (days >= 3) {
+            stuckPairs.push({
+              from: cur.name || cur.step_key,
+              to: next.name || next.step_key,
+              days,
+            });
+          }
+        }
+      }
+      if (stuckPairs.length === 0) return { score: 0 };
+      const worst = stuckPairs.sort((a, b) => b.days - a.days)[0];
+      if (worst.days >= 7 || stuckPairs.length >= 2) {
+        return {
+          score: 12,
+          reason: `${stuckPairs.length} 处交接卡顿（最严重：${worst.from} → ${worst.to} 已停 ${worst.days} 天）`,
+          evidence: `milestones 序列分析：前序 actual_at 距今 ≥ 3 天但下一节点仍 pending`,
+        };
+      }
+      return {
+        score: 6,
+        reason: `${worst.from} → ${worst.to} 交接已停 ${worst.days} 天`,
+        evidence: `milestones 序列分析：前序已完成 ${worst.days} 天但下一节点未启动`,
+      };
+    },
+  },
+
+  // 20. 团队：多节点同时超期（执行能力告警）
+  {
+    id: 'multiple_overdue_milestones',
+    category: '团队执行',
+    label: '多节点同时超期',
+    maxScore: 16,
+    evaluate: ctx => {
+      const ACTIVE = new Set(['in_progress', '进行中']);
+      const PENDING = new Set(['pending', '未开始', 'not_started']);
+      const now = Date.now();
+      const overdue = ctx.milestones.filter(m =>
+        (ACTIVE.has(m.status) || PENDING.has(m.status)) &&
+        m.due_at &&
+        new Date(m.due_at).getTime() < now
+      );
+      if (overdue.length === 0) return { score: 0 };
+      if (overdue.length >= 4) {
+        return {
+          score: 16,
+          reason: `${overdue.length} 个节点同时超期 — 团队执行严重失控`,
+          evidence: `milestones 表：未完成且 due_at < now，共 ${overdue.length} 条`,
+        };
+      }
+      if (overdue.length >= 2) {
+        return {
+          score: 9,
+          reason: `${overdue.length} 个节点超期未推进`,
+          evidence: `milestones 表：未完成且 due_at < now，共 ${overdue.length} 条`,
+        };
+      }
+      return {
+        score: 4,
+        reason: '1 个节点超期 — 需立即跟进',
+        evidence: `milestones 表：未完成且 due_at < now，共 1 条`,
+      };
+    },
+  },
 ];
 
 // ════════════════════════════════════════════════
@@ -723,8 +974,8 @@ export const riskAssessmentSkill: SkillModule = {
   hashInput: (input: SkillInput) => {
     return JSON.stringify({
       orderId: input.orderId,
-      // v4：业务员视角叙事层 + 专业知识库注入
-      version: 'v8-facts-only',
+      // v9：新增 6 个维度（原辅料 3 + 团队执行 3）
+      version: 'v9-materials-and-team-exec',
     });
   },
 
@@ -743,7 +994,7 @@ export const riskAssessmentSkill: SkillModule = {
     // 并行加载关联数据
     const [milestonesRes, attachmentsRes, customerStatsRes, factoryStatsRes] = await Promise.all([
       (ctx.supabase.from('milestones') as any)
-        .select('step_key, status, due_at')
+        .select('step_key, status, due_at, actual_at, owner_user_id, is_critical, name, sequence_number')
         .eq('order_id', input.orderId),
       (ctx.supabase.from('order_attachments') as any)
         .select('file_type')
@@ -815,8 +1066,9 @@ export const riskAssessmentSkill: SkillModule = {
       });
     }
 
-    // 4. 总分归一化（所有维度 maxScore 之和 = 229，映射到 0-100）
-    const MAX_TOTAL_SCORE = 229;
+    // 4. 总分归一化（所有维度 maxScore 之和 = 317，映射到 0-100）
+    // 维度分类：客户 / 工厂 / 订单类型 / 包装 / 文件 / 流程 / 历史 / 交期 / 季节 / 原辅料 / 团队执行
+    const MAX_TOTAL_SCORE = 317;
     const score = Math.round(Math.min(100, (totalScore / MAX_TOTAL_SCORE) * 100));
     let level: 'high' | 'medium' | 'low';
     let summary: string;
