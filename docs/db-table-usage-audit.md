@@ -1,8 +1,8 @@
 # 数据库表使用审计
 
-> 生成时间：2026-04-27  
-> 审计工具：代码 grep 引用统计 + Cron 写入分析 + Supabase 实际行数验证  
-> 版本：System Consolidation Sprint v2（已结合实际 DB 状态修正）
+> 生成时间：2026-04-27（v1/v2）→ 2026-04-28（v3 全量补全）  
+> 审计工具：代码 grep 引用统计 + Cron 写入分析 + Supabase 实际行数验证 + migrations 全量比对  
+> 版本：System Consolidation Sprint v3（**已扩展到 migrations 定义的全部 73 张表**）
 
 ---
 
@@ -46,6 +46,324 @@ tech_scout_reports, warehouse_items
 | 2026-04-27 | RENAME 归档 | `order_model_analytics` → `order_model_analytics_archived_20260427` | `ALTER TABLE order_model_analytics_archived_20260427 RENAME TO order_model_analytics;` |
 
 ---
+
+## ⚠️ 第三阶段补全（2026-04-28，Phase 1 入口审计）
+
+**v2 覆盖局限**：v2 详述了 ~35 张表，但 migrations 全量扫描显示有 73 张表（`grep "create table" supabase/migration.sql supabase/migrations/*.sql`）。本次 v3 把 **从未在 v1/v2 出现过的 38 张表**全部补齐，并加入两项关键新发现。
+
+### v3 关键新发现
+
+#### 发现 #1：`lib/services/quote-bridge.service.ts` 是孤儿代码
+
+- 文件存在（268 行）实现 `convertQuoteToOrderFinancials(quoteId, orderId)` —— 报价→财务→利润完整数据流
+- **代码引用：0** 处（grep `convertQuoteToOrderFinancials` 与 `quote-bridge` 在 app/components 全部命中为零）
+- 已生成的能力但**没有任何 UI / action / cron 调用它**
+- 影响：v2 审计声称 quoter_quotes "已通过 quote-bridge 打通报价数据流" — 这个说法**事实上不成立**
+- 处理建议：保留代码，留待 Phase 2 接入；不要 archive，否则要白做一遍
+
+#### 发现 #2：`lib/ai/aiGateway.ts` 已存在但只覆盖 2 个调用方
+
+- 200 行，已实现 task / cacheKey / shadowMode / featureFlag / auditLog
+- 当前调用方：`app/actions/quoter-training.ts`, `lib/services/briefing.service.ts`（共 2 处）
+- 其他 AI 调用仍直接走 `lib/agent/anthropicClient.ts`（`callClaude` / `callClaudeJSON`）—— 18 处以上
+- 处理建议：保留，Phase 2 渐进迁移
+
+#### 发现 #3：profit_snapshots 写入路径完全断链
+
+- `profit_snapshots` 表存在（migration 20260427_trade_os_foundation.sql 创建）
+- **唯一写入点**：`lib/services/quote-bridge.service.ts`（孤儿）+ `lib/services/profit.service.ts`（被服务层引用，但**实际触发条件未连入 UI**）
+- 结果：表存在但**生产环境几乎不会有数据**，是**逻辑层 GHOST**
+- v2 标记其"已通过 quote-bridge 接入第一版快照"也是事实上不成立
+
+---
+
+### v3 全量索引（73 张表）
+
+> 数据来源：`supabase/migrations/*.sql` + `supabase/migration.sql` 全量扫描  
+> 引用计数来源：`grep "from\(['\"]TABLE['\"]\)"` 在 `app/` + `lib/` 下统计  
+> 写入次数 = `.insert/.update/.upsert/.delete` 调用数量  
+> Cron写入 = 上述写入中位于 `app/api/cron/` 下的数量  
+> UI 读取 = 在 `*.tsx` 文件中出现的引用文件数
+
+| 分类 | 表名 | 总引用 | 写入 | Cron写 | UI读 | v1/v2已覆盖 |
+|---|---|---|---|---|---|---|
+| ✅ ACTIVE | orders | 85 | 1 | 0 | 10 | ✓ |
+| ✅ ACTIVE | profiles | 74 | 1 | 0 | 15 | ✓ |
+| ✅ ACTIVE | milestones | 70 | 4 | 0 | 11 | ✓ |
+| ✅ ACTIVE | notifications | 31 | 50 | **23** | 0 | ✓ |
+| ✅ ACTIVE | delay_requests | 22 | 1 | 0 | 5 | ✓ |
+| ✅ ACTIVE | mail_inbox | **20** | 4 | 2 | 0 | **✗ 待补** |
+| ✅ ACTIVE | customer_memory | **20** | 12 | 2 | 1 | **✗ 待补** |
+| ✅ ACTIVE | milestone_logs | 18 | 19 | 0 | 2 | ✓ |
+| ✅ ACTIVE | order_attachments | 15 | 3 | 0 | 7 | ✓ |
+| ✅ ACTIVE | agent_actions | 12 | 10 | 6 | 1 | ✓ |
+| ✅ ACTIVE | order_financials | 11 | 2 | 0 | 0 | ✓ |
+| ✅ ACTIVE | factories | 10 | 0 | 0 | 3 | ✓ |
+| ✅ ACTIVE | order_cost_baseline | 9 | 2 | 0 | 0 | ✓ |
+| ✅ ACTIVE | order_confirmations | **8** | 2 | 0 | 0 | **✗ 待补**（关键：blockRules 依赖） |
+| 📥 PASSIVE | customers | 5 | 0 | 0 | 0 | ✓ |
+| 📥 PASSIVE | ai_knowledge_base | **5** | 9 | 1 | 0 | **✗ 待补** |
+| 📥 PASSIVE | daily_briefings | 5 | 2 | 2 | 0 | ✓ |
+| 📥 PASSIVE | production_reports | **5** | 2 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | order_retrospectives | **4** | 0 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | cancel_requests | **4** | 0 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | customer_rhythm | 4 | 0 | 0 | 0 | ✓ |
+| 📥 PASSIVE | email_order_diffs | **4** | 1 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | pre_order_price_approvals | **4** | 0 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | procurement_line_items | 4 | 2 | 0 | 0 | ✓ |
+| 📥 PASSIVE | user_memos | **4** | 1 | 0 | 2 | **✗ 待补** |
+| 📥 PASSIVE | order_logs | 3 | 3 | 0 | 1 | ✓ |
+| 📥 PASSIVE | system_alerts | 3 | 0 | 0 | 0 | ✓ |
+| 📥 PASSIVE | system_health_reports | 3 | 0 | 0 | 1 | ✓ |
+| 📥 PASSIVE | profit_snapshots | 3 | 0 | 0 | 0 | ✓ |
+| 📥 PASSIVE | quoter_quotes | 3 | 1 | 0 | 1 | ✓ |
+| 📥 PASSIVE | compliance_findings | 3 | 1 | 0 | 0 | ✓ |
+| 📥 PASSIVE | procurement_tracking | **3** | 2 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | quoter_cmt_training_samples | 3 | 2 | 0 | 0 | ✓ |
+| 📥 PASSIVE | shipment_confirmations | **2** | 3 | 0 | 1 | **✗ 待补** |
+| 📥 PASSIVE | order_amendments | **2** | 2 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | order_root_causes | **2** | 1 | 0 | 0 | **✗ 待补**（最近新建） |
+| 📥 PASSIVE | order_commissions | **2** | 2 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | packing_lists | **2** | 0 | 0 | 1 | **✗ 待补** |
+| 📥 PASSIVE | document_extractions | **2** | 0 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | quoter_training_feedback | **2** | 1 | 0 | 1 | **✗ 待补** |
+| 📥 PASSIVE | quoter_fabric_records | **2** | 1 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | customer_email_domains | **2** | 4 | 0 | 0 | **✗ 待补** |
+| 📥 PASSIVE | ai_skill_runs | 2 | 0 | 0 | 0 | ✓ |
+| 📥 PASSIVE | ai_skill_circuit_state | **2** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | ai_collection_log | 1 | 1 | 0 | 0 | ✓ |
+| 👻 GHOST | ai_context_cache | 1 | 0 | 0 | 0 | ✓ |
+| 👻 GHOST | attachments | **1** | 0 | 0 | 0 | **✗ 待补**（被 order_attachments 取代） |
+| 👻 GHOST | agent_batch_jobs | **1** | 1 | 1 | 0 | **✗ 待补** |
+| 👻 GHOST | company_profile | **1** | 1 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | daily_tasks | 1 | 0 | 0 | 0 | ✓ |
+| 👻 GHOST | email_process_log | 1 | 0 | 0 | 0 | ✓ |
+| 👻 GHOST | issue_slips | **1** | 0 | 0 | 1 | **✗ 待补** |
+| 👻 GHOST | mail_inbox（重复） | — | — | — | — | — |
+| 👻 GHOST | materials_bom | **1** | 2 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | order_notes_log | **1** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | order_templates | **1** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | outsource_jobs | **1** | 2 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | packing_list_lines | **1** | 2 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | procurement_shared_sheets | **1** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | procurement_sheet_items | **1** | 1 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | qc_inspections | **1** | 2 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | shipment_batches | **1** | 1 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | system_kv | **1** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | order_sequences | 0 | 0 | 0 | 0 | ✓（v2: ACTIVE，PG 函数依赖） |
+| 👻 GHOST | ai_learning_log | **0** | 0 | 0 | 0 | v2: 不存在于 DB |
+| 👻 GHOST | ai_skill_actions | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | company_settings | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | cost_reconciliations | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | customer_analytics | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | exceptions | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | factory_analytics | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | issue_slip_lines | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | order_model_analytics | 0 | 0 | 0 | 0 | v2 已 RENAME 归档 |
+| 👻 GHOST | quoter_cmt_operations | **0** | 0 | 0 | 0 | **✗ 待补** |
+| 👻 GHOST | quoter_cmt_rates | **0** | 0 | 0 | 0 | **✗ 待补** |
+
+**统计**：73 张表 / v1+v2 详述 35 张 / **本轮 v3 新增 38 张**。
+
+---
+
+### v3 详述：v1/v2 未覆盖的 38 张表
+
+#### 主链路活跃但 v2 漏写
+
+##### mail_inbox
+- **分类**：✅ ACTIVE
+- **代码引用**：20 处
+- **UI 读取**：admin/mail-monitor、订单详情邮件 tab
+- **Cron 写入**：email-scan、email-backfill（每 15 分钟+每日 17:40）
+- **影响订单主链路**：是（邮件→订单匹配核心）
+- **建议**：保留；这是 v2 漏掉的高活跃表
+
+##### customer_memory
+- **分类**：✅ ACTIVE
+- **代码引用**：20 处
+- **UI 读取**：客户详情、风险评估
+- **Cron 写入**：email-scan（写入 type='email_summary'）
+- **影响订单主链路**：是（风险评估读取）
+- **建议**：保留；与 customer_rhythm 数据互补，不冲突
+
+##### order_confirmations
+- **分类**：✅ ACTIVE（关键）
+- **代码引用**：8 处
+- **UI 读取**：订单详情确认链 tab
+- **Cron 写入**：无
+- **影响订单主链路**：**是（blockRules.ts 强依赖：fabric_color/size_breakdown/logo_print/packaging_label 阻塞 milestone）**
+- **建议**：保留；任何变更需同步更新 blockRules.ts
+
+##### order_root_causes
+- **分类**：✅ ACTIVE（新建）
+- **代码引用**：2 处（rootCauseEngine + causeRules）
+- **UI 读取**：无（暂未上 UI）
+- **Cron 写入**：无（rootCauseEngine 按需写入）
+- **影响订单主链路**：是（决策引擎依据）
+- **建议**：保留；Phase 2 在订单详情加 root cause panel；cause_code 已枚举但 reason_text 仍允许自由文本，待 Phase 1 做枚举强制
+
+##### ai_knowledge_base
+- **分类**：📥 PASSIVE（值得升级 ACTIVE）
+- **代码引用**：5 处（actions/ai-knowledge.ts）
+- **UI 读取**：admin/ai-knowledge 页
+- **Cron 写入**：1 处（来源不详，可能 agent-learn）
+- **影响订单主链路**：否
+- **建议**：保留；专业知识库支撑风险评估的 knowledge injection
+
+##### production_reports
+- **分类**：📥 PASSIVE
+- **代码引用**：5 处
+- **UI 读取**：订单详情生产 tab
+- **Cron 写入**：无
+- **影响订单主链路**：是（生产进度上报）
+- **建议**：保留；defect_count 等字段是工厂能力画像的数据源
+
+#### v2 漏写的次活跃表（PASSIVE）
+
+| 表 | 引用 | 写 | UI | 备注 |
+|---|---|---|---|---|
+| order_amendments | 2 | 2 | 0 | 客户改单记录 → 客户行为画像数据源 |
+| order_retrospectives | 4 | 0 | 0 | 复盘表，写入逻辑不清楚需查 |
+| cancel_requests | 4 | 0 | 0 | 4 处引用但 0 写入 → 可能是 UI 读未连写入路径 |
+| email_order_diffs | 4 | 1 | 0 | 邮件检测的字段差异 → 客户改单频率派生 |
+| pre_order_price_approvals | 4 | 0 | 0 | 价格闸门审批；写入路径需查（可能在 UI tsx 内联） |
+| procurement_tracking | 3 | 2 | 0 | 采购跟踪 |
+| order_commissions | 2 | 2 | 0 | 佣金记录 |
+| order_logs | 3 | 3 | 1 | 操作日志（quote-bridge 计划写入但未连） |
+| customer_email_domains | 2 | 4 | 0 | 客户邮箱域名映射；写入仅在 actions/customer-emails.ts |
+| document_extractions | 2 | 0 | 0 | 0 写入但 2 引用 → 可能是历史 PO 解析中间表 |
+| materials_bom | 1 | 2 | 0 | 物料 BOM；可能与 procurement_line_items 重叠 |
+| outsource_jobs | 1 | 2 | 0 | 外发记录；用户提及"外发异常"画像数据源 |
+| packing_lists / packing_list_lines | 1+2 | 0+2 | 1+0 | 装箱单（拆装明细）；出货安全 block 规则的潜在依据 |
+| qc_inspections | 1 | 2 | 0 | QC 记录；与 v2 标记的"qc_reports 不存在"不冲突，这是另一张表 |
+| quoter_training_feedback | 2 | 1 | 1 | 报价员训练反馈 |
+| quoter_fabric_records | 2 | 1 | 0 | 报价面料记录 |
+| shipment_batches | 1 | 1 | 0 | 分批出货 |
+| shipment_confirmations | 2 | 3 | 1 | 出货确认 |
+| user_memos | 4 | 1 | 2 | 个人便签 |
+| issue_slips / issue_slip_lines | 1+0 | 0+0 | 1+0 | 出问题记录单；几乎无写入 → archive 候选 |
+| ai_skill_circuit_state | 2 | 0 | 0 | 仅读未写 → 熔断状态从未真正触发？ |
+| agent_batch_jobs | 1 | 1 | 0 | Anthropic Batch API 任务记录 |
+
+#### v2 漏写的真正幽灵（GHOST，0 引用）
+
+**全部 0 代码引用**，建议 Phase 2 评估归档：
+
+- **attachments**（被 order_attachments 取代，1 处引用是历史代码）
+- **company_profile** / **company_settings**（公司信息表，company_profile 1 写但无消费）
+- **cost_reconciliations**（0 引用，从未使用）
+- **customer_analytics** / **factory_analytics**（被 customer_rhythm / 计算属性取代）
+- **exceptions**（0 引用，疑似异常上报历史表）
+- **issue_slip_lines**（与 issue_slips 配对但未启用）
+- **order_notes_log**（被 order_logs 取代）
+- **order_templates**（订单模板，UI 有 admin/order-templates 但读取代码 0）
+- **procurement_shared_sheets** / **procurement_sheet_items**（采购共享表，1 ref 但本质未启用）
+- **quoter_cmt_operations** / **quoter_cmt_rates**（报价 CMT 表，0 引用，疑似规划阶段）
+- **system_kv**（KV 存储抽象，0 实用引用）
+- **ai_skill_actions**（0 引用，与 ai_skill_runs / agent_actions 重叠）
+
+> **提醒**：Phase 1 不允许删表，仅做记录。归档评估留到 Phase 2，且必须先 `SELECT COUNT(*)` 确认无生产数据。
+
+---
+
+### 报价 → 订单 → 利润 数据流断点分析
+
+> 用户在 Phase 1 范围里明确要求"必须把 quoter_quotes、order_financials、profit_snapshots 的断点写清楚"。
+
+#### 三表当前状态
+
+| 表 | 行数提示 | 主要写入 | 主要读取 | 状态 |
+|---|---|---|---|---|
+| `quoter_quotes` | 报价员日常使用 | `app/actions/quoter.ts` | 报价员页面、订单关联（理论上） | ACTIVE |
+| `order_financials` | 订单详情有数据 | `app/actions/order-financials.ts`、`app/actions/order-business-state.ts` | 订单详情经营数据、`riskAssessment.ts`、`pending-approvals.service` | ACTIVE |
+| `profit_snapshots` | 几乎为空 | **仅** `quote-bridge.service.ts`（孤儿）+ `profit.service.ts` | `daily-tasks.service` 读取（如果有 snapshot） | **逻辑层 GHOST** |
+
+#### 数据流应该长什么样（设计意图）
+
+```
+quoter 报价员定单价/成本/利润率 → quoter_quotes
+       ↓
+   订单创建时 把报价 ID 传入
+       ↓
+   convertQuoteToOrderFinancials(quoteId, orderId)
+       ↓
+   写入/更新 order_financials（含 quote 来源 ID）
+       ↓
+   生成第一版 profit_snapshot（当下利润假设）
+       ↓
+   订单执行过程中 实际成本/汇率/费用变化 → 追加新 profit_snapshot
+       ↓
+   完成后 sealProfitSnapshot 锁死最终利润
+```
+
+#### 实际断点（按严重度）
+
+**断点 1：quoter_quotes 与 orders 之间没有外键**
+- `quoter_quotes` 没有 `linked_order_id` 字段
+- `orders` 没有 `source_quote_id` 字段
+- 即便有 `quote-bridge` 服务也不知道哪个 quote 对应哪个 order
+- **修复成本**：低（加 1 列 + admin 手动绑定）
+- **风险**：无，nullable 字段不影响主流程
+
+**断点 2：quote-bridge 服务孤儿**
+- 文件存在 268 行，0 调用
+- 对应的 admin 触发 UI 没建
+- **修复成本**：低（加一个 admin 页面，手动选 quote 和 order，触发 convert）
+- **风险**：低，服务内部已自带"数据不完整时返回 missing fields 不静默失败"
+
+**断点 3：profit_snapshots 没有自动触发节点**
+- 现有代码只在 quote-bridge 触发时写一次
+- 订单执行过程中实际成本变化（采购实付、QC 返工费、出货运费）不会自动触发新 snapshot
+- 当前 `profit.service.ts` 有计算函数但**没有 cron 或 event hook 调用它**
+- **修复成本**：中（需定义触发时机：cost_baseline 修改？支付到账？里程碑完成？）
+- **风险**：低（feature flag 包住）
+
+**断点 4：order_financials 字段与 quoter_quotes 字段不对齐**
+- `quoter_quotes` 有：unit_price, total_amount, fabric_cost, cmt_cost, profit_margin
+- `order_financials` 有：quote_amount, deposit_amount, balance_amount, margin_pct
+- **fabric_cost / cmt_cost 在 order_financials 中没有对应字段**，convert 时只能聚合到 cost_total 之类
+- **修复成本**：中（要么扩展 order_financials，要么在 order_cost_baseline 中存储分项）
+- 当前 `order_cost_baseline` 表本来就该承担这个角色（保存细分成本基线），但 quote-bridge 没写它
+- **正确链路应该是**：quote → cost_baseline（细分） + financials（汇总） + profit_snapshot（瞬时利润）
+
+#### Phase 2 修复清单（不在 Phase 1 范围）
+
+1. `orders` 加 `source_quote_id uuid REFERENCES quoter_quotes(id) NULL`
+2. 新建 admin 页 `/admin/quote-bridge`，可手动选 quote+order 触发 convert
+3. quote-bridge 服务内部调整：同时写 order_cost_baseline（细分成本）+ order_financials（汇总）+ profit_snapshots
+4. 后续在订单执行节点（cost_baseline 修改、payment 入账）触发新 snapshot
+5. 利润趋势图（profit_snapshots 时序数据）做进订单详情经营 tab
+
+---
+
+### v3 重点关注清单更新
+
+#### 🔴 立即确认（事实修正）
+
+| 表 | v2 说法 | v3 修正 |
+|---|---|---|
+| `profit_snapshots` | "已通过 quote-bridge 接入第一版快照" | **事实上不成立**：quote-bridge 是孤儿，profit_snapshots 几乎为空 |
+| `order_logs` | "quote-bridge 已开始写入" | **事实上不成立**：同上 |
+| `quoter_quotes` | "quote-bridge 已建立到 order_financials 的数据流" | **数据流代码存在但无入口**，事实链路为 0 |
+
+#### 🟡 Phase 1 数据采集 OK 推进的依据
+
+通过 v3 全量审计，下面 4 张 Phase 1 计划新建的表**与现有表无重复**：
+
+- `customer_behavior_profile` — 与 customer_memory（事件表）、customer_rhythm（节奏跟进）互补，是计算后的画像
+- `factory_capability_profile` — 与 factories（基础信息）、factory_analytics（已 GHOST）不冲突
+- `agent_action_feedback` — 全新概念，无重叠
+- `admin_overrides` — 全新概念，无重叠
+
+#### 🟢 Phase 1 不需要 touch 的表（保护清单）
+
+| 表 | 原因 |
+|---|---|
+| orders / milestones / profiles / order_attachments | 主链路核心，绝对不动 |
+| order_confirmations | blockRules 硬依赖，结构不动 |
+| order_sequences | PG 函数依赖，永久保留 |
+| 18 个 cron 写入表 | Phase 1 不动任何 cron |
 
 ---
 
@@ -462,13 +780,25 @@ tech_scout_reports, warehouse_items
 
 ---
 
-## 统计汇总
+## 统计汇总（v3 修正）
 
-| 分类 | 数量 |
-|------|------|
-| ✅ ACTIVE | 15 |
-| 📥 PASSIVE | 8 |
-| ⚠️ DANGEROUS | 4 |
-| 👻 GHOST / 📦 ARCHIVE_CANDIDATE | 约 20+ |
+| 分类 | v2 数量 | v3 全量数量 | 备注 |
+|------|------|------|------|
+| ✅ ACTIVE | 15 | **15**（其中 6 张是 v3 补充：mail_inbox / customer_memory / order_confirmations / order_root_causes / production_reports / ai_knowledge_base） | 主链路 / 阻塞规则 / 数据采集核心 |
+| 📥 PASSIVE | 8 | **30** | v3 补足了 22 张次活跃表 |
+| ⚠️ DANGEROUS | 4 | **4** | system_health_reports / ai_learning_log / compliance_findings / alerts（v2 列出，状态不变） |
+| 👻 GHOST | 约 20 | **24** | 其中 14 张是 0 引用真幽灵 |
+| **migrations 总数** | — | **73** | 来自 `supabase/migration.sql` + `supabase/migrations/*.sql` |
 
-> **注意**：此审计基于代码静态分析，实际表是否存在、是否有数据，需在 Supabase SQL Editor 运行 `SELECT table_name, (SELECT COUNT(*) FROM information_schema.tables WHERE table_name=t.table_name) FROM information_schema.tables t WHERE table_schema='public'` 确认。
+**v3 重要更新**：
+1. v2 标记为"已通过 quote-bridge 打通"的报价数据流，**事实上是孤儿代码（0 调用方）**
+2. `profit_snapshots` 实际是逻辑层 GHOST，需 Phase 2 修复
+3. `lib/ai/aiGateway.ts` 已存在但仅覆盖 2 个调用点，其余 AI 调用仍直接走 anthropicClient
+4. v1/v2 详述 35 张表，**v3 补全 38 张**未覆盖表
+
+> **注意**：此审计基于代码静态分析，实际表是否存在、是否有数据，需在 Supabase SQL Editor 运行  
+> ```sql
+> SELECT table_name, (xpath('/row/c/text()', query_to_xml(format('select count(*) as c from %I.%I', table_schema, table_name), false, true, '')))[1]::text::int AS row_count
+> FROM information_schema.tables WHERE table_schema='public' ORDER BY row_count DESC;
+> ```
+> 该查询会返回每张表的实际行数，配合本文 v3 索引表使用即可验证。
