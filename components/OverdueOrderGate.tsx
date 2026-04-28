@@ -50,47 +50,61 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
 
       if (choice === 'shipped') {
         // 已发货 → 标记所有节点完成 + 订单完成
-        await (supabase.from('milestones') as any)
+        // ⚠️ 注意：DB CHECK 约束 lifecycle_status 只允许中文值 ('草稿','已生效','执行中','已完成','已取消','待复盘','已复盘')
+        const { error: msErr } = await (supabase.from('milestones') as any)
           .update({ status: 'done', actual_at: now })
           .eq('order_id', orderId)
           .neq('status', 'done');
-        await (supabase.from('orders') as any)
+        if (msErr) {
+          alert(`节点状态更新失败：${msErr.message}\n请刷新页面重试。`);
+          setSubmitting(false);
+          return;
+        }
+        const { error: ordErr } = await (supabase.from('orders') as any)
           .update({
-            lifecycle_status: 'completed',
+            lifecycle_status: '已完成', // ✅ 必须中文，匹配 CHECK 约束
             notes: `【超期确认】已发货，系统自动标记完成（确认时间：${now}）`,
           })
           .eq('id', orderId);
+        if (ordErr) {
+          alert(`订单状态更新失败：${ordErr.message}\n（节点已标记完成，但订单状态未更新，请联系管理员）`);
+          setSubmitting(false);
+          return;
+        }
         router.refresh();
         setDismissed(true);
       } else if (choice === 'waiting_customer') {
         // 等客户发货通知 → 更新出厂日期 + 特殊标记
-        await (supabase.from('orders') as any)
+        const { error } = await (supabase.from('orders') as any)
           .update({
             factory_date: newDate,
             notes: `【超期确认】货已完成，等客户发货通知\n新预计发货日：${newDate}（客户通知后出运）`,
           })
           .eq('id', orderId);
+        if (error) { alert(`更新失败：${error.message}`); setSubmitting(false); return; }
         router.refresh();
         setDismissed(true);
       } else if (choice === 'pending') {
         // 等待发货 → 更新出厂日期 + 记录原因
-        await (supabase.from('orders') as any)
+        const { error } = await (supabase.from('orders') as any)
           .update({
             factory_date: newDate,
             notes: `【超期确认】待发货\n原因：${reason}\n新预计发货日：${newDate}`,
           })
           .eq('id', orderId);
+        if (error) { alert(`更新失败：${error.message}`); setSubmitting(false); return; }
         router.refresh();
         setDismissed(true);
       } else if (choice === 'problem') {
         // 有问题 → 记录原因 + 更新日期
-        await (supabase.from('orders') as any)
+        const { error } = await (supabase.from('orders') as any)
           .update({
             factory_date: newDate,
             special_tags: ['交期逾期'],
             notes: `【超期确认】有问题无法发货\n原因：${reason}\n新预计发货日：${newDate}`,
           })
           .eq('id', orderId);
+        if (error) { alert(`更新失败：${error.message}`); setSubmitting(false); return; }
         router.refresh();
         setDismissed(true);
       }
