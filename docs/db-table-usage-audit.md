@@ -1,8 +1,45 @@
 # 数据库表使用审计
 
 > 生成时间：2026-04-27  
-> 审计工具：代码 grep 引用统计 + Cron 写入分析  
-> 版本：System Consolidation Sprint v1
+> 审计工具：代码 grep 引用统计 + Cron 写入分析 + Supabase 实际行数验证  
+> 版本：System Consolidation Sprint v2（已结合实际 DB 状态修正）
+
+---
+
+## ⚠️ 第二阶段修正声明（2026-04-27 晚）
+
+通过 Supabase SQL Editor 实际查询，发现 v1 审计文档存在**误报**：
+
+### 修正一：`order_sequences` 不是 GHOST，是关键基础设施
+- 实际 16 行数据，在用
+- 通过 PG 函数 `generate_order_sequence()` 被 `lib/repositories/ordersRepo.ts` RPC 调用
+- Migration 注释明确：`⚠️ CRITICAL: This table should NEVER be deleted or rolled back`
+- **重新分类为 ✅ ACTIVE，永久保留**
+
+### 修正二：以下 23 张表**从未在生产创建过**，v1 误判为 GHOST，应从审计移除
+
+```
+agent_suggestions, ai_learning_log, ai_self_improve_log, alerts,
+cost_monitoring_alerts, customer_contacts, customer_followups,
+email_archive, email_uid_dedup, knowledge_graph_edges, knowledge_graph_nodes,
+milestone_templates, order_communication_logs, order_embeddings,
+payment_records, procurement_orders, production_orders, qc_reports,
+schedule_anchors, schedule_deviations, shipping_bookings,
+tech_scout_reports, warehouse_items
+```
+
+> 这些表是历史 prompt 提到但从未实际建表。`alerts` 一项是命名错误：实际表是 `system_alerts`（已存在但 0 行）。
+
+### 修正三：4 张可冻结归档候选的真实状态
+
+| 表 | 实际行数 | 写入源 | 处理 |
+|----|---------|--------|------|
+| `ai_collection_log` | 6 | ai-self-improve（已禁用） | 冻结写入，保留历史 |
+| `compliance_findings` | 39 | compliance-check（已禁用） | 冻结写入，保留历史 |
+| `system_health_reports` | 19 | nightly-maintenance（已禁用） | 冻结写入，保留历史 |
+| `order_model_analytics` | **0** | 无 | ✅ 真·空表，可执行 RENAME 归档 |
+
+---
 
 ---
 
