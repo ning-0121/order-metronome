@@ -35,6 +35,8 @@ import { ProcurementTab } from '@/components/tabs/ProcurementTab';
 import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
 import { CostControlTab } from '@/components/tabs/CostControlTab';
 import { BackButton } from '@/components/BackButton';
+import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
+import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -591,6 +593,13 @@ export default async function OrderDetailPage({
               doneStepKeys={(milestones || []).filter((m: any) => isDoneStatus(m.status)).map((m: any) => m.step_key)}
             />
           </div>
+
+          {/* 决策评审面板（仅 admin + 引擎启用） */}
+          {isAdmin && businessDecisionEngineEnabled() && (
+            <div className="mt-6">
+              <OrderDecisionPanel orderId={id} isAdmin={isAdmin} />
+            </div>
+          )}
           </>
         )}
 
