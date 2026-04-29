@@ -51,28 +51,63 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/memos', label: '备忘录', icon: '📝' },
       ];
 
-  // 更多菜单（低频入口）
-  const moreLinks = isAdmin
+  // 更多菜单分组（admin）
+  const moreGroups = isAdmin
     ? [
-        { href: '/quoter', label: '报价员', icon: '💰' },
-        { href: '/customers', label: '客户管理', icon: '🤝' },
-        { href: '/factories', label: '工厂管理', icon: '🏭' },
-        { href: '/memos', label: '备忘录', icon: '📝' },
-        { href: '/ai-knowledge', label: 'AI知识库', icon: '🧠' },
-        { href: '/admin/mail-monitor', label: '今日邮件晨报', icon: '📧' },
-        { href: '/admin/price-approvals', label: '价格审批', icon: '💰' },
-        { href: '/admin/system-health', label: '系统守护', icon: '🛡' },
-        { href: '/admin/overdue', label: '逾期治理', icon: '🚨' },
-        { href: '/admin/delay-hotspots', label: '延误排行榜', icon: '📉' },
-        { href: '/admin/customer-schedules', label: '客户节奏', icon: '🎼' },
-        { href: '/admin/order-templates', label: '订单模板', icon: '📋' },
-        { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
-        { href: '/guide', label: '操作说明', icon: '📖' },
+        {
+          label: '业务工具',
+          links: [
+            { href: '/quoter',     label: '报价员',   icon: '💰' },
+            { href: '/customers',  label: '客户管理', icon: '🤝' },
+            { href: '/factories',  label: '工厂管理', icon: '🏭' },
+            { href: '/memos',      label: '备忘录',   icon: '📝' },
+          ],
+        },
+        {
+          label: 'AI',
+          links: [
+            { href: '/ai-knowledge', label: 'AI 知识库', icon: '🧠' },
+            { href: '/my-assistant', label: 'AI 助手',   icon: '🤖' },
+          ],
+        },
+        {
+          label: '邮件',
+          links: [
+            { href: '/admin/mail-monitor', label: '今日邮件晨报', icon: '📧' },
+          ],
+        },
+        {
+          label: '审批 / 治理',
+          links: [
+            { href: '/admin/price-approvals',    label: '价格审批',   icon: '💰' },
+            { href: '/admin/system-health',      label: '系统守护',   icon: '🛡' },
+            { href: '/admin/overdue',            label: '逾期治理',   icon: '🚨' },
+            { href: '/admin/delay-hotspots',     label: '延误排行榜', icon: '📉' },
+            { href: '/admin/customer-schedules', label: '客户节奏',   icon: '🎼' },
+          ],
+        },
+        {
+          label: '配置',
+          links: [
+            { href: '/admin/order-templates', label: '订单模板', icon: '📋' },
+          ],
+        },
+        {
+          label: '帮助',
+          links: [
+            { href: '/guide', label: '操作说明', icon: '📖' },
+          ],
+        },
       ]
+    : [];
+
+  // 非 admin 平铺列表（保持原样）
+  const moreLinks = isAdmin
+    ? moreGroups.flatMap(g => g.links)
     : [
-        { href: '/quoter', label: '报价员', icon: '💰' },
-        { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
-        { href: '/guide', label: '操作说明', icon: '📖' },
+        { href: '/quoter',       label: '报价员',   icon: '💰' },
+        { href: '/my-assistant', label: 'AI 助手',  icon: '🤖' },
+        { href: '/guide',        label: '操作说明', icon: '📖' },
       ];
 
   const logoHref = isAdmin ? '/ceo' : '/dashboard';
@@ -124,21 +159,37 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
                   {moreOpen && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-                      <div className="absolute top-full left-0 mt-1 w-52 bg-white rounded-xl border border-gray-200 shadow-lg z-50 py-1">
-                        {moreLinks.map(link => {
-                          const showBadge = link.href === '/admin/price-approvals' && pendingPriceCount > 0;
-                          return (
-                            <Link key={link.href} href={link.href} onClick={() => setMoreOpen(false)}
-                              className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
-                              <span className="flex items-center gap-2"><span>{link.icon}</span>{link.label}</span>
-                              {showBadge && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold min-w-[18px] text-center">
-                                  {pendingPriceCount}
-                                </span>
-                              )}
-                            </Link>
-                          );
-                        })}
+                      <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-xl border border-gray-200 shadow-lg z-50 py-1 max-h-[80vh] overflow-y-auto">
+                        {isAdmin
+                          ? moreGroups.map((group, gi) => (
+                              <div key={group.label}>
+                                {gi > 0 && <div className="mx-3 my-1 border-t border-gray-100" />}
+                                <p className="px-4 pt-2 pb-0.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                                  {group.label}
+                                </p>
+                                {group.links.map(link => {
+                                  const showBadge = link.href === '/admin/price-approvals' && pendingPriceCount > 0;
+                                  return (
+                                    <Link key={link.href} href={link.href} onClick={() => setMoreOpen(false)}
+                                      className="flex items-center justify-between gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                                      <span className="flex items-center gap-2"><span>{link.icon}</span>{link.label}</span>
+                                      {showBadge && (
+                                        <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold min-w-[18px] text-center">
+                                          {pendingPriceCount}
+                                        </span>
+                                      )}
+                                    </Link>
+                                  );
+                                })}
+                              </div>
+                            ))
+                          : moreLinks.map(link => (
+                              <Link key={link.href} href={link.href} onClick={() => setMoreOpen(false)}
+                                className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                                <span>{link.icon}</span>{link.label}
+                              </Link>
+                            ))
+                        }
                       </div>
                     </>
                   )}
