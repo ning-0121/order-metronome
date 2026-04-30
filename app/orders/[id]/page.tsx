@@ -324,6 +324,7 @@ export default async function OrderDetailPage({
           <div className="mb-6">
             <AISkillSidebar orderId={id} />
           </div>
+          <OrderBusinessPanel orderId={id} isAdmin={isAdmin} userRoles={currentRoles} />
           <div className="grid gap-6 md:grid-cols-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">基础信息</h2>
