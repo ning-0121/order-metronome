@@ -244,6 +244,42 @@ export function calculateConfirmationCompletion(input: EngineInput): {
   return { rate, missing, details };
 }
 
+/**
+ * 过滤出"仍在积极影响订单"的逾期节点。
+ *
+ * 排除已被后续节点完成所覆盖的历史逾期：
+ * 若某个逾期节点之后存在已完成（done）的节点，说明订单已经进展过去了，
+ * 该逾期属于历史问题，不应计入当前风险。
+ */
+function getActivelyOverdueMilestones(milestones: any[]): any[] {
+  const now = new Date();
+  const overdue = milestones.filter(m =>
+    ['in_progress', '进行中'].includes(m.status) &&
+    m.due_at && new Date(m.due_at) < now
+  );
+  if (overdue.length === 0) return [];
+
+  const doneMilestones = milestones.filter(m =>
+    ['done', '已完成'].includes(m.status) && m.due_at
+  );
+
+  // 只保留没有被"更晚已完成节点"覆盖的逾期节点
+  return overdue.filter(m => {
+    const hasLaterDone = doneMilestones.some(
+      done => new Date(done.due_at) > new Date(m.due_at)
+    );
+    return !hasLaterDone;
+  });
+}
+
+/** 判断货物是否已出运（用于切换到后出货风险视角） */
+function isOrderShipped(milestones: any[]): boolean {
+  const shipmentSteps = ['booking_done', 'shipment_execute', 'customs_export', 'domestic_delivery'];
+  return milestones.some(m =>
+    shipmentSteps.includes(m.step_key) && ['done', '已完成'].includes(m.status)
+  );
+}
+
 export function calculateBusinessRisk(input: EngineInput): {
   level: StatusResult<'low' | 'medium' | 'high' | 'critical'>;
   factors: string[];
@@ -279,12 +315,22 @@ export function calculateBusinessRisk(input: EngineInput): {
     factors.push('新客户+新工厂'); score += 10;
   }
 
-  // 里程碑逾期
-  const overdueMilestones = input.milestones.filter(m =>
-    ['in_progress', '进行中'].includes(m.status) && m.due_at && new Date(m.due_at) < new Date()
-  );
-  if (overdueMilestones.length > 0) {
-    factors.push(`${overdueMilestones.length} 个节点逾期`); score += overdueMilestones.length * 5;
+  // 里程碑逾期（只计入仍在积极影响订单的节点，排除历史逾期）
+  const activeOverdue = getActivelyOverdueMilestones(input.milestones);
+  if (activeOverdue.length > 0) {
+    factors.push(`${activeOverdue.length} 个节点逾期`); score += activeOverdue.length * 5;
+  }
+
+  // 后出货风险（货物已出运时补充）
+  if (isOrderShipped(input.milestones)) {
+    const payment = calculatePaymentStatus(input);
+    if (payment.value === 'pending' || payment.value === 'partial') {
+      // 已由付款风险部分计入，不重复加分
+    }
+    // 如果出货了但没有尾款到期日，提示尾款跟进风险
+    if (input.financials && !input.financials.balance_due_date && payment.value !== 'received') {
+      factors.push('尾款跟进'); score += 10;
+    }
   }
 
   let value: 'low' | 'medium' | 'high' | 'critical';
@@ -394,7 +440,20 @@ export function calculateDelayRisk(input: EngineInput): StatusResult<'none' | 'l
   const remaining = Math.ceil((new Date(input.order.factory_date).getTime() - Date.now()) / 86400000);
 
   if (remaining < 0) {
-    return { value: 'high', level: 'red', explain: `已超出厂日期 ${Math.abs(remaining)} 天` };
+    // 出厂日已过：区分是否已出运
+    if (isOrderShipped(input.milestones)) {
+      // 已出运 → 交期风险消除，切换到收款/客户确认风险
+      const payment = calculatePaymentStatus(input);
+      if (payment.value === 'pending' || payment.value === 'partial') {
+        return { value: 'medium', level: 'yellow', explain: '货物已出运，尾款待收' };
+      }
+      if (payment.value === 'overdue') {
+        return { value: 'high', level: 'red', explain: '货物已出运，尾款逾期未收' };
+      }
+      return { value: 'none', level: 'green', explain: '货物已出运，收款正常' };
+    }
+    // 出厂日已过但尚未出运 → 真实延期
+    return { value: 'high', level: 'red', explain: `已超出厂日期 ${Math.abs(remaining)} 天，货物未出运` };
   }
 
   // 确认链不完整 + 时间紧
@@ -407,16 +466,14 @@ export function calculateDelayRisk(input: EngineInput): StatusResult<'none' | 'l
     };
   }
 
-  // 里程碑逾期
-  const overdueCount = input.milestones.filter(m =>
-    ['in_progress', '进行中'].includes(m.status) && m.due_at && new Date(m.due_at) < new Date()
-  ).length;
+  // 里程碑逾期（只计仍在积极影响订单的节点）
+  const activeOverdueCount = getActivelyOverdueMilestones(input.milestones).length;
 
-  if (overdueCount >= 3) {
-    return { value: 'high', level: 'red', explain: `${overdueCount} 个节点逾期，延期风险极高` };
+  if (activeOverdueCount >= 3) {
+    return { value: 'high', level: 'red', explain: `${activeOverdueCount} 个节点逾期，延期风险极高` };
   }
-  if (overdueCount >= 1 && remaining <= 14) {
-    return { value: 'medium', level: 'yellow', explain: `${overdueCount} 个节点逾期，剩 ${remaining} 天` };
+  if (activeOverdueCount >= 1 && remaining <= 14) {
+    return { value: 'medium', level: 'yellow', explain: `${activeOverdueCount} 个节点逾期，剩 ${remaining} 天` };
   }
   if (remaining <= 7) {
     return { value: 'medium', level: 'yellow', explain: `距出厂仅 ${remaining} 天` };

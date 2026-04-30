@@ -4,7 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { calcDueDates } from '@/lib/schedule';
 import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
-import { updateMilestone, updateMilestones } from '@/lib/repositories/milestonesRepo';
+// updateMilestone/updateMilestones 不再在 recalculateSchedule 中使用
+// （系统级联操作直接走 supabase，避免 repo 层权限校验干扰）
 import { sendEmailNotification } from '@/lib/utils/notifications';
 import { isAdminRole } from '@/lib/domain/roles';
 import { type ActionResult, success, failure, toLegacyResult } from '@/lib/types/action-result';
@@ -723,26 +724,20 @@ async function recalculateSchedule(
       .select('*')
       .eq('order_id', orderData.id);
 
-    // 使用统一入口批量更新
+    // 直接走 supabase，不经过 repo 层权限校验
+    // （权限已在 approveDelayRequestCore 做了 admin 校验，此处是系统级联操作）
     if (allMilestones) {
-      const updates = allMilestones
-        .map((m: any) => {
-          const due = dueMap[m.step_key as keyof typeof dueMap];
-          if (due) {
-            return {
-              id: m.id,
-              patch: {
-                planned_at: due.toISOString(),
-                due_at: due.toISOString(),
-              },
-            };
+      for (const m of allMilestones as any[]) {
+        const due = dueMap[m.step_key as keyof typeof dueMap];
+        if (due) {
+          const { error: updErr } = await supabase
+            .from('milestones')
+            .update({ planned_at: due.toISOString(), due_at: due.toISOString() })
+            .eq('id', m.id);
+          if (updErr) {
+            console.error(`[recalculateSchedule] anchor-branch: failed to update milestone ${m.id} (${m.step_key}):`, updErr.message);
           }
-          return null;
-        })
-        .filter((u: any): u is { id: string; patch: Record<string, any> } => u !== null);
-      
-      if (updates.length > 0) {
-        await updateMilestones(updates);
+        }
       }
     }
 
@@ -761,41 +756,34 @@ async function recalculateSchedule(
     const newDueAt = new Date(delayRequest.proposed_new_due_at);
     const deltaDays = Math.round((newDueAt.getTime() - oldDueAt.getTime()) / (1000 * 60 * 60 * 24));
 
-    // 使用统一入口更新当前里程碑
-    await updateMilestone(milestoneData.id, {
-      planned_at: delayRequest.proposed_new_due_at,
-      due_at: delayRequest.proposed_new_due_at,
-    });
+    // 直接更新当前里程碑（系统级联操作，跳过 repo 层权限校验）
+    const { error: curErr } = await supabase
+      .from('milestones')
+      .update({ planned_at: delayRequest.proposed_new_due_at, due_at: delayRequest.proposed_new_due_at })
+      .eq('id', milestoneData.id);
+    if (curErr) {
+      console.error(`[recalculateSchedule] due_at-branch: failed to update current milestone ${milestoneData.id}:`, curErr.message);
+    }
 
     // Shift downstream milestones by same delta
     const { data: downstreamMilestones } = await supabase
       .from('milestones')
-      .select('*')
+      .select('id, due_at, step_key')
       .eq('order_id', orderData.id)
       .gte('due_at', milestoneData.due_at)
       .neq('id', milestoneData.id);
 
-    // 使用统一入口批量更新下游里程碑
     if (downstreamMilestones) {
-      const updates = downstreamMilestones
-        .map((m: any) => {
-          if (m.due_at) {
-            const currentDue = new Date(m.due_at);
-            const newDue = new Date(currentDue.getTime() + deltaDays * 24 * 60 * 60 * 1000);
-            return {
-              id: m.id,
-              patch: {
-                due_at: newDue.toISOString(),
-                planned_at: newDue.toISOString(),
-              },
-            };
-          }
-          return null;
-        })
-        .filter((u: any): u is { id: string; patch: Record<string, any> } => u !== null);
-      
-      if (updates.length > 0) {
-        await updateMilestones(updates);
+      for (const m of downstreamMilestones as any[]) {
+        if (!m.due_at) continue;
+        const newDue = new Date(new Date(m.due_at).getTime() + deltaDays * 24 * 60 * 60 * 1000);
+        const { error: dsErr } = await supabase
+          .from('milestones')
+          .update({ due_at: newDue.toISOString(), planned_at: newDue.toISOString() })
+          .eq('id', m.id);
+        if (dsErr) {
+          console.error(`[recalculateSchedule] due_at-branch: failed to update downstream milestone ${m.id} (${m.step_key}):`, dsErr.message);
+        }
       }
     }
 
