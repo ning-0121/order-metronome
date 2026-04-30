@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getOrderBusinessState } from '@/app/actions/order-business-state';
+import { uploadCostSheet } from '@/app/actions/cost-control';
 import type { OrderBusinessState, StatusLevel } from '@/lib/engine/orderBusinessEngine';
 import {
   getProfitNextAction,
@@ -36,6 +37,13 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const canSeeFinancials = isAdmin || userRoles.some(r => ['finance', 'production_manager'].includes(r));
+  const canUpload = isAdmin || userRoles.includes('finance');
+
+  const reload = () => {
+    getOrderBusinessState(orderId)
+      .then(res => { if (!res.error) setState(res.data || null); })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -60,7 +68,7 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
       {/* 利润卡 */}
       {canSeeFinancials ? (
-        <ProfitCard state={state} orderId={orderId} />
+        <ProfitCard state={state} orderId={orderId} canUpload={canUpload} onUploaded={reload} />
       ) : (
         <ProfitCardLite state={state} />
       )}
@@ -97,8 +105,44 @@ function NextActionBtn({ action }: { action: NextAction | null }) {
 // ═══════════════════════════════════════════════
 // 利润卡（完整版 — admin/finance）
 // ═══════════════════════════════════════════════
-function ProfitCard({ state, orderId }: { state: OrderBusinessState; orderId: string }) {
+function ProfitCard({
+  state,
+  orderId,
+  canUpload,
+  onUploaded,
+}: {
+  state: OrderBusinessState;
+  orderId: string;
+  canUpload: boolean;
+  onUploaded: () => void;
+}) {
   const s = LEVEL_STYLES[state.order_profit_status.level];
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg(null);
+    try {
+      const res = await uploadCostSheet(orderId, file);
+      if (res.error) {
+        setUploadMsg('❌ ' + res.error);
+      } else {
+        const fob = res.data?.fob_price ? `FOB $${res.data.fob_price}` : '';
+        setUploadMsg('✅ 已解析' + (fob ? `：${fob}` : ''));
+        onUploaded();
+      }
+    } catch {
+      setUploadMsg('❌ 上传失败');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
   return (
     <div className={`rounded-xl border p-4 ${s.bg} ${s.border}`}>
       <div className="flex items-center justify-between mb-2">
@@ -121,7 +165,25 @@ function ProfitCard({ state, orderId }: { state: OrderBusinessState; orderId: st
         <div className="text-sm text-gray-400 mt-2">待录入销售额</div>
       )}
       <p className={`text-[11px] mt-2 leading-relaxed ${s.text}`}>{state.order_profit_status.explain}</p>
-      {/* NextAction 按钮已移除 */}
+      {canUpload && (
+        <div className="mt-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleFile}
+          />
+          <button
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+            className="w-full text-[11px] font-medium px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-colors disabled:opacity-50"
+          >
+            {uploading ? '解析中…' : '📊 上传预算单'}
+          </button>
+          {uploadMsg && <p className="text-[10px] mt-1 text-center text-gray-600">{uploadMsg}</p>}
+        </div>
+      )}
     </div>
   );
 }

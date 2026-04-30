@@ -11,6 +11,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { calculateProfitSnapshot } from '@/lib/services/profit.service';
 import {
   parseCostSheet,
   calculateMaterialBudget,
@@ -102,6 +103,30 @@ export async function uploadCostSheet(
     await (supabase.from('order_cost_baseline') as any).insert(baselineData);
   }
 
+  // 如果解析到了 FOB 售价，同步写入 order_financials.sale_price_per_piece（仅当字段为空时）
+  if (matched.fob_price) {
+    const { data: fin } = await (supabase.from('order_financials') as any)
+      .select('id, sale_price_per_piece, sale_total')
+      .eq('order_id', orderId)
+      .maybeSingle();
+
+    if (fin && !fin.sale_price_per_piece && !fin.sale_total) {
+      await (supabase.from('order_financials') as any)
+        .update({ sale_price_per_piece: matched.fob_price, sale_currency: 'USD', updated_at: new Date().toISOString() })
+        .eq('order_id', orderId);
+    } else if (!fin) {
+      // order_financials 还未初始化，插入一条含售价的基础记录
+      await (supabase.from('order_financials') as any).insert({
+        order_id: orderId,
+        sale_price_per_piece: matched.fob_price,
+        sale_currency: 'USD',
+      });
+    }
+
+    // 触发利润快照重算
+    void calculateProfitSnapshot(supabase, { orderId, snapshotType: 'live' });
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return {
     data: {
@@ -109,6 +134,7 @@ export async function uploadCostSheet(
       fabric_consumption_kg: matched.fabric_consumption_kg,
       cmt_price: matched.cmt_price,
       budget_kg: budget?.grossUsage,
+      fob_price: matched.fob_price,
       warnings: result.warnings,
     },
   };
