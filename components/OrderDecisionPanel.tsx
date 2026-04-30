@@ -15,8 +15,13 @@ import {
   overrideDecision,
   getLatestOrderDecisionReview,
   getOrderDecisionHistory,
+  acceptDecision,
+  ignoreDecision,
+  getDecisionFeedback,
+  getDecisionTaskStatus,
 } from '@/app/actions/order-decision';
 import type { DecisionResult, OrderDecisionReviewRow, RuleFlag, AuditSummary } from '@/lib/types/decision';
+import type { DecisionTaskStatus } from '@/app/actions/order-decision';
 
 interface Props {
   orderId: string;
@@ -65,6 +70,8 @@ function fmtDate(iso: string) {
 
 // ─── 主组件 ──────────────────────────────────────────────────────────────────
 
+type FeedbackStatus = { user_action: string; created_at: string } | null;
+
 export function OrderDecisionPanel({ orderId, isAdmin }: Props) {
   const [review, setReview] = useState<OrderDecisionReviewRow | null>(null);
   const [history, setHistory] = useState<OrderDecisionReviewRow[]>([]);
@@ -77,15 +84,34 @@ export function OrderDecisionPanel({ orderId, isAdmin }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackStatus>(null);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [taskStatus, setTaskStatus] = useState<DecisionTaskStatus | null>(null);
+
+  const loadFeedback = useCallback(async (reviewId: string) => {
+    const res = await getDecisionFeedback(reviewId);
+    if (!res.error) setFeedback(res.data ?? null);
+  }, []);
+
+  const loadTaskStatus = useCallback(async (reviewId: string) => {
+    const res = await getDecisionTaskStatus(reviewId);
+    if (!res.error && res.data) setTaskStatus(res.data);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     const res = await getLatestOrderDecisionReview(orderId);
     if (res.error) setError(res.error);
-    else setReview(res.data ?? null);
+    else {
+      setReview(res.data ?? null);
+      if (res.data) {
+        void loadFeedback(res.data.id);
+        void loadTaskStatus(res.data.id);
+      }
+    }
     setLoading(false);
-  }, [orderId]);
+  }, [orderId, loadFeedback, loadTaskStatus]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -130,9 +156,37 @@ export function OrderDecisionPanel({ orderId, isAdmin }: Props) {
       setSuccessMsg('决策已覆写');
       setOverrideMode(null);
       setOverrideReason('');
+      setFeedback(null);
+      setTaskStatus(null);
       await load();
     }
     setSubmitting(false);
+  }
+
+  async function handleAccept() {
+    if (!review) return;
+    setFeedbackSubmitting(true);
+    setError(null);
+    const res = await acceptDecision(review.id);
+    if (res.error) setError(res.error);
+    else {
+      setSuccessMsg('已接受决策');
+      void loadFeedback(review.id);
+    }
+    setFeedbackSubmitting(false);
+  }
+
+  async function handleIgnore() {
+    if (!review) return;
+    setFeedbackSubmitting(true);
+    setError(null);
+    const res = await ignoreDecision(review.id);
+    if (res.error) setError(res.error);
+    else {
+      setSuccessMsg('已标记忽略');
+      void loadFeedback(review.id);
+    }
+    setFeedbackSubmitting(false);
   }
 
   if (!isAdmin) return null;
@@ -187,10 +241,15 @@ export function OrderDecisionPanel({ orderId, isAdmin }: Props) {
             showHistory={showHistory}
             history={history}
             historyLoading={historyLoading}
+            feedback={feedback}
+            feedbackSubmitting={feedbackSubmitting}
+            taskStatus={taskStatus}
             onSetOverrideMode={setOverrideMode}
             onSetOverrideReason={setOverrideReason}
             onOverride={handleOverride}
             onToggleHistory={handleToggleHistory}
+            onAccept={handleAccept}
+            onIgnore={handleIgnore}
           />
         )}
       </div>
@@ -225,16 +284,23 @@ interface ReviewDetailProps {
   showHistory: boolean;
   history: OrderDecisionReviewRow[];
   historyLoading: boolean;
+  feedback: FeedbackStatus;
+  feedbackSubmitting: boolean;
+  taskStatus: DecisionTaskStatus | null;
   onSetOverrideMode: (m: 'override_to_proceed' | 'override_to_stop' | null) => void;
   onSetOverrideReason: (r: string) => void;
   onOverride: () => void;
   onToggleHistory: () => void;
+  onAccept: () => void;
+  onIgnore: () => void;
 }
 
 function ReviewDetail({
   review, overrideMode, overrideReason, submitting,
   showHistory, history, historyLoading,
+  feedback, feedbackSubmitting, taskStatus,
   onSetOverrideMode, onSetOverrideReason, onOverride, onToggleHistory,
+  onAccept, onIgnore,
 }: ReviewDetailProps) {
   const result = review.result_json;
   const ds = DECISION_STYLE[review.decision] ?? DECISION_STYLE.CAUTION;
@@ -257,6 +323,19 @@ function ReviewDetail({
             )}
             {review.override_status === 'approved' && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600">已覆写</span>
+            )}
+            {feedback && feedback.user_action === 'accept' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ 已接受</span>
+            )}
+            {feedback && feedback.user_action === 'ignore' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">已忽略</span>
+            )}
+            {review.decision !== 'PROCEED' && taskStatus && (
+              taskStatus.state === 'resolved'
+                ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">🟢 已处理</span>
+                : taskStatus.escalateCount >= 1
+                  ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚡ 已升级 {taskStatus.escalateCount} 次 · 风险中</span>
+                  : <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600">🔴 仍在风险中</span>
             )}
           </div>
           {result.explanation && (
@@ -332,6 +411,27 @@ function ReviewDetail({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ── 接受 / 忽略 快捷操作 ── */}
+      {!feedback && review.decision !== 'PROCEED' && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">对本次评审：</span>
+          <button
+            onClick={onAccept}
+            disabled={feedbackSubmitting}
+            className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-50 transition-colors"
+          >
+            ✓ 接受建议
+          </button>
+          <button
+            onClick={onIgnore}
+            disabled={feedbackSubmitting}
+            className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            忽略
+          </button>
         </div>
       )}
 

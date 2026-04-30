@@ -14,6 +14,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
 import { runOrderDecisionReview as engineRunReview } from '@/lib/engine/orderDecisionEngine';
+import { upsertTask } from '@/lib/services/daily-tasks.service';
 import type {
   DecisionResult,
   OrderDecisionReviewRow,
@@ -46,6 +47,97 @@ async function requireAdmin() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 内部辅助：决策结果 → 生成 daily_tasks
+// ─────────────────────────────────────────────────────────────
+
+async function generateDecisionTasks(
+  supabase: any,
+  orderId: string,
+  reviewId: string,
+  result: DecisionResult,
+): Promise<void> {
+  if (result.decision === 'PROCEED') return;
+
+  // 查订单基本信息（order_no, customer_name, owner_id）
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('order_no, customer_name, owner_id')
+    .eq('id', orderId)
+    .single();
+
+  if (!order) return;
+
+  // 查所有 admin 用户
+  const { data: profiles } = await (supabase.from('profiles') as any)
+    .select('user_id, role, roles');
+
+  const adminIds: string[] = (profiles ?? [])
+    .filter((p: any) => p.role === 'admin' || (Array.isArray(p.roles) && p.roles.includes('admin')))
+    .map((p: any) => p.user_id as string);
+
+  const allProfiles: any[] = profiles ?? [];
+
+  const actionUrl = `/orders/${orderId}`;
+  const today = new Date().toISOString().split('T')[0];
+
+  if (result.decision === 'STOP') {
+    // STOP → 高优先级任务给 admins + 订单负责人
+    const targetIds = new Set<string>([...adminIds]);
+    if (order.owner_id) targetIds.add(order.owner_id);
+
+    for (const userId of targetIds) {
+      await upsertTask(supabase, {
+        assignedTo: userId,
+        taskDate: today,
+        taskType: 'system_alert',
+        priority: 1,
+        title: `🛑 决策引擎：停止推进 — ${order.order_no}`,
+        description: `客户：${order.customer_name}。${result.explanation ?? ''}`.slice(0, 200),
+        actionUrl,
+        actionLabel: '查看决策',
+        relatedOrderId: orderId,
+        relatedCustomer: order.customer_name,
+        sourceType: 'decision_review',
+        sourceId: `${reviewId}:stop`,
+      });
+    }
+  }
+
+  // 每条 requiredAction → 一条 daily_task（最多 3 条）
+  const actions = (result.requiredActions ?? []).slice(0, 3);
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
+    const priority = result.decision === 'STOP' ? 1 : 2;
+
+    // 找对应角色的用户
+    const roleUsers = allProfiles
+      .filter((p: any) => {
+        const roleStr = action.targetRole?.toLowerCase() ?? '';
+        return p.role === roleStr || (Array.isArray(p.roles) && p.roles.some((r: string) => r.toLowerCase() === roleStr));
+      })
+      .map((p: any) => p.user_id as string);
+
+    const targetIds = new Set<string>([...adminIds, ...roleUsers]);
+
+    for (const userId of targetIds) {
+      await upsertTask(supabase, {
+        assignedTo: userId,
+        taskDate: today,
+        taskType: 'system_alert',
+        priority,
+        title: `${result.decision === 'STOP' ? '🛑' : '⚠️'} ${action.action} — ${order.order_no}`,
+        description: `客户：${order.customer_name}，责任方：${action.targetRole}`,
+        actionUrl,
+        actionLabel: '查看决策',
+        relatedOrderId: orderId,
+        relatedCustomer: order.customer_name,
+        sourceType: 'decision_review',
+        sourceId: `${reviewId}:action:${i}`,
+      });
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // 1. 触发决策评审
 // ─────────────────────────────────────────────────────────────
 
@@ -65,6 +157,22 @@ export async function runOrderDecisionReview(
     reviewType: 'manual',
     ...options,
   });
+
+  // 查最新评审 id（用于任务 dedup key）
+  const { data: latestReview } = await (auth.supabase.from('order_decision_reviews') as any)
+    .select('id, created_at')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // 只有 30s 内的新评审才生成任务（避免缓存命中时重复生成）
+  if (latestReview) {
+    const ageMs = Date.now() - new Date(latestReview.created_at).getTime();
+    if (ageMs < 30_000) {
+      void generateDecisionTasks(auth.supabase, orderId, latestReview.id, result);
+    }
+  }
 
   return { data: result };
 }
@@ -192,4 +300,135 @@ export async function getOrderDecisionHistory(
 
   if (error) return { error: error.message };
   return { data: data ?? [] };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5. 接受决策（acknowledge）
+// ─────────────────────────────────────────────────────────────
+
+export async function acceptDecision(
+  reviewId: string,
+): Promise<{ error?: string }> {
+  if (!businessDecisionEngineEnabled()) {
+    return { error: '决策引擎尚未启用' };
+  }
+
+  const auth = await requireAdmin();
+  if ('error' in auth) return { error: auth.error };
+
+  const { user, supabase } = auth;
+
+  const { error } = await (supabase.from('decision_feedback') as any).insert({
+    decision_review_id: reviewId,
+    user_action: 'accept',
+    feedback_by: user.id,
+  });
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+// ─────────────────────────────────────────────────────────────
+// 6. 忽略决策（ignore）
+// ─────────────────────────────────────────────────────────────
+
+export async function ignoreDecision(
+  reviewId: string,
+  reason?: string,
+): Promise<{ error?: string }> {
+  if (!businessDecisionEngineEnabled()) {
+    return { error: '决策引擎尚未启用' };
+  }
+
+  const auth = await requireAdmin();
+  if ('error' in auth) return { error: auth.error };
+
+  const { user, supabase } = auth;
+
+  const { error } = await (supabase.from('decision_feedback') as any).insert({
+    decision_review_id: reviewId,
+    user_action: 'ignore',
+    override_reason: reason?.trim() || null,
+    feedback_by: user.id,
+  });
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+// ─────────────────────────────────────────────────────────────
+// 7. 查询最近一条决策反馈
+// ─────────────────────────────────────────────────────────────
+
+export async function getDecisionFeedback(
+  reviewId: string,
+): Promise<{ data?: { user_action: string; created_at: string } | null; error?: string }> {
+  if (!businessDecisionEngineEnabled()) {
+    return { error: '决策引擎尚未启用' };
+  }
+
+  const auth = await requireAdmin();
+  if ('error' in auth) return { error: auth.error };
+
+  const { data, error } = await (auth.supabase.from('decision_feedback') as any)
+    .select('user_action, created_at')
+    .eq('decision_review_id', reviewId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  return { data: data ?? null };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 8. 查询决策对应任务的处理状态
+// ─────────────────────────────────────────────────────────────
+
+export type DecisionTaskStatus =
+  | { state: 'resolved' }                    // 全部完成 or feedback已确认
+  | { state: 'at_risk'; escalateCount: number }  // 仍有 pending 任务
+
+export async function getDecisionTaskStatus(
+  reviewId: string,
+): Promise<{ data?: DecisionTaskStatus; error?: string }> {
+  if (!businessDecisionEngineEnabled()) {
+    return { error: '决策引擎尚未启用' };
+  }
+
+  const auth = await requireAdmin();
+  if ('error' in auth) return { error: auth.error };
+
+  const { supabase } = auth;
+
+  // 先查 feedback：有 accept/ignore/override 则视为已处理
+  const { data: fb } = await (supabase.from('decision_feedback') as any)
+    .select('user_action')
+    .eq('decision_review_id', reviewId)
+    .limit(1)
+    .maybeSingle();
+
+  if (fb) {
+    return { data: { state: 'resolved' } };
+  }
+
+  // 查该 reviewId 对应的所有 daily_tasks（source_type='decision_review'，source_id 以 reviewId 开头）
+  const { data: tasks, error } = await (supabase.from('daily_tasks') as any)
+    .select('status, escalate_count, source_id')
+    .eq('source_type', 'decision_review')
+    .like('source_id', `${reviewId}:%`);
+
+  if (error) return { error: error.message };
+  if (!tasks || tasks.length === 0) return { data: { state: 'resolved' } };
+
+  const hasPending = tasks.some((t: any) =>
+    t.status === 'pending' || t.status === 'snoozed'
+  );
+
+  if (!hasPending) {
+    return { data: { state: 'resolved' } };
+  }
+
+  const maxEscalate = Math.max(...tasks.map((t: any) => t.escalate_count ?? 0));
+  return { data: { state: 'at_risk', escalateCount: maxEscalate } };
 }
