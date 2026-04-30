@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
+import { getUserRoleFromEmail } from '@/lib/utils/user-role';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,12 @@ export default async function PendingApprovalsPage({ searchParams }: PageProps) 
     Array.isArray((profile as any)?.roles) && (profile as any).roles.length > 0
       ? (profile as any).roles
       : [(profile as any)?.role].filter(Boolean);
+
+  // 邮件白名单兜底：DB profile 角色未设置时仍能正确识别 admin
+  const emailRole = getUserRoleFromEmail(user.email);
+  if (emailRole === 'admin' && !roles.includes('admin')) {
+    roles.unshift('admin');
+  }
 
   const isAdmin = roles.includes('admin');
   const isFinance = roles.includes('finance');
