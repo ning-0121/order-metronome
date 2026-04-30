@@ -125,8 +125,6 @@ export function AISkillSidebar({ orderId }: Props) {
         </div>
       </div>
 
-      {/* ── 缺失资料检查 ── */}
-      <MissingInfoCard orderId={orderId} />
     </div>
   );
 }
