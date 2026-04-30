@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { runRiskAssessment, runMissingInfoCheck } from '@/app/actions/skills';
+import { runRiskAssessment, runMissingInfoCheck, createMissingInfoTasks } from '@/app/actions/skills';
 import type { SkillResult, SkillFinding, SkillSuggestion } from '@/lib/agent/skills/types';
 
 interface Props {
@@ -141,10 +141,13 @@ function MissingInfoCard({ orderId }: { orderId: string }) {
   const [cached, setCached] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [ran, setRan] = useState(false);
+  const [taskCreating, setTaskCreating] = useState(false);
+  const [taskMsg, setTaskMsg] = useState<string | null>(null);
 
   async function run() {
     setLoading(true);
     setError(null);
+    setTaskMsg(null);
     const res = await runMissingInfoCheck(orderId);
     setLoading(false);
     setRan(true);
@@ -155,6 +158,21 @@ function MissingInfoCard({ orderId }: { orderId: string }) {
       setResult(res.result || null);
       setShadow(!!res.shadow);
       setCached(!!res.cached);
+    }
+  }
+
+  async function handleCreateTasks() {
+    if (!result || result.findings.length === 0) return;
+    setTaskCreating(true);
+    setTaskMsg(null);
+    const res = await createMissingInfoTasks(orderId, result.findings);
+    setTaskCreating(false);
+    if (res.error) {
+      setTaskMsg(`❌ ${res.error}`);
+    } else if (res.created === 0) {
+      setTaskMsg(`✓ 任务已存在（${res.skipped} 条已去重）`);
+    } else {
+      setTaskMsg(`✓ 已生成 ${res.created} 条任务${res.skipped > 0 ? `，${res.skipped} 条已存在` : ''}`);
     }
   }
 
@@ -257,6 +275,24 @@ function MissingInfoCard({ orderId }: { orderId: string }) {
                     <SuggestionItem key={i} suggestion={s} />
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {/* 生成处理任务 */}
+            {result.findings.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <button
+                  onClick={handleCreateTasks}
+                  disabled={taskCreating}
+                  className="w-full text-xs bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-medium py-2 px-3 rounded-lg transition-colors"
+                >
+                  {taskCreating ? '生成中…' : '生成处理任务'}
+                </button>
+                {taskMsg && (
+                  <p className={`mt-1.5 text-[11px] text-center ${
+                    taskMsg.startsWith('❌') ? 'text-red-600' : 'text-green-700'
+                  }`}>{taskMsg}</p>
+                )}
               </div>
             )}
 

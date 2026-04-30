@@ -16,7 +16,8 @@ import { riskAssessmentSkill } from '@/lib/agent/skills/riskAssessment';
 import { customerEmailInsightsSkill } from '@/lib/agent/skills/customerEmailInsights';
 import { deliveryFeasibilitySkill } from '@/lib/agent/skills/deliveryFeasibility';
 import { quoteReviewSkill } from '@/lib/agent/skills/quoteReview';
-import type { SkillResult } from '@/lib/agent/skills/types';
+import { upsertTask } from '@/lib/services/daily-tasks.service';
+import type { SkillResult, SkillFinding } from '@/lib/agent/skills/types';
 
 /**
  * 权限检查：用户是否有权访问该订单的 AI Skill
@@ -244,4 +245,96 @@ export async function runDeliveryFeasibility(orderId: string): Promise<{
  */
 export async function invalidateSkillCache(orderId: string): Promise<void> {
   await invalidateOrderSkillCache(orderId);
+}
+
+// ─────────────────────────────────────────────────────────────
+// 缺失资料 → Daily Tasks 轻连接
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 将 missingInfo Skill 的缺失项转为 daily_tasks
+ *
+ * 权限：admin only（任务写操作）
+ * 防重复：依赖 UNIQUE(assigned_to, source_type, source_id, task_date)
+ *
+ * source_type = 'missing_info'
+ * source_id   = '{orderId}:{blocksStep | label_slug}'
+ */
+export async function createMissingInfoTasks(
+  orderId: string,
+  findings: SkillFinding[],
+): Promise<{ created: number; skipped: number; error?: string }> {
+  if (!findings || findings.length === 0) {
+    return { created: 0, skipped: 0 };
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { created: 0, skipped: 0, error: '请先登录' };
+
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { created: 0, skipped: 0, error: '仅管理员可生成处理任务' };
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('order_no, customer_name')
+    .eq('id', orderId)
+    .single();
+  if (!order) return { created: 0, skipped: 0, error: '订单不存在' };
+
+  const { data: profiles } = await (supabase.from('profiles') as any)
+    .select('user_id, role, roles');
+  const allProfiles: any[] = profiles ?? [];
+
+  const adminIds = allProfiles
+    .filter((p: any) => p.role === 'admin' || (Array.isArray(p.roles) && p.roles.includes('admin')))
+    .map((p: any) => p.user_id as string);
+
+  const today = new Date().toISOString().split('T')[0];
+  const actionUrl = `/orders/${orderId}`;
+  let created = 0;
+  let skipped = 0;
+
+  for (const finding of findings) {
+    const missingField = finding.blocksStep
+      ?? finding.label.toLowerCase().replace(/[^a-z0-9一-龥]/g, '_').slice(0, 40);
+    const sourceId = `${orderId}:${missingField}`;
+    const priority = finding.severity === 'high' ? 1 : 2;
+    const emoji = priority === 1 ? '🔴' : '🟡';
+
+    const roleStr = finding.whoShouldFix ?? '';
+    const roleUsers = roleStr
+      ? allProfiles
+          .filter((p: any) =>
+            p.role === roleStr ||
+            (Array.isArray(p.roles) && p.roles.includes(roleStr))
+          )
+          .map((p: any) => p.user_id as string)
+      : [];
+
+    const targetIds = new Set<string>([...adminIds, ...roleUsers]);
+
+    for (const userId of targetIds) {
+      const res = await upsertTask(supabase, {
+        assignedTo: userId,
+        taskDate: today,
+        taskType: 'system_alert',
+        priority,
+        title: `${emoji} 缺失资料：${finding.label} — ${order.order_no}`,
+        description: `客户：${order.customer_name}${finding.blocksStepName ? `，阻塞节点：${finding.blocksStepName}` : ''}`,
+        actionUrl,
+        actionLabel: '补充资料',
+        relatedOrderId: orderId,
+        relatedCustomer: order.customer_name,
+        sourceType: 'missing_info',
+        sourceId,
+      });
+
+      if (res.ok) {
+        if (res.data.created) created++;
+        else skipped++;
+      }
+    }
+  }
+
+  return { created, skipped };
 }
