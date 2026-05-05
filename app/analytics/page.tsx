@@ -35,11 +35,43 @@ export default async function AnalyticsPage() {
   const currentMonth = new Date().toISOString().slice(0, 7);
 
   // 总览统计
-  const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity');
+  const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity, created_at');
   const totalOrders = (allOrders || []).length;
   const totalQuantity = (allOrders || []).reduce((s: number, o: any) => s + (o.quantity || 0), 0);
   const totalCustomers = new Set((allOrders || []).map((o: any) => o.customer_name).filter(Boolean)).size;
   const totalFactories = new Set((allOrders || []).map((o: any) => o.factory_name).filter(Boolean)).size;
+
+  // ===== 增长趋势：本周 / 本月 / 同比 =====
+  const now = new Date();
+  // 本周一 00:00 起
+  const dow = (now.getDay() + 6) % 7; // 周一=0
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - dow);
+  // 上周一 / 上上周日
+  const lastWeekStart = new Date(weekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  // 本月 1 号
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  // 上月 1 号 / 上月末
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const ordersList = (allOrders || []) as any[];
+  const inRange = (d: Date, start: Date, end: Date) =>
+    d.getTime() >= start.getTime() && d.getTime() < end.getTime();
+
+  const thisWeekOrders   = ordersList.filter(o => o.created_at && new Date(o.created_at) >= weekStart).length;
+  const lastWeekOrders   = ordersList.filter(o => o.created_at && inRange(new Date(o.created_at), lastWeekStart, weekStart)).length;
+  const thisMonthOrders  = ordersList.filter(o => o.created_at && new Date(o.created_at) >= monthStart).length;
+  const lastMonthOrders  = ordersList.filter(o => o.created_at && inRange(new Date(o.created_at), lastMonthStart, lastMonthEnd)).length;
+
+  const weekGrowth = lastWeekOrders > 0
+    ? Math.round(((thisWeekOrders - lastWeekOrders) / lastWeekOrders) * 100)
+    : (thisWeekOrders > 0 ? 100 : 0);
+  const monthGrowth = lastMonthOrders > 0
+    ? Math.round(((thisMonthOrders - lastMonthOrders) / lastMonthOrders) * 100)
+    : (thisMonthOrders > 0 ? 100 : 0);
 
   const weekDelta = summary.thisWeekCompleted - summary.lastWeekCompleted;
   const weekDeltaStr = weekDelta > 0 ? `+${weekDelta}` : `${weekDelta}`;
@@ -76,6 +108,46 @@ export default async function AnalyticsPage() {
       <div>
         <h1 className="text-2xl md:text-3xl font-bold text-gray-900">📊 数据分析</h1>
         <p className="text-gray-500 text-sm mt-1">订单数据总览、客户/员工/工厂三维度分析</p>
+      </div>
+
+      {/* ===== 增长趋势：本周/本月新增订单 ===== */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">📈 订单增长趋势</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-4">
+            <p className="text-xs text-gray-500 mb-1">本周新增</p>
+            <p className="text-3xl font-bold text-indigo-700">{thisWeekOrders}</p>
+            <p className="text-xs text-gray-500 mt-1.5">
+              上周 {lastWeekOrders} 单
+              <span className={`ml-1.5 font-medium ${weekGrowth > 0 ? 'text-green-600' : weekGrowth < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                {weekGrowth > 0 ? '↑' : weekGrowth < 0 ? '↓' : '→'} {Math.abs(weekGrowth)}%
+              </span>
+            </p>
+          </div>
+          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-100 p-4">
+            <p className="text-xs text-gray-500 mb-1">本月新增</p>
+            <p className="text-3xl font-bold text-blue-700">{thisMonthOrders}</p>
+            <p className="text-xs text-gray-500 mt-1.5">
+              上月 {lastMonthOrders} 单
+              <span className={`ml-1.5 font-medium ${monthGrowth > 0 ? 'text-green-600' : monthGrowth < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                {monthGrowth > 0 ? '↑' : monthGrowth < 0 ? '↓' : '→'} {Math.abs(monthGrowth)}%
+              </span>
+            </p>
+          </div>
+          <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-100 p-4">
+            <p className="text-xs text-gray-500 mb-1">本周准时完成</p>
+            <p className="text-3xl font-bold text-green-700">{summary.thisWeekCompleted}</p>
+            <p className="text-xs text-gray-500 mt-1.5">
+              上周 {summary.lastWeekCompleted} 项
+              <span className={`ml-1.5 font-medium ${weekDeltaColor}`}>{weekDeltaStr}</span>
+            </p>
+          </div>
+          <Link href="/sales-targets" className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-100 p-4 hover:shadow-sm transition-shadow">
+            <p className="text-xs text-gray-500 mb-1">🎯 客户年度目标</p>
+            <p className="text-lg font-bold text-amber-700">查看进度</p>
+            <p className="text-xs text-gray-500 mt-1.5">CEO 设目标 / 销售看进度</p>
+          </Link>
+        </div>
       </div>
 
       {/* ===== 总览统计 + 风险 ===== */}
