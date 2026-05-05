@@ -968,6 +968,57 @@ function NewOrderWizard() {
                     <p className="text-xs text-amber-600 mt-1">将跳过订舱/报关/出运节点，替换为「国内送仓完成」</p>
                   )}
                 </div>
+
+                {/* 国内送仓 — 客户指定仓库信息（仅 domestic 显示） */}
+                {deliveryType === 'domestic' && (
+                  <div className="col-span-2 rounded-lg bg-amber-50 border border-amber-200 p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">📦</span>
+                      <h4 className="text-sm font-semibold text-amber-900">客户指定收货仓库</h4>
+                      <span className="text-xs text-amber-700">（年年旺等客户）</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          仓库名称 <span className="text-red-500">*</span>
+                        </label>
+                        <input type="text" name="delivery_warehouse_name" required
+                          placeholder="如：年年旺嘉兴仓"
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          客户要求送达 <span className="text-red-500">*</span>
+                        </label>
+                        <input type="date" name="delivery_required_at" required
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          详细地址 <span className="text-red-500">*</span>
+                        </label>
+                        <input type="text" name="delivery_address" required
+                          placeholder="省/市/区/街道/门牌号"
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          收货联系人 <span className="text-red-500">*</span>
+                        </label>
+                        <input type="text" name="delivery_contact" required
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          联系电话 <span className="text-red-500">*</span>
+                        </label>
+                        <input type="tel" name="delivery_phone" required
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Cancel Date</label>
                   <input type="date" name="cancel_date"

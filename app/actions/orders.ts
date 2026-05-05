@@ -140,6 +140,13 @@ export async function createOrder(
   const factory_name = formData.get('factory_name') as string | null;
   const factory_id = formData.get('factory_id') as string | null;
 
+  // 国内送仓字段（仅 domestic 必填）
+  const delivery_warehouse_name = formData.get('delivery_warehouse_name') as string | null;
+  const delivery_address = formData.get('delivery_address') as string | null;
+  const delivery_contact = formData.get('delivery_contact') as string | null;
+  const delivery_phone = formData.get('delivery_phone') as string | null;
+  const delivery_required_at = formData.get('delivery_required_at') as string | null;
+
   // 多工厂（分厂区生产）— 客户端以 JSON 字符串数组写入
   let factory_ids: string[] | null = null;
   let factory_names: string[] | null = null;
@@ -182,6 +189,15 @@ export async function createOrder(
   if (!factory_date) return { ok: false, error: '请填写出厂日期' };
   if (!quantity) return { ok: false, error: '请填写预估总数量' };
   if (!styleCount) return { ok: false, error: '请填写款数' };
+
+  // 国内送仓校验
+  if (delivery_type === 'domestic') {
+    if (!delivery_warehouse_name?.trim()) return { ok: false, error: '国内送仓订单请填写收货仓库名称' };
+    if (!delivery_address?.trim())        return { ok: false, error: '国内送仓订单请填写详细地址' };
+    if (!delivery_contact?.trim())        return { ok: false, error: '国内送仓订单请填写收货联系人' };
+    if (!delivery_phone?.trim())          return { ok: false, error: '国内送仓订单请填写联系电话' };
+    if (!delivery_required_at)            return { ok: false, error: '国内送仓订单请填写客户要求送达日期' };
+  }
   if (!colorCount) return { ok: false, error: '请填写颜色数' };
 
   // ── 日期合理性校验 ──
@@ -333,6 +349,12 @@ export async function createOrder(
     factory_date: factory_date || null,
     eta: eta || warehouse_due_date || null,
     delivery_type,
+    // 国内送仓字段（仅 domestic 时有值）
+    delivery_warehouse_name: delivery_type === 'domestic' ? (delivery_warehouse_name?.trim() || null) : null,
+    delivery_address:        delivery_type === 'domestic' ? (delivery_address?.trim() || null)        : null,
+    delivery_contact:        delivery_type === 'domestic' ? (delivery_contact?.trim() || null)        : null,
+    delivery_phone:          delivery_type === 'domestic' ? (delivery_phone?.trim() || null)          : null,
+    delivery_required_at:    delivery_type === 'domestic' ? (delivery_required_at || null)            : null,
     order_purpose,
     notes: (formData.get('notes') as string) || null,
     special_tags: [

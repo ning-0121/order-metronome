@@ -67,6 +67,12 @@ const INSERT_WHITELIST = [
   'price_approval_id',
   // 样品阶段（2026-04-15）
   'sample_phase',
+  // 国内送仓字段（2026-05-04）
+  'delivery_warehouse_name',
+  'delivery_address',
+  'delivery_contact',
+  'delivery_phone',
+  'delivery_required_at',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -114,6 +120,12 @@ const UPDATE_WHITELIST = [
   'sample_confirm_days_override',
   'factory_ids',
   'factory_names',
+  // 国内送仓字段（2026-05-04）
+  'delivery_warehouse_name',
+  'delivery_address',
+  'delivery_contact',
+  'delivery_phone',
+  'delivery_required_at',
 ] as const;
 
 // ⚠️ 系统级约束：order_no 一旦生成，永不修改

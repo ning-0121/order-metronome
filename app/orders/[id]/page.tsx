@@ -18,6 +18,7 @@ import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
 import { RecalcButton } from '@/components/RecalcButton';
+import { RescheduleBanner } from '@/components/RescheduleBanner';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
@@ -154,6 +155,27 @@ export default async function OrderDetailPage({
         <div className="max-w-7xl mx-auto">
           <BackButton fromUrl={fromUrl} />
         </div>
+      </div>
+
+      {/* 重排排期横幅（出厂日已过且未出运/送仓时显示给 admin/owner） */}
+      <div className="max-w-7xl mx-auto px-6 pt-4">
+        {(() => {
+          const allMs: any[] = (orderData as any).milestones || [];
+          const finalKeys = ['booking_done', 'domestic_delivery', 'shipment_completed', 'shipment_done'];
+          const isShipped = allMs.some(m =>
+            finalKeys.includes(m.step_key) && (m.status === 'done' || m.status === '已完成')
+          );
+          return (
+            <RescheduleBanner
+              orderId={id}
+              orderNo={orderData.order_no}
+              factoryDate={orderData.factory_date || null}
+              deliveryRequiredAt={(orderData as any).delivery_required_at || orderData.warehouse_due_date || null}
+              isShipped={isShipped}
+              canReschedule={isAdmin || isOrderOwner}
+            />
+          );
+        })()}
       </div>
 
       {/* 顶部 Header */}
