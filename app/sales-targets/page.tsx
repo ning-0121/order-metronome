@@ -53,11 +53,12 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
   const allCustomers = (customersRes.data || []) as { id: string; customer_name: string }[];
 
   // 总览数据
-  const totalTarget = rows.reduce((s, r) => s + r.target_amount_cny, 0);
-  const totalActual = rows.reduce((s, r) => s + r.progress.actualCny, 0);
-  const totalExpected = rows.reduce((s, r) => s + r.progress.expectedCny, 0);
+  const totalTarget = rows.reduce((s, r) => s + r.target_qty, 0);
+  const totalActual = rows.reduce((s, r) => s + r.progress.actualQty, 0);
+  const totalExpected = rows.reduce((s, r) => s + r.progress.expectedQty, 0);
   const overallPct = totalTarget > 0 ? (totalActual / totalTarget) * 100 : 0;
   const overallPerf = totalExpected > 0 ? totalActual / totalExpected : 0;
+  const fmtWan = (n: number) => `${(n / 10000).toFixed(1)} 万件`;
 
   const yearOptions = [year - 1, year, year + 1];
 
@@ -92,8 +93,8 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
 
         {/* 总览卡 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <Card label="目标总额（CNY）" value={`¥${(totalTarget / 10000).toFixed(1)} 万`} />
-          <Card label="已完成" value={`¥${(totalActual / 10000).toFixed(1)} 万`} />
+          <Card label="目标总件数" value={fmtWan(totalTarget)} />
+          <Card label="已完成件数" value={fmtWan(totalActual)} />
           <Card label="完成率" value={`${overallPct.toFixed(1)}%`} hint={overallPct >= 100 ? '🚀 已达标' : ''} />
           <Card
             label="整体节奏"
@@ -152,17 +153,17 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
                         {ev.label}
                       </span>
                     </div>
-                    {r.target_amount_cny > 0 && (
+                    {r.target_qty > 0 && (
                       <div className="text-right">
                         <p className="text-xs text-gray-500">完成 / 目标</p>
                         <p className="text-sm font-semibold text-gray-900">
-                          ¥{(r.progress.actualCny / 10000).toFixed(1)} / {(r.target_amount_cny / 10000).toFixed(0)} 万
+                          {fmtWan(r.progress.actualQty)} / {fmtWan(r.target_qty)}
                         </p>
                       </div>
                     )}
                   </div>
 
-                  {r.target_amount_cny > 0 ? (
+                  {r.target_qty > 0 ? (
                     <>
                       {/* 进度条 */}
                       <div className="relative w-full bg-gray-200 rounded-full h-2.5 mb-2">
@@ -170,8 +171,8 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
                         {/* 预期标线 */}
                         <div
                           className="absolute top-0 h-full w-0.5 bg-gray-700"
-                          style={{ left: `${Math.min(100, (r.progress.expectedCny / r.target_amount_cny) * 100)}%` }}
-                          title={`预期：¥${(r.progress.expectedCny / 10000).toFixed(1)} 万`}
+                          style={{ left: `${Math.min(100, (r.progress.expectedQty / r.target_qty) * 100)}%` }}
+                          title={`预期：${fmtWan(r.progress.expectedQty)}`}
                         />
                       </div>
                       <div className="flex justify-between text-xs text-gray-500 mb-2">
@@ -183,7 +184,7 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
                     </>
                   ) : (
                     <div className="text-sm text-gray-500">
-                      暂未设置目标（实际 ¥{(r.progress.actualCny / 10000).toFixed(1)} 万）
+                      暂未设置目标（实际 {fmtWan(r.progress.actualQty)}）
                     </div>
                   )}
                 </div>

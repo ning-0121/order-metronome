@@ -12,7 +12,7 @@ interface Props {
 export function TargetEditor({ year, customers }: Props) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState('');
-  const [amountWan, setAmountWan] = useState(''); // 输入单位：万元
+  const [qtyWan, setQtyWan] = useState(''); // 输入单位：万件
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -20,18 +20,19 @@ export function TargetEditor({ year, customers }: Props) {
   const handleSave = async () => {
     setMsg(null);
     if (!customerId) { setMsg('❌ 请选择客户'); return; }
-    const wan = parseFloat(amountWan);
-    if (!wan || wan <= 0) { setMsg('❌ 目标金额需大于 0（单位：万元）'); return; }
+    const wan = parseFloat(qtyWan);
+    if (!wan || wan <= 0) { setMsg('❌ 目标件数需大于 0（单位：万件）'); return; }
 
+    const targetQty = Math.round(wan * 10000);
     setSaving(true);
     try {
-      const res = await setCustomerTarget(customerId, year, wan * 10000, notes);
+      const res = await setCustomerTarget(customerId, year, targetQty, notes);
       if (res.error) {
         setMsg('❌ ' + res.error);
       } else {
-        setMsg('✅ 已保存');
+        setMsg(`✅ 已保存：${targetQty.toLocaleString('zh-CN')} 件`);
         setCustomerId('');
-        setAmountWan('');
+        setQtyWan('');
         setNotes('');
         router.refresh();
       }
@@ -60,13 +61,13 @@ export function TargetEditor({ year, customers }: Props) {
           <input
             type="number"
             min={0}
-            step={1}
-            value={amountWan}
-            onChange={(e) => setAmountWan(e.target.value)}
-            placeholder="目标金额"
+            step={0.1}
+            value={qtyWan}
+            onChange={(e) => setQtyWan(e.target.value)}
+            placeholder="目标件数"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-sm"
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">万元</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">万件</span>
         </div>
 
         <input

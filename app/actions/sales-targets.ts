@@ -1,7 +1,7 @@
 'use server';
 
 /**
- * 销售目标 Server Actions
+ * 销售目标 Server Actions（件数口径）
  *
  * 权限：
  *  - 设置/删除：admin only
@@ -13,7 +13,6 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import {
   computeTargetProgress,
-  getOrderRevenueCny,
   type TargetProgress,
 } from '@/lib/services/sales-targets.service';
 
@@ -22,19 +21,19 @@ export interface CustomerTargetRow {
   customer_id: string;
   customer_name: string;
   year: number;
-  target_amount_cny: number;
+  target_qty: number;
   notes: string | null;
   progress: TargetProgress;
   isMyCustomer: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────
-// 1. 设置 / 更新目标（upsert）
+// 1. 设置 / 更新目标（upsert）— 件数
 // ─────────────────────────────────────────────────────────────
 export async function setCustomerTarget(
   customerId: string,
   year: number,
-  amountCny: number,
+  targetQty: number,
   notes?: string,
 ): Promise<{ error?: string; data?: any }> {
   const supabase = await createClient();
@@ -46,14 +45,15 @@ export async function setCustomerTarget(
 
   if (!customerId) return { error: '缺少客户 ID' };
   if (!year || year < 2020 || year > 2100) return { error: '年份不合法' };
-  if (!amountCny || amountCny <= 0) return { error: '目标金额必须大于 0' };
+  if (!targetQty || targetQty <= 0) return { error: '目标件数必须大于 0' };
+  if (!Number.isInteger(targetQty)) return { error: '目标件数必须是整数' };
 
   const { data, error } = await (supabase.from('customer_sales_targets') as any)
     .upsert(
       {
         customer_id: customerId,
         year,
-        target_amount_cny: amountCny,
+        target_qty: targetQty,
         notes: notes?.trim() || null,
         created_by: user.id,
         updated_at: new Date().toISOString(),
@@ -92,8 +92,8 @@ export async function deleteCustomerTarget(targetId: string): Promise<{ error?: 
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3. 列出目标 + 进度
-//    - admin/finance：看全部客户（含未设目标的，showMissing 开关控制）
+// 3. 列出目标 + 进度（件数）
+//    - admin/finance：看全部客户
 //    - 其他角色：仅看自己负责过订单的客户
 // ─────────────────────────────────────────────────────────────
 export async function listTargets(
@@ -115,7 +115,7 @@ export async function listTargets(
   const isFinance = userRoles.includes('finance');
   const canSeeAll = isAdmin || isFinance;
 
-  // 当年所有订单（含 financials + 客户）
+  // 当年所有订单（取消的不算）
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year + 1}-01-01`;
 
@@ -127,28 +127,15 @@ export async function listTargets(
 
   const orderList = (orders || []) as any[];
 
-  // 拉对应的 financials
-  const orderIds = orderList.map(o => o.id);
-  let financialsMap: Record<string, any> = {};
-  if (orderIds.length > 0) {
-    const { data: fins } = await (supabase.from('order_financials') as any)
-      .select('order_id, sale_total, sale_price_per_piece, sale_currency, exchange_rate')
-      .in('order_id', orderIds);
-    for (const f of (fins || []) as any[]) {
-      financialsMap[f.order_id] = f;
-    }
-  }
-
-  // 按客户聚合销售额（CNY）+ 标记"我负责"
-  const customerActual: Record<string, { cny: number; mine: boolean; name: string }> = {};
+  // 按客户聚合件数（直接读 orders.quantity，不依赖 financials）
+  const customerActual: Record<string, { qty: number; mine: boolean; name: string }> = {};
   for (const o of orderList) {
     if (!o.customer_id) continue;
-    const fin = financialsMap[o.id];
-    const cny = getOrderRevenueCny(fin, o.quantity);
+    const qty = Number(o.quantity) || 0;
     if (!customerActual[o.customer_id]) {
-      customerActual[o.customer_id] = { cny: 0, mine: false, name: o.customer_name || '' };
+      customerActual[o.customer_id] = { qty: 0, mine: false, name: o.customer_name || '' };
     }
-    customerActual[o.customer_id].cny += cny;
+    customerActual[o.customer_id].qty += qty;
     if (o.owner_user_id === user.id || o.created_by === user.id) {
       customerActual[o.customer_id].mine = true;
     }
@@ -156,7 +143,7 @@ export async function listTargets(
 
   // 拉所有目标
   const { data: targets } = await (supabase.from('customer_sales_targets') as any)
-    .select('id, customer_id, year, target_amount_cny, notes, customers!inner(id, customer_name)')
+    .select('id, customer_id, year, target_qty, notes, customers!inner(id, customer_name)')
     .eq('year', year);
 
   const targetMap: Record<string, any> = {};
@@ -181,20 +168,20 @@ export async function listTargets(
     // 没有目标 + showAll=false → 跳过
     if (!t && !options.showAll) continue;
 
-    const targetCny = t ? Number(t.target_amount_cny) : 0;
-    const actualCny = actual?.cny || 0;
+    const targetQty = t ? Number(t.target_qty) : 0;
+    const actualQty = actual?.qty || 0;
     const customerName = t?.customers?.customer_name || actual?.name || '';
 
-    if (!targetCny && !options.showAll) continue;
+    if (!targetQty && !options.showAll) continue;
 
     result.push({
       target_id: t?.id || '',
       customer_id: cid,
       customer_name: customerName,
       year,
-      target_amount_cny: targetCny,
+      target_qty: targetQty,
       notes: t?.notes || null,
-      progress: computeTargetProgress(targetCny, actualCny, year),
+      progress: computeTargetProgress(targetQty, actualQty, year),
       isMyCustomer: !!actual?.mine,
     });
   }
@@ -205,7 +192,7 @@ export async function listTargets(
     const sa = statusOrder[a.progress.evaluation.status] ?? 99;
     const sb = statusOrder[b.progress.evaluation.status] ?? 99;
     if (sa !== sb) return sa - sb;
-    return b.target_amount_cny - a.target_amount_cny;
+    return b.target_qty - a.target_qty;
   });
 
   return { data: result };
