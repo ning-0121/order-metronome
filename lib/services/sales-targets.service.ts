@@ -1,7 +1,97 @@
 /**
  * 销售目标 — 纯函数（件数口径）
  * 进度计算 + 考评等级 + 文字建议（无 AI 调用）
+ *
+ * 年份口径：按中国农历新年划分
+ *   "2026 农历年" = 2026-02-17（农历正月初一）至 2027-02-05（次年初一前一天）
  */
+
+// ─────────────────────────────────────────────────────────────
+// 农历新年日期表（公历）— 覆盖 2024-2032
+// 数据源：中国国务院公历农历对照（精确到日）
+// ─────────────────────────────────────────────────────────────
+const LUNAR_NEW_YEAR_DATES: Record<number, string> = {
+  2024: '2024-02-10',
+  2025: '2025-01-29',
+  2026: '2026-02-17',
+  2027: '2027-02-06',
+  2028: '2028-01-26',
+  2029: '2029-02-13',
+  2030: '2030-02-03',
+  2031: '2031-01-23',
+  2032: '2032-02-11',
+  2033: '2033-01-31',
+};
+
+/**
+ * 给定农历年份（如 2026），返回该农历年的公历起止日期。
+ * - start：当年农历正月初一
+ * - end：下一年农历正月初一（不含，半开区间）
+ *
+ * 范围外（< 2024 或 > 2032）退化为公历年（兜底）。
+ */
+export function getLunarYearRange(year: number): { start: Date; end: Date; startStr: string; endStr: string } {
+  const startStr = LUNAR_NEW_YEAR_DATES[year];
+  const endStr = LUNAR_NEW_YEAR_DATES[year + 1];
+  if (!startStr || !endStr) {
+    const start = new Date(year, 0, 1);
+    const end = new Date(year + 1, 0, 1);
+    return {
+      start,
+      end,
+      startStr: `${year}-01-01`,
+      endStr: `${year + 1}-01-01`,
+    };
+  }
+  return {
+    start: new Date(startStr),
+    end: new Date(endStr),
+    startStr,
+    endStr,
+  };
+}
+
+/**
+ * 返回当前所处的"农历年"标号
+ * 例：今天 2026-05-04 → 农历年 2026
+ *     今天 2026-01-15（春节前）→ 农历年 2025
+ */
+export function getCurrentLunarYear(today: Date = new Date()): number {
+  const years = Object.keys(LUNAR_NEW_YEAR_DATES).map(Number).sort((a, b) => a - b);
+  let result = years[0];
+  for (const y of years) {
+    if (new Date(LUNAR_NEW_YEAR_DATES[y]) <= today) result = y;
+    else break;
+  }
+  return result;
+}
+
+/**
+ * 农历年范围内"已过天数 / 全年总天数"
+ */
+export function getLunarYearProgress(year: number, today: Date = new Date()): {
+  daysElapsed: number;
+  daysInYear: number;
+  daysRemaining: number;
+} {
+  const { start, end } = getLunarYearRange(year);
+  const daysInYear = Math.round((end.getTime() - start.getTime()) / 86400000);
+
+  const cur = new Date(today);
+  cur.setHours(0, 0, 0, 0);
+
+  let daysElapsed: number;
+  if (cur < start) daysElapsed = 0;
+  else if (cur >= end) daysElapsed = daysInYear;
+  else daysElapsed = Math.floor((cur.getTime() - start.getTime()) / 86400000) + 1;
+
+  return {
+    daysElapsed,
+    daysInYear,
+    daysRemaining: Math.max(0, daysInYear - daysElapsed),
+  };
+}
+
 
 export type TargetStatus = 'ahead' | 'on_track' | 'slight_behind' | 'behind';
 
@@ -26,30 +116,10 @@ export interface TargetProgress {
 }
 
 /**
- * 当年已过天数 / 全年总天数
+ * @deprecated 用 getLunarYearProgress（按农历年）— 此函数仅做兼容兜底
  */
-export function getYearProgress(year: number, today: Date = new Date()): {
-  daysElapsed: number;
-  daysInYear: number;
-  daysRemaining: number;
-} {
-  const yearStart = new Date(year, 0, 1);
-  const yearEnd = new Date(year, 11, 31);
-  const daysInYear = Math.ceil((yearEnd.getTime() - yearStart.getTime()) / 86400000) + 1;
-
-  const cur = new Date(today);
-  cur.setHours(0, 0, 0, 0);
-
-  let daysElapsed: number;
-  if (cur < yearStart) daysElapsed = 0;
-  else if (cur > yearEnd) daysElapsed = daysInYear;
-  else daysElapsed = Math.floor((cur.getTime() - yearStart.getTime()) / 86400000) + 1;
-
-  return {
-    daysElapsed,
-    daysInYear,
-    daysRemaining: Math.max(0, daysInYear - daysElapsed),
-  };
+export function getYearProgress(year: number, today: Date = new Date()) {
+  return getLunarYearProgress(year, today);
 }
 
 /**
@@ -117,7 +187,8 @@ export function computeTargetProgress(
   year: number,
   today: Date = new Date(),
 ): TargetProgress {
-  const { daysElapsed, daysInYear, daysRemaining } = getYearProgress(year, today);
+  // 使用农历年范围
+  const { daysElapsed, daysInYear, daysRemaining } = getLunarYearProgress(year, today);
 
   const expectedQty = targetQty * (daysElapsed / daysInYear);
   const progressPct = targetQty > 0 ? actualQty / targetQty : 0;

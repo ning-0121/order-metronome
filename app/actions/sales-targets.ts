@@ -13,6 +13,7 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import {
   computeTargetProgress,
+  getLunarYearRange,
   type TargetProgress,
 } from '@/lib/services/sales-targets.service';
 
@@ -115,14 +116,13 @@ export async function listTargets(
   const isFinance = userRoles.includes('finance');
   const canSeeAll = isAdmin || isFinance;
 
-  // 当年所有订单（取消的不算）
-  const yearStart = `${year}-01-01`;
-  const yearEnd = `${year + 1}-01-01`;
+  // 农历年范围过滤订单（取消的不算）
+  const { startStr, endStr } = getLunarYearRange(year);
 
   const { data: orders } = await (supabase.from('orders') as any)
     .select('id, customer_id, customer_name, owner_user_id, created_by, quantity, lifecycle_status, created_at')
-    .gte('created_at', yearStart)
-    .lt('created_at', yearEnd)
+    .gte('created_at', startStr)
+    .lt('created_at', endStr)
     .not('lifecycle_status', 'in', '("cancelled","已取消")');
 
   const orderList = (orders || []) as any[];

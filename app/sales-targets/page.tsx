@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { listTargets, listAllCustomersForTarget } from '@/app/actions/sales-targets';
+import { getCurrentLunarYear, getLunarYearRange } from '@/lib/services/sales-targets.service';
 import { TargetEditor } from '@/components/TargetEditor';
 
 export const dynamic = 'force-dynamic';
@@ -43,7 +44,9 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
   }
 
   const sp = (await searchParams) ?? {};
-  const year = parseInt(sp.year || String(new Date().getFullYear()), 10);
+  const defaultYear = getCurrentLunarYear();
+  const year = parseInt(sp.year || String(defaultYear), 10);
+  const range = getLunarYearRange(year);
 
   const [targetsRes, customersRes] = await Promise.all([
     listTargets(year, { showAll: isAdmin }),
@@ -61,6 +64,8 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
   const fmtWan = (n: number) => `${(n / 10000).toFixed(1)} 万件`;
 
   const yearOptions = [year - 1, year, year + 1];
+  // 末日 = 下年初一前一天
+  const lastDay = new Date(range.end.getTime() - 86400000).toISOString().slice(0, 10);
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -71,6 +76,10 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
             <Link href="/" className="text-sm text-gray-500 hover:text-gray-700">← 返回</Link>
             <h1 className="text-2xl font-bold text-gray-900 mt-2">🎯 客户年度销售目标</h1>
             <p className="text-sm text-gray-500 mt-1">
+              按 <span className="font-medium text-amber-700">中国农历新年</span> 划分年度 ·
+              当前农历 {year} 年：{range.startStr} 至 {lastDay}
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">
               {isAdmin
                 ? 'CEO/管理员可设置各客户年度目标，系统每天自动计算进度与考评建议'
                 : '查看你负责客户的年度目标进度'}
@@ -84,8 +93,9 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
                 className={`text-sm px-3 py-1.5 rounded-full font-medium ${
                   y === year ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
+                title={`农历 ${y} 年`}
               >
-                {y}
+                农历 {y}
               </Link>
             ))}
           </div>

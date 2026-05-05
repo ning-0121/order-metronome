@@ -88,7 +88,7 @@ export function TargetEditor({ year, customers }: Props) {
       </div>
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
       <p className="text-xs text-gray-400">
-        年度 {year} · 同一客户重复保存会覆盖原目标 · 仅 admin 可操作
+        农历 {year} 年（春节起算）· 同一客户重复保存会覆盖原目标 · 仅 admin 可操作
       </p>
     </div>
   );
