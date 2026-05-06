@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "npx tsx scripts/pre-deploy-check.ts",
+    "check": "npx tsx scripts/pre-deploy-check.ts && npx tsx scripts/test-runtime-confidence.ts",
+    "test:runtime": "npx tsx scripts/test-runtime-confidence.ts",
     "predeploy": "npm run build && npm run check",
     "prepare": "husky"
   },
