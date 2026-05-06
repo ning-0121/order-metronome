@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { getOrderBusinessState } from '@/app/actions/order-business-state';
 import { uploadCostSheet } from '@/app/actions/cost-control';
+import { getRuntimeOrderForDisplay } from '@/app/actions/runtime-confidence';
+import { RuntimeRiskCard } from './RuntimeRiskCard';
 import type { OrderBusinessState, StatusLevel } from '@/lib/engine/orderBusinessEngine';
 import {
   getProfitNextAction,
@@ -35,6 +37,8 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
   const [state, setState] = useState<OrderBusinessState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Runtime Phase 1：投影数据，null 表示 flag off / 没数据 → fallback 老风险卡
+  const [runtimeData, setRuntimeData] = useState<any | null>(null);
 
   const canSeeFinancials = isAdmin || userRoles.some(r => ['finance', 'production_manager'].includes(r));
   const canUpload = isAdmin || userRoles.includes('finance');
@@ -47,12 +51,16 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
 
   useEffect(() => {
     setLoading(true);
-    getOrderBusinessState(orderId)
-      .then(res => {
-        if (res.error) setError(res.error);
-        else setState(res.data || null);
+    // 并行：经营状态 + runtime 投影（runtime 失败/无权/无数据都不阻塞主面板）
+    Promise.all([
+      getOrderBusinessState(orderId).catch(() => ({ error: '加载失败' as const })),
+      getRuntimeOrderForDisplay(orderId).catch(() => ({ data: null })),
+    ])
+      .then(([stateRes, runtimeRes]) => {
+        if ('error' in stateRes && stateRes.error) setError(stateRes.error);
+        else if ('data' in stateRes) setState(stateRes.data || null);
+        if ('data' in runtimeRes && runtimeRes.data) setRuntimeData(runtimeRes.data);
       })
-      .catch(() => setError('加载失败'))
       .finally(() => setLoading(false));
   }, [orderId]);
 
@@ -64,6 +72,9 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
   );
   if (!state) return null;
 
+  // 决定渲染哪个风险卡：有 runtime 数据 → 新卡；否则 → 老卡
+  const showRuntimeRisk = !!(runtimeData && runtimeData.explain_json);
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
       {/* 利润卡 */}
@@ -74,8 +85,18 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
       )}
       {/* 收款卡 */}
       <PaymentCard state={state} canSeeFinancials={canSeeFinancials} orderId={orderId} />
-      {/* 风险卡 */}
-      <RiskCard state={state} orderId={orderId} />
+      {/* 风险卡 — runtime 优先，没数据 fallback 老卡 */}
+      {showRuntimeRisk ? (
+        <RuntimeRiskCard
+          confidence={runtimeData.delivery_confidence}
+          riskLevel={runtimeData.risk_level}
+          predictedFinishDate={runtimeData.predicted_finish_date}
+          bufferDays={runtimeData.buffer_days}
+          explain={runtimeData.explain_json}
+        />
+      ) : (
+        <RiskCard state={state} orderId={orderId} />
+      )}
       {/* 确认链 */}
       <ConfirmationCard state={state} orderId={orderId} />
     </div>

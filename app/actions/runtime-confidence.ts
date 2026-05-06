@@ -16,8 +16,13 @@
  * 不挂钩子、不改 UI、不影响任何现有业务流程。
  */
 
-import { createServiceRoleClient } from '@/lib/supabase/server';
-import { runtimeProjectionEnabled } from '@/lib/engine/featureFlags';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import {
+  runtimeProjectionEnabled,
+  runtimeConfidenceVisible,
+  runtimeConfidenceMode,
+} from '@/lib/engine/featureFlags';
+import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { computeDeliveryConfidence } from '@/lib/runtime/deliveryConfidence';
 import type {
   RuntimeEventType,
@@ -279,6 +284,50 @@ export async function getRuntimeOrder(
     if (error) return { error: error.message };
     return { data: data ?? undefined };
   } catch (e: any) {
+    return { error: e?.message || 'unknown' };
+  }
+}
+
+/**
+ * UI 显示专用 — 只读、走用户 session（RLS）、双闸：env flag + 用户身份
+ *
+ * 返回 null 的情况：
+ *  - flag = off
+ *  - flag = admin 但当前用户不是 admin
+ *  - 该订单没有 runtime_orders 数据（首次没 trigger 过 / 或 RLS 不允许）
+ *
+ * 调用方拿到 null 应渲染老风险卡（fallback）
+ */
+export async function getRuntimeOrderForDisplay(
+  orderId: string,
+): Promise<{ data?: any; error?: string }> {
+  try {
+    const mode = runtimeConfidenceMode();
+    if (mode === 'off') return { data: null };
+
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { data: null };
+
+    // 灰度阶段：仅 admin 可见
+    if (mode === 'admin') {
+      const { isAdmin } = await getCurrentUserRole(supabase);
+      if (!runtimeConfidenceVisible(isAdmin)) return { data: null };
+    }
+
+    // 走用户 session 读，RLS 控制可见性（admin/finance/管理助理/生产主管全量；其他只看相关订单）
+    const { data, error } = await (supabase.from('runtime_orders') as any)
+      .select('order_id, delivery_confidence, risk_level, predicted_finish_date, buffer_days, last_recomputed_at, explain_json, version')
+      .eq('order_id', orderId)
+      .maybeSingle();
+
+    if (error) {
+      console.error(LOG_PREFIX, 'display read failed:', error.message);
+      return { error: error.message };
+    }
+    return { data: data ?? null };
+  } catch (e: any) {
+    console.error(LOG_PREFIX, 'display exception:', e?.message);
     return { error: e?.message || 'unknown' };
   }
 }

@@ -422,11 +422,12 @@ function scoreToRisk(score: number): RuntimeRiskLevel {
 
 function buildHeadline(score: number, level: RuntimeRiskLevel, context?: string): string {
   const emoji = { green: '🟢', yellow: '🟡', orange: '🟠', red: '🔴', gray: '⚪' }[level];
+  // 文案原则：温和、不刺激情绪，让员工看到觉得"系统在帮我"
   const verbal: Record<RuntimeRiskLevel, string> = {
     green:  '准时交付',
     yellow: '交付有压力',
-    orange: '交付风险高',
-    red:    '交付严重风险',
+    orange: '交付需关注',
+    red:    '交付风险高',
     gray:   '数据不足',
   };
   const ctx = context ? `（${context}）` : '';

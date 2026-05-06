@@ -264,7 +264,7 @@ section('Case 6 — 已出运 + 尾款待收（切换付款视角）');
 // CASE 7: 出厂日已过 + 货物未出
 // ──────────────────────────────────────────────────────────
 
-section('Case 7 — 出厂日已过 10 天且货物未出 → red 严重');
+section('Case 7 — 出厂日已过 10 天且货物未出 → red');
 {
   const out = computeDeliveryConfidence({
     order: order('2026-04-26'), // 今天 5-6，超期 10 天
