@@ -219,17 +219,26 @@ export function computeDeliveryConfidence(
     }
   }
 
+  // 交付距离软化（只对"叠加项"生效，worst critical 不被软化）
+  // 理由：1 个关键节点超期 = 真实风险，必须显著降分；
+  //       多个关键节点同时 stuck（=同根因连锁反应）+ 出厂日还远 → 给恢复空间
+  const stackedSoftening: number =
+    factoryDate && remainingDays !== null && remainingDays > 30 ? 0.6 :
+    factoryDate && remainingDays !== null && remainingDays > 14 ? 0.75 :
+    factoryDate && remainingDays !== null && remainingDays >= 7 ? 0.9 :
+    1.0;
+
   // 递减叠加：worst 100% / 2nd 50% / 3rd 25% / 4th 15% / 5th+ 10%；类别总封顶 -40
-  // 同根因往往导致多个关键节点同时 stuck，避免指数化惩罚
   overdueCriticals.sort((a, b) => b.baseHit - a.baseHit || b.days - a.days);
   const STACK_FACTORS = [1.0, 0.5, 0.25, 0.15, 0.1];
-  const CRITICAL_OVERDUE_CAP = 40;  // was 50
+  const CRITICAL_OVERDUE_CAP = 40;
   let criticalOverdueTotal = 0;
   for (let i = 0; i < overdueCriticals.length; i++) {
     const { m, days, baseHit } = overdueCriticals[i];
     const factor = STACK_FACTORS[Math.min(i, STACK_FACTORS.length - 1)];
-    let delta = -Math.round(baseHit * factor);
-    // 类别封顶：单一类别总扣分 ≤ -50
+    // worst（i===0）不打折；叠加项才用 distance softening
+    const adjFactor = i === 0 ? factor : factor * stackedSoftening;
+    let delta = -Math.round(baseHit * adjFactor);
     if (-criticalOverdueTotal + -delta > CRITICAL_OVERDUE_CAP) {
       delta = -(CRITICAL_OVERDUE_CAP - (-criticalOverdueTotal));
     }
@@ -259,7 +268,8 @@ export function computeDeliveryConfidence(
     if (overdueDays > 0 && !isBlocked(m.status)) nonCriticalOverdueCount++;
   }
   if (nonCriticalOverdueCount > 0) {
-    const delta = Math.max(-10, -3 * nonCriticalOverdueCount);
+    // 进一步降权：非关键节点本来就影响小，封顶从 -10 降到 -5
+    const delta = Math.max(-5, -2 * nonCriticalOverdueCount);
     reasons.push({
       code: 'noncritical_overdue',
       label: `${nonCriticalOverdueCount} 个非关键节点超期（影响小）`,
