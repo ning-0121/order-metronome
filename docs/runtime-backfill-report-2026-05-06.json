@@ -1,0 +1,131 @@
+{
+  "ranAt": "2026-05-06T18:26:32.023Z",
+  "durationSec": 21,
+  "totals": {
+    "total": 20,
+    "ok": 20,
+    "failed": 0,
+    "skipped": 0
+  },
+  "distribution": {
+    "green": {
+      "count": 0,
+      "pct": "0.0%"
+    },
+    "yellow": {
+      "count": 1,
+      "pct": "5.0%"
+    },
+    "orange": {
+      "count": 0,
+      "pct": "0.0%"
+    },
+    "red": {
+      "count": 19,
+      "pct": "95.0%"
+    },
+    "gray": {
+      "count": 0,
+      "pct": "0.0%"
+    }
+  },
+  "confidence": {
+    "avg": 17,
+    "median": 7,
+    "min": 0,
+    "max": 71
+  },
+  "topRed": [
+    {
+      "order_no": "QM-20260418-008",
+      "customer_name": "rag",
+      "confidence": 0,
+      "topReason": "关键节点【产前样客户确认】已超期 43 天"
+    },
+    {
+      "order_no": "QM-20260418-007",
+      "customer_name": "rag",
+      "confidence": 0,
+      "topReason": "关键节点【财务审核】已超期 15 天"
+    },
+    {
+      "order_no": "QM-20260418-002",
+      "customer_name": "rag",
+      "confidence": 0,
+      "topReason": "关键节点【财务审核】已超期 15 天"
+    },
+    {
+      "order_no": "QM-20260414-003",
+      "customer_name": "巴拿马",
+      "confidence": 0,
+      "topReason": "关键节点【财务审核】已超期 16 天"
+    },
+    {
+      "order_no": "QM-20260409-002",
+      "customer_name": "年年旺",
+      "confidence": 0,
+      "topReason": "关键节点【采购订单下达】已超期 24 天"
+    },
+    {
+      "order_no": "QM-20260406-009",
+      "customer_name": "PITCH",
+      "confidence": 0,
+      "topReason": "关键节点【尾查】已超期 15 天"
+    },
+    {
+      "order_no": "QM-20260406-007",
+      "customer_name": "rag",
+      "confidence": 0,
+      "topReason": "关键节点【采购订单下达】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260406-004",
+      "customer_name": "Habib",
+      "confidence": 0,
+      "topReason": "关键节点【订舱完成】已超期 9 天"
+    },
+    {
+      "order_no": "QM-20260418-005",
+      "customer_name": "rag",
+      "confidence": 5,
+      "topReason": "关键节点【采购订单下达】已超期 11 天"
+    },
+    {
+      "order_no": "QM-20260418-001",
+      "customer_name": "Temu",
+      "confidence": 6,
+      "topReason": "关键节点【采购订单下达】已超期 29 天"
+    }
+  ],
+  "topReasonCodes": [
+    {
+      "code": "critical_step_overdue",
+      "count": 69
+    },
+    {
+      "code": "noncritical_overdue",
+      "count": 20
+    },
+    {
+      "code": "factory_date_passed",
+      "count": 5
+    },
+    {
+      "code": "tight_buffer",
+      "count": 3
+    },
+    {
+      "code": "medium_buffer",
+      "count": 3
+    },
+    {
+      "code": "critical_blocked_no_resolution",
+      "count": 1
+    },
+    {
+      "code": "critical_delayed_but_approved",
+      "count": 1
+    }
+  ],
+  "failedOrders": []
+}

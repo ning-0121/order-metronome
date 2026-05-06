@@ -286,6 +286,42 @@ section('Case 7 — 出厂日已过 10 天且货物未出 → red');
 }
 
 // ──────────────────────────────────────────────────────────
+// CASE 9: 多个关键节点同时 stuck（同根因）→ 递减叠加，不应 0%
+// ──────────────────────────────────────────────────────────
+
+section('Case 9 — 4 个关键节点同时超期（数据维护差） → 递减叠加，避免 0%');
+{
+  const out = computeDeliveryConfidence({
+    order: order('2026-06-30'),
+    milestones: [
+      // 4 个关键节点全部 in_progress 且超期 8+ 天（典型"流程没维护"）
+      ms('finance_approval', '财务审核', '2026-04-15', 'in_progress', { seq: 1, owner_role: 'finance' }),
+      ms('procurement_order_placed', '采购下单', '2026-04-18', 'in_progress', { seq: 2, owner_role: 'procurement' }),
+      ms('production_kickoff', '大货启动', '2026-04-22', 'in_progress', { seq: 3, owner_role: 'production' }),
+      ms('factory_completion', '工厂完成', '2026-04-26', 'in_progress', { seq: 4, owner_role: 'production' }),
+      ms('booking_done', '订舱完成', '2026-06-28', 'pending', { seq: 5 }),
+    ],
+    now: NOW,
+  });
+  console.log('   confidence=', out.confidence, 'level=', out.riskLevel);
+  console.log('   reasons:', out.explain.reasons.map(r => `${r.label}(${r.delta})`));
+  // 旧逻辑：4 × -30 = -120 → 0%
+  // 新逻辑：-30 + -15 + -7 + -4 = -56，封顶 -50 → 50%
+  assert(out.confidence > 30, '不应被惩罚到 < 30%（旧逻辑会到 0%）', `got ${out.confidence}`);
+  assert(out.confidence <= 60, '应仍在 red/orange 范围（确实危险）', `got ${out.confidence}`);
+  // 至少显示 2 条递减叠加（第 4 条可能因 -50 cap 被略过，符合预期）
+  const criticalReasons = out.explain.reasons.filter(r => r.code === 'critical_step_overdue');
+  assert(criticalReasons.length >= 2, '至少显示 2 条递减叠加', `got ${criticalReasons.length}`);
+  // 总扣分不超过 -50
+  const totalCriticalDeduction = criticalReasons.reduce((s, r) => s + r.delta, 0);
+  assert(totalCriticalDeduction >= -50, `critical_step_overdue 总扣分 ≥ -50：实际 ${totalCriticalDeduction}`);
+  // 第一条是 worst（用 100% factor）
+  assert(criticalReasons[0].delta === -30, `worst 扣 -30：实际 ${criticalReasons[0].delta}`);
+  // 第二条 50%
+  assert(criticalReasons[1].delta === -15, `2nd 扣 -15（50%）：实际 ${criticalReasons[1].delta}`);
+}
+
+// ──────────────────────────────────────────────────────────
 // CASE 8: explain 文案语义检查
 // ──────────────────────────────────────────────────────────
 

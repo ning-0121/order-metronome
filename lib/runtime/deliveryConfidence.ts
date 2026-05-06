@@ -166,6 +166,9 @@ export function computeDeliveryConfidence(
     m => !isDone(m.status) && isCriticalStep(m.step_key),
   );
 
+  // 收集"普通超期"的关键节点（blocked / 已批延期单独立刻扣分）
+  const overdueCriticals: Array<{ m: any; days: number; baseHit: number }> = [];
+
   for (const m of undoneCritical) {
     const due = m.due_at ? new Date(m.due_at) : null;
     const overdueDays = due ? daysBetween(now, due) : 0;
@@ -184,7 +187,6 @@ export function computeDeliveryConfidence(
       score -= 35;
       continue;
     }
-    // blocked + 已申请未审批 → 中等扣分
     if (blocked && pendingDelay) {
       reasons.push({
         code: 'critical_blocked_pending_approval',
@@ -196,7 +198,6 @@ export function computeDeliveryConfidence(
       continue;
     }
 
-    // 已被批准延期覆盖 → 不扣或仅小扣（缓冲提示）
     if (coveredByDelay) {
       reasons.push({
         code: 'critical_delayed_but_approved',
@@ -208,23 +209,43 @@ export function computeDeliveryConfidence(
       continue;
     }
 
-    // 关键节点超期（无延期处理）
+    // 关键节点超期（无延期处理）→ 收集后递减叠加
     if (overdueDays > 0) {
-      let delta = 0;
-      let weight: ConfidenceReason['weight'] = 'medium';
-      if (overdueDays >= 8)      { delta = -30; weight = 'critical'; }
-      else if (overdueDays >= 3) { delta = -20; weight = 'high'; }
-      else                       { delta = -10; weight = 'medium'; }
-
-      reasons.push({
-        code: 'critical_step_overdue',
-        label: `关键节点【${m.name}】已超期 ${overdueDays} 天`,
-        delta,
-        weight,
-      });
-      score += delta;
+      let baseHit = 0;
+      if (overdueDays >= 8)      baseHit = 30;
+      else if (overdueDays >= 3) baseHit = 20;
+      else                       baseHit = 10;
+      overdueCriticals.push({ m, days: overdueDays, baseHit });
     }
-    // 未到期 / 提前完成 → 不扣分
+  }
+
+  // 递减叠加：worst 100% / 2nd 50% / 3rd 25% / 4th 15% / 5th+ 10%；类别总封顶 -50
+  // 同根因往往导致多个关键节点同时 stuck，避免指数化惩罚
+  overdueCriticals.sort((a, b) => b.baseHit - a.baseHit || b.days - a.days);
+  const STACK_FACTORS = [1.0, 0.5, 0.25, 0.15, 0.1];
+  const CRITICAL_OVERDUE_CAP = 50;
+  let criticalOverdueTotal = 0;
+  for (let i = 0; i < overdueCriticals.length; i++) {
+    const { m, days, baseHit } = overdueCriticals[i];
+    const factor = STACK_FACTORS[Math.min(i, STACK_FACTORS.length - 1)];
+    let delta = -Math.round(baseHit * factor);
+    // 类别封顶：单一类别总扣分 ≤ -50
+    if (-criticalOverdueTotal + -delta > CRITICAL_OVERDUE_CAP) {
+      delta = -(CRITICAL_OVERDUE_CAP - (-criticalOverdueTotal));
+    }
+    if (delta === 0) break;
+    criticalOverdueTotal += delta;
+    const weight: ConfidenceReason['weight'] =
+      i === 0 ? (days >= 8 ? 'critical' : 'high') : (i <= 1 ? 'medium' : 'low');
+    reasons.push({
+      code: 'critical_step_overdue',
+      label: i === 0
+        ? `关键节点【${m.name}】已超期 ${days} 天`
+        : `叠加：【${m.name}】超期 ${days} 天（递减计入）`,
+      delta,
+      weight,
+    });
+    score += delta;
   }
 
   // ─── C. 非关键节点超期（小幅扣分，封顶 -10）
@@ -248,17 +269,24 @@ export function computeDeliveryConfidence(
     score += delta;
   }
 
-  // ─── D. 出厂日已过但货物未出 → 强力扣分
+  // ─── D. 出厂日已过但货物未出
+  // 注意：和"工厂完成超期"高度重合，已扣分时减弱权重避免双计
   if (factoryDate && remainingDays !== null && remainingDays < 0) {
     const overByDays = Math.abs(remainingDays);
-    const delta = overByDays >= 7 ? -25 : -15;
-    reasons.push({
-      code: 'factory_date_passed',
-      label: `出厂日已过 ${overByDays} 天，货物未出运`,
-      delta,
-      weight: 'critical',
-    });
-    score += delta;
+    let baseFD = overByDays >= 7 ? 15 : 10;
+    if (criticalOverdueTotal < 0) {
+      // 已经因关键节点超期扣过分 → 此处只追加 40% 权重
+      baseFD = Math.round(baseFD * 0.4);
+    }
+    if (baseFD > 0) {
+      reasons.push({
+        code: 'factory_date_passed',
+        label: `出厂日已过 ${overByDays} 天，货物未出运`,
+        delta: -baseFD,
+        weight: criticalOverdueTotal < 0 ? 'medium' : 'high',
+      });
+      score -= baseFD;
+    }
   }
   // ─── E. 临近出厂日 + 还有关键工作未完成
   else if (factoryDate && remainingDays !== null && undoneCritical.length > 0) {
