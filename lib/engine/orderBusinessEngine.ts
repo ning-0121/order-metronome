@@ -272,6 +272,63 @@ function getActivelyOverdueMilestones(milestones: any[]): any[] {
   });
 }
 
+/**
+ * Phase 1 简化版关键路径节点 — 真正影响最终交付的节点
+ * 这些节点延期会直接拖累出厂日；其它节点（如确认链单项、附件类）影响小
+ */
+const CRITICAL_STEP_KEYS = new Set<string>([
+  'finance_approval',
+  'procurement_order_placed',
+  'pre_production_sample_approved',
+  'production_kickoff',
+  'final_qc_check',
+  'factory_completion',
+  'booking_done',
+  'domestic_delivery',
+]);
+
+/**
+ * 找到"下一个挡路的关键节点"——未完成的、最早的、关键路径上的节点
+ * 用来回答："下一步要做什么、谁卡着"
+ */
+export function getNextCriticalBlocker(milestones: any[]): {
+  step_key: string;
+  name: string;
+  due_at: string | null;
+  status: string;
+  owner_role: string | null;
+  daysOverdue: number; // > 0 = 已逾期
+  daysUntil: number;   // > 0 = 还有几天到期
+} | null {
+  const undone = milestones
+    .filter(m =>
+      !['done', '已完成', 'completed'].includes(m.status) &&
+      CRITICAL_STEP_KEYS.has(m.step_key)
+    )
+    .sort((a, b) => {
+      const ax = a.sequence_number ?? 999;
+      const bx = b.sequence_number ?? 999;
+      if (ax !== bx) return ax - bx;
+      const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+      const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+      return ad - bd;
+    });
+  const next = undone[0];
+  if (!next) return null;
+  const now = Date.now();
+  const due = next.due_at ? new Date(next.due_at).getTime() : null;
+  const daysDelta = due !== null ? Math.ceil((now - due) / 86400000) : 0;
+  return {
+    step_key: next.step_key,
+    name: next.name,
+    due_at: next.due_at || null,
+    status: next.status,
+    owner_role: next.owner_role || null,
+    daysOverdue: daysDelta > 0 ? daysDelta : 0,
+    daysUntil: daysDelta < 0 ? Math.abs(daysDelta) : 0,
+  };
+}
+
 /** 判断货物是否已出运（用于切换到后出货风险视角） */
 function isOrderShipped(milestones: any[]): boolean {
   const shipmentSteps = ['booking_done', 'shipment_execute', 'customs_export', 'domestic_delivery'];
@@ -315,21 +372,30 @@ export function calculateBusinessRisk(input: EngineInput): {
     factors.push('新客户+新工厂'); score += 10;
   }
 
-  // 里程碑逾期（只计入仍在积极影响订单的节点，排除历史逾期）
-  const activeOverdue = getActivelyOverdueMilestones(input.milestones);
-  if (activeOverdue.length > 0) {
-    factors.push(`${activeOverdue.length} 个节点逾期`); score += activeOverdue.length * 5;
+  // 前瞻式风险：找下一个挡路的关键节点（替代历史"X 个节点逾期"）
+  // Phase 1 简化：只看关键路径节点；blocked / 进行中 / 未开始统一处理
+  const blocker = getNextCriticalBlocker(input.milestones);
+  if (blocker) {
+    if (blocker.status === 'blocked' || blocker.status === '阻塞' || blocker.status === '卡单') {
+      factors.push(`关键节点【${blocker.name}】被卡住`); score += 25;
+    } else if (blocker.daysOverdue >= 7) {
+      factors.push(`【${blocker.name}】已超期 ${blocker.daysOverdue} 天，影响最终交付`); score += 25;
+    } else if (blocker.daysOverdue >= 3) {
+      factors.push(`【${blocker.name}】超期 ${blocker.daysOverdue} 天`); score += 15;
+    } else if (blocker.daysOverdue > 0) {
+      factors.push(`【${blocker.name}】略有延误（${blocker.daysOverdue} 天）`); score += 5;
+    }
+    // daysUntil > 0：尚未到期，不算风险
   }
 
   // 后出货风险（货物已出运时补充）
   if (isOrderShipped(input.milestones)) {
-    const payment = calculatePaymentStatus(input);
-    if (payment.value === 'pending' || payment.value === 'partial') {
-      // 已由付款风险部分计入，不重复加分
-    }
-    // 如果出货了但没有尾款到期日，提示尾款跟进风险
+    // 已由付款风险部分计入，不重复加分
     if (input.financials && !input.financials.balance_due_date && payment.value !== 'received') {
-      factors.push('尾款跟进'); score += 10;
+      factors.push('已出货 · 客户尾款待跟进'); score += 10;
+    }
+    if (payment.value === 'pending' || payment.value === 'partial') {
+      // 出货后的核心风险是尾款，不是节点
     }
   }
 
@@ -466,19 +532,35 @@ export function calculateDelayRisk(input: EngineInput): StatusResult<'none' | 'l
     };
   }
 
-  // 里程碑逾期（只计仍在积极影响订单的节点）
-  const activeOverdueCount = getActivelyOverdueMilestones(input.milestones).length;
+  // 前瞻式延期风险：看下一个关键节点
+  const blocker = getNextCriticalBlocker(input.milestones);
+  if (blocker) {
+    if (blocker.status === 'blocked' || blocker.status === '阻塞' || blocker.status === '卡单') {
+      return {
+        value: 'high',
+        level: 'red',
+        explain: `下一关键节点【${blocker.name}】被卡住，需立即解决（剩 ${remaining} 天出厂）`,
+      };
+    }
+    if (blocker.daysOverdue >= 7 || (blocker.daysOverdue >= 3 && remaining <= 14)) {
+      return {
+        value: 'high',
+        level: 'red',
+        explain: `【${blocker.name}】超期 ${blocker.daysOverdue} 天 · 剩 ${remaining} 天出厂，可能影响交付`,
+      };
+    }
+    if (blocker.daysOverdue > 0) {
+      return {
+        value: 'medium',
+        level: 'yellow',
+        explain: `【${blocker.name}】略有延误（${blocker.daysOverdue} 天）· 剩 ${remaining} 天出厂`,
+      };
+    }
+  }
 
-  if (activeOverdueCount >= 3) {
-    return { value: 'high', level: 'red', explain: `${activeOverdueCount} 个节点逾期，延期风险极高` };
-  }
-  if (activeOverdueCount >= 1 && remaining <= 14) {
-    return { value: 'medium', level: 'yellow', explain: `${activeOverdueCount} 个节点逾期，剩 ${remaining} 天` };
-  }
   if (remaining <= 7) {
-    return { value: 'medium', level: 'yellow', explain: `距出厂仅 ${remaining} 天` };
+    return { value: 'medium', level: 'yellow', explain: `距出厂仅 ${remaining} 天，关注关键节点进度` };
   }
-
   return { value: 'none', level: 'green', explain: `距出厂 ${remaining} 天，进度正常` };
 }
 
