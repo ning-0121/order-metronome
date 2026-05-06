@@ -212,18 +212,18 @@ export function computeDeliveryConfidence(
     // 关键节点超期（无延期处理）→ 收集后递减叠加
     if (overdueDays > 0) {
       let baseHit = 0;
-      if (overdueDays >= 8)      baseHit = 30;
-      else if (overdueDays >= 3) baseHit = 20;
-      else                       baseHit = 10;
+      if (overdueDays >= 8)      baseHit = 25;  // was 30
+      else if (overdueDays >= 3) baseHit = 15;  // was 20
+      else                       baseHit = 8;   // was 10
       overdueCriticals.push({ m, days: overdueDays, baseHit });
     }
   }
 
-  // 递减叠加：worst 100% / 2nd 50% / 3rd 25% / 4th 15% / 5th+ 10%；类别总封顶 -50
+  // 递减叠加：worst 100% / 2nd 50% / 3rd 25% / 4th 15% / 5th+ 10%；类别总封顶 -40
   // 同根因往往导致多个关键节点同时 stuck，避免指数化惩罚
   overdueCriticals.sort((a, b) => b.baseHit - a.baseHit || b.days - a.days);
   const STACK_FACTORS = [1.0, 0.5, 0.25, 0.15, 0.1];
-  const CRITICAL_OVERDUE_CAP = 50;
+  const CRITICAL_OVERDUE_CAP = 40;  // was 50
   let criticalOverdueTotal = 0;
   for (let i = 0; i < overdueCriticals.length; i++) {
     const { m, days, baseHit } = overdueCriticals[i];
@@ -270,23 +270,18 @@ export function computeDeliveryConfidence(
   }
 
   // ─── D. 出厂日已过但货物未出
-  // 注意：和"工厂完成超期"高度重合，已扣分时减弱权重避免双计
+  // 这是"硬信号"——出厂日过了就是过了，无论是哪个关键节点超期都重要。
+  // 故意保留与"工厂完成超期"的轻度双计，确保此场景稳定 red。
   if (factoryDate && remainingDays !== null && remainingDays < 0) {
     const overByDays = Math.abs(remainingDays);
-    let baseFD = overByDays >= 7 ? 15 : 10;
-    if (criticalOverdueTotal < 0) {
-      // 已经因关键节点超期扣过分 → 此处只追加 40% 权重
-      baseFD = Math.round(baseFD * 0.4);
-    }
-    if (baseFD > 0) {
-      reasons.push({
-        code: 'factory_date_passed',
-        label: `出厂日已过 ${overByDays} 天，货物未出运`,
-        delta: -baseFD,
-        weight: criticalOverdueTotal < 0 ? 'medium' : 'high',
-      });
-      score -= baseFD;
-    }
+    const baseFD = overByDays >= 7 ? 15 : 10;
+    reasons.push({
+      code: 'factory_date_passed',
+      label: `出厂日已过 ${overByDays} 天，货物未出运`,
+      delta: -baseFD,
+      weight: 'high',
+    });
+    score -= baseFD;
   }
   // ─── E. 临近出厂日 + 还有关键工作未完成
   else if (factoryDate && remainingDays !== null && undoneCritical.length > 0) {
