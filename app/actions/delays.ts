@@ -531,6 +531,28 @@ async function approveDelayRequestCore(
     });
   }
 
+  // ── Runtime Hook 2: delay 批准 → 异步重算 confidence
+  void (async () => {
+    try {
+      const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');
+      await recomputeDeliveryConfidence(orderData.id, {
+        type: 'delay_approved',
+        source: `delay_request:${delayRequestId}`,
+        severity: 'info',
+        payload: {
+          delay_request_id: delayRequestId,
+          milestone_id: delayRequestData.milestone_id,
+          new_due_at: delayRequestData.proposed_new_due_at,
+          new_anchor: delayRequestData.proposed_new_anchor_date,
+          delay_days: delayRequestData.delay_days,
+        },
+        triggeredBy: user.id,
+      });
+    } catch (e: any) {
+      console.error('[runtime-hook]', 'delay_approved hook crashed:', e?.message);
+    }
+  })();
+
   revalidatePath(`/orders/${orderData.id}`);
   revalidatePath('/admin');
   revalidatePath('/dashboard');

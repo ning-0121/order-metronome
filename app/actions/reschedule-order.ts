@@ -219,6 +219,28 @@ export async function applyReschedule(
     note: `[重排排期] 新上线日：${newProductionStartDate}，生产周期：${productionCycleDays} 天，更新 ${updatedCount} 个节点。${note?.trim() ? '备注：' + note.trim() : ''}`,
   });
 
+  // ── Runtime Hook 4: amendment 应用 → 异步重算 confidence
+  void (async () => {
+    try {
+      const { recomputeDeliveryConfidence } = await import('./runtime-confidence');
+      await recomputeDeliveryConfidence(orderId, {
+        type: 'amendment_applied',
+        source: 'reschedule-order',
+        severity: 'info',
+        payload: {
+          new_production_start: newProductionStartDate,
+          production_cycle_days: productionCycleDays,
+          new_factory_date: newFactoryDate,
+          milestones_shifted: updatedCount,
+          note: note || null,
+        },
+        triggeredBy: user.id,
+      });
+    } catch (e: any) {
+      console.error('[runtime-hook]', 'amendment_applied hook crashed:', e?.message);
+    }
+  })();
+
   revalidatePath(`/orders/${orderId}`);
   return { data: { updatedCount, newFactoryDate } };
 }

@@ -620,11 +620,11 @@ export async function updateMilestone(
     .eq('id', id)
     .select()
     .single();
-  
+
   if (error) {
     return { error: error.message };
   }
-  
+
   // 记录更新日志（非状态转换）
   if (!sanitized.status && currentMilestone) {
     const currentStatus = mapDbEnumToStatus(currentMilestone.status);
@@ -638,8 +638,42 @@ export async function updateMilestone(
       '里程碑信息已更新'
     );
   }
-  
+
+  // ── Runtime Hook 1: milestone 状态/截止变更 → 异步重算 confidence
+  // fire-and-forget，永不阻塞主链路；recompute 内部已 catch 所有错
+  if (currentMilestone?.order_id && (sanitized.status || sanitized.due_at || sanitized.planned_at)) {
+    fireRuntimeRecompute(currentMilestone.order_id, {
+      type: 'milestone_status_changed',
+      source: `milestone:${id}`,
+      severity: sanitized.status === 'blocked' ? 'warning' : 'info',
+      payload: {
+        milestone_id: id,
+        new_status: sanitized.status,
+        new_due_at: sanitized.due_at,
+        old_status: currentMilestone.status,
+      },
+    });
+  }
+
   return { data };
+}
+
+/**
+ * Fire-and-forget runtime confidence 重算
+ * 动态导入避免 server action 循环依赖，并保证主链路绝不被阻塞或失败
+ */
+function fireRuntimeRecompute(orderId: string, event: any): void {
+  void (async () => {
+    try {
+      const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');
+      const r = await recomputeDeliveryConfidence(orderId, event);
+      if (!r.ok && !r.skipped) {
+        console.warn('[runtime-hook]', 'milestone hook recompute returned error:', r.error);
+      }
+    } catch (e: any) {
+      console.error('[runtime-hook]', 'milestone hook crashed:', e?.message);
+    }
+  })();
 }
 
 /**

@@ -177,6 +177,21 @@ async function executeSideEffects(
   // 1. 重算节拍器（改交期 / 改贸易条款）
   if (effects.has('recalc_schedule')) {
     try { await recalcOrderMilestones(orderId); } catch {}
+    // ── Runtime Hook 3: anchor 变更（出厂日 / ETD / 仓库截止）→ 异步重算 confidence
+    void (async () => {
+      try {
+        const { recomputeDeliveryConfidence } = await import('./runtime-confidence');
+        await recomputeDeliveryConfidence(orderId, {
+          type: 'anchor_changed',
+          source: `amendment:recalc_schedule`,
+          severity: 'info',
+          payload: { effects: Array.from(effects) },
+          triggeredBy: actorUserId,
+        });
+      } catch (e: any) {
+        console.error('[runtime-hook]', 'anchor_changed hook crashed:', e?.message);
+      }
+    })();
   }
 
   // 2. 重置「包装方式确认」节点 → in_progress + 清空 evidence
