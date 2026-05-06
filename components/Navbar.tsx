@@ -46,9 +46,9 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
       ]
     : [
         { href: '/dashboard', label: '我的工作台', icon: '📋' },
+        { href: '/my-customers', label: '我的客户', icon: '🎯' },
         { href: '/orders', label: '订单列表', icon: '📦' },
         { href: '/briefing', label: '今日简报', icon: '📧' },
-        { href: '/memos', label: '备忘录', icon: '📝' },
       ];
 
   // 更多菜单分组（admin）
@@ -57,6 +57,8 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         {
           label: '业务工具',
           links: [
+            { href: '/my-customers', label: '我的客户面板', icon: '👤' },
+            { href: '/sales-targets', label: '客户年度目标', icon: '🎯' },
             { href: '/quoter',     label: '报价员',   icon: '💰' },
             { href: '/customers',  label: '客户管理', icon: '🤝' },
             { href: '/factories',  label: '工厂管理', icon: '🏭' },
@@ -105,7 +107,9 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
   const moreLinks = isAdmin
     ? moreGroups.flatMap(g => g.links)
     : [
+        { href: '/sales-targets', label: '年度目标', icon: '🎯' },
         { href: '/quoter',       label: '报价员',   icon: '💰' },
+        { href: '/memos',        label: '备忘录',   icon: '📝' },
         { href: '/my-assistant', label: 'AI 助手',  icon: '🤖' },
         { href: '/guide',        label: '操作说明', icon: '📖' },
       ];
