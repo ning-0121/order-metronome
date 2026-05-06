@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { isOverdue, addWorkingDays, ensureBusinessDay } from '@/lib/utils/date';
 import {
@@ -389,15 +389,20 @@ export async function markMilestoneDone(
     }
   }
 
-  // Check if evidence is required and exists（三重检查）
+  // Check if evidence is required and exists（多重检查 — 用 service-role 绕过 RLS，
+  // 否则非 admin 用户的 RLS 会过滤掉附件，导致明明有文件却卡住"需要凭证"）
   if (milestone.evidence_required) {
+    const sysClient = (() => {
+      try { return createServiceRoleClient(); } catch { return supabase; }
+    })();
+
     // 检查1: milestone_id 关联的附件（attachments 表）
-    const { data: att1 } = await (supabase.from('attachments') as any)
+    const { data: att1 } = await (sysClient.from('attachments') as any)
       .select('id')
       .eq('milestone_id', milestoneId)
       .limit(1);
     // 检查2: milestone_id 关联的附件（order_attachments 表）
-    const { data: att2 } = await (supabase.from('order_attachments') as any)
+    const { data: att2 } = await (sysClient.from('order_attachments') as any)
       .select('id')
       .eq('milestone_id', milestoneId)
       .limit(1);
@@ -425,7 +430,7 @@ export async function markMilestoneDone(
     let att3: any[] = [];
     const expectedTypes = stepToFileType[milestone.step_key];
     if (expectedTypes && milestone.order_id) {
-      const { data } = await (supabase.from('order_attachments') as any)
+      const { data } = await (sysClient.from('order_attachments') as any)
         .select('id')
         .eq('order_id', milestone.order_id)
         .in('file_type', expectedTypes)
@@ -436,7 +441,7 @@ export async function markMilestoneDone(
     // 检查4: 兜底 — 按 order_id + storage_path 前缀匹配（file_type 写入失败时的降级）
     let att4: any[] = [];
     if (att3.length === 0 && milestone.order_id && milestone.step_key) {
-      const { data } = await (supabase.from('order_attachments') as any)
+      const { data } = await (sysClient.from('order_attachments') as any)
         .select('id')
         .eq('order_id', milestone.order_id)
         .ilike('storage_path', `%/${milestone.step_key}_%`)
@@ -456,7 +461,7 @@ export async function markMilestoneDone(
       };
       const keyword = stepNameMap[milestone.step_key];
       if (keyword) {
-        const { data } = await (supabase.from('order_attachments') as any)
+        const { data } = await (sysClient.from('order_attachments') as any)
           .select('id')
           .eq('order_id', milestone.order_id)
           .ilike('file_name', `%${keyword}%`)
@@ -471,7 +476,7 @@ export async function markMilestoneDone(
       const missing: string[] = [];
       const typeNames: Record<string, string> = { production_order: '生产订单', trims_sheet: '原辅料单' };
       for (const ft of requiredTypes) {
-        const { data: found } = await (supabase.from('order_attachments') as any)
+        const { data: found } = await (sysClient.from('order_attachments') as any)
           .select('id')
           .eq('order_id', milestone.order_id)
           .eq('file_type', ft)
