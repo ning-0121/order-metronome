@@ -30,16 +30,31 @@ type MilestoneLogAction =
   | 'execution_note';
 
 /**
+ * "后生命周期节点" — 设计上就在订单已出运 / 已完成之后才更新的节点，
+ * 不应该被 lifecycle_status='completed' 的检查拦截。
+ *
+ * 例如：收款完成节点的计划日期 = anchor + 30 天，
+ *      出运后才需要财务跟进入账。
+ */
+const POST_LIFECYCLE_STEP_KEYS = new Set<string>([
+  'payment_received',         // 收款完成（财务跟进客户尾款）
+  'retrospective_completed',  // 订单复盘（业务/管理员事后总结）
+]);
+
+/**
  * 检查订单是否允许修改关卡
  * - 普通角色：已完成 / 已取消订单禁止操作
  * - 管理员：可强制操作（用于历史数据修复 / 状态回滚）
+ * - 后生命周期节点（如 收款 / 复盘）：豁免，任何角色任何状态都可操作
  */
 async function checkOrderModifiable(
   supabase: any,
   orderId: string,
   isAdmin: boolean = false,
+  stepKey?: string,
 ): Promise<string | null> {
   if (isAdmin) return null; // 管理员后门：任意状态都允许操作
+  if (stepKey && POST_LIFECYCLE_STEP_KEYS.has(stepKey)) return null; // 出运后节点豁免
   const { data: order } = await (supabase.from('orders') as any)
     .select('lifecycle_status')
     .eq('id', orderId)
@@ -182,8 +197,8 @@ export async function markMilestoneDone(
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdmin = isAdminRole(userRoles);
 
-  // 生命周期校验：已完成/已取消的订单禁止操作（管理员可强制）
-  const lifecycleError = await checkOrderModifiable(supabase, milestone.order_id, isAdmin);
+  // 生命周期校验：已完成/已取消的订单禁止操作（管理员可强制；后生命周期节点豁免）
+  const lifecycleError = await checkOrderModifiable(supabase, milestone.order_id, isAdmin, milestone.step_key);
   if (lifecycleError) return { error: lifecycleError };
 
   // 管理员可以代标完成（用于一线人员离职/休假的应急场景），但日志会标注「管理员代操作」
@@ -823,8 +838,8 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdminUser = isAdminRole(userRoles);
-  // 生命周期校验（管理员可强制）
-  const lifecycleErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUser);
+  // 生命周期校验（管理员可强制；后生命周期节点豁免）
+  const lifecycleErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUser, milestone.step_key);
   if (lifecycleErr) return { error: lifecycleErr };
 
   const isAssignedUser = milestone.owner_user_id === user.id;
@@ -1045,7 +1060,7 @@ export async function updateMilestoneStatus(
     const { data: profileLc } = await supabase
       .from('profiles').select('role, roles').eq('user_id', userLc.id).single();
     const lcRoles: string[] = (profileLc as any)?.roles?.length > 0 ? (profileLc as any).roles : [(profileLc as any)?.role].filter(Boolean);
-    const lcErr = await checkOrderModifiable(supabase, (milestone as any).order_id, lcRoles.includes('admin'));
+    const lcErr = await checkOrderModifiable(supabase, (milestone as any).order_id, lcRoles.includes('admin'), (milestone as any).step_key);
     if (lcErr) return { error: lcErr };
   }
   
@@ -1155,8 +1170,8 @@ export async function markMilestoneUnblocked(milestoneId: string) {
     return { error: '无权操作：仅管理员 / 订单创建者 / 跟单 / 节点执行人可解除卡住' };
   }
 
-  // 生命周期校验（非 admin 也按非强制走标准校验）
-  const lcErr = await checkOrderModifiable(supabase, msForCheck.order_id, isAdmin);
+  // 生命周期校验（非 admin 也按非强制走标准校验；后生命周期节点豁免）
+  const lcErr = await checkOrderModifiable(supabase, msForCheck.order_id, isAdmin, msForCheck.step_key);
   if (lcErr) return { error: lcErr };
 
   // 使用状态机转换（卡住 -> 进行中）
@@ -1567,8 +1582,8 @@ export async function saveChecklistData(
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdminUserCl = isAdminRole(userRoles);
 
-  // 生命周期校验（管理员可强制）
-  const lcErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUserCl);
+  // 生命周期校验（管理员可强制；后生命周期节点豁免）
+  const lcErr = await checkOrderModifiable(supabase, milestone.order_id, isAdminUserCl, milestone.step_key);
   if (lcErr) return { error: lcErr };
 
   // 角色校验：只能编辑自己角色对应的检查项（管理员一般不受限）

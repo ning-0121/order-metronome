@@ -43,7 +43,63 @@ delay_requests    — 延期申请
 notifications     — 系统通知
 order_attachments — 附件上传
 order_sequences   — 订单号自动序列（新增）
+
+# Runtime Engine Phase 1（2026-05-06）— Order Metronome 2.0
+runtime_events    — 投影层 append-only 事件源
+runtime_orders    — 每订单最新交付置信度状态（含 explain_json）
+customer_sales_targets — 客户年度销售目标（农历年）
 ```
+
+---
+
+## Runtime Engine Phase 1（"Delivery Confidence"）
+
+### 核心理念
+从「节点没按时完成 = 红」（流程合规）转向「订单能不能按时交付 = 健康度」（交付导向）。
+风险卡显示 4 个维度：**为什么 / 哪个节点 / 影响交付吗 / 下一步谁该做什么**。
+
+### 关键文件
+| 类型 | 路径 |
+|------|------|
+| 纯计算引擎 | `lib/runtime/deliveryConfidence.ts` |
+| 关键节点定义 | `lib/runtime/criticalNodes.ts` |
+| 类型 | `lib/runtime/types.ts` |
+| 投影器 + UI 读取 | `app/actions/runtime-confidence.ts` |
+| UI 卡片 | `components/RuntimeRiskCard.tsx` |
+| 单元测试 | `scripts/test-runtime-confidence.ts` |
+| 集成测试 | `scripts/test-recompute-confidence.ts` |
+| 一次性回填 | `scripts/backfill-runtime-confidence.ts` |
+| 设计文档 | `docs/runtime-phase1.md` |
+
+### 4 个钩子（fire-and-forget，永不阻塞主链路）
+- `lib/repositories/milestonesRepo.ts updateMilestone` 成功后 → `milestone_status_changed`
+- `app/actions/delays.ts approveDelayRequestCore` 末尾 → `delay_approved`
+- `app/actions/order-amendments.ts executeSideEffects(recalc_schedule)` → `anchor_changed`
+- `app/actions/reschedule-order.ts applyReschedule` 末尾 → `amendment_applied`
+
+### Feature Flag — `RUNTIME_CONFIDENCE_ENGINE`
+| 取值 | 行为 |
+|------|------|
+| `off`（默认） | 全员看老风险卡，钩子触发后 5ms 内 skipped 返回 |
+| `admin` | 灰度，仅 admin 看新卡 |
+| `on` | 全员（受 RLS 限制）看新卡 |
+
+**回滚**：把 env 改回 `off` 即可，DB 表保留无害。
+
+### 算法关键参数（已经过 4 轮调参）
+- 关键节点超期：8+天 -25 / 3-7天 -15 / 1-2天 -8
+- 类别封顶 -40
+- 递减叠加：worst 100% / 2nd 50% / 3rd 25% / 4th 15% / 5th+ 10%
+- 距离软化：factory_date >30天 ×0.6 / 14-30天 ×0.75 / 7-14天 ×0.9 / <7天或已过 不软化
+- 软化只对叠加项生效，worst critical 不被软化
+- 非关键节点超期总封顶 -5
+
+### 投影口径
+- 数据来源：现有 milestones / delay_requests / order_financials（不双轨）
+- 不修改任何业务表
+- runtime_events 永不 update/delete（append-only）
+- runtime_orders 用 version 列做乐观并发，冲突重试 1 次
+- service-role 写，user-session 读（RLS）
 
 ---
 

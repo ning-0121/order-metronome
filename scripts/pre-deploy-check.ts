@@ -162,7 +162,65 @@ for (const flag of requiredFlags) {
   assert(typeof AGENT_FLAGS[flag]() === 'boolean', `Flag ${flag}() 返回 boolean`);
 }
 
-// ════ 6. 行业知识库完整性 ════
+// ════ 6. Runtime Engine Phase 1 完整性 ════
+console.log('\n⚡ Runtime Engine');
+const {
+  CRITICAL_STEP_KEYS,
+  isCriticalStep,
+  isShipmentStep,
+  STEP_WEIGHT,
+} = require('../lib/runtime/criticalNodes');
+assert(CRITICAL_STEP_KEYS instanceof Set, 'CRITICAL_STEP_KEYS 是 Set');
+assert(CRITICAL_STEP_KEYS.size >= 6, `关键节点 ${CRITICAL_STEP_KEYS.size} 个 (≥6)`);
+const requiredCriticalKeys = [
+  'finance_approval',
+  'production_kickoff',
+  'factory_completion',
+  'booking_done',
+  'domestic_delivery',
+];
+for (const k of requiredCriticalKeys) {
+  assert(isCriticalStep(k), `关键节点包含 ${k}`);
+}
+assert(isShipmentStep('booking_done'), '出运节点识别正常');
+assert(STEP_WEIGHT.production_kickoff === 'critical', 'production_kickoff 权重为 critical');
+
+const { computeDeliveryConfidence, findNextCriticalBlocker } = require('../lib/runtime/deliveryConfidence');
+assert(typeof computeDeliveryConfidence === 'function', 'computeDeliveryConfidence 已导出');
+assert(typeof findNextCriticalBlocker === 'function', 'findNextCriticalBlocker 已导出');
+
+// 算法 smoke test：空订单不崩
+const smokeOut = computeDeliveryConfidence({
+  order: { id: 'x', factory_date: null },
+  milestones: [],
+  now: new Date('2026-05-07T00:00:00Z'),
+});
+assert(typeof smokeOut.confidence === 'number', 'smoke: 空订单返回 confidence 数字');
+assert(smokeOut.confidence >= 0 && smokeOut.confidence <= 100, 'smoke: confidence ∈ [0, 100]');
+assert(['green', 'yellow', 'orange', 'red', 'gray'].includes(smokeOut.riskLevel),
+  'smoke: riskLevel 合法');
+assert(smokeOut.explain && typeof smokeOut.explain.headline === 'string',
+  'smoke: explain.headline 是字符串');
+
+// Runtime feature flag helpers 存在
+const {
+  runtimeConfidenceMode,
+  runtimeProjectionEnabled,
+  runtimeConfidenceVisible,
+} = require('../lib/engine/featureFlags');
+assert(typeof runtimeConfidenceMode === 'function', 'runtimeConfidenceMode() 存在');
+assert(['off', 'admin', 'on'].includes(runtimeConfidenceMode()),
+  `runtimeConfidenceMode() 返回值合法：${runtimeConfidenceMode()}`);
+assert(typeof runtimeProjectionEnabled === 'function', 'runtimeProjectionEnabled() 存在');
+assert(typeof runtimeConfidenceVisible === 'function', 'runtimeConfidenceVisible() 存在');
+
+// 部署期保护：默认应该是 off（除非显式开启）
+const currentMode = runtimeConfidenceMode();
+if (currentMode !== 'off') {
+  console.log(`  ⚠️  RUNTIME_CONFIDENCE_ENGINE = ${currentMode}（确认是预期的灰度配置）`);
+}
+
+// ════ 7. 行业知识库完整性 ════
 console.log('\n📚 行业知识');
 const { FABRIC_RISKS, QUALITY_ISSUES, BEST_PRACTICES } = require('../lib/agent/industryKnowledge');
 assert(Object.keys(FABRIC_RISKS).length >= 4, `面料风险 ${Object.keys(FABRIC_RISKS).length} 种 (≥4)`);

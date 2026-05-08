@@ -1,6 +1,6 @@
 {
-  "ranAt": "2026-05-06T18:39:07.157Z",
-  "durationSec": 24,
+  "ranAt": "2026-05-06T18:45:05.385Z",
+  "durationSec": 18,
   "totals": {
     "total": 20,
     "ok": 20,
@@ -17,12 +17,12 @@
       "pct": "5.0%"
     },
     "orange": {
-      "count": 9,
-      "pct": "45.0%"
+      "count": 11,
+      "pct": "55.0%"
     },
     "red": {
-      "count": 10,
-      "pct": "50.0%"
+      "count": 8,
+      "pct": "40.0%"
     },
     "gray": {
       "count": 0,
@@ -30,77 +30,65 @@
     }
   },
   "confidence": {
-    "avg": 48,
-    "median": 49,
-    "min": 21,
-    "max": 76
+    "avg": 53,
+    "median": 54,
+    "min": 27,
+    "max": 78
   },
   "topRed": [
     {
       "order_no": "QM-20260406-007",
       "customer_name": "rag",
-      "confidence": 21,
+      "confidence": 27,
       "topReason": "关键节点【采购订单下达】被卡住且无延期申请"
     },
     {
       "order_no": "QM-20260409-002",
       "customer_name": "年年旺",
-      "confidence": 35,
+      "confidence": 40,
       "topReason": "关键节点【采购订单下达】已超期 24 天"
     },
     {
       "order_no": "QM-20260406-009",
       "customer_name": "PITCH",
-      "confidence": 35,
+      "confidence": 40,
       "topReason": "关键节点【尾查】已超期 15 天"
     },
     {
       "order_no": "QM-20260406-004",
       "customer_name": "Habib",
-      "confidence": 35,
+      "confidence": 40,
       "topReason": "关键节点【尾查】已超期 12 天"
     },
     {
       "order_no": "QM-20260418-001",
       "customer_name": "Temu",
-      "confidence": 38,
+      "confidence": 42,
       "topReason": "关键节点【采购订单下达】已超期 29 天"
     },
     {
       "order_no": "QM-20260418-005",
       "customer_name": "rag",
-      "confidence": 40,
+      "confidence": 45,
       "topReason": "关键节点【采购订单下达】已超期 11 天"
     },
     {
       "order_no": "QM-20260414-003",
       "customer_name": "巴拿马",
-      "confidence": 40,
+      "confidence": 45,
       "topReason": "关键节点【采购订单下达】已超期 84 天"
     },
     {
       "order_no": "QM-20260411-001",
       "customer_name": "EHL",
-      "confidence": 42,
+      "confidence": 47,
       "topReason": "关键节点【采购订单下达】已超期 44 天"
-    },
-    {
-      "order_no": "QM-20260408-004",
-      "customer_name": "杭州杨小姐",
-      "confidence": 47,
-      "topReason": "关键节点【采购订单下达】已超期 22 天"
-    },
-    {
-      "order_no": "QM-20260408-003",
-      "customer_name": "年年旺",
-      "confidence": 47,
-      "topReason": "关键节点【采购订单下达】已超期 22 天"
     }
   ],
   "topReasonCodes": [
     {
       "code": "critical_step_overdue",
-      "count": 51
+      "count": 54
     },
     {
       "code": "noncritical_overdue",
