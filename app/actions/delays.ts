@@ -940,6 +940,167 @@ export async function getImpactedMilestones(delayRequestId: string) {
   return { data: impactedMilestones, error: null };
 }
 
+/**
+ * 订单级二次延期申请
+ *
+ * 场景：出厂日已超期（甚至二次超期），需要正式走审批流程延期出厂日。
+ * 做法：自动找订单中最后一个未完成的出运相关里程碑，对它创建 delay_request，
+ *       并把 proposed_new_anchor_date 设为新出厂日，审批通过后全量重算排期。
+ */
+export async function createOrderLevelDelayRequest(
+  orderId: string,
+  reasonCategory: 'customer' | 'supplier' | 'internal' | 'force_majeure',
+  reasonType: string,
+  reasonDetail: string,
+  newFactoryDate: string,
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Unauthorized' };
+
+  // 生命周期校验
+  const { data: orderCheck } = await (supabase.from('orders') as any)
+    .select('lifecycle_status, order_no, customer_name, incoterm, factory_date, etd, warehouse_due_date, created_by, owner_user_id')
+    .eq('id', orderId).single();
+  if (!orderCheck) return { error: '订单不存在' };
+  const ls = orderCheck.lifecycle_status;
+  if (ls === 'completed' || ls === '已完成') return { error: '该订单已完成，不能申请延期' };
+  if (ls === 'cancelled' || ls === '已取消') return { error: '该订单已取消，不能申请延期' };
+
+  // 权限：订单创建者、负责人或管理员可申请
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0
+    ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdmin = isAdminRole(userRoles);
+  const isSales = userRoles.some(r => ['sales', 'merchandiser'].includes(r));
+  const isOwner = orderCheck.created_by === user.id || orderCheck.owner_user_id === user.id;
+  if (!isAdmin && !isSales && !isOwner) {
+    return { error: '仅订单负责人或管理员可申请延期' };
+  }
+
+  // 新出厂日必须晚于今天
+  if (newFactoryDate <= new Date().toISOString().slice(0, 10)) {
+    return { error: '新出厂日期必须晚于今天' };
+  }
+
+  // 找最后一个未完成的出运相关里程碑（优先顺序：booking_done > factory_completion > inspection_release）
+  const SHIPMENT_KEYS = ['booking_done', 'factory_completion', 'inspection_release', 'shipment_completed', 'shipment_done', 'domestic_delivery'];
+  const { data: allMs } = await (supabase.from('milestones') as any)
+    .select('id, step_key, status, due_at, owner_role, owner_user_id, name')
+    .eq('order_id', orderId);
+
+  let targetMilestone: any = null;
+  for (const key of SHIPMENT_KEYS) {
+    const ms = (allMs || []).find((m: any) => m.step_key === key && m.status !== 'done' && m.status !== '已完成');
+    if (ms) { targetMilestone = ms; break; }
+  }
+  // fallback：任意最后一个未完成的里程碑
+  if (!targetMilestone && allMs && allMs.length > 0) {
+    const undone = (allMs as any[]).filter(m => m.status !== 'done' && m.status !== '已完成');
+    targetMilestone = undone[undone.length - 1] || allMs[allMs.length - 1];
+  }
+  if (!targetMilestone) return { error: '未找到可关联的里程碑，无法提交延期申请' };
+
+  // 防重复：同一里程碑不允许有多条 pending 延期请求
+  const { data: existingPending } = await (supabase.from('delay_requests') as any)
+    .select('id').eq('milestone_id', targetMilestone.id).eq('status', 'pending').limit(1);
+  if (existingPending && existingPending.length > 0) {
+    return { error: '该节点已有待审批的延期申请，请等待审批后再提交' };
+  }
+
+  const { DELAY_CATEGORIES } = await import('@/lib/domain/delay-rules');
+  const categoryInfo = DELAY_CATEGORIES[reasonCategory];
+  const currentAnchor = orderCheck.incoterm === 'FOB' ? (orderCheck.factory_date || orderCheck.etd) : orderCheck.warehouse_due_date;
+  const delayDays = currentAnchor
+    ? Math.ceil((new Date(newFactoryDate).getTime() - new Date(currentAnchor).getTime()) / 86400000)
+    : 0;
+
+  const { data: delayRequest, error: insertErr } = await (supabase.from('delay_requests') as any)
+    .insert({
+      order_id: orderId,
+      milestone_id: targetMilestone.id,
+      requested_by: user.id,
+      reason_type: reasonType,
+      reason_category: reasonCategory,
+      reason_detail: reasonDetail,
+      proposed_new_anchor_date: newFactoryDate,
+      proposed_new_due_at: null,
+      requires_customer_approval: categoryInfo.requiresCustomerApproval,
+      delay_days: delayDays,
+      impacts_final_delivery: true,
+      status: 'pending',
+    })
+    .select().single();
+
+  if (insertErr) return { error: insertErr.message };
+
+  await logMilestoneAction(supabase, targetMilestone.id, orderId, 'request_delay',
+    `[二次延期] ${reasonDetail}`, { delay_request_id: (delayRequest as any).id, new_factory_date: newFactoryDate });
+
+  // 通知管理员
+  const requesterName = (profile as any)?.name || user.email?.split('@')[0] || '员工';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com';
+  const orderLink = `${appUrl}/orders/${orderId}?tab=delays`;
+  const subject = `[二次延期申请] ${requesterName} — ${orderCheck.order_no} · 新出厂日 ${newFactoryDate}`;
+  const body = `
+    <div style="font-family:-apple-system,'PingFang SC',sans-serif;max-width:600px;margin:0 auto;">
+      <div style="background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);padding:24px;border-radius:12px 12px 0 0;">
+        <h2 style="color:white;margin:0;font-size:22px;">🔄 二次延期申请待审批</h2>
+        <p style="color:#fecaca;margin:8px 0 0;font-size:14px;">出厂日已超期，申请人申请再次延期</p>
+      </div>
+      <div style="background:white;padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
+        <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+          <tr><td style="padding:8px 0;color:#6b7280;width:100px;">订单号</td>
+              <td style="padding:8px 0;font-weight:600;"><a href="${orderLink}" style="color:#4f46e5;">${orderCheck.order_no}</a></td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;">客户</td>
+              <td style="padding:8px 0;font-weight:600;">${orderCheck.customer_name || '—'}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;">原出厂日</td>
+              <td style="padding:8px 0;">${currentAnchor || '—'}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;">申请新出厂日</td>
+              <td style="padding:8px 0;font-weight:600;color:#dc2626;">${newFactoryDate}（延期 ${delayDays} 天）</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;">延期原因</td>
+              <td style="padding:8px 0;">${reasonType}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;vertical-align:top;">详细说明</td>
+              <td style="padding:8px 0;line-height:1.6;">${escapeHtml(reasonDetail)}</td></tr>
+        </table>
+        <a href="${orderLink}" style="display:inline-block;background:#dc2626;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">去审批处理</a>
+      </div>
+    </div>
+  `;
+  const { data: admins } = await (supabase.from('profiles') as any).select('user_id').or('role.eq.admin,roles.cs.{admin}');
+  const adminUserIds: string[] = [];
+  for (const admin of admins || []) {
+    await (supabase.from('notifications') as any).insert({
+      user_id: admin.user_id,
+      type: 'delay_request',
+      title: `${requesterName} 申请二次延期：${orderCheck.order_no}`,
+      message: `新出厂日：${newFactoryDate}（延期 ${delayDays} 天）\n原因：${reasonDetail.slice(0, 100)}`,
+      related_order_id: orderId,
+      related_milestone_id: targetMilestone.id,
+      status: 'unread',
+    });
+    adminUserIds.push(admin.user_id);
+  }
+  const ccEmails = MANAGER_CC_EMAILS;
+  await sendEmailNotification(ccEmails, subject, body).catch(() => {});
+
+  if (adminUserIds.length > 0) {
+    try {
+      const { pushToUsers } = await import('@/lib/utils/wechat-push');
+      await pushToUsers(supabase, adminUserIds,
+        `🔄 ${requesterName} 申请二次延期`,
+        `订单：${orderCheck.order_no}（${orderCheck.customer_name || '—'}）\n新出厂日：${newFactoryDate}\n原因：${reasonType}\n${reasonDetail.slice(0, 80)}\n\n${orderLink}`
+      );
+    } catch {}
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/admin');
+
+  return { data: delayRequest };
+}
+
 export async function getDelayRequestsByOrder(orderId: string) {
   const supabase = await createClient();
 

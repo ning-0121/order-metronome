@@ -344,7 +344,9 @@ CREATE TABLE IF NOT EXISTS public.daily_tasks (
     'quote_approval',         -- 待我审批的报价
     'profit_warning',         -- 订单利润预警
     'system_alert',           -- 系统告警
-    'email_action'            -- 邮件需要处理
+    'email_action',           -- 邮件需要处理
+    'missing_info',           -- 订单缺失关键信息
+    'decision_required'       -- 需要人工决策的事项
   )),
   priority int NOT NULL DEFAULT 3 CHECK (priority IN (1,2,3)),
   -- 1=紧急（今天必须处理）2=重要（应该处理）3=普通（有空处理）

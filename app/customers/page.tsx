@@ -4,6 +4,28 @@ import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { CustomerEmailMappingPanel } from '@/components/CustomerEmailMappingPanel';
 
+const TIER_STYLES: Record<string, string> = {
+  A: 'bg-indigo-100 text-indigo-700',
+  B: 'bg-blue-100 text-blue-700',
+  C: 'bg-gray-100 text-gray-500',
+};
+
+const FOLLOWUP_STYLES: Record<string, string> = {
+  normal: 'bg-green-100 text-green-700',
+  due: 'bg-yellow-100 text-yellow-700',
+  overdue: 'bg-orange-100 text-orange-700',
+  at_risk: 'bg-red-100 text-red-700',
+  inactive: 'bg-gray-100 text-gray-400',
+};
+
+const FOLLOWUP_LABELS: Record<string, string> = {
+  normal: '正常',
+  due: '待跟进',
+  overdue: '逾期跟进',
+  at_risk: '高风险',
+  inactive: '不活跃',
+};
+
 export default async function CustomersPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -52,11 +74,18 @@ export default async function CustomersPage() {
   const customers = Array.from(customerMap.values())
     .sort((a, b) => b.orders.length - a.orders.length);
 
-  // 获取客户记忆
-  const { data: memories } = await (supabase.from('customer_memory') as any)
-    .select('customer_id, content, risk_level, category, created_at')
-    .order('created_at', { ascending: false })
-    .limit(200);
+  const customerNames = customers.map(c => c.name);
+
+  // 批量查询（单次拉取，不 N+1）
+  const [{ data: memories }, { data: rhythms }] = await Promise.all([
+    (supabase.from('customer_memory') as any)
+      .select('customer_id, content, risk_level, category, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200),
+    (supabase.from('customer_rhythm') as any)
+      .select('customer_name, tier, risk_score, followup_status, next_followup_at, last_contact_at, total_order_value_usd, risk_factors')
+      .in('customer_name', customerNames),
+  ]);
 
   const memoryMap = new Map<string, any[]>();
   for (const m of memories || []) {
@@ -64,6 +93,10 @@ export default async function CustomersPage() {
     list.push(m);
     memoryMap.set(m.customer_id, list);
   }
+
+  // customer_rhythm 是 customer profile 的唯一 SoT，页面只读不计算
+  const rhythmMap = new Map<string, any>();
+  for (const r of rhythms || []) rhythmMap.set(r.customer_name, r);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -82,6 +115,7 @@ export default async function CustomersPage() {
             const mems = memoryMap.get(c.name) || [];
             const highRiskMems = mems.filter(m => m.risk_level === 'high');
             const factories = [...new Set(c.orders.map((o: any) => o.factory_name).filter(Boolean))];
+            const rhythm = rhythmMap.get(c.name) ?? null;
 
             return (
               <div key={c.name} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -92,7 +126,19 @@ export default async function CustomersPage() {
                       {c.name.charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <h2 className="font-bold text-gray-900 text-lg">{c.name}</h2>
+                      <div className="flex items-center gap-2">
+                        <h2 className="font-bold text-gray-900 text-lg">{c.name}</h2>
+                        {rhythm?.tier && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${TIER_STYLES[rhythm.tier] ?? 'bg-gray-100 text-gray-500'}`}>
+                            {rhythm.tier}类客户
+                          </span>
+                        )}
+                        {rhythm?.followup_status && rhythm.followup_status !== 'normal' && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${FOLLOWUP_STYLES[rhythm.followup_status] ?? ''}`}>
+                            {FOLLOWUP_LABELS[rhythm.followup_status] ?? rhythm.followup_status}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5">
                         <span>{c.orders.length} 单</span>
                         <span>{c.totalQty.toLocaleString()} 件</span>
@@ -122,6 +168,46 @@ export default async function CustomersPage() {
                 {/* 邮箱域名绑定 */}
                 <div className="px-5 pb-1">
                   <CustomerEmailMappingPanel customerName={c.name} />
+                </div>
+
+                {/* 客户画像（SoT: customer_rhythm，只读）*/}
+                <div className="px-5 pb-2">
+                  <details>
+                    <summary className="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none">
+                      📊 客户画像
+                    </summary>
+                    {rhythm ? (
+                      <div className="mt-2 rounded-lg bg-gray-50 p-3 grid grid-cols-4 gap-3 text-center">
+                        <div>
+                          <div className="text-xs text-gray-400">风险评分</div>
+                          <div className={`text-sm font-semibold ${
+                            (rhythm.risk_score ?? 0) >= 70 ? 'text-red-600' :
+                            (rhythm.risk_score ?? 0) >= 40 ? 'text-yellow-600' : 'text-green-600'
+                          }`}>
+                            {rhythm.risk_score != null ? rhythm.risk_score : '—'}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400">客户等级</div>
+                          <div className="text-sm font-semibold text-gray-700">{rhythm.tier ?? '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400">下次跟进</div>
+                          <div className="text-sm font-semibold text-gray-700">
+                            {rhythm.next_followup_at ? formatDate(rhythm.next_followup_at) : '—'}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400">上次联系</div>
+                          <div className="text-sm font-semibold text-gray-700">
+                            {rhythm.last_contact_at ? formatDate(rhythm.last_contact_at) : '—'}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-400 px-1">暂无画像数据</p>
+                    )}
+                  </details>
                 </div>
 
                 {/* 客户记忆 */}
