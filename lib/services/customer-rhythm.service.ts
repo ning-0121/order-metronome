@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ok, err, type ServiceResult } from './types'
+import { computeCustomerPnl } from './customer/customer-pnl.service'
 import type {
   CustomerRhythm,
   CustomerTier,
@@ -462,4 +463,96 @@ export async function recordCustomerContact(
   await resolveAlertByKey(supabase, 'customer_at_risk', customerName)
 
   return ok(undefined)
+}
+
+// ─────────────────────────────────────────────────────────────
+// P&L Materializer
+// 职责：将 customer-pnl.service 的计算结果写入 customer_rhythm
+// 规则：
+//   - 只 UPDATE，不 INSERT（行由 updateCustomerRhythm 负责创建）
+//   - 只写 8 个 P&L 字段，不碰 tier/notes/followup 等手动字段
+//   - 只允许 cron/admin 调用，不 export 给页面或 Server Action
+// ─────────────────────────────────────────────────────────────
+
+export interface PnlMaterializeResult {
+  updated: number
+  skipped: number  // customer_rhythm 行不存在，等下次 rhythm sync 后再物化
+  errors: string[]
+}
+
+export async function rebuildCustomerRhythmPnl(
+  supabase: SupabaseClient,
+  customerName: string,
+): Promise<ServiceResult<'updated' | 'skipped'>> {
+  try {
+    const { data: pnl, error: pnlErr } = await computeCustomerPnl(customerName, supabase)
+    if (pnlErr || !pnl) return err(pnlErr ?? 'computeCustomerPnl returned no data')
+
+    const { count, error: updateErr } = await (supabase.from('customer_rhythm') as any)
+      .update({
+        avg_margin_pct:         pnl.avgMarginPct || null,
+        total_revenue_cny:      pnl.totalRevenueCny || null,
+        margin_trend:           pnl.marginTrend,
+        on_time_delivery_rate:  pnl.onTimeDeliveryRate,
+        avg_deposit_delay_days: pnl.avgDepositDelayDays,
+        overdue_payments:       pnl.overduePayments,
+        behavior_tags:          pnl.behaviorTags,
+        profile_updated_at:     new Date().toISOString(),
+      })
+      .eq('customer_name', customerName)
+      .select('customer_name', { count: 'exact', head: true })
+
+    if (updateErr) return err(updateErr.message)
+
+    // count === 0 → customer_rhythm 行不存在，rhythm sync 尚未为该客户建行
+    return ok(count === 0 ? 'skipped' : 'updated')
+  } catch (e: any) {
+    return err(`rebuildCustomerRhythmPnl exception: ${e?.message}`)
+  }
+}
+
+export async function rebuildAllCustomerRhythmPnl(
+  supabase: SupabaseClient,
+): Promise<ServiceResult<PnlMaterializeResult>> {
+  try {
+    const { data: rows, error } = await (supabase.from('orders') as any)
+      .select('customer_name')
+      .neq('customer_name', null)
+      .neq('customer_name', '')
+
+    if (error) return err(`Failed to fetch customer names: ${error.message}`)
+
+    const customerNames = [...new Set(
+      (rows || []).map((r: any) => r.customer_name as string).filter(Boolean)
+    )]
+
+    const BATCH_SIZE = 5  // P&L 计算比 rhythm 重（4张表），降低并发
+    let updated = 0
+    let skipped = 0
+    const errors: string[] = []
+
+    for (let i = 0; i < customerNames.length; i += BATCH_SIZE) {
+      const batch = customerNames.slice(i, i + BATCH_SIZE)
+      const results = await Promise.allSettled(
+        batch.map(name => rebuildCustomerRhythmPnl(supabase, name))
+      )
+
+      for (let j = 0; j < results.length; j++) {
+        const res = results[j]
+        const name = batch[j]
+        if (res.status === 'fulfilled' && res.value.ok) {
+          res.value.data === 'updated' ? updated++ : skipped++
+        } else {
+          const msg = res.status === 'rejected'
+            ? res.reason?.message
+            : !res.value.ok ? res.value.error : 'unknown'
+          errors.push(`${name}: ${msg}`)
+        }
+      }
+    }
+
+    return ok({ updated, skipped, errors })
+  } catch (e: any) {
+    return err(`rebuildAllCustomerRhythmPnl exception: ${e?.message}`)
+  }
 }
