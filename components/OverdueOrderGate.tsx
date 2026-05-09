@@ -11,6 +11,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  mergeCustomerShipHoldTag,
+  textLooksLikeCustomerShipHold,
+} from '@/lib/domain/customerShipHold';
 
 interface Props {
   orderId: string;
@@ -48,6 +52,11 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
       const supabase = createClient();
       const now = new Date().toISOString();
 
+      const loadTags = async () => {
+        const { data } = await supabase.from('orders').select('special_tags').eq('id', orderId).maybeSingle();
+        return Array.isArray(data?.special_tags) ? data.special_tags : [];
+      };
+
       if (choice === 'shipped') {
         // 已发货 → 标记所有节点完成 + 订单完成
         // 2026-04-27 复盘：CHECK 约束已被 drop，DB 主流是英文枚举 (active/completed/cancelled/draft)
@@ -74,10 +83,12 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
         router.refresh();
         setDismissed(true);
       } else if (choice === 'waiting_customer') {
-        // 等客户发货通知 → 更新出厂日期 + 特殊标记
+        // 等客户发货通知 → 更新出厂日期 + 「待客户指令出运」标签（区分真实延误）
+        const prevTags = await loadTags();
         const { error } = await (supabase.from('orders') as any)
           .update({
             factory_date: newDate,
+            special_tags: mergeCustomerShipHoldTag(prevTags),
             notes: `【超期确认】货已完成，等客户发货通知\n新预计发货日：${newDate}（客户通知后出运）`,
           })
           .eq('id', orderId);
@@ -85,12 +96,17 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
         router.refresh();
         setDismissed(true);
       } else if (choice === 'pending') {
-        // 等待发货 → 更新出厂日期 + 记录原因
+        // 等待发货 → 更新出厂日期 + 记录原因（原因含「等客户通知」类 → 同步打标签）
+        const prevTags = await loadTags();
+        const payload: Record<string, unknown> = {
+          factory_date: newDate,
+          notes: `【超期确认】待发货\n原因：${reason}\n新预计发货日：${newDate}`,
+        };
+        if (textLooksLikeCustomerShipHold(reason)) {
+          payload.special_tags = mergeCustomerShipHoldTag(prevTags);
+        }
         const { error } = await (supabase.from('orders') as any)
-          .update({
-            factory_date: newDate,
-            notes: `【超期确认】待发货\n原因：${reason}\n新预计发货日：${newDate}`,
-          })
+          .update(payload)
           .eq('id', orderId);
         if (error) { alert(`更新失败：${error.message}`); setSubmitting(false); return; }
         router.refresh();

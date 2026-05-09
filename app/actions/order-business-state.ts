@@ -16,6 +16,7 @@ import {
   type OrderBusinessState,
   type EngineInput,
 } from '@/lib/engine/orderBusinessEngine';
+import { isCustomerShipHoldFromOrder } from '@/lib/domain/customerShipHold';
 
 /**
  * 获取订单经营状态（一次调用，返回所有计算结果）
@@ -31,7 +32,7 @@ export async function getOrderBusinessState(orderId: string): Promise<{
   // 并行加载所有数据
   const [orderRes, financialsRes, confirmationsRes, milestonesRes] = await Promise.all([
     (supabase.from('orders') as any)
-      .select('id, order_no, quantity, incoterm, factory_date, is_new_customer, is_new_factory, special_tags, lifecycle_status')
+      .select('id, order_no, quantity, incoterm, factory_date, is_new_customer, is_new_factory, special_tags, lifecycle_status, notes')
       .eq('id', orderId)
       .single(),
     (supabase.from('order_financials') as any)
@@ -66,6 +67,10 @@ export async function getOrderBusinessState(orderId: string): Promise<{
       is_new_customer: orderRes.data.is_new_customer ?? false,
       is_new_factory: orderRes.data.is_new_factory ?? false,
       special_tags: orderRes.data.special_tags || [],
+      customer_ship_hold: isCustomerShipHoldFromOrder({
+        special_tags: orderRes.data.special_tags,
+        notes: orderRes.data.notes,
+      }),
     },
     financials: financialsRes.data || null,
     confirmations: confirmationsRes.data || [],

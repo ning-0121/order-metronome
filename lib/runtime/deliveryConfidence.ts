@@ -17,6 +17,7 @@ import {
   isCriticalStep,
   isShipmentStep,
 } from './criticalNodes';
+import { isCustomerShipHoldFromOrder } from '@/lib/domain/customerShipHold';
 import type {
   ConfidenceComputeInput,
   ConfidenceComputeOutput,
@@ -280,18 +281,27 @@ export function computeDeliveryConfidence(
   }
 
   // ─── D. 出厂日已过但货物未出
-  // 这是"硬信号"——出厂日过了就是过了，无论是哪个关键节点超期都重要。
-  // 故意保留与"工厂完成超期"的轻度双计，确保此场景稳定 red。
+  // 默认：硬信号（扣高分）；若业务已标「待客户指令出运」则改为提示性轻扣分（合并发货等）
   if (factoryDate && remainingDays !== null && remainingDays < 0) {
     const overByDays = Math.abs(remainingDays);
-    const baseFD = overByDays >= 7 ? 15 : 10;
-    reasons.push({
-      code: 'factory_date_passed',
-      label: `出厂日已过 ${overByDays} 天，货物未出运`,
-      delta: -baseFD,
-      weight: 'high',
-    });
-    score -= baseFD;
+    if (isCustomerShipHoldFromOrder(order)) {
+      reasons.push({
+        code: 'customer_ship_hold_factory_passed',
+        label: `出厂日已过 ${overByDays} 天 — 待客户出运指令（不按生产延误重扣）`,
+        delta: -2,
+        weight: 'low',
+      });
+      score -= 2;
+    } else {
+      const baseFD = overByDays >= 7 ? 15 : 10;
+      reasons.push({
+        code: 'factory_date_passed',
+        label: `出厂日已过 ${overByDays} 天，货物未出运`,
+        delta: -baseFD,
+        weight: 'high',
+      });
+      score -= baseFD;
+    }
   }
   // ─── E. 临近出厂日 + 还有关键工作未完成
   else if (factoryDate && remainingDays !== null && undoneCritical.length > 0) {

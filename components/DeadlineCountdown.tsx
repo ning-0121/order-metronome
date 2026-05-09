@@ -5,9 +5,11 @@ import { useState, useEffect } from 'react';
 interface Props {
   targetDate: string;
   label: string;
+  /** 业务已确认「待客户指令出运」— 逾期仍用蓝标区分真实延误 */
+  customerHoldVisual?: boolean;
 }
 
-export function DeadlineCountdown({ targetDate, label }: Props) {
+export function DeadlineCountdown({ targetDate, label, customerHoldVisual }: Props) {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -25,15 +27,20 @@ export function DeadlineCountdown({ targetDate, label }: Props) {
   const isUrgent = diffDays >= 0 && diffDays <= 7;
   const isWarning = diffDays > 7 && diffDays <= 14;
 
-  const color = isOverdue
-    ? 'text-red-600 bg-red-50 border-red-200'
-    : isUrgent
-    ? 'text-orange-600 bg-orange-50 border-orange-200'
-    : isWarning
-    ? 'text-amber-600 bg-amber-50 border-amber-200'
-    : 'text-green-600 bg-green-50 border-green-200';
+  const color =
+    isOverdue && customerHoldVisual
+      ? 'text-blue-700 bg-blue-50 border-blue-200'
+      : isOverdue
+        ? 'text-red-600 bg-red-50 border-red-200'
+        : isUrgent
+          ? 'text-orange-600 bg-orange-50 border-orange-200'
+          : isWarning
+            ? 'text-amber-600 bg-amber-50 border-amber-200'
+            : 'text-green-600 bg-green-50 border-green-200';
 
-  const text = isOverdue
+  const text = isOverdue && customerHoldVisual
+    ? `待客户指令 · ${Math.abs(diffDays)} 天`
+    : isOverdue
     ? `已超 ${Math.abs(diffDays)} 天`
     : diffDays === 0
     ? '今天到期'

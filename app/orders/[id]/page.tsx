@@ -38,6 +38,12 @@ import { CostControlTab } from '@/components/tabs/CostControlTab';
 import { BackButton } from '@/components/BackButton';
 import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
+import {
+  isCustomerShipHoldFromOrder,
+  CUSTOMER_SHIP_HOLD_TAG,
+  isCustomerHoldStale,
+  CUSTOMER_HOLD_STALE_DAYS,
+} from '@/lib/domain/customerShipHold';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -67,6 +73,8 @@ export default async function OrderDetailPage({
   if (orderError || !order) { notFound(); }
 
   const orderData = order as any;
+  const customerShipHold = isCustomerShipHoldFromOrder(orderData);
+  const customerHoldStale = isCustomerHoldStale(orderData);
   const supabase = await createClient();
   const { role: currentRole, isAdmin } = await getCurrentUserRole(supabase);
   const { data: { user } } = await supabase.auth.getUser();
@@ -158,8 +166,20 @@ export default async function OrderDetailPage({
       </div>
 
       {/* 重排排期横幅（出厂日已过且未出运/送仓时显示给 admin/owner） */}
-      <div className="max-w-7xl mx-auto px-6 pt-4">
+      <div className="max-w-7xl mx-auto px-6 pt-4 space-y-3">
+        {customerShipHold && customerHoldStale && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+            <span className="text-xl shrink-0">🟡</span>
+            <div className="text-sm">
+              <p className="font-semibold text-amber-900">客户待运 · 已超过 {CUSTOMER_HOLD_STALE_DAYS} 天未刷新锚点日期</p>
+              <p className="text-amber-800 mt-1">
+                请在备注中更新原因与下一预计出运日，或通过超期确认调整「预计发货日」，避免列表长期挂在「待复盘」。
+              </p>
+            </div>
+          </div>
+        )}
         {(() => {
+          if (customerShipHold) return null;
           const allMs: any[] = (orderData as any).milestones || [];
           const finalKeys = ['booking_done', 'domestic_delivery', 'shipment_completed', 'shipment_done'];
           const isShipped = allMs.some(m =>
@@ -212,7 +232,14 @@ export default async function OrderDetailPage({
                 {(orderData.special_tags || [])
                   .filter((tag: string) => tag !== '分批出货中')
                   .map((tag: string) => (
-                    <span key={tag} className="text-xs font-medium px-2.5 py-1 rounded-full bg-red-100 text-red-700">{tag}</span>
+                    <span
+                      key={tag}
+                      className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                        tag === CUSTOMER_SHIP_HOLD_TAG ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-700'
+                      }`}
+                    >
+                      {tag}
+                    </span>
                   ))}
                 {/* 分批出货标签（独立组件，可点击切换） */}
                 <SplitShipmentTag
@@ -246,7 +273,11 @@ export default async function OrderDetailPage({
                   <span className="text-sm text-gray-400">
                     出厂：<span className="text-gray-700 font-medium">{formatDate(orderData.factory_date)}</span>
                   </span>
-                  <DeadlineCountdown targetDate={orderData.factory_date} label="出厂" />
+                  <DeadlineCountdown
+                    targetDate={orderData.factory_date}
+                    label="出厂"
+                    customerHoldVisual={customerShipHold}
+                  />
                 </div>
               )}
               {/* ETD/ETA 仅 DDP 才显示（FOB / 人民币 由客户自己安排出运或我们送仓） */}
@@ -279,6 +310,7 @@ export default async function OrderDetailPage({
 
           {/* 超期订单强制确认 — 只显示给负责业务或管理员 */}
           {(() => {
+            if (customerShipHold) return null;
             const keyDate = orderData.incoterm === 'DDP'
               ? orderData.etd
               : (orderData.factory_date || orderData.etd);

@@ -5,6 +5,11 @@ import { computeOrderStatus } from '@/lib/utils/order-status';
 import { OrderSearchBar } from '@/components/OrderSearchBar';
 import { ExportProductionSheetButton } from '@/components/ExportProductionSheetButton';
 import { InlineEditField } from '@/components/InlineEditField';
+import {
+  isCustomerShipHoldFromOrder,
+  isCustomerHoldStale,
+  CUSTOMER_HOLD_STALE_DAYS,
+} from '@/lib/domain/customerShipHold';
 
 // 阶段进度计算
 const PHASE_KEYS = [
@@ -91,7 +96,7 @@ function getSearchDimensions(orders: any[]): {
   };
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string }> }) {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string; ship_hold?: string }> }) {
   const params = await searchParams;
   const statusFilter = params?.status || 'active';
   const purposeFilter = params?.purpose || 'production';
@@ -106,6 +111,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     | 'factory_asc' | 'factory_desc'
     | 'created_desc' | 'created_asc'
     | 'qty_desc' | 'qty_asc';
+  const shipHoldFilter = params?.ship_hold === 'yes' || params?.ship_hold === 'stale' ? params.ship_hold : '';
 
   const { data: allOrders, error } = await getOrders();
 
@@ -142,6 +148,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const activeOrders = purposeOrders.filter((o: any) => !completedOrders.includes(o));
   const baseOrders = statusFilter === 'completed' ? completedOrders : activeOrders;
 
+  const shipHoldCount = baseOrders.filter((o: any) => isCustomerShipHoldFromOrder(o)).length;
+  const shipHoldStaleCount = baseOrders.filter((o: any) => isCustomerHoldStale(o)).length;
+
   // 应用维度筛选
   let filteredOrders = baseOrders;
   if (customerFilter) filteredOrders = filteredOrders.filter((o: any) => o.customer_name === customerFilter);
@@ -150,6 +159,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   if (typeFilter) filteredOrders = filteredOrders.filter((o: any) => o.order_type === typeFilter);
   if (merchandiserFilter) filteredOrders = filteredOrders.filter((o: any) => o.merchandiser_name === merchandiserFilter);
   if (salesFilter) filteredOrders = filteredOrders.filter((o: any) => o.sales_name === salesFilter);
+  if (shipHoldFilter === 'yes') {
+    filteredOrders = filteredOrders.filter((o: any) => isCustomerShipHoldFromOrder(o));
+  } else if (shipHoldFilter === 'stale') {
+    filteredOrders = filteredOrders.filter((o: any) => isCustomerHoldStale(o));
+  }
 
   // 应用搜索
   const unsorted = filteredOrders.filter((o: any) => matchOrder(o, searchQuery));
@@ -202,7 +216,16 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const dimensions = getSearchDimensions(baseOrders);
 
   // 是否有活跃的筛选条件
-  const hasFilters = !!(searchQuery || customerFilter || factoryFilter || incotermFilter || typeFilter);
+  const hasFilters = !!(
+    searchQuery ||
+    customerFilter ||
+    factoryFilter ||
+    incotermFilter ||
+    typeFilter ||
+    merchandiserFilter ||
+    salesFilter ||
+    shipHoldFilter
+  );
 
   // 统计超出交期的订单（考虑已批准/待审批的延期申请）
   const now = Date.now();
@@ -289,7 +312,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         ].map(tab => (
           <Link
             key={tab.key}
-            href={`/orders?purpose=${tab.key}&status=active`}
+            href={`/orders?purpose=${tab.key}&status=active${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
             className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${
               purposeFilter === tab.key
                 ? 'bg-indigo-600 text-white shadow-sm'
@@ -309,7 +332,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         ].map(tab => (
           <Link
             key={tab.key}
-            href={`/orders?purpose=${purposeFilter}&status=${tab.key}`}
+            href={`/orders?purpose=${purposeFilter}&status=${tab.key}${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               statusFilter === tab.key
                 ? 'bg-indigo-600 text-white'
@@ -319,6 +342,47 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             {tab.label} ({tab.count})
           </Link>
         ))}
+      </div>
+
+      {/* 客户待运 / 待复盘筛选 */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <span className="text-xs text-gray-500 shrink-0">出货态势：</span>
+        {([
+          { key: '' as const, label: '全部' },
+          { key: 'yes' as const, label: '客户待运', count: shipHoldCount },
+          { key: 'stale' as const, label: '待复盘', hint: `≥${CUSTOMER_HOLD_STALE_DAYS}天未更新锚点`, count: shipHoldStaleCount },
+        ]).map(tab => {
+          const qsParts = [`purpose=${purposeFilter}`, `status=${statusFilter}`, `sort=${sortOrder}`];
+          if (searchQuery) qsParts.push(`q=${encodeURIComponent(searchQuery)}`);
+          if (customerFilter) qsParts.push(`customer=${encodeURIComponent(customerFilter)}`);
+          if (factoryFilter) qsParts.push(`factory=${encodeURIComponent(factoryFilter)}`);
+          if (incotermFilter) qsParts.push(`incoterm=${incotermFilter}`);
+          if (typeFilter) qsParts.push(`type=${typeFilter}`);
+          if (merchandiserFilter) qsParts.push(`merchandiser=${encodeURIComponent(merchandiserFilter)}`);
+          if (salesFilter) qsParts.push(`sales=${encodeURIComponent(salesFilter)}`);
+          if (tab.key) qsParts.push(`ship_hold=${tab.key}`);
+          const href = `/orders?${qsParts.join('&')}`;
+          const active =
+            (tab.key === '' && !shipHoldFilter) ||
+            (tab.key !== '' && shipHoldFilter === tab.key);
+          return (
+            <Link
+              key={tab.key || 'all'}
+              href={href}
+              title={tab.hint}
+              className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition-all ${
+                active
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {tab.label}
+              {typeof tab.count === 'number' && (
+                <span className={active ? 'text-blue-100' : 'text-gray-400'}>({tab.count})</span>
+              )}
+            </Link>
+          );
+        })}
       </div>
 
       {/* 排序 — 6 种模式 */}
@@ -342,6 +406,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           if (factoryFilter) qsParts.push(`factory=${encodeURIComponent(factoryFilter)}`);
           if (incotermFilter) qsParts.push(`incoterm=${incotermFilter}`);
           if (typeFilter) qsParts.push(`type=${typeFilter}`);
+          if (merchandiserFilter) qsParts.push(`merchandiser=${encodeURIComponent(merchandiserFilter)}`);
+          if (salesFilter) qsParts.push(`sales=${encodeURIComponent(salesFilter)}`);
+          if (shipHoldFilter) qsParts.push(`ship_hold=${shipHoldFilter}`);
           const href = `/orders?${qsParts.join('&')}`;
           const active = sortOrder === opt.key;
           return (
@@ -369,6 +436,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         currentFactory={factoryFilter}
         currentIncoterm={incotermFilter}
         currentType={typeFilter}
+        currentShipHold={shipHoldFilter}
         dimensions={dimensions}
       />
 
@@ -377,36 +445,44 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         <div className="flex items-center gap-2 mb-4 flex-wrap">
           <span className="text-xs text-gray-500">筛选条件：</span>
           {searchQuery && (
-            <Link href={`/orders?status=${statusFilter}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+            <Link href={`/orders?status=${statusFilter}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
               搜索: {searchQuery} <span className="text-indigo-400">×</span>
             </Link>
           )}
           {customerFilter && (
-            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200">
               客户: {customerFilter} <span className="text-blue-400">×</span>
             </Link>
           )}
           {factoryFilter && (
-            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 hover:bg-green-200">
               工厂: {factoryFilter} <span className="text-green-400">×</span>
             </Link>
           )}
           {incotermFilter && (
-            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-700 hover:bg-purple-200">
               贸易: {incotermFilter} <span className="text-purple-400">×</span>
             </Link>
           )}
           {typeFilter && (
-            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}`}
+            <Link href={`/orders?status=${statusFilter}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200">
               类型: {{ trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' }[typeFilter] || typeFilter} <span className="text-amber-400">×</span>
             </Link>
           )}
-          <Link href={`/orders?status=${statusFilter}`}
+          {shipHoldFilter && (
+            <Link
+              href={`/orders?purpose=${purposeFilter}&status=${statusFilter}&sort=${sortOrder}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800 hover:bg-blue-200"
+            >
+              {shipHoldFilter === 'yes' ? '客户待运' : '待复盘'} <span className="text-blue-400">×</span>
+            </Link>
+          )}
+          <Link href={`/orders?purpose=${purposeFilter}&status=${statusFilter}`}
             className="text-xs text-gray-400 hover:text-gray-600 underline">
             清除全部
           </Link>
@@ -424,7 +500,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             }
           </p>
           {hasFilters ? (
-            <Link href={`/orders?status=${statusFilter}`} className="btn-primary inline-flex items-center gap-2">
+            <Link href={`/orders?purpose=${purposeFilter}&status=${statusFilter}`} className="btn-primary inline-flex items-center gap-2">
               清除筛选
             </Link>
           ) : (
@@ -450,6 +526,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             }[status.color];
             const phases = computePhases(milestones);
             const dateStr = order.incoterm === 'FOB' ? formatDate(order.etd) : formatDate(order.warehouse_due_date);
+            const mobHold = isCustomerShipHoldFromOrder(order);
+            const mobStale = isCustomerHoldStale(order);
 
             return (
               <Link key={order.id} href={`/orders/${order.id}`} className="block bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow active:bg-gray-50">
@@ -461,6 +539,16 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   </div>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusConfig.class}`}>{statusConfig.label}</span>
                 </div>
+                {(mobHold || mobStale) && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {mobHold && (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">客户待运</span>
+                    )}
+                    {mobStale && (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">待复盘 ≥{CUSTOMER_HOLD_STALE_DAYS}天</span>
+                    )}
+                  </div>
+                )}
                 <div className="flex items-center gap-3 text-xs text-gray-500 mb-2">
                   <span>{order.incoterm}</span>
                   <span>{dateStr}</span>
@@ -514,11 +602,17 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 return (
                   <tr key={order.id}>
                     <td>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-gray-900">{order.order_no}</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${typeColors[order.order_type] || 'bg-gray-100 text-gray-600'}`}>
                           {typeLabels[order.order_type] || order.order_type}
                         </span>
+                        {isCustomerShipHoldFromOrder(order) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800">客户待运</span>
+                        )}
+                        {isCustomerHoldStale(order) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800">待复盘</span>
+                        )}
                       </div>
                     </td>
                     <td>
@@ -568,16 +662,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                         const allMilestoneDone = milestones.every((m: any) => _isDone(m.status));
                         const lifecycleDone = DONE_LIFECYCLE.has((order as any).lifecycle_status || '');
                         const isOverdue = daysOver > 0 && !allMilestoneDone && !lifecycleDone;
+                        const custHold = isCustomerShipHoldFromOrder(order);
+                        const holdStale = isCustomerHoldStale(order);
                         return (
                           <div>
-                            <span className={`text-xs ${isOverdue ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
+                            <span className={`text-xs ${isOverdue && !custHold ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
                               {dateLabel} {formatDate(originalKeyDate)}
                             </span>
                             {isOverdue && hasPending && (
                               <div className="text-xs text-amber-600 font-medium">⏳ 延期申请中</div>
                             )}
-                            {isOverdue && !hasPending && (
+                            {isOverdue && !hasPending && custHold && (
+                              <div className="text-xs text-blue-600 font-medium">📦 客户待运 · {daysOver} 天</div>
+                            )}
+                            {isOverdue && !hasPending && !custHold && (
                               <div className="text-xs text-red-500 font-medium">⚠ 超期 {daysOver} 天</div>
+                            )}
+                            {custHold && holdStale && (
+                              <div className="text-xs text-amber-700 font-medium">🟡 待复盘（≥{CUSTOMER_HOLD_STALE_DAYS}天）</div>
                             )}
                           </div>
                         );

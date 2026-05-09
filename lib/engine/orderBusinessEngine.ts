@@ -71,6 +71,8 @@ export interface EngineInput {
     is_new_factory: boolean;
     special_tags: string[];
     lifecycle_status: string;
+    /** 货已备好、仅待客户出运指令 — 不按出厂逾期加重惩罚 */
+    customer_ship_hold?: boolean;
   };
   financials: {
     sale_total: number | null;
@@ -363,7 +365,14 @@ export function calculateBusinessRisk(input: EngineInput): {
   // 交期风险
   if (input.order.factory_date) {
     const remaining = Math.ceil((new Date(input.order.factory_date).getTime() - Date.now()) / 86400000);
-    if (remaining < 0) { factors.push(`出厂已逾期 ${Math.abs(remaining)} 天`); score += 25; }
+    if (remaining < 0) {
+      if (input.order.customer_ship_hold) {
+        factors.push('待客户出运指令（货已备好，不计入出厂逾期）');
+      } else {
+        factors.push(`出厂已逾期 ${Math.abs(remaining)} 天`);
+        score += 25;
+      }
+    }
     else if (remaining <= 7) { factors.push(`距出厂仅 ${remaining} 天`); score += 15; }
   }
 
@@ -518,7 +527,14 @@ export function calculateDelayRisk(input: EngineInput): StatusResult<'none' | 'l
       }
       return { value: 'none', level: 'green', explain: '货物已出运，收款正常' };
     }
-    // 出厂日已过但尚未出运 → 真实延期
+    // 出厂日已过但尚未出运
+    if (input.order.customer_ship_hold) {
+      return {
+        value: 'low',
+        level: 'yellow',
+        explain: `已超出原定出厂日 ${Math.abs(remaining)} 天，业务已标「待客户指令出运」（非生产延误）`,
+      };
+    }
     return { value: 'high', level: 'red', explain: `已超出厂日期 ${Math.abs(remaining)} 天，货物未出运` };
   }
 

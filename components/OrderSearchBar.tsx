@@ -16,6 +16,8 @@ interface Props {
   currentFactory: string;
   currentIncoterm: string;
   currentType: string;
+  /** 订单列表「客户待运 / 待复盘」筛选 */
+  currentShipHold?: string;
   dimensions: {
     customers: Dimension[];
     factories: Dimension[];
@@ -33,6 +35,7 @@ export function OrderSearchBar({
   currentFactory,
   currentIncoterm,
   currentType,
+  currentShipHold,
   dimensions,
 }: Props) {
   const router = useRouter();
@@ -60,6 +63,7 @@ export function OrderSearchBar({
     if (currentFactory && !('factory' in overrides)) base.factory = currentFactory;
     if (currentIncoterm && !('incoterm' in overrides)) base.incoterm = currentIncoterm;
     if (currentType && !('type' in overrides)) base.type = currentType;
+    if (currentShipHold && !('ship_hold' in overrides)) base.ship_hold = currentShipHold;
     const merged = { ...base, ...overrides };
     // Remove empty values
     Object.keys(merged).forEach(k => { if (!merged[k]) delete merged[k]; });
