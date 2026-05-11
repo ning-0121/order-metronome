@@ -14,6 +14,8 @@ const TASK_TYPE_CONFIG: Record<TaskType, { icon: string; label: string; color: s
   profit_warning:     { icon: '📉', label: '利润预警',   color: 'border-l-rose-500' },
   system_alert:       { icon: '🚨', label: '系统告警',   color: 'border-l-red-600' },
   email_action:       { icon: '📧', label: '邮件待处理', color: 'border-l-purple-400' },
+  missing_info:       { icon: '⚠️', label: '信息缺失',   color: 'border-l-yellow-500' },
+  decision_required:  { icon: '🤔', label: '待决策',     color: 'border-l-indigo-500' },
 };
 
 const PRIORITY_LABEL: Record<number, { text: string; badge: string }> = {
@@ -29,10 +31,17 @@ interface TaskCardProps {
   onDismiss: (taskId: string) => void;
 }
 
+function getStaleDays(taskDate: string): number {
+  const today = new Date().toISOString().split('T')[0];
+  if (taskDate >= today) return 0;
+  return Math.floor((Date.now() - new Date(taskDate + 'T00:00:00').getTime()) / 86400000);
+}
+
 export function TaskCard({ task, onDone, onSnooze, onDismiss }: TaskCardProps) {
   const [loading, setLoading] = useState(false);
   const config = TASK_TYPE_CONFIG[task.task_type] ?? { icon: '📌', label: task.task_type, color: 'border-l-gray-300' };
   const priorityInfo = PRIORITY_LABEL[task.priority] ?? PRIORITY_LABEL[3];
+  const staleDays = getStaleDays(task.task_date);
 
   async function handle(action: 'done' | 'snoozed' | 'dismissed') {
     setLoading(true);
@@ -70,6 +79,13 @@ export function TaskCard({ task, onDone, onSnooze, onDismiss }: TaskCardProps) {
             <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${priorityInfo.badge}`}>
               {priorityInfo.text}
             </span>
+            {staleDays >= 1 && (
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                staleDays >= 3 ? 'bg-red-100 text-red-600' : 'bg-orange-50 text-orange-600'
+              }`}>
+                待{staleDays}天
+              </span>
+            )}
           </div>
         </div>
 

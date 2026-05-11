@@ -38,6 +38,7 @@ import { CostControlTab } from '@/components/tabs/CostControlTab';
 import { BackButton } from '@/components/BackButton';
 import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
+import { RetrospectiveTab } from '@/components/tabs/RetrospectiveTab';
 import {
   isCustomerShipHoldFromOrder,
   CUSTOMER_SHIP_HOLD_TAG,
@@ -66,7 +67,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -348,6 +349,10 @@ export default async function OrderDetailPage({
               { key: 'email_center', label: '邮件中心' },
               { key: 'notes', label: '📝 备注' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
+              // 复盘（订单完成 / 待复盘 / 已复盘时显示）
+              ...(['completed', '已完成', '待复盘', '已复盘'].includes(orderData.lifecycle_status)
+                ? [{ key: 'retrospective', label: '📋 复盘' }]
+                : []),
               // 根因分析（仅 admin + 引擎启用时显示）
               ...(isAdmin && rootCauseEngineEnabled() ? [{ key: 'root_causes', label: '🔬 根因' }] : []),
             ].map(t => (
@@ -883,6 +888,16 @@ export default async function OrderDetailPage({
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">执行评分</h2>
             <LiveScorePreview orderId={id} />
+          </div>
+        )}
+
+        {activeTab === 'retrospective' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <RetrospectiveTab
+              orderId={id}
+              orderNo={orderData.order_no}
+              isOwnerOrAdmin={isAdmin || isOrderOwner}
+            />
           </div>
         )}
 

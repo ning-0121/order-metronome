@@ -258,6 +258,8 @@ export type TaskType =
   | 'profit_warning'
   | 'system_alert'
   | 'email_action'
+  | 'missing_info'
+  | 'decision_required'
 
 export type TaskPriority = 1 | 2 | 3
 

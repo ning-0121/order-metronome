@@ -22,6 +22,24 @@ function todayStr(): string {
 }
 
 // ─────────────────────────────────────────────────────────────
+// computeTaskPriority — 系统唯一 TaskPriority 计算函数
+//
+// 规则：staleDays >= urgentAfterDays → 1（紧急）；否则 → 2（中等）
+// 每个 task generator 传入自己的 urgentAfterDays 阈值：
+//   milestone:       urgentAfterDays=1  （任何逾期即紧急）
+//   delay_approval:  urgentAfterDays=2  （等待≥2天升级）
+//   retrospective:   urgentAfterDays=7  （完成≥7天升级）
+//   missing_info:    urgentAfterDays=14 （创建≥14天升级）
+//   system_alert:    固定 priority=1，不经此函数
+// ─────────────────────────────────────────────────────────────
+export function computeTaskPriority(
+  staleDays: number,
+  urgentAfterDays: number,
+): TaskPriority {
+  return staleDays >= urgentAfterDays ? 1 : 2
+}
+
+// ─────────────────────────────────────────────────────────────
 // upsertTask
 // 写入单条任务，UNIQUE 约束冲突时静默跳过（视为正常）
 // ─────────────────────────────────────────────────────────────
@@ -121,7 +139,7 @@ async function generateMilestoneTasks(
     const isDueToday = plannedDate.toISOString().split('T')[0] === targetDate
 
     const taskType: TaskType = isOverdue ? 'milestone_overdue' : 'milestone_due_today'
-    const priority: TaskPriority = isOverdue ? 1 : 2
+    const priority: TaskPriority = computeTaskPriority(daysOverdue, 1)
     const daysOverdue = isOverdue
       ? Math.floor((today.getTime() - plannedDate.getTime()) / (1000 * 60 * 60 * 24))
       : 0
@@ -260,7 +278,7 @@ async function generateDelayApprovalTasks(
         assignedTo: userId,
         taskDate: targetDate,
         taskType: 'delay_approval',
-        priority: daysWaiting >= 2 ? 1 : 2,
+        priority: computeTaskPriority(daysWaiting, 2),
         title: `待审批延期：${order.order_no}${daysWaiting > 0 ? `（等待${daysWaiting}天）` : ''}`,
         description: `客户：${order.customer_name}，原因：${req.reason}`,
         actionUrl: `/orders/${req.order_id}`,
@@ -409,6 +427,245 @@ async function generateAlertTasks(
 }
 
 // ─────────────────────────────────────────────────────────────
+// generateRetrospectiveTasks
+// 订单完成 3 天后仍无复盘记录 → 给订单 owner 生成 decision_required 任务
+// ─────────────────────────────────────────────────────────────
+async function generateRetrospectiveTasks(
+  supabase: SupabaseClient,
+  targetDate: string
+): Promise<TaskGenerationResult> {
+  let created = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+
+  // 找已完成、终止时间超过 3 天的订单
+  const { data: orders, error } = await (supabase.from('orders') as any)
+    .select('id, order_no, customer_name, created_by, owner_user_id, terminated_at')
+    .in('lifecycle_status', ['completed', '已完成', '待复盘'])
+    .lt('terminated_at', threeDaysAgo + 'T00:00:00')
+    .not('terminated_at', 'is', null)
+    .limit(100)
+
+  if (error) {
+    errors.push(`fetchCompletedOrders: ${error.message}`)
+    return { created, skipped, errors }
+  }
+
+  if (!orders || orders.length === 0) return { created, skipped, errors }
+
+  // 批量查已有复盘
+  const orderIds = orders.map((o: any) => o.id)
+  const { data: retros } = await (supabase.from('order_retrospectives') as any)
+    .select('order_id, key_issue')
+    .in('order_id', orderIds)
+  const retroDone = new Set((retros || [])
+    .filter((r: any) => r.key_issue && r.key_issue.length > 0)
+    .map((r: any) => r.order_id))
+
+  for (const order of orders) {
+    if (retroDone.has(order.id)) continue  // 已有完整复盘，跳过
+
+    const owner = order.owner_user_id || order.created_by
+    if (!owner) continue
+
+    const daysSince = Math.floor(
+      (Date.now() - new Date(order.terminated_at).getTime()) / 86400000
+    )
+
+    const result = await upsertTask(supabase, {
+      assignedTo: owner,
+      taskDate: targetDate,
+      taskType: 'decision_required',
+      priority: computeTaskPriority(daysSince, 7),
+      title: `${order.order_no} 待复盘（完成 ${daysSince} 天）`,
+      description: `订单已完成 ${daysSince} 天，尚未填写复盘。记录问题与改进措施有助于下次做得更好。`,
+      actionUrl: `/orders/${order.id}?tab=retrospective`,
+      actionLabel: '去复盘',
+      relatedOrderId: order.id,
+      relatedCustomer: order.customer_name,
+      sourceType: 'retrospective_pending',
+      sourceId: order.id,
+    })
+
+    if (result.ok) {
+      if (result.data.created) created++
+      else skipped++
+    } else {
+      errors.push(`order ${order.id}: ${result.error}`)
+    }
+  }
+
+  return { created, skipped, errors }
+}
+
+// ─────────────────────────────────────────────────────────────
+// generateMissingInfoTasks
+// 扫描活跃订单的关键信息缺失（factory_date / 财务 / 确认资料），
+// 为订单 owner 生成 missing_info 任务
+// ─────────────────────────────────────────────────────────────
+async function generateMissingInfoTasks(
+  supabase: SupabaseClient,
+  targetDate: string
+): Promise<TaskGenerationResult> {
+  let created = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  // 只看执行中的订单（active / 执行中），不含草稿/完成/取消
+  const { data: orders, error } = await (supabase.from('orders') as any)
+    .select('id, order_no, customer_name, factory_date, etd, warehouse_due_date, incoterm, created_by, owner_user_id, created_at')
+    .in('lifecycle_status', ['active', '执行中'])
+    .order('created_at', { ascending: true })
+    .limit(200)
+
+  if (error) {
+    errors.push(`fetchOrders: ${error.message}`)
+    return { created, skipped, errors }
+  }
+
+  const orderIds = (orders || []).map((o: any) => o.id)
+
+  // 批量查财务记录
+  const { data: financials } = orderIds.length > 0
+    ? await (supabase.from('order_financials') as any)
+        .select('order_id, sale_total, cost_total, deposit_amount')
+        .in('order_id', orderIds)
+    : { data: [] }
+  const financialMap = new Map<string, any>()
+  for (const f of financials || []) financialMap.set(f.order_id, f)
+
+  // 批量查确认资料
+  const { data: confirmations } = orderIds.length > 0
+    ? await (supabase.from('order_confirmations') as any)
+        .select('order_id, fabric_color, size_ratio, logo_print, packaging')
+        .in('order_id', orderIds)
+    : { data: [] }
+  const confirmMap = new Map<string, any>()
+  for (const c of confirmations || []) confirmMap.set(c.order_id, c)
+
+  for (const order of orders || []) {
+    const orderAge = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86400000)
+    // 刚创建的订单（<3天）给宽限期，不立即报缺
+    if (orderAge < 3) continue
+
+    const owner = order.owner_user_id || order.created_by
+    if (!owner) continue
+
+    const fin = financialMap.get(order.id)
+    const conf = confirmMap.get(order.id)
+
+    const missingItems: string[] = []
+
+    // 1. 出厂日期缺失（订单创建 7 天后仍没有出厂日）
+    const anchor = order.factory_date || order.etd || order.warehouse_due_date
+    if (!anchor && orderAge >= 7) {
+      missingItems.push('出厂/交期日期')
+    }
+
+    // 2. 财务数据缺失（订单创建 5 天后仍没有销售金额）
+    if ((!fin || !fin.sale_total) && orderAge >= 5) {
+      missingItems.push('销售金额')
+    }
+
+    // 3. 确认资料不完整（订单创建 5 天后仍有空白关键确认项）
+    if (conf && orderAge >= 5) {
+      if (!conf.fabric_color) missingItems.push('面料与颜色')
+      if (!conf.size_ratio)   missingItems.push('尺码配比')
+    }
+
+    if (missingItems.length === 0) continue
+
+    const title = `${order.order_no} 缺失信息：${missingItems.join('、')}`
+    const description = `订单已创建 ${orderAge} 天，以下关键信息仍未填写：${missingItems.join('、')}。请尽快补充以保证排期准确。`
+
+    const result = await upsertTask(supabase, {
+      assignedTo: owner,
+      taskDate: targetDate,
+      taskType: 'missing_info',
+      priority: computeTaskPriority(orderAge, 14),
+      title,
+      description,
+      actionUrl: `/orders/${order.id}?tab=basic`,
+      actionLabel: '去补填',
+      relatedOrderId: order.id,
+      relatedCustomer: order.customer_name,
+      sourceType: 'missing_info',
+      sourceId: `${order.id}_${targetDate}`,
+    })
+
+    if (result.ok) {
+      if (result.data.created) created++
+      else skipped++
+    } else {
+      errors.push(`order ${order.id}: ${result.error}`)
+    }
+  }
+
+  return { created, skipped, errors }
+}
+
+// ─────────────────────────────────────────────────────────────
+// escalateStaleTasks  [Escalation Path A]
+//
+// 职责：task queue 轻升级（daily_tasks 表）
+//   - priority bump：2→1（逾期3天），不低于当前值
+//   - escalate_count + 1：记录升级次数，供 order-decision.ts 判断 at_risk
+//   - 不发通知，不 hard block
+//
+// 与其他升级路径的区别：
+//   Path B — runEscalationChain (cron/reminders)：milestones 通知路由，按角色逐级推送
+//   Path C — escalate_ceo (agent-execute)：AI 触发的硬升级，直接通知 CEO
+//   Path D — war room：手动升级入口，走 order-amendments
+// ─────────────────────────────────────────────────────────────
+export async function escalateStaleTasks(
+  supabase: SupabaseClient
+): Promise<{ escalated: number; errors: string[] }> {
+  const errors: string[] = []
+  let escalated = 0
+
+  // 找到所有 pending 且任务日期已过 1 天以上、priority > 1 的任务
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+
+  const { data: staleTasks, error } = await (supabase.from('daily_tasks') as any)
+    .select('id, priority, task_date, escalate_count')
+    .eq('status', 'pending')
+    .lt('task_date', yesterday)  // 任务日期 < 昨天 → 至少逾期 1 天
+    .gt('priority', 1)           // 只升级 priority=2,3（priority=1 已经最高）
+    .limit(200)
+
+  if (error) {
+    errors.push(`fetchStaleTasks: ${error.message}`)
+    return { escalated, errors }
+  }
+
+  for (const task of staleTasks || []) {
+    const daysStale = Math.floor(
+      (Date.now() - new Date(task.task_date + 'T00:00:00').getTime()) / 86400000
+    )
+    // 逾期 1 天 → priority=2；逾期 3 天+ → priority=1
+    const newPriority = daysStale >= 3 ? 1 : 2
+    if (newPriority >= task.priority) continue  // 已经足够高，跳过
+
+    const { error: upErr } = await (supabase.from('daily_tasks') as any)
+      .update({
+        priority: newPriority,
+        escalate_count: (task.escalate_count ?? 0) + 1,
+      })
+      .eq('id', task.id)
+
+    if (upErr) {
+      errors.push(`escalate ${task.id}: ${upErr.message}`)
+    } else {
+      escalated++
+    }
+  }
+
+  return { escalated, errors }
+}
+
+// ─────────────────────────────────────────────────────────────
 // generateDailyTasks
 // 主函数：根据 trigger 类型生成对应任务
 // ─────────────────────────────────────────────────────────────
@@ -429,15 +686,19 @@ export async function generateDailyTasks(
     }
 
     if (trigger.trigger === 'daily_cron') {
-      // 全量生成：所有来源并行跑
-      const [ms, cr, da, pw, al] = await Promise.all([
+      // 全量生成：所有来源并行跑（含 missing_info + 轻升级）
+      const [ms, cr, da, pw, al, mi, rt] = await Promise.all([
         generateMilestoneTasks(supabase, targetDate),
         generateCustomerFollowupTasks(supabase, targetDate),
         generateDelayApprovalTasks(supabase, targetDate),
         generateProfitWarningTasks(supabase, targetDate),
         generateAlertTasks(supabase, targetDate),
+        generateMissingInfoTasks(supabase, targetDate),
+        generateRetrospectiveTasks(supabase, targetDate),
       ])
-      merge(ms); merge(cr); merge(da); merge(pw); merge(al)
+      merge(ms); merge(cr); merge(da); merge(pw); merge(al); merge(mi); merge(rt)
+      // 轻升级：fire-and-forget，不阻塞主流程
+      void escalateStaleTasks(supabase).catch(() => {})
 
     } else if (trigger.trigger === 'milestone_update') {
       // 只刷新该里程碑相关任务

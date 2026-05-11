@@ -5,8 +5,10 @@
  *
  * 当订单交期已过且未全部完成时，打开订单详情页时强制弹窗：
  * 1. 已发货（补录数据）→ 标记完成
- * 2. 未发货，等待发货 → 填写预计发货日
- * 3. 未发货，有问题 → 必须填原因+新计划
+ * 2. 货已完成，等客户发货通知 → 更新出厂日 + 打待运标签
+ * 3. 未发货，等待中 → 更新出厂日 + 记录原因
+ * 4. 有问题，无法发货 → 必须填原因+新计划
+ * 5. 申请延期（需管理员审批）→ 走正式延期申请流程
  */
 
 import { useState } from 'react';
@@ -15,6 +17,14 @@ import {
   mergeCustomerShipHoldTag,
   textLooksLikeCustomerShipHold,
 } from '@/lib/domain/customerShipHold';
+import { createOrderLevelDelayRequest } from '@/app/actions/delays';
+
+const DELAY_CATEGORY_OPTIONS = [
+  { value: 'customer', label: '👤 客户原因', desc: '客户未确认/改款/改色/延期验货/未付款' },
+  { value: 'supplier', label: '🏭 供应商原因', desc: '面料/辅料延迟，供应商交期延误' },
+  { value: 'internal', label: '🏢 内部原因', desc: '工厂排期/品质返工/生产问题' },
+  { value: 'force_majeure', label: '⚡ 不可抗力', desc: '疫情/自然灾害/港口封锁' },
+] as const;
 
 interface Props {
   orderId: string;
@@ -27,9 +37,11 @@ interface Props {
 
 export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, daysOverdue, isAdmin }: Props) {
   const router = useRouter();
-  const [choice, setChoice] = useState<'' | 'shipped' | 'waiting_customer' | 'pending' | 'problem'>('');
+  const [choice, setChoice] = useState<'' | 'shipped' | 'waiting_customer' | 'pending' | 'problem' | 'request_delay'>('');
   const [newDate, setNewDate] = useState('');
   const [reason, setReason] = useState('');
+  const [delayCategory, setDelayCategory] = useState<'customer' | 'supplier' | 'internal' | 'force_majeure'>('customer');
+  const [delayDetail, setDelayDetail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
@@ -45,9 +57,31 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
       alert('请填写新预计发货日期');
       return;
     }
+    if (choice === 'request_delay') {
+      if (!newDate) { alert('请填写新出厂日期'); return; }
+      if (!delayDetail.trim()) { alert('请填写延期原因说明'); return; }
+    }
 
     setSubmitting(true);
     try {
+      if (choice === 'request_delay') {
+        const categoryLabels: Record<string, string> = {
+          customer: '客户原因', supplier: '供应商原因', internal: '内部原因', force_majeure: '不可抗力',
+        };
+        const result = await createOrderLevelDelayRequest(
+          orderId,
+          delayCategory,
+          categoryLabels[delayCategory],
+          delayDetail,
+          newDate,
+        );
+        if (result.error) { alert(`提交失败：${result.error}`); setSubmitting(false); return; }
+        alert('延期申请已提交，等待管理员审批。审批通过后系统将自动更新排期。');
+        router.refresh();
+        setDismissed(true);
+        return;
+      }
+
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
       const now = new Date().toISOString();
@@ -174,7 +208,49 @@ export function OverdueOrderGate({ orderId, orderNo, customerName, keyDate, days
                 <p className="text-xs text-gray-500">品质/面料/客户原因 → 必须填写原因和计划</p>
               </div>
             </label>
+
+            <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${choice === 'request_delay' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:bg-white'}`}>
+              <input type="radio" name="overdue_choice" value="request_delay" checked={choice === 'request_delay'} onChange={() => setChoice('request_delay')} />
+              <div>
+                <span className="text-sm font-semibold text-indigo-800">📋 申请延期（需管理员审批）</span>
+                <p className="text-xs text-gray-500">填写原因 + 新出厂日 → 走正式审批流程，通过后自动更新排期</p>
+              </div>
+            </label>
           </div>
+
+          {/* 延期申请表单 */}
+          {choice === 'request_delay' && (
+            <div className="mt-3 space-y-3 pl-6">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">延期原因类型 <span className="text-red-500">*</span></label>
+                <div className="grid grid-cols-2 gap-2">
+                  {DELAY_CATEGORY_OPTIONS.map(opt => (
+                    <label key={opt.value} className={`flex flex-col p-2 rounded-lg border cursor-pointer text-xs transition-all ${delayCategory === opt.value ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                      <input type="radio" name="delay_category" value={opt.value} checked={delayCategory === opt.value}
+                        onChange={() => setDelayCategory(opt.value as typeof delayCategory)} className="sr-only" />
+                      <span className="font-medium">{opt.label}</span>
+                      <span className="text-gray-400 mt-0.5">{opt.desc}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">原因详细说明 <span className="text-red-500">*</span></label>
+                <textarea value={delayDetail} onChange={e => setDelayDetail(e.target.value)} rows={2}
+                  placeholder="请说明延期具体原因，例如：客户要求修改颜色，需重新生产..."
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">新出厂日 <span className="text-red-500">*</span></label>
+                <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)}
+                  min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <p className="text-xs text-indigo-600 bg-indigo-50 rounded-lg px-3 py-2">
+                提交后管理员将收到通知进行审批。审批通过后系统自动更新所有下游节点排期，出厂日将顺延至 {newDate || '—'}。
+              </p>
+            </div>
+          )}
 
           {/* 动态表单 */}
           {choice === 'waiting_customer' && (

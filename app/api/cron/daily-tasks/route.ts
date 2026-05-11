@@ -78,25 +78,28 @@ export async function GET(req: Request) {
 
         let emoji: string;
         let urgency: string;
-        let priority: number;
+        // pushSortScore: 推送通知专用排序分（越高越靠前）
+        // 注意：这不是 TaskPriority(1|2|3)，仅用于本 cron 内部排序取 Top 3
+        let pushSortScore: number;
 
         if (diffDays < 0) {
           emoji = '🔴';
           urgency = `逾期 ${Math.abs(diffDays)} 天`;
-          priority = 100 + Math.abs(diffDays); // 逾期越久越靠前
+          pushSortScore = 100 + Math.abs(diffDays);
         } else if (diffDays === 0) {
           emoji = '🟠';
           urgency = '今天截止';
-          priority = 50;
+          pushSortScore = 50;
         } else if (diffDays <= 3) {
           emoji = '🟡';
           urgency = `还剩 ${diffDays} 天`;
-          priority = 30 - diffDays;
+          pushSortScore = 30 - diffDays;
         } else {
           emoji = '⚪';
           urgency = `还剩 ${diffDays} 天`;
-          priority = 0;
+          pushSortScore = 0;
         }
+        const priority = pushSortScore; // alias for downstream sort
 
         tasks.push({
           emoji,
