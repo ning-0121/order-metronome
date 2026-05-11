@@ -22,6 +22,24 @@ function todayStr(): string {
 }
 
 // ─────────────────────────────────────────────────────────────
+// computeTaskPriority — 系统唯一 TaskPriority 计算函数
+//
+// 规则：staleDays >= urgentAfterDays → 1（紧急）；否则 → 2（中等）
+// 每个 task generator 传入自己的 urgentAfterDays 阈值：
+//   milestone:       urgentAfterDays=1  （任何逾期即紧急）
+//   delay_approval:  urgentAfterDays=2  （等待≥2天升级）
+//   retrospective:   urgentAfterDays=7  （完成≥7天升级）
+//   missing_info:    urgentAfterDays=14 （创建≥14天升级）
+//   system_alert:    固定 priority=1，不经此函数
+// ─────────────────────────────────────────────────────────────
+export function computeTaskPriority(
+  staleDays: number,
+  urgentAfterDays: number,
+): TaskPriority {
+  return staleDays >= urgentAfterDays ? 1 : 2
+}
+
+// ─────────────────────────────────────────────────────────────
 // upsertTask
 // 写入单条任务，UNIQUE 约束冲突时静默跳过（视为正常）
 // ─────────────────────────────────────────────────────────────
@@ -121,7 +139,7 @@ async function generateMilestoneTasks(
     const isDueToday = plannedDate.toISOString().split('T')[0] === targetDate
 
     const taskType: TaskType = isOverdue ? 'milestone_overdue' : 'milestone_due_today'
-    const priority: TaskPriority = isOverdue ? 1 : 2
+    const priority: TaskPriority = computeTaskPriority(daysOverdue, 1)
     const daysOverdue = isOverdue
       ? Math.floor((today.getTime() - plannedDate.getTime()) / (1000 * 60 * 60 * 24))
       : 0
@@ -260,7 +278,7 @@ async function generateDelayApprovalTasks(
         assignedTo: userId,
         taskDate: targetDate,
         taskType: 'delay_approval',
-        priority: daysWaiting >= 2 ? 1 : 2,
+        priority: computeTaskPriority(daysWaiting, 2),
         title: `待审批延期：${order.order_no}${daysWaiting > 0 ? `（等待${daysWaiting}天）` : ''}`,
         description: `客户：${order.customer_name}，原因：${req.reason}`,
         actionUrl: `/orders/${req.order_id}`,
@@ -460,7 +478,7 @@ async function generateRetrospectiveTasks(
       assignedTo: owner,
       taskDate: targetDate,
       taskType: 'decision_required',
-      priority: daysSince >= 7 ? 1 : 2,
+      priority: computeTaskPriority(daysSince, 7),
       title: `${order.order_no} 待复盘（完成 ${daysSince} 天）`,
       description: `订单已完成 ${daysSince} 天，尚未填写复盘。记录问题与改进措施有助于下次做得更好。`,
       actionUrl: `/orders/${order.id}?tab=retrospective`,
@@ -566,7 +584,7 @@ async function generateMissingInfoTasks(
       assignedTo: owner,
       taskDate: targetDate,
       taskType: 'missing_info',
-      priority: orderAge >= 14 ? 1 : 2,
+      priority: computeTaskPriority(orderAge, 14),
       title,
       description,
       actionUrl: `/orders/${order.id}?tab=basic`,
