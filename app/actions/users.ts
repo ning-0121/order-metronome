@@ -112,9 +112,9 @@ export async function checkUserDeletable(targetUserId: string): Promise<{
 
   // 查找该用户作为跟单/创建者、且订单未归档的订单
   const { data: ownedRaw } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, status, created_by, owner_user_id')
+    .select('id, order_no, customer_name, lifecycle_status, created_by, owner_user_id')
     .or(`created_by.eq.${targetUserId},owner_user_id.eq.${targetUserId}`)
-    .not('status', 'in', '("completed","archived","cancelled","已完成","已归档","已取消")')
+    .not('lifecycle_status', 'in', '("completed","archived","cancelled","已完成","已归档","已取消")')
     .limit(50);
   const ownedOrders = ((ownedRaw || []) as any[]).map((o: any) => ({
     id: o.id,

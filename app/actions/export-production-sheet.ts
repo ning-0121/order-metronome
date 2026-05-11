@@ -54,9 +54,9 @@ export async function exportProductionTrackingSheet(): Promise<{
 
   let ordersQuery = (supabase.from('orders') as any)
     .select(
-      'id, order_no, internal_order_no, customer_name, style_no, style_count, color_count, colors, quantity, factory_date, etd, cancel_date, special_tags, status, owner_user_id, created_by',
+      'id, order_no, internal_order_no, customer_name, style_no, style_count, color_count, colors, quantity, factory_date, etd, cancel_date, special_tags, lifecycle_status, owner_user_id, created_by',
     )
-    .not('status', 'in', '("completed","archived","cancelled","已完成","已归档","已取消")')
+    .not('lifecycle_status', 'in', '("completed","archived","cancelled","已完成","已归档","已取消")')
     .order('factory_date', { ascending: true, nullsFirst: false });
 
   if (!canSeeAll) {
