@@ -607,9 +607,17 @@ async function generateMissingInfoTasks(
 }
 
 // ─────────────────────────────────────────────────────────────
-// escalateStaleTasks
-// 轻升级：pending 任务逾期超过 N 天则自动调高 priority
-// 不发通知，不 hard block，仅改 priority 让 UI 突出显示
+// escalateStaleTasks  [Escalation Path A]
+//
+// 职责：task queue 轻升级（daily_tasks 表）
+//   - priority bump：2→1（逾期3天），不低于当前值
+//   - escalate_count + 1：记录升级次数，供 order-decision.ts 判断 at_risk
+//   - 不发通知，不 hard block
+//
+// 与其他升级路径的区别：
+//   Path B — runEscalationChain (cron/reminders)：milestones 通知路由，按角色逐级推送
+//   Path C — escalate_ceo (agent-execute)：AI 触发的硬升级，直接通知 CEO
+//   Path D — war room：手动升级入口，走 order-amendments
 // ─────────────────────────────────────────────────────────────
 export async function escalateStaleTasks(
   supabase: SupabaseClient
@@ -621,7 +629,7 @@ export async function escalateStaleTasks(
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
 
   const { data: staleTasks, error } = await (supabase.from('daily_tasks') as any)
-    .select('id, priority, task_date, task_type')
+    .select('id, priority, task_date, escalate_count')
     .eq('status', 'pending')
     .lt('task_date', yesterday)  // 任务日期 < 昨天 → 至少逾期 1 天
     .gt('priority', 1)           // 只升级 priority=2,3（priority=1 已经最高）
@@ -641,7 +649,10 @@ export async function escalateStaleTasks(
     if (newPriority >= task.priority) continue  // 已经足够高，跳过
 
     const { error: upErr } = await (supabase.from('daily_tasks') as any)
-      .update({ priority: newPriority })
+      .update({
+        priority: newPriority,
+        escalate_count: (task.escalate_count ?? 0) + 1,
+      })
       .eq('id', task.id)
 
     if (upErr) {
