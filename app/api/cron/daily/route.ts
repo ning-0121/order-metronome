@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { syncAllCustomerRhythms } from '@/lib/services/customer-rhythm.service'
+import { syncAllCustomerRhythms, rebuildAllCustomerRhythmPnl } from '@/lib/services/customer-rhythm.service'
 import { resolveStaleAlerts } from '@/lib/services/alerts.service'
 import { generateDailyTasks } from '@/lib/services/daily-tasks.service'
 
@@ -34,7 +34,19 @@ export async function GET(req: NextRequest) {
       log.push(`  ✗ Rhythms failed: ${rhythmResult.error}`)
     }
 
-    // Step 2: 清理过期告警
+    // Step 2: 物化客户 P&L 画像（在 rhythm sync 之后，确保行已存在）
+    log.push('→ Rebuilding customer P&L profiles...')
+    const pnlResult = await rebuildAllCustomerRhythmPnl(supabase)
+    if (pnlResult.ok) {
+      log.push(`  ✓ PnL: ${pnlResult.data.updated} updated, ${pnlResult.data.skipped} skipped, ${pnlResult.data.errors.length} errors`)
+      if (pnlResult.data.errors.length > 0) {
+        log.push(`  ! PnL errors: ${pnlResult.data.errors.slice(0, 3).join(', ')}`)
+      }
+    } else {
+      log.push(`  ✗ PnL failed: ${pnlResult.error}`)
+    }
+
+    // Step 3: 清理过期告警
     log.push('→ Resolving stale alerts...')
     const alertResult = await resolveStaleAlerts(supabase)
     if (alertResult.ok) {
@@ -43,7 +55,7 @@ export async function GET(req: NextRequest) {
       log.push(`  ✗ Alerts failed: ${alertResult.error}`)
     }
 
-    // Step 3: 生成今日任务
+    // Step 4: 生成今日任务
     log.push('→ Generating daily tasks...')
     const taskResult = await generateDailyTasks(supabase, {
       trigger: 'daily_cron',
