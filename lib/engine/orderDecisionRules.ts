@@ -221,6 +221,10 @@ function ruleDepositNotReceivedPreProduction(ctx: OrderDecisionContext): RuleFla
   const lifecycle = String(ctx.order.lifecycle_status ?? '');
   if (TERMINAL_LIFECYCLE.has(lifecycle)) return null;
 
+  // TODO(SoT): payment collection status is owned by Finance System.
+  // deposit_amount / deposit_status are legacy/cache signals only and must not be
+  // treated as the source of truth. This rule may produce false positives/negatives
+  // when OM's order_financials is stale relative to Finance System. See docs/system-layer.md.
   const depositAmount = num(ctx.financials?.deposit_amount);
   const depositStatus = String(ctx.financials?.deposit_status ?? '');
 
@@ -259,6 +263,9 @@ function ruleBalanceNotReceivedPreShipment(ctx: OrderDecisionContext): RuleFlag 
   const lifecycle = String(ctx.order.lifecycle_status ?? '');
   if (TERMINAL_LIFECYCLE.has(lifecycle)) return null;
 
+  // TODO(SoT): payment collection status is owned by Finance System.
+  // balance_amount / balance_status are legacy/cache signals only and must not be
+  // treated as the source of truth. See docs/system-layer.md.
   const balanceAmount = num(ctx.financials?.balance_amount);
   const balanceStatus = String(ctx.financials?.balance_status ?? '');
   if (balanceAmount === null || balanceAmount <= 0) return null;
@@ -449,6 +456,8 @@ function ruleNewCustomerComplexNoDeposit(ctx: OrderDecisionContext): RuleFlag | 
   if (matchingComplex.length === 0) return null;
 
   // 计算 deposit 占比
+  // TODO(SoT): deposit_amount is owned by Finance System; OM-side value is a
+  // legacy/cache signal only. See docs/system-layer.md.
   const depositAmount = num(ctx.financials?.deposit_amount);
   const saleTotal = num(ctx.financials?.sale_total);
   let depositPct: number;

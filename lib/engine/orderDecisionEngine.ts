@@ -174,6 +174,9 @@ function computeInputHash(ctx: OrderDecisionContext): string {
     margin: f?.margin_pct ?? null,
     salePrice: f?.sale_price_per_piece ?? null,
     saleTotal: f?.sale_total ?? null,
+    // TODO(SoT): deposit/balance amount + status are owned by Finance System.
+    // OM-side values are legacy/cache signals only. Inputs to decision hashing
+    // may become unstable when OM is stale vs Finance. See docs/system-layer.md.
     depositAmount: f?.deposit_amount ?? null,
     depositStatus: f?.deposit_status ?? null,
     balanceAmount: f?.balance_amount ?? null,

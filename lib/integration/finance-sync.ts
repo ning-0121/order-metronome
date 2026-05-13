@@ -15,6 +15,7 @@ type WebhookEventType =
   | 'order.activated'
   | 'order.completed'
   | 'order.cancelled'
+  | 'order.resync'
   | 'milestone.updated'
   | 'price_approval.requested'
   | 'delay.requested'
@@ -92,7 +93,7 @@ async function sendToFinanceSystem(
 // ============================================================
 
 /** 订单创建/更新时同步到财务系统 */
-export async function syncOrderToFinance(order: Record<string, unknown>, event: 'order.created' | 'order.updated' | 'order.activated' = 'order.updated') {
+export async function syncOrderToFinance(order: Record<string, unknown>, event: 'order.created' | 'order.updated' | 'order.activated' | 'order.resync' = 'order.updated') {
   return sendToFinanceSystem(event, {
     id: order.id,
     order_no: order.order_no,

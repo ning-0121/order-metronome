@@ -401,6 +401,10 @@ function computeShippedOrCompleted(args: {
   let score = 95; // 基线高（货物在路上 / 已交付）
 
   // 付款情况
+  // TODO(SoT): payment collection status is owned by Finance System.
+  // These order_financials fields (balance_status / deposit_status) are legacy/cache
+  // signals only and must not be treated as the source of truth. They have no UI
+  // writer in OM today and may be stale or empty for most orders. See docs/system-layer.md.
   const balanceStatus = financials?.balance_status; // received / partial / pending / overdue
   const depositStatus = financials?.deposit_status;
 

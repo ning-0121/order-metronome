@@ -146,7 +146,28 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
     setLoading(false);
   }
 
-  if (!canActivate && !canDelete && !canRequestCancel && !canDirectCancel && !canForceComplete && !canApproveImport) return null;
+  // 重新同步到财务系统：仅 admin / finance 可见
+  // SoT 边界：仅推送订单主数据，不涉及收款字段（收款 SoT 在 Finance System）
+  const canResyncFinance = (isAdmin || isFinance) && !isDraft && lifecycleStatus !== 'cancelled';
+
+  async function handleResyncFinance() {
+    if (!confirm(`将订单「${orderNo}」的主数据重新同步到财务系统？\n\n仅推送订单金额/币种/付款条款等主数据，不涉及收款记录。`)) return;
+    setLoading(true);
+    try {
+      const { resyncOrderToFinance } = await import('@/app/actions/finance-resync');
+      const res = await resyncOrderToFinance(orderId);
+      if (!res.ok) {
+        alert(`同步失败：${res.error}`);
+      } else {
+        alert('✅ 已重新同步，请到财务系统刷新查看');
+      }
+    } catch (e) {
+      alert(`同步异常：${e instanceof Error ? e.message : '未知错误'}`);
+    }
+    setLoading(false);
+  }
+
+  if (!canActivate && !canDelete && !canRequestCancel && !canDirectCancel && !canForceComplete && !canApproveImport && !canResyncFinance) return null;
 
   return (
     <div className="flex items-center gap-2">
@@ -215,6 +236,18 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
           className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium disabled:opacity-50"
         >
           ✅ 标记完成
+        </button>
+      )}
+
+      {/* 重新同步到财务系统（admin / finance） */}
+      {canResyncFinance && (
+        <button
+          onClick={handleResyncFinance}
+          disabled={loading}
+          className="text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+          title="将订单主数据（金额/币种/付款条款等）重新推送给外部财务系统。不涉及收款记录。"
+        >
+          重新同步到财务系统
         </button>
       )}
 

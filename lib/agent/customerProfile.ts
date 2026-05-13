@@ -122,6 +122,11 @@ export async function buildCustomerProfile(
   profile.overdueRate = completedCount > 0 ? Math.round((overdueCount / completedCount) * 100) : 0;
 
   // ── 付款行为：从 order_financials + 出货里程碑反算实际付款天数 ──
+  // TODO(SoT): payment collection status is owned by Finance System.
+  // These order_financials fields are legacy/cache signals only and must not be
+  // treated as the source of truth. Customer payment behavior should ultimately
+  // be computed from Finance System data (currently unavailable via API).
+  // See docs/system-layer.md.
   try {
     const { data: financials } = await supabase
       .from('order_financials')

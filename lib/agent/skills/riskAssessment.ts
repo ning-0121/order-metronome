@@ -888,6 +888,11 @@ async function generateBusinessNarrative(
     : null;
 
   // 查询经营数据（收款/利润/确认链）
+  // TODO(SoT): payment collection status is owned by Finance System.
+  // The deposit_status / deposit_amount / balance_status / balance_amount / balance_due_date
+  // fields are legacy/cache signals only and must not be treated as the source of truth.
+  // Risk assessment narrative should clarify these are OM-side snapshots, not real-time
+  // finance system data. See docs/system-layer.md.
   let bizContext = '';
   try {
     const [finRes, confRes] = await Promise.all([

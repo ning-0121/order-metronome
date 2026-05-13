@@ -125,6 +125,12 @@ const CONFIRMATION_LABELS: Record<string, string> = {
 // ════════════════════════════════════════════════
 
 export function calculatePaymentStatus(input: EngineInput): StatusResult<'received' | 'partial' | 'pending' | 'overdue' | 'hold'> {
+  // TODO(SoT): payment collection status is owned by Finance System.
+  // The order_financials.deposit_* / balance_* fields read here are legacy/cache
+  // signals only and must not be treated as the source of truth. The status
+  // computed by this function is an OM-side approximation that may be stale.
+  // payment_hold / allow_* are OM-side override controls — those remain valid.
+  // See docs/system-layer.md.
   const f = input.financials;
   if (!f) return { value: 'pending', level: 'gray', explain: '尚未录入经营数据' };
 

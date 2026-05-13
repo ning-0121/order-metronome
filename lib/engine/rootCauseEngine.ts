@@ -92,6 +92,10 @@ export async function buildOrderContext(orderId: string): Promise<OrderContext |
       if (price > 0) marginPct = ((price - cost) / price) * 100;
     }
 
+    // TODO(SoT): payment collection status is owned by Finance System.
+    // deposit_status / balance_status are legacy/cache signals only and must not
+    // be treated as the source of truth. Root cause analysis using these flags
+    // may misattribute when OM is stale. See docs/system-layer.md.
     const depositReceived = financials?.deposit_status === 'received';
     const balanceReceived = financials?.balance_status === 'received';
     const paymentHold = financials?.payment_hold === true;

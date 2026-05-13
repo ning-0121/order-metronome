@@ -17,6 +17,10 @@ const paymentBlockingProduction: CauseRule = {
     const fin = ctx.financials as any;
     if (!fin) return null;
 
+    // TODO(SoT): deposit_status / balance_status are owned by Finance System.
+    // OM-side values are legacy/cache signals only and must not be treated as
+    // the source of truth. allow_production / payment_hold are OM-side override
+    // controls and remain valid. See docs/system-layer.md.
     const blocked =
       fin.allow_production === false ||
       fin.payment_hold === true ||

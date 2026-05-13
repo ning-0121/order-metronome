@@ -129,6 +129,12 @@ export function getBlockedReasons(
   }
 
   // 付款规则
+  // TODO(SoT): payment collection status is owned by Finance System.
+  // deposit_status / balance_status are legacy/cache signals only and must not
+  // be treated as the source of truth. When OM's order_financials is stale,
+  // these blocks may fail to trigger (false negative) or block unnecessarily
+  // (false positive). allow_production / allow_shipment / payment_hold are
+  // OM-side override controls — those remain valid. See docs/system-layer.md.
   if (financials) {
     // Admin override 检查
     const productionOverridden = financials.allow_production;
