@@ -545,6 +545,152 @@ export const FIBER_ABBREVIATIONS: Record<string, string> = {
   'TR': 'Tetron Rayon 涤粘混纺',
 };
 
+// ════════════════════════════════════════════════════════════════
+// Off-Price 客户开发知识（DDS / Ross / Burlington / TJX 等）
+// 完整方法论见 docs/knowledge/off-price-playbook.md
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * Off-Price 客户名称识别规则
+ * 用于自动识别客户类型，决定推款策略
+ * 匹配方式：大小写不敏感的子串匹配
+ */
+export const OFF_PRICE_RETAILERS: ReadonlyArray<{
+  keyword: string;
+  fullName: string;
+  parent?: string;
+}> = [
+  { keyword: 'dds',         fullName: "DD's Discounts",  parent: 'Ross Stores' },
+  { keyword: 'ross',        fullName: 'Ross Stores' },
+  { keyword: 'burlington',  fullName: 'Burlington' },
+  { keyword: 'tjx',         fullName: 'TJX Companies' },
+  { keyword: 'tjmaxx',      fullName: 'T.J. Maxx',       parent: 'TJX' },
+  { keyword: 't.j.maxx',    fullName: 'T.J. Maxx',       parent: 'TJX' },
+  { keyword: 'marshalls',   fullName: 'Marshalls',       parent: 'TJX' },
+  { keyword: 'homegoods',   fullName: 'HomeGoods',       parent: 'TJX' },
+  { keyword: 'sierra',      fullName: 'Sierra Trading',  parent: 'TJX' },
+] as const;
+
+/**
+ * Off-Price 月度推款日历
+ * key: 月份（1-12）
+ * value: 该月业务员应推的品类 + 业务重点
+ */
+export const OFF_PRICE_MONTHLY_PUSH: Record<number, {
+  focus: string;
+  products: string[];
+  tactics: string;
+}> = {
+  1:  { focus: '秋冬开发启动',          products: ['fleece set', 'jacket', 'thermal'],         tactics: '推秋冬主打款，提前准备 color card + cost-down 版' },
+  2:  { focus: '秋冬集中看样',          products: ['hoodie set', 'jogger set', 'brushed legging'], tactics: '秋冬主攻月，全力出样' },
+  3:  { focus: '秋冬确认 + 初步 PO',    products: ['fleece set', 'sherpa jacket', 'rib lounge set'], tactics: '强推套装/外套，跟进报价转 PO' },
+  4:  { focus: '秋冬补充开发',          products: ['cost-down 版本', 'carton optimization'],   tactics: '控成本、确认交期、补充款' },
+  5:  { focus: 'Back-to-School 初期',  products: ['basic activewear', 'basic legging', 'layering top'], tactics: '推 BTS 基础款' },
+  6:  { focus: '秋季 Activewear',      products: ['crossover flare', 'basic legging', 'tennis skirt', 'bra set', 'yoga set', 'seamless set'], tactics: '推 transition 款（夏可卖、秋也能卖）' },
+  7:  { focus: 'Holiday 初期',         products: ['fleece blanket hoodie', 'gifting socks'],  tactics: '准备春夏 color card；推 Holiday gifting' },
+  8:  { focus: 'Holiday + 冬季补货',   products: ['cozy lounge set', 'sherpa item', 'pajama set', 'plush items'], tactics: '推 holiday 色系（burgundy / forest / cream），快反报价' },
+  9:  { focus: '春夏开发启动',          products: ['shorts', 'tank tops', 'lightweight legging'], tactics: '推 spring color + lightweight，提前 fabric booking' },
+  10: { focus: '春夏集中开发',          products: ['shorts', 'tank', 'tennis dress', 'biker shorts'], tactics: '跟进所有报价转 PO 进度' },
+  11: { focus: '春夏确认',              products: ['swim', 'yoga set', 'lounge'],              tactics: 'trend simplification + retail-friendly version' },
+  12: { focus: '补货 + 清仓',           products: ['black legging', 'solid bra', 'fleece basics', 'white tops', 'seamless basics'], tactics: '不推复杂款，主推 quick reorder + basics' },
+};
+
+/**
+ * Retail → FOB 成本映射（按品类拆分）
+ * 单位：USD
+ * range: [FOB 下限, FOB 上限]
+ */
+export const OFF_PRICE_RETAIL_TO_FOB: Record<string, Record<number, [number, number]>> = {
+  // Activewear 类
+  'basic_legging':    { 14.99: [3.5, 4.5], 19.99: [5.0, 6.5], 24.99: [6.5, 8.0], 29.99: [8.0, 10.0] },
+  'crossover_flare':  { 14.99: [4.0, 5.0], 19.99: [5.5, 7.0], 24.99: [7.0, 8.5], 29.99: [8.5, 10.5] },
+  'fleece_set':       {                    19.99: [6.5, 8.0], 24.99: [8.0, 10.0], 29.99: [10.0, 12.5] },
+  'yoga_set':         { 14.99: [4.0, 5.0], 19.99: [5.5, 7.0], 24.99: [7.0, 9.0],  29.99: [9.0, 11.0] },
+  // Loungewear / Cozy 类
+  'rib_lounge_set':   {                    19.99: [6.0, 7.5], 24.99: [7.5, 9.0],  29.99: [9.5, 11.0] },
+  'sherpa_jacket':    {                    19.99: [7.5, 9.0], 24.99: [9.5, 11.5], 29.99: [11.5, 14.0] },
+  'pajama_set':       {                    19.99: [5.5, 7.0], 24.99: [7.0, 8.5],  29.99: [8.5, 10.5] },
+  // Bra / Small Item 类
+  'sports_bra':       { 9.99: [2.2, 3.0],  14.99: [3.5, 4.5], 19.99: [5.0, 6.0] },
+  'bra_set':          {                    14.99: [4.0, 5.5], 19.99: [5.5, 7.0] },
+  'seamless':         { 9.99: [2.5, 3.2],  14.99: [4.0, 5.0], 19.99: [5.5, 7.0] },
+};
+
+/**
+ * Off-Price 适合 / 不适合品类清单
+ */
+export const OFF_PRICE_PRODUCT_FIT = {
+  highly_suitable: [
+    'flare legging', 'crossover flare', 'basic legging', 'yoga pant',
+    'fleece set', 'jogger set', 'lounge set',
+    'pajama', 'cozy set', 'rib lounge', 'soft touch items',
+    'black legging', 'black flare', 'neutral bra', 'fleece hoodie',
+  ],
+  unsuitable: [
+    'heavy embellishment (重绣花/重亮片)',
+    'couture / 高端 tailoring',
+    '贵辅料款 (≥ 30% 单件成本来自辅料)',
+    '单价 ≥ USD 40 的 trend 款',
+    '极小众设计 (无法 5000+ 件量产)',
+  ],
+} as const;
+
+/**
+ * Off-Price 关键时机规则（buyer 时间节奏）
+ */
+export const OFF_PRICE_KEY_TIMING = {
+  // buyer 提前看货的月数范围
+  buyer_preview_months_ahead: [4, 8],
+  // buyer 下 PO 提前月数
+  po_lead_months_ahead: [3, 6],
+  // 生产到港的月数
+  production_to_arrival_months: [2, 4],
+  // 业务员必须提前于销售季的月数（核心规则）
+  sales_lead_time_required_months: [4, 6],
+  // 推晚多少个月算"基本错过窗口"
+  miss_window_threshold_months: 1,
+} as const;
+
+/**
+ * 判断客户是否为 Off-Price 体系
+ * 大小写不敏感、子串匹配，例如 "Ross USA Inc" / "DDS" / "tjmaxx" 都会命中
+ */
+export function isOffPriceCustomer(customerName: string | null | undefined): boolean {
+  if (!customerName) return false;
+  const lower = customerName.toLowerCase();
+  return OFF_PRICE_RETAILERS.some(r => lower.includes(r.keyword));
+}
+
+/**
+ * 返回匹配到的 Off-Price 客户元数据（用于 UI 显示）
+ * 未命中返回 null
+ */
+export function getOffPriceRetailer(customerName: string | null | undefined): {
+  keyword: string;
+  fullName: string;
+  parent?: string;
+} | null {
+  if (!customerName) return null;
+  const lower = customerName.toLowerCase();
+  return OFF_PRICE_RETAILERS.find(r => lower.includes(r.keyword)) || null;
+}
+
+/**
+ * 获取指定月份的 Off-Price 推款建议
+ * @param month 月份 1-12，省略时使用当前月份
+ */
+export function getOffPriceMonthlyPush(month?: number): {
+  month: number;
+  focus: string;
+  products: string[];
+  tactics: string;
+} {
+  const m = month ?? (new Date().getMonth() + 1);
+  const normalized = Math.min(12, Math.max(1, m));
+  const entry = OFF_PRICE_MONTHLY_PUSH[normalized];
+  return { month: normalized, ...entry };
+}
+
 /**
  * 根据订单特征生成专业建议
  */

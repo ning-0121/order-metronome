@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { CustomerEmailMappingPanel } from '@/components/CustomerEmailMappingPanel';
+import { getOffPriceRetailer, getOffPriceMonthlyPush } from '@/lib/agent/industryKnowledge';
 
 const TIER_STYLES: Record<string, string> = {
   A: 'bg-indigo-100 text-indigo-700',
@@ -111,11 +112,34 @@ export default async function CustomersPage() {
         <div className="text-center py-12 text-gray-400">暂无客户数据</div>
       ) : (
         <div className="space-y-4">
+          {/* 本月 Off-Price 推款建议（页面级，只读）
+              来源：lib/agent/industryKnowledge.ts → OFF_PRICE_MONTHLY_PUSH
+              不消耗任何 AI token，无 DB 写入 */}
+          {(() => {
+            const push = getOffPriceMonthlyPush();
+            const hasOffPriceCustomer = customers.some(c => getOffPriceRetailer(c.name) !== null);
+            if (!hasOffPriceCustomer) return null;
+            return (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-700 font-semibold whitespace-nowrap">🏷️ {push.month} 月 Off-Price 推款</span>
+                  <span className="text-gray-700">
+                    <span className="font-medium">{push.focus}</span>
+                    <span className="text-gray-500"> · </span>
+                    <span>{push.products.join(' / ')}</span>
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800/80 mt-1 ml-1">{push.tactics}</p>
+              </div>
+            );
+          })()}
           {customers.map(c => {
             const mems = memoryMap.get(c.name) || [];
             const highRiskMems = mems.filter(m => m.risk_level === 'high');
             const factories = [...new Set(c.orders.map((o: any) => o.factory_name).filter(Boolean))];
             const rhythm = rhythmMap.get(c.name) ?? null;
+            // Off-Price 客户识别（纯字符串匹配，无 AI、无 DB 写入）
+            const offPriceMeta = getOffPriceRetailer(c.name);
 
             return (
               <div key={c.name} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -136,6 +160,14 @@ export default async function CustomersPage() {
                         {rhythm?.followup_status && rhythm.followup_status !== 'normal' && (
                           <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${FOLLOWUP_STYLES[rhythm.followup_status] ?? ''}`}>
                             {FOLLOWUP_LABELS[rhythm.followup_status] ?? rhythm.followup_status}
+                          </span>
+                        )}
+                        {offPriceMeta && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded font-semibold bg-amber-100 text-amber-800"
+                            title={`Off-Price 体系 · ${offPriceMeta.fullName}${offPriceMeta.parent ? `（${offPriceMeta.parent} 旗下）` : ''}。详见 docs/knowledge/off-price-playbook.md`}
+                          >
+                            🏷️ Off-Price
                           </span>
                         )}
                       </div>
