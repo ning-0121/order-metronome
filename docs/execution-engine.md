@@ -97,6 +97,65 @@ UNIQUE(assigned_to, source_type, source_id, task_date)
 
 ---
 
+## Progressive Validation / 渐进式校验
+
+> **核心原则**：订单创建不追求资料 100% 齐全；但关键执行节点完成前必须补齐。
+
+### 为什么不全程必填
+
+强制创建时填齐所有字段，会逼业务员在客户真没确认时填假数据绕过校验，反而污染数据。
+现实情况：年年旺这类客户经常下单时只口头通知，仓库地址、联系人等需事后补充。
+
+### 4 段式生命周期
+
+```
+T+0   创建：字段允许全空（UI 标注「待客户确认可空」）
+T+5   开始催：missing_info 任务系统覆盖
+T+7   生成催办任务（priority=2）
+T+14  任务升级 priority=1（escalateStaleTasks）
+T+N   尝试推关键节点 → hard-block，列出缺失项
+T+N   补齐 → banner 消失 → 节点可推进
+```
+
+### 当前实例：国内送仓信息
+
+| 字段 | 创建必填 | 催办起点 | Hard-Block 节点 |
+|------|---------|---------|----------------|
+| `delivery_warehouse_name` | ❌ | 7 天 | `packing_method_confirmed` |
+| `delivery_address` | ❌ | 7 天 | `packing_method_confirmed` |
+| `delivery_contact` | ❌ | 7 天 | `packing_method_confirmed` |
+| `delivery_phone` | ❌ | 7 天 | `packing_method_confirmed` |
+| `delivery_required_at` | ❌ | 7 天 | `packing_method_confirmed` |
+
+**兜底**：上面节点被 admin 绕过后，`domestic_delivery` 节点再次硬阻塞（双闸门）。
+
+**Admin Override**：`isAdmin === true` 可绕过 hard-block（应急放行）。
+
+### 适用此模式的判断标准
+
+要给某组字段套 Progressive Validation 时，必须同时满足：
+
+1. **下游依赖明确** — 存在一个具体的执行节点，该节点不补齐这些字段就客观上做不下去
+2. **创建期客观空缺** — 至少 20% 的真实订单在创建时拿不到这些信息（不是"业务员懒得填"）
+3. **不卡到工厂** — 字段补齐前的所有节点都能并行推进，工厂可以同时开始生产
+
+不满足这 3 条的字段，应当继续创建时强制必填。
+
+### 反模式（已规避）
+
+| 反模式 | 后果 |
+|-------|------|
+| ❌ 创建时硬必填 | 业务员填假数据绕过 → 数据污染 |
+| ❌ 全程不校验 | 工厂排到包装环节才发现 → 已浪费排产时间 |
+| ❌ 仅 UI 提示无 hard-block | 业务员忘记 → 工厂打错唛头 |
+| ❌ 全节点 hard-block | 卡住生产 → 工厂等不到地址也不能开裁 |
+
+### 共享性
+
+此模式不含 Qimo 专属数据，登记为 `[SHARED]`。详见 [shared-core-registry.md](./shared-core-registry.md#delivery-info-progressive-validation-shared)。
+
+---
+
 ## 18 关卡系统
 
 ### 阶段划分
