@@ -515,7 +515,7 @@ async function generateMissingInfoTasks(
 
   // 只看执行中的订单（active / 执行中），不含草稿/完成/取消
   const { data: orders, error } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, factory_date, etd, warehouse_due_date, incoterm, created_by, owner_user_id, created_at')
+    .select('id, order_no, customer_name, factory_date, etd, warehouse_due_date, incoterm, delivery_type, delivery_warehouse_name, delivery_address, delivery_contact, delivery_phone, delivery_required_at, created_by, owner_user_id, created_at')
     .in('lifecycle_status', ['active', '执行中'])
     .order('created_at', { ascending: true })
     .limit(200)
@@ -573,6 +573,20 @@ async function generateMissingInfoTasks(
     if (conf && orderAge >= 5) {
       if (!conf.fabric_color) missingItems.push('面料与颜色')
       if (!conf.size_ratio)   missingItems.push('尺码配比')
+    }
+
+    // 4. 国内送仓字段缺失（订单创建 7 天后仍未补齐送货地址）
+    //    创建时允许为空，但「包装方式确认」前必须补齐（包装/唛头依赖此信息）。
+    if (order.delivery_type === 'domestic' && orderAge >= 7) {
+      const domesticMissing: string[] = []
+      if (!order.delivery_warehouse_name?.trim()) domesticMissing.push('收货仓库')
+      if (!order.delivery_address?.trim())        domesticMissing.push('送货地址')
+      if (!order.delivery_contact?.trim())        domesticMissing.push('收货联系人')
+      if (!order.delivery_phone?.trim())          domesticMissing.push('联系电话')
+      if (!order.delivery_required_at)            domesticMissing.push('客户要求送达日期')
+      if (domesticMissing.length > 0) {
+        missingItems.push(`送货信息(${domesticMissing.join('/')})`)
+      }
     }
 
     if (missingItems.length === 0) continue

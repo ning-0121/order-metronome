@@ -977,42 +977,45 @@ function NewOrderWizard() {
                       <h4 className="text-sm font-semibold text-amber-900">客户指定收货仓库</h4>
                       <span className="text-xs text-amber-700">（年年旺等客户）</span>
                     </div>
+                    <p className="text-xs text-amber-700/80 -mt-1">
+                      💡 客户未确认可暂时空着；但「包装方式确认」节点完成前必须补齐，否则无法继续推进。
+                    </p>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
-                          仓库名称 <span className="text-red-500">*</span>
+                          仓库名称 <span className="text-gray-400 text-[10px]">（待客户确认可空）</span>
                         </label>
-                        <input type="text" name="delivery_warehouse_name" required
+                        <input type="text" name="delivery_warehouse_name"
                           placeholder="如：年年旺嘉兴仓"
                           className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
-                          客户要求送达 <span className="text-red-500">*</span>
+                          客户要求送达 <span className="text-gray-400 text-[10px]">（待确认可空）</span>
                         </label>
-                        <input type="date" name="delivery_required_at" required
+                        <input type="date" name="delivery_required_at"
                           className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
                       </div>
                       <div className="col-span-2">
                         <label className="block text-xs font-medium text-gray-700 mb-1">
-                          详细地址 <span className="text-red-500">*</span>
+                          详细地址 <span className="text-gray-400 text-[10px]">（待确认可空）</span>
                         </label>
-                        <input type="text" name="delivery_address" required
+                        <input type="text" name="delivery_address"
                           placeholder="省/市/区/街道/门牌号"
                           className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
-                          收货联系人 <span className="text-red-500">*</span>
+                          收货联系人 <span className="text-gray-400 text-[10px]">（待确认可空）</span>
                         </label>
-                        <input type="text" name="delivery_contact" required
+                        <input type="text" name="delivery_contact"
                           className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
-                          联系电话 <span className="text-red-500">*</span>
+                          联系电话 <span className="text-gray-400 text-[10px]">（待确认可空）</span>
                         </label>
-                        <input type="tel" name="delivery_phone" required
+                        <input type="tel" name="delivery_phone"
                           className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
                       </div>
                     </div>

@@ -168,6 +168,29 @@ export default async function OrderDetailPage({
 
       {/* 重排排期横幅（出厂日已过且未出运/送仓时显示给 admin/owner） */}
       <div className="max-w-7xl mx-auto px-6 pt-4 space-y-3">
+        {/* 国内送仓信息缺失提示（订单创建后允许暂空，但需在「包装方式确认」前补齐） */}
+        {(orderData as any).delivery_type === 'domestic' && (() => {
+          const o = orderData as any;
+          const missing: string[] = [];
+          if (!o.delivery_warehouse_name?.trim()) missing.push('仓库名称');
+          if (!o.delivery_address?.trim())        missing.push('详细地址');
+          if (!o.delivery_contact?.trim())        missing.push('收货联系人');
+          if (!o.delivery_phone?.trim())          missing.push('联系电话');
+          if (!o.delivery_required_at)            missing.push('客户要求送达日期');
+          if (missing.length === 0) return null;
+          return (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+              <span className="text-xl shrink-0">📦</span>
+              <div className="text-sm">
+                <p className="font-semibold text-amber-900">国内送仓信息待补齐：{missing.join('、')}</p>
+                <p className="text-amber-800 mt-1">
+                  创建订单时允许暂空，但<strong className="text-amber-900">「包装方式确认」节点完成前必须补齐</strong>（包装/唛头依赖送货地址）。
+                  请在「订单基本信息」编辑区域补充，或与客户确认后填入。
+                </p>
+              </div>
+            </div>
+          );
+        })()}
         {customerShipHold && customerHoldStale && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
             <span className="text-xl shrink-0">🟡</span>

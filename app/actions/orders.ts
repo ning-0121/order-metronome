@@ -190,14 +190,9 @@ export async function createOrder(
   if (!quantity) return { ok: false, error: '请填写预估总数量' };
   if (!styleCount) return { ok: false, error: '请填写款数' };
 
-  // 国内送仓校验
-  if (delivery_type === 'domestic') {
-    if (!delivery_warehouse_name?.trim()) return { ok: false, error: '国内送仓订单请填写收货仓库名称' };
-    if (!delivery_address?.trim())        return { ok: false, error: '国内送仓订单请填写详细地址' };
-    if (!delivery_contact?.trim())        return { ok: false, error: '国内送仓订单请填写收货联系人' };
-    if (!delivery_phone?.trim())          return { ok: false, error: '国内送仓订单请填写联系电话' };
-    if (!delivery_required_at)            return { ok: false, error: '国内送仓订单请填写客户要求送达日期' };
-  }
+  // 国内送仓校验：创建时允许全部为空（部分客户尚未确认仓库/地址/联系人/送达日期）。
+  // 推进到「包装方式确认」节点前必须补齐 → 见 app/actions/milestones.ts hard-block。
+  // 14 天后仍缺失则由 missing_info 任务自动催办 → 见 generateMissingInfoTasks。
   if (!colorCount) return { ok: false, error: '请填写颜色数' };
 
   // ── 日期合理性校验 ──

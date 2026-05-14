@@ -221,6 +221,31 @@ export async function markMilestoneDone(
     return { error: '无权操作：只有对应角色的负责人或管理员可以标记完成' };
   }
 
+  // ── 国内送仓信息硬阻塞 ──
+  // 创建订单时允许 5 个送货字段全部为空（部分客户尚未确认仓库地址），
+  // 但推进到「包装方式确认」/「国内送仓完成」节点前必须补齐。
+  // 这是工厂排包装、印唛头标签的前置依赖。
+  const DOMESTIC_DELIVERY_GATE_KEYS = new Set(['packing_method_confirmed', 'domestic_delivery']);
+  if (DOMESTIC_DELIVERY_GATE_KEYS.has(milestone.step_key) && !isAdmin) {
+    const { data: orderForDelivery } = await (supabase.from('orders') as any)
+      .select('delivery_type, delivery_warehouse_name, delivery_address, delivery_contact, delivery_phone, delivery_required_at')
+      .eq('id', milestone.order_id)
+      .single();
+    if (orderForDelivery?.delivery_type === 'domestic') {
+      const missing: string[] = [];
+      if (!orderForDelivery.delivery_warehouse_name?.trim()) missing.push('仓库名称');
+      if (!orderForDelivery.delivery_address?.trim())        missing.push('详细地址');
+      if (!orderForDelivery.delivery_contact?.trim())        missing.push('收货联系人');
+      if (!orderForDelivery.delivery_phone?.trim())          missing.push('联系电话');
+      if (!orderForDelivery.delivery_required_at)            missing.push('客户要求送达日期');
+      if (missing.length > 0) {
+        return {
+          error: `国内送仓信息缺失：${missing.join('、')}。请先在订单详情页补齐后再完成此节点（包装/唛头依赖送货地址）。`,
+        };
+      }
+    }
+  }
+
   // 顺序约束：取消硬阻塞，所有节点可并行处理
   // 2026-04-14：CEO要求各角色各自处理各自的节点，不互相卡
   // 保留业务尾查依赖跟单尾查（同类双签逻辑），其余全部放开
