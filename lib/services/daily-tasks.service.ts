@@ -15,6 +15,7 @@ import type {
   TaskType,
   TaskPriority,
 } from './types'
+import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus'
 
 // ── 今日日期字符串 ─────────────────────────────────────────────
 function todayStr(): string {
@@ -120,7 +121,7 @@ async function generateMilestoneTasks(
       orders!inner(order_no, customer_name, lifecycle_status)
     `)
     .neq('status', 'done')
-    .not('orders.lifecycle_status', 'in', '("completed","cancelled")')
+    .not('orders.lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER)
     .not('planned_at', 'is', null)
     .lte('planned_at', new Date(new Date(targetDate).getTime() + 24 * 3600 * 1000).toISOString())
 
@@ -320,7 +321,7 @@ async function generateProfitWarningTasks(
     `)
     .eq('snapshot_type', 'live')
     .in('margin_status', ['critical', 'negative'])
-    .not('orders.lifecycle_status', 'in', '("completed","cancelled")')
+    .not('orders.lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER)
 
   if (error) {
     errors.push(`fetchProfitSnapshots: ${error.message}`)

@@ -13,6 +13,7 @@ import type {
   MarginStatus,
   SnapshotType,
 } from './types'
+import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus'
 import { createSystemAlert, resolveAlertByKey, MARGIN_THRESHOLDS } from './alerts.service'
 
 // ── 利润状态判断（纯函数，可单独测试）───────────────────────
@@ -283,7 +284,7 @@ export async function getOrdersWithLowMargin(
     `)
     .eq('snapshot_type', 'live')
     .in('margin_status', ['critical', 'negative', 'warning'])
-    .neq('orders.lifecycle_status', 'completed')
+    .not('orders.lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER)
     .order('gross_margin', { ascending: true })
 
   if (error) return err(error.message)

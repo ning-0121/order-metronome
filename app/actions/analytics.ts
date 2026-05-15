@@ -337,7 +337,8 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
   // 也不再 fallback 到 created_at 当下单日（created_at 是行插入时间，与业务无关）
   const { data: orders } = await (supabase.from('orders') as any)
     .select('id, order_no, customer_name, factory_name, quantity, factory_date, order_date, lifecycle_status')
-    .not('lifecycle_status', 'eq', '已取消');
+    // 仅排除已取消订单（含中英文），保留已完成订单用于历史分析
+    .not('lifecycle_status', 'in', '("cancelled","已取消")');
   if (!orders || orders.length === 0) return [];
 
   // 获取所有订单的关键里程碑（po_confirmed 实际/计划 + production_kickoff 实际/计划）

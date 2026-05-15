@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ok, err, type ServiceResult } from './types'
+import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus'
 import type {
   AIContextCache,
   ContextType,
@@ -339,7 +340,7 @@ export async function buildGlobalContext(
   const [ordersCountRes, activeAlertsCountRes] = await Promise.allSettled([
     (supabase.from('orders') as any)
       .select('lifecycle_status')
-      .not('lifecycle_status', 'in', '("completed","cancelled")'),
+      .not('lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER),
     (supabase.from('system_alerts') as any)
       .select('id', { count: 'exact' })
       .eq('is_resolved', false),

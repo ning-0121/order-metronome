@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { calcDueDates } from '@/lib/schedule';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { isDoneStatus } from '@/lib/domain/types';
+import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus';
 
 /**
  * 重算单个订单所有未完成关卡的截止日期
@@ -83,9 +84,10 @@ export async function recalcAllOrders() {
   if (!isAdmin) return { error: '仅管理员可重算排期' };
 
   // 获取所有未完成的订单
+  // 注意：必须用 TERMINAL_LIFECYCLE_FILTER 同时排除中英文枚举
   const { data: orders } = await (supabase.from('orders') as any)
     .select('id, order_no')
-    .not('lifecycle_status', 'in', '("completed","cancelled")');
+    .not('lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER);
 
   const results = [];
   for (const order of orders || []) {
