@@ -14,6 +14,8 @@ import { POParserModal } from './POParserModal';
 import { computeDeliveryAlert, computeDelayDays } from '@/lib/domain/milestone-helpers';
 import { updateMilestoneActualDate } from '@/app/actions/milestones';
 import { getSwimLane, getDefaultLanesForRoles, LANE_META, type SwimLane } from '@/lib/domain/swimLane';
+import { isBatchAwareStep } from '@/lib/domain/batchAwareSteps';
+import { BatchMilestonePanel } from './BatchMilestonePanel';
 
 /** 允许填写实际日期的节点 */
 const ACTUAL_DATE_EDITABLE_KEYS = [
@@ -27,6 +29,8 @@ interface OrderTimelineProps {
   orderId: string;
   orderNo?: string;
   orderIncoterm: 'FOB' | 'DDP';
+  /** 订单是否启用分批出货（影响出货阶段节点的批次进度展示）*/
+  isSplitShipment?: boolean;
   currentRole?: string;
   currentRoles?: string[];
   currentUserId?: string;
@@ -171,7 +175,7 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   );
 }
 
-export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, currentRole, currentRoles = [], currentUserId, isAdmin = false }: OrderTimelineProps) {
+export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false }: OrderTimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
   const [showPOParser, setShowPOParser] = useState(false);
@@ -587,6 +591,22 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           orderId={orderId}
                           orderNo={orderNo}
                         />
+
+                        {/* 分批出货节点：嵌入批次进度面板 */}
+                        {isSplitShipment && isBatchAwareStep(m.step_key) && (
+                          <BatchMilestonePanel
+                            orderId={orderId}
+                            stepKey={m.step_key as any}
+                            canEdit={isAdmin || Boolean(
+                              currentRoles.some(r => {
+                                const rl = String(r).toLowerCase();
+                                const milestoneRole = String(m.owner_role || '').toLowerCase();
+                                // 同 lane 角色可编辑；admin/任意 sales/logistics/finance 也可（与 nudge 同样宽松）
+                                return rl === milestoneRole || rl === 'sales' || rl === 'logistics' || rl === 'finance';
+                              })
+                            )}
+                          />
+                        )}
 
                         {/* 催办提醒按钮：所有未完成节点可催办（2026-05-15 放宽）
                             - 跨角色催办时 API 自动抄送 admin/CEO

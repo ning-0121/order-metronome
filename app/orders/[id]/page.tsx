@@ -696,6 +696,7 @@ export default async function OrderDetailPage({
                 orderId={id}
                 orderNo={orderData.order_no}
                 orderIncoterm={orderData.incoterm as 'FOB' | 'DDP'}
+                isSplitShipment={Boolean(orderData.is_split_shipment)}
                 currentRole={currentRole}
                 currentRoles={currentRoles}
                 currentUserId={user.id}
