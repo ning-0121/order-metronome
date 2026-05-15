@@ -225,60 +225,213 @@ function NewOrderWizard() {
   }
 
   // PO 上传后自动 AI 解析并填表
+  //
+  // 行为（保守 MVP，2026-05-15 重构）：
+  //   1. 支持选多个 PDF/Excel — 并行 parsePO，累积合并结果
+  //   2. 表单字段为空才自动填充；已有值则保留人工填写
+  //   3. 被识别但因人工已填而未覆盖的字段，统一展示在摘要 + 写入 notes
+  //   4. 多 PO 合并规则：
+  //        PO 号        → 全部合并，逗号分隔
+  //        总数量      → 累加
+  //        交期        → 取最早
+  //        款数 / 颜色 → 去重合并
+  //        客户名      → 取第一个 PO 的（冲突时不覆盖人工）
   async function handlePOFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || file.size === 0) return;
+    const files = Array.from(e.target.files || []).filter(f => f && f.size > 0);
+    if (files.length === 0) return;
     setPoParsing(true);
     setPoParseResult(null);
     setPoAutoFilled(false);
     try {
       const { parsePO } = await import('@/app/actions/po-parser');
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await parsePO(fd);
-      if (res.ok && res.data) {
-        setPoParseResult(res.data);
-        // 自动填写表单字段
-        const form = e.target.closest('form');
-        if (form) {
-          const fill = (name: string, value: string | number) => {
-            const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null;
-            if (el && value) {
-              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, 'value'
-              )?.set || Object.getOwnPropertyDescriptor(
-                window.HTMLSelectElement.prototype, 'value'
-              )?.set;
-              nativeInputValueSetter?.call(el, String(value));
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-          };
-          const d = res.data;
-          if (d.customer_name) fill('customer_name', d.customer_name);
-          if (d.order_no) fill('customer_po_number', d.order_no);
-          // order_date 在下面统一用 normalizeToISODate 处理，这里跳过
-          // 算总数量
-          const totalQty = d.styles.reduce((sum: number, s: any) => sum + (s.total_qty || 0), 0);
-          if (totalQty > 0) fill('total_quantity', totalQty);
-          // 款数 = styles 数组长度
-          if (d.styles.length > 0) fill('style_count', d.styles.length);
-          // 颜色数 = 所有款的颜色去重
-          const allColors = d.styles.flatMap((s: any) => (s.colors || []).map((c: any) => c.color_en || c.color_cn));
-          const uniqueColors = new Set(allColors.filter(Boolean));
-          if (uniqueColors.size > 0) fill('color_count', uniqueColors.size);
-          // 交期 — 容错解析多种日期格式
-          if (d.delivery_date) {
-            const deliveryDateFormatted = normalizeToISODate(d.delivery_date);
-            if (deliveryDateFormatted) {
-              fill('etd', deliveryDateFormatted);
-              fill('warehouse_due_date', deliveryDateFormatted);
-              fill('factory_date', deliveryDateFormatted);
-            }
+
+      // 并行解析所有 PO 文件，单个失败不阻塞其余
+      const results = await Promise.all(
+        files.map(async (file) => {
+          try {
+            const fd = new FormData();
+            fd.append('file', file);
+            const res = await parsePO(fd);
+            return res.ok && res.data ? { ok: true as const, data: res.data, fileName: file.name } : { ok: false as const, error: res.error || '解析失败', fileName: file.name };
+          } catch (err: any) {
+            return { ok: false as const, error: err?.message || '解析异常', fileName: file.name };
           }
-          if (d.order_date) fill('order_date', normalizeToISODate(d.order_date) || d.order_date.replace(/\./g, '-'));
-          setPoAutoFilled(true);
+        }),
+      );
+
+      const successes = results.filter((r): r is Extract<typeof r, { ok: true }> => r.ok);
+      const failures = results.filter((r): r is Extract<typeof r, { ok: false }> => !r.ok);
+
+      if (successes.length === 0) {
+        console.error('[PO auto-parse] 全部解析失败', failures);
+        return;
+      }
+
+      // ─── 多 PO 字段合并 ───────────────────────────────
+      const merged = {
+        customer_name: successes[0].data.customer_name || '',
+        order_nos: [] as string[],
+        total_qty: 0,
+        style_keys: new Set<string>(),
+        color_keys: new Set<string>(),
+        earliest_delivery: null as string | null,
+        order_date: '' as string,
+        confidence_notes_all: [] as string[],
+      };
+      for (const s of successes) {
+        const d = s.data;
+        if (d.order_no) merged.order_nos.push(d.order_no);
+        merged.total_qty += d.styles.reduce((sum: number, st: any) => sum + (st.total_qty || 0), 0);
+        for (const st of d.styles) {
+          const key = (st.style_no || st.product_name || '').trim().toLowerCase();
+          if (key) merged.style_keys.add(key);
+          for (const c of (st.colors || [])) {
+            const ckey = String(c.color_en || c.color_cn || '').trim().toLowerCase();
+            if (ckey) merged.color_keys.add(ckey);
+          }
         }
+        if (d.delivery_date) {
+          const iso = normalizeToISODate(d.delivery_date);
+          if (iso && (!merged.earliest_delivery || iso < merged.earliest_delivery)) {
+            merged.earliest_delivery = iso;
+          }
+        }
+        if (!merged.order_date && d.order_date) {
+          merged.order_date = normalizeToISODate(d.order_date) || d.order_date.replace(/\./g, '-');
+        }
+        if (Array.isArray(d.confidence_notes)) {
+          for (const n of d.confidence_notes) merged.confidence_notes_all.push(`[${s.fileName}] ${n}`);
+        }
+      }
+
+      // 给上方摘要面板用：合成一个聚合的 POParsedData 形态
+      const aggregatedDisplay = {
+        ...successes[0].data,
+        customer_name: merged.customer_name,
+        order_no: merged.order_nos.join(', '),
+        delivery_date: merged.earliest_delivery || successes[0].data.delivery_date,
+        styles: successes.flatMap(s => s.data.styles), // 摘要展示全部款
+        confidence_notes: merged.confidence_notes_all,
+        _meta: {
+          po_count: successes.length,
+          failed_count: failures.length,
+        },
+      } as any;
+      setPoParseResult(aggregatedDisplay);
+
+      // ─── 表单填充（保守：仅填空字段，不覆盖人工）───
+      const form = e.target.closest('form');
+      if (!form) return;
+      const readField = (name: string): string => {
+        const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null;
+        return el?.value?.trim() || '';
+      };
+      const fillIfEmpty = (name: string, value: string | number): { applied: boolean; existing: string } => {
+        const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null;
+        const existing = el?.value?.trim() || '';
+        if (!el || !value) return { applied: false, existing };
+        if (existing) return { applied: false, existing };       // 已有值 → 不覆盖
+        const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        nativeSetter?.call(el, String(value));
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { applied: true, existing: '' };
+      };
+
+      const conflicts: Array<{ field: string; userValue: string; aiValue: string }> = [];
+
+      // 客户名
+      if (merged.customer_name) {
+        const r = fillIfEmpty('customer_name', merged.customer_name);
+        if (!r.applied && r.existing && r.existing !== merged.customer_name) {
+          conflicts.push({ field: '客户名', userValue: r.existing, aiValue: merged.customer_name });
+        }
+      }
+      // PO 号合并
+      if (merged.order_nos.length > 0) {
+        const joined = merged.order_nos.join(', ');
+        const r = fillIfEmpty('customer_po_number', joined);
+        if (!r.applied && r.existing && r.existing !== joined) {
+          conflicts.push({ field: 'PO 号', userValue: r.existing, aiValue: joined });
+        }
+      }
+      // 总数量累加
+      if (merged.total_qty > 0) {
+        const r = fillIfEmpty('total_quantity', merged.total_qty);
+        if (!r.applied && r.existing && Number(r.existing) !== merged.total_qty) {
+          conflicts.push({ field: '总数量', userValue: r.existing, aiValue: String(merged.total_qty) });
+        }
+      }
+      // 款数
+      if (merged.style_keys.size > 0) {
+        const r = fillIfEmpty('style_count', merged.style_keys.size);
+        if (!r.applied && r.existing && Number(r.existing) !== merged.style_keys.size) {
+          conflicts.push({ field: '款数', userValue: r.existing, aiValue: String(merged.style_keys.size) });
+        }
+      }
+      // 颜色数
+      if (merged.color_keys.size > 0) {
+        const r = fillIfEmpty('color_count', merged.color_keys.size);
+        if (!r.applied && r.existing && Number(r.existing) !== merged.color_keys.size) {
+          conflicts.push({ field: '颜色数', userValue: r.existing, aiValue: String(merged.color_keys.size) });
+        }
+      }
+      // 交期：取最早
+      if (merged.earliest_delivery) {
+        const r1 = fillIfEmpty('etd', merged.earliest_delivery);
+        const r2 = fillIfEmpty('warehouse_due_date', merged.earliest_delivery);
+        const r3 = fillIfEmpty('factory_date', merged.earliest_delivery);
+        // 只记一次冲突（按 factory_date 这个主字段）
+        if (!r3.applied && r3.existing && r3.existing !== merged.earliest_delivery) {
+          conflicts.push({ field: '出厂/交期日期', userValue: r3.existing, aiValue: merged.earliest_delivery });
+        }
+      }
+      // 下单日期
+      if (merged.order_date) {
+        const r = fillIfEmpty('order_date', merged.order_date);
+        if (!r.applied && r.existing && r.existing !== merged.order_date) {
+          conflicts.push({ field: '下单日期', userValue: r.existing, aiValue: merged.order_date });
+        }
+      }
+
+      // 把冲突 + 失败信息追加到 notes（不覆盖既有 notes）
+      const noteLines: string[] = [];
+      if (successes.length > 1) {
+        noteLines.push(`【AI 识别 ${successes.length} 个 PO 文件】合并：PO 号 ${merged.order_nos.join(', ')}；总数量 ${merged.total_qty}；交期取最早 ${merged.earliest_delivery || '—'}`);
+      }
+      if (conflicts.length > 0) {
+        noteLines.push(`【AI 识别冲突（已保留人工填写）】`);
+        for (const c of conflicts) {
+          noteLines.push(`  ${c.field}：人工=「${c.userValue}」，AI=「${c.aiValue}」`);
+        }
+      }
+      if (failures.length > 0) {
+        noteLines.push(`【AI 解析失败 ${failures.length} 个文件】${failures.map(f => f.fileName).join('、')}`);
+      }
+      if (noteLines.length > 0) {
+        const notesEl = form.querySelector('[name="notes"]') as HTMLTextAreaElement | HTMLInputElement | null;
+        if (notesEl) {
+          const existingNotes = notesEl.value?.trim() || '';
+          const newBlock = noteLines.join('\n');
+          const combined = existingNotes ? `${existingNotes}\n\n${newBlock}` : newBlock;
+          const proto = notesEl instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+          setter?.call(notesEl, combined);
+          notesEl.dispatchEvent(new Event('input', { bubbles: true }));
+          notesEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+
+      setPoAutoFilled(true);
+
+      // 简单告知用户（不弹复杂 modal）
+      if (conflicts.length > 0 || failures.length > 0) {
+        const msg: string[] = [];
+        if (successes.length > 0) msg.push(`✅ AI 识别 ${successes.length} 个 PO 完成`);
+        if (failures.length > 0) msg.push(`❌ ${failures.length} 个文件解析失败`);
+        if (conflicts.length > 0) msg.push(`⚠ ${conflicts.length} 个字段与你已填的内容不一致 — 已保留你的填写，AI 结果记入备注`);
+        alert(msg.join('\n'));
       }
     } catch (err: any) {
       console.error('[PO auto-parse]', err?.message);
@@ -417,6 +570,36 @@ function NewOrderWizard() {
         `💡 命名格式：{订单号}_{文档类型}.{扩展名}`
       );
       return;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 同字段多文件重名检测（2026-05-15）
+    // 业务上传 3 个客户 PO 时，如果都叫 "PO.pdf"，OS 允许选择但服务端会覆盖。
+    // 要求同字段内多文件名互不相同（不区分大小写）。
+    // 用 filesToUpload 已收集的数据，按 fileType 分组检查。
+    // ═══════════════════════════════════════════════════════
+    {
+      const { findDuplicateFileNames } = await import('@/lib/domain/fileNaming');
+      const byType: Record<string, { files: File[]; label: string }> = {};
+      for (const f of filesToUpload) {
+        if (!byType[f.fileType]) byType[f.fileType] = { files: [], label: f.label };
+        byType[f.fileType].files.push(f.file);
+      }
+      const dupErrors: string[] = [];
+      for (const { files, label } of Object.values(byType)) {
+        if (files.length <= 1) continue;
+        const dups = findDuplicateFileNames(files);
+        if (dups.length > 0) {
+          dupErrors.push(`• ${label}：${dups.length} 组同名文件 (${dups.join('、')})`);
+        }
+      }
+      if (dupErrors.length > 0) {
+        showError(
+          `检测到多文件同名（不允许，会被存储覆盖）：\n\n${dupErrors.join('\n')}\n\n` +
+          `💡 请用 _PO号 / _款号 / _v1 等后缀区分后重新选择。`
+        );
+        return;
+      }
     }
 
     // 文件验证可用格式
@@ -1160,8 +1343,8 @@ function NewOrderWizard() {
               <div className="space-y-3">
                 {([
                   { name: 'customer_po_file',        label: '客户 PO（可多个）',  required: true,  multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
-                  { name: 'internal_quote_file',     label: '内部成本核算单',     required: true,  stepKey: 'finance_approval' },
-                  { name: 'customer_quote_file',     label: '客户最终报价单',     required: true,  stepKey: 'finance_approval' },
+                  { name: 'internal_quote_file',     label: '内部成本核算单（可多个）',  required: true,  multiple: true, stepKey: '_internal_quote' },
+                  { name: 'customer_quote_file',     label: '客户最终报价单（可多个）',  required: true,  multiple: true, stepKey: '_customer_quote' },
                   { name: 'production_order_file',   label: '生产制单',          required: false, stepKey: 'production_order_upload', hint: '财务审核后2日内上传' },
                   { name: 'trims_sheet_file',        label: '辅料表',            required: false, stepKey: 'bulk_materials_confirmed' },
                   { name: 'packing_requirement_file',label: '装箱要求',          required: false, stepKey: 'packing_method_confirmed' },
@@ -1206,6 +1389,10 @@ function NewOrderWizard() {
                 ))}
               </div>
               <p className="text-xs text-gray-400 mt-2">支持 PDF、Excel、Word、JPG、PNG，单文件 ≤ 20MB（文件直传云存储，不影响订单创建）</p>
+              <p className="text-xs text-amber-600 mt-1">
+                💡 <strong>多个同类文件</strong>请用后缀互相区分（例：<code className="bg-amber-50 px-1">_PO12345</code> / <code className="bg-amber-50 px-1">_款号A</code> / <code className="bg-amber-50 px-1">_v1</code> / <code className="bg-amber-50 px-1">_v2</code>）。
+                同名文件会被存储覆盖，必须改成互不相同的文件名再上传。
+              </p>
 
               {/* PO AI 识别结果预览 */}
               {poAutoFilled && poParseResult && (

@@ -47,7 +47,7 @@ export const FILE_NAMING_BY_STEP: Record<
   string,
   { label: string; suffixHint?: string; example: string }
 > = {
-  po_confirmed:                    { label: '客户PO',          example: 'QM-20260415-001_客户PO.pdf' },
+  po_confirmed:                    { label: '客户PO',          suffixHint: '多份 PO 请加 _PO号 区分，例：_PO12345', example: 'QM-20260415-001_客户PO_PO12345.pdf' },
   finance_approval:                { label: '财务审批记录',     example: 'QM-20260415-001_财务审批记录.pdf' },
   order_kickoff_meeting:           { label: '订单评审会纪要',   example: 'QM-20260415-001_订单评审会纪要.pdf' },
   production_order_upload:         { label: '生产单',          example: 'QM-20260415-001_生产单.xlsx' },
@@ -183,6 +183,13 @@ export const FILE_NAMING_BY_DOC_TYPE: Record<
   purchase_order:   { label: '采购单',       example: 'QM-20260415-001_采购单.xlsx' },
   packing_list:     { label: '装箱单',       example: 'QM-20260415-001_装箱单.xlsx' },
   ci:               { label: 'CI',          example: 'QM-20260415-001_CI.pdf' },
+
+  // ── 虚拟文档类型（不对应里程碑节点，仅用于命名校验路由）──
+  // 这些 key 以 _ 开头，避免与真实 step_key 冲突。
+  // 用途：PO/报价单等在「订单创建时」上传的文档，本身不绑定具体节点，
+  //      但仍需有自己的命名关键词，不能误用其他节点的 label。
+  _internal_quote:  { label: '内部成本核算单', suffixHint: '多份请加 _v1/_v2 或 _报价人 区分', example: 'QM-20260415-001_内部成本核算单_v1.xlsx' },
+  _customer_quote:  { label: '客户最终报价单', suffixHint: '多份请加 _v1/_v2 或 _PO号 区分',  example: 'QM-20260415-001_客户最终报价单_v1.pdf' },
 };
 
 /**
@@ -192,8 +199,11 @@ export const FILE_NAMING_BY_DOC_TYPE: Record<
 export const STEP_KEY_BY_FILE_TYPE: Record<string, string> = {
   customer_po:          'po_confirmed',
   finance_approval:     'finance_approval',
-  internal_quote:       'finance_approval',
-  customer_quote:       'finance_approval',
+  // 修正（2026-05-15）：报价单不应映射到 finance_approval，
+  // 否则命名 validator 会要求文件名含「财务审批记录」关键词，业务永远过不了。
+  // 改用虚拟 step key，含正确的「内部成本核算单」/「客户最终报价单」关键词。
+  internal_quote:       '_internal_quote',
+  customer_quote:       '_customer_quote',
   production_order:     'production_order_upload',
   trims_sheet:          'bulk_materials_confirmed',
   packing_requirement:  'packing_method_confirmed',
@@ -414,4 +424,25 @@ export function renameFile(file: File, newName: string): File {
     type: file.type,
     lastModified: file.lastModified,
   });
+}
+
+/**
+ * 同一字段下多文件重名检测
+ *
+ * 用途：业务上传 3 个客户 PO 时，如果都叫 "PO.pdf"，OS 可能允许但服务端存储会覆盖。
+ *      要求多文件互不重名（不区分大小写）。
+ *
+ * 返回：重复的文件名集合（去重后）；空数组表示无冲突
+ */
+export function findDuplicateFileNames(files: File[]): string[] {
+  const counts = new Map<string, number>();
+  for (const f of files) {
+    const lower = f.name.toLowerCase();
+    counts.set(lower, (counts.get(lower) || 0) + 1);
+  }
+  const dups: string[] = [];
+  for (const [name, count] of counts.entries()) {
+    if (count > 1) dups.push(name);
+  }
+  return dups;
 }
