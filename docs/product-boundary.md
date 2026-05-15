@@ -4,15 +4,46 @@
 > 商业化方向：面向中小外贸工厂的"订单执行 SaaS"。
 > 核心价值主张：让老板在30秒内看清哪个订单要出事。
 
+**关联文档**：
+- [shared-release-process.md](./shared-release-process.md) — 同步流程治理
+- [shared-core-registry.md](./shared-core-registry.md) — [SHARED] 模块清单
+- [commercial-sync-backlog.md](./commercial-sync-backlog.md) — 待同步项
+
+---
+
+## 分支模型
+
+```
+main                       Qimo 内部生产，[SHARED] 模块的 SSOT
+│
+├── sync/shared-<name>     从 main 切出的同步分支（每个 [SHARED] 批次一个）
+│   例：
+│   sync/shared-progressive-validation
+│   sync/shared-off-price
+│   sync/shared-sot-comments
+│   sync/p0-lifecycle-status
+│
+└── commercial-product     SaaS 产品分支
+    - 仅 merge sync/* 接收 Shared Core（不允许自行改 Shared）
+    - 自身只允许新增/修改 [COMMERCIAL] 模块
+```
+
+**核心规则**：
+- Shared Core 改动 **只从 main 流向 commercial-product**（单向）
+- commercial-product **不允许直接修改** [SHARED] 文件
+- 每次同步必须通过 `sync/*` 分支 + `--no-ff` merge，留下追溯点
+
+完整同步流程见 [shared-release-process.md § 6](./shared-release-process.md#6-分支模型与-pr-模式)。
+
 ---
 
 ## 分类体系
 
-| 分类 | 含义 | 外部可见 |
-|------|------|---------|
-| **Internal Only** | 绑定 Qimo 业务流程，无法通用化 | ❌ |
-| **Shared Core** | 通用执行逻辑，两套产品共用 | ✅（内部 + 商业） |
-| **Commercial Product** | 对外 Demo / SaaS 的核心页面 | ✅（演示优先） |
+| 分类 | 含义 | 外部可见 | 同步方向 |
+|------|------|---------|---------|
+| **Internal Only / `[INTERNAL]`** | 绑定 Qimo 业务流程，无法通用化 | ❌ | 不同步 |
+| **Shared Core / `[SHARED]`** | 通用执行逻辑，两套产品共用 | ✅（内部 + 商业） | main → commercial（单向）|
+| **Commercial Product / `[COMMERCIAL]`** | 对外 Demo / SaaS 独有 | ✅（演示优先） | 不反向同步 |
 
 ---
 

@@ -7,6 +7,23 @@
 > - `[SHARED]` — 通用逻辑，commercial-product 可直接同步
 > - `[INTERNAL]` — 仅适用 Qimo 内部，不可同步
 > - `[ABSTRACTED]` — 通用骨架 + 可配置参数，同步时需替换参数
+>
+> **同步治理**：详见 [shared-release-process.md](./shared-release-process.md)。
+> **待同步队列**：详见 [commercial-sync-backlog.md](./commercial-sync-backlog.md)。
+
+---
+
+## 字段说明
+
+每个模块条目末尾必须含以下 3 个治理字段：
+
+| 字段 | 取值 | 含义 |
+|------|------|------|
+| `release_status` | `internal_validated` / `audited` / `staged` / `released` / `deprecated` | 5 阶段晋升流程的当前位置 |
+| `synced_to_commercial` | `✅` / `❌` / `n/a` | 是否已存在于 commercial-product 分支 |
+| `last_sync_commit` | `<short sha>` / `pending` / `n/a` | commercial-product 上接收此模块的 merge commit |
+
+`n/a` 适用于 `[INTERNAL]` 模块（不参与同步）。
 
 ---
 
@@ -61,6 +78,11 @@
 - ❌ "全程不校验" → 真到包装环节才发现地址不全，工厂已开始排产
 - ✅ "渐进式校验" → 信息流动节奏匹配业务现实，hard-block 卡在真正会出问题的节点
 
+**治理字段**：
+- `release_status`: `internal_validated`
+- `synced_to_commercial`: ❌
+- `last_sync_commit`: `pending`
+
 ---
 
 ## computeTaskPriority `[SHARED]`
@@ -75,6 +97,11 @@
 
 **Qimo 专属性**：无。纯函数，**commercial-product 可直接同步**。
 
+**治理字段**：
+- `release_status`: `released`（早于 commercial-product 分支创建即存在）
+- `synced_to_commercial`: ✅
+- `last_sync_commit`: `n/a`（predates branch）
+
 ---
 
 ## escalateStaleTasks `[SHARED]`
@@ -84,6 +111,11 @@
 **位置**：`lib/services/daily-tasks.service.ts`
 
 **Qimo 专属性**：无。**commercial-product 可直接同步**。
+
+**治理字段**：
+- `release_status`: `released`
+- `synced_to_commercial`: ✅
+- `last_sync_commit`: `n/a`（predates branch）
 
 ---
 
@@ -95,6 +127,11 @@
 
 **Qimo 专属性**：算法本身通用。参数（关键节点列表、扣分系数）属于 Qimo 调优结果，但可作为 `[ABSTRACTED]` 默认值给 commercial-product 使用。
 
+**治理字段**：
+- `release_status`: `released`
+- `synced_to_commercial`: ✅
+- `last_sync_commit`: `n/a`（predates branch）
+
 ---
 
 ## customer_rhythm SoT 模式 `[SHARED]`
@@ -105,15 +142,27 @@
 
 **Qimo 专属性**：行为标签集合（`A类客户` / `付款慢` 等）通用。**commercial-product 可直接同步**。
 
+**治理字段**：
+- `release_status`: `released`
+- `synced_to_commercial`: ✅
+- `last_sync_commit`: `n/a`（predates branch — bytes identical on both branches，已验证）
+
 ---
 
-## finance-resync 模式 `[SHARED]`
+## finance-resync 模式 `[INTERNAL]`（默认不同步）
 
 **用途**：当外部财务系统是收款 SoT 时，OM 端提供单向手动「重新同步」按钮。
 
-**位置**：`app/actions/finance-resync.ts` + `components/OrderActions.tsx`
+**位置**：`app/actions/finance-resync.ts` + `components/OrderActions.tsx` + `lib/integration/finance-sync.ts`
 
-**Qimo 专属性**：依赖 Qimo 配置的 `FINANCE_SYSTEM_URL`。骨架通用，env var 不同。属于 `[ABSTRACTED]`。
+**Qimo 专属性**：依赖 Qimo 内部财务系统的 `FINANCE_SYSTEM_URL` / `INTEGRATION_API_KEY` / webhook 签名密钥。
+按 [shared-release-process.md § 5](./shared-release-process.md#5-当前模块归类明示) 决策**默认归 `[INTERNAL]`**，不同步。
+未来若有 commercial 付费客户需接外部财务系统，应抽象为「可配置 webhook 模板」模块后再晋升 `[SHARED]`。
+
+**治理字段**：
+- `release_status`: `internal_validated`
+- `synced_to_commercial`: ❌（**永久不同步**当前实现）
+- `last_sync_commit`: `n/a`
 
 ---
 
@@ -123,7 +172,22 @@
 
 **示例位置**：`lib/runtime/deliveryConfidence.ts` 等 9 个文件，共 11 处。
 
-**Qimo 专属性**：无。**commercial-product 可直接同步**。
+**Qimo 专属性**：无。**commercial-product 必须同步**（避免维护者重蹈"以 OM 字段为收款 SoT"的覆辙）。
+
+**治理字段**：
+- `release_status`: `internal_validated`
+- `synced_to_commercial`: ❌
+- `last_sync_commit`: `pending`
+
+---
+
+## delivery-info-progressive-validation 之外的近期模块
+
+| 模块 | 标签 | release_status | synced_to_commercial | last_sync_commit | 备注 |
+|------|------|----------------|---------------------|------------------|------|
+| `orders.status → lifecycle_status` 修复 | `[SHARED]` (P0) | `internal_validated` | ❌ | `pending` | commercial 仍复现 bug |
+| Off-Price 知识库 | `[SHARED]` | `internal_validated` | ❌ | `pending` | demo 客户名需补 1-2 个 Off-Price 关键词触发标签 |
+| Swim-lane filter | `[SHARED]` | `internal_validated` | ❌ | `pending` | 2026-05-15 上线 main，需观察使用反馈 1 周再 audit |
 
 ---
 
@@ -138,6 +202,9 @@
 - 不需要同步到 commercial-product
 - 但要确保不污染 `[SHARED]` 模块
 
+完整治理流程见 [shared-release-process.md](./shared-release-process.md)。
+当前待同步队列见 [commercial-sync-backlog.md](./commercial-sync-backlog.md)。
+
 ---
 
-*最后更新：2026-05-14*
+*最后更新：2026-05-15*
