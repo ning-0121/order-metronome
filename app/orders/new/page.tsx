@@ -565,11 +565,53 @@ function NewOrderWizard() {
       }
     }
     if (namingErrors.length > 0) {
-      showError(
-        `${namingErrors.length} 个文件命名不合规，请修正后重新选择：\n\n${namingErrors.join('\n\n')}\n\n` +
-        `💡 命名格式：{订单号}_{文档类型}.{扩展名}`
-      );
-      return;
+      // ── 2026-05-15：提供一键自动修正命名 ──
+      // 业务收到客户发来的文件，命名千奇百怪。强制业务手动 rename 7 个文件
+      // 是巨大的人力浪费。这里弹一个确认框，让业务选择"系统自动改名"或"我自己改"。
+      const fixable = filesToUpload.filter(f => {
+        const sk = STEP_KEY_BY_FILE_TYPE[f.fileType];
+        return sk; // 有命名标准的才能 auto-fix
+      });
+      const autoFixPrompt =
+        `${namingErrors.length} 个文件命名不合规。\n\n` +
+        `选项：\n` +
+        `  确定 → 让系统自动按推荐命名重命名所有文件，立即提交订单\n` +
+        `  取消 → 我自己改文件名后重新选择\n\n` +
+        `不合规列表：\n${namingErrors.slice(0, 5).join('\n')}` +
+        (namingErrors.length > 5 ? `\n... 还有 ${namingErrors.length - 5} 个` : '');
+
+      const autoFix = confirm(autoFixPrompt);
+      if (!autoFix) {
+        showError(
+          `${namingErrors.length} 个文件命名不合规，请修正后重新选择：\n\n${namingErrors.join('\n\n')}\n\n` +
+          `💡 命名格式：{订单号}_{文档类型}.{扩展名}`
+        );
+        return;
+      }
+
+      // 系统自动 rename：按 fileType 分组，同类多文件加 _v1/_v2/_v3 后缀
+      const { renameFile, suggestFileName } = await import('@/lib/domain/fileNaming');
+      const byType: Record<string, number> = {};
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const f = filesToUpload[i];
+        const sk = STEP_KEY_BY_FILE_TYPE[f.fileType];
+        if (!sk) continue;
+        const result = validateFileName(f.file.name, sk, preGeneratedOrderNo);
+        const blocking = result.issues.filter(i => i.code !== 'has_space');
+        if (blocking.length === 0) continue; // 已合规，跳过
+        // 计算同类序号
+        byType[f.fileType] = (byType[f.fileType] || 0) + 1;
+        const seq = byType[f.fileType];
+        const extMatch = /\.[^.]+$/.exec(f.file.name);
+        const ext = extMatch ? extMatch[0] : '.pdf';
+        // 用 suggestion 作为基础，多文件加 _v{n} 后缀
+        const baseSuggestion = suggestFileName(sk, preGeneratedOrderNo, ext);
+        // 把 .ext 去掉，加 _v{n}，再加回 .ext
+        const withoutExt = baseSuggestion.replace(/\.[^.]+$/, '');
+        const newName = seq > 1 ? `${withoutExt}_v${seq}${ext}` : baseSuggestion;
+        filesToUpload[i] = { ...f, file: renameFile(f.file, newName) };
+      }
+      console.log('[createOrder] auto-renamed', filesToUpload.length, 'files');
     }
 
     // ═══════════════════════════════════════════════════════

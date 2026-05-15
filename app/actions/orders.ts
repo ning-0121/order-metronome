@@ -714,35 +714,62 @@ export async function createOrder(
   }
 
   // ── STEP 9: 交期已过订单处理 ──
+  // 2026-05-15 重要修复：原本用 try/catch {} 静默吞错，但 Supabase await
+  // 不抛错只返回 {error}，导致 milestone update 失败时 lifecycle_status
+  // 仍被设为 'completed' → 形成 ghost milestone（订单已完成但节点没标完，
+  // 财务/生产视图持续显示逾期，业务又改不了）。
+  // 现改为：每步显式检查 error，failure 时回滚或不再继续。
   const pastDateStatus = formData.get('past_date_status') as string | null;
   const pastDateReason = formData.get('past_date_reason') as string | null;
   if (pastDateStatus) {
-    try {
-      if (pastDateStatus === 'shipped') {
-        // 已发货：标记所有节点完成 + 订单完成
-        const now = new Date().toISOString();
-        await (supabase.from('milestones') as any)
-          .update({ status: 'done', actual_at: now })
-          .eq('order_id', orderData.id);
-        await (supabase.from('orders') as any)
-          .update({ lifecycle_status: 'completed', notes: (orderData.notes || '') + '\n\n【补录】已发货订单，系统自动标记完成' })
-          .eq('id', orderData.id);
-      } else if (pastDateStatus === 'problem') {
-        // 有问题：记录原因到订单备注 + 标记为 blocked
+    if (pastDateStatus === 'shipped') {
+      // 已发货：先把所有节点标完成，确认成功后再标订单完成
+      const now = new Date().toISOString();
+      const { error: msErr, count: msUpdated } = await (supabase.from('milestones') as any)
+        .update({ status: 'done', actual_at: now }, { count: 'exact' })
+        .eq('order_id', orderData.id);
+
+      if (msErr) {
+        console.error('[createOrder] STEP 9 已发货：milestone 标完失败', msErr.message);
+        // milestone 没标完就不要标 lifecycle=completed，否则 ghost
+        // 回退到 'active'，让业务后续手动用「强制标完」补救
         await (supabase.from('orders') as any)
           .update({
             lifecycle_status: 'active',
-            notes: (orderData.notes || '') + `\n\n【交期已过未发货】原因：${pastDateReason || '未说明'}`,
-            special_tags: [...(orderData.special_tags || []), '交期逾期'],
+            notes: (orderData.notes || '') + `\n\n【补录失败】已发货标记节点完成失败：${msErr.message}（请管理员手动处理）`,
           })
           .eq('id', orderData.id);
       } else {
-        // pending（在途）：正常激活
-        await (supabase.from('orders') as any)
-          .update({ lifecycle_status: 'active' })
+        // milestone 标完成功，标订单 completed
+        const { error: ordErr } = await (supabase.from('orders') as any)
+          .update({
+            lifecycle_status: 'completed',
+            notes: (orderData.notes || '') + `\n\n【补录】已发货订单，系统自动标记完成（已更新 ${msUpdated ?? '?'} 个节点）`,
+          })
           .eq('id', orderData.id);
+        if (ordErr) {
+          console.error('[createOrder] STEP 9 已发货：lifecycle 更新失败', ordErr.message);
+          // 节点已全标 done 但订单状态未变 — 这种情况下 order 仍是 draft/active，
+          // 不会产生 ghost（因为节点已全 done），后续可手动结案。不阻断订单创建。
+        }
       }
-    } catch {} // 处理失败不阻断
+    } else if (pastDateStatus === 'problem') {
+      // 有问题：记录原因到订单备注 + 标记为 active 加交期逾期标签
+      const { error: probErr } = await (supabase.from('orders') as any)
+        .update({
+          lifecycle_status: 'active',
+          notes: (orderData.notes || '') + `\n\n【交期已过未发货】原因：${pastDateReason || '未说明'}`,
+          special_tags: [...(orderData.special_tags || []), '交期逾期'],
+        })
+        .eq('id', orderData.id);
+      if (probErr) console.error('[createOrder] STEP 9 problem 状态更新失败', probErr.message);
+    } else {
+      // pending（在途）：正常激活
+      const { error: pendErr } = await (supabase.from('orders') as any)
+        .update({ lifecycle_status: 'active' })
+        .eq('id', orderData.id);
+      if (pendErr) console.error('[createOrder] STEP 9 pending 状态更新失败', pendErr.message);
+    }
   }
 
   // ── DONE ──
