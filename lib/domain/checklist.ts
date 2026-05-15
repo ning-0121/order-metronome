@@ -292,10 +292,22 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
         options: ['继续生产', '需整改后继续', '需停产整改'] },
       { key: 'rectification', label: '整改要求', type: 'text', required: false, role: 'merchandiser', group: '判定' },
       { key: 'qc_report_uploaded', label: '中查报告照片已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '判定' },
-      // 业务确认
-      { key: 'sales_reviewed', label: '业务已审阅中查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
-      { key: 'sales_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
-        options: ['同意继续生产', '需整改后继续', '需与客户沟通'] },
+      // 注：业务审阅/意见已移到 mid_qc_sales_check 节点（业务自己的中查节点），
+      //    避免跟单被业务的必填项卡住无法提交。2026-05-15 修复
+    ],
+  },
+
+  // ── 业务中查（业务对生产中查结果的复核 + 客户对接判断）──
+  mid_qc_sales_check: {
+    title: '业务中查（复核生产中查）',
+    items: [
+      { key: 'production_qc_reviewed', label: '已审阅生产侧中查报告', type: 'checkbox', required: true, role: 'sales', group: '复核',
+        helpText: '如果生产侧中查还未提交，可在备注里写"待跟单上传"，然后先做客户沟通判断' },
+      { key: 'sales_opinion', label: '业务判断', type: 'select', required: true, role: 'sales', group: '复核',
+        options: ['同意继续生产', '需整改后继续', '需与客户沟通', '客户已确认接受'] },
+      { key: 'customer_communication', label: '客户沟通记录（如需）', type: 'text', required: false, role: 'sales', group: '复核',
+        helpText: '如需与客户对齐，简要记录沟通结果' },
+      { key: 'follow_up_note', label: '业务跟进备注', type: 'text', required: false, role: 'sales', group: '复核' },
     ],
   },
 
@@ -333,10 +345,24 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
         options: ['PASS', 'PENDING（待整改复验）', 'FAIL（不通过）'] },
       { key: 'rectification', label: '整改要求', type: 'text', required: false, role: 'merchandiser', group: '判定' },
       { key: 'report_uploaded', label: '尾查报告已上传', type: 'checkbox', required: false, role: 'merchandiser', group: '判定' },
-      // 业务确认
-      { key: 'sales_reviewed', label: '业务已审阅尾查结果', type: 'checkbox', required: true, role: 'sales', group: '业务确认' },
-      { key: 'sales_opinion', label: '业务意见', type: 'select', required: true, role: 'sales', group: '业务确认',
-        options: ['同意出货', '需整改复验', '需与客户沟通', '拒绝出货'] },
+      // 注：业务审阅/意见已移到 final_qc_sales_check 节点（业务自己的尾查节点），
+      //    避免跟单被业务的必填项卡住无法提交。2026-05-15 修复
+    ],
+  },
+
+  // ── 业务尾查（业务对生产尾查结果的复核 + 出货放行决策）──
+  final_qc_sales_check: {
+    title: '业务尾查（复核生产尾查 + 出货决策）',
+    items: [
+      { key: 'production_final_qc_reviewed', label: '已审阅生产侧尾查报告（AQL）', type: 'checkbox', required: true, role: 'sales', group: '复核',
+        helpText: '如果生产侧尾查还未提交，可先在备注记"待跟单上传"，根据自己看到的样品/数据判断' },
+      { key: 'sales_opinion', label: '业务判断', type: 'select', required: true, role: 'sales', group: '判定',
+        options: ['同意出货', '需整改复验', '需与客户沟通', '拒绝出货', '客户已确认接受'] },
+      { key: 'customer_approval', label: '客户是否已确认接货', type: 'select', required: false, role: 'sales', group: '判定',
+        options: ['已确认', '客户未要求确认', '待确认'] },
+      { key: 'shipping_authorized', label: '业务授权出货', type: 'checkbox', required: true, role: 'sales', group: '判定',
+        helpText: '勾选即表示业务已 OK 出货。如不勾选请用「拒绝出货」' },
+      { key: 'customer_communication', label: '客户沟通记录（如需）', type: 'text', required: false, role: 'sales', group: '客户对接' },
     ],
   },
 
@@ -448,10 +474,20 @@ function parseChecklistData(data: unknown): ChecklistData {
   return [];
 }
 
-/** 校验检查清单是否全部必填项已完成 */
+/** 校验检查清单是否全部必填项已完成
+ *
+ *  @param stepKey 当前节点的 step_key
+ *  @param data 当前已填的 checklist 数据
+ *  @param ownerRole （可选）当前节点的 owner_role —— 传入后，**只校验属于该 owner_role
+ *                  组的必填项**。属于其他角色的 required 项（如生产 QC 里嵌入的业务
+ *                  审阅项）会被跳过，避免跨角色卡死。
+ *                  历史上有 mid_qc_check（merchandiser）里嵌业务必填项，导致跟单
+ *                  永远无法提交。2026-05-15 修复
+ */
 export function validateChecklistComplete(
   stepKey: string,
-  data: ChecklistData | null
+  data: ChecklistData | null,
+  ownerRole?: string | null,
 ): { valid: boolean; missing: string[] } {
   const config = CHECKLIST_MAP[stepKey];
   if (!config) return { valid: true, missing: [] };
@@ -460,8 +496,28 @@ export function validateChecklistComplete(
   const safeData = parseChecklistData(data);
   const responseMap = new Map(safeData.map(r => [r.key, r]));
 
+  // 同组角色判断（与 MilestoneActions.canModify 一致）
+  const sameRoleGroup = (a: string, b: string): boolean => {
+    if (a === b) return true;
+    const merchGroup = ['merchandiser', 'production', 'production_manager', 'qc', 'quality'];
+    if (merchGroup.includes(a) && merchGroup.includes(b)) return true;
+    const salesGroup = ['sales', 'sales_assistant', 'admin_assistant'];
+    if (salesGroup.includes(a) && salesGroup.includes(b)) return true;
+    return false;
+  };
+
+  const normalizedOwnerRole = ownerRole ? String(ownerRole).toLowerCase() : null;
+
   for (const item of config.items) {
     if (!item.required) continue;
+    // 2026-05-15: 跨角色 required 项不参与当前提交者的校验
+    // 防御历史上 mid_qc_check 类节点嵌入跨角色必填项导致死锁的问题
+    if (normalizedOwnerRole && item.role) {
+      const itemRole = String(item.role).toLowerCase();
+      if (!sameRoleGroup(normalizedOwnerRole, itemRole)) {
+        continue;
+      }
+    }
     const response = responseMap.get(item.key);
     if (!response || response.value === null || response.value === '' || response.value === false) {
       missing.push(item.label);

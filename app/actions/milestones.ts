@@ -374,10 +374,15 @@ export async function markMilestoneDone(
       }
     }
 
-    // 再从 DB 读取验证
+    // 再从 DB 读取验证 — 只校验当前 owner_role 对应的必填项
+    // 跨角色嵌入的 required 项不阻塞当前提交（见 validateChecklistComplete 注释）
     const { data: msWithChecklist } = await (supabase.from('milestones') as any)
       .select('checklist_data').eq('id', milestoneId).single();
-    const checkResult = validateChecklistComplete(milestone.step_key, msWithChecklist?.checklist_data || null);
+    const checkResult = validateChecklistComplete(
+      milestone.step_key,
+      msWithChecklist?.checklist_data || null,
+      milestone.owner_role,
+    );
     if (!checkResult.valid) {
       return { error: `检查清单未完成，缺少：${checkResult.missing.join('、')}` };
     }
