@@ -155,9 +155,90 @@ export async function POST(request: NextRequest) {
     // 邮件通知 — 只发给被催的人本人（可能失败但不阻断）
     const emailSent = await sendEmailNotification(recipientEmail, subject, html);
 
+    // ── 跨角色催办自动抄送 admin/CEO（2026-05-15）──
+    // 触发条件：催办人和被催人不属于同一职能（如业务催生产）→
+    //          系统自动 CC admin 角色用户，提升管理透明度。
+    // 同职能催办（如生产催生产、跟单催跟单）不抄送，保持点对点。
+    let ccAdminSent = false;
+    let ccAdminCount = 0;
+    try {
+      // 查询催办人角色 + 被催人角色
+      const { data: senderRoleProfile } = await supabase
+        .from('profiles')
+        .select('role, roles')
+        .eq('user_id', user.id)
+        .single();
+      const senderRoles: string[] =
+        (senderRoleProfile as any)?.roles?.length > 0
+          ? (senderRoleProfile as any).roles
+          : [(senderRoleProfile as any)?.role].filter(Boolean);
+
+      const milestoneOwnerRole = String(milestoneData.owner_role || '').toLowerCase();
+      const sameRoleGroup = (a: string, b: string) => {
+        if (a === b) return true;
+        // 跟单/生产/qc/quality 视为同组（都属于生产侧）
+        const productionGroup = ['merchandiser', 'production', 'production_manager', 'qc', 'quality'];
+        if (productionGroup.includes(a) && productionGroup.includes(b)) return true;
+        // sales / sales_assistant 视为同组（业务侧）
+        const salesGroup = ['sales', 'sales_assistant'];
+        if (salesGroup.includes(a) && salesGroup.includes(b)) return true;
+        return false;
+      };
+      const isCrossRole = milestoneOwnerRole && !senderRoles.some(r =>
+        sameRoleGroup(String(r).toLowerCase(), milestoneOwnerRole)
+      );
+
+      if (isCrossRole) {
+        // 查所有 admin 用户（role='admin' 或 roles 包含 'admin'）
+        const { data: admins } = await supabase
+          .from('profiles')
+          .select('user_id, email, name')
+          .or('role.eq.admin,roles.cs.{admin}');
+        const adminList = (admins as any[] | null) || [];
+        // 给 admin 写入应用内通知
+        for (const a of adminList) {
+          if (a.user_id === user.id) continue; // 不通知发起人自己
+          await (supabase.from('notifications') as any).insert({
+            user_id: a.user_id,
+            type: 'cross_role_nudge',
+            title: `[抄送] ${senderName} 催 ${milestoneData.name}`,
+            message: `${senderName}（${senderRoles.join('/')}）正在催办「${milestoneData.name}」（${milestoneOwnerRole}负责）— 订单 ${orderData.order_no}（${orderData.customer_name}）`,
+            related_order_id: orderData.id,
+            related_milestone_id: milestone_id,
+            status: 'unread',
+          });
+          // 邮件抄送（同步发送，避免阻塞主流程过久）
+          if (a.email) {
+            const ccSubject = `[抄送·跨部门催办] ${orderData.order_no} — ${senderName} 催 ${milestoneData.name}`;
+            const ccHtml = `
+              <h2 style="color:#7c3aed;">跨部门催办抄送通知</h2>
+              <p><strong>${escapeHtml(senderName)}</strong>（${senderRoles.join('/')}）正在催办其他部门的节点：</p>
+              <table style="border-collapse:collapse;margin:16px 0;">
+                <tr><td style="padding:4px 12px;font-weight:bold;">订单号</td><td style="padding:4px 12px;">${orderData.order_no}</td></tr>
+                <tr><td style="padding:4px 12px;font-weight:bold;">客户</td><td style="padding:4px 12px;">${orderData.customer_name}</td></tr>
+                <tr><td style="padding:4px 12px;font-weight:bold;">节点</td><td style="padding:4px 12px;font-weight:bold;">${milestoneData.name}</td></tr>
+                <tr><td style="padding:4px 12px;font-weight:bold;">节点负责角色</td><td style="padding:4px 12px;">${milestoneOwnerRole}</td></tr>
+                <tr><td style="padding:4px 12px;font-weight:bold;">被催负责人</td><td style="padding:4px 12px;">${escapeHtml(recipientName || recipientEmail)}</td></tr>
+              </table>
+              ${messageHtml}
+              <p style="color:#6b7280;font-size:12px;">此邮件为系统自动抄送 — 你不需要回复，仅作管理透明用途。</p>
+              <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com'}/orders/${orderData.id}?tab=progress" style="display:inline-block;padding:8px 20px;background:#7c3aed;color:white;border-radius:8px;text-decoration:none;font-weight:bold;">查看订单</a></p>
+            `;
+            const sent = await sendEmailNotification(a.email, ccSubject, ccHtml);
+            if (sent) ccAdminCount++;
+          }
+        }
+        ccAdminSent = ccAdminCount > 0;
+      }
+    } catch (ccErr: any) {
+      console.error('[Nudge] cross-role CC admin failed:', ccErr?.message);
+      // CC 失败不阻塞主流程
+    }
+
     const channels: string[] = ['系统通知'];
     if (wecomSent) channels.push('企业微信');
     if (emailSent) channels.push('邮件');
+    if (ccAdminSent) channels.push(`抄送 ${ccAdminCount} 位管理员`);
 
     return NextResponse.json({
       success: true,
@@ -165,6 +246,8 @@ export async function POST(request: NextRequest) {
       recipient_email: recipientEmail,
       emailSent,
       wecomSent,
+      ccAdminSent,
+      ccAdminCount,
     });
   } catch (error: any) {
     console.error('Error sending nudge:', error);

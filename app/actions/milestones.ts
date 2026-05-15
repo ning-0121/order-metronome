@@ -246,12 +246,14 @@ export async function markMilestoneDone(
     }
   }
 
-  // 顺序约束：取消硬阻塞，所有节点可并行处理
-  // 2026-04-14：CEO要求各角色各自处理各自的节点，不互相卡
-  // 保留业务尾查依赖跟单尾查（同类双签逻辑），其余全部放开
+  // 顺序约束：跨角色硬阻塞全部移除
+  // 2026-04-14：CEO 要求各角色各自处理各自的节点，不互相卡
+  // 2026-05-15：进一步取消业务/跟单 QC 双签的硬依赖
+  //   原本 mid_qc_sales_check 必须等 mid_qc_check，但业务可以独立验货
+  //   两个角色的检查结果分别记录，无需强制顺序
+  //   跨角色协调改用「催办+抄送 admin」机制，详见 /api/nudge
   const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = {
-    mid_qc_sales_check: ['mid_qc_check'],       // 业务中查必须在跟单中查之后
-    final_qc_sales_check: ['final_qc_check'],   // 业务尾查必须在跟单尾查之后
+    // 暂留空。未来若发现真有不可绕过的依赖再加。
   };
   const prerequisites = SEQUENTIAL_REQUIREMENTS[milestone.step_key];
   if (prerequisites && !isAdmin) {
@@ -383,8 +385,12 @@ export async function markMilestoneDone(
     // 评审会：业务确认即可完成（已取消行政督察双签）
   }
 
-  // 质量门禁：出运相关节点必须在尾查通过后才能操作
-  const SHIPMENT_GATES = ['inspection_release', 'booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute'];
+  // 质量门禁：真正物理出货前必须 QC 通过
+  // 2026-05-15 收窄：业务的「订舱完成」「报关安排出运」是文件/排期预订工作，
+  //   可以与生产并行（订舱可以提前预订，报关可以提前备文件）。
+  //   只有 inspection_release（放行）和 shipment_execute（物理出运）真正需要
+  //   尾查通过。其余原 GATE 内的节点改为允许业务并行推进。
+  const SHIPMENT_GATES = ['inspection_release', 'shipment_execute'];
   if (SHIPMENT_GATES.includes(milestone.step_key)) {
     const { data: qcMilestone } = await (supabase.from('milestones') as any)
       .select('status, checklist_data')

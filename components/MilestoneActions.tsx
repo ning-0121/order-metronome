@@ -156,11 +156,16 @@ export function MilestoneActions({
       }
     }
 
-    // 阻断校验
+    // 阻断校验 — 2026-05-15 改为软警告
+    // 跨角色不再硬阻塞。前置未完成时给业务弹 confirm 让其确认，
+    // 确认后允许推进。这样业务可以独立完成自己 lane 的节点，不被生产线卡住。
     const blockers = getBlockers();
     if (blockers.length > 0) {
-      setSubmitError('⛔ 以下前置节点尚未完成，无法推进：\n' + blockers.map(b => '· ' + b).join('\n'));
-      return;
+      const proceed = confirm(
+        `⚠ 以下前置节点尚未完成：\n${blockers.map(b => '· ' + b).join('\n')}\n\n` +
+        `仍然要推进此节点吗？\n（建议先通过下方「催办提醒」让前置负责人推进，再继续）`,
+      );
+      if (!proceed) return;
     }
 
     setLoading(true);

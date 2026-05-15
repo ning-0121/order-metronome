@@ -588,33 +588,62 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           orderNo={orderNo}
                         />
 
-                        {/* 催办提醒按钮：管理员或任何相关人员都可催办进行中/逾期节点 */}
-                        {!_isDone(m.status) && (_isActive(m.status) || (m.due_at && new Date(m.due_at) < new Date())) && (
-                          <div className="bg-blue-50 rounded-lg p-3 flex items-center justify-between">
-                            <div className="text-xs text-blue-700">
-                              <span className="font-medium">负责人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'}</span>
-                              <span className="text-blue-500 ml-2">{getRoleLabel(m.owner_role)}</span>
+                        {/* 催办提醒按钮：所有未完成节点可催办（2026-05-15 放宽）
+                            - 跨角色催办时 API 自动抄送 admin/CEO
+                            - 1 小时内同节点只能催 1 次 */}
+                        {!_isDone(m.status) && (() => {
+                          // 判断是否跨角色（仅用于 UI 文案，实际抄送由后端决定）
+                          const milestoneRole = String(m.owner_role || '').toLowerCase();
+                          const sameRoleGroup = (a: string, b: string) => {
+                            if (a === b) return true;
+                            const prodGroup = ['merchandiser', 'production', 'production_manager', 'qc', 'quality'];
+                            if (prodGroup.includes(a) && prodGroup.includes(b)) return true;
+                            const salesGroup = ['sales', 'sales_assistant'];
+                            if (salesGroup.includes(a) && salesGroup.includes(b)) return true;
+                            return false;
+                          };
+                          const myRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+                          const isCross = milestoneRole && myRoles.length > 0 && !myRoles.some(r => sameRoleGroup(String(r).toLowerCase(), milestoneRole));
+                          return (
+                            <div className={`rounded-lg p-3 flex items-center justify-between ${isCross ? 'bg-purple-50' : 'bg-blue-50'}`}>
+                              <div className="text-xs">
+                                <span className={`font-medium ${isCross ? 'text-purple-700' : 'text-blue-700'}`}>
+                                  负责人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'}
+                                </span>
+                                <span className={`ml-2 ${isCross ? 'text-purple-500' : 'text-blue-500'}`}>
+                                  {getRoleLabel(m.owner_role)}
+                                </span>
+                                {isCross && (
+                                  <span className="ml-2 text-purple-600 font-medium">（跨部门）</span>
+                                )}
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  const reason = isCross
+                                    ? prompt(`要催办其他部门的「${m.name}」？\n\n这条催办会自动抄送给 admin/CEO。\n（可选）填写催办理由，例：客户催进度 / 你们这边已耽误 3 天 / 影响后续我的节点：`)
+                                    : prompt(`要发送催办提醒给「${m.name}」的负责人？\n（可选）填写催办理由：`);
+                                  if (reason === null) return; // 用户取消
+                                  try {
+                                    const res = await fetch('/api/nudge', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ milestoneId: m.id, message: reason || '' }),
+                                    });
+                                    const json = await res.json();
+                                    if (json.error) alert(json.error);
+                                    else {
+                                      const ccInfo = json.ccAdminSent ? `\n✅ 已抄送 ${json.ccAdminCount} 位管理员` : '';
+                                      alert(`催办已发送：${json.message}${ccInfo}`);
+                                    }
+                                  } catch { alert('发送失败'); }
+                                }}
+                                className={`text-xs px-3 py-1.5 rounded-lg text-white font-medium ${isCross ? 'bg-purple-600 hover:bg-purple-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                              >
+                                {isCross ? '📢 催办（抄送老板）' : '📧 催办提醒'}
+                              </button>
                             </div>
-                            <button
-                              onClick={async () => {
-                                if (!confirm(`确定发送催办提醒给「${m.name}」的负责人？`)) return;
-                                try {
-                                  const res = await fetch('/api/nudge', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ milestoneId: m.id }),
-                                  });
-                                  const json = await res.json();
-                                  if (json.error) alert(json.error);
-                                  else alert('催办邮件已发送');
-                                } catch { alert('发送失败'); }
-                              }}
-                              className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium"
-                            >
-                              📧 催办提醒
-                            </button>
-                          </div>
-                        )}
+                          );
+                        })()}
 
                         {/* 凭证上传统一在 MilestoneActions 的「提交进度」表单里完成
                             （之前此处的 EvidenceUpload 双入口已于 2026-04-15 合并） */}
