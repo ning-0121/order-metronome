@@ -7,12 +7,13 @@ import { OwnerAssignment } from './OwnerAssignment';
 import { SOPButton } from './SOPModal';
 import { getSOPForStep } from '@/lib/domain/sop';
 import { getMilestoneLogs } from '@/app/actions/milestones';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type { Milestone } from '@/lib/types';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { POParserModal } from './POParserModal';
 import { computeDeliveryAlert, computeDelayDays } from '@/lib/domain/milestone-helpers';
 import { updateMilestoneActualDate } from '@/app/actions/milestones';
+import { getSwimLane, getDefaultLanesForRoles, LANE_META, type SwimLane } from '@/lib/domain/swimLane';
 
 /** 允许填写实际日期的节点 */
 const ACTUAL_DATE_EDITABLE_KEYS = [
@@ -176,6 +177,26 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
   const [showPOParser, setShowPOParser] = useState(false);
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
+  // ── Swim-lane filter ──
+  // 默认按当前用户角色显示对应泳道。
+  // 用户可手动切换到「全部」或单独某条 lane。不锁死。
+  const defaultLanes = useMemo(() => {
+    const roles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
+    return getDefaultLanesForRoles(roles);
+  }, [currentRole, currentRoles]);
+  // null = 显示全部；SwimLane[] = 仅显示指定 lanes
+  const [laneFilter, setLaneFilter] = useState<SwimLane[] | null>(
+    defaultLanes.length === 3 ? null : defaultLanes,
+  );
+  const totalByLane = useMemo(() => {
+    const acc: Record<SwimLane, number> = { sales: 0, production: 0, sync: 0 };
+    for (const m of milestones) {
+      const lane = getSwimLane((m as any).step_key);
+      acc[lane]++;
+    }
+    return acc;
+  }, [milestones]);
+
   // 从 URL ?focus=<milestone_id> 自动滚动+展开+高亮
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -225,9 +246,16 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
     return aN - bN;
   });
 
+  // Swim-lane 过滤：null = 全部；否则只保留指定 lane 的节点
+  const laneFilteredMilestones = useMemo(() => {
+    if (laneFilter === null) return milestones;
+    const allowed = new Set(laneFilter);
+    return milestones.filter(m => allowed.has(getSwimLane((m as any).step_key)));
+  }, [milestones, laneFilter]);
+
   // 阶段内：按 stepKeys 数组里的位置排序（永久固定的逻辑顺序）
   const grouped = MILESTONE_GROUPS.map(g => {
-    const items = milestones.filter(m => g.stepKeys.includes((m as any).step_key));
+    const items = laneFilteredMilestones.filter(m => g.stepKeys.includes((m as any).step_key));
     items.sort((a, b) => {
       const aIdx = g.stepKeys.indexOf((a as any).step_key);
       const bIdx = g.stepKeys.indexOf((b as any).step_key);
@@ -236,8 +264,72 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
     return { ...g, items };
   });
 
+  // Lane filter helpers
+  const isLaneActive = (lane: SwimLane) => laneFilter !== null && laneFilter.length === 1 && laneFilter[0] === lane;
+  const isAllActive = laneFilter === null;
+  const isMyLanesActive =
+    laneFilter !== null &&
+    laneFilter.length === defaultLanes.length &&
+    laneFilter.every(l => defaultLanes.includes(l));
+  const toggleLane = (lane: SwimLane) => {
+    setLaneFilter(prev => {
+      if (prev === null) return [lane];                 // 从「全部」点单 lane → 只显示该 lane
+      if (prev.length === 1 && prev[0] === lane) return null; // 再次点 → 取消，回到全部
+      return [lane];
+    });
+  };
+
   return (
     <div className="space-y-6">
+      {/* ── Swim-lane Filter ── */}
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <span className="text-xs text-gray-500 mr-1">视图：</span>
+
+        <button
+          onClick={() => setLaneFilter(null)}
+          className={`text-xs px-3 py-1.5 rounded-full transition ${
+            isAllActive ? 'bg-gray-900 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          全部 ({milestones.length})
+        </button>
+
+        {defaultLanes.length < 3 && (
+          <button
+            onClick={() => setLaneFilter(defaultLanes)}
+            className={`text-xs px-3 py-1.5 rounded-full transition ${
+              isMyLanesActive ? 'bg-indigo-600 text-white' : 'bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50'
+            }`}
+            title={`默认根据当前角色显示：${defaultLanes.map(l => LANE_META[l].label).join(' + ')}`}
+          >
+            我的视图
+          </button>
+        )}
+
+        {(['sales', 'production', 'sync'] as SwimLane[]).map(lane => {
+          const meta = LANE_META[lane];
+          const active = isLaneActive(lane);
+          return (
+            <button
+              key={lane}
+              onClick={() => toggleLane(lane)}
+              className={`text-xs px-3 py-1.5 rounded-full transition flex items-center gap-1.5 ${
+                active ? meta.pillClass : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${active ? 'bg-white/80' : meta.dotClass}`} />
+              {meta.label} ({totalByLane[lane]})
+            </button>
+          );
+        })}
+
+        {laneFilter !== null && !isMyLanesActive && (
+          <span className="text-[11px] text-gray-400 ml-1">
+            {laneFilteredMilestones.length === 0 ? '当前 filter 下无节点' : `共 ${laneFilteredMilestones.length} 节点`}
+          </span>
+        )}
+      </div>
+
       {grouped.map(group => {
         // 跳过没有节点的分组（如 shipping_sample_send 被过滤掉时）
         if (group.items.length === 0) return null;
@@ -309,6 +401,18 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, cur
                           <span className={'font-medium text-sm ' + (isDone ? 'text-gray-500 line-through' : 'text-gray-900')}>
                             {m.name}
                           </span>
+                          {(() => {
+                            const lane = getSwimLane(m.step_key);
+                            const laneMeta = LANE_META[lane];
+                            return (
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${laneMeta.badgeClass}`}
+                                title={`泳道：${laneMeta.label}`}
+                              >
+                                {laneMeta.shortLabel}
+                              </span>
+                            );
+                          })()}
                           <span className={'text-xs px-2 py-0.5 rounded-full font-medium ' + (STATUS_STYLE[m.status] || STATUS_STYLE['未开始'])}>
                             {_statusLabel(m.status)}
                           </span>
