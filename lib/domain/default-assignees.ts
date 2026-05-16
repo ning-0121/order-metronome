@@ -50,6 +50,9 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
  * 固定由生产主管负责的里程碑 step_key
  * CEO 2026-04-09 拍板：工厂匹配确认 + 产前样准备完成 永远是生产主管的活
  * CEO 2026-04-27 补充：加工费确认 + 生产预评估 也是生产主管负责（修复模板错误）
+ *
+ * 注意：本数组保留向后兼容，但 auto-claim 逻辑请用下方更精细的
+ *      STRICTLY_PM_STEPS / PM_OR_FINANCE_STEPS 区分。
  */
 export const PRODUCTION_MANAGER_FIXED_STEPS: string[] = [
   'processing_fee_confirmed',    // 加工费确认（生产主管与工厂谈加工费）
@@ -57,6 +60,30 @@ export const PRODUCTION_MANAGER_FIXED_STEPS: string[] = [
   'factory_confirmed',           // 工厂匹配确认
   'pre_production_sample_ready', // 产前样准备完成
 ];
+
+/**
+ * 严格只能由生产主管认领的节点 —— 业务/跟单/财务/admin 都不能 auto-claim。
+ * 如果 PM 未匹配，节点保持 owner_user_id=null，由 admin 手动指定。
+ */
+export const STRICTLY_PM_STEPS: string[] = [
+  'bulk_materials_confirmed',    // 生产预评估
+  'factory_confirmed',           // 工厂匹配确认
+  'pre_production_sample_ready', // 产前样准备完成
+];
+
+/**
+ * 生产主管 + 财务都可以认领的节点。
+ * 业务规则：加工费由生产主管与工厂谈，但财务有定夺权（审批阈值/利润影响）。
+ * 因此财务（如方园 fiona）认领此节点是合理的，不视为误认领。
+ */
+export const PM_OR_FINANCE_STEPS: string[] = [
+  'processing_fee_confirmed',    // 加工费确认
+];
+
+/** 判断 step_key 是否允许财务 auto-claim（除 PM 外的合法认领角色）*/
+export function canFinanceClaimStep(stepKey: string): boolean {
+  return PM_OR_FINANCE_STEPS.includes(stepKey);
+}
 
 interface ProfileLite {
   user_id: string;
