@@ -196,9 +196,20 @@ export default async function DashboardPage() {
 
   // 我的逾期 = owner_user_id 严格等于当前用户
   // 他人逾期 = 我参与的订单里、不是我的（admin 看全局）
+  // ⚠️ 2026-05-15：排除"生产主管固定节点被业务/跟单错误自动认领"的历史脏数据
+  //    生产预评估/加工费/工厂匹配/产前样准备 这些节点理论上只属于生产主管，
+  //    如果 owner_user_id 是非 PM 用户，不显示在他们的"我的逾期"，
+  //    改用"他人逾期"通道（保留可见性）+ 催办按钮（生产主管才能处理）。
+  const { PRODUCTION_MANAGER_FIXED_STEPS } = await import('@/lib/domain/default-assignees');
+  const isPmUser = userRoles.some(r => String(r).toLowerCase() === 'production_manager');
   const myOverdue = isAdmin
     ? []
-    : filteredOverdue.filter((m: any) => m.owner_user_id === user.id);
+    : filteredOverdue.filter((m: any) => {
+        if (m.owner_user_id !== user.id) return false;
+        // 如果是生产主管固定节点，但当前用户不是 PM → 不算我的，归到他人逾期
+        if (PRODUCTION_MANAGER_FIXED_STEPS.includes(m.step_key) && !isPmUser) return false;
+        return true;
+      });
   const othersOverdue = isAdmin
     ? filteredOverdue
     : filteredOverdue.filter((m: any) =>

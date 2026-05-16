@@ -122,11 +122,17 @@ export function MilestoneActions({
       return;
     }
 
-    // 产前样寄出：必须填快递单号
+    // 产前样寄出：快递单号 OR 备注说明二选一（2026-05-15 放宽）
+    // 实际场景：有时通过专人送达、客户自取等方式，没有快递单号，
+    //          只要业务在备注里说明"如何送达"即可完成。
     const trackingNumber = (form.querySelector('input[name="tracking_number"]') as HTMLInputElement)?.value?.trim();
-    if (milestone.step_key === 'pre_production_sample_sent' && !trackingNumber) {
-      setSubmitError('⚠️ 请填写快递单号');
-      return;
+    if (milestone.step_key === 'pre_production_sample_sent') {
+      const hasTracking = !!trackingNumber;
+      const hasNote = !!evidenceNote.trim();
+      if (!hasTracking && !hasNote) {
+        setSubmitError('⚠️ 请填写快递单号；如无快递单号（专人送达/客户自取等），请在「处理备注」里说明送达方式');
+        return;
+      }
     }
 
     // 必须上传证据
@@ -236,11 +242,15 @@ export function MilestoneActions({
           .eq('id', orderId);
       }
 
-      // 保存快递单号到备注
-      if (trackingNumber) {
+      // 保存快递单号或送达方式说明到备注
+      // 2026-05-15：快递单号变可选，无单号时把备注作为送达方式说明记入 notes
+      if (milestone.step_key === 'pre_production_sample_sent' && (trackingNumber || evidenceNote)) {
         const supabaseForNote = createClient();
+        const noteText = trackingNumber
+          ? `快递单号: ${trackingNumber}${evidenceNote ? '\n' + evidenceNote : ''}`
+          : `送达方式（无快递单号）: ${evidenceNote}`;
         await (supabaseForNote.from('milestones') as any)
-          .update({ notes: `快递单号: ${trackingNumber}${evidenceNote ? '\n' + evidenceNote : ''}` })
+          .update({ notes: noteText })
           .eq('id', milestone.id);
       }
 
@@ -759,19 +769,21 @@ export function MilestoneActions({
             </div>
           )}
 
-          {/* 产前样寄出：快递单号 */}
+          {/* 产前样寄出：快递单号（可选 — 无单号时在备注里说明送达方式）*/}
           {milestone.step_key === 'pre_production_sample_sent' && (
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
-                快递单号 <span className="text-red-500">*</span>
+                快递单号 <span className="text-gray-400">（可选）</span>
               </label>
               <input
                 type="text"
                 name="tracking_number"
-                required
-                placeholder="输入快递/物流单号"
+                placeholder="输入快递/物流单号；如无单号请在下方备注说明送达方式"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-indigo-400"
               />
+              <p className="text-[11px] text-gray-400 mt-1">
+                💡 专人送达/客户自取/手提带等无快递单号场景，请在「处理备注」里说明
+              </p>
             </div>
           )}
 

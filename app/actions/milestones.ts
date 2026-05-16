@@ -272,10 +272,20 @@ export async function markMilestoneDone(
   }
 
   // 自动认领：如果该关卡尚未分配具体负责人，且操作者角色匹配，自动认领
+  // ⚠️ 2026-05-15：生产主管固定步骤（生产预评估/加工费/工厂匹配/产前样准备）
+  //    不允许业务/跟单自动认领。秦增富未匹配时保持 owner_user_id=null，
+  //    由 admin 手动指定，避免业务"我的逾期"里出现本不该业务背的节点。
   if (!milestone.owner_user_id && roleMatches) {
-    await (supabase.from('milestones') as any)
-      .update({ owner_user_id: user.id })
-      .eq('id', milestoneId);
+    const { PRODUCTION_MANAGER_FIXED_STEPS } = await import('@/lib/domain/default-assignees');
+    const isPmFixedStep = PRODUCTION_MANAGER_FIXED_STEPS.includes(milestone.step_key);
+    const userIsPm = userRoles.some((r: string) => String(r).toLowerCase() === 'production_manager');
+    // 生产主管固定步骤：只有 PM 本人或 admin 可自动认领（admin 走另一分支）
+    const allowAutoClaim = !isPmFixedStep || userIsPm;
+    if (allowAutoClaim) {
+      await (supabase.from('milestones') as any)
+        .update({ owner_user_id: user.id })
+        .eq('id', milestoneId);
+    }
   }
 
   // ── 经营控制门禁：确认链 + 付款状态阻塞（管理员可绕过）──
