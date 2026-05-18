@@ -26,8 +26,10 @@ interface Props {
   file: File | { name: string } | null;
   /** 节点 step_key — 用于判断推荐命名 */
   stepKey: string;
-  /** 订单号 — 用于生成推荐命名 */
+  /** 系统订单号（QM-xxx）— 兜底接受的命名前缀 */
   orderNo?: string | null;
+  /** 内部订单号（订单册编号）— 优先推荐的命名前缀 */
+  internalOrderNo?: string | null;
   /**
    * 重命名回调 — 仅当 file 是真实的 File 对象时才能重命名
    * 如果 file 是只读信息（如已上传的附件），可以省略此回调
@@ -37,15 +39,15 @@ interface Props {
   compact?: boolean;
 }
 
-export function FileNameCheck({ file, stepKey, orderNo, onRename, compact }: Props) {
+export function FileNameCheck({ file, stepKey, orderNo, internalOrderNo, onRename, compact }: Props) {
   const [dismissed, setDismissed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
 
   const check = useMemo(() => {
     if (!file?.name) return null;
-    return validateFileName(file.name, stepKey, orderNo);
-  }, [file?.name, stepKey, orderNo]);
+    return validateFileName(file.name, stepKey, orderNo, internalOrderNo);
+  }, [file?.name, stepKey, orderNo, internalOrderNo]);
 
   if (!file || !check) return null;
 

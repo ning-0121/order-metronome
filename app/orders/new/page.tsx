@@ -159,6 +159,16 @@ function NewOrderWizard() {
   // 追踪文件选择（用于命名检查）
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
 
+  // 命名不合规时的待修复状态（用于错误页面直接渲染"一键应用推荐"按钮）
+  const [pendingAutoFix, setPendingAutoFix] = useState<{
+    files: { fileType: string; label: string; name: string }[];
+    errors: string[];
+    internalOrderNo: string | null;
+  } | null>(null);
+
+  // 追踪内部订单号输入（供 FileNameCheck 推荐命名实时用上）
+  const [internalOrderNoLive, setInternalOrderNoLive] = useState('');
+
   // 加载模板列表
   useEffect(() => {
     getActiveOrderTemplates().then(res => {
@@ -552,11 +562,14 @@ function NewOrderWizard() {
     // 阻塞条件：缺订单号 / 缺文档类型关键词 / 含禁止字符 / 含歧义词（最终/new等）
     // 软提示：含空格（不阻塞）
     // ═══════════════════════════════════════════════════════
+    // 读取内部订单号（优先用作文件命名前缀）
+    const internalOrderNo = rawFormData.get('internal_order_no') as string | null;
+
     const namingErrors: string[] = [];
     for (const f of filesToUpload) {
       const stepKey = STEP_KEY_BY_FILE_TYPE[f.fileType];
       if (!stepKey) continue; // 未定义命名标准的 fileType 跳过
-      const result = validateFileName(f.file.name, stepKey, preGeneratedOrderNo);
+      const result = validateFileName(f.file.name, stepKey, preGeneratedOrderNo, internalOrderNo);
       const blockingIssues = result.issues.filter(i => i.code !== 'has_space');
       if (blockingIssues.length > 0) {
         namingErrors.push(
@@ -565,53 +578,48 @@ function NewOrderWizard() {
       }
     }
     if (namingErrors.length > 0) {
-      // ── 2026-05-15：提供一键自动修正命名 ──
-      // 业务收到客户发来的文件，命名千奇百怪。强制业务手动 rename 7 个文件
-      // 是巨大的人力浪费。这里弹一个确认框，让业务选择"系统自动改名"或"我自己改"。
-      const fixable = filesToUpload.filter(f => {
-        const sk = STEP_KEY_BY_FILE_TYPE[f.fileType];
-        return sk; // 有命名标准的才能 auto-fix
-      });
-      const autoFixPrompt =
-        `${namingErrors.length} 个文件命名不合规。\n\n` +
-        `选项：\n` +
-        `  确定 → 让系统自动按推荐命名重命名所有文件，立即提交订单\n` +
-        `  取消 → 我自己改文件名后重新选择\n\n` +
-        `不合规列表：\n${namingErrors.slice(0, 5).join('\n')}` +
-        (namingErrors.length > 5 ? `\n... 还有 ${namingErrors.length - 5} 个` : '');
-
-      const autoFix = confirm(autoFixPrompt);
-      if (!autoFix) {
+      // ── 2026-05-18：错误页面直接渲染「一键自动应用推荐命名」按钮，不再用 confirm popup ──
+      // 业务反馈：confirm 易被忽略 / 浏览器 popup 习惯被关掉。改成把可点按钮直接放
+      // 在 showError 的红框下方。点击后自动 rename + 重新触发 submit。
+      const isAutoFixRetry = formData.get('auto_fix_applied') === 'true';
+      if (!isAutoFixRetry) {
+        // 第一次失败：把待修复文件信息存到 state 让 UI 渲染按钮
+        setPendingAutoFix({
+          files: filesToUpload.map(f => ({ fileType: f.fileType, label: f.label, name: f.file.name })),
+          errors: namingErrors,
+          internalOrderNo,
+        });
         showError(
-          `${namingErrors.length} 个文件命名不合规，请修正后重新选择：\n\n${namingErrors.join('\n\n')}\n\n` +
-          `💡 命名格式：{订单号}_{文档类型}.{扩展名}`
+          `${namingErrors.length} 个文件命名不合规：\n\n${namingErrors.join('\n\n')}\n\n` +
+          `💡 命名格式：{内部订单号}_{文档类型}.{扩展名}\n` +
+          `💡 点击下方"一键应用推荐命名"按钮，系统会自动改名后重新提交`,
         );
         return;
       }
 
-      // 系统自动 rename：按 fileType 分组，同类多文件加 _v1/_v2/_v3 后缀
+      // 第二次进入（用户点了"一键应用推荐"）：执行 auto-rename
       const { renameFile, suggestFileName } = await import('@/lib/domain/fileNaming');
       const byType: Record<string, number> = {};
       for (let i = 0; i < filesToUpload.length; i++) {
         const f = filesToUpload[i];
         const sk = STEP_KEY_BY_FILE_TYPE[f.fileType];
         if (!sk) continue;
-        const result = validateFileName(f.file.name, sk, preGeneratedOrderNo);
+        const result = validateFileName(f.file.name, sk, preGeneratedOrderNo, internalOrderNo);
         const blocking = result.issues.filter(i => i.code !== 'has_space');
-        if (blocking.length === 0) continue; // 已合规，跳过
-        // 计算同类序号
+        if (blocking.length === 0) continue;
         byType[f.fileType] = (byType[f.fileType] || 0) + 1;
         const seq = byType[f.fileType];
         const extMatch = /\.[^.]+$/.exec(f.file.name);
         const ext = extMatch ? extMatch[0] : '.pdf';
-        // 用 suggestion 作为基础，多文件加 _v{n} 后缀
-        const baseSuggestion = suggestFileName(sk, preGeneratedOrderNo, ext);
-        // 把 .ext 去掉，加 _v{n}，再加回 .ext
+        // 优先用内部订单号生成推荐名
+        const baseSuggestion = suggestFileName(sk, preGeneratedOrderNo, ext, internalOrderNo);
         const withoutExt = baseSuggestion.replace(/\.[^.]+$/, '');
         const newName = seq > 1 ? `${withoutExt}_v${seq}${ext}` : baseSuggestion;
         filesToUpload[i] = { ...f, file: renameFile(f.file, newName) };
       }
       console.log('[createOrder] auto-renamed', filesToUpload.length, 'files');
+      // 清空 state（fix 完成）
+      setPendingAutoFix(null);
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1068,7 +1076,9 @@ function NewOrderWizard() {
                   </label>
                   <input type="text" name="internal_order_no" required
                     placeholder="订单册编号（必填）"
+                    onChange={e => setInternalOrderNoLive(e.target.value)}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <p className="text-[11px] text-gray-400 mt-1">📌 上传文件命名将以此号为前缀（如 <code className="bg-gray-100 px-1">1022832_客户PO.pdf</code>）</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1424,6 +1434,7 @@ function NewOrderWizard() {
                         file={selectedFiles[name]!}
                         stepKey={stepKey}
                         orderNo={preGeneratedOrderNo}
+                        internalOrderNo={internalOrderNoLive}
                         compact={false}
                       />
                     )}
@@ -1486,6 +1497,46 @@ function NewOrderWizard() {
             {error && (
               <div ref={bottomErrorRef} className="rounded-lg bg-red-50 border border-red-300 p-4 text-sm text-red-800 whitespace-pre-line">
                 <span className="font-semibold">⚠ 创建失败：</span>{error}
+
+                {/* 命名不合规时：直接提供"一键应用推荐命名"按钮 */}
+                {pendingAutoFix && (
+                  <div className="mt-3 flex gap-2 not-prose">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // 标记 auto-fix 已触发；下次 submit 时 isAutoFixRetry=true
+                        const form = bottomErrorRef.current?.closest('form');
+                        if (form) {
+                          // 加 hidden input 标记 auto_fix_applied
+                          let hidden = form.querySelector('input[name="auto_fix_applied"]') as HTMLInputElement | null;
+                          if (!hidden) {
+                            hidden = document.createElement('input');
+                            hidden.type = 'hidden';
+                            hidden.name = 'auto_fix_applied';
+                            form.appendChild(hidden);
+                          }
+                          hidden.value = 'true';
+                          setError(null);
+                          // 触发 form submit
+                          form.requestSubmit();
+                        }
+                      }}
+                      className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+                    >
+                      ⚡ 一键应用推荐命名并创建订单
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingAutoFix(null);
+                        setError(null);
+                      }}
+                      className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      我自己改名
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

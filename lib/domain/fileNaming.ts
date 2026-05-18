@@ -26,10 +26,10 @@
  *   ❌ 不要只写「采购单.xlsx」「BOM.xlsx」 — 一定要带订单号
  */
 
-export const FILE_NAMING_FORMAT = '{订单号}_{文档类型}[_可选后缀].{扩展名}';
+export const FILE_NAMING_FORMAT = '{内部订单号 或 系统订单号}_{文档类型}[_可选后缀].{扩展名}';
 
 export const FILE_NAMING_RULES = [
-  '订单号放最前，例如 QM-20260415-001',
+  '订单号放最前 — 优先用「内部订单号」（订单册编号，例 1022832 / YT-0511），系统 QM- 号也接受',
   '文档类型用下方「推荐命名对照表」里的标准词',
   '需要分批/分版本时用下划线加后缀：_v1、_v2、_面料、_辅料、_20260420',
   '不使用空格和特殊字符（/ \\ : * ? " < > | 空格）',
@@ -313,17 +313,25 @@ function splitName(fileName: string): { base: string; ext: string } {
   return { base: fileName.slice(0, idx), ext: fileName.slice(idx) };
 }
 
-/** 生成推荐文件名（基础版本，不带后缀） */
+/** 生成推荐文件名（基础版本，不带后缀）
+ *  2026-05-18：优先用 internal_order_no（业务的内部订单册编号），
+ *  fallback 到 order_no（系统 QM- 号）。
+ */
 export function suggestFileName(
   stepKey: string,
   orderNo: string | null | undefined,
   originalExt: string,
+  internalOrderNo?: string | null,
 ): string {
   const hint = FILE_NAMING_BY_STEP[stepKey];
   const label = hint?.label || '凭证';
-  const safeOrderNo = orderNo && orderNo.trim() ? orderNo.trim() : 'QM-订单号';
+  // 优先内部订单号（业务的订单册编号），fallback 到系统订单号
+  const ref =
+    (internalOrderNo && internalOrderNo.trim()) ||
+    (orderNo && orderNo.trim()) ||
+    '内部订单号';
   const ext = originalExt || '.pdf';
-  return `${safeOrderNo}_${label}${ext}`;
+  return `${ref}_${label}${ext}`;
 }
 
 /**
@@ -332,14 +340,18 @@ export function suggestFileName(
  * 规则（按严重程度排序）：
  *   1. 不含禁止字符（/ \ : * ? " < > |）
  *   2. 不含歧义词（最终/final/new/新版/...）
- *   3. 包含订单号（如果已传 orderNo）
+ *   3. 包含订单引用号（内部订单号 优先；系统订单号 也接受）
  *   4. 包含该节点的文档类型关键词（如"采购单"、"客户PO"）
  *   5. 不含空格（推荐，但仅提示）
+ *
+ * @param internalOrderNo 业务订单册的内部编号（如 1022832 / YT-0511）— 主推荐
+ * @param orderNo 系统生成订单号（如 QM-20260518-001）— 兜底接受
  */
 export function validateFileName(
   fileName: string,
   stepKey: string,
   orderNo?: string | null,
+  internalOrderNo?: string | null,
 ): NameCheckResult {
   const issues: NameCheckIssue[] = [];
   const { base, ext } = splitName(fileName);
@@ -363,21 +375,31 @@ export function validateFileName(
     });
   }
 
-  // 3. 订单号（仅当提供了 orderNo）
-  if (orderNo && orderNo.trim()) {
-    const on = orderNo.trim();
-    if (!base.includes(on)) {
+  // 3. 订单引用号（接受内部订单号 OR 系统订单号 任一即可）
+  // 2026-05-18：业务实际工作流是文件以内部订单号命名（订单册编号），
+  // 系统 QM- 号是次选。命名校验匹配任一即通过。
+  const internalRef = (internalOrderNo && internalOrderNo.trim()) || '';
+  const systemRef = (orderNo && orderNo.trim()) || '';
+  const hasAnyRef = internalRef || systemRef;
+
+  if (hasAnyRef) {
+    const hasInternal = internalRef && base.includes(internalRef);
+    const hasSystem = systemRef && base.includes(systemRef);
+    if (!hasInternal && !hasSystem) {
+      // 优先推内部订单号（如果有），否则系统号
+      const recommendedRef = internalRef || systemRef;
+      const label = internalRef ? '内部订单号' : '订单号';
       issues.push({
         code: 'missing_order_no',
-        message: `未包含订单号"${on}"`,
+        message: `未包含${label}"${recommendedRef}"`,
       });
     }
   } else {
-    // 没有订单号上下文时，提示如果文件名有占位符
-    if (/QM-订单号|QM-xxxx|QM-XXXX/i.test(base)) {
+    // 没有任何订单引用上下文时，提示占位符
+    if (/QM-订单号|QM-xxxx|QM-XXXX|内部订单号/i.test(base)) {
       issues.push({
         code: 'contains_placeholder',
-        message: '文件名含占位符（QM-订单号/QM-xxxx），请替换为实际订单号',
+        message: '文件名含占位符，请替换为实际订单号',
       });
     }
   }
@@ -412,7 +434,7 @@ export function validateFileName(
   return {
     ok: issues.length === 0,
     issues,
-    suggestion: suggestFileName(stepKey, orderNo, ext),
+    suggestion: suggestFileName(stepKey, orderNo, ext, internalOrderNo),
   };
 }
 
