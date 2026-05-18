@@ -579,7 +579,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <th>款号/PO</th>
                 <th>数量</th>
                 <th>贸易条款</th>
-                <th>下单日</th>
+                <th>下单时间</th>
                 <th>关键日期</th>
                 <th>类型</th>
                 <th>状态</th>
@@ -647,11 +647,37 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       <span className="badge badge-neutral">{{ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' }[order.incoterm as string] || order.incoterm}</span>
                     </td>
                     <td>
-                      {(order as any).order_date ? (
-                        <span className="text-xs text-gray-600">{String((order as any).order_date).slice(0, 10)}</span>
-                      ) : (
-                        <span className="text-gray-300 text-xs">—</span>
-                      )}
+                      {(() => {
+                        const orderDate = (order as any).order_date;
+                        const createdAt = (order as any).created_at;
+                        if (!orderDate && !createdAt) {
+                          return <span className="text-gray-300 text-xs">—</span>;
+                        }
+                        // 下单日（业务录入的日期，date 类型）
+                        const dateStr = orderDate ? String(orderDate).slice(0, 10) : null;
+                        // 创建时间（系统记录的精确时刻，timestamp）— 取 HH:MM
+                        let timeStr: string | null = null;
+                        if (createdAt) {
+                          const d = new Date(createdAt);
+                          if (!isNaN(d.getTime())) {
+                            const hh = String(d.getHours()).padStart(2, '0');
+                            const mm = String(d.getMinutes()).padStart(2, '0');
+                            timeStr = `${hh}:${mm}`;
+                          }
+                        }
+                        return (
+                          <div className="flex flex-col">
+                            {dateStr ? (
+                              <span className="text-xs text-gray-700 font-medium">{dateStr}</span>
+                            ) : (
+                              <span className="text-xs text-gray-400">{createdAt ? String(createdAt).slice(0, 10) : '—'}</span>
+                            )}
+                            {timeStr && (
+                              <span className="text-[10px] text-gray-400">{timeStr}</span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td>
                       {(() => {
