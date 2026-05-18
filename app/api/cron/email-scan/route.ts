@@ -274,6 +274,14 @@ export async function POST(req: Request) {
                 status: 'unread',
               });
               alerted++;
+              // P2-3 WeChat：变更检测推 WeChat（业务必须看到变更）
+              try {
+                const { pushToUsers } = await import('@/lib/utils/wechat-push');
+                await pushToUsers(supabase, [orderOwner],
+                  `📧 客户邮件变更 — ${order.order_no}`,
+                  `${changeDesc}\n建议：${analysis.suggestedAction || '请核实'}`,
+                ).catch(() => {});
+              } catch {}
             }
           }
         }
@@ -300,6 +308,14 @@ export async function POST(req: Request) {
               status: 'unread',
             });
             alerted++;
+            // P2-3 WeChat 全链路：客户邮件待回复推 WeChat
+            try {
+              const { pushToUsers } = await import('@/lib/utils/wechat-push');
+              await pushToUsers(supabase, [custOrder.owner_user_id],
+                `🚨 客户紧急邮件 — ${analysis.customerName}`,
+                `主题：${email.subject}\n${analysis.suggestedAction || '请尽快回复客户邮件'}`,
+              ).catch(() => {});
+            } catch {}
           }
         }
       }
@@ -323,6 +339,14 @@ export async function POST(req: Request) {
             related_order_id: sampleOrder.id,
             status: 'unread',
           });
+          // P2-3 WeChat：样品相关邮件推 WeChat（样品周期短，反馈必须快）
+          try {
+            const { pushToUsers } = await import('@/lib/utils/wechat-push');
+            await pushToUsers(supabase, [sampleOrder.owner_user_id],
+              `🧪 客户样品邮件 — ${analysis.customerName}`,
+              analysis.suggestedAction || '客户关于样品有新回复，请尽快查看',
+            ).catch(() => {});
+          } catch {}
         }
       }
 
