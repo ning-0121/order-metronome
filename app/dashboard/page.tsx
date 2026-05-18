@@ -151,11 +151,15 @@ export default async function DashboardPage() {
       .order('due_at', { ascending: true }),
     // 已超期（未完成且过了 due_at 的节点）
     // 修复（2026-04-28）：原仅限 in_progress 会漏掉新订单中"未开始"但已过期的节点
-    // 修复（2026-05-06）：排除 blocked / 卡单 / 卡住——blocked 已显式暂停，不重复计入逾期
+    // 修复（2026-05-06）：排除 blocked / 卡单 / 卡住
+    // 回滚（2026-05-18）：恢复包含 blocked — 之前的排除导致 block-and-forget：
+    //   采购把节点标 blocked + 卡住原因「业务没下单」→ 节点消失 → 业务没收到提醒
+    //   → 真正问题永远不解决。现在 blocked 节点保留在逾期列表里（仅 done 排除），
+    //   SLA 继续累计，UI 上分到「卡住中」桶，blocked_reason 自动催 upstream。
     (supabase.from('milestones') as any)
       .select(`*, orders!inner (id, order_no, customer_name, internal_order_no, lifecycle_status)`)
       .lt('due_at', `${today}T00:00:00`)
-      .not('status', 'in', '("done","已完成","completed","blocked","卡单","卡住")')
+      .not('status', 'in', '("done","已完成","completed")')
       .order('due_at', { ascending: true }),
     // 当前用户涉及的订单
     (supabase.from('orders') as any)

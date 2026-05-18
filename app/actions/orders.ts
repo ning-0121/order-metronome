@@ -206,35 +206,27 @@ export async function createOrder(
     return { ok: false, error: `出厂日期 ${factory_date} 明显不对，请检查` };
   }
 
-  // 出厂日期必须在下单日期之后
-  if (factoryDt < orderDt) {
-    return { ok: false, error: `出厂日期（${factory_date}）不能早于下单日期（${order_date}）` };
-  }
-
   // 下单到出厂最少7天（面料采购+生产需要时间）
   const daysToFactory = Math.ceil((factoryDt.getTime() - orderDt.getTime()) / 86400000);
   if (daysToFactory < 7) {
     return { ok: false, error: `下单日到出厂日仅 ${daysToFactory} 天，最少需要 7 天（含采购和生产时间）。如确实是加急单请选择"加急订单"类型。` };
   }
 
-  // DDP: ETD 必须在出厂日期之后
-  if (etd && factory_date) {
-    if (new Date(etd) < factoryDt) {
-      return { ok: false, error: `ETD（${etd}）不能早于出厂日期（${factory_date}）` };
-    }
-  }
-
-  // DDP: ETA 必须在 ETD 之后
-  if (etd && warehouse_due_date) {
-    if (new Date(warehouse_due_date) <= new Date(etd)) {
-      return { ok: false, error: `ETA（${warehouse_due_date}）必须晚于 ETD（${etd}）` };
-    }
-  }
-
-  // Cancel date 必须在出厂日期之后
-  if (cancel_date && factory_date) {
-    if (new Date(cancel_date) < factoryDt) {
-      return { ok: false, error: `Cancel Date（${cancel_date}）不能早于出厂日期（${factory_date}）` };
+  // ── 日期链 invariant 校验（SSOT, 2026-05-18）──
+  // 原本分散的 4 个日期顺序检查统一到 lib/domain/orderDates.ts，
+  // 同样的校验也用于 updateOrder + approveDelayRequest，全路径一致。
+  {
+    const { validateOrderDateChain, formatDateChainErrors } = await import('@/lib/domain/orderDates');
+    const violations = validateOrderDateChain({
+      order_date,
+      factory_date,
+      etd,
+      warehouse_due_date,
+      eta: formData.get('eta') as string | null,
+      cancel_date,
+    });
+    if (violations.length > 0) {
+      return { ok: false, error: formatDateChainErrors(violations) };
     }
   }
   // ── 价格审批闸门校验（CEO 强制规则） ──
@@ -938,18 +930,28 @@ export async function updateOrder(id: string, formData: FormData) {
     if (incoterm === 'DDP') {
       updates.etd = etd;
       updates.warehouse_due_date = warehouse_due_date;
-      // 校验：ETA 必须晚于 ETD
-      if (etd && warehouse_due_date && new Date(warehouse_due_date) <= new Date(etd)) {
-        return { error: `ETA（${warehouse_due_date}）必须晚于 ETD（${etd}）` };
-      }
-      // 校验：ETD 必须晚于出厂日期
-      if (etd && factory_date && new Date(etd) < new Date(factory_date)) {
-        return { error: `ETD（${etd}）不能早于出厂日期（${factory_date}）` };
-      }
     } else {
       // FOB: 只用 factory_date 作为锚点
       updates.etd = etd;
       updates.warehouse_due_date = null;
+    }
+
+    // ── 日期链 invariant 校验（SSOT, 2026-05-18）──
+    // 读取订单现有日期作为基线，merge 进 updates 后整体校验
+    const { data: existingOrder } = await (supabase.from('orders') as any)
+      .select('order_date, factory_date, etd, warehouse_due_date, eta, cancel_date')
+      .eq('id', id)
+      .single();
+    if (existingOrder) {
+      const { validateDateChainWithUpdate, formatDateChainErrors } = await import('@/lib/domain/orderDates');
+      const violations = validateDateChainWithUpdate(existingOrder, {
+        etd: updates.etd,
+        warehouse_due_date: updates.warehouse_due_date,
+        factory_date: factory_date || existingOrder.factory_date,
+      });
+      if (violations.length > 0) {
+        return { error: formatDateChainErrors(violations) };
+      }
     }
   }
   

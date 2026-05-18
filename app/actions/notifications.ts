@@ -365,64 +365,124 @@ export async function sendBlockedNotification(
 
   const orderData = order as any;
 
-  // Get order creator email
-  let recipientEmail = '';
-  try {
-    const { data: profile } = await supabase
+  // ── 2026-05-18: 智能路由 ──
+  // 根据 blockedReason 关键词决定真正需要被催的人，而不是默认只给业务发邮件。
+  // 这修复了 block-and-forget bug：之前所有 blocked 都只通知业务，
+  // 但「面料没到」其实要催采购，「工厂产能不够」要催生产主管。
+  function inferUpstreamRole(reason: string): 'sales' | 'procurement' | 'production_manager' | 'finance' | 'qc' | 'merchandiser' | null {
+    const r = reason.toLowerCase();
+    // 业务相关：客户、PO、下单、确认（客户侧）、付款条款
+    if (/业务|客户|po|下单|订单未|确认|样.*未确认|授权/.test(reason)) return 'sales';
+    // 财务相关：付款、审批、定金、尾款、价格
+    if (/财务|付款|定金|尾款|审批未通过|超预算|价格/.test(reason)) return 'finance';
+    // 采购相关：面料、辅料、染色、到货、供应商
+    if (/面料|辅料|染色|到货|供应商|布料|纱线|采购未/.test(reason)) return 'procurement';
+    // 生产主管：产能、机台、排期、加工费、工厂未匹配
+    if (/产能|机台|排期|加工费|工厂.*未|工厂.*没/.test(reason)) return 'production_manager';
+    // QC：质量、不合格、返工、整改
+    if (/质量|不合格|返工|整改|qc|验货/.test(reason)) return 'qc';
+    return null;
+  }
+
+  const upstreamRole = inferUpstreamRole(blockedReason);
+  const recipients: { user_id: string; email: string; name: string; reason: string }[] = [];
+
+  // 1. 推断的 upstream 角色的人
+  if (upstreamRole) {
+    const { data: roleProfiles } = await supabase
       .from('profiles')
-      .select('email')
+      .select('user_id, email, name, role, roles')
+      .or(`role.eq.${upstreamRole},roles.cs.{${upstreamRole}}`);
+    for (const p of (roleProfiles as any[] | null) || []) {
+      if (p.email) {
+        recipients.push({
+          user_id: p.user_id,
+          email: p.email,
+          name: p.name || p.email,
+          reason: `${upstreamRole} 角色（根据卡住原因路由）`,
+        });
+      }
+    }
+  }
+
+  // 2. 兜底：订单创建者（业务）— 始终通知，因为是订单所有者
+  try {
+    const { data: creatorProfile } = await supabase
+      .from('profiles')
+      .select('user_id, email, name')
       .eq('user_id', orderData.created_by)
       .single();
-    recipientEmail = (profile as any)?.email || '';
-  } catch (e) {
-    return { error: 'Creator email not found' };
-  }
-  
-  if (!recipientEmail) return { error: 'Creator email not found' };
+    const cp = creatorProfile as any;
+    if (cp?.email && !recipients.find(r => r.email === cp.email)) {
+      recipients.push({
+        user_id: cp.user_id,
+        email: cp.email,
+        name: cp.name || cp.email,
+        reason: '订单创建者',
+      });
+    }
+  } catch { /* ignore */ }
+
+  if (recipients.length === 0) return { error: 'No recipients resolved' };
+
+  // Check if already sent (within 24h to allow re-send)
+  const recipientEmails = recipients.map(r => r.email);
+  const { data: recent } = await supabase
+    .from('notifications')
+    .select('id, sent_to')
+    .eq('milestone_id', milestoneId)
+    .eq('kind', 'blocked')
+    .gte('sent_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+
+  const alreadySent = new Set(((recent as any[] | null) || []).map(r => r.sent_to));
+  const toNotify = recipients.filter(r => !alreadySent.has(r.email));
+  if (toNotify.length === 0) return { data: { already_sent: true } };
 
   const ccEmails = MANAGER_CC_EMAILS;
 
-  // Check if already sent
-  const { data: existing } = await supabase
-    .from('notifications')
-    .select('id')
-    .eq('milestone_id', milestoneId)
-    .eq('kind', 'blocked')
-    .eq('sent_to', recipientEmail)
-    .single();
+  // Create notifications + 写应用内 notifications 表 + WeChat push
+  const { pushToUsers } = await import('@/lib/utils/wechat-push');
+  for (const r of toNotify) {
+    await supabase.from('notifications').insert({
+      milestone_id: milestoneId,
+      order_id: orderId,
+      kind: 'blocked',
+      sent_to: r.email,
+      sent_at: new Date().toISOString(),
+      payload: {
+        order_no: orderData.order_no,
+        milestone_name: milestoneData.name,
+        blocked_reason: blockedReason,
+        route_reason: r.reason,
+      },
+    });
 
-  if (existing) {
-    return { data: { already_sent: true } };
+    // WeChat Work push
+    try {
+      await pushToUsers(
+        supabase,
+        [r.user_id],
+        `[卡住] ${orderData.order_no} · ${milestoneData.name}`,
+        `卡住原因：${blockedReason}\n你被指派处理（${r.reason}），请尽快推进或回复责任方。`,
+      );
+    } catch { /* ignore */ }
   }
 
-  // Create notification
-  const insertPayload: any = {
-    milestone_id: milestoneId,
-    order_id: orderId,
-    kind: 'blocked',
-    sent_to: recipientEmail,
-    sent_at: new Date().toISOString(),
-    payload: {
-      order_no: orderData.order_no,
-      milestone_name: milestoneData.name,
-      blocked_reason: blockedReason,
-    },
-  };
-  await supabase.from('notifications').insert(insertPayload);
-
-  // Send email
-  const subject = `[URGENT] Order ${orderData.order_no} - ${milestoneData.name} BLOCKED`;
+  // Send email — 主接收人是 toNotify 全部，cc 是 manager
+  const subject = `[卡住·需要你处理] ${orderData.order_no} - ${milestoneData.name}`;
   const body = `
-    <h2>Milestone Blocked</h2>
-    <p><strong>Order:</strong> ${orderData.order_no}</p>
-    <p><strong>Milestone:</strong> ${milestoneData.name}</p>
-    <p><strong>Blocked Reason:</strong> ${blockedReason}</p>
-    <p>Please take immediate action to resolve this issue.</p>
+    <h2 style="color:#d97706;">订单节点已卡住</h2>
+    <p><strong>订单：</strong>${orderData.order_no}（${orderData.customer_name || '—'}）</p>
+    <p><strong>节点：</strong>${milestoneData.name}</p>
+    <p><strong>卡住原因：</strong>${blockedReason}</p>
+    <p><strong>系统判断需要你协助处理</strong>（基于卡住原因关键词路由）。</p>
+    <p>请尽快推进或在系统里回复责任方。<br>
+    若需要他人配合，可在订单详情用「催办」功能 @ 对应同事。</p>
   `;
 
-  await sendEmailNotification([recipientEmail, ...ccEmails], subject, body);
+  await sendEmailNotification([...toNotify.map(r => r.email), ...ccEmails], subject, body);
 
-  return { data: { sent: true } };
+  return { data: { sent: true, recipients: toNotify.length } };
 }
 
 /**

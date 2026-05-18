@@ -713,6 +713,41 @@ async function recalculateSchedule(
       updates.warehouse_due_date = delayRequest.proposed_new_anchor_date;
     }
 
+    // ── 日期链 invariant 校验（SSOT, 2026-05-18）──
+    // 延期审批是历史上 ETA<ETD 等异常数据的主要入口。在写库前 merge 现有日期校验。
+    try {
+      const { validateDateChainWithUpdate, formatDateChainErrors } = await import('@/lib/domain/orderDates');
+      const violations = validateDateChainWithUpdate(
+        {
+          order_date: orderData.order_date,
+          factory_date: orderData.factory_date,
+          etd: orderData.etd,
+          warehouse_due_date: orderData.warehouse_due_date,
+          eta: orderData.eta,
+          cancel_date: orderData.cancel_date,
+        },
+        updates,
+      );
+      if (violations.length > 0) {
+        console.error(
+          `[approveDelayRequest] 日期链校验失败 — ${orderData.order_no}:`,
+          formatDateChainErrors(violations),
+        );
+        // 不直接 throw — recalculateSchedule 是 fire-and-forget 副作用
+        // 但记录到 milestone_logs 让 admin 看到
+        await (supabase.from('milestone_logs') as any).insert({
+          milestone_id: milestoneData.id,
+          order_id: orderData.id,
+          actor_user_id: null,
+          action: 'delay_date_chain_violation',
+          note: `延期审批通过但新日期破坏日期链：${formatDateChainErrors(violations)}。审批已记录但日期未写入订单 — 请人工核实。`,
+        });
+        return;
+      }
+    } catch (err: any) {
+      console.error('[approveDelayRequest] 日期链校验异常:', err?.message);
+    }
+
     await supabase
       .from('orders')
       .update(updates)
