@@ -371,12 +371,33 @@ export async function updateOrder(
       .select('warehouse_due_date')
       .eq('id', id)
       .single();
-    
+
     if (!current?.warehouse_due_date) {
       return { error: 'Warehouse Due Date is required for DDP orders' };
     }
   }
-  
+
+  // ── Lifecycle State Machine 校验（2026-05-18, P1）──
+  // 禁止非法状态转移（如 completed → active 回滚）
+  if (sanitized.lifecycle_status) {
+    const { data: { user } } = await supabase.auth.getUser();
+    let adminOverride = false;
+    if (user) {
+      const { data: profile } = await (supabase.from('profiles') as any)
+        .select('role, roles').eq('user_id', user.id).single();
+      const roles: string[] = (profile as any)?.roles?.length > 0
+        ? (profile as any).roles
+        : [(profile as any)?.role].filter(Boolean);
+      adminOverride = roles.includes('admin');
+    }
+    const { data: existing } = await (supabase.from('orders') as any)
+      .select('lifecycle_status').eq('id', id).single();
+    const fromStatus = (existing as any)?.lifecycle_status;
+    const { validateTransition } = await import('@/lib/domain/lifecycleStateMachine');
+    const transitionErr = validateTransition(fromStatus, sanitized.lifecycle_status, adminOverride);
+    if (transitionErr) return { error: transitionErr };
+  }
+
   const { data, error } = await (supabase
     .from('orders') as any)
     .update(sanitized)

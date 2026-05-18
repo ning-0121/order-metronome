@@ -172,6 +172,29 @@ export async function updateOrderFinancials(
     (updates as any).min_margin_alert = marginPct < 8;
   }
 
+  // ── 金额守恒校验（2026-05-18, P1）──
+  // 定金 + 尾款 ≈ 销售总额（容差 0.01 CNY）
+  // 如果只录入部分字段（如先录销售额、定金/尾款待算），跳过校验
+  if (updates.deposit_amount !== undefined || updates.balance_amount !== undefined || (updates as any).sale_total !== undefined) {
+    const { data: existing } = await (supabase.from('order_financials') as any)
+      .select('sale_total, deposit_amount, balance_amount')
+      .eq('order_id', orderId)
+      .single();
+    const merged = {
+      sale_total: (updates as any).sale_total ?? (existing as any)?.sale_total,
+      deposit_amount: updates.deposit_amount ?? (existing as any)?.deposit_amount,
+      balance_amount: updates.balance_amount ?? (existing as any)?.balance_amount,
+    };
+    const { validateAmountConservation } = await import('@/lib/domain/orderInvariants');
+    const r = validateAmountConservation({
+      saleTotal: merged.sale_total,
+      depositAmount: merged.deposit_amount,
+      balanceAmount: merged.balance_amount,
+      toleranceCny: 0.01,
+    });
+    if (!r.ok) return { error: r.message };
+  }
+
   const { error } = await (supabase.from('order_financials') as any)
     .update({ ...updates, updated_by: user.id, updated_at: new Date().toISOString() })
     .eq('order_id', orderId);
