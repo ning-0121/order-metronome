@@ -19,6 +19,7 @@ import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
 import { RecalcButton } from '@/components/RecalcButton';
 import { RescheduleBanner } from '@/components/RescheduleBanner';
+import { OrderDelayPanel } from '@/components/OrderDelayPanel';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
@@ -220,6 +221,37 @@ export default async function OrderDetailPage({
             />
           );
         })()}
+
+        {/* 整单延期管理面板：申请 + 历史 + 客户证据 */}
+        <OrderDelayPanel
+          orderId={id}
+          orderNo={orderData.order_no}
+          customerName={orderData.customer_name || ''}
+          currentFactoryDate={orderData.factory_date || orderData.etd || null}
+          incoterm={String(orderData.incoterm || '')}
+          delayHistory={((delayRequests as any[]) || []).map((d: any) => ({
+            id: d.id,
+            status: d.status,
+            reason_category: d.reason_category,
+            reason_type: d.reason_type,
+            reason_detail: d.reason_detail,
+            proposed_new_anchor_date: d.proposed_new_anchor_date,
+            requires_customer_approval: d.requires_customer_approval,
+            customer_approval_evidence_url: d.customer_approval_evidence_url,
+            delay_days: d.delay_days,
+            created_at: d.created_at,
+            approved_at: d.approved_at,
+            decision_note: d.decision_note,
+          }))}
+          canRequestDelay={
+            (isAdmin || isOrderOwner || currentRoles.some(r => ['sales', 'merchandiser'].includes(r))) &&
+            orderData.lifecycle_status !== 'completed' &&
+            orderData.lifecycle_status !== '已完成' &&
+            orderData.lifecycle_status !== 'cancelled' &&
+            orderData.lifecycle_status !== '已取消'
+          }
+          isAdmin={isAdmin}
+        />
       </div>
 
       {/* 顶部 Header */}

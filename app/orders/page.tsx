@@ -579,6 +579,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <th>款号/PO</th>
                 <th>数量</th>
                 <th>贸易条款</th>
+                <th>下单日</th>
                 <th>关键日期</th>
                 <th>类型</th>
                 <th>状态</th>
@@ -644,6 +645,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     </td>
                     <td>
                       <span className="badge badge-neutral">{{ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' }[order.incoterm as string] || order.incoterm}</span>
+                    </td>
+                    <td>
+                      {(order as any).order_date ? (
+                        <span className="text-xs text-gray-600">{String((order as any).order_date).slice(0, 10)}</span>
+                      ) : (
+                        <span className="text-gray-300 text-xs">—</span>
+                      )}
                     </td>
                     <td>
                       {(() => {

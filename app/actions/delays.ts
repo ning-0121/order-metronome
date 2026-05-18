@@ -1133,7 +1133,7 @@ export async function createOrderLevelDelayRequest(
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/admin');
 
-  return { data: delayRequest };
+  return { data: delayRequest, delayRequestId: (delayRequest as any)?.id };
 }
 
 export async function getDelayRequestsByOrder(orderId: string) {
