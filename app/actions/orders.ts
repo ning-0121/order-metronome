@@ -334,6 +334,8 @@ export async function createOrder(
     style_count: styleCount ? parseInt(styleCount, 10) : null,
     color_count: colorCount ? parseInt(colorCount, 10) : null,
     factory_date: factory_date || null,
+    // P2-2 AQL 前置：合同条款的一部分，订单创建时录入
+    aql_standard: (formData.get('aql_standard') as string) || null,
     eta: eta || warehouse_due_date || null,
     delivery_type,
     // 国内送仓字段（仅 domestic 时有值）

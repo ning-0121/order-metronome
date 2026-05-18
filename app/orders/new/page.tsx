@@ -1212,6 +1212,26 @@ function NewOrderWizard() {
                 </div>
 
                 {/* 国内送仓 — 客户指定仓库信息（仅 domestic 显示） */}
+                {/* AQL 验货标准 — 合同条款，订单创建时锁定 */}
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    AQL 验货标准 <span className="text-gray-400 text-xs">（合同条款，下游尾查 prefill）</span>
+                  </label>
+                  <select
+                    name="aql_standard"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    defaultValue=""
+                  >
+                    <option value="">— 未指定（建议根据 PO 条款选择）—</option>
+                    <option value="1.5">AQL 1.5（严格，多用于高端/品牌客户）</option>
+                    <option value="2.5">AQL 2.5（标准，最常用）</option>
+                    <option value="4.0">AQL 4.0（宽松，价格敏感订单）</option>
+                    <option value="customer_specified">客户指定其他标准</option>
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    💡 AQL 决定工厂排产时的容差，订单创建时确定可避免尾查时才发现标准不对
+                  </p>
+                </div>
                 {deliveryType === 'domestic' && (
                   <div className="col-span-2 rounded-lg bg-amber-50 border border-amber-200 p-4 space-y-3">
                     <div className="flex items-center gap-2">
