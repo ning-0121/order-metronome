@@ -1428,7 +1428,7 @@ function NewOrderWizard() {
                         }}
                         className="flex-1 text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
                     </div>
-                    {/* 命名检查 — 仅显示提示，不阻塞（此处不支持直接重命名，上传时保留原名） */}
+                    {/* 命名检查 — 内联"应用推荐命名"按钮，DataTransfer 安全替换 input.files */}
                     {selectedFiles[name] && (
                       <FileNameCheck
                         file={selectedFiles[name]!}
@@ -1436,6 +1436,27 @@ function NewOrderWizard() {
                         orderNo={preGeneratedOrderNo}
                         internalOrderNo={internalOrderNoLive}
                         compact={false}
+                        onRename={(renamedFile) => {
+                          // 用 DataTransfer 安全替换 input.files（保留其他多文件不动）
+                          const input = document.querySelector(`input[name="${name}"]`) as HTMLInputElement | null;
+                          if (!input || !input.files) return;
+                          const dt = new DataTransfer();
+                          const targetName = selectedFiles[name]?.name;
+                          let replaced = false;
+                          for (let i = 0; i < input.files.length; i++) {
+                            const f = input.files[i];
+                            if (!replaced && f.name === targetName) {
+                              dt.items.add(renamedFile);
+                              replaced = true;
+                            } else {
+                              dt.items.add(f);
+                            }
+                          }
+                          if (!replaced) dt.items.add(renamedFile);
+                          input.files = dt.files;
+                          // 触发 React 感知文件变化
+                          setSelectedFiles(prev => ({ ...prev, [name]: dt.files![0] || null }));
+                        }}
                       />
                     )}
                   </div>

@@ -77,6 +77,15 @@ export const FILE_NAMING_BY_STEP: Record<
   finance_shipment_approval:       { label: '核准出运记录',     example: 'QM-20260415-001_核准出运记录.pdf' },
   shipment_execute:                { label: '提单',            example: 'QM-20260415-001_提单.pdf' },
   payment_received:                { label: '收款凭证',         example: 'QM-20260415-001_收款凭证.pdf' },
+
+  // ── 虚拟 step key（不对应里程碑节点，仅用于命名校验路由）──
+  // ⚠️ 重要：suggestFileName / validateFileName 都从本 map 查 label。
+  // 之前误加到 FILE_NAMING_BY_DOC_TYPE 导致 fallback 到「凭证」label。2026-05-18 修复。
+  //
+  // PO / 报价单等在「订单创建时」上传的文档，本身不绑定具体节点，
+  // 但仍需有自己的命名关键词，不能误用其他节点的 label。
+  _internal_quote:                 { label: '内部成本核算单', suffixHint: '多份请加 _v1/_v2 或 _报价人 区分', example: 'QM-20260415-001_内部成本核算单_v1.xlsx' },
+  _customer_quote:                 { label: '客户最终报价单', suffixHint: '多份请加 _v1/_v2 或 _PO号 区分',  example: 'QM-20260415-001_客户最终报价单_v1.pdf' },
 };
 
 /**
