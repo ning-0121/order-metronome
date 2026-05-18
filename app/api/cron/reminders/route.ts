@@ -72,16 +72,18 @@ async function checkUnassignedMerchandiser(supabase: any): Promise<number> {
 
   let escalatedCount = 0;
   for (const order of orders as any[]) {
-    // 检查该订单的 merchandiser 节点是否有 owner_user_id
-    const { data: merchMs } = await supabase
+    // 2026-05-18 修复：原逻辑「找任何一个 merch 节点 owner_user_id IS NULL」过敏，
+    // 因为 30 节点订单常有下游节点尚未到时间还未认领，会误报「无跟单」。
+    // 正确判断：只要存在至少一个已分配的 merchandiser 节点 → 主跟单已识别，跳过升级。
+    const { data: assignedMerch } = await supabase
       .from('milestones')
-      .select('id, owner_user_id')
+      .select('id')
       .eq('order_id', order.id)
       .eq('owner_role', 'merchandiser')
-      .is('owner_user_id', null)
+      .not('owner_user_id', 'is', null)
       .limit(1);
 
-    if (!merchMs || merchMs.length === 0) continue; // 已分配，跳过
+    if (assignedMerch && assignedMerch.length > 0) continue; // 至少一个 merch 已分配 → 主跟单已定，跳过
 
     // 去重：这个订单是否已上报过
     const { data: existing } = await supabase
