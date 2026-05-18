@@ -16,6 +16,7 @@ import { isDoneStatus, isActiveStatus } from '@/lib/domain/types';
 import { getActiveOrderTemplates } from '@/app/actions/order-templates';
 import type { OrderTemplate } from '@/app/actions/order-templates';
 import { FileNameCheck } from '@/components/FileNameCheck';
+import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
 
 /**
@@ -1050,6 +1051,12 @@ function NewOrderWizard() {
                 <div>
                   <FactorySelect />
                 </div>
+                {/* 客户信用风险 banner — 选客户后实时查询 customer_rhythm 评估 */}
+                {selectedCustomer && selectedCustomer.trim().length >= 2 && (
+                  <div className="col-span-2">
+                    <CustomerCreditBanner customerName={selectedCustomer} />
+                  </div>
+                )}
                 <div className="col-span-2">
                   <MultiFactorySelect />
                 </div>

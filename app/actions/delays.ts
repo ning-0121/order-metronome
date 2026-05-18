@@ -419,7 +419,9 @@ async function approveDelayRequestCore(
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdmin = isAdminRole(userRoles);
 
-  if (!isAdmin) return failure('无权操作：只有管理员可以审批延期申请', 'PERMISSION_DENIED');
+  // 2026-05-18 CEO 决策：所有延期申请一律由 CEO/admin 审批，不分级。
+  // 业务理由：延期直接影响交期承诺，必须 CEO 拍板，避免中层审批失真。
+  if (!isAdmin) return failure('延期审批权属 CEO，仅管理员可批准。请联系管理员处理。', 'PERMISSION_DENIED');
 
   // Update delay request
   const updatePayload: any = {
@@ -609,7 +611,8 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
   const isRejectAdmin = rejectUserRoles.includes('admin');
 
   if (!isRejectAdmin) {
-    return { error: '无权操作：只有管理员可以驳回延期申请' };
+    // 2026-05-18 CEO 决策：延期审批一律 CEO 拍板（驳回也是）
+    return { error: '延期审批权属 CEO，仅管理员可驳回。请联系管理员处理。' };
   }
 
   // Update delay request

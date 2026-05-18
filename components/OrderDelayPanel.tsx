@@ -156,7 +156,7 @@ export function OrderDelayPanel({
           .eq('id', (result as any).delayRequestId);
       }
 
-      alert('✅ 延期申请已提交，等待管理员审批。审批通过后系统将自动重排下游节点。');
+      alert('✅ 延期申请已提交，等待 CEO 审批。审批通过后系统将自动重排下游节点。');
       setShowForm(false);
       // 重置表单
       setReasonCategory('customer');
