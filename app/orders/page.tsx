@@ -572,19 +572,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           <table className="table-modern">
             <thead>
               <tr>
-                <th>订单号</th>
-                <th>内部单号</th>
-                <th>客户</th>
-                <th>工厂</th>
-                <th>款号/PO</th>
+                <th>订单号 / 内部单号</th>
+                <th>客户 / 工厂</th>
+                <th>款号 · PO</th>
                 <th>数量</th>
-                <th>贸易条款</th>
-                <th>下单时间</th>
-                <th>关键日期</th>
-                <th>类型</th>
+                <th>下单 / 关键日期</th>
                 <th>状态</th>
                 <th>阶段进度</th>
-                <th>操作</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -602,130 +597,119 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
                 return (
                   <tr key={order.id}>
+                    {/* 订单号 + 内部单号 + 类型/贸易/状态徽章 一格放下 */}
                     <td>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-gray-900">{order.order_no}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${typeColors[order.order_type] || 'bg-gray-100 text-gray-600'}`}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-gray-900 whitespace-nowrap">{order.order_no}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${typeColors[order.order_type] || 'bg-gray-100 text-gray-600'}`}>
                           {typeLabels[order.order_type] || order.order_type}
                         </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600 whitespace-nowrap">
+                          {{ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: 'RMB(税外)', RMB_INC_TAX: 'RMB(含税)' }[order.incoterm as string] || order.incoterm}
+                        </span>
                         {isCustomerShipHoldFromOrder(order) && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800">客户待运</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800 whitespace-nowrap">客户待运</span>
                         )}
                         {isCustomerHoldStale(order) && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800">待复盘</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 whitespace-nowrap">待复盘</span>
                         )}
                       </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        <InlineEditField
+                          orderId={order.id}
+                          field="internal_order_no"
+                          value={(order as any).internal_order_no}
+                          placeholder="填内部单号"
+                          locked={true}
+                          lockedMessage="内部单号已填写，修改需要财务审批。请联系财务或管理员。"
+                        />
+                      </div>
                     </td>
-                    <td>
-                      <InlineEditField
-                        orderId={order.id}
-                        field="internal_order_no"
-                        value={(order as any).internal_order_no}
-                        placeholder="填写"
-                        locked={true}
-                        lockedMessage="内部单号已填写，修改需要财务审批。请联系财务或管理员。"
-                      />
-                    </td>
+
+                    {/* 客户 + 工厂 */}
                     <td>
                       <Link href={`/orders?status=${statusFilter}&customer=${encodeURIComponent(order.customer_name)}`}
-                        className="text-gray-700 hover:text-indigo-600 hover:underline">{order.customer_name}</Link>
+                        className="text-gray-800 hover:text-indigo-600 hover:underline font-medium whitespace-nowrap">{order.customer_name}</Link>
+                      <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
+                        🏭 {(order as any).factory_name ? (
+                          <Link href={`/orders?status=${statusFilter}&factory=${encodeURIComponent((order as any).factory_name)}`}
+                            className="hover:text-indigo-600 hover:underline">{(order as any).factory_name}</Link>
+                        ) : <span className="text-gray-400">未指定</span>}
+                      </div>
                     </td>
+
+                    {/* 款号 / PO */}
                     <td>
-                      {(order as any).factory_name ? (
-                        <Link href={`/orders?status=${statusFilter}&factory=${encodeURIComponent((order as any).factory_name)}`}
-                          className="text-gray-600 hover:text-indigo-600 hover:underline">{(order as any).factory_name}</Link>
-                      ) : <span className="text-gray-400">—</span>}
+                      <div className="text-gray-900 whitespace-nowrap">{(order as any).style_no || <span className="text-gray-400">-</span>}</div>
+                      {(order as any).po_number && <div className="text-xs text-gray-500 whitespace-nowrap mt-0.5">{(order as any).po_number}</div>}
                     </td>
-                <td>
-                  <div className="text-sm text-gray-900">{(order as any).style_no || '-'}</div>
-                  {(order as any).po_number && <div className="text-xs text-gray-500">{(order as any).po_number}</div>}
-                </td>
+
+                    {/* 数量 */}
                     <td>
-                      <span className="text-gray-700 font-medium">{order.quantity ? `${order.quantity}件` : '—'}</span>
+                      <span className="text-gray-800 font-medium whitespace-nowrap">{order.quantity ? `${order.quantity} 件` : '—'}</span>
                     </td>
-                    <td>
-                      <span className="badge badge-neutral">{{ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' }[order.incoterm as string] || order.incoterm}</span>
-                    </td>
+
+                    {/* 下单日期 + 关键日期 + 超期提示 一格上下排列 */}
                     <td>
                       {(() => {
                         const orderDate = (order as any).order_date;
                         const createdAt = (order as any).created_at;
-                        if (!orderDate && !createdAt) {
-                          return <span className="text-gray-300 text-xs">—</span>;
-                        }
-                        // 下单日（业务录入的日期，date 类型）
-                        const dateStr = orderDate ? String(orderDate).slice(0, 10) : null;
-                        // 创建时间（系统记录的精确时刻，timestamp）— 取 HH:MM
+                        const dateStr = orderDate ? String(orderDate).slice(0, 10) : (createdAt ? String(createdAt).slice(0, 10) : null);
                         let timeStr: string | null = null;
                         if (createdAt) {
                           const d = new Date(createdAt);
                           if (!isNaN(d.getTime())) {
-                            const hh = String(d.getHours()).padStart(2, '0');
-                            const mm = String(d.getMinutes()).padStart(2, '0');
-                            timeStr = `${hh}:${mm}`;
+                            timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
                           }
                         }
-                        return (
-                          <div className="flex flex-col">
-                            {dateStr ? (
-                              <span className="text-xs text-gray-700 font-medium">{dateStr}</span>
-                            ) : (
-                              <span className="text-xs text-gray-400">{createdAt ? String(createdAt).slice(0, 10) : '—'}</span>
-                            )}
-                            {timeStr && (
-                              <span className="text-[10px] text-gray-400">{timeStr}</span>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td>
-                      {(() => {
                         const originalKeyDate = order.incoterm === 'DDP'
                           ? order.etd
                           : ((order as any).factory_date || order.etd);
                         const dateLabel = order.incoterm === 'DDP' ? 'ETD' : '出厂';
-                        if (!originalKeyDate) return <span className="text-gray-400 text-xs">—</span>;
-                        // 检查是否有已批准的延期（用新日期计算超期）
                         const approvedDelay = ((order as any).delay_requests || [])
                           .filter((d: any) => d.status === 'approved' && d.proposed_new_anchor_date)
                           .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
                         const effectiveDate = approvedDelay ? approvedDelay.proposed_new_anchor_date : originalKeyDate;
                         const hasPending = ((order as any).delay_requests || []).some((d: any) => d.status === 'pending');
-                        const daysOver = Math.ceil((Date.now() - new Date(effectiveDate + 'T23:59:59').getTime()) / 86400000);
+                        const daysOver = originalKeyDate ? Math.ceil((Date.now() - new Date(effectiveDate + 'T23:59:59').getTime()) / 86400000) : 0;
                         const allMilestoneDone = milestones.every((m: any) => _isDone(m.status));
                         const lifecycleDone = DONE_LIFECYCLE.has((order as any).lifecycle_status || '');
                         const isOverdue = daysOver > 0 && !allMilestoneDone && !lifecycleDone;
                         const custHold = isCustomerShipHoldFromOrder(order);
                         const holdStale = isCustomerHoldStale(order);
                         return (
-                          <div>
-                            <span className={`text-xs ${isOverdue && !custHold ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
-                              {dateLabel} {formatDate(originalKeyDate)}
-                            </span>
+                          <div className="space-y-0.5">
+                            <div className="text-xs text-gray-500 whitespace-nowrap">
+                              下单 <span className="text-gray-700 font-medium">{dateStr || '—'}</span>
+                              {timeStr && <span className="text-gray-400 ml-1">{timeStr}</span>}
+                            </div>
+                            {originalKeyDate ? (
+                              <div className={`text-xs whitespace-nowrap ${isOverdue && !custHold ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
+                                {dateLabel} <span className="font-medium">{formatDate(originalKeyDate)}</span>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-400">关键日期 —</div>
+                            )}
                             {isOverdue && hasPending && (
-                              <div className="text-xs text-amber-600 font-medium">⏳ 延期申请中</div>
+                              <div className="text-[11px] text-amber-600 font-medium whitespace-nowrap">⏳ 延期申请中</div>
                             )}
                             {isOverdue && !hasPending && custHold && (
-                              <div className="text-xs text-blue-600 font-medium">📦 客户待运 · {daysOver} 天</div>
+                              <div className="text-[11px] text-blue-600 font-medium whitespace-nowrap">📦 待运 · {daysOver}天</div>
                             )}
                             {isOverdue && !hasPending && !custHold && (
-                              <div className="text-xs text-red-500 font-medium">⚠ 超期 {daysOver} 天</div>
+                              <div className="text-[11px] text-red-600 font-medium whitespace-nowrap">⚠ 超期 {daysOver} 天</div>
                             )}
                             {custHold && holdStale && (
-                              <div className="text-xs text-amber-700 font-medium">🟡 待复盘（≥{CUSTOMER_HOLD_STALE_DAYS}天）</div>
+                              <div className="text-[11px] text-amber-700 font-medium whitespace-nowrap">🟡 待复盘 ≥{CUSTOMER_HOLD_STALE_DAYS}天</div>
                             )}
                           </div>
                         );
                       })()}
                     </td>
+
+                    {/* 状态 */}
                     <td>
-                      <span className={`badge ${order.order_type === 'sample' ? 'badge-info' : 'badge-neutral'}`}>
-                        {({ trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' }[order.order_type as string] || order.order_type)}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`badge ${statusConfig.class}`}>
+                      <span className={`badge ${statusConfig.class} whitespace-nowrap`}>
                         {statusConfig.label}
                       </span>
                     </td>
@@ -765,9 +749,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       {order.id ? (
                         <Link
                           href={`/orders/${order.id}`}
-                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-medium text-sm transition-colors"
+                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-medium text-sm transition-colors whitespace-nowrap"
                         >
-                          查看详情
+                          详情
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                           </svg>
