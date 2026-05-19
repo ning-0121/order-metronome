@@ -168,7 +168,7 @@ export async function aiGenerateDocument(
   try {
     const { getOrderExtraction } = await import('@/app/actions/po-extract');
     poData = await getOrderExtraction(orderId, 'customer_po');
-  } catch {}
+  } catch (e: any) { console.warn(`[documents] 文档处理次要操作 171:`, e?.message); }
 
   const today = new Date().toISOString().slice(0, 10);
   const currency = poData?.header?.currency || 'USD';
@@ -310,7 +310,7 @@ PO行项目: ${JSON.stringify(lineItemsFromPO)}
         .in('review_status', ['confirmed', 'modified', 'pending_review'])
         .order('created_at', { ascending: false }).limit(1).maybeSingle();
       extractionId = ext?.id || null;
-    } catch {}
+    } catch (e: any) { console.warn(`[documents] 文档处理次要操作 313:`, e?.message); }
 
     const { data: doc, error } = await (supabase.from('order_documents') as any)
       .insert({

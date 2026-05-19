@@ -416,7 +416,7 @@ async function generateAIInsights(
       is_actionable: true,
       status: 'active',
     });
-  } catch {} // 缓存写入失败不影响结果
+  } catch (e: any) { console.warn(`[smart-insights] 缓存写入失败不影响结果:`, e?.message); }
 
   return aiInsights;
 }

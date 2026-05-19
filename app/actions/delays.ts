@@ -340,7 +340,7 @@ export async function createDelayRequest(
       const wecomTitle = `⏳ ${requesterName} 申请延期`;
       const wecomContent = `订单：${orderData.order_no}（${orderData.customer_name || '—'}）\n节点：${milestoneData.name}\n原因：${reasonType}\n说明：${reasonDetail.slice(0, 100)}\n\n点击查看详情：${orderLink}`;
       await pushToUsers(supabase, adminUserIds, wecomTitle, wecomContent);
-    } catch {}
+    } catch (e: any) { console.warn(`[delays] 延期申请次要操作 343:`, e?.message); }
   }
 
   revalidatePath(`/orders/${orderData.id}`);
@@ -1130,7 +1130,7 @@ export async function createOrderLevelDelayRequest(
         `🔄 ${requesterName} 申请二次延期`,
         `订单：${orderCheck.order_no}（${orderCheck.customer_name || '—'}）\n新出厂日：${newFactoryDate}\n原因：${reasonType}\n${reasonDetail.slice(0, 80)}\n\n${orderLink}`
       );
-    } catch {}
+    } catch (e: any) { console.warn(`[delays] 延期申请次要操作 1133:`, e?.message); }
   }
 
   revalidatePath(`/orders/${orderId}`);

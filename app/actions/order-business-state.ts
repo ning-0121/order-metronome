@@ -58,7 +58,7 @@ export async function getOrderBusinessState(orderId: string): Promise<{
       const { data: newFinancials } = await (supabase.from('order_financials') as any)
         .select('*').eq('order_id', orderId).maybeSingle();
       financialsRes.data = newFinancials;
-    } catch {}
+    } catch (e: any) { console.warn(`[order-business-state] 业务状态覆盖审计写入:`, e?.message); }
   }
 
   const input: EngineInput = {

@@ -56,7 +56,7 @@ export async function deleteAttachment(attachmentId: string, orderId: string) {
       const u = new URL(row.file_url);
       const idx = u.pathname.indexOf('/order-docs/');
       if (idx >= 0) pathToRemove = u.pathname.slice(idx + '/order-docs/'.length);
-    } catch {}
+    } catch (e: any) { console.warn(`[attachments] 附件次要操作 59:`, e?.message); }
   }
   if (pathToRemove) {
     await supabase.storage.from('order-docs').remove([pathToRemove]);
@@ -130,7 +130,7 @@ export async function getAttachmentDownloadUrl(
       const u = new URL(row.file_url);
       const idx = u.pathname.indexOf('/order-docs/');
       if (idx >= 0) pathToSign = u.pathname.slice(idx + '/order-docs/'.length);
-    } catch {}
+    } catch (e: any) { console.warn(`[attachments] 附件次要操作 133:`, e?.message); }
   }
 
   if (!pathToSign) {

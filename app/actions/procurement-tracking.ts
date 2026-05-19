@@ -252,7 +252,7 @@ export async function approveSupplementRequest(itemId: string): Promise<{ error?
     }
 
     revalidatePath(`/orders/${orderId}`);
-  } catch {}
+  } catch (e: any) { console.warn(`[procurement-tracking] 采购跟踪次要操作:`, e?.message); }
 
   return {};
 }

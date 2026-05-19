@@ -197,7 +197,7 @@ export async function addProcurementItem(
       const alertMsg = budgetWarning ||
         `${orderNo}: ${item.material_name} 采购 ${item.ordered_qty} ${item.ordered_unit || ''} 超出预算 ${budgetQty}（+${(((item.ordered_qty - (budgetQty || 0)) / (budgetQty || 1)) * 100).toFixed(1)}%）`;
       await sendCostAlert(orderId, 'procurement_over_budget', alertMsg, auth.userId);
-    } catch {}
+    } catch (e: any) { console.warn(`[procurement] 采购次要操作 200:`, e?.message); }
   }
 
   revalidatePath(`/orders/${orderId}`);
@@ -369,7 +369,7 @@ export async function recordReceipt(
         `${order?.order_no || '?'}: ${fullItem.material_name} 实收 ${receivedQty} ${fullItem.ordered_unit || ''} vs 预算 ${fullItem.budget_qty}（偏差 ${pct}%）`,
         auth.userId,
       );
-    } catch {}
+    } catch (e: any) { console.warn(`[procurement] 采购次要操作 372:`, e?.message); }
   }
 
   revalidatePath(`/orders/${orderId}`);
