@@ -3,6 +3,7 @@ import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { getDelayRequestsByOrder } from '@/app/actions/delays';
 import { getOrderCommissions } from '@/app/actions/commissions';
 import { formatDate } from '@/lib/utils/date';
+import { getOrderTypeBadge, getOrderTypeLabel } from '@/lib/theme/colors';
 import { OrderTimeline } from '@/components/OrderTimeline';
 import { DelayRequestsList } from '@/components/DelayRequestsList';
 import { OrderScoreCard } from '@/components/OrderScoreCard';
@@ -91,8 +92,8 @@ export default async function OrderDetailPage({
     }
   }
 
-  // ── 并行加载 4 个独立查询（之前是串行，P1 性能修复） ──
-  const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult] = await Promise.all([
+  // ── 并行加载 5 个独立查询（owner profile 之前是串行额外查询，2026-05-19 合并到并行池）──
+  const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult, ownerProfileResult] = await Promise.all([
     getMilestonesByOrder(id),
     getDelayRequestsByOrder(id),
     getOrderLogs(id),
@@ -100,21 +101,19 @@ export default async function OrderDetailPage({
       .select('id, milestone_id, file_type, file_name, file_url, storage_path, file_size, mime_type, uploaded_by, created_at')
       .eq('order_id', id)
       .order('created_at', { ascending: true }),
+    orderData.owner_user_id
+      ? (supabase.from('profiles') as any)
+          .select('name, email')
+          .eq('user_id', orderData.owner_user_id)
+          .single()
+      : Promise.resolve({ data: null }),
   ]);
   const { data: milestones } = milestonesResult;
   const { data: delayRequests } = delayRequestsResult;
   const { data: logs } = logsResult;
   const attachments = (attachmentsResult.data || []) as any[];
-
-  // 负责业务/理单
-  let ownerName = '—';
-  if (orderData.owner_user_id) {
-    const { data: ownerProfile } = await (supabase.from('profiles') as any)
-      .select('name, email')
-      .eq('user_id', orderData.owner_user_id)
-      .single();
-    ownerName = ownerProfile?.name || ownerProfile?.email || '—';
-  }
+  const ownerProfile = (ownerProfileResult as any)?.data || null;
+  const ownerName = ownerProfile?.name || ownerProfile?.email || '—';
 
   // 跟单负责人（从 merchandiser 关卡查找已分配的用户，兼容多种角色值）
   let merchandiserName: string | null = null;
@@ -274,11 +273,11 @@ export default async function OrderDetailPage({
                     {orderData.lifecycle_status === 'draft' ? '草稿' : orderData.lifecycle_status === 'active' ? '执行中' : orderData.lifecycle_status === 'completed' || orderData.lifecycle_status === '已完成' ? '已完成' : orderData.lifecycle_status === 'cancelled' || orderData.lifecycle_status === '已取消' ? '已取消' : orderData.lifecycle_status === 'pending_approval' ? '⏳ 待审批' : orderData.lifecycle_status}
                   </span>
                 )}
-                {orderData.order_type && (() => {
-                  const tl: Record<string, string> = { trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急' };
-                  const tc: Record<string, string> = { trial: 'bg-blue-100 text-blue-700', bulk: 'bg-gray-100 text-gray-700', repeat: 'bg-green-100 text-green-700', urgent: 'bg-red-100 text-red-700' };
-                  return <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${tc[orderData.order_type] || 'bg-gray-100'}`}>{tl[orderData.order_type] || orderData.order_type}</span>;
-                })()}
+                {orderData.order_type && (
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${getOrderTypeBadge(orderData.order_type)}`}>
+                    {getOrderTypeLabel(orderData.order_type)}
+                  </span>
+                )}
                 {orderData.is_new_customer && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">新客户首单</span>
                 )}

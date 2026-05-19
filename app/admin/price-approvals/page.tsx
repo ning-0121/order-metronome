@@ -159,7 +159,7 @@ export default function PriceApprovalsPage() {
 
                 {/* 价格差异表 */}
                 {Array.isArray(it.price_diffs) && it.price_diffs.length > 0 && (
-                  <div className="rounded-lg border border-red-200 overflow-hidden">
+                  <div className="rounded-lg border border-red-200 overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-red-50">
                         <tr>

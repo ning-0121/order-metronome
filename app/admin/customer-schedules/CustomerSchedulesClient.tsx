@@ -142,7 +142,7 @@ export function CustomerSchedulesClient({ initialRows, initialError }: Props) {
       </div>
 
       {/* 客户列表 */}
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
