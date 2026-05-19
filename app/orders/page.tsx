@@ -576,11 +576,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <th>订单号 / 内部单号</th>
                 <th>客户 / 工厂</th>
                 <th>款号 · PO</th>
-                <th>数量</th>
-                <th>下单 / 关键日期</th>
-                <th>状态</th>
-                <th>阶段进度</th>
-                <th></th>
+                <th className="col-shrink">数量</th>
+                <th className="col-shrink">下单 / 关键日期</th>
+                <th className="col-shrink">状态</th>
+                <th className="col-shrink">阶段进度</th>
+                <th className="col-shrink"></th>
               </tr>
             </thead>
             <tbody>
@@ -649,12 +649,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     </td>
 
                     {/* 数量 */}
-                    <td>
+                    <td className="col-shrink">
                       <span className="text-gray-800 font-medium whitespace-nowrap">{order.quantity ? `${order.quantity} 件` : '—'}</span>
                     </td>
 
                     {/* 下单日期 + 关键日期 + 超期提示 一格上下排列 */}
-                    <td>
+                    <td className="col-shrink">
                       {(() => {
                         const orderDate = (order as any).order_date;
                         const createdAt = (order as any).created_at;
@@ -712,12 +712,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     </td>
 
                     {/* 状态 */}
-                    <td>
+                    <td className="col-shrink">
                       <span className={`badge ${statusConfig.class} whitespace-nowrap`}>
                         {statusConfig.label}
                       </span>
                     </td>
-                <td>
+                <td className="col-shrink">
                   {(() => {
                     const phases = computePhases(milestones);
                     const currentPhase = phases.find(p => p.active) || phases.find(p => !p.allDone && p.total > 0);
@@ -749,7 +749,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     );
                   })()}
                 </td>
-                    <td>
+                    <td className="col-shrink text-right">
                       {order.id ? (
                         <Link
                           href={`/orders/${order.id}`}

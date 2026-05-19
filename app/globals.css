@@ -117,9 +117,13 @@ body {
 /* Table styles */
 .table-modern {
   width: 100%;
-  min-width: 1100px; /* 列多时让外层 overflow-x-auto 滚动，而不是压扁文本 */
   border-collapse: separate;
   border-spacing: 0;
+  /* table-layout: auto (默认) + 让列按内容自适应；
+   * 之前 min-width:1100px 会在宽屏把多余空间平均摊给所有列，
+   * 导致「数量/状态/操作」这种内容只 50-80px 的列被强制拉到 200px，
+   * 视觉上中间留大空缝。窄屏由外层 overflow-x-auto wrapper 处理。
+   */
 }
 
 .table-modern th {
@@ -132,6 +136,15 @@ body {
   text-align: left;
   border-bottom: 1px solid var(--border-color);
   white-space: nowrap; /* 表头始终一行，列窄不会拆字 */
+}
+
+/* 「收缩列」工具类 — 内容很短的列（数量/状态/操作）加这个，
+ * 会缩到内容宽度，把剩余空间让给长内容列。
+ */
+.table-modern th.col-shrink,
+.table-modern td.col-shrink {
+  width: 1px;
+  white-space: nowrap;
 }
 
 .table-modern td {
