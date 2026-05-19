@@ -47,13 +47,6 @@ export const FILE_NAMING_BY_STEP: Record<
   string,
   { label: string; suffixHint?: string; example: string }
 > = {
-  // ── 虚拟 step key（订单创建时上传，不绑定具体里程碑节点）──
-  // 与 FILE_NAMING_BY_DOC_TYPE 中以 _ 开头的虚拟类型保持同步；
-  // 这两个 key 让 validateFileName / suggestFileName / 自动改名 能识别
-  // 「内部成本核算单」「客户最终报价单」的标准命名关键词，避免回退到通用「凭证」。
-  _internal_quote:                 { label: '内部成本核算单',   suffixHint: '多份请加 _v1/_v2 或 _报价人 区分', example: 'QM-20260415-001_内部成本核算单_v1.xlsx' },
-  _customer_quote:                 { label: '客户最终报价单',   suffixHint: '多份请加 _v1/_v2 或 _PO号 区分',   example: 'QM-20260415-001_客户最终报价单_v1.pdf' },
-
   po_confirmed:                    { label: '客户PO',          suffixHint: '多份 PO 请加 _PO号 区分，例：_PO12345', example: 'QM-20260415-001_客户PO_PO12345.pdf' },
   finance_approval:                { label: '财务审批记录',     example: 'QM-20260415-001_财务审批记录.pdf' },
   order_kickoff_meeting:           { label: '订单评审会纪要',   example: 'QM-20260415-001_订单评审会纪要.pdf' },
