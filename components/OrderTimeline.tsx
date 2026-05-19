@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import type { Milestone } from '@/lib/types';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { POParserModal } from './POParserModal';
-import { computeDeliveryAlert, computeDelayDays } from '@/lib/domain/milestone-helpers';
+import { computeDeliveryAlert, computeDelayDays, completedWithinGrace } from '@/lib/domain/milestone-helpers';
 import { updateMilestoneActualDate } from '@/app/actions/milestones';
 import { getSwimLane, getDefaultLanesForRoles, LANE_META, type SwimLane } from '@/lib/domain/swimLane';
 import { isBatchAwareStep } from '@/lib/domain/batchAwareSteps';
@@ -439,7 +439,8 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                             if (days > 3) {
                               return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium" title="将影响订单评分">🚨 逾期 {days} 天完成</span>;
                             }
-                            return <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium" title="将影响订单评分">⚠ 逾期 {days} 天完成</span>;
+                            // 1-3 天：在 3 天补登宽限内，标「准时（含宽限）」而不是「逾期」
+                            return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium" title={`实际晚于截止 ${days} 天，在 3 天宽限内 → 算准时完成`}>✓ 准时（晚 {days}d，宽限内）</span>;
                           })()}
                           {/* SOP 按钮 */}
                           {(() => {
@@ -466,17 +467,18 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                               </span>
                             );
                           })()}
-                          {m.actual_at && (
-                            <span
-                              className={
-                                computeDeliveryAlert(m.actual_at, m.due_at) === 'RED' ? 'text-red-600 font-semibold' :
-                                computeDeliveryAlert(m.actual_at, m.due_at) === 'YELLOW' ? 'text-yellow-600 font-semibold' :
-                                'text-green-600'
-                              }
-                            >
-                              完成：{formatDateTime(m.actual_at)}
-                            </span>
-                          )}
+                          {m.actual_at && (() => {
+                            // 已完成节点：YELLOW（1-3 天）在 3 天宽限内 → 显示绿色，与徽章口径一致
+                            // 进行中但 actual_at 已超期 → 仍用三色预警
+                            const alert = computeDeliveryAlert(m.actual_at, m.due_at);
+                            const isWithinGrace = isDone && completedWithinGrace(m.actual_at, m.due_at);
+                            const cls = alert === 'RED' ? 'text-red-600 font-semibold' :
+                              alert === 'YELLOW' && !isWithinGrace ? 'text-yellow-600 font-semibold' :
+                              'text-green-600';
+                            return (
+                              <span className={cls}>完成：{formatDateTime(m.actual_at)}</span>
+                            );
+                          })()}
                         </div>
 
                         {/* evidence_note 提示（进行中且未展开时显示） */}

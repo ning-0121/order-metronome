@@ -34,6 +34,32 @@ export function computeDeliveryAlert(actualAt: string | null, dueAt: string | nu
 }
 
 /**
+ * 是否在「3 天补登宽限」内完成
+ *
+ * 业务定义（2026-05-19）：员工在外勤/车间没及时操作，事后补登 actual_at 的场景
+ * 视为「按时完成」如果 actual_at ≤ due_at + 3 天。
+ *
+ * 用途：
+ *   - 历史业绩统计：在宽限内完成 = on-time（不计逾期）
+ *   - UI 显示「✓ 准时（含 3 天宽限）」徽章
+ *
+ * 与 computeDeliveryAlert 的区别：
+ *   - computeDeliveryAlert 给三色（GREEN / YELLOW / RED）— 用于「预警」场景
+ *   - completedWithinGrace 给布尔（是否算准时）— 用于「事后定性」场景
+ *   - YELLOW（1-3 天延迟）在「事后定性」时算 ✓ 准时，在「事中预警」时仍算黄灯
+ */
+export const BACKFILL_GRACE_DAYS = 3;
+export function completedWithinGrace(
+  actualAt: string | null,
+  dueAt: string | null,
+  graceDays: number = BACKFILL_GRACE_DAYS,
+): boolean {
+  if (!actualAt || !dueAt) return true; // 没填的不当迟到
+  const diffDays = computeDelayDays(actualAt, dueAt);
+  return diffDays <= graceDays;
+}
+
+/**
  * 计算实际日期与截止日期的偏差天数（按北京日历日）
  * 正数=延迟，负数=提前
  *

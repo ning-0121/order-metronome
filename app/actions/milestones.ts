@@ -674,6 +674,21 @@ export async function markMilestoneDone(
     }
   }
 
+  // ── 完成 → 清理 daily_tasks 表里关于本节点的「逾期/今日到期」待办 ──
+  // 之前的 bug：cron 把节点登记为 milestone_overdue/milestone_due_today；
+  // 用户事后完成（含补登）后，my-today 还能看到几天前的"逾期 5 天"卡片。
+  // status enum 是 pending/done/snoozed/dismissed，用 done 标记完成。
+  // fire-and-forget，失败不影响主链路。
+  (supabase.from('daily_tasks') as any)
+    .update({
+      status: 'done',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('related_milestone_id', milestoneId)
+    .in('task_type', ['milestone_overdue', 'milestone_due_today'])
+    .eq('status', 'pending')
+    .then(() => {}, (e: any) => console.warn('[markMilestoneDone] clean daily_tasks failed:', e?.message));
+
   const updatedMilestone = directUpdate;
   const milestoneData = milestone as any;
 

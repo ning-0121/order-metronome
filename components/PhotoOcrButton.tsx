@@ -76,18 +76,39 @@ export function PhotoOcrButton({ stepKey, orderId, onParsed }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parsed, setParsed] = useState<{ summary: string; notes: string[]; fieldCount: number } | null>(null);
+  // 预览：选完图先让用户确认「拍清楚了」再上传，避免糊图浪费一次 AI 调用
+  const [pendingPreview, setPendingPreview] = useState<{
+    previewUrl: string;
+    base64: string;
+    mediaType: string;
+  } | null>(null);
 
   if (!PHOTO_OCR_SUPPORTED_STEPS.has(stepKey)) return null;
 
+  // Step 1：选完图 → 压缩 + 显示预览，等用户确认
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
     setError(null);
     setParsed(null);
-    setLoading(true);
     try {
       const { base64, mediaType } = await compressImage(f);
-      const res = await parseProductionPhoto(base64, mediaType, stepKey, orderId);
+      const previewUrl = `data:${mediaType};base64,${base64}`;
+      setPendingPreview({ previewUrl, base64, mediaType });
+    } catch (err: any) {
+      setError(err?.message || '图片处理失败');
+    } finally {
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+
+  // Step 2：用户确认「拍清楚了」 → 真正调 AI
+  async function confirmAndParse() {
+    if (!pendingPreview) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await parseProductionPhoto(pendingPreview.base64, pendingPreview.mediaType, stepKey, orderId);
       if (!res.ok || !res.fields) {
         setError(res.error || '识别失败，请重试');
         return;
@@ -102,13 +123,18 @@ export function PhotoOcrButton({ stepKey, orderId, onParsed }: Props) {
         notes: res.notes || [],
         fieldCount: Object.keys(cleaned).length,
       });
+      setPendingPreview(null);
     } catch (err: any) {
       setError(err?.message || String(err));
     } finally {
       setLoading(false);
-      // 重置 input 让相同文件能再次触发 change
-      if (inputRef.current) inputRef.current.value = '';
     }
+  }
+
+  function retake() {
+    setPendingPreview(null);
+    setError(null);
+    inputRef.current?.click();
   }
 
   return (
@@ -132,14 +158,48 @@ export function PhotoOcrButton({ stepKey, orderId, onParsed }: Props) {
         disabled={loading}
       />
 
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={loading}
-        className="mt-3 w-full sm:w-auto px-5 py-3 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 active:bg-indigo-800"
-      >
-        {loading ? '识别中…（约 5-15 秒）' : '📷 拍照 / 选图'}
-      </button>
+      {/* 预览：让用户确认拍清楚了再调 AI */}
+      {pendingPreview && (
+        <div className="mt-3 rounded-md border border-indigo-200 bg-white p-2">
+          <p className="text-xs text-indigo-800 font-medium mb-2">
+            预览：看得清字才识别得准。模糊/反光/裁切不全请重拍。
+          </p>
+          <img
+            src={pendingPreview.previewUrl}
+            alt="预览"
+            className="w-full max-h-64 object-contain rounded border border-gray-100 bg-gray-50"
+          />
+          <div className="mt-2 flex flex-col sm:flex-row gap-2">
+            <button
+              type="button"
+              onClick={confirmAndParse}
+              disabled={loading}
+              className="flex-1 px-4 py-3 sm:py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 active:bg-indigo-800"
+            >
+              {loading ? '识别中…' : '✓ 看清楚了，上传识别'}
+            </button>
+            <button
+              type="button"
+              onClick={retake}
+              disabled={loading}
+              className="flex-1 px-4 py-3 sm:py-2 rounded-lg border border-indigo-300 bg-white text-indigo-700 text-sm font-medium hover:bg-indigo-100 disabled:opacity-50"
+            >
+              ↻ 重拍
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!pendingPreview && (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={loading}
+          className="mt-3 w-full sm:w-auto px-5 py-3 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 active:bg-indigo-800"
+        >
+          📷 拍照 / 选图
+        </button>
+      )}
 
       {parsed && (
         <div className="mt-3 rounded-md bg-white border border-indigo-200 p-2.5 text-xs text-indigo-900">
