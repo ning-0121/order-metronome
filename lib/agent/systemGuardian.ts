@@ -21,6 +21,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { isDoneStatus } from '@/lib/domain/types';
 export type GuardianCategory =
   | 'security'
   | 'stability'
@@ -226,7 +227,7 @@ async function checkStaleCompletedOrders(
       .eq('order_id', order.id);
     if (ms && ms.length > 0) {
       const allDone = ms.every(
-        (m: any) => m.status === 'done' || m.status === '已完成' || m.status === 'completed',
+        (m: any) => isDoneStatus(m.status) || isDoneStatus(m.status),
       );
       if (allDone) stale.push(order);
     }

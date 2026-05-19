@@ -9,8 +9,7 @@ import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 import { sendEmailNotification } from '@/lib/utils/notifications';
 import { isAdminRole } from '@/lib/domain/roles';
 import { type ActionResult, success, failure, toLegacyResult } from '@/lib/types/action-result';
-import { isBlockedStatus } from '@/lib/domain/types';
-
+import { isBlockedStatus, isDoneStatus, isPendingStatus } from '@/lib/domain/types';
 type MilestoneLogAction =
   | 'mark_done'
   | 'mark_in_progress'
@@ -383,7 +382,7 @@ async function approveDelayRequestCore(
 
   const delayRequestData = delayRequest as any;
 
-  if (delayRequestData.status !== 'pending') {
+  if (!isPendingStatus(delayRequestData.status)) {
     return failure(
       `该延期申请已${delayRequestData.status === 'approved' ? '批准' : '处理'}，请刷新页面`,
       'CONFLICT',
@@ -1030,12 +1029,12 @@ export async function createOrderLevelDelayRequest(
 
   let targetMilestone: any = null;
   for (const key of SHIPMENT_KEYS) {
-    const ms = (allMs || []).find((m: any) => m.step_key === key && m.status !== 'done' && m.status !== '已完成');
+    const ms = (allMs || []).find((m: any) => m.step_key === key && !isDoneStatus(m.status));
     if (ms) { targetMilestone = ms; break; }
   }
   // fallback：任意最后一个未完成的里程碑
   if (!targetMilestone && allMs && allMs.length > 0) {
-    const undone = (allMs as any[]).filter(m => m.status !== 'done' && m.status !== '已完成');
+    const undone = (allMs as any[]).filter(m => !isDoneStatus(m.status));
     targetMilestone = undone[undone.length - 1] || allMs[allMs.length - 1];
   }
   if (!targetMilestone) return { error: '未找到可关联的里程碑，无法提交延期申请' };

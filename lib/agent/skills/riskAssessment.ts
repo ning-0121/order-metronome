@@ -20,6 +20,7 @@ import type {
   SkillContext,
 } from './types';
 import { callClaudeJSON } from '@/lib/agent/anthropicClient';
+import { isDoneStatus } from '@/lib/domain/types';
 import { AGENT_FLAGS } from '@/lib/agent/featureFlags';
 import {
   getKnowledgeByTags,
@@ -386,7 +387,7 @@ const DIMENSIONS: RiskDimension[] = [
     maxScore: 12,
     evaluate: ctx => {
       const missing: string[] = [];
-      const isDone = (key: string) => ctx.milestones.some(m => m.step_key === key && (m.status === 'done' || m.status === 'completed'));
+      const isDone = (key: string) => ctx.milestones.some(m => m.step_key === key && (isDoneStatus(m.status)));
       if (!ctx.hasFile('customer_po') && !isDone('po_confirmed')) missing.push('客户 PO');
       if (!ctx.hasFile('internal_quote') && !isDone('finance_approval')) missing.push('内部成本核算单');
       if (!ctx.hasFile('customer_quote') && !isDone('finance_approval')) missing.push('客户报价单');

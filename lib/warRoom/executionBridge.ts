@@ -3,8 +3,7 @@
  * War Room 根因 → 员工执行任务映射
  * 纯规则，无 LLM
  */
-import { isDoneStatus } from '@/lib/domain/types';
-
+import { isBlockedStatus, isDoneStatus } from '@/lib/domain/types';
 export interface ExecutionTask {
   id: string;
   milestoneId: string;
@@ -74,7 +73,7 @@ export function buildExecutionTasks(
     // 只收录：逾期 + 今日到期 + 48h内到期
     if (due && due > in48h) continue;
     // 无截止日期的节点：只收录阻塞状态
-    if (!due && m.status !== '阻塞') continue;
+    if (!due && !isBlockedStatus(m.status)) continue;
 
     const order = orders[m.order_id];
     if (!order) continue;

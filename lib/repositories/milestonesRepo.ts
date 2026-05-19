@@ -11,14 +11,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
-import {
-  normalizeMilestoneStatus,
-  isValidStatusTransition,
-  getStatusTransitionError,
-  type MilestoneStatus,
-  canModifyMilestones,
-  type OrderLifecycleStatus,
-} from '@/lib/domain/types';
+import { canModifyMilestones, getStatusTransitionError, isBlockedStatus, isDoneStatus, isValidStatusTransition, normalizeMilestoneStatus, type MilestoneStatus, type OrderLifecycleStatus } from '@/lib/domain/types';
 import { formatBlockedReasonToNotes, appendToNotes } from '@/lib/domain/milestone-helpers';
 import { normalizeRoleToDb } from '@/lib/domain/roles';
 // DB profile-based role check is done inline (multi-role aware)
@@ -356,7 +349,7 @@ async function checkGateDependencies(
   // 检查 required 依赖是否已完成
   for (const dep of dependentMilestones) {
     // 只检查 required 的依赖
-    if (dep.required && dep.status !== 'done') {
+    if (dep.required && !isDoneStatus(dep.status)) {
       // 获取依赖 Gate 的名称
       const { data: depMilestone } = await (supabase
         .from('milestones') as any)
@@ -645,7 +638,7 @@ export async function updateMilestone(
     fireRuntimeRecompute(currentMilestone.order_id, {
       type: 'milestone_status_changed',
       source: `milestone:${id}`,
-      severity: sanitized.status === 'blocked' ? 'warning' : 'info',
+      severity: isBlockedStatus(sanitized.status) ? 'warning' : 'info',
       payload: {
         milestone_id: id,
         new_status: sanitized.status,

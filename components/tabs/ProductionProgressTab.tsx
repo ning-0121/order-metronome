@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { isActiveStatus, isDoneStatus } from '@/lib/domain/types';
 import { createClient } from '@/lib/supabase/client';
 import {
   getProductionReports,
@@ -289,8 +290,8 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
   // 跟单时间线数据：匹配 milestones + 已上传报告数量
   const timelineData = MERCH_TIMELINE_STEPS.map(step => {
     const ms = merchMilestones.find(m => m.step_key === step.step_key);
-    const isDone = ms && (ms.status === 'done' || ms.status === '已完成');
-    const isInProgress = ms && (ms.status === 'in_progress' || ms.status === '进行中');
+    const isDone = ms && (isDoneStatus(ms.status));
+    const isInProgress = ms && (isActiveStatus(ms.status));
     const isOverdue = ms?.due_at && !isDone && new Date(ms.due_at) < new Date();
     const dueStr = ms?.due_at ? new Date(ms.due_at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '—';
     const uploadCount = stepUploadCounts[step.step_key] || 0;

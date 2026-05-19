@@ -1,3 +1,4 @@
+import { isActiveStatus, isDoneStatus } from '@/lib/domain/types';
 /**
  * 邮件-订单深度对比引擎
  *
@@ -60,10 +61,10 @@ export async function deepCompareEmailWithOrder(
     .eq('order_id', orderId)
     .order('due_at', { ascending: true });
 
-  const doneCount = (milestones || []).filter((m: any) => m.status === '已完成' || m.status === 'done').length;
+  const doneCount = (milestones || []).filter((m: any) => isDoneStatus(m.status)).length;
   const totalCount = (milestones || []).length;
   const overdueNodes = (milestones || []).filter((m: any) =>
-    m.status !== '已完成' && m.status !== 'done' && m.due_at && new Date(m.due_at) < new Date()
+    !isDoneStatus(m.status) && m.due_at && new Date(m.due_at) < new Date()
   ).map((m: any) => m.name);
 
   // 3. 获取客户记忆（已记录的要求）
@@ -102,7 +103,7 @@ export async function deepCompareEmailWithOrder(
       : '无历史记录';
 
     const milestoneContext = (milestones || []).slice(0, 15).map((m: any) => {
-      const status = m.status === '已完成' ? '✅' : m.status === '进行中' ? '🔵' : '⬜';
+      const status = isDoneStatus(m.status) ? '✅' : isActiveStatus(m.status) ? '🔵' : '⬜';
       return `${status} ${m.name} (截止:${m.due_at?.slice(0, 10) || '?'} ${m.actual_at ? '实际:' + m.actual_at.slice(0, 10) : ''})`;
     }).join('\n');
 

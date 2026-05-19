@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { isPendingStatus } from '@/lib/domain/types';
 import { redirect } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
 import Link from 'next/link';
@@ -236,7 +237,7 @@ export default async function DashboardPage() {
       for (const dr of delayReqs as any[]) {
         // 优先记录 approved > pending > rejected
         const current = delayRequestMap[dr.milestone_id];
-        if (!current || dr.status === 'approved' || (dr.status === 'pending' && current === 'rejected')) {
+        if (!current || dr.status === 'approved' || (isPendingStatus(dr.status) && current === 'rejected')) {
           delayRequestMap[dr.milestone_id] = dr.status;
         }
       }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { isPendingStatus } from '@/lib/domain/types';
 import Link from 'next/link';
 import { listPendingPriceApprovals, approvePriceApproval } from '@/app/actions/price-approvals';
 
@@ -51,9 +52,9 @@ export default function PriceApprovalsPage() {
     load();
   }
 
-  const visible = filter === 'pending' ? items.filter(i => i.status === 'pending') : items;
+  const visible = filter === 'pending' ? items.filter(i => isPendingStatus(i.status)) : items;
   const stats = {
-    pending: items.filter(i => i.status === 'pending').length,
+    pending: items.filter(i => isPendingStatus(i.status)).length,
     approved: items.filter(i => i.status === 'approved').length,
     rejected: items.filter(i => i.status === 'rejected').length,
   };
@@ -111,7 +112,7 @@ export default function PriceApprovalsPage() {
                       <span className={`px-2 py-0.5 rounded text-xs font-medium border ${cfg.color}`}>
                         {cfg.label}
                       </span>
-                      {expired && it.status === 'pending' && (
+                      {expired && isPendingStatus(it.status) && (
                         <span className="px-2 py-0.5 rounded text-xs bg-gray-200 text-gray-600">⏰ 已过期</span>
                       )}
                       <span className="text-xs text-gray-400">
@@ -128,7 +129,7 @@ export default function PriceApprovalsPage() {
                       <p className="text-sm text-gray-600 mt-1">{it.summary}</p>
                     )}
                   </div>
-                  {it.status === 'pending' && !expired && (
+                  {isPendingStatus(it.status) && !expired && (
                     <div className="flex gap-2 shrink-0">
                       <button
                         onClick={() => handleDecide(it.id, 'approved')}

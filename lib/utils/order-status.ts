@@ -1,6 +1,7 @@
 import { isAfter, isBefore, differenceInHours, differenceInCalendarDays, startOfDay } from 'date-fns';
 import type { Milestone } from '@/lib/types';
 import { computeDeliveryAlert } from '@/lib/domain/milestone-helpers';
+import { isDoneStatus, isActiveStatus, isBlockedStatus, isPendingStatus } from '@/lib/domain/types';
 
 export type OrderStatusColor = 'GREEN' | 'YELLOW' | 'RED';
 
@@ -38,11 +39,12 @@ export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
   const now = new Date();
   const riskFactors: string[] = [];
 
-  // 状态判断辅助（兼容中英文）
-  const _isDone = (s: string) => s === '已完成' || s === 'done' || s === 'completed';
-  const _isBlocked = (s: string) => s === '卡住' || s === 'blocked' || s === '卡单' || s === '阻塞';
-  const _isActive = (s: string) => s === '进行中' || s === 'in_progress';
-  const _isPending = (s: string) => s === '未开始' || s === 'pending' || s === 'not_started';
+  // 状态判断辅助 — 复用 lib/domain/types 的 canonical helpers，
+  // 之前本地手写的列表（'卡住'/'卡单' 等）漏映射会导致状态判错。2026-05-19 收口。
+  const _isDone = (s: string) => isDoneStatus(s);
+  const _isBlocked = (s: string) => isBlockedStatus(s);
+  const _isActive = (s: string) => isActiveStatus(s);
+  const _isPending = (s: string) => isPendingStatus(s);
 
   // ===== 🔴 RED 条件 =====
 

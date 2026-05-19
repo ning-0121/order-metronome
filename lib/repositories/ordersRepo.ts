@@ -4,12 +4,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
-import {
-  transitionOrderLifecycle,
-  normalizeMilestoneStatus,
-  isDoneStatus,
-  type OrderLifecycleStatus,
-} from '@/lib/domain/types';
+import { isActiveStatus, isBlockedStatus, isDoneStatus, isPendingStatus, normalizeMilestoneStatus, transitionOrderLifecycle, type OrderLifecycleStatus } from '@/lib/domain/types';
 import { createMilestone, transitionMilestoneStatus } from './milestonesRepo';
 
 // ⚠️ 系统级约束：order_no 只能由系统生成，禁止外部传入
@@ -683,7 +678,7 @@ export async function decideCancel(
   const order = cancelRequest.orders;
   
   // 校验：只有pending状态才能审批
-  if (cancelRequest.status !== 'pending') {
+  if (!isPendingStatus(cancelRequest.status)) {
     return { error: `取消申请状态为"${cancelRequest.status}"，无法审批。` };
   }
   
@@ -907,10 +902,10 @@ export async function submitRetrospective(
     .eq('order_id', orderId);
   
   const blockedCount = milestones?.filter((m: any) => {
-    const status = m.status === 'pending' ? '未开始' : 
-                   m.status === 'in_progress' ? '进行中' :
-                   m.status === 'done' ? '已完成' :
-                   m.status === 'blocked' ? '卡住' : m.status;
+    const status = isPendingStatus(m.status) ? '未开始' : 
+                   isActiveStatus(m.status) ? '进行中' :
+                   isDoneStatus(m.status) ? '已完成' :
+                   isBlockedStatus(m.status) ? '卡住' : m.status;
     return status === '卡住';
   }).length || 0;
   

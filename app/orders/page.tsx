@@ -21,7 +21,7 @@ const PHASE_KEYS = [
   { label: '出货', keys: ['packing_method_confirmed', 'factory_completion', 'inspection_release', 'shipping_sample_send'] },
   { label: '物流收款', keys: ['booking_done', 'customs_export', 'payment_received'] },
 ];
-import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
+import { isActiveStatus, isBlockedStatus, isDoneStatus, isPendingStatus } from '@/lib/domain/types';
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
 const _isBlocked = (s: string) => isBlockedStatus(s);
@@ -244,7 +244,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
   // 辅助：订单是否有待审批的延期申请
   function hasPendingDelay(o: any): boolean {
-    return (o.delay_requests || []).some((d: any) => d.status === 'pending');
+    return (o.delay_requests || []).some((d: any) => isPendingStatus(d.status));
   }
 
   // 出运关键节点：任意一个完成即视为已出货
@@ -256,7 +256,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     if (DONE_LIFECYCLE.has(o.lifecycle_status || '')) return acc;
     // 2. 出运关键节点已完成（实际已出货但数据未同步完）→ 跳过
     const hasShipped = (o.milestones || []).some((m: any) =>
-      SHIPPED_STEP_KEYS.has(m.step_key) && (String(m.status || '').toLowerCase() === 'done' || m.status === '已完成')
+      SHIPPED_STEP_KEYS.has(m.step_key) && (String(m.status || '').toLowerCase() === 'done' || isDoneStatus(m.status))
     );
     if (hasShipped) return acc;
     const { date: effectiveDate, isDelayed } = getEffectiveDeliveryDate(o);
@@ -670,7 +670,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                           .filter((d: any) => d.status === 'approved' && d.proposed_new_anchor_date)
                           .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
                         const effectiveDate = approvedDelay ? approvedDelay.proposed_new_anchor_date : originalKeyDate;
-                        const hasPending = ((order as any).delay_requests || []).some((d: any) => d.status === 'pending');
+                        const hasPending = ((order as any).delay_requests || []).some((d: any) => isPendingStatus(d.status));
                         const daysOver = originalKeyDate ? Math.ceil((Date.now() - new Date(effectiveDate + 'T23:59:59').getTime()) / 86400000) : 0;
                         const allMilestoneDone = milestones.every((m: any) => _isDone(m.status));
                         const lifecycleDone = DONE_LIFECYCLE.has((order as any).lifecycle_status || '');

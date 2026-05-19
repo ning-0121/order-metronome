@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { isPendingStatus } from '@/lib/domain/types';
 import { approveDelayRequest, rejectDelayRequest } from '@/app/actions/delays';
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
@@ -69,8 +70,8 @@ export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isO
     setProcessingId(null);
   }
 
-  const pendingRequests = delayRequests.filter(r => r.status === 'pending');
-  const processedRequests = delayRequests.filter(r => r.status !== 'pending');
+  const pendingRequests = delayRequests.filter(r => isPendingStatus(r.status));
+  const processedRequests = delayRequests.filter(r => !isPendingStatus(r.status));
 
   return (
     <div className="space-y-4 bg-white">
