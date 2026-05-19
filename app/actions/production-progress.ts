@@ -428,7 +428,42 @@ export async function deleteProductionReport(reportId: string, orderId: string) 
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   if (!userRoles.includes('admin')) return { error: '仅管理员可删除日报' };
 
-  await (supabase.from('production_reports') as any).delete().eq('id', reportId);
+  // ── 订单归属校验（2026-05-19）──
+  // 之前的实现只检查 admin 角色就直接 delete，没验证 reportId 是否属于
+  // 传入的 orderId。攻击/误操作场景：admin 在订单 A 的页面误传订单 B 的
+  // reportId → 静默删 B 的日报，且没有审计能反查谁干的。
+  // 现在：先 select 确认 report.order_id 匹配 + 写 milestone_logs 审计。
+  const { data: report } = await (supabase.from('production_reports') as any)
+    .select('id, order_id, report_date, qty_produced')
+    .eq('id', reportId)
+    .single();
+  if (!report) return { error: '日报不存在或已被删除' };
+  if (report.order_id !== orderId) {
+    console.warn('[deleteProductionReport] order mismatch', { reportId, claimed: orderId, actual: report.order_id });
+    return { error: '日报归属订单不一致，已拒绝删除（请刷新页面重试）' };
+  }
+
+  const { error: delErr } = await (supabase.from('production_reports') as any).delete().eq('id', reportId);
+  if (delErr) return { error: `删除失败：${delErr.message}` };
+
+  // 审计：admin 删日报必须留痕（事后追责）
+  // milestone_logs 要求 milestone_id NOT NULL — 这里用 order 的任一里程碑做关联即可
+  try {
+    const { data: anyMs } = await (supabase.from('milestones') as any)
+      .select('id').eq('order_id', orderId).limit(1).single();
+    if (anyMs?.id) {
+      await (supabase.from('milestone_logs') as any).insert({
+        milestone_id: anyMs.id,
+        order_id: orderId,
+        actor_user_id: user.id,
+        action: 'admin_delete_report',
+        note: `admin 删除生产日报 ${report.report_date || ''} (qty=${report.qty_produced ?? '-'}, report_id=${reportId})`,
+      });
+    }
+  } catch (e: any) {
+    console.warn('[deleteProductionReport] audit log failed:', e?.message);
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return { success: true };
 }

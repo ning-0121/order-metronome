@@ -17,6 +17,7 @@ import { getActiveOrderTemplates } from '@/app/actions/order-templates';
 import type { OrderTemplate } from '@/app/actions/order-templates';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
+import { PastDateStatusModal, type PastDateStatus } from '@/components/PastDateStatusModal';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
 
 /**
@@ -122,6 +123,8 @@ function NewOrderWizard() {
   const [currentStep, setCurrentStep] = useState<Step>(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 交期已过状态确认 modal（替换之前的 window.prompt — Mobile Safari 会静默 block）
+  const [pastDateModal, setPastDateModal] = useState<{ deliveryDate: string; pendingFormData: FormData } | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<any[]>([]);
   const [incoterm, setIncoterm] = useState<string>('');
@@ -516,7 +519,11 @@ function NewOrderWizard() {
 
   async function handleStep1SubmitCore(rawFormData: FormData) {
 
-    // ── 交期已过检测：如果出厂日/交期已过，让业务确认订单状态 ──
+    // ── 交期已过检测 — 弹 React Modal 让业务选状态 ──
+    // 之前用 window.prompt() 流程：Mobile Safari 静默 block 后 prompt 返回 null，
+    // 业务以为提交了实际啥也没发生（点不动类静默故障）。
+    // 改成 state 驱动的 modal：检测到过期 → 暂停提交 + 打开 modal；
+    // 用户在 modal 里选完后调 handlePastDateConfirm 重新提交。
     const incotermCheck = rawFormData.get('incoterm') as string;
     const etdCheck = rawFormData.get('etd') as string;
     const factoryDateCheck = rawFormData.get('factory_date') as string;
@@ -524,31 +531,9 @@ function NewOrderWizard() {
     const deliveryDateCheck = etdCheck || factoryDateCheck || whDueDateCheck;
     if (deliveryDateCheck && !rawFormData.get('past_date_confirmed')) {
       const deliveryTime = new Date(deliveryDateCheck + 'T23:59:59').getTime();
-      const now = Date.now();
-      if (deliveryTime < now) {
-        // 交期已过 — 弹窗确认
-        const choice = prompt(
-          `⚠ 交期 ${deliveryDateCheck} 已过！请选择订单状态：\n\n` +
-          `1 — 已发货（补录历史数据）\n` +
-          `2 — 未发货，在途中\n` +
-          `3 — 未发货，有问题\n\n` +
-          `请输入 1、2 或 3：`
-        );
-        if (!choice || !['1', '2', '3'].includes(choice.trim())) {
-          showError('请选择订单状态（1/2/3）后再创建');
-          return;
-        }
-        const choiceMap: Record<string, string> = { '1': 'shipped', '2': 'pending', '3': 'problem' };
-        rawFormData.set('past_date_status', choiceMap[choice.trim()]);
-        rawFormData.set('past_date_confirmed', 'true');
-        if (choice.trim() === '3') {
-          const reason = prompt('请填写未发货原因（如：客户暂停、面料问题、品质返工等）：');
-          if (!reason?.trim()) {
-            showError('请填写未发货原因');
-            return;
-          }
-          rawFormData.set('past_date_reason', reason.trim());
-        }
+      if (deliveryTime < Date.now()) {
+        setPastDateModal({ deliveryDate: deliveryDateCheck, pendingFormData: rawFormData });
+        return; // 等 modal 回调（handlePastDateConfirm）重新进入此函数
       }
     }
 
@@ -764,6 +749,25 @@ function NewOrderWizard() {
 
     // 全部通过 → 直接创建
     await doCreateOrder(rawFormData, filesToUpload);
+  }
+
+  /** 「交期已过」modal 确认 — 写入选择 + 重新进 submit 流程 */
+  async function handlePastDateConfirm(status: PastDateStatus, reason?: string) {
+    if (!pastDateModal) return;
+    const fd = pastDateModal.pendingFormData;
+    fd.set('past_date_status', status);
+    fd.set('past_date_confirmed', 'true');
+    if (status === 'problem' && reason) fd.set('past_date_reason', reason);
+    setPastDateModal(null);
+    // 第二次进入会跳过 past_date 检测（because past_date_confirmed 已 set）
+    try {
+      await handleStep1SubmitCore(fd);
+    } catch (err: any) {
+      console.error('[handlePastDateConfirm] resume error', err);
+      setVerifying(false);
+      setLoading(false);
+      showError(`创建订单时出错：${err?.message || String(err)}`);
+    }
   }
 
   /** 推送 CEO 审批价格差异 */
@@ -2005,6 +2009,14 @@ function NewOrderWizard() {
           </div>
         </div>
       )}
+
+      {/* 交期已过 — 状态选择 modal（替换之前的 window.prompt） */}
+      <PastDateStatusModal
+        open={!!pastDateModal}
+        deliveryDate={pastDateModal?.deliveryDate || ''}
+        onConfirm={handlePastDateConfirm}
+        onCancel={() => setPastDateModal(null)}
+      />
     </div>
   );
 }
