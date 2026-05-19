@@ -147,6 +147,14 @@ body {
   white-space: nowrap;
 }
 
+/* 「紧凑表格」— 每行三行内容时降低 padding，让一屏看更多行 */
+.table-modern.table-compact th {
+  padding: 10px 12px;
+}
+.table-modern.table-compact td {
+  padding: 10px 12px;
+}
+
 .table-modern td {
   padding: 14px;
   border-bottom: 1px solid var(--border-color);
