@@ -117,6 +117,7 @@ body {
 /* Table styles */
 .table-modern {
   width: 100%;
+  min-width: 1100px; /* 列多时让外层 overflow-x-auto 滚动，而不是压扁文本 */
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -124,19 +125,21 @@ body {
 .table-modern th {
   background: #f9fafb;
   font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  padding: 12px 16px;
+  font-size: 13px;
+  /* 中文不要 letter-spacing / uppercase — 否则单字之间被撑开，列窄时就竖排 */
+  color: #374151;
+  padding: 12px 14px;
   text-align: left;
   border-bottom: 1px solid var(--border-color);
+  white-space: nowrap; /* 表头始终一行，列窄不会拆字 */
 }
 
 .table-modern td {
-  padding: 16px;
+  padding: 14px;
   border-bottom: 1px solid var(--border-color);
   vertical-align: middle;
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 .table-modern tbody tr {
@@ -296,9 +299,9 @@ body {
     min-height: 44px; /* iOS 推荐最小触摸目标 */
   }
 
-  /* 表格字体缩小 */
-  .table-modern th { font-size: 10px; padding: 8px 10px; }
-  .table-modern td { padding: 10px; font-size: 13px; }
+  /* 表格字体缩小（移动端通常用卡片视图，table 极少展示） */
+  .table-modern th { font-size: 12px; padding: 10px 12px; }
+  .table-modern td { padding: 12px; font-size: 13px; }
 
   /* 统计卡片紧凑 */
   .stat-card { padding: 16px; border-radius: 12px; }
