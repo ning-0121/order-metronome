@@ -82,6 +82,7 @@ export default function EmployeeAnalyticsPage() {
                 ))}
               </div>
             </div>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left">
@@ -127,6 +128,7 @@ export default function EmployeeAnalyticsPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* 详细分析 */}

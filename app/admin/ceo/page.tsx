@@ -430,7 +430,7 @@ export default async function CEODashboardPage() {
               <p>暂无瓶颈</p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-gray-200">
+            <div className="overflow-x-auto rounded-xl border border-gray-200">
               <table className="table-modern">
                 <thead>
                   <tr>
@@ -490,7 +490,7 @@ export default async function CEODashboardPage() {
               <p>暂无瓶颈</p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-gray-200">
+            <div className="overflow-x-auto rounded-xl border border-gray-200">
               <table className="table-modern">
                 <thead>
                   <tr>

@@ -10,6 +10,7 @@ import {
   isCustomerHoldStale,
   CUSTOMER_HOLD_STALE_DAYS,
 } from '@/lib/domain/customerShipHold';
+import { ORDER_TYPE_LABELS, ORDER_TYPE_COLORS } from '@/lib/theme/colors';
 
 // 阶段进度计算
 const PHASE_KEYS = [
@@ -592,8 +593,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   RED: { label: '风险', class: 'badge-danger' },
                 }[status.color];
 
-                const typeLabels: Record<string, string> = { trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急' };
-                const typeColors: Record<string, string> = { trial: 'bg-blue-100 text-blue-700', bulk: 'bg-gray-100 text-gray-700', repeat: 'bg-green-100 text-green-700', urgent: 'bg-red-100 text-red-700' };
+                // 类型映射统一走 lib/theme/colors（避免 orders/page 和 orders/[id] 重复维护）
+                const typeLabels = ORDER_TYPE_LABELS;
+                const typeColors: Record<string, string> = Object.fromEntries(
+                  Object.entries(ORDER_TYPE_COLORS).map(([k, v]) => [k, v.badge])
+                );
 
                 return (
                   <tr key={order.id}>
