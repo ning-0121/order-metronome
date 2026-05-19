@@ -20,7 +20,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/lib/supabase/server';
+import { guardAICall, logAICall } from '@/lib/ai/rate-limit';
 
 export interface PhotoParseResult {
   ok: boolean;
@@ -92,13 +92,9 @@ export async function parseProductionPhoto(
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: 'AI 服务未配置，请联系管理员' };
 
-  // 鉴权 — 防止匿名调用消耗 API 配额
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: '请先登录' };
-  if (!user.email?.endsWith('@qimoclothing.com')) {
-    return { ok: false, error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
-  }
+  // 鉴权 + 限速 — 统一走 rate-limit helper（之前自己实现的版本没限速）
+  const guard = await guardAICall('photo_ocr', orderId);
+  if (!guard.ok) return { ok: false, error: guard.error };
 
   const cfg = PROMPTS[stepKey];
   if (!cfg) return { ok: false, error: `节点「${stepKey}」暂不支持拍照解析` };
@@ -112,6 +108,7 @@ export async function parseProductionPhoto(
   }
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
   const normalizedMedia = allowed.includes(mediaType) ? mediaType : 'image/jpeg';
+  const startedAt = Date.now();
 
   const systemPrompt = `你是服装外贸订单的单据识别专家。${cfg.instruction}
 
@@ -160,18 +157,12 @@ export async function parseProductionPhoto(
     try {
       parsed = JSON.parse(jsonStr);
     } catch {
+      logAICall('photo_ocr', orderId, 'error', Date.now() - startedAt, 'JSON parse failed').catch(() => {});
       return { ok: false, error: 'AI 返回格式异常，请重试或检查图片是否清晰' };
     }
 
-    // 记录一次使用日志（按订单聚合，给后续 audit / cost 用）
-    await (supabase.from('milestone_logs') as any).insert({
-      milestone_id: null,
-      order_id: orderId,
-      actor_user_id: user.id,
-      action: 'photo_ocr',
-      note: `拍照解析「${stepKey}」`,
-      payload: { step_key: stepKey, fields_count: Object.keys(parsed.fields || {}).length },
-    }).then(() => {}, () => {}); // fire-and-forget，失败不影响主链路
+    logAICall('photo_ocr', orderId, 'success', Date.now() - startedAt,
+      `step=${stepKey} fields=${Object.keys(parsed.fields || {}).length}`).catch(() => {});
 
     return {
       ok: true,
@@ -180,7 +171,10 @@ export async function parseProductionPhoto(
       summary: parsed.summary || '',
     };
   } catch (err: any) {
-    if (err?.name === 'AbortError') return { ok: false, error: 'AI 解析超时（>45s），请换张清晰的照片' };
+    const isTimeout = err?.name === 'AbortError';
+    logAICall('photo_ocr', orderId, isTimeout ? 'timeout' : 'error',
+      Date.now() - startedAt, err?.message?.slice(0, 200)).catch(() => {});
+    if (isTimeout) return { ok: false, error: 'AI 解析超时（>45s），请换张清晰的照片' };
     return { ok: false, error: `识别失败：${err.message || String(err)}` };
   }
 }

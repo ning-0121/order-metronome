@@ -111,12 +111,19 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
 }`;
 
 export async function parsePO(formData: FormData): Promise<{ ok: boolean; data?: POParsedData; error?: string }> {
+  // 鉴权 + 配额：之前直接调 Anthropic，任何拿到 server action 端点的人都能刷
+  // API 配额（按 Sonnet 4 价格一次几毛钱，一天可烧几百）
+  const { guardAICall, logAICall } = await import('@/lib/ai/rate-limit');
+  const guard = await guardAICall('po_parse');
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const file = formData.get('file') as File | null;
   if (!file) return { ok: false, error: '请上传文件' };
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: 'AI 服务未配置，请联系管理员' };
 
+  const startedAt = Date.now();
   try {
     const client = new Anthropic({ apiKey });
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -189,10 +196,13 @@ export async function parsePO(formData: FormData): Promise<{ ok: boolean; data?:
     }
 
     const parsed: POParsedData = JSON.parse(jsonStr);
+    logAICall('po_parse', null, 'success', Date.now() - startedAt).catch(() => {});
     return { ok: true, data: parsed };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[parsePO] Error:', message);
+    const isTimeout = err instanceof Error && (err.name === 'AbortError' || message.includes('abort'));
+    logAICall('po_parse', null, isTimeout ? 'timeout' : 'error', Date.now() - startedAt, message.slice(0, 200)).catch(() => {});
     if (message.includes('credit balance') || message.includes('billing')) {
       return { ok: false, error: 'AI 服务余额不足，请联系管理员充值 Anthropic API 额度。' };
     }

@@ -140,10 +140,13 @@ async function generateMilestoneTasks(
     const isDueToday = plannedDate.toISOString().split('T')[0] === targetDate
 
     const taskType: TaskType = isOverdue ? 'milestone_overdue' : 'milestone_due_today'
-    const priority: TaskPriority = computeTaskPriority(daysOverdue, 1)
+    // ⚠️ 必须在 computeTaskPriority 之前定义 daysOverdue（const TDZ）。
+    // 之前的顺序错误导致 ReferenceError 被 async cron 静默吞掉，cron 一直
+    // 没生成任务，所有用户的「我的今日任务」都是空的。2026-05-19 修复。
     const daysOverdue = isOverdue
       ? Math.floor((today.getTime() - plannedDate.getTime()) / (1000 * 60 * 60 * 24))
       : 0
+    const priority: TaskPriority = computeTaskPriority(daysOverdue, 1)
 
     const result = await upsertTask(supabase, {
       assignedTo: ms.owner_id,
