@@ -503,6 +503,19 @@ function NewOrderWizard() {
 
     const rawFormData = new FormData(e.currentTarget);
 
+    try {
+      await handleStep1SubmitCore(rawFormData);
+    } catch (err: any) {
+      // 兜底：任何未处理的异常都打到 UI，避免「点了没反应」的盲点
+      console.error('[handleStep1Submit] unexpected error', err);
+      setVerifying(false);
+      setLoading(false);
+      showError(`创建订单时发生未预期错误：${err?.message || String(err)}\n\n请截图反馈给技术，浏览器控制台有完整堆栈。`);
+    }
+  }
+
+  async function handleStep1SubmitCore(rawFormData: FormData) {
+
     // ── 交期已过检测：如果出厂日/交期已过，让业务确认订单状态 ──
     const incotermCheck = rawFormData.get('incoterm') as string;
     const etdCheck = rawFormData.get('etd') as string;
@@ -582,7 +595,7 @@ function NewOrderWizard() {
       // ── 2026-05-18：错误页面直接渲染「一键自动应用推荐命名」按钮，不再用 confirm popup ──
       // 业务反馈：confirm 易被忽略 / 浏览器 popup 习惯被关掉。改成把可点按钮直接放
       // 在 showError 的红框下方。点击后自动 rename + 重新触发 submit。
-      const isAutoFixRetry = formData.get('auto_fix_applied') === 'true';
+      const isAutoFixRetry = rawFormData.get('auto_fix_applied') === 'true';
       if (!isAutoFixRetry) {
         // 第一次失败：把待修复文件信息存到 state 让 UI 渲染按钮
         setPendingAutoFix({
