@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { markMilestoneDone, markMilestoneBlocked, saveChecklistData } from '@/app/actions/milestones';
+import { BackfillDatePicker } from '@/components/BackfillDatePicker';
+import { PhotoOcrButton, PHOTO_OCR_SUPPORTED_STEPS } from '@/components/PhotoOcrButton';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { isDoneStatus, isActiveStatus, isPendingStatus } from '@/lib/domain/types';
@@ -52,8 +54,13 @@ export function MilestoneActions({
   const [evidenceNote, setEvidenceNote] = useState('');
   const [blockError, setBlockError] = useState('');
   const [submitError, setSubmitError] = useState('');
+  // 补登：员工在外勤/车间时可能延后才打开系统补录，允许把 actual_at 指向过去
+  // 取值：'' = 现在，'YYYY-MM-DD' = 那天的下班时间（18:00 本地）
+  const [backfillDate, setBackfillDate] = useState<string>('');
   // 检查清单响应数据的引用，供提交时自动保存
   const checklistResponsesRef = useRef<Record<string, { value: any; pending_date?: string }> | null>(null);
+  // OCR 拍照填表：ChecklistSection 暴露的 fill 函数
+  const checklistFillRef = useRef<((fields: Record<string, any>) => void) | null>(null);
   // AI 质检
   const [aiQcLoading, setAiQcLoading] = useState(false);
   const [aiQcResult, setAiQcResult] = useState<DefectDetectionResult | null>(null);
@@ -283,12 +290,20 @@ export function MilestoneActions({
         if (checklistPayload.length === 0) checklistPayload = null;
       }
 
+      // 补登：把选定日期转成 ISO 时间（按当地 18:00 锚定，避免时区跨日）
+      let actualAtOverride: string | null = null;
+      if (backfillDate) {
+        const d = new Date(`${backfillDate}T18:00:00`);
+        if (!Number.isNaN(d.getTime())) actualAtOverride = d.toISOString();
+      }
+
       // 标记完成（服务端会先保存清单再验证）
-      const result = await markMilestoneDone(milestone.id, checklistPayload);
+      const result = await markMilestoneDone(milestone.id, checklistPayload, actualAtOverride);
       if (result.error) {
         setSubmitError(result.error);
       } else {
         setShowSubmitForm(false);
+        setBackfillDate('');
         router.refresh();
       }
     } catch (err: any) {
@@ -399,11 +414,11 @@ export function MilestoneActions({
 
       {/* 操作按钮 — 前置未完成也允许操作，只显示警告 */}
       {canModify && (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => { setShowSubmitForm(!showSubmitForm); setShowBlockForm(false); }}
             disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white font-medium hover:bg-indigo-700 disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-3 sm:py-2 text-base sm:text-sm text-white font-medium hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 w-full sm:w-auto"
           >
             📤 去处理
           </button>
@@ -451,7 +466,7 @@ export function MilestoneActions({
           <button
             onClick={() => { setShowBlockForm(!showBlockForm); setShowSubmitForm(false); }}
             disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg border border-orange-300 px-4 py-2 text-sm text-orange-700 font-medium hover:bg-orange-50 disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 rounded-lg border border-orange-300 px-4 py-3 sm:py-2 text-base sm:text-sm text-orange-700 font-medium hover:bg-orange-50 disabled:opacity-50 w-full sm:w-auto"
           >
             🚧 申请延期
           </button>
@@ -479,12 +494,22 @@ export function MilestoneActions({
             </div>
           )}
 
+          {/* 拍照解析（仅 QC / 入库节点）— 放在 checklist 之前，识别后填入下方表格 */}
+          {PHOTO_OCR_SUPPORTED_STEPS.has(milestone.step_key) && orderId && (
+            <PhotoOcrButton
+              stepKey={milestone.step_key}
+              orderId={orderId}
+              onParsed={(fields) => { checklistFillRef.current?.(fields); }}
+            />
+          )}
+
           {/* 检查清单 */}
           <ChecklistSection
             milestone={milestone}
             orderId={orderId || ''}
             currentRoles={allRoles}
             onResponsesChange={(responses) => { checklistResponsesRef.current = responses; }}
+            onReady={(fill) => { checklistFillRef.current = fill; }}
           />
 
           {/* 生产单上传：2 个文件（生产订单 + 原辅料单）*/}
@@ -882,14 +907,17 @@ export function MilestoneActions({
             </div>
           )}
 
-          <div className="flex gap-2">
+          {/* 补登：外勤/车间没及时操作时，可以把实际完成时间指向过去 */}
+          <BackfillDatePicker value={backfillDate} onChange={setBackfillDate} dueAt={milestone.due_at} />
+
+          <div className="flex flex-col sm:flex-row gap-2">
             <button type="submit" disabled={loading}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+              className="rounded-lg bg-indigo-600 px-4 py-3 sm:py-2 text-base sm:text-sm text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
               {loading ? '提交中...' : '✅ 确认完成'}
             </button>
             <button type="button"
-              onClick={() => { setShowSubmitForm(false); setSubmitError(''); }}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+              onClick={() => { setShowSubmitForm(false); setSubmitError(''); setBackfillDate(''); }}
+              className="rounded-lg border border-gray-300 px-4 py-3 sm:py-2 text-base sm:text-sm text-gray-600 hover:bg-gray-50">
               取消
             </button>
           </div>
@@ -931,11 +959,13 @@ export function MilestoneActions({
 
 // ══════ 检查清单子组件 ══════
 
-function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange }: {
+function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange, onReady }: {
   milestone: any;
   orderId: string;
   currentRoles: string[];
   onResponsesChange?: (responses: Record<string, { value: any; pending_date?: string }>) => void;
+  /** 暴露一个 fill 函数给父组件，供「拍照解析」一键填表用 */
+  onReady?: (fill: (fields: Record<string, any>) => void) => void;
 }) {
   const [config] = useState<ChecklistConfig | null>(() => getChecklistForStep(milestone.step_key));
   const [responses, setResponses] = useState<Record<string, { value: any; pending_date?: string }>>({});
@@ -952,6 +982,25 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange 
     }
     setResponses(map);
   }, [config, milestone.checklist_data]);
+
+  // 拍照解析填表入口：把识别出的 { key: value } merge 到 responses
+  // 只覆盖 schema 里存在的 key，避免脏数据
+  useEffect(() => {
+    if (!config || !onReady) return;
+    const validKeys = new Set(config.items.map(i => i.key));
+    onReady((fields) => {
+      setResponses(prev => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(fields)) {
+          if (!validKeys.has(k)) continue;
+          next[k] = { value: v, pending_date: next[k]?.pending_date };
+        }
+        onResponsesChange?.(next);
+        return next;
+      });
+      setSaved(false);
+    });
+  }, [config, onReady, onResponsesChange]);
 
   if (!config) return null;
 

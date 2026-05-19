@@ -168,6 +168,7 @@ export async function getUserMilestones(userId: string) {
 export async function markMilestoneDone(
   milestoneId: string,
   checklistData?: Array<{ key: string; value: any; pending_date?: string }> | null,
+  actualAtOverride?: string | null,
 ) {
   try {
   const supabase = await createClient();
@@ -568,10 +569,47 @@ export async function markMilestoneDone(
   
   // 凭证已上传通过，直接强制完成（绕过状态机和依赖检查）
   // 数据库 enum 用英文：pending, in_progress, done, blocked, overdue
+  //
+  // ── 补登机制（2026-05-19）──
+  // actualAtOverride 允许员工填「实际完成是昨天/前天」（外勤、车间没及时打开系统）
+  // 安全约束：
+  //   - 不允许早于 6 个月前（防止乱填）
+  //   - 不允许晚于现在（明天怎么可能已经完成）
+  //   - 超过 due_at + 3 天的补登仍记 late_backfill 日志，不绕过逾期统计
+  let resolvedActualAt = new Date().toISOString();
+  let backfillNote = '';
+  if (actualAtOverride) {
+    const overrideTs = new Date(actualAtOverride).getTime();
+    const nowTs = Date.now();
+    const sixMonthsAgo = nowTs - 6 * 30 * 86400000;
+    if (Number.isNaN(overrideTs)) {
+      return { error: '实际完成时间格式无效' };
+    }
+    if (overrideTs > nowTs) {
+      return { error: '实际完成时间不能晚于现在' };
+    }
+    if (overrideTs < sixMonthsAgo) {
+      return { error: '实际完成时间不能早于 6 个月前（补登仅限近期）' };
+    }
+    resolvedActualAt = new Date(overrideTs).toISOString();
+    // 判断是否为「迟到补登」
+    if (milestone.due_at) {
+      const daysLate = Math.floor((overrideTs - new Date(milestone.due_at).getTime()) / 86400000);
+      const lagFromNow = Math.floor((nowTs - overrideTs) / 86400000);
+      if (lagFromNow >= 1) {
+        backfillNote = daysLate > 3
+          ? `补登：实际于 ${lagFromNow} 天前完成（晚于截止 ${daysLate} 天，仍算逾期）`
+          : `补登：实际于 ${lagFromNow} 天前完成（${daysLate > 0 ? `晚于截止 ${daysLate} 天，在 3 天宽限内` : '在截止前'}）`;
+      }
+    } else if (Math.floor((nowTs - overrideTs) / 86400000) >= 1) {
+      backfillNote = `补登：实际于 ${Math.floor((nowTs - overrideTs) / 86400000)} 天前完成`;
+    }
+  }
+
   const { data: directUpdate, error: directErr } = await (supabase.from('milestones') as any)
     .update({
       status: 'done',
-      actual_at: new Date().toISOString(),
+      actual_at: resolvedActualAt,
     })
     .eq('id', milestoneId)
     .select('*')
@@ -581,16 +619,20 @@ export async function markMilestoneDone(
     return { error: directErr?.message || '节点状态更新失败，请重试' };
   }
 
-  // 写入操作日志（包含逾期天数，供后续评分使用）
+  // 写入操作日志（包含逾期天数 + 补登信息，供后续评分使用）
+  const baseNote = overdueDays > 0
+    ? `凭证已上传，完成时已逾期 ${overdueDays} 天`
+    : '凭证已上传，按时完成';
   await (supabase.from('milestone_logs') as any).insert({
     milestone_id: milestoneId,
     order_id: milestone.order_id,
     actor_user_id: user.id,
-    action: 'mark_done',
-    note: overdueDays > 0
-      ? `凭证已上传，完成时已逾期 ${overdueDays} 天`
-      : '凭证已上传，按时完成',
-    payload: overdueDays > 0 ? { overdue_days: overdueDays } : null,
+    action: backfillNote ? 'mark_done_backfill' : 'mark_done',
+    note: backfillNote ? `${baseNote}（${backfillNote}）` : baseNote,
+    payload: {
+      ...(overdueDays > 0 ? { overdue_days: overdueDays } : {}),
+      ...(actualAtOverride ? { backfilled: true, actual_at_override: resolvedActualAt } : {}),
+    },
   });
 
   // 逾期完成 → 给订单负责人 + admin 发提醒（让 CEO/督导都看到）
