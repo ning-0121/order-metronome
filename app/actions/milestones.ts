@@ -8,7 +8,7 @@ import {
   createMilestone,
   transitionMilestoneStatus,
 } from '@/lib/repositories/milestonesRepo';
-import { normalizeMilestoneStatus, isDoneStatus } from '@/lib/domain/types';
+import { isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
 import { isAdminRole } from '@/lib/domain/roles';
@@ -326,7 +326,7 @@ export async function markMilestoneDone(
       const confirmations: Array<{ module: string; status: string }> = confRes.data || [];
       const doneSteps = new Set(
         ((milestonesRes.data || []) as any[])
-          .filter(m => m.status === 'done' || m.status === '已完成')
+          .filter(m => isDoneStatus(m.status))
           .map(m => m.step_key)
       );
       const IMPLICIT_CONFIRMATIONS: Record<string, string[]> = {

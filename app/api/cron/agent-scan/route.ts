@@ -11,6 +11,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { isDoneStatus } from '@/lib/domain/types';
 import { generateSuggestionsForOrder } from '@/lib/agent/generateSuggestions';
 import { buildEnhancementPrompts, applyEnhancementText, getEnhancementContext } from '@/lib/agent/aiEnhance';
 import { submitBatch, pollBatchResults, type BatchRequest } from '@/lib/agent/anthropicClient';
@@ -137,7 +138,7 @@ export async function POST(req: Request) {
       // 检查原节点是否已解决（如果已解决就不升级了）
       if (ca.milestone_id) {
         const { data: ms } = await supabase.from('milestones').select('status').eq('id', ca.milestone_id).maybeSingle();
-        if (ms && (ms.status === 'done' || ms.status === '已完成')) {
+        if (ms && (isDoneStatus(ms.status))) {
           // 节点已完成，清除链（标记chain为null防重复）
           await supabase.from('agent_actions').update({ action_payload: { ...payload, chain_next_type: null } }).eq('id', ca.id);
           continue;
@@ -375,7 +376,7 @@ export async function POST(req: Request) {
 
       // 统计超期数
       const overdueCount = (milestones || []).filter((m: any) =>
-        m.status !== 'done' && m.status !== '已完成' && m.due_at && new Date(m.due_at) < new Date()
+        !isDoneStatus(m.status) && m.due_at && new Date(m.due_at) < new Date()
       ).length;
 
       // 5.5 主动提问：关键异常推送给负责人（每单每天最多1次）

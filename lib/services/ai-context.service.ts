@@ -1,3 +1,4 @@
+import { isDoneStatus, isPendingStatus } from '@/lib/domain/types';
 // ============================================================
 // Trade OS — AI Context Cache Service
 // 职责：构建并缓存 AI 使用的上下文，避免重复查询和 token 浪费
@@ -257,10 +258,10 @@ export async function buildOrderContext(
   const financials = financialsRes.status === 'fulfilled' ? financialsRes.value.data : null
 
   // 里程碑完成情况
-  const doneMilestones = milestones.filter((m: any) => m.status === 'done')
-  const pendingMilestones = milestones.filter((m: any) => m.status === 'pending')
+  const doneMilestones = milestones.filter((m: any) => isDoneStatus(m.status))
+  const pendingMilestones = milestones.filter((m: any) => isPendingStatus(m.status))
   const overdueMilestones = milestones.filter((m: any) =>
-    m.status !== 'done' && m.planned_at && new Date(m.planned_at) < new Date()
+    !isDoneStatus(m.status) && m.planned_at && new Date(m.planned_at) < new Date()
   )
 
   const summaryJson = {

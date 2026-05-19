@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { revalidatePath } from 'next/cache';
-import { isDoneStatus } from '@/lib/domain/types';
+import { isDoneStatus, isPendingStatus } from '@/lib/domain/types';
 import {
   AMENDMENT_RULES,
   checkAmendmentAllowed,
@@ -111,7 +111,7 @@ export async function approveOrderAmendment(
     .single();
 
   if (fetchErr || !amendment) return { error: '申请不存在' };
-  if (amendment.status !== 'pending') return { error: '此申请已处理' };
+  if (!isPendingStatus(amendment.status)) return { error: '此申请已处理' };
 
   // 更新申请状态
   await (supabase.from('order_amendments') as any)

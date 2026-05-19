@@ -11,6 +11,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { isPendingStatus } from '@/lib/domain/types';
 import { revalidatePath } from 'next/cache';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
 import { runOrderDecisionReview as engineRunReview } from '@/lib/engine/orderDecisionEngine';
@@ -422,7 +423,7 @@ export async function getDecisionTaskStatus(
   if (!tasks || tasks.length === 0) return { data: { state: 'resolved' } };
 
   const hasPending = tasks.some((t: any) =>
-    t.status === 'pending' || t.status === 'snoozed'
+    isPendingStatus(t.status) || t.status === 'snoozed'
   );
 
   if (!hasPending) {

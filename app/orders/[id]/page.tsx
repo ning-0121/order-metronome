@@ -10,7 +10,7 @@ import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { LiveScorePreview } from '@/components/LiveScorePreview';
 import { DocumentCenterTab } from '@/components/tabs/DocumentCenterTab';
-import { normalizeMilestoneStatus, isDoneStatus, isActiveStatus } from '@/lib/domain/types';
+import { isActiveStatus, isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
@@ -208,7 +208,7 @@ export default async function OrderDetailPage({
           const allMs: any[] = (orderData as any).milestones || [];
           const finalKeys = ['booking_done', 'domestic_delivery', 'shipment_completed', 'shipment_done'];
           const isShipped = allMs.some(m =>
-            finalKeys.includes(m.step_key) && (m.status === 'done' || m.status === '已完成')
+            finalKeys.includes(m.step_key) && (isDoneStatus(m.status))
           );
           return (
             <RescheduleBanner

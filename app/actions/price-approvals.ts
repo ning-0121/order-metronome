@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { isPendingStatus } from '@/lib/domain/types';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { revalidatePath } from 'next/cache';
 
@@ -99,7 +100,7 @@ export async function approvePriceApproval(
     .eq('id', approvalId)
     .single();
   if (!row) return { error: '审批记录不存在' };
-  if (row.status !== 'pending') return { error: `该申请已是「${row.status}」状态，无法重复审批` };
+  if (!isPendingStatus(row.status)) return { error: `该申请已是「${row.status}」状态，无法重复审批` };
 
   const { error } = await (supabase.from('pre_order_price_approvals') as any)
     .update({

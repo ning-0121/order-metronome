@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 
+import { isActiveStatus, isBlockedStatus, isDoneStatus } from '@/lib/domain/types';
 /**
  * Agent 对话 — 业务员的 AI 专业助手（小绮）V2.0
  *
@@ -63,10 +64,10 @@ export async function askAgent(
         ]);
 
         const milestones = msRes.data || [];
-        const done = milestones.filter((m: any) => m.status === 'done' || m.status === '已完成').length;
-        const overdue = milestones.filter((m: any) => m.due_at && new Date(m.due_at) < new Date() && m.status !== 'done' && m.status !== '已完成');
-        const active = milestones.filter((m: any) => m.status === 'in_progress' || m.status === '进行中');
-        const blocked = milestones.filter((m: any) => m.status === 'blocked' || m.status === '卡单');
+        const done = milestones.filter((m: any) => isDoneStatus(m.status)).length;
+        const overdue = milestones.filter((m: any) => m.due_at && new Date(m.due_at) < new Date() && !isDoneStatus(m.status));
+        const active = milestones.filter((m: any) => isActiveStatus(m.status));
+        const blocked = milestones.filter((m: any) => isBlockedStatus(m.status));
 
         context.push(`📦 订单 ${order.order_no}：`);
         context.push(`  客户：${order.customer_name}${order.is_new_customer ? '（新客户首单）' : ''} | 工厂：${order.factory_name || '未指定'}${order.is_new_factory ? '（新工厂）' : ''} | ${order.quantity}件 | ${order.incoterm}`);

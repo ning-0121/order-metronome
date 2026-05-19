@@ -7,8 +7,7 @@
  * 3. 通知上游负责人：你的延迟影响了谁
  */
 
-import { normalizeMilestoneStatus, isDoneStatus } from '@/lib/domain/types';
-
+import { isActiveStatus, isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 interface MilestoneForChain {
   id: string;
   step_key: string;
@@ -55,7 +54,7 @@ export function analyzeChainImpact(
     const dueDate = new Date(current.due_at);
     const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / 86400000);
     const isDone = isDoneStatus(normalizeMilestoneStatus(current.status));
-    const isActive = current.status === '进行中' || current.status === 'in_progress';
+    const isActive = isActiveStatus(current.status);
 
     if (isDone) continue;
 

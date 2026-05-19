@@ -13,6 +13,7 @@
 
 import type { ConfidenceExplain, RuntimeRiskLevel } from '@/lib/runtime/types';
 
+import { isBlockedStatus } from '@/lib/domain/types';
 interface Props {
   confidence: number;
   riskLevel: RuntimeRiskLevel;
@@ -154,7 +155,7 @@ export function RuntimeRiskCard({
                 {blocker.daysOverdue === 0 && blocker.daysUntil > 0 && (
                   <span>还有 {blocker.daysUntil} 天到期</span>
                 )}
-                {blocker.status && (blocker.status === 'blocked' || blocker.status === '阻塞') && (
+                {blocker.status && (isBlockedStatus(blocker.status)) && (
                   <span className="ml-1 text-rose-600 font-medium">· 阻塞中</span>
                 )}
               </p>

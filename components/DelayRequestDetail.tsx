@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { isPendingStatus } from '@/lib/domain/types';
 import { approveDelayRequest, rejectDelayRequest, getImpactedMilestones } from '@/app/actions/delays';
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
@@ -56,7 +57,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
   const [showActions, setShowActions] = useState(false);
 
   useEffect(() => {
-    if (delayRequest.status === 'pending' && isAdmin) {
+    if (isPendingStatus(delayRequest.status) && isAdmin) {
       loadImpactedMilestones();
     }
   }, [delayRequest.id, delayRequest.status, isAdmin]);
@@ -116,7 +117,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
     deltaDays = Math.round((proposed.getTime() - original.getTime()) / (1000 * 60 * 60 * 24));
   }
 
-  if (delayRequest.status !== 'pending') {
+  if (!isPendingStatus(delayRequest.status)) {
     return null; // Only show for pending requests
   }
 

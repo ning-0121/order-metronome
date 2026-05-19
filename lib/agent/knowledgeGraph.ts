@@ -1,3 +1,4 @@
+import { isDoneStatus } from '@/lib/domain/types';
 /**
  * 统一知识图谱 — 整合客户+工厂+订单+邮件的全维度记忆
  *
@@ -67,8 +68,8 @@ export async function buildUnifiedContext(
     .select('name, status, due_at, completed_at')
     .eq('order_id', orderId);
   const ms = milestones || [];
-  const done = ms.filter((m: any) => m.status === 'done' || m.status === '已完成').length;
-  const overdue = ms.filter((m: any) => m.due_at && new Date(m.due_at) < new Date() && m.status !== 'done' && m.status !== '已完成');
+  const done = ms.filter((m: any) => isDoneStatus(m.status)).length;
+  const overdue = ms.filter((m: any) => m.due_at && new Date(m.due_at) < new Date() && !isDoneStatus(m.status));
   const daysLeft = order.factory_date ? Math.ceil((new Date(order.factory_date).getTime() - Date.now()) / 86400000) : 0;
 
   // Agent 历史

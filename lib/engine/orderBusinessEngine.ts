@@ -1,3 +1,4 @@
+import { isBlockedStatus } from '@/lib/domain/types';
 /**
  * 订单经营状态引擎 — 统一计算层
  *
@@ -391,7 +392,7 @@ export function calculateBusinessRisk(input: EngineInput): {
   // Phase 1 简化：只看关键路径节点；blocked / 进行中 / 未开始统一处理
   const blocker = getNextCriticalBlocker(input.milestones);
   if (blocker) {
-    if (blocker.status === 'blocked' || blocker.status === '阻塞' || blocker.status === '卡单') {
+    if (isBlockedStatus(blocker.status) || isBlockedStatus(blocker.status)) {
       factors.push(`关键节点【${blocker.name}】被卡住`); score += 25;
     } else if (blocker.daysOverdue >= 7) {
       factors.push(`【${blocker.name}】已超期 ${blocker.daysOverdue} 天，影响最终交付`); score += 25;
@@ -557,7 +558,7 @@ export function calculateDelayRisk(input: EngineInput): StatusResult<'none' | 'l
   // 前瞻式延期风险：看下一个关键节点
   const blocker = getNextCriticalBlocker(input.milestones);
   if (blocker) {
-    if (blocker.status === 'blocked' || blocker.status === '阻塞' || blocker.status === '卡单') {
+    if (isBlockedStatus(blocker.status) || isBlockedStatus(blocker.status)) {
       return {
         value: 'high',
         level: 'red',

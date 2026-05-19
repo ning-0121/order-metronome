@@ -4,6 +4,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { isActiveStatus, isDoneStatus } from '@/lib/domain/types';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
@@ -42,13 +43,13 @@ export async function GET() {
       let orderFixed = 0;
 
       for (const ms of milestones as any[]) {
-        if (ms.sequence_number < currentSeq && ms.status !== 'done' && ms.status !== '已完成') {
+        if (ms.sequence_number < currentSeq && !isDoneStatus(ms.status)) {
           // 这个节点应该是 done 但还不是
           const { error } = await (supabase.from('milestones') as any)
             .update({ status: 'done', actual_at: ms.due_at || new Date().toISOString() })
             .eq('id', ms.id);
           if (!error) orderFixed++;
-        } else if (ms.sequence_number === currentSeq && ms.status !== 'in_progress' && ms.status !== '进行中' && ms.status !== 'done' && ms.status !== '已完成') {
+        } else if (ms.sequence_number === currentSeq && !isActiveStatus(ms.status) && !isDoneStatus(ms.status)) {
           // 当前节点应该是 in_progress
           await (supabase.from('milestones') as any)
             .update({ status: 'in_progress' })

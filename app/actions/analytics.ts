@@ -2,8 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getRoleLabel } from '@/lib/utils/i18n';
-import { isDoneStatus, isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
-
+import { isActiveStatus, isBlockedStatus, isDoneStatus } from '@/lib/domain/types';
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
 
@@ -187,7 +186,7 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
           phaseData[phase].onTime += 1;
         }
       }
-    } else if ((m.status === 'in_progress' || m.status === '进行中') && m.due_at && new Date(m.due_at) < now) {
+    } else if ((isActiveStatus(m.status)) && m.due_at && new Date(m.due_at) < now) {
       phaseData[phase].overdue += 1;
     }
   });
