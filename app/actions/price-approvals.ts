@@ -73,7 +73,7 @@ export async function requestPriceApproval(payload: {
       expires_at: new Date(Date.now() + 86400000).toISOString(),
       created_at: new Date().toISOString(),
     });
-  } catch {} // 推送失败不阻断
+  } catch (e: any) { console.warn(`[price-approvals] 推送失败不阻断:`, e?.message); }
 
   revalidatePath('/admin/price-approvals');
   return { id: (data as any).id };
@@ -130,13 +130,13 @@ export async function approvePriceApproval(
       title,
       message,
     });
-  } catch {}
+  } catch (e: any) { console.warn(`[price-approvals] price_approval 应用内通知发送:`, e?.message); }
 
   // 企业微信推送
   try {
     const { pushToUsers } = await import('@/lib/utils/wechat-push');
     await pushToUsers(supabase, [requesterId], title, message);
-  } catch {}
+  } catch (e: any) { console.warn(`[price-approvals] price_approval 企微推送:`, e?.message); }
 
   revalidatePath('/admin/price-approvals');
   return {};

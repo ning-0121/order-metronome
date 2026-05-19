@@ -161,7 +161,7 @@ export async function createOrder(
       const parsed = JSON.parse(namesRaw);
       if (Array.isArray(parsed) && parsed.length > 0) factory_names = parsed;
     }
-  } catch {}
+  } catch (e: any) { console.warn(`[orders] 订单次要操作 164:`, e?.message); }
 
   // 样品阶段（新）+ 兼容旧 checkbox
   const sample_phase_raw = formData.get('sample_phase') as string | null;
@@ -567,7 +567,7 @@ export async function createOrder(
             `📋 新订单 ${orderData.order_no} 未指定跟单`,
             `客户 ${customer_name || '?'}，${quantity || '?'} 件\n请尽快指定跟单人员`
           );
-        } catch {}
+        } catch (e: any) { console.warn(`[orders] 订单次要操作 570:`, e?.message); }
       }
     }
   } catch (notifErr: any) {
@@ -624,7 +624,7 @@ export async function createOrder(
             `${creatorName} 导入订单，客户 ${customer_name || '?'}，${quantity || '?'} 件\n原因：${importReason || '未填'}`
           ).catch(() => {});
         }
-      } catch {}
+      } catch (e: any) { console.warn(`[orders] 订单次要操作 627:`, e?.message); }
 
       // 6b: 不做后续的里程碑激活！等 CEO 审批通过后由 approveImportOrder 处理
       // ↓ 直接跳过原来的 6b-6e 代码
@@ -660,19 +660,19 @@ export async function createOrder(
         status: 'unread',
       });
     }
-  } catch {} // 通知失败不阻断订单创建
+  } catch (e: any) { console.warn(`[orders] 通知失败不阻断订单创建:`, e?.message); }
 
   // ── 推送到财务系统 ──
   try {
     const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
     await syncOrderToFinance(orderData, 'order.created');
-  } catch {} // 财务推送失败不阻断订单创建
+  } catch (e: any) { console.warn(`[orders] 财务推送失败不阻断订单创建:`, e?.message); }
 
   // ── STEP 7: 初始化经营数据 + 确认链 ──
   try {
     const { initOrderFinancials } = await import('@/app/actions/order-financials');
     await initOrderFinancials(orderData.id);
-  } catch {} // 初始化失败不阻断订单创建
+  } catch (e: any) { console.warn(`[orders] 初始化失败不阻断订单创建:`, e?.message); }
 
   // ── STEP 8: 翻单回顾存入客户画像 ──
   if (order_type === 'repeat' && repeat_issues) {
@@ -704,7 +704,7 @@ export async function createOrder(
           .update({ notes: `【翻单回顾】${content}` })
           .eq('id', orderData.id);
       }
-    } catch {} // 回顾存储失败不阻断订单创建
+    } catch (e: any) { console.warn(`[orders] 回顾存储失败不阻断订单创建:`, e?.message); }
   }
 
   // ── STEP 9: 交期已过订单处理 ──
@@ -1060,7 +1060,7 @@ export async function activateOrderAction(orderId: string) {
   try {
     const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
     if (result.data) await syncOrderToFinance(result.data as Record<string, unknown>, 'order.activated');
-  } catch {}
+  } catch (e: any) { console.warn(`[orders] 订单次要操作 1063:`, e?.message); }
 
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/orders');
@@ -1143,7 +1143,7 @@ export async function decideCancelAction(
       const { notifyOrderCancelled } = await import('@/lib/integration/finance-sync');
       const cancelReq = result.data && typeof result.data === 'object' && 'cancelRequest' in result.data ? (result.data as any).cancelRequest : null;
       if (cancelReq) await notifyOrderCancelled({ id: cancelReq.order_id, lifecycle_status: '已取消' } as Record<string, unknown>);
-    } catch {}
+    } catch (e: any) { console.warn(`[orders] 订单次要操作 1146:`, e?.message); }
   }
 
   // 获取订单ID以便revalidate（从result中获取）
@@ -1214,7 +1214,7 @@ export async function completeOrderAction(orderId: string) {
   try {
     const { notifyOrderCompleted } = await import('@/lib/integration/finance-sync');
     if (result.data) await notifyOrderCompleted(result.data as Record<string, unknown>);
-  } catch {}
+  } catch (e: any) { console.warn(`[orders] 订单次要操作 1217:`, e?.message); }
 
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/orders');
@@ -1391,7 +1391,7 @@ export async function forceCompleteOrderAction(orderId: string): Promise<{ error
   try {
     const { calculateOrderScore } = await import('@/app/actions/commissions');
     await calculateOrderScore(orderId);
-  } catch {}
+  } catch (e: any) { console.warn(`[orders] 订单次要操作 1394:`, e?.message); }
 
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/orders');

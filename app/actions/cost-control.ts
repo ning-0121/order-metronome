@@ -285,7 +285,7 @@ export async function sendCostAlert(
   try {
     const { pushToUsers } = await import('@/lib/utils/wechat-push');
     await pushToUsers(supabase, Array.from(recipientIds), title, message).catch(() => {});
-  } catch {}
+  } catch (e: any) { console.warn(`[cost-control] 成本控制次要操作:`, e?.message); }
 }
 
 // ════════════════════════════════════════════════

@@ -686,7 +686,7 @@ export async function runAIAnalysis(): Promise<{ data?: AIAnalysisResult[]; erro
         is_actionable: true,
         status: 'active',
       });
-    } catch {} // 单个客户分析失败不影响其他
+    } catch (e: any) { console.warn(`[ai-knowledge] 单个客户分析失败不影响其他:`, e?.message); }
   }
 
   // ── 2. 工厂趋势分析 ──

@@ -112,7 +112,7 @@ export async function detectDefectsFromAttachment(
           ai_analyzed_at: new Date().toISOString(),
         })
         .eq('id', attachmentId);
-    } catch {} // 保存失败不影响返回结果
+    } catch (e: any) { console.warn(`[defect-detect] 保存失败不影响返回结果:`, e?.message); }
 
     return { data: result };
   } catch (err: any) {
@@ -176,7 +176,7 @@ export async function detectDefectsForMilestone(
         mimeType: img.mime_type,
         fileName: img.file_name,
       });
-    } catch {}
+    } catch (e: any) { console.warn(`[defect-detect] 缺陷识别附属操作:`, e?.message); }
   }
 
   if (imageData.length === 0) {

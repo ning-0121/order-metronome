@@ -356,7 +356,7 @@ export async function markMilestoneDone(
 
       // 确认链阻塞改为警告，不再硬阻止（业务可以并行推进）
       // 只有 SEQUENTIAL_REQUIREMENTS 里的硬约束才阻止
-    } catch {} // 阻塞检查失败不阻断（降级）
+    } catch (e: any) { console.warn(`[milestones] 阻塞检查失败不阻断（降级）:`, e?.message); }
   }
 
   // Check checklist completion (if milestone has a checklist)
@@ -874,7 +874,7 @@ export async function markMilestoneDone(
     try {
       const { initDefaultProcurementItems } = await import('@/app/actions/procurement-tracking');
       await initDefaultProcurementItems(milestoneData.order_id);
-    } catch {} // 初始化失败不阻断
+    } catch (e: any) { console.warn(`[milestones] 初始化失败不阻断:`, e?.message); }
   }
 
   // Auto-advance to next milestone
@@ -909,7 +909,7 @@ export async function markMilestoneDone(
       const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
       const { data: orderData } = await (supabase.from('orders') as any).select('*').eq('id', milestoneData.order_id).single();
       if (orderData) await syncOrderToFinance(orderData, 'order.updated');
-    } catch {}
+    } catch (e: any) { console.warn(`[milestones] 里程碑次要操作 912:`, e?.message); }
   }
 
   return { data: updatedMilestone };
