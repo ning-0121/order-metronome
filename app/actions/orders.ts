@@ -776,6 +776,10 @@ export async function createOrder(
   }
 }
 
+/** 兜底防止订单表无限增长拖垮列表页 — 历史订单超过这个数会被截断。
+ *  超过后再做分页 / 归档/ filter 下推。当前规模 ~1000 单远低于此。 */
+const ORDERS_HARD_LIMIT = 2000;
+
 export async function getOrders() {
   const supabase = await createClient();
 
@@ -811,7 +815,8 @@ export async function getOrders() {
   if (canSeeAll) {
     const { data: orders, error } = await (supabase.from('orders') as any)
       .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(ORDERS_HARD_LIMIT);
     if (error) return { error: error.message };
     // 解析跟单和业务员名称
     const userIds = new Set<string>();
@@ -863,7 +868,8 @@ export async function getOrders() {
   const { data: orders, error } = await (supabase.from('orders') as any)
     .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, sequence_number)')
     .in('id', myOrderIds)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(ORDERS_HARD_LIMIT);
 
   if (error) return { error: error.message };
   const enriched = await attachDelayRequests(orders || []);
