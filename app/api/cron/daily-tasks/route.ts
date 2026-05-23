@@ -41,25 +41,39 @@ export async function GET(req: Request) {
       .from('profiles')
       .select('user_id, name, email, role, roles');
 
+    // ── 一次性批量查所有人的未完成节点，然后内存分组 ──
+    // 之前每个 profile 循环里 await 一次 milestones 查询，30+ 人就是 30+
+    // 次串行 RTT，逼近 Vercel 60s 上限。2026-05-19 改批量。
+    const eligibleProfiles: any[] = [];
     for (const profile of (profiles || []) as any[]) {
       const roles: string[] = Array.isArray(profile.roles) && profile.roles.length > 0
         ? profile.roles : [profile.role].filter(Boolean);
       if (roles.length === 0) continue;
-      if (roles.includes('admin') && roles.length === 1) continue; // 纯 admin 不推（CEO 看全局报告）
+      if (roles.includes('admin') && roles.length === 1) continue;
+      eligibleProfiles.push(profile);
+    }
+    const userIds = eligibleProfiles.map(p => p.user_id);
+    const { data: allMilestones } = userIds.length > 0
+      ? await supabase
+          .from('milestones')
+          .select('id, name, step_key, due_at, status, order_id, owner_user_id, orders!inner(order_no, customer_name)')
+          .in('owner_user_id', userIds)
+          .in('status', ['in_progress', '进行中'])
+          .not('due_at', 'is', null)
+          .order('due_at', { ascending: true })
+      : { data: [] };
+    const milestonesByOwner = new Map<string, any[]>();
+    for (const m of (allMilestones || []) as any[]) {
+      const arr = milestonesByOwner.get(m.owner_user_id) || [];
+      if (arr.length < 10) arr.push(m); // 保留原本 limit(10) 语义，每人最多取 10 个
+      milestonesByOwner.set(m.owner_user_id, arr);
+    }
 
+    for (const profile of eligibleProfiles) {
       const userName = profile.name || profile.email?.split('@')[0] || '同事';
+      const myMilestones = milestonesByOwner.get(profile.user_id) || [];
 
-      // 查这个人负责的未完成节点（按紧急度排序）
-      const { data: myMilestones } = await supabase
-        .from('milestones')
-        .select('id, name, step_key, due_at, status, order_id, orders!inner(order_no, customer_name)')
-        .eq('owner_user_id', profile.user_id)
-        .in('status', ['in_progress', '进行中'])
-        .not('due_at', 'is', null)
-        .order('due_at', { ascending: true })
-        .limit(10);
-
-      if (!myMilestones || myMilestones.length === 0) continue;
+      if (myMilestones.length === 0) continue;
 
       // 分类：逾期 / 今天到期 / 即将到期（3天内）/ 其他
       const tasks: Array<{

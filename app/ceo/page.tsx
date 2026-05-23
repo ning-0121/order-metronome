@@ -51,11 +51,20 @@ export default async function CEOWarRoom() {
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const twoDaysLater = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-  // ===== 数据加载（批量查询，避免 N+1） =====
-  const { data: orders } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+  // ===== 数据加载（批量查询，避免 N+1）=====
+  // 之前 .select('*') 拉全表所有字段，订单越多越拖。2026-05-19 收口：
+  // 只 select CEO 页实际用到的字段；milestones 同样只取需要的列。
+  const CEO_ORDER_LIMIT = 2000; // 兜底，历史订单超量时不会一次拉爆
+  const { data: orders } = await supabase
+    .from('orders')
+    .select('id, order_no, customer_name, order_type, incoterm, quantity, factory_date, lifecycle_status, special_tags, created_by, owner_user_id, created_at')
+    .order('created_at', { ascending: false })
+    .limit(CEO_ORDER_LIMIT);
   const orderIds = (orders || []).map((o: any) => o.id);
   const { data: allMilestones } = orderIds.length > 0
-    ? await supabase.from('milestones').select('*').in('order_id', orderIds)
+    ? await supabase.from('milestones')
+        .select('id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, order_id, sequence_number')
+        .in('order_id', orderIds)
     : { data: [] };
   // 按 order_id 分组
   const milestonesByOrder = new Map<string, any[]>();
