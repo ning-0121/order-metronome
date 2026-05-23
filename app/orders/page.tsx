@@ -570,17 +570,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         {/* Desktop: table layout */}
         <div className="hidden md:block bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
-          <table className="table-modern">
+          <table className="table-modern table-compact">
             <thead>
               <tr>
-                <th>订单号 / 内部单号</th>
-                <th>客户 / 工厂</th>
-                <th>款号 · PO</th>
-                <th>数量</th>
-                <th>下单 / 关键日期</th>
-                <th>状态</th>
-                <th>阶段进度</th>
-                <th></th>
+                <th>订单 / 内部单号</th>
+                <th>客户 · 工厂 · 款号</th>
+                <th className="col-shrink">数量</th>
+                <th className="col-shrink">日期 / 状态</th>
+                <th className="col-shrink">阶段进度</th>
+                <th className="col-shrink"></th>
               </tr>
             </thead>
             <tbody>
@@ -601,24 +599,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
                 return (
                   <tr key={order.id}>
-                    {/* 订单号 + 内部单号 + 类型/贸易/状态徽章 一格放下 */}
+                    {/* 列 1：订单号 + 徽章 + 内部单号（3 行紧凑） */}
                     <td>
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap leading-tight">
                         <span className="font-semibold text-gray-900 whitespace-nowrap">{order.order_no}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${typeColors[order.order_type] || 'bg-gray-100 text-gray-600'}`}>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${typeColors[order.order_type] || 'bg-gray-100 text-gray-600'}`}>
                           {typeLabels[order.order_type] || order.order_type}
                         </span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600 whitespace-nowrap">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-gray-100 text-gray-600 whitespace-nowrap">
                           {{ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: 'RMB(税外)', RMB_INC_TAX: 'RMB(含税)' }[order.incoterm as string] || order.incoterm}
                         </span>
                         {isCustomerShipHoldFromOrder(order) && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800 whitespace-nowrap">客户待运</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-100 text-blue-800 whitespace-nowrap">客户待运</span>
                         )}
                         {isCustomerHoldStale(order) && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 whitespace-nowrap">待复盘</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-800 whitespace-nowrap">待复盘</span>
                         )}
                       </div>
-                      <div className="mt-1 text-xs text-gray-500">
+                      <div className="mt-0.5 text-xs text-gray-500 leading-tight">
                         <InlineEditField
                           orderId={order.id}
                           field="internal_order_no"
@@ -630,31 +628,34 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       </div>
                     </td>
 
-                    {/* 客户 + 工厂 */}
+                    {/* 列 2：客户 / 工厂 / 款号·PO（3 行紧凑） */}
                     <td>
-                      <Link href={`/orders?status=${statusFilter}&customer=${encodeURIComponent(order.customer_name)}`}
-                        className="text-gray-800 hover:text-indigo-600 hover:underline font-medium whitespace-nowrap">{order.customer_name}</Link>
-                      <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
-                        🏭 {(order as any).factory_name ? (
-                          <Link href={`/orders?status=${statusFilter}&factory=${encodeURIComponent((order as any).factory_name)}`}
-                            className="hover:text-indigo-600 hover:underline">{(order as any).factory_name}</Link>
-                        ) : <span className="text-gray-400">未指定</span>}
+                      <div className="leading-tight space-y-0.5">
+                        <Link href={`/orders?status=${statusFilter}&customer=${encodeURIComponent(order.customer_name)}`}
+                          className="block text-gray-800 hover:text-indigo-600 hover:underline font-medium whitespace-nowrap">{order.customer_name}</Link>
+                        <div className="text-xs text-gray-500 whitespace-nowrap">
+                          🏭 {(order as any).factory_name ? (
+                            <Link href={`/orders?status=${statusFilter}&factory=${encodeURIComponent((order as any).factory_name)}`}
+                              className="hover:text-indigo-600 hover:underline">{(order as any).factory_name}</Link>
+                          ) : <span className="text-gray-400">未指定</span>}
+                        </div>
+                        {((order as any).style_no || (order as any).po_number) && (
+                          <div className="text-xs text-gray-500 whitespace-nowrap">
+                            {(order as any).style_no && <>款 <span className="text-gray-700">{(order as any).style_no}</span></>}
+                            {(order as any).style_no && (order as any).po_number && <span className="text-gray-300 mx-1">·</span>}
+                            {(order as any).po_number && <>PO <span className="text-gray-700">{(order as any).po_number}</span></>}
+                          </div>
+                        )}
                       </div>
                     </td>
 
-                    {/* 款号 / PO */}
-                    <td>
-                      <div className="text-gray-900 whitespace-nowrap">{(order as any).style_no || <span className="text-gray-400">-</span>}</div>
-                      {(order as any).po_number && <div className="text-xs text-gray-500 whitespace-nowrap mt-0.5">{(order as any).po_number}</div>}
-                    </td>
-
-                    {/* 数量 */}
-                    <td>
+                    {/* 列 3：数量（贴内容） */}
+                    <td className="col-shrink">
                       <span className="text-gray-800 font-medium whitespace-nowrap">{order.quantity ? `${order.quantity} 件` : '—'}</span>
                     </td>
 
-                    {/* 下单日期 + 关键日期 + 超期提示 一格上下排列 */}
-                    <td>
+                    {/* 列 4：日期 + 状态徽章（合并 — 状态在顶部一行，下面是下单/出厂/超期） */}
+                    <td className="col-shrink">
                       {(() => {
                         const orderDate = (order as any).order_date;
                         const createdAt = (order as any).created_at;
@@ -682,10 +683,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                         const custHold = isCustomerShipHoldFromOrder(order);
                         const holdStale = isCustomerHoldStale(order);
                         return (
-                          <div className="space-y-0.5">
-                            <div className="text-xs text-gray-500 whitespace-nowrap">
-                              下单 <span className="text-gray-700 font-medium">{dateStr || '—'}</span>
-                              {timeStr && <span className="text-gray-400 ml-1">{timeStr}</span>}
+                          <div className="leading-tight space-y-0.5">
+                            {/* 状态徽章 + 下单 同一行 */}
+                            <div className="flex items-center gap-2 whitespace-nowrap">
+                              <span className={`badge ${statusConfig.class} text-[10px]`}>{statusConfig.label}</span>
+                              <span className="text-xs text-gray-500">
+                                下单 <span className="text-gray-700">{dateStr || '—'}</span>
+                                {timeStr && <span className="text-gray-400 ml-1">{timeStr}</span>}
+                              </span>
                             </div>
                             {originalKeyDate ? (
                               <div className={`text-xs whitespace-nowrap ${isOverdue && !custHold ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
@@ -710,14 +715,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                         );
                       })()}
                     </td>
-
-                    {/* 状态 */}
-                    <td>
-                      <span className={`badge ${statusConfig.class} whitespace-nowrap`}>
-                        {statusConfig.label}
-                      </span>
-                    </td>
-                <td>
+                <td className="col-shrink">
                   {(() => {
                     const phases = computePhases(milestones);
                     const currentPhase = phases.find(p => p.active) || phases.find(p => !p.allDone && p.total > 0);
@@ -749,7 +747,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     );
                   })()}
                 </td>
-                    <td>
+                    <td className="col-shrink text-right">
                       {order.id ? (
                         <Link
                           href={`/orders/${order.id}`}
