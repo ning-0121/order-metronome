@@ -31,17 +31,25 @@ export type AIApi =
   | 'photo_ocr'
   | 'cost_sheet'
   | 'production_photo'
-  | 'risk_assessment';
+  | 'risk_assessment'
+  | 'capacity_analysis'  // 2026-05-19 补：app/actions/analytics.ts:getCapacityAIAnalysis
+  | 'agent_chat'         // 2026-05-19 补：app/actions/agent-chat.ts:askAgent（用户输入最自由，最容易被刷）
+  | 'smart_insights'     // 2026-05-19 补：app/actions/smart-insights.ts:getSmartInsights / getContextualAIAdvice
+  | 'po_extract';        // 2026-05-19 补：app/actions/po-extract.ts:extractPOFromAttachment
 
 /** 每小时调用上限（per user） */
 const HOURLY_LIMIT: Record<AIApi, number> = {
-  po_parse:        20,  // 创建订单时偶尔触发
+  po_parse:        20,
   po_verify:       30,
   three_doc_verify: 20,
-  photo_ocr:       30,  // 拍照识别贵
+  photo_ocr:       30,
   cost_sheet:      20,
-  production_photo: 50, // 日报拍照频率高
+  production_photo: 50,
   risk_assessment: 60,
+  capacity_analysis: 10, // 内部分析报表，频率应该低
+  agent_chat:      40,   // 聊天会重复问，配额给宽一点
+  smart_insights:  30,
+  po_extract:      20,
 };
 
 /** 全 API 加起来的小时上限（防总量刷） */
@@ -162,6 +170,10 @@ function apiLabel(api: AIApi): string {
     cost_sheet: '成本核算单解析',
     production_photo: '生产日报照片提取',
     risk_assessment: 'AI 风险评估',
+    capacity_analysis: '产能 AI 分析',
+    agent_chat: 'AI 助手对话',
+    smart_insights: 'AI 智能洞察',
+    po_extract: 'PO 字段抽取',
   };
   return map[api] || api;
 }

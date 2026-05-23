@@ -354,7 +354,14 @@ async function generateAIInsights(
     ? `\n已有规则分析结果：${ruleInsights.map(r => r.title).join('；')}`
     : '';
 
+  // AI 限速（2026-05-19 补）— 这里走 cache miss 才会调 Claude，所以
+  // guardAICall 放在缓存检查之后；缓存命中无消耗，跳过限速
+  const { guardAICall, logAICall } = await import('@/lib/ai/rate-limit');
+  const guard = await guardAICall('smart_insights');
+  if (!guard.ok) return [];
+
   // 调用 Claude
+  const aiStartedAt = Date.now();
   const client = new Anthropic({ apiKey });
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -387,10 +394,16 @@ async function generateAIInsights(
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
+    logAICall('smart_insights', null, 'error', Date.now() - aiStartedAt, 'JSON parse failed').catch(() => {});
     return [];
   }
 
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) {
+    logAICall('smart_insights', null, 'error', Date.now() - aiStartedAt, 'response not array').catch(() => {});
+    return [];
+  }
+
+  logAICall('smart_insights', null, 'success', Date.now() - aiStartedAt).catch(() => {});
 
   const aiInsights: SmartInsight[] = parsed.slice(0, 3).map((item: any) => ({
     type: (customerName ? 'customer' : 'factory') as SmartInsight['type'],
@@ -481,6 +494,12 @@ export async function getContextualAIAdvice(params: {
 只返回JSON。`,
   };
 
+  // AI 限速（2026-05-19 补）— cache miss 才会走到这里
+  const { guardAICall, logAICall } = await import('@/lib/ai/rate-limit');
+  const guard2 = await guardAICall('smart_insights', params.orderId || null);
+  if (!guard2.ok) return { data: null };
+
+  const aiStartedAt2 = Date.now();
   try {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
@@ -499,8 +518,10 @@ export async function getContextualAIAdvice(params: {
       parsed = JSON.parse(jsonStr);
     } catch {
       console.error('[AI Advice] JSON parse failed, raw:', jsonStr.slice(0, 200));
+      logAICall('smart_insights', params.orderId || null, 'error', Date.now() - aiStartedAt2, 'JSON parse failed').catch(() => {});
       return { data: null };
     }
+    logAICall('smart_insights', params.orderId || null, 'success', Date.now() - aiStartedAt2).catch(() => {});
     const result: AIAdvice = {
       advice: String(parsed.advice || ''),
       tips: Array.isArray(parsed.tips) ? parsed.tips.map(String) : [],
@@ -525,7 +546,8 @@ export async function getContextualAIAdvice(params: {
     } catch {}
 
     return { data: result };
-  } catch {
+  } catch (err: any) {
+    logAICall('smart_insights', params.orderId || null, 'error', Date.now() - aiStartedAt2, err?.message?.slice(0, 200)).catch(() => {});
     return { data: null };
   }
 }

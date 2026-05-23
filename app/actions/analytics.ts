@@ -438,6 +438,13 @@ export interface CapacityAnalysis {
 }
 
 export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
+  // 鉴权 + 限速（2026-05-19 补，之前直接 new Anthropic 任何人可刷 API 配额）
+  const { guardAICall, logAICall } = await import('@/lib/ai/rate-limit');
+  const guard = await guardAICall('capacity_analysis');
+  if (!guard.ok) {
+    return { summary: guard.error || '限速触发', monthlyInsights: [], recommendations: [] };
+  }
+
   const distribution = await getShipmentDistribution();
   const dataStr = distribution.map(m => `${m.month}(${m.label}): 出厂${m.factoryDateCount}单/${m.totalQuantity}件 [完成${m.completedCount}/计划${m.plannedCount}] 下单${m.orderDateCount} 生产上线${m.productionCount} 客户${m.customers.length}家 工厂${m.factories.length}家`).join('\n');
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -445,6 +452,7 @@ export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
   const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   const prompt = `你是一位资深外贸服装生产管理顾问。以下是一家服装外贸公司的订单分布：\n\n${dataStr}\n\n当前日期：${new Date().toISOString().slice(0, 10)}（${currentMonth}月已过${dayOfMonth}/${daysInMonth}天）\n注意：当月数据是截至今日的，分析时请考虑月份进度。\n\n请分析：\n1. 对每个月给出产能状态（overload/normal/underload/empty）和一句话建议\n2. 总体排产形势（2-3句话）\n3. 3-5条行动建议（含：是否需要提前准备产能、哪些月可接加单、排产节奏、业务开发力度）\n\n返回JSON：{"summary":"...","monthlyInsights":[{"month":"2026-04","label":"4月","status":"normal","advice":"..."}],"recommendations":["..."]}\n只返回JSON。`;
 
+  const startedAt = Date.now();
   try {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const client = new Anthropic();
@@ -453,11 +461,15 @@ export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      logAICall('capacity_analysis', null, 'success', Date.now() - startedAt).catch(() => {});
       return { summary: parsed.summary || '分析完成',
         monthlyInsights: (parsed.monthlyInsights || []).map((i: any) => ({ month: i.month, label: i.label || i.month, status: i.status || 'normal', advice: i.advice || '' })),
         recommendations: parsed.recommendations || [] };
     }
-  } catch (err: any) { console.error('[getCapacityAIAnalysis]', err?.message); }
+  } catch (err: any) {
+    console.error('[getCapacityAIAnalysis]', err?.message);
+    logAICall('capacity_analysis', null, 'error', Date.now() - startedAt, err?.message?.slice(0, 200)).catch(() => {});
+  }
 
   const avgQty = distribution.reduce((s, m) => s + m.totalQuantity, 0) / Math.max(distribution.length, 1);
   return { summary: `平均每月出货 ${Math.round(avgQty)} 件。`,

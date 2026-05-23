@@ -989,7 +989,7 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
       const { count } = await (supabase.from('milestones') as any)
         .select('*', { count: 'exact', head: true })
         .in('order_id', orderIds)
-        .eq('status', '阻塞');
+        .eq('status', 'blocked');  // ⚠️ DB enum 是英文，之前写 '阻塞' 永远查不到 → 客户重复阻塞告警从未触发（2026-05-19 修）
       if (count != null && count >= 2) {
         await (supabase.from('customer_memory') as any).insert({
           customer_id: customerName,
