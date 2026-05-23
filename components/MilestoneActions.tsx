@@ -1210,12 +1210,16 @@ function CompletedFileUpload({ milestoneId, orderId, orderNo, stepKey, isProduct
 
   useEffect(() => {
     const supabase = createClient();
+    // 2026-05-19：加 .catch — supabase promise reject 时不至于 unhandled
     (supabase.from('order_attachments') as any)
       .select('id, file_name, file_url, file_type, created_at')
       .eq('order_id', orderId)
       .eq('milestone_id', milestoneId)
       .order('created_at', { ascending: false })
-      .then(({ data }: any) => setFiles(data || []));
+      .then(
+        ({ data }: any) => setFiles(data || []),
+        (err: any) => console.warn('[MilestoneActions] 附件加载失败:', err?.message),
+      );
   }, [milestoneId, orderId]);
 
   /** 上传前做命名检查，不符合规范时让用户选择是否改名 */

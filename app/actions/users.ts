@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
+import { friendlyError } from '@/lib/utils/db-error';
 
 export interface User {
   user_id: string;
@@ -24,7 +25,7 @@ export async function getAllUsers(): Promise<{ data: User[] | null; error: strin
     .order('email', { ascending: true });
 
   if (error) {
-    return { data: null, error: error.message };
+    return { data: null, error: friendlyError(error, '加载用户列表失败') };
   }
 
   return {
@@ -73,7 +74,7 @@ export async function updateUserRoles(
     .eq('user_id', targetUserId);
 
   if (error) {
-    return { error: error.message };
+    return { error: friendlyError(error, '更新用户角色失败') };
   }
 
   return { error: null };

@@ -10,6 +10,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import {
   computeOrderBusinessState,
@@ -114,7 +115,7 @@ export async function overrideBusinessControl(
     })
     .eq('order_id', orderId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
 
   // 写审计日志到 order_logs
   const fieldLabels: Record<string, string> = {

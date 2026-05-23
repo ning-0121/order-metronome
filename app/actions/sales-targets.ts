@@ -9,6 +9,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import {
@@ -64,7 +65,7 @@ export async function setCustomerTarget(
     .select()
     .single();
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
 
   revalidatePath('/sales-targets');
   revalidatePath('/ceo');
@@ -86,7 +87,7 @@ export async function deleteCustomerTarget(targetId: string): Promise<{ error?: 
     .delete()
     .eq('id', targetId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
   revalidatePath('/sales-targets');
   revalidatePath('/ceo');
   return {};
@@ -216,6 +217,6 @@ export async function listAllCustomersForTarget(): Promise<{
     .select('id, customer_name')
     .order('customer_name');
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
   return { data: data || [] };
 }

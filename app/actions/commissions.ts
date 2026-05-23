@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import { isDoneStatus } from '@/lib/domain/types';
 
@@ -329,7 +330,7 @@ export async function getOrderCommissions(orderId: string) {
     .select('*')
     .eq('order_id', orderId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
 
   // 关联用户名
   if (data && data.length > 0) {
