@@ -26,10 +26,15 @@ export function SmartInsightsPanel({ customerName, factoryName, orderType }: Pro
       return;
     }
     setLoading(true);
-    getSmartInsights({ customerName, factoryName, orderType }).then(res => {
-      setInsights(res.data);
-      setLoading(false);
-    });
+    // 2026-05-19：加 .catch — 之前网络错 / server crash 触发 unhandled
+    // promise rejection，UI 永远 loading 卡死。
+    getSmartInsights({ customerName, factoryName, orderType })
+      .then(res => setInsights(res.data || []))
+      .catch(err => {
+        console.warn('[SmartInsightsPanel] load failed:', err?.message);
+        setInsights([]);
+      })
+      .finally(() => setLoading(false));
   }, [customerName, factoryName, orderType]);
 
   if (!customerName && !factoryName) return null;

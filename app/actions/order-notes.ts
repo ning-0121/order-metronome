@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 
 export interface OrderNote {
@@ -27,7 +28,7 @@ export async function getOrderNotes(orderId: string): Promise<{ data?: OrderNote
     .eq('order_id', orderId)
     .order('created_at', { ascending: false });
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
   return { data: (data || []) as OrderNote[] };
 }
 
@@ -69,7 +70,7 @@ export async function addOrderNote(
     .select('*')
     .single();
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
 
   revalidatePath(`/orders/${orderId}`);
   return { data: data as OrderNote };
@@ -91,7 +92,7 @@ export async function deleteOrderNote(
     .delete()
     .eq('id', noteId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
 
   revalidatePath(`/orders/${orderId}`);
   return { success: true };

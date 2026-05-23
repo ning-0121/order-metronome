@@ -22,10 +22,12 @@ export function FactorySelect() {
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getFactories().then(({ data }) => {
-      setFactories(data || []);
-      setLoading(false);
-    });
+    // 2026-05-19：加 .catch — 之前 server crash 时 promise reject 后
+    // setLoading(false) 永不执行，下拉框永久 loading。
+    getFactories()
+      .then(({ data }) => setFactories(data || []))
+      .catch(err => console.warn('[FactorySelect] load failed:', err?.message))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {

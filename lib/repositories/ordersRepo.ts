@@ -372,6 +372,29 @@ export async function updateOrder(
     }
   }
 
+  // ── quantity / total_amount 守恒（2026-05-19）──
+  // 之前 quantity 和 total_amount 都在 UPDATE_WHITELIST 里独立可改，
+  // 无 total_amount = quantity × unit_price 校验。修了 quantity 后
+  // total_amount 不重算，财务报表错。
+  // 规则：
+  //   - 同时改 quantity + total_amount → 信任前端（业务可能在 UI 上一起改）
+  //   - 只改 quantity，不改 total_amount → 自动重算（从 DB 读 unit_price 算）
+  //   - 只改 unit_price → 自动重算 total_amount
+  if (
+    ('quantity' in sanitized && !('total_amount' in sanitized)) ||
+    ('unit_price' in sanitized && !('total_amount' in sanitized))
+  ) {
+    const { data: cur } = await (supabase.from('orders') as any)
+      .select('quantity, unit_price')
+      .eq('id', id)
+      .single();
+    const effQty = (sanitized.quantity ?? cur?.quantity) as number | null;
+    const effPrice = (sanitized.unit_price ?? cur?.unit_price) as number | null;
+    if (effQty != null && effPrice != null && !Number.isNaN(effQty) && !Number.isNaN(effPrice)) {
+      sanitized.total_amount = Math.round(effQty * effPrice * 100) / 100;
+    }
+  }
+
   // ── Lifecycle State Machine 校验（2026-05-18, P1）──
   // 禁止非法状态转移（如 completed → active 回滚）
   if (sanitized.lifecycle_status) {
@@ -806,8 +829,12 @@ export async function completeOrder(
   }
   
   // 更新订单：设置完成信息
+  // 2026-05-19：之前只设 termination_type='完成'，没更新 lifecycle_status
+  // → 订单可能处于「active + 已终止」混淆态，dashboard / cron / 查询
+  // 用 lifecycle_status 过滤的地方都看不到这单是 done。
   const updateData: any = {
     termination_type: '完成',
+    lifecycle_status: 'completed',
   };
   
   const { data: updated, error: updateError } = await (supabase

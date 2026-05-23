@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { friendlyError } from '@/lib/utils/db-error';
 import { isPendingStatus } from '@/lib/domain/types';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { revalidatePath } from 'next/cache';
@@ -55,7 +56,7 @@ export async function requestPriceApproval(payload: {
     .select('id')
     .single();
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
 
   // 推送到财务系统
   try {
@@ -111,7 +112,7 @@ export async function approvePriceApproval(
     })
     .eq('id', approvalId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error) };
 
   // ── 通知申请人 ──
   const requesterId = (row as any).requested_by;
