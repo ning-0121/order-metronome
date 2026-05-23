@@ -335,6 +335,12 @@ async function checkAndSendNotification(
 
 /**
  * Send blocked notification immediately when milestone is blocked
+ *
+ * ⚠️ 鉴权（2026-05-19 补）：之前是 'use server' 公开函数但内部假设只有
+ * markMilestoneBlocked 调用 → Next.js 自动生成 RPC 端点，外部登录用户
+ * 能用伪造的 milestoneId/orderId/reason 触发通知发送（钓鱼/骚扰）。
+ * 现在要求：登录 + 调用者必须能访问该 milestone（owner / order owner /
+ * admin），否则拒绝。
  */
 export async function sendBlockedNotification(
   milestoneId: string,
@@ -342,6 +348,34 @@ export async function sendBlockedNotification(
   blockedReason: string
 ) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  // 调用者必须对 milestone 有访问权限：admin / milestone.owner_user_id /
+  // order.created_by / order.owner_user_id 任一即可
+  const { data: callerProfile } = await supabase
+    .from('profiles').select('roles, role').eq('user_id', user.id).single();
+  const callerRoles: string[] = (callerProfile as any)?.roles?.length > 0
+    ? (callerProfile as any).roles
+    : [(callerProfile as any)?.role].filter(Boolean);
+  const isAdmin = callerRoles.includes('admin');
+  if (!isAdmin) {
+    const [{ data: msAccess }, { data: orderAccess }] = await Promise.all([
+      (supabase.from('milestones') as any).select('owner_user_id, order_id').eq('id', milestoneId).single(),
+      (supabase.from('orders') as any).select('created_by, owner_user_id').eq('id', orderId).single(),
+    ]);
+    if (!msAccess || msAccess.order_id !== orderId) {
+      return { error: 'milestone 与 orderId 不匹配' };
+    }
+    const allowed =
+      msAccess.owner_user_id === user.id ||
+      orderAccess?.created_by === user.id ||
+      orderAccess?.owner_user_id === user.id;
+    if (!allowed) {
+      console.warn('[sendBlockedNotification] unauthorized call', { userId: user.id, milestoneId, orderId });
+      return { error: '无权操作此节点' };
+    }
+  }
 
   // Get milestone
   const { data: milestone } = await supabase
@@ -488,21 +522,49 @@ export async function sendBlockedNotification(
 /**
  * 交期预警邮件：actual_at 超 due_at 超过 3 天时发送
  */
+/**
+ * ⚠️ 鉴权（2026-05-19）：同 sendBlockedNotification — 'use server' 公开函数
+ * 但只该被 updateMilestoneActualDate 内部调用；外部 RPC 端点需要堵
+ */
 export async function sendDeliveryDelayAlert(
   milestoneId: string,
   orderId: string,
   delayDays: number
 ) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: callerProfile } = await supabase
+    .from('profiles').select('roles, role').eq('user_id', user.id).single();
+  const callerRoles: string[] = (callerProfile as any)?.roles?.length > 0
+    ? (callerProfile as any).roles
+    : [(callerProfile as any)?.role].filter(Boolean);
+  const isAdmin = callerRoles.includes('admin');
 
   const { data: milestone } = await supabase
     .from('milestones').select('*').eq('id', milestoneId).single();
   if (!milestone) return { error: 'Milestone not found' };
   const m = milestone as any;
+  if (m.order_id !== orderId) {
+    return { error: 'milestone 与 orderId 不匹配' };
+  }
 
   const { data: order } = await supabase
     .from('orders').select('*').eq('id', orderId).single();
   if (!order) return { error: 'Order not found' };
+
+  // 鉴权：admin / milestone owner / order created_by / order owner_user_id
+  if (!isAdmin) {
+    const allowed =
+      m.owner_user_id === user.id ||
+      (order as any).created_by === user.id ||
+      (order as any).owner_user_id === user.id;
+    if (!allowed) {
+      console.warn('[sendDeliveryDelayAlert] unauthorized call', { userId: user.id, milestoneId, orderId });
+      return { error: '无权操作此节点' };
+    }
+  }
   const o = order as any;
 
   // 获取订单创建者邮箱

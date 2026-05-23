@@ -258,7 +258,13 @@ export async function askAgent(
       context.push(`系统共 ${total} 个订单，${active} 个进行中。`);
     }
 
+    // ═══ AI 限速（2026-05-19 补：之前 askAgent 是登录后无限刷的入口）═══
+    const { guardAICall, logAICall } = await import('@/lib/ai/rate-limit');
+    const guard = await guardAICall('agent_chat');
+    if (!guard.ok) return { answer: '', error: guard.error };
+
     // ═══ 调用 Claude（多轮对话 + Prompt Cache） ═══
+    const aiStartedAt = Date.now();
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const client = new Anthropic();
 
@@ -340,9 +346,11 @@ ${buildIndustryPrompt()}`;
     }
 
     const answer = response.content[0].type === 'text' ? response.content[0].text : '无法回答';
+    logAICall('agent_chat', null, 'success', Date.now() - aiStartedAt).catch(() => {});
     return { answer };
   } catch (err: any) {
     console.error('[askAgent]', err?.message);
+    logAICall('agent_chat', null, 'error', Date.now() - aiStartedAt, err?.message?.slice(0, 200)).catch(() => {});
     if (err?.message?.includes('credit') || err?.message?.includes('billing')) {
       return { answer: '', error: 'AI 服务余额不足，请联系管理员充值' };
     }

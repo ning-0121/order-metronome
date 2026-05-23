@@ -2,6 +2,7 @@
 
 import type { POParsedData, POStyleData, GarmentCategory } from './po-parser';
 import { MEASUREMENT_TEMPLATES } from '@/lib/domain/measurement-templates';
+import { createClient } from '@/lib/supabase/server';
 
 // ── 配色常量（对齐用户模板） ──
 const COLORS = {
@@ -16,6 +17,15 @@ const COLORS = {
 };
 
 export async function generateProductionOrder(data: POParsedData): Promise<{ ok: boolean; base64?: string; fileName?: string; error?: string }> {
+  // 鉴权：之前完全没检查，外部 POST 这个 server action 端点即可拿到含
+  // 客户/数量/交期的 Excel。2026-05-19 补登录 + 邮箱域名校验。
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '请先登录' };
+  if (!user.email?.endsWith('@qimoclothing.com')) {
+    return { ok: false, error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
+  }
+
   try {
     const ExcelJS = await import('exceljs');
     const workbook = new ExcelJS.default.Workbook();

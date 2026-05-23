@@ -187,6 +187,12 @@ export async function extractPOFromAttachment(
     let extractionTokens = 0;
     let extractError: string | null = null;
 
+    // AI 限速（2026-05-19 补）— extractPOFromAttachment 之前没限速
+    const { guardAICall, logAICall } = await import('@/lib/ai/rate-limit');
+    const guard = await guardAICall('po_extract', orderId);
+    if (!guard.ok) return { error: guard.error };
+
+    const aiStartedAt = Date.now();
     try {
       const Anthropic = (await import('@anthropic-ai/sdk')).default;
       const client = new Anthropic();
@@ -228,8 +234,10 @@ export async function extractPOFromAttachment(
         jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
       }
       extracted = JSON.parse(jsonStr) as ExtractedPO;
+      logAICall('po_extract', orderId, 'success', Date.now() - aiStartedAt).catch(() => {});
     } catch (err: any) {
       extractError = err?.message || 'AI提取失败';
+      logAICall('po_extract', orderId, 'error', Date.now() - aiStartedAt, extractError?.slice(0, 200)).catch(() => {});
     }
 
     // 写入数据库
