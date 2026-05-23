@@ -431,7 +431,11 @@ export async function transitionMilestoneStatus(
   const normalizedNextStatus = normalizeMilestoneStatus(nextStatus);
   
   // ⚠️ Gate 依赖检查：如果要进入"进行中"状态，检查依赖的 required Gate 是否已完成
-  if (normalizedNextStatus === '进行中') {
+  // 例外：从「阻塞」恢复到「进行中」是解锁动作，不应被 Gate 依赖挡 — 用户之前
+  // 能把它 block 说明节点本来就是活跃的，解锁只是恢复之前的状态，不是新启动。
+  // 2026-05-19：之前没区分这两个场景，导致 markMilestoneUnblocked 在有上游
+  // 强制 Gate 未完成时永久失败 → UI 显示锁住、无法处理。
+  if (normalizedNextStatus === '进行中' && currentStatus !== '阻塞') {
     const depCheck = await checkGateDependencies(supabase, milestone.order_id, milestone);
     if (!depCheck.canProceed) {
       return { error: depCheck.reason || '依赖的控制点尚未完成' };
@@ -457,13 +461,21 @@ export async function transitionMilestoneStatus(
   
   // 处理 notes
   let updatedNotes = milestone.notes;
-  
+
   if (normalizedNextStatus === '阻塞' && note) {
     // 阻塞状态：格式化原因到 notes
     updatedNotes = formatBlockedReasonToNotes(note, milestone.notes, false);
   } else if (note) {
-    // 其他状态：追加到 notes
-    updatedNotes = appendToNotes(milestone.notes, note, true);
+    // 从「阻塞」转出（解锁 / 完成）时，先剥掉 notes 里残留的「卡住原因：xxx」首行，
+    // 再把新 note 追加进去。否则解锁后 notes 还挂着卡住原因，UI 会继续展示
+    // 「🚧 阻塞说明」等历史信息让用户以为没解锁成功。2026-05-19。
+    let baseNotes = milestone.notes || '';
+    if (currentStatus === '阻塞') {
+      // formatBlockedReasonToNotes 的格式是「卡住原因：XXX」起头，可能后面跟 \n\n + 其他
+      // 剥掉首行的卡住原因
+      baseNotes = baseNotes.replace(/^卡住原因：[^\n]*(\n\n?|$)/, '').trim();
+    }
+    updatedNotes = appendToNotes(baseNotes || null, note, true);
   }
   
   // 更新状态：将中文状态转换为数据库枚举值
