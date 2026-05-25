@@ -136,7 +136,7 @@ export async function verifyPOAgainstOrder(
 
     const response = await client.messages.create(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: VERIFY_PROMPT,
         messages,
@@ -417,7 +417,7 @@ export async function verifyThreeDocuments(
     });
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1200,
       system: `你是服装外贸订单审核专家。请比对内部成本核算单、客户报价单和客户PO这三份文件。
 
