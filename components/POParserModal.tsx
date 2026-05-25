@@ -172,12 +172,19 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
     setData({ ...data, styles });
   };
 
+  const handleClose = () => {
+    if (step === 'preview' && data) {
+      const ok = window.confirm('确定关闭？当前填写的内容将会丢失。');
+      if (!ok) return;
+    }
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" />
       <div
         className="relative bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl flex items-center justify-between z-10">
@@ -191,7 +198,7 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
               {step === 'done' && '生产单已生成，点击下载'}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+          <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded-lg">
             <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
