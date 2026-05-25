@@ -186,6 +186,52 @@ ALTER TABLE orders ADD COLUMN xxx text;
 
 ---
 
+## ⚠️ 高风险操作铁律（2026-05-23 事故后追加）
+
+### 1. force-push 前置三步走（违反 = 100% 出事）
+
+**任何 `git push --force` / `--force-with-lease` 之前，必须按顺序执行：**
+
+```bash
+git fetch origin                          # 1. 拉远程最新
+git log --oneline HEAD..origin/main       # 2. 远程有什么本地没有？
+git log --oneline origin/main..HEAD       # 3. 本地有什么远程没有？
+```
+
+**判断规则**：
+- 如果远程有本地没有的 commit → **远程更新，本地是旧的**，绝不能 force-push 覆盖
+- 如果是 conventional commit 格式（`fix(scope):`、`feat(scope):` 带 PR 编号）→ **几乎肯定是远程被 PR 合入过新工作**，本地是滞后的快照
+- 如果两边的 message 风格差很多 → 立即停下，问用户，不要猜
+
+**历史案例（2026-05-23）**：本地 iCloud 副本滞后了 14 个 audit-r2 PR，我以为本地是新的、远程是别的版本，结果 force-push 把生产打回到 3 个月前的旧版本，76 个模块缺失。一定要查 fetch 再说。
+
+### 2. iCloud 禁区
+
+**git 仓库永远不要放在 `~/Library/Mobile Documents/`（iCloud Drive）下。**
+
+iCloud 会：
+- 创建 `main 2`、`file 2.ts` 这种带空格后缀的损坏文件
+- 同步延迟导致本地状态滞后于实际（上面那次事故的根本原因之一）
+- 锁定文件造成 git 操作偶发失败
+
+**正确位置**：`~/dev/order-metronome/`（或任何非云同步目录）。
+
+### 3. 双版本（绮陌自用 vs 商业 SaaS）启动规则
+
+**当前状态：只有绮陌自用版**，部署在 `ning-0121/order-metronome` → `order.qimoactivewear.com`。
+
+**如果未来要做商业版，必须按这个顺序：**
+
+1. **不要 fork 生产 main**。新开一个 GitHub repo（比如 `order-metronome-saas`），从生产某个稳定 tag clone 过来
+2. **不共用 Vercel 项目**。商业版独立 Vercel project，独立域名
+3. **绝不共用 Supabase**。商业版独立 Supabase project，独立 env vars。否则生产数据会被污染
+4. **package.json name 必须不一样**（`order-metronome` vs `order-metronome-saas`），CLAUDE.md 顶部加版本横幅，三处标识可立即区分
+5. **同步规则**：通用 bug / 安全 / 性能修复 双向 cherry-pick；绮陌专属（域名、客户名、邮箱后缀、SOP）只进绮陌版
+
+**未启动前不要乱建 saas 仓库**。事故前我就是因为脑子里有"双版本"的概念，看到 diverge 就想当然分流，结果搞反方向。要做就明确决策再做。
+
+---
+
 ## 环境变量清单
 
 ```env
