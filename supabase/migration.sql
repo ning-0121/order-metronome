@@ -2333,3 +2333,58 @@ CREATE POLICY "po_drafts_update_own" ON public.po_parse_drafts
   FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 CREATE POLICY "po_drafts_delete_own" ON public.po_parse_drafts
   FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+-- ===== 2026-05-26 delay_requests RLS 扩展：支持多角色系统 + 财务/生产主管可见 =====
+-- 问题：旧策略只查 profiles.role 单字段（值='admin'），但现在用户多通过 roles[] 数组授权。
+-- 表现：CEO/管理员看「待审批中心」时延期申请显示 0，但订单列表卡片明明有"延期待审批"徽章。
+-- 修复：SELECT 放开给 admin/production_manager/finance/admin_assistant（含 roles[] 数组）；
+--      UPDATE 放开给 admin/production_manager/production（与 pending-approvals.service.ts:82 一致）
+
+DROP POLICY IF EXISTS "delay_requests_select" ON public.delay_requests;
+CREATE POLICY "delay_requests_select" ON public.delay_requests
+  FOR SELECT USING (
+    -- 自己发起的延期申请
+    auth.uid() = requested_by
+    -- 节点所有人
+    OR EXISTS (
+      SELECT 1 FROM public.milestones m
+      WHERE m.id = delay_requests.milestone_id
+      AND m.owner_user_id = auth.uid()
+    )
+    -- 订单创建者（业务能看自己订单的所有延期）
+    OR EXISTS (
+      SELECT 1 FROM public.milestones m
+      JOIN public.orders o ON o.id = m.order_id
+      WHERE m.id = delay_requests.milestone_id
+      AND o.created_by = auth.uid()
+    )
+    -- 管理类角色（admin / production_manager / finance / admin_assistant）—— 单字段 OR 数组
+    OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.user_id = auth.uid()
+      AND (
+        p.role IN ('admin', 'production_manager', 'finance', 'admin_assistant')
+        OR (p.roles IS NOT NULL AND p.roles::text[] && ARRAY['admin','production_manager','finance','admin_assistant'])
+      )
+    )
+  );
+
+DROP POLICY IF EXISTS "delay_requests_update" ON public.delay_requests;
+CREATE POLICY "delay_requests_update" ON public.delay_requests
+  FOR UPDATE USING (
+    -- 节点所有人可改（撤回 / 补充材料）
+    EXISTS (
+      SELECT 1 FROM public.milestones m
+      WHERE m.id = delay_requests.milestone_id
+      AND m.owner_user_id = auth.uid()
+    )
+    -- 审批人：admin / production_manager / production —— 单字段 OR 数组
+    OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.user_id = auth.uid()
+      AND (
+        p.role IN ('admin', 'production_manager', 'production')
+        OR (p.roles IS NOT NULL AND p.roles::text[] && ARRAY['admin','production_manager','production'])
+      )
+    )
+  );
