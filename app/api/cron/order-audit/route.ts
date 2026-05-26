@@ -214,6 +214,15 @@ export async function POST(req: Request) {
           title: `📋 每日审计：${highCount} 个严重问题，${mediumCount} 个需关注`,
           message: `扫描 ${orders.length} 个订单，发现 ${issues.length} 个问题：\n${summary}${issues.length > 10 ? `\n...还有 ${issues.length - 10} 个问题` : ''}`,
           status: 'unread',
+          // 把全部 issues 存进 payload，点击通知后跳详情页展示完整列表
+          payload: {
+            scanned_at: now.toISOString(),
+            total_scanned: orders.length,
+            total_issues: issues.length,
+            high_count: highCount,
+            medium_count: mediumCount,
+            issues,
+          },
         });
       }
     }

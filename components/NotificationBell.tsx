@@ -96,6 +96,7 @@ export function NotificationBell() {
                   const targetUrl = n.related_order_id
                     ? `/orders/${n.related_order_id}?tab=progress`
                     : n.type === 'new_user' ? '/admin/users'
+                    : n.type === 'daily_audit' ? `/admin/audit-report?nid=${n.id}`
                     : null;
 
                   const content = (
