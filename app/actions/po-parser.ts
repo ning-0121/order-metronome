@@ -1,6 +1,12 @@
 'use server';
 
 import Anthropic from '@anthropic-ai/sdk';
+import { createClient } from '@/lib/supabase/server';
+
+/** 上传文件最大字节数：10MB。超过后拒绝读入内存。 */
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+/** 草稿恢复时间窗：超过此分钟数视为陈旧不展示。 */
+const DRAFT_FRESH_MINUTES = 30;
 
 export type GarmentCategory = 'pants' | 'tops' | 'dress' | 'outerwear' | 'other';
 
@@ -110,15 +116,27 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
   "confidence_notes": ["PO中未找到面料克重信息", "交期日期可能需要确认"]
 }`;
 
-export async function parsePO(formData: FormData): Promise<{ ok: boolean; data?: POParsedData; error?: string }> {
+export async function parsePO(
+  formData: FormData,
+  orderId?: string,
+): Promise<{ ok: boolean; data?: POParsedData; error?: string; draftId?: string }> {
   // 鉴权 + 配额：之前直接调 Anthropic，任何拿到 server action 端点的人都能刷
   // API 配额（按 Sonnet 4 价格一次几毛钱，一天可烧几百）
   const { guardAICall, logAICall } = await import('@/lib/ai/rate-limit');
-  const guard = await guardAICall('po_parse');
+  const guard = await guardAICall('po_parse', orderId);
   if (!guard.ok) return { ok: false, error: guard.error };
 
   const file = formData.get('file') as File | null;
   if (!file) return { ok: false, error: '请上传文件' };
+
+  // P0-3: 文件大小限制 —— 避免大文件 OOM + AI token 爆炸
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    return {
+      ok: false,
+      error: `文件 ${mb}MB 超出 ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB 上限。请压缩后重传，或拍图上传。`,
+    };
+  }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: 'AI 服务未配置，请联系管理员' };
@@ -195,19 +213,160 @@ export async function parsePO(formData: FormData): Promise<{ ok: boolean; data?:
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     }
 
-    const parsed: POParsedData = JSON.parse(jsonStr);
-    logAICall('po_parse', null, 'success', Date.now() - startedAt).catch(() => {});
-    return { ok: true, data: parsed };
+    // P1-4: JSON.parse 单独 try/catch — 否则 Claude 偶尔返回带前导文字的 JSON
+    // 整体被吞进 catch-all，用户看到的是莫名其妙的 "Unexpected token"
+    let parsed: POParsedData;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      const snippet = jsonStr.slice(0, 300);
+      console.error('[parsePO] JSON parse failed, raw:', snippet);
+      logAICall('po_parse', orderId || null, 'error', Date.now() - startedAt,
+        `JSON parse failed: ${snippet}`).catch(() => {});
+      return {
+        ok: false,
+        error: 'AI 返回格式异常，已记录。请重试或换张更清晰的图片/PDF。',
+      };
+    }
+
+    logAICall('po_parse', orderId || null, 'success', Date.now() - startedAt).catch(() => {});
+
+    // P0-1: 解析成功后落库，防关闭/刷新丢数据
+    const draftId = await savePOParseDraft(orderId, file.name, file.size, parsed).catch((e) => {
+      console.warn('[parsePO] save draft failed (non-blocking):', e?.message);
+      return undefined;
+    });
+
+    return { ok: true, data: parsed, draftId };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[parsePO] Error:', message);
     const isTimeout = err instanceof Error && (err.name === 'AbortError' || message.includes('abort'));
-    logAICall('po_parse', null, isTimeout ? 'timeout' : 'error', Date.now() - startedAt, message.slice(0, 200)).catch(() => {});
+    logAICall('po_parse', orderId || null, isTimeout ? 'timeout' : 'error', Date.now() - startedAt, message.slice(0, 200)).catch(() => {});
     if (message.includes('credit balance') || message.includes('billing')) {
       return { ok: false, error: 'AI 服务余额不足，请联系管理员充值 Anthropic API 额度。' };
     }
     return { ok: false, error: `解析失败：${message}` };
   }
+}
+
+// ──────────────────────────────────────────────────────────
+// P0-1: 草稿持久化（po_parse_drafts 表）
+// ──────────────────────────────────────────────────────────
+
+/**
+ * 内部辅助：把解析结果存入草稿表。返回 draftId。
+ * RLS 已保证 user_id 必须 = auth.uid()，service-role 不在此用，走 user session。
+ */
+async function savePOParseDraft(
+  orderId: string | undefined,
+  fileName: string,
+  fileSize: number,
+  parsedJson: POParsedData,
+): Promise<string | undefined> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return undefined;
+  const { data, error } = await (supabase.from('po_parse_drafts') as any)
+    .insert({
+      user_id: user.id,
+      order_id: orderId || null,
+      file_name: fileName,
+      file_size_bytes: fileSize,
+      parsed_json: parsedJson,
+    })
+    .select('id')
+    .single();
+  if (error) {
+    console.warn('[savePOParseDraft] insert failed:', error.message);
+    return undefined;
+  }
+  return data?.id;
+}
+
+/**
+ * Server Action：取当前用户在此订单上最近 30 分钟内的草稿（最新一条）。
+ * 用于 Modal 打开时检测"是否有未完成的解析草稿"。
+ */
+export async function getRecentPOParseDraft(orderId: string): Promise<{
+  ok: boolean;
+  draft?: {
+    id: string;
+    parsed_json: POParsedData;
+    file_name: string | null;
+    age_minutes: number;
+  };
+  error?: string;
+}> {
+  if (!orderId) return { ok: false, error: 'orderId 不能为空' };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '未登录' };
+
+  const cutoff = new Date(Date.now() - DRAFT_FRESH_MINUTES * 60 * 1000).toISOString();
+  const { data, error } = await (supabase.from('po_parse_drafts') as any)
+    .select('id, parsed_json, file_name, updated_at')
+    .eq('user_id', user.id)
+    .eq('order_id', orderId)
+    .gte('updated_at', cutoff)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[getRecentPOParseDraft] query failed:', error.message);
+    return { ok: false, error: error.message };
+  }
+  if (!data) return { ok: true };
+
+  const ageMs = Date.now() - new Date(data.updated_at).getTime();
+  return {
+    ok: true,
+    draft: {
+      id: data.id,
+      parsed_json: data.parsed_json,
+      file_name: data.file_name,
+      age_minutes: Math.round(ageMs / 60000),
+    },
+  };
+}
+
+/**
+ * Server Action：用户在 preview 中编辑后关闭 Modal 时调用，把当前状态盖回草稿。
+ */
+export async function updatePOParseDraft(
+  draftId: string,
+  parsedJson: POParsedData,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!draftId) return { ok: false, error: 'draftId 不能为空' };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '未登录' };
+
+  const { error } = await (supabase.from('po_parse_drafts') as any)
+    .update({ parsed_json: parsedJson, updated_at: new Date().toISOString() })
+    .eq('id', draftId)
+    .eq('user_id', user.id); // RLS 已保护，这里双保险
+  if (error) {
+    console.warn('[updatePOParseDraft] update failed:', error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
+/**
+ * Server Action：生成 Excel 成功 / 用户主动丢弃草稿时调用。
+ */
+export async function deletePOParseDraft(draftId: string): Promise<{ ok: boolean }> {
+  if (!draftId) return { ok: false };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+  await (supabase.from('po_parse_drafts') as any)
+    .delete()
+    .eq('id', draftId)
+    .eq('user_id', user.id);
+  return { ok: true };
 }
 
 async function excelToText(buffer: Buffer, fileName: string): Promise<string> {

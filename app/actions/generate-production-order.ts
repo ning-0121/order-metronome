@@ -16,7 +16,10 @@ const COLORS = {
   WHITE_TEXT: 'FFFFFFFF',
 };
 
-export async function generateProductionOrder(data: POParsedData): Promise<{ ok: boolean; base64?: string; fileName?: string; error?: string }> {
+export async function generateProductionOrder(
+  data: POParsedData,
+  options?: { orderId?: string; draftId?: string },
+): Promise<{ ok: boolean; base64?: string; fileName?: string; error?: string }> {
   // 鉴权：之前完全没检查，外部 POST 这个 server action 端点即可拿到含
   // 客户/数量/交期的 Excel。2026-05-19 补登录 + 邮箱域名校验。
   const supabase = await createClient();
@@ -370,6 +373,17 @@ export async function generateProductionOrder(data: POParsedData): Promise<{ ok:
     const xlsxBuffer = await workbook.xlsx.writeBuffer();
     const base64 = Buffer.from(xlsxBuffer).toString('base64');
     const fileName = `${data.order_no}_生产单_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    // P0-1: 成功生成 Excel 后清掉草稿（数据已经下载到用户手里了，草稿失去意义）
+    if (options?.draftId) {
+      await (supabase.from('po_parse_drafts') as any)
+        .delete()
+        .eq('id', options.draftId)
+        .eq('user_id', user.id)
+        .then(({ error }: { error: any }) => {
+          if (error) console.warn('[generateProductionOrder] cleanup draft failed:', error.message);
+        });
+    }
 
     return { ok: true, base64, fileName };
   } catch (err: unknown) {

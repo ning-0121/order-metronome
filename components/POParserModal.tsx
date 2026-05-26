@@ -1,7 +1,15 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { parsePO, type POParsedData, type POStyleData, type GarmentCategory } from '@/app/actions/po-parser';
+import { useState, useRef, useEffect } from 'react';
+import {
+  parsePO,
+  getRecentPOParseDraft,
+  updatePOParseDraft,
+  deletePOParseDraft,
+  type POParsedData,
+  type POStyleData,
+  type GarmentCategory,
+} from '@/app/actions/po-parser';
 import { generateProductionOrder } from '@/app/actions/generate-production-order';
 import { MEASUREMENT_TEMPLATES } from '@/lib/domain/measurement-templates';
 
@@ -42,7 +50,41 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
   const [downloadUrl, setDownloadUrl] = useState('');
   const [downloadName, setDownloadName] = useState('');
   const [fileName, setFileName] = useState('');
+  /** P0-1: 当前 AI 解析结果对应的草稿 ID。manual 流程为 null。 */
+  const [draftId, setDraftId] = useState<string | null>(null);
+  /** P0-1: 进 Modal 时检测到的可恢复草稿（30 分钟内）。null = 没有 / 已处理。 */
+  const [draftBanner, setDraftBanner] = useState<{
+    id: string;
+    parsed_json: POParsedData;
+    file_name: string | null;
+    age_minutes: number;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // P0-1: Modal 打开时检查是否有未完成的草稿
+  useEffect(() => {
+    if (!orderId) return;
+    let cancelled = false;
+    getRecentPOParseDraft(orderId).then((res) => {
+      if (cancelled) return;
+      if (res.ok && res.draft) setDraftBanner(res.draft);
+    });
+    return () => { cancelled = true; };
+  }, [orderId]);
+
+  const handleRestoreDraft = () => {
+    if (!draftBanner) return;
+    setData(draftBanner.parsed_json);
+    setDraftId(draftBanner.id);
+    setStep('preview');
+    setDraftBanner(null);
+  };
+
+  const handleDiscardDraft = () => {
+    if (!draftBanner) return;
+    void deletePOParseDraft(draftBanner.id);
+    setDraftBanner(null);
+  };
 
   const handleManualStart = () => {
     setData(JSON.parse(JSON.stringify(EMPTY_DATA)));
@@ -58,13 +100,14 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
     const formData = new FormData();
     formData.append('file', file);
 
-    const result = await parsePO(formData);
+    const result = await parsePO(formData, orderId);
     if (!result.ok || !result.data) {
       setError(result.error || '解析失败');
       setStep('upload');
       return;
     }
     setData(result.data);
+    if (result.draftId) setDraftId(result.draftId);
     setStep('preview');
   };
 
@@ -72,25 +115,26 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
     if (!data) return;
     setStep('generating');
 
-    const result = await generateProductionOrder(data);
+    const result = await generateProductionOrder(data, {
+      orderId,
+      draftId: draftId || undefined,
+    });
     if (!result.ok || !result.base64) {
       setError(result.error || '生成失败');
       setStep('preview');
       return;
     }
 
-    // Create download link
-    const byteChars = atob(result.base64);
-    const byteNumbers = new Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) {
-      byteNumbers[i] = byteChars.charCodeAt(i);
-    }
-    const blob = new Blob([new Uint8Array(byteNumbers)], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
+    // P1-5: 一行替换原本的 for 循环逐字节构造，主线程不再卡顿
+    const blob = new Blob(
+      [Uint8Array.from(atob(result.base64), (c) => c.charCodeAt(0))],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    );
     const url = URL.createObjectURL(blob);
     setDownloadUrl(url);
     setDownloadName(result.fileName || '生产单.xlsx');
+    // 草稿已经在 server action 里删过，前端清掉 id 避免后续误操作
+    setDraftId(null);
     setStep('done');
   };
 
@@ -174,8 +218,16 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
 
   const handleClose = () => {
     if (step === 'preview' && data) {
-      const ok = window.confirm('确定关闭？当前填写的内容将会丢失。');
+      // 如果是 AI 流程且已有 draftId，可以把当前编辑状态保存为草稿；否则就真丢
+      const msg = draftId
+        ? '关闭弹窗？当前编辑会自动保存为草稿，30 分钟内可恢复。'
+        : '确定关闭？当前填写的内容将会丢失（手动填写模式不保存草稿）。';
+      const ok = window.confirm(msg);
       if (!ok) return;
+      if (draftId && data) {
+        // fire-and-forget；用户已经选择关闭，不阻塞 UI
+        void updatePOParseDraft(draftId, data);
+      }
     }
     onClose();
   };
@@ -211,6 +263,34 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
             <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
           )}
 
+          {/* P0-1: 草稿恢复 banner — 在 upload 步骤显示，避免覆盖正在进行的工作 */}
+          {step === 'upload' && draftBanner && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm text-amber-900">
+                  <p className="font-medium">📝 发现 {draftBanner.age_minutes} 分钟前的未完成草稿</p>
+                  {draftBanner.file_name && (
+                    <p className="text-xs text-amber-700 mt-0.5">来自文件：{draftBanner.file_name}</p>
+                  )}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={handleRestoreDraft}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 hover:bg-amber-700 text-white"
+                  >
+                    恢复编辑
+                  </button>
+                  <button
+                    onClick={handleDiscardDraft}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-700 hover:bg-amber-100"
+                  >
+                    开始新的
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Step 1: Upload or Manual */}
           {step === 'upload' && (
             <div className="space-y-4">
@@ -244,7 +324,7 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
                     <label htmlFor="po-file-input" className="cursor-pointer">
                       <div className="text-4xl mb-3">📄</div>
                       <p className="text-sm font-medium text-gray-700">点击上传客户 PO</p>
-                      <p className="text-xs text-gray-500 mt-1">支持 Excel、PDF、图片（拍照/扫描）</p>
+                      <p className="text-xs text-gray-500 mt-1">支持 Excel、PDF、图片（拍照/扫描），最大 10MB</p>
                     </label>
                     {fileName && (
                       <p className="mt-3 text-sm text-indigo-600 font-medium">

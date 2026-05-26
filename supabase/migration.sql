@@ -2294,3 +2294,37 @@ SET storage_path = regexp_replace(
 WHERE storage_path IS NULL
   AND file_url IS NOT NULL
   AND file_url LIKE '%/storage/v1/object/public/%';
+
+-- ===== 2026-05-25 po_parse_drafts（PO AI 解析草稿，防关闭/刷新丢数据）=====
+-- 业务背景：parsePO 调用花钱（~0.5 RMB/次），但解析结果原本只存在客户端 React state，
+-- 用户刷新/断网/误关 Modal 后全部丢失，必须重传文件重新付费。
+-- 现在解析成功后落库，Modal 重开时若有 30 分钟内的草稿可一键恢复。
+CREATE TABLE IF NOT EXISTS public.po_parse_drafts (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  order_id        uuid REFERENCES public.orders(id) ON DELETE CASCADE,
+  file_name       text,
+  file_size_bytes int,
+  parsed_json     jsonb NOT NULL,
+  -- 24 小时后认为过期；前端只展示 30 分钟内的，剩下的留作审计
+  expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_po_drafts_user_order_updated
+  ON public.po_parse_drafts(user_id, order_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_po_drafts_expires
+  ON public.po_parse_drafts(expires_at);
+
+ALTER TABLE public.po_parse_drafts ENABLE ROW LEVEL SECURITY;
+
+-- 每人只能看 / 写自己的草稿
+CREATE POLICY "po_drafts_select_own" ON public.po_parse_drafts
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY "po_drafts_insert_own" ON public.po_parse_drafts
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY "po_drafts_update_own" ON public.po_parse_drafts
+  FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY "po_drafts_delete_own" ON public.po_parse_drafts
+  FOR DELETE TO authenticated USING (user_id = auth.uid());
