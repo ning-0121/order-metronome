@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { calcDueDates } from '@/lib/schedule';
 import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
@@ -366,10 +366,33 @@ async function approveDelayRequestCore(
   decisionNote?: string,
 ): Promise<ActionResult<any>> {
   try {
-  const supabase = await createClient();
+  // 用户会话客户端 — 用于鉴权（auth.getUser + 角色读取）
+  const userClient = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await userClient.auth.getUser();
   if (!user) return failure('Unauthorized', 'AUTH_REQUIRED');
+
+  // 权限：仅管理员可审批延期 — 这一步用 user session（profiles 走 RLS）
+  const { data: profile } = await userClient
+    .from('profiles')
+    .select('role, roles')
+    .eq('user_id', user.id)
+    .single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const isAdmin = isAdminRole(userRoles);
+  // 2026-05-18 CEO 决策：所有延期申请一律由 CEO/admin 审批，不分级。
+  if (!isAdmin) return failure('延期审批权属 CEO，仅管理员可批准。请联系管理员处理。', 'PERMISSION_DENIED');
+
+  // 鉴权通过后，所有数据操作用 service-role 客户端 — 绕过 delay_requests RLS 的
+  // 多角色 / 老策略残留问题（2026-05-26 事故）。
+  // 不可用时降级到 user session（开发环境可能没配 SUPABASE_SERVICE_ROLE_KEY）。
+  let supabase: any;
+  try {
+    supabase = createServiceRoleClient();
+  } catch (e: any) {
+    console.warn('[approveDelayRequest] service-role 不可用，降级 user session:', e?.message);
+    supabase = userClient;
+  }
 
   // Get delay request
   const { data: delayRequest } = await supabase
@@ -408,19 +431,6 @@ async function approveDelayRequestCore(
 
   const orderData = order as any;
   const milestoneData = milestone as any;
-
-  // 权限：仅管理员可审批延期（审批权集中在管理层，避免自己审批自己）
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, roles')
-    .eq('user_id', user.id)
-    .single();
-  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdmin = isAdminRole(userRoles);
-
-  // 2026-05-18 CEO 决策：所有延期申请一律由 CEO/admin 审批，不分级。
-  // 业务理由：延期直接影响交期承诺，必须 CEO 拍板，避免中层审批失真。
-  if (!isAdmin) return failure('延期审批权属 CEO，仅管理员可批准。请联系管理员处理。', 'PERMISSION_DENIED');
 
   // Update delay request
   const updatePayload: any = {
@@ -1203,8 +1213,14 @@ export async function bulkApproveAllPendingDelays(
     return { ok: false, approved: 0, failed: 0, total: 0, message: '仅管理员可批准延期申请' };
   }
 
-  // 拉所有 pending 延期申请（RLS 已保证 admin 可见全部）
-  const { data: pendingRows, error: queryError } = await (supabase
+  // 拉所有 pending 延期申请 — 用 service-role 绕过 RLS（admin 已校验过）
+  let queryClient: any = supabase;
+  try {
+    queryClient = createServiceRoleClient();
+  } catch (e: any) {
+    console.warn('[bulkApprove] service-role 不可用，降级 user session:', e?.message);
+  }
+  const { data: pendingRows, error: queryError } = await (queryClient
     .from('delay_requests') as any)
     .select('id')
     .eq('status', 'pending')

@@ -13,6 +13,27 @@
  */
 
 import type { ServiceResult } from './types';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+
+/**
+ * 当用户是 admin 时返回 service-role 客户端绕过 RLS。
+ *
+ * 业务理由：本页面已在 page-level 做了 admin 角色校验（pending-approvals/page.tsx:40），
+ * service 内部再过一次 RLS 反而会因为多角色策略不全 / 老策略残留导致 admin 看不到自己有权处理的项。
+ * 已经发生过事故（2026-05-26 alex 是 DB role=admin，但「延期申请」仍显示 0），
+ * 改成 admin 路径直接用 service-role，保证看得到所有数据；非 admin 仍走 RLS。
+ */
+function clientFor(ctx: UserContext, fallback: any): any {
+  if (ctx.roles?.includes('admin')) {
+    try {
+      return createServiceRoleClient();
+    } catch (e: any) {
+      console.warn('[pending-approvals] service-role 不可用，降级到 user session:', e?.message);
+      return fallback;
+    }
+  }
+  return fallback;
+}
 
 // ── 类型 ──────────────────────────────────────────────────────
 
@@ -73,7 +94,8 @@ async function collectDelayRequests(
   supabase: any,
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
-  const { data } = await (supabase.from('delay_requests') as any)
+  const client = clientFor(ctx, supabase);
+  const { data } = await (client.from('delay_requests') as any)
     .select('id, order_id, reason, days_delay, status, created_at, requested_by, orders(order_no, customer_name)')
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
