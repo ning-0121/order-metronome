@@ -63,5 +63,46 @@ export async function GET() {
     report.service_role_create_error = e?.message;
   }
 
+  // 5. 完整复现页面查询 — 带 orders() 嵌套 join
+  try {
+    const sr = createServiceRoleClient();
+    const { data: fullRows, error: fullErr } = await (sr
+      .from('delay_requests') as any)
+      .select('id, order_id, reason, days_delay, status, created_at, requested_by, orders(order_no, customer_name)')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(100);
+    report.full_query_count = fullRows?.length ?? null;
+    report.full_query_error = fullErr?.message ?? null;
+    report.full_query_first_row = fullRows?.[0] ?? null;
+  } catch (e: any) {
+    report.full_query_exception = e?.message;
+  }
+
+  // 6. 直接调真实的 getPendingApprovals 函数
+  try {
+    const { getPendingApprovals } = await import('@/lib/services/pending-approvals.service');
+    const userClient = await createClient();
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) {
+      const { data: profile } = await (userClient.from('profiles') as any)
+        .select('role, roles').eq('user_id', user.id).single();
+      const roles: string[] = (profile as any)?.roles?.length > 0
+        ? (profile as any).roles
+        : [(profile as any)?.role].filter(Boolean);
+      const result = await getPendingApprovals(userClient, { userId: user.id, roles });
+      report.service_result = {
+        ok: result.ok,
+        error: (result as any).error,
+        delay_count: result.ok ? result.data.byCategory.delay : null,
+        total: result.ok ? result.data.total : null,
+        by_category: result.ok ? result.data.byCategory : null,
+      };
+    }
+  } catch (e: any) {
+    report.service_exception = e?.message;
+    report.service_stack = e?.stack?.slice(0, 500);
+  }
+
   return NextResponse.json(report, { status: 200 });
 }
