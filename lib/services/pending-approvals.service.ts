@@ -100,7 +100,7 @@ async function collectDelayRequests(
   // 但 delay_requests 表没声明 FK 到 orders（或 schema cache 不认），整个查询
   // fail 返回 null → 显示 0。改成两次独立查询。
   const { data: delays, error: delaysError } = await (client.from('delay_requests') as any)
-    .select('id, order_id, reason, days_delay, status, created_at, requested_by')
+    .select('id, order_id, reason, delay_days, status, created_at, requested_by')
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
     .limit(100);
@@ -130,7 +130,7 @@ async function collectDelayRequests(
     return {
       id: r.id,
       category: 'delay' as ApprovalCategory,
-      title: `${order?.order_no || '?'} 申请延期 ${r.days_delay || '?'} 天`,
+      title: `${order?.order_no || '?'} 申请延期 ${r.delay_days || '?'} 天`,
       subtitle: r.reason ? r.reason.slice(0, 50) : undefined,
       orderId: r.order_id,
       orderNo: order?.order_no,
