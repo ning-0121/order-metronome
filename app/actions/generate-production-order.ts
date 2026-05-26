@@ -70,19 +70,23 @@ export async function generateProductionOrder(
       const sheetName = uniqueSheetName(style.style_no);
       const sheet = workbook.addWorksheet(sheetName);
 
-      const sizeStartCol = 5;
-      const packagingCol = sizeStartCol + sizeLabels.length;
-      const colorNoteCol = packagingCol + 1;
-      const totalCols = colorNoteCol;
+      // 新列顺序：款号 | 主布颜色 | 箱数 | 数量 | [S/M/L/XL...] | 客户包装 | 图片
+      // 去掉了「款式描述」（品名已在表头），数量挪到尺码前
+      const boxCol = 3;        // 箱数
+      const qtyCol = 4;        // 数量
+      const sizeStartCol = 5;  // S 列起点
+      const packagingCol = sizeStartCol + sizeLabels.length;  // 客户包装
+      const imageCol = packagingCol + 1;                       // 图片
+      const totalCols = imageCol;
 
       sheet.columns = [
         { width: 14 }, // A: 款号
-        { width: 14 }, // B: 大身颜色
-        { width: 14 }, // C: 款式描述
-        { width: 8 },  // D: 箱数
-        ...sizeLabels.map(() => ({ width: 8 })), // sizes
-        { width: 8 },  // 数量
-        { width: 10 }, // 图片（预留）
+        { width: 14 }, // B: 主布颜色
+        { width: 8 },  // C: 箱数
+        { width: 10 }, // D: 数量
+        ...sizeLabels.map(() => ({ width: 7 })), // E..: 尺码
+        { width: 24 }, // 客户包装
+        { width: 10 }, // 图片
       ];
 
       // 辅助函数
@@ -146,94 +150,91 @@ export async function generateProductionOrder(
       row++;
 
       // Row 6: 表格表头（深绿背景白字）
-      const headers = ['款号', '大身颜色', '款式描述', '箱数', ...sizeLabels.map(() => ''), '数量', '图片'];
-      // 先写固定标签
-      const headerLabels = ['款号', '大身颜色', '款式描述', '箱数'];
-      headerLabels.forEach((h, i) => {
-        const cell = sheet.getCell(row, i + 1);
-        cell.value = h;
+      const greenHeader = (col: number, text: string) => {
+        const cell = sheet.getCell(row, col);
+        cell.value = text;
         cell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.WHITE_TEXT } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.GREEN_HEADER } };
         cell.border = thinBorder;
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      });
-      // 数量列头
-      const qtyHeaderCol = sizeStartCol + sizeLabels.length;
-      const qtyCell = sheet.getCell(row, qtyHeaderCol);
-      qtyCell.value = '数量';
-      qtyCell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.WHITE_TEXT } };
-      qtyCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.GREEN_HEADER } };
-      qtyCell.border = thinBorder;
-      qtyCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      // 尺码列头
-      sizeLabels.forEach((sz, si) => {
-        const cell = sheet.getCell(row, sizeStartCol + si);
-        cell.value = sz;
-        cell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.WHITE_TEXT } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.GREEN_HEADER } };
-        cell.border = thinBorder;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      });
-      // 图片列头
-      const imgCell = sheet.getCell(row, qtyHeaderCol + 1);
-      imgCell.value = '图片';
-      imgCell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.WHITE_TEXT } };
-      imgCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.GREEN_HEADER } };
-      imgCell.border = thinBorder;
-      imgCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      };
+      greenHeader(1, '款号');
+      greenHeader(2, '主布颜色');
+      greenHeader(boxCol, '箱数');
+      greenHeader(qtyCol, '数量');
+      sizeLabels.forEach((sz, si) => greenHeader(sizeStartCol + si, sz));
+      greenHeader(packagingCol, '客户包装');
+      greenHeader(imageCol, '图片');
       row++;
 
       // Data rows
       const dataStartRow = row;
       style.colors.forEach((color, ci) => {
         setValue(row, 1, ci === 0 ? str(style.style_no) : '');
-        setValue(row, 2, `${str(color.color_en)} ${str(color.color_cn)}`.trim());
-        setValue(row, 3, ci === 0 ? str(style.product_name) : '');
-        const boxes = Math.ceil(color.qty / 48);
-        setValue(row, 4, boxes);
+        // 主布颜色：中文 + 英文括号
+        const colorText = color.color_cn && color.color_en
+          ? `${str(color.color_cn)}（${str(color.color_en)}）`
+          : str(color.color_cn) || str(color.color_en);
+        setValue(row, 2, colorText);
 
+        const boxes = Math.ceil(color.qty / 48);
+        setValue(row, boxCol, boxes);
+
+        // 数量先放（红字突出）
+        const qtyValueCell = sheet.getCell(row, qtyCol);
+        qtyValueCell.value = color.qty;
+        qtyValueCell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.RED_TEXT } };
+        qtyValueCell.border = thinBorder;
+        qtyValueCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        // 尺码配比
         sizeLabels.forEach((sz, si) => {
-          setValue(row, sizeStartCol + si, color.sizes[sz] || 0);
+          setValue(row, sizeStartCol + si, color.sizes?.[sz] || 0);
         });
 
-        setValue(row, qtyHeaderCol, color.qty);
-        // 图片列空
-        sheet.getCell(row, qtyHeaderCol + 1).border = thinBorder;
+        // 客户包装：优先用色级 packaging，否则空
+        setValue(row, packagingCol, str(color.packaging));
+        sheet.getCell(row, packagingCol).alignment = { vertical: 'middle', wrapText: true, horizontal: 'left' };
+
+        // 图片列空但带边框
+        sheet.getCell(row, imageCol).border = thinBorder;
 
         row++;
       });
 
-      // Total row（黄底红字）
+      // Total row（黄底）— 箱数和数量都算合计
       const totalRow = row;
       setLabel(totalRow, 1, '总计');
-      sheet.mergeCells(totalRow, 1, totalRow, 3);
-      for (let c = 4; c <= qtyHeaderCol + 1; c++) {
-        sheet.getCell(totalRow, c).border = thinBorder;
-        sheet.getCell(totalRow, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
-      }
-      const totalQtyCell = sheet.getCell(totalRow, qtyHeaderCol);
+      sheet.mergeCells(totalRow, 1, totalRow, 2);
+      // 总箱数
+      const totalBoxes = style.colors.reduce((s, c) => s + Math.ceil(c.qty / 48), 0);
+      const totalBoxesCell = sheet.getCell(totalRow, boxCol);
+      totalBoxesCell.value = totalBoxes;
+      totalBoxesCell.font = { name: FONT_NAME, size: 11, bold: true, color: { argb: COLORS.RED_TEXT } };
+      totalBoxesCell.border = thinBorder;
+      totalBoxesCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
+      totalBoxesCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      // 总数量
+      const totalQtyCell = sheet.getCell(totalRow, qtyCol);
       totalQtyCell.value = style.total_qty;
       totalQtyCell.font = { name: FONT_NAME, size: 11, bold: true, color: { argb: COLORS.RED_TEXT } };
+      totalQtyCell.border = thinBorder;
+      totalQtyCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
       totalQtyCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      row += 2;
-
-      // 面料信息高亮行（黄底）
-      if (style.fabric_weight || style.material) {
-        const fabricInfo = `${style.fabric_weight || ''} 单耗：待填`.trim();
-        const fabricCell = sheet.getCell(row, 1);
-        fabricCell.value = fabricInfo;
-        fabricCell.font = { name: FONT_NAME, size: 10, bold: true };
-        fabricCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
-        sheet.mergeCells(row, 1, row, qtyHeaderCol + 1);
-        row += 2;
+      // 其余列填黄底
+      for (let c = sizeStartCol; c <= imageCol; c++) {
+        const cell = sheet.getCell(totalRow, c);
+        cell.border = thinBorder;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
       }
+      row += 2;
 
       // 产前样 / 船样要求
       setLabel(row, 1, '');
       setValue(row, 2, '交样时间');
       sheet.getCell(row, 2).font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
-      setValue(row, qtyHeaderCol - 1, '要求');
-      sheet.getCell(row, qtyHeaderCol - 1).font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
+      setValue(row, packagingCol, '要求');
+      sheet.getCell(row, packagingCol).font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
       row++;
 
       setValue(row, 1, '产前样');
@@ -243,13 +244,31 @@ export async function generateProductionOrder(
       setValue(row, 1, '船样');
       sheet.getCell(row, 1).font = { name: FONT_NAME, size: 10, bold: true };
       if (style.sample_requirements) {
-        setValue(row, qtyHeaderCol - 1, style.sample_requirements);
+        setValue(row, packagingCol, style.sample_requirements);
       }
       row += 2;
 
+      // 单件用量行（黄底居中，款式评语上方）— 用户标注: "款式评语上方增加一列单件用量"
+      // 优先用 style.unit_consumption（AI 解析或手填），否则用 fabric_weight 兜底
+      const consumptionText = style.unit_consumption?.trim()
+        ? style.unit_consumption.trim()
+        : style.fabric_weight
+        ? `${style.fabric_weight} 单耗：待填`
+        : '';
+      if (consumptionText) {
+        const consCell = sheet.getCell(row, 1);
+        consCell.value = consumptionText;
+        consCell.font = { name: FONT_NAME, size: 11, bold: true, color: { argb: COLORS.NAVY_TEXT } };
+        consCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
+        consCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        sheet.mergeCells(row, 1, row, imageCol);
+        sheet.getRow(row).height = 22;
+        row++;
+      }
+
       // 款式评语
       setLabel(row, 1, '款式评语');
-      sheet.mergeCells(row, 1, row, qtyHeaderCol + 1);
+      sheet.mergeCells(row, 1, row, imageCol);
       row++;
 
       if (style.quality_notes) {
@@ -257,7 +276,7 @@ export async function generateProductionOrder(
         notesCell.value = style.quality_notes;
         notesCell.font = { name: FONT_NAME, size: 10, color: { argb: COLORS.NAVY_TEXT } };
         notesCell.alignment = { wrapText: true, vertical: 'top' };
-        sheet.mergeCells(row, 1, row, qtyHeaderCol + 1);
+        sheet.mergeCells(row, 1, row, imageCol);
         sheet.getRow(row).height = 100;
       }
       row += 2;

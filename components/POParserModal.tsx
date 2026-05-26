@@ -509,7 +509,16 @@ export function POParserModal({ orderId, onClose }: POParserModalProps) {
 
                   {/* Notes */}
                   <div>
-                    <label className="text-xs font-medium text-gray-500">包装要求</label>
+                    <label className="text-xs font-medium text-gray-500">单件用量（生产单上印在款式评语上方）</label>
+                    <input
+                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-xs"
+                      placeholder="例：280克直贡呢 1.2平方 0.346公斤"
+                      value={(style as any).unit_consumption || ''}
+                      onChange={(e) => updateStyle(si, 'unit_consumption' as any, e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">包装要求（订单级，所有颜色通用）</label>
                     <textarea className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-xs" rows={2} value={style.packaging} onChange={(e) => updateStyle(si, 'packaging', e.target.value)} />
                   </div>
                   <div>

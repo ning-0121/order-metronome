@@ -21,10 +21,14 @@ export interface POStyleData {
     color_en: string;
     qty: number;
     sizes: Record<string, number>;
+    /** 每色独立的客户包装说明（如"一套一个小包袋，6套一中包"），可选 */
+    packaging?: string;
   }[];
   packaging: string;
   quality_notes: string;
   sample_requirements: string;
+  /** 单件用量 — 上印 "款式评语" 上方的黄色行，如 "280克直贡呢 1.2平方 0.346公斤" */
+  unit_consumption?: string;
   measurements?: {
     label: string;
     values: Record<string, string>;
@@ -58,6 +62,8 @@ const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务
 6. 数量必须是数字，不要带单位
 7. 判断服装品类（pants/tops/dress/outerwear/other）
 8. 如果PO中包含尺寸表/测量数据（如腰围、臀围、胸围等各尺码的数值），请提取到measurements数组中
+9. 单件用量（unit_consumption）：如果PO提到"单耗"、"用量"、"每件"加面料数据（如"1.2平方"、"0.346公斤"），合并成一个字符串返回，例如 "280克直贡呢 1.2平方 0.346公斤"；找不到就留空
+10. 每色客户包装（colors[].packaging）：如果PO对不同颜色有不同包装要求（如黑色"一套一袋"、深红"S:M:L=1:2:2"），分别提取到对应 color 的 packaging 字段
 
 日期解析规则（重要！）：
 - Excel的日期序列号（如46124）= 从1900-01-01起的天数，请转换为 YYYY.MM.DD
