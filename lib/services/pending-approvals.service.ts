@@ -95,27 +95,52 @@ async function collectDelayRequests(
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
   const client = clientFor(ctx, supabase);
-  const { data } = await (client.from('delay_requests') as any)
-    .select('id, order_id, reason, days_delay, status, created_at, requested_by, orders(order_no, customer_name)')
+
+  // 2026-05-26 修复：原本用 PostgREST 嵌套 join orders(order_no, customer_name)，
+  // 但 delay_requests 表没声明 FK 到 orders（或 schema cache 不认），整个查询
+  // fail 返回 null → 显示 0。改成两次独立查询。
+  const { data: delays, error: delaysError } = await (client.from('delay_requests') as any)
+    .select('id, order_id, reason, days_delay, status, created_at, requested_by')
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
     .limit(100);
 
+  if (delaysError) {
+    console.warn('[collectDelayRequests] query failed:', delaysError.message);
+    return [];
+  }
+  if (!delays || delays.length === 0) return [];
+
+  // 拉关联订单的基本信息（id / order_no / customer_name）
+  const orderIds = Array.from(new Set((delays as any[]).map((d) => d.order_id).filter(Boolean)));
+  const orderMap = new Map<string, { order_no: string; customer_name: string }>();
+  if (orderIds.length > 0) {
+    const { data: orders } = await (client.from('orders') as any)
+      .select('id, order_no, customer_name')
+      .in('id', orderIds);
+    for (const o of (orders || []) as any[]) {
+      orderMap.set(o.id, { order_no: o.order_no, customer_name: o.customer_name });
+    }
+  }
+
   const canApprove = hasAnyRole(ctx.roles, ['admin', 'production_manager', 'production']);
 
-  return ((data || []) as any[]).map(r => ({
-    id: r.id,
-    category: 'delay' as ApprovalCategory,
-    title: `${r.orders?.order_no || '?'} 申请延期 ${r.days_delay || '?'} 天`,
-    subtitle: r.reason ? r.reason.slice(0, 50) : undefined,
-    orderId: r.order_id,
-    orderNo: r.orders?.order_no,
-    customerName: r.orders?.customer_name,
-    sourceUrl: `/orders/${r.order_id}#delay-${r.id}`,
-    createdAt: r.created_at,
-    ageDays: ageDaysFrom(r.created_at),
-    actionable: canApprove,
-  }));
+  return (delays as any[]).map((r) => {
+    const order = orderMap.get(r.order_id);
+    return {
+      id: r.id,
+      category: 'delay' as ApprovalCategory,
+      title: `${order?.order_no || '?'} 申请延期 ${r.days_delay || '?'} 天`,
+      subtitle: r.reason ? r.reason.slice(0, 50) : undefined,
+      orderId: r.order_id,
+      orderNo: order?.order_no,
+      customerName: order?.customer_name,
+      sourceUrl: `/orders/${r.order_id}#delay-${r.id}`,
+      createdAt: r.created_at,
+      ageDays: ageDaysFrom(r.created_at),
+      actionable: canApprove,
+    };
+  });
 }
 
 async function collectCeoImportApprovals(
