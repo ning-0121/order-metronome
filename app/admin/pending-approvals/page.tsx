@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
 import { getUserRoleFromEmail } from '@/lib/utils/user-role';
+import { BulkApproveDelaysButton } from '@/components/BulkApproveDelaysButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -127,6 +128,11 @@ export default async function PendingApprovalsPage({ searchParams }: PageProps) 
             </span>
           )}
         </div>
+
+        {/* 延期申请专用：一键全部批准（仅 admin 可见且当前筛选是延期或全部时显示） */}
+        {isAdmin && (filter === 'delay' || filter === 'all') && (data.byCategory.delay || 0) > 0 && (
+          <BulkApproveDelaysButton pendingCount={data.byCategory.delay || 0} />
+        )}
 
         {/* 列表 */}
         {visible.length === 0 ? (

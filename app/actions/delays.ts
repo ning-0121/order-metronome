@@ -1167,3 +1167,87 @@ export async function getDelayRequestsByOrder(orderId: string) {
 
   return { data: requests };
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// 批量批准所有待处理延期申请
+// 一次性清理积压，每条都走完整 approveDelayRequestCore（含日期链 / 日志 /
+// 通知 / runtime 重算）。失败的继续往下走，最后汇总。
+// ──────────────────────────────────────────────────────────────────────
+export async function bulkApproveAllPendingDelays(
+  decisionNote?: string,
+): Promise<{
+  ok: boolean;
+  approved: number;
+  failed: number;
+  total: number;
+  errors?: Array<{ id: string; reason: string }>;
+  message: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, approved: 0, failed: 0, total: 0, message: '未登录' };
+  }
+
+  // 权限：与单个 approveDelayRequestCore 一致 — 仅管理员
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, roles')
+    .eq('user_id', user.id)
+    .single();
+  const userRoles: string[] =
+    (profile as any)?.roles?.length > 0
+      ? (profile as any).roles
+      : [(profile as any)?.role].filter(Boolean);
+  if (!isAdminRole(userRoles)) {
+    return { ok: false, approved: 0, failed: 0, total: 0, message: '仅管理员可批准延期申请' };
+  }
+
+  // 拉所有 pending 延期申请（RLS 已保证 admin 可见全部）
+  const { data: pendingRows, error: queryError } = await (supabase
+    .from('delay_requests') as any)
+    .select('id')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(200); // 保险：单次最多处理 200 条，避免 Vercel 超时
+
+  if (queryError) {
+    return { ok: false, approved: 0, failed: 0, total: 0, message: `查询失败: ${queryError.message}` };
+  }
+
+  const ids = (pendingRows || []).map((r: any) => r.id);
+  if (ids.length === 0) {
+    return { ok: true, approved: 0, failed: 0, total: 0, message: '没有待批准的延期申请' };
+  }
+
+  const note = decisionNote || '批量批准（系统清理积压）';
+  const errors: Array<{ id: string; reason: string }> = [];
+  let approved = 0;
+
+  // 串行处理（每条都有 DB 操作 + 副作用，并行容易出竞态）
+  for (const id of ids) {
+    try {
+      const result = await approveDelayRequestCore(id, note);
+      if (result.ok) {
+        approved++;
+      } else {
+        errors.push({ id, reason: result.error || '未知错误' });
+      }
+    } catch (e: any) {
+      errors.push({ id, reason: e?.message || String(e) });
+    }
+  }
+
+  revalidatePath('/admin/pending-approvals');
+  revalidatePath('/');
+
+  const failed = errors.length;
+  return {
+    ok: true,
+    approved,
+    failed,
+    total: ids.length,
+    errors: failed > 0 ? errors.slice(0, 10) : undefined, // 只返回前 10 条避免 payload 太大
+    message: `共 ${ids.length} 条，成功 ${approved} 条${failed > 0 ? `，失败 ${failed} 条` : ''}${ids.length === 200 ? '（达到单次上限 200，请再次点击处理剩余）' : ''}`,
+  };
+}
