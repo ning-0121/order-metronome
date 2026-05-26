@@ -2319,7 +2319,12 @@ CREATE INDEX IF NOT EXISTS idx_po_drafts_expires
 
 ALTER TABLE public.po_parse_drafts ENABLE ROW LEVEL SECURITY;
 
--- 每人只能看 / 写自己的草稿
+-- 每人只能看 / 写自己的草稿（DROP+CREATE 幂等，避免重跑报 42710）
+DROP POLICY IF EXISTS "po_drafts_select_own" ON public.po_parse_drafts;
+DROP POLICY IF EXISTS "po_drafts_insert_own" ON public.po_parse_drafts;
+DROP POLICY IF EXISTS "po_drafts_update_own" ON public.po_parse_drafts;
+DROP POLICY IF EXISTS "po_drafts_delete_own" ON public.po_parse_drafts;
+
 CREATE POLICY "po_drafts_select_own" ON public.po_parse_drafts
   FOR SELECT TO authenticated USING (user_id = auth.uid());
 CREATE POLICY "po_drafts_insert_own" ON public.po_parse_drafts
