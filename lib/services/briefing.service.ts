@@ -143,7 +143,7 @@ async function collectContext(supabase: any, userId: string): Promise<BriefingCo
   let pendingDelays: any[] = [];
   if (orderIds.length > 0) {
     const { data } = await (supabase.from('delay_requests') as any)
-      .select('id, order_id, reason, days_delay, created_at')
+      .select('id, order_id, reason, delay_days, created_at')
       .in('order_id', orderIds)
       .eq('status', 'pending')
       .limit(20);
@@ -208,7 +208,7 @@ ${ctx.overdue.slice(0, 10).map(m => {
 ## 待审批延期（${ctx.pendingDelays.length} 个）
 ${ctx.pendingDelays.slice(0, 5).map(d => {
     const order = ctx.myOrders.find(o => o.id === d.order_id);
-    return `- ${order?.order_no || '?'} 申请 ${d.days_delay || '?'} 天：${d.reason?.slice(0, 50) || '?'}`;
+    return `- ${order?.order_no || '?'} 申请 ${d.delay_days || '?'} 天：${d.reason?.slice(0, 50) || '?'}`;
   }).join('\n') || '无'}
 
 请基于以上信息生成今日简报 JSON。`;
