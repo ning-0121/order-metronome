@@ -172,6 +172,12 @@ npm run build && npm run check
 3. **不引入回归**
    - [ ] 修改评分逻辑时确认四个角色（业务/跟单/采购/财务）都正常
    - [ ] 修改权限时确认 canSeeAll 包含 admin/finance/admin_assistant/production_manager
+
+4. **查询返回 0 / null 时的调试顺序**（2026-05-26 浪费一下午的教训）
+   - **先看 error 字段再下结论**：`const { data, error } = await ...` 的 `error` 优先于 `data`。如果忽略 error，列名拼写错误、关系不存在等会被默默吞掉返回 `data=null`。
+   - **不要先怀疑 RLS**。RLS 出问题的 symptom 一般是「能登录但看不见数据」，但同样的 symptom 也可能是 PostgREST schema 错（FK 不存在）、列名拼错、状态值不匹配。**先用 service-role 客户端跑一遍原查询**：如果 service-role 也返回错误 → 不是 RLS。
+   - **嵌套 join 优先怀疑 FK 缺失**：`.select('a, b, foreign_table(...)')` 这种语法依赖 PostgREST schema 缓存的外键关系。如果数据库 FK 没声明，整个查询 fail。报错信息是 `Could not find a relationship between 'X' and 'Y' in the schema cache`。
+   - **加诊断接口（5 分钟工作）远比靠假设修 RLS（数小时）省事**：建一个临时 `/api/admin/diag-xxx` 路由，分别用 user session 和 service-role 跑同一查询，对比结果，立刻定位是 RLS / FK / 列名 / 其他。诊断完删掉。
    - [ ] 修改里程碑时确认 schedule.ts TIMELINE 中有对应 key
    - [ ] 修改 Agent 时确认 Feature Flag 有对应开关
 
