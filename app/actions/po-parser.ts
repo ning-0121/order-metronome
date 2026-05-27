@@ -49,6 +49,9 @@ export interface POParsedData {
   }[];
   size_labels: string[];
   confidence_notes: string[];
+  /** 生产单右上「注意」框文字（业务员可编辑）。
+   * 默认："注意：大货数量不能少出，也不能多出。交货期不能晚，延期会扣款。大货尺寸千万不能做小。" */
+  warning_notes?: string;
 }
 
 const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务是从客户PO（采购订单）中提取信息，返回标准化的JSON格式。

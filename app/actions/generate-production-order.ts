@@ -64,227 +64,288 @@ export async function generateProductionOrder(
     };
 
     // ===== 每个款式生成主表 + 尺寸表 =====
+    // 2026-05-27 模板深度复刻：1:1 对齐绮陌《订单资料.xlsx》布局
+    // 详细映射：13 列固定，A-M；高度/合并范围/字体（18pt 宋体/Calibri）/
+    // 黄色填充/红字数量/蓝字注意 全部按用户提供的模板还原
     for (const style of data.styles) {
-
-      // ────── 主表（生产单） ──────
-      const sheetName = uniqueSheetName(style.style_no);
+      const sheetName = uniqueSheetName(`${str(style.style_no)} ${str(style.product_name)}`.trim());
       const sheet = workbook.addWorksheet(sheetName);
 
-      // 新列顺序：款号 | 主布颜色 | 箱数 | 数量 | [S/M/L/XL...] | 客户包装 | 图片
-      // 去掉了「款式描述」（品名已在表头），数量挪到尺码前
-      const boxCol = 3;        // 箱数
-      const qtyCol = 4;        // 数量
-      const sizeStartCol = 5;  // S 列起点
-      const packagingCol = sizeStartCol + sizeLabels.length;  // 客户包装
-      const imageCol = packagingCol + 1;                       // 图片
-      const totalCols = imageCol;
+      // ── 模板常量 ──
+      const ZH_FONT = '宋体';
+      const NUM_FONT = 'Calibri';
+      const FS = 18;
+      const Y_BG = 'FFFFFF00';                                            // 黄底
+      const PEACH_BG = 'FFFFE4E1';                                        // 顶部公司头浅橘
+      const BLUE = 'FF0000FF';                                            // 蓝字（注意 / 船样要求）
+      const RED = 'FFFF0000';                                             // 红字（数量 / 总计）
+      const thin = { style: 'thin' as const };
+      const allBorder = { top: thin, left: thin, bottom: thin, right: thin };
 
+      // 列宽（实测自模板）
       sheet.columns = [
-        { width: 14 }, // A: 款号
-        { width: 14 }, // B: 主布颜色
-        { width: 8 },  // C: 箱数
-        { width: 10 }, // D: 数量
-        ...sizeLabels.map(() => ({ width: 7 })), // E..: 尺码
-        { width: 24 }, // 客户包装
-        { width: 10 }, // 图片
+        { width: 15.53 }, // A 款号
+        { width: 23.22 }, // B 主布颜色
+        { width: 17.50 }, // C 箱数
+        { width: 12.68 }, // D 数量
+        { width: 9.99 },  // E S
+        { width: 9 },     // F M
+        { width: 9 },     // G L
+        { width: 9 },     // H XL
+        { width: 25.15 }, // I 客户包装
+        { width: 15.53 }, // J 颜色备注（左半）
+        { width: 16.71 }, // K 颜色备注（右半）
+        { width: 9 },     // L 图片位（左半）
+        { width: 31.25 }, // M 图片位（右半）/ 注意框
       ];
 
-      // 辅助函数
-      const setLabel = (r: number, c: number, text: string) => {
+      const N = Math.max(style.colors.length, 1); // 颜色数（至少 1 行）
+
+      // 行索引（动态根据颜色数计算）
+      const R_TITLE = 1;
+      const R_ORDER = 2;
+      const R_NAME = 3;
+      const R_DUE = 4;
+      const R_QTY = 5;
+      const R_HEADER = 6;
+      const R_DATA_START = 7;
+      const R_DATA_END = R_DATA_START + N - 1;
+      const R_TOTAL = R_DATA_END + 1;
+      const R_FABRIC = R_TOTAL + 1;
+      const R_SAMPLE_TIME = R_FABRIC + 1;
+      const R_PRE_SAMPLE = R_SAMPLE_TIME + 1;
+      const R_SHIP_SAMPLE = R_PRE_SAMPLE + 1;
+      const R_COMMENT_TITLE = R_SHIP_SAMPLE + 1;
+      const R_COMMENT_BODY = R_COMMENT_TITLE + 1;
+      const R_PACK_NOTE = R_COMMENT_BODY + 1;
+      const R_SIGN = R_PACK_NOTE + 1;
+
+      // 行高
+      sheet.getRow(R_TITLE).height = 61;
+      [R_ORDER, R_NAME, R_DUE, R_QTY, R_HEADER].forEach((r) => (sheet.getRow(r).height = 63));
+      for (let r = R_DATA_START; r <= R_DATA_END; r++) sheet.getRow(r).height = 40;
+      sheet.getRow(R_TOTAL).height = 51;
+      sheet.getRow(R_FABRIC).height = 73;
+      sheet.getRow(R_SAMPLE_TIME).height = 48;
+      [R_PRE_SAMPLE, R_SHIP_SAMPLE].forEach((r) => (sheet.getRow(r).height = 64));
+      sheet.getRow(R_COMMENT_TITLE).height = 40;
+      sheet.getRow(R_COMMENT_BODY).height = 304;
+      [R_PACK_NOTE, R_SIGN].forEach((r) => (sheet.getRow(r).height = 64));
+
+      // ── 通用样式辅助 ──
+      const styleCell = (
+        r: number,
+        c: number,
+        value: any,
+        opts: {
+          bg?: string;
+          color?: string;
+          font?: string;
+          bold?: boolean;
+          align?: 'left' | 'center' | 'right';
+          wrap?: boolean;
+          border?: boolean;
+        } = {},
+      ) => {
         const cell = sheet.getCell(r, c);
-        cell.value = text;
-        cell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
-        cell.border = thinBorder;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (value !== undefined) cell.value = value;
+        cell.font = {
+          name: opts.font || ZH_FONT,
+          size: FS,
+          bold: opts.bold !== false, // 默认 bold
+          color: opts.color ? { argb: opts.color } : undefined,
+        };
+        if (opts.bg) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.bg } };
+        if (opts.border !== false) cell.border = allBorder;
+        cell.alignment = {
+          horizontal: opts.align || 'center',
+          vertical: 'middle',
+          wrapText: opts.wrap ?? false,
+        };
+        return cell;
+      };
+      const fillRange = (r1: number, c1: number, r2: number, c2: number, bg: string) => {
+        for (let r = r1; r <= r2; r++) {
+          for (let c = c1; c <= c2; c++) {
+            const cell = sheet.getCell(r, c);
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+            cell.border = allBorder;
+          }
+        }
+      };
+      const borderRange = (r1: number, c1: number, r2: number, c2: number) => {
+        for (let r = r1; r <= r2; r++) {
+          for (let c = c1; c <= c2; c++) {
+            sheet.getCell(r, c).border = allBorder;
+          }
+        }
       };
 
-      const setValue = (r: number, c: number, text: string | number, bold = false) => {
-        const cell = sheet.getCell(r, c);
-        cell.value = text;
-        cell.font = { name: FONT_NAME, size: 10, bold, color: { argb: COLORS.NAVY_TEXT } };
-        cell.border = thinBorder;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      };
+      // ── R1: 公司头 绮陌服饰 (A1:M1) ──
+      styleCell(R_TITLE, 1, '绮陌服饰', { bg: PEACH_BG });
+      sheet.mergeCells(R_TITLE, 1, R_TITLE, 13);
 
-      let row = 1;
+      // ── R2-R5: 头部信息 4 列网格 ──
+      // R2: 订单号(A:C) | 值(D:I) | 下单日期(J) | 值(K:M)
+      const customerSuffix = data.customer_name ? `（${str(data.customer_name)}）` : '';
+      styleCell(R_ORDER, 1, '订单号', { bg: Y_BG });
+      sheet.mergeCells(R_ORDER, 1, R_ORDER, 3);
+      styleCell(R_ORDER, 4, `${str(data.order_no)}${customerSuffix}`, { font: NUM_FONT });
+      sheet.mergeCells(R_ORDER, 4, R_ORDER, 9);
+      styleCell(R_ORDER, 10, '下单日期', { bg: Y_BG });
+      styleCell(R_ORDER, 11, str(data.order_date) || '—', { font: NUM_FONT });
+      sheet.mergeCells(R_ORDER, 11, R_ORDER, 13);
 
-      // Row 1: 空行（顶部装饰区，可放公司logo）
-      sheet.getRow(row).height = 30;
-      row++;
+      // R3: 品名(A:C) | 值(D:I) | 原料(J) | 值(K:M)
+      styleCell(R_NAME, 1, '品名', { bg: Y_BG });
+      sheet.mergeCells(R_NAME, 1, R_NAME, 3);
+      styleCell(R_NAME, 4, str(style.product_name));
+      sheet.mergeCells(R_NAME, 4, R_NAME, 9);
+      styleCell(R_NAME, 10, '原料', { bg: Y_BG });
+      styleCell(R_NAME, 11, str(style.material), { font: NUM_FONT, wrap: true });
+      sheet.mergeCells(R_NAME, 11, R_NAME, 13);
 
-      // Row 2: 订单号
-      setLabel(row, 1, '订单号');
-      sheet.mergeCells(row, 1, row, 2);
-      setValue(row, 3, str(data.order_no), true);
-      sheet.mergeCells(row, 3, row, packagingCol);
-      row++;
+      // R4: 交期(A:C) | 值(D:I) | 面料克重(J 跨2行) | 值(K:M 跨2行)
+      styleCell(R_DUE, 1, '交期', { bg: Y_BG });
+      sheet.mergeCells(R_DUE, 1, R_DUE, 3);
+      styleCell(R_DUE, 4, str(data.delivery_date), { font: NUM_FONT, wrap: true });
+      sheet.mergeCells(R_DUE, 4, R_DUE, 9);
+      styleCell(R_DUE, 10, '面料克重', { bg: Y_BG });
+      sheet.mergeCells(R_DUE, 10, R_QTY, 10);
+      styleCell(R_DUE, 11, str(style.fabric_weight), { font: NUM_FONT, wrap: true });
+      sheet.mergeCells(R_DUE, 11, R_QTY, 13);
 
-      // Row 3: 品名
-      setLabel(row, 1, '品名');
-      sheet.mergeCells(row, 1, row, 2);
-      setValue(row, 3, str(style.product_name), true);
-      sheet.mergeCells(row, 3, row, packagingCol - 2);
-      setValue(row, packagingCol - 1, str(style.material));
-      sheet.mergeCells(row, packagingCol - 1, row, packagingCol);
-      row++;
+      // R5: 数量(A:C) | =D{TOTAL_ROW} (D:I)
+      styleCell(R_QTY, 1, '数量', { bg: Y_BG });
+      sheet.mergeCells(R_QTY, 1, R_QTY, 3);
+      styleCell(R_QTY, 4, { formula: `D${R_TOTAL}` } as any, { font: NUM_FONT, color: RED });
+      sheet.mergeCells(R_QTY, 4, R_QTY, 9);
 
-      // Row 4: 交期
-      setLabel(row, 1, '交期');
-      sheet.mergeCells(row, 1, row, 2);
-      const deliveryCell = sheet.getCell(row, 3);
-      deliveryCell.value = `${str(data.delivery_date)}（客户装柜日，不得延期）`;
-      deliveryCell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
-      deliveryCell.border = thinBorder;
-      deliveryCell.alignment = { vertical: 'middle' };
-      sheet.mergeCells(row, 3, row, packagingCol - 2);
-      setValue(row, packagingCol - 1, str(style.fabric_weight));
-      sheet.mergeCells(row, packagingCol - 1, row, packagingCol);
-      row++;
+      // ── R6: 表头 黄底 ──
+      const HEADERS: Array<[number, string, number?]> = [
+        [1, '款号'],
+        [2, '主布颜色'],
+        [3, '箱数'],
+        [4, '数量'],
+        [5, 'S'],
+        [6, 'M'],
+        [7, 'L'],
+        [8, 'XL'],
+        [9, '客户包装'],
+      ];
+      HEADERS.forEach(([col, label]) => styleCell(R_HEADER, col, label, { bg: Y_BG, wrap: true }));
+      // 颜色备注合并 J:K
+      styleCell(R_HEADER, 10, '颜色备注', { bg: Y_BG });
+      sheet.mergeCells(R_HEADER, 10, R_HEADER, 11);
+      // 图片位预留 L6:M(R_DATA_END) — 跨表头 + 数据行
+      borderRange(R_HEADER, 12, R_DATA_END, 13);
+      sheet.mergeCells(R_HEADER, 12, R_DATA_END, 13);
 
-      // Row 5: 数量
-      setLabel(row, 1, '数量');
-      sheet.mergeCells(row, 1, row, 2);
-      setValue(row, 3, Number(style.total_qty) || 0, true);
-      sheet.mergeCells(row, 3, row, packagingCol);
-      row++;
-
-      // Row 6: 表格表头（深绿背景白字）
-      const greenHeader = (col: number, text: string) => {
-        const cell = sheet.getCell(row, col);
-        cell.value = text;
-        cell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.WHITE_TEXT } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.GREEN_HEADER } };
-        cell.border = thinBorder;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      };
-      greenHeader(1, '款号');
-      greenHeader(2, '主布颜色');
-      greenHeader(boxCol, '箱数');
-      greenHeader(qtyCol, '数量');
-      sizeLabels.forEach((sz, si) => greenHeader(sizeStartCol + si, sz));
-      greenHeader(packagingCol, '客户包装');
-      greenHeader(imageCol, '图片');
-      row++;
-
-      // Data rows
-      const dataStartRow = row;
+      // ── R7..R{N+6}: 数据行 ──
       style.colors.forEach((color, ci) => {
-        setValue(row, 1, ci === 0 ? str(style.style_no) : '');
-        // 主布颜色：中文 + 英文括号
-        const colorText = color.color_cn && color.color_en
-          ? `${str(color.color_cn)}（${str(color.color_en)}）`
-          : str(color.color_cn) || str(color.color_en);
-        setValue(row, 2, colorText);
-
-        const boxes = Math.ceil(color.qty / 48);
-        setValue(row, boxCol, boxes);
-
-        // 数量先放（红字突出）
-        const qtyValueCell = sheet.getCell(row, qtyCol);
-        qtyValueCell.value = color.qty;
-        qtyValueCell.font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.RED_TEXT } };
-        qtyValueCell.border = thinBorder;
-        qtyValueCell.alignment = { horizontal: 'center', vertical: 'middle' };
-
+        const r = R_DATA_START + ci;
+        if (ci === 0) styleCell(r, 1, str(style.style_no), { font: NUM_FONT, wrap: true, bold: false });
+        // 主布颜色：sz14（模板里小一号）
+        const colorCell = sheet.getCell(r, 2);
+        colorCell.value = str(color.color_cn) || str(color.color_en);
+        colorCell.font = { name: ZH_FONT, size: 14, color: { argb: 'FF000000' } };
+        colorCell.border = allBorder;
+        colorCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        // 箱数：公式 =D{r}/48
+        styleCell(r, 3, { formula: `D${r}/48` } as any, { font: NUM_FONT, bold: false, color: 'FF000000' });
+        // 数量：公式 =E+F+G+H 红字
+        styleCell(r, 4, { formula: `E${r}+F${r}+G${r}+H${r}` } as any, { font: NUM_FONT, bold: false, color: RED });
         // 尺码配比
-        sizeLabels.forEach((sz, si) => {
-          setValue(row, sizeStartCol + si, color.sizes?.[sz] || 0);
+        ['S', 'M', 'L', 'XL'].forEach((sz, si) => {
+          styleCell(r, 5 + si, color.sizes?.[sz] || 0, { font: NUM_FONT, bold: false });
         });
-
-        // 客户包装：优先用色级 packaging，否则空
-        setValue(row, packagingCol, str(color.packaging));
-        sheet.getCell(row, packagingCol).alignment = { vertical: 'middle', wrapText: true, horizontal: 'left' };
-
-        // 图片列空但带边框
-        sheet.getCell(row, imageCol).border = thinBorder;
-
-        row++;
+        // 客户包装 — 只在第一行填，后面合并
+        if (ci === 0) {
+          const packCell = sheet.getCell(r, 9);
+          packCell.value = str(color.packaging);
+          packCell.font = { name: ZH_FONT, size: 14 };
+          packCell.border = allBorder;
+          packCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        }
+        // 颜色备注（英文）合并 J:K
+        styleCell(r, 10, str(color.color_en), { bold: false });
+        sheet.mergeCells(r, 10, r, 11);
       });
-
-      // Total row（黄底）— 箱数和数量都算合计
-      const totalRow = row;
-      setLabel(totalRow, 1, '总计');
-      sheet.mergeCells(totalRow, 1, totalRow, 2);
-      // 总箱数
-      const totalBoxes = style.colors.reduce((s, c) => s + Math.ceil(c.qty / 48), 0);
-      const totalBoxesCell = sheet.getCell(totalRow, boxCol);
-      totalBoxesCell.value = totalBoxes;
-      totalBoxesCell.font = { name: FONT_NAME, size: 11, bold: true, color: { argb: COLORS.RED_TEXT } };
-      totalBoxesCell.border = thinBorder;
-      totalBoxesCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
-      totalBoxesCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      // 总数量
-      const totalQtyCell = sheet.getCell(totalRow, qtyCol);
-      totalQtyCell.value = style.total_qty;
-      totalQtyCell.font = { name: FONT_NAME, size: 11, bold: true, color: { argb: COLORS.RED_TEXT } };
-      totalQtyCell.border = thinBorder;
-      totalQtyCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
-      totalQtyCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      // 其余列填黄底
-      for (let c = sizeStartCol; c <= imageCol; c++) {
-        const cell = sheet.getCell(totalRow, c);
-        cell.border = thinBorder;
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
-      }
-      row += 2;
-
-      // 产前样 / 船样要求
-      setLabel(row, 1, '');
-      setValue(row, 2, '交样时间');
-      sheet.getCell(row, 2).font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
-      setValue(row, packagingCol, '要求');
-      sheet.getCell(row, packagingCol).font = { name: FONT_NAME, size: 10, bold: true, color: { argb: COLORS.NAVY_TEXT } };
-      row++;
-
-      setValue(row, 1, '产前样');
-      sheet.getCell(row, 1).font = { name: FONT_NAME, size: 10, bold: true };
-      row++;
-
-      setValue(row, 1, '船样');
-      sheet.getCell(row, 1).font = { name: FONT_NAME, size: 10, bold: true };
-      if (style.sample_requirements) {
-        setValue(row, packagingCol, style.sample_requirements);
-      }
-      row += 2;
-
-      // 单件用量行（黄底居中，款式评语上方）— 用户标注: "款式评语上方增加一列单件用量"
-      // 优先用 style.unit_consumption（AI 解析或手填），否则用 fabric_weight 兜底
-      const consumptionText = style.unit_consumption?.trim()
-        ? style.unit_consumption.trim()
-        : style.fabric_weight
-        ? `${style.fabric_weight} 单耗：待填`
-        : '';
-      if (consumptionText) {
-        const consCell = sheet.getCell(row, 1);
-        consCell.value = consumptionText;
-        consCell.font = { name: FONT_NAME, size: 11, bold: true, color: { argb: COLORS.NAVY_TEXT } };
-        consCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.YELLOW_BG } };
-        consCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.mergeCells(row, 1, row, imageCol);
-        sheet.getRow(row).height = 22;
-        row++;
+      // 款号 A 列合并（跨 N 行）+ 客户包装 I 列合并
+      if (N > 1) {
+        sheet.mergeCells(R_DATA_START, 1, R_DATA_END, 1);
+        sheet.mergeCells(R_DATA_START, 9, R_DATA_END, 9);
       }
 
-      // 款式评语
-      setLabel(row, 1, '款式评语');
-      sheet.mergeCells(row, 1, row, imageCol);
-      row++;
+      // ── 总计行（R_TOTAL，黄底）──
+      styleCell(R_TOTAL, 1, '总计');
+      sheet.mergeCells(R_TOTAL, 1, R_TOTAL, 2);
+      // 总箱数公式 =SUM(C{start}:C{end})
+      styleCell(R_TOTAL, 3, { formula: `SUM(C${R_DATA_START}:C${R_DATA_END})` } as any, {
+        font: NUM_FONT,
+        bold: false,
+      });
+      // 总数量公式 =SUM(D{start}:D{end}) 红字
+      styleCell(R_TOTAL, 4, { formula: `SUM(D${R_DATA_START}:D${R_DATA_END})` } as any, {
+        font: NUM_FONT,
+        bold: false,
+        color: RED,
+      });
+      // 其余 E-M 列空但带边框
+      for (let c = 5; c <= 13; c++) sheet.getCell(R_TOTAL, c).border = allBorder;
 
-      if (style.quality_notes) {
-        const notesCell = sheet.getCell(row, 1);
-        notesCell.value = style.quality_notes;
-        notesCell.font = { name: FONT_NAME, size: 10, color: { argb: COLORS.NAVY_TEXT } };
-        notesCell.alignment = { wrapText: true, vertical: 'top' };
-        sheet.mergeCells(row, 1, row, imageCol);
-        sheet.getRow(row).height = 100;
-      }
-      row += 2;
+      // ── R_FABRIC: 面料克重 黄行 (A:M 合并) ──
+      // 优先 unit_consumption（含单耗详情），否则 fabric_weight 兜底
+      const fabricText = style.unit_consumption?.trim() || str(style.fabric_weight) || '面料信息待填';
+      styleCell(R_FABRIC, 1, fabricText, { bg: Y_BG });
+      sheet.mergeCells(R_FABRIC, 1, R_FABRIC, 13);
 
-      // 包装明细提示
-      const packNote = sheet.getCell(row, 1);
-      packNote.value = '包装明细及要求详见附页';
-      packNote.font = { name: FONT_NAME, size: 10 };
+      // ── R_SAMPLE_TIME: 交样时间标题 (B:C) | 要求 (D:L) | 注意框 (M 跨 3 行) ──
+      sheet.getCell(R_SAMPLE_TIME, 1).border = allBorder;
+      styleCell(R_SAMPLE_TIME, 2, '交样时间');
+      sheet.mergeCells(R_SAMPLE_TIME, 2, R_SAMPLE_TIME, 3);
+      styleCell(R_SAMPLE_TIME, 4, '要求');
+      sheet.mergeCells(R_SAMPLE_TIME, 4, R_SAMPLE_TIME, 12);
+      // 注意框（M12:M14 合并）
+      const warnText = (data as any).warning_notes?.trim()
+        || '注意：大货数量不能少出，也不能多出。交货期不能晚，延期会扣款。大货尺寸千万不能做小。';
+      styleCell(R_SAMPLE_TIME, 13, warnText, { color: BLUE, wrap: true });
+      sheet.mergeCells(R_SAMPLE_TIME, 13, R_SHIP_SAMPLE, 13);
+
+      // ── R_PRE_SAMPLE: 产前样 ──
+      styleCell(R_PRE_SAMPLE, 1, '产前样');
+      styleCell(R_PRE_SAMPLE, 2, '');
+      sheet.mergeCells(R_PRE_SAMPLE, 2, R_PRE_SAMPLE, 3);
+      styleCell(R_PRE_SAMPLE, 4, '');
+      sheet.mergeCells(R_PRE_SAMPLE, 4, R_PRE_SAMPLE, 12);
+
+      // ── R_SHIP_SAMPLE: 船样 ──
+      styleCell(R_SHIP_SAMPLE, 1, '船样');
+      styleCell(R_SHIP_SAMPLE, 2, '', { font: NUM_FONT });
+      sheet.mergeCells(R_SHIP_SAMPLE, 2, R_SHIP_SAMPLE, 3);
+      styleCell(R_SHIP_SAMPLE, 4, str(style.sample_requirements), { color: BLUE, wrap: true });
+      sheet.mergeCells(R_SHIP_SAMPLE, 4, R_SHIP_SAMPLE, 12);
+
+      // ── R_COMMENT_TITLE: 款式评语标题（黄底）──
+      styleCell(R_COMMENT_TITLE, 1, '款式评语', { bg: Y_BG });
+      sheet.mergeCells(R_COMMENT_TITLE, 1, R_COMMENT_TITLE, 13);
+
+      // ── R_COMMENT_BODY: 9 条评语（黄底，wrap）──
+      const commentText = style.quality_notes?.trim() || '（待填）';
+      const commentCell = styleCell(R_COMMENT_BODY, 1, commentText, { bg: Y_BG, wrap: true, align: 'center' });
+      commentCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      sheet.mergeCells(R_COMMENT_BODY, 1, R_COMMENT_BODY, 13);
+
+      // ── R_PACK_NOTE: 包装明细及要求详见附页 ──
+      styleCell(R_PACK_NOTE, 1, '包装明细及要求详见附页');
+      sheet.mergeCells(R_PACK_NOTE, 1, R_PACK_NOTE, 13);
+
+      // ── R_SIGN: 签收人 | 签收时间 ──
+      styleCell(R_SIGN, 1, '签收人：', { align: 'left' });
+      sheet.getCell(R_SIGN, 2).border = allBorder;
+      sheet.mergeCells(R_SIGN, 2, R_SIGN, 9);
+      styleCell(R_SIGN, 10, '签收时间：', { align: 'left' });
+      sheet.mergeCells(R_SIGN, 10, R_SIGN, 13);
 
       // ────── 尺寸表 Sheet ──────
       const sizeSheetName = uniqueSheetName(`${str(style.style_no)}尺寸表`);
