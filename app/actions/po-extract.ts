@@ -113,7 +113,7 @@ export async function extractPOFromAttachment(
     if (!storagePath) return { error: '附件存储路径不存在，请重新上传' };
 
     const { data: fileBlob, error: downloadError } = await supabase.storage
-      .from('order-attachments')
+      .from('order-docs')
       .download(storagePath);
     if (downloadError || !fileBlob) return { error: `文件下载失败：${downloadError?.message}` };
 

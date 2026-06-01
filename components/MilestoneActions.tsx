@@ -230,14 +230,30 @@ export function MilestoneActions({
           const fileType = (file as any)._fileType || getFileTypeForStep(milestone.step_key);
           const ext2 = file.name.split('.').pop() || 'bin';
           const path2 = orderId + '/milestones/' + milestone.step_key + '_' + fileType + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext2;
-          await supabase2.storage.from('order-docs').upload(path2, file, { contentType: file.type, upsert: true });
+          const { error: extraUploadError } = await supabase2.storage
+            .from('order-docs')
+            .upload(path2, file, { contentType: file.type, upsert: true });
+          if (extraUploadError) {
+            const msg = String(extraUploadError.message || '');
+            const friendly = msg.includes('exceeded the maximum allowed size') || msg.includes('Payload too large')
+              ? `⚠️ 附加文件过大，存储拒收：${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB）。请压缩后重试（推荐 ≤ 10MB）。`
+              : `附加文件上传失败：${file.name} — ${msg}`;
+            setSubmitError(friendly);
+            setLoading(false);
+            return;
+          }
           const { data: { publicUrl: url2 } } = supabase2.storage.from('order-docs').getPublicUrl(path2);
-          await (supabase2.from('order_attachments') as any).insert({
+          const { error: extraInsertError } = await (supabase2.from('order_attachments') as any).insert({
             order_id: orderId, milestone_id: milestone.id,
             uploaded_by: u2?.id || null, file_name: file.name, file_url: url2,
             storage_path: path2,
             file_type: fileType, mime_type: file.type || null,
           });
+          if (extraInsertError) {
+            setSubmitError(`附加文件已上传到存储，但记录写入失败：${file.name} — ${extraInsertError.message}（code: ${extraInsertError.code}）。请截图此错误联系管理员。`);
+            setLoading(false);
+            return;
+          }
         }
       }
 

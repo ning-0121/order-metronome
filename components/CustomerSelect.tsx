@@ -9,6 +9,7 @@ export function CustomerSelect() {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   // 新建客户弹窗
   const [showCreate, setShowCreate] = useState(false);
@@ -19,10 +20,20 @@ export function CustomerSelect() {
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getCustomers().then(({ data }) => {
-      setCustomers(data || []);
-      setLoading(false);
-    });
+    getCustomers()
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[CustomerSelect] 加载客户列表失败:', error);
+          setLoadError(typeof error === 'string' ? error : '客户列表加载失败，请刷新重试');
+        }
+        setCustomers(data || []);
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error('[CustomerSelect] 加载客户列表异常:', e);
+        setLoadError('客户列表加载失败，请刷新重试');
+        setLoading(false);
+      });
   }, []);
 
   // 点击外部关闭下拉
@@ -92,6 +103,9 @@ export function CustomerSelect() {
           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-green-500 text-sm">✓</span>
         )}
       </div>
+      {loadError && (
+        <p className="mt-1 text-xs text-red-600">⚠️ {loadError}</p>
+      )}
 
       {/* Hidden inputs for form submission */}
       <input type="hidden" name="customer_id" value={selected?.id || ''} />
