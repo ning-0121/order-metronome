@@ -540,14 +540,26 @@ async function generateMissingInfoTasks(
   const financialMap = new Map<string, any>()
   for (const f of financials || []) financialMap.set(f.order_id, f)
 
-  // 批量查确认资料
-  const { data: confirmations } = orderIds.length > 0
+  // 批量查确认资料（order_confirmations 为一模块一行：module + status）
+  const { data: confirmations, error: confError } = orderIds.length > 0
     ? await (supabase.from('order_confirmations') as any)
-        .select('order_id, fabric_color, size_ratio, logo_print, packaging')
+        .select('order_id, module, status')
         .in('order_id', orderIds)
-    : { data: [] }
-  const confirmMap = new Map<string, any>()
-  for (const c of confirmations || []) confirmMap.set(c.order_id, c)
+    : { data: [], error: null }
+  if (confError) {
+    console.error('[daily-tasks] 查询 order_confirmations 失败:', confError.message)
+  }
+  // 保留原 `if (conf && ...)` 语义：只检查启用了确认追踪（已有确认行）的订单，避免对历史无追踪订单误报
+  const ordersWithConfirmations = new Set<string>()
+  // order_id -> 已确认模块集合（status === 'confirmed' 才算已确认）
+  const confirmedModulesMap = new Map<string, Set<string>>()
+  for (const c of confirmations || []) {
+    ordersWithConfirmations.add(c.order_id)
+    if (c.status === 'confirmed') {
+      if (!confirmedModulesMap.has(c.order_id)) confirmedModulesMap.set(c.order_id, new Set())
+      confirmedModulesMap.get(c.order_id)!.add(c.module)
+    }
+  }
 
   for (const order of orders || []) {
     const orderAge = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86400000)
@@ -558,7 +570,6 @@ async function generateMissingInfoTasks(
     if (!owner) continue
 
     const fin = financialMap.get(order.id)
-    const conf = confirmMap.get(order.id)
 
     const missingItems: string[] = []
 
@@ -574,9 +585,11 @@ async function generateMissingInfoTasks(
     }
 
     // 3. 确认资料不完整（订单创建 5 天后仍有空白关键确认项）
-    if (conf && orderAge >= 5) {
-      if (!conf.fabric_color) missingItems.push('面料与颜色')
-      if (!conf.size_ratio)   missingItems.push('尺码配比')
+    //    order_confirmations 一模块一行，status === 'confirmed' 才算已确认
+    if (orderAge >= 5 && ordersWithConfirmations.has(order.id)) {
+      const confirmed = confirmedModulesMap.get(order.id) || new Set<string>()
+      if (!confirmed.has('fabric_color'))   missingItems.push('面料与颜色')
+      if (!confirmed.has('size_breakdown')) missingItems.push('尺码配比')
     }
 
     // 4. 国内送仓字段缺失（订单创建 7 天后仍未补齐送货地址）
