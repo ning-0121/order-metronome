@@ -343,7 +343,9 @@ export async function createDelayRequest(
   }
 
   revalidatePath(`/orders/${orderData.id}`);
+  revalidatePath('/orders');
   revalidatePath('/admin');
+  revalidatePath('/ceo');
 
   return { data: delayRequest };
 }
@@ -565,8 +567,10 @@ async function approveDelayRequestCore(
   })();
 
   revalidatePath(`/orders/${orderData.id}`);
+  revalidatePath('/orders');
   revalidatePath('/admin');
   revalidatePath('/dashboard');
+  revalidatePath('/ceo');
   revalidatePath('/');
 
   return success(updatedRequest);
@@ -689,8 +693,10 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
   }
 
   revalidatePath(`/orders/${orderData.id}`);
+  revalidatePath('/orders');
   revalidatePath('/admin');
   revalidatePath('/dashboard');
+  revalidatePath('/ceo');
   revalidatePath('/');
 
   return { data: updatedRequest };
@@ -1143,7 +1149,9 @@ export async function createOrderLevelDelayRequest(
   }
 
   revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/orders');
   revalidatePath('/admin');
+  revalidatePath('/ceo');
 
   return { data: delayRequest, delayRequestId: (delayRequest as any)?.id };
 }
@@ -1255,6 +1263,10 @@ export async function bulkApproveAllPendingDelays(
   }
 
   revalidatePath('/admin/pending-approvals');
+  revalidatePath('/orders');
+  revalidatePath('/admin');
+  revalidatePath('/dashboard');
+  revalidatePath('/ceo');
   revalidatePath('/');
 
   const failed = errors.length;
