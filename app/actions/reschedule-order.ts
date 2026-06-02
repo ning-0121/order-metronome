@@ -188,9 +188,13 @@ export async function applyReschedule(
 
   // 1. 更新订单的 factory_date（FOB/RMB 锚点）+ 在 DDP 情况下不动 etd
   const orderUpdate: Record<string, any> = { factory_date: newFactoryDate };
-  await (supabase.from('orders') as any)
+  const { error: anchorError } = await (supabase.from('orders') as any)
     .update(orderUpdate)
     .eq('id', orderId);
+  // 锚点是整个重排的核心，写失败必须中止——否则节点会被移到新日期但订单锚点没动，排期错位
+  if (anchorError) {
+    return { error: `更新订单出厂日失败，重排已中止：${anchorError.message}` };
+  }
 
   // 2. 更新未完成的里程碑（直接 update，不走 repo 层避免权限误杀）
   let updatedCount = 0;

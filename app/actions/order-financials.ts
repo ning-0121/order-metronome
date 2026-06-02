@@ -99,7 +99,7 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
   const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
 
   // 插入 order_financials
-  await (supabase.from('order_financials') as any).upsert({
+  const { error: finError } = await (supabase.from('order_financials') as any).upsert({
     order_id: orderId,
     sale_price_per_piece: salePrice || null,
     sale_currency: order.currency || 'USD',
@@ -112,15 +112,24 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
     min_margin_alert: marginPct < 8,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'order_id' });
+  // 财务记录写失败不再静默：返回 error 让调用方可感知（建单主链路仍由调用方决定是否阻断）
+  if (finError) {
+    console.error('[initOrderFinancials] 财务记录初始化失败:', finError.message);
+    return { error: `财务记录初始化失败：${finError.message}` };
+  }
 
   // 初始化 4 个确认模块（如果不存在）
   for (const module of CONFIRM_MODULES) {
-    await (supabase.from('order_confirmations') as any).upsert({
+    const { error: confError } = await (supabase.from('order_confirmations') as any).upsert({
       order_id: orderId,
       module,
       status: 'not_started',
       data: {},
     }, { onConflict: 'order_id,module' });
+    if (confError) {
+      console.error(`[initOrderFinancials] 确认模块 ${module} 初始化失败:`, confError.message);
+      return { error: `确认模块初始化失败：${confError.message}` };
+    }
   }
 
   return {};

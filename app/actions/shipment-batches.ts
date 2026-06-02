@@ -46,16 +46,20 @@ export async function enableSplitShipment(
     if (!r.ok) return { error: r.message };
   }
 
-  // 更新订单标记
-  await (supabase.from('orders') as any)
-    .update({ is_split_shipment: true, total_batches: batches.length })
-    .eq('id', orderId);
+  // ── 防丢数据：先快照旧批次，再删→插，插失败则回滚恢复（无事务环境下的补偿）──
+  // 1. 快照旧批次（UNIQUE(order_id,batch_no) 约束下无法先插后删，故用「删后插+失败回滚」）
+  const { data: oldBatches } = await (supabase.from('shipment_batches') as any)
+    .select('*')
+    .eq('order_id', orderId);
 
-  // 删除旧批次
-  await (supabase.from('shipment_batches') as any)
+  // 2. 删除旧批次（检查 error，失败立即中止，不丢数据、不留半成品）
+  const { error: delError } = await (supabase.from('shipment_batches') as any)
     .delete().eq('order_id', orderId);
+  if (delError) {
+    return { error: `清理旧批次失败：${delError.message}` };
+  }
 
-  // 创建新批次
+  // 3. 创建新批次
   const rows = batches.map((b, i) => ({
     order_id: orderId,
     batch_no: i + 1,
@@ -68,10 +72,22 @@ export async function enableSplitShipment(
 
   const { error } = await (supabase.from('shipment_batches') as any).insert(rows);
   if (error) {
+    // 插入失败 → 回滚：把刚删掉的旧批次原样写回，避免数据永久丢失
+    if (oldBatches && oldBatches.length > 0) {
+      await (supabase.from('shipment_batches') as any).insert(oldBatches);
+    }
     if (error.message?.includes('does not exist') || error.code === '42P01') {
       return { error: '分批出货功能正在初始化，请联系管理员执行数据库迁移' };
     }
     return { error: error.message };
+  }
+
+  // 4. 全部成功后才标记订单为分批出货（失败时订单不会被错误标记）
+  const { error: orderError } = await (supabase.from('orders') as any)
+    .update({ is_split_shipment: true, total_batches: batches.length })
+    .eq('id', orderId);
+  if (orderError) {
+    return { error: `批次已创建，但订单标记更新失败：${orderError.message}` };
   }
 
   revalidatePath(`/orders/${orderId}`);

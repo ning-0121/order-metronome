@@ -1381,9 +1381,13 @@ export async function forceCompleteOrderAction(orderId: string): Promise<{ error
 
   // 标记订单完成
   // ⚠️ 2026-04-27 统一为英文（清账：lifecycle_status 中英混用）
-  await (supabase.from('orders') as any)
+  const { error: completeError } = await (supabase.from('orders') as any)
     .update({ lifecycle_status: 'completed' })
     .eq('id', orderId);
+  // 状态写失败必须中止——否则节点已全部 done、后续还会算佣金，但订单仍未完成，状态错乱
+  if (completeError) {
+    return { error: `标记订单完成失败：${completeError.message}` };
+  }
 
   // 日志
   await (supabase.from('milestone_logs') as any).insert({
