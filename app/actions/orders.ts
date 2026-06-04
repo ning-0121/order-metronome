@@ -795,7 +795,7 @@ export async function getOrders() {
   const isAdmin = roles.includes('admin');
 
   // 管理员/财务/行政/生产主管看全部订单
-  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager'].includes(r));
+  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager'].includes(r));
 
   // 辅助：把 delay_requests 按 order_id 分组合并进 orders
   async function attachDelayRequests(orderList: any[]): Promise<any[]> {

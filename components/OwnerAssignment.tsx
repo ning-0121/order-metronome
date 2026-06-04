@@ -12,10 +12,12 @@ interface OwnerAssignmentProps {
   currentOwnerUserId: string | null;
   isAdmin: boolean;
   isProductionManager?: boolean;
+  /** 其它可改派负责人的角色（如业务部经理）汇总后的开关 */
+  canReassign?: boolean;
   milestoneStatus?: string;
 }
 
-export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, isProductionManager = false, milestoneStatus }: OwnerAssignmentProps) {
+export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, isProductionManager = false, canReassign = false, milestoneStatus }: OwnerAssignmentProps) {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
@@ -23,7 +25,7 @@ export function OwnerAssignment({ milestoneId, currentOwnerUserId, isAdmin, isPr
   const [selectedUserId, setSelectedUserId] = useState<string>(currentOwnerUserId || '');
   const [error, setError] = useState<string | null>(null);
 
-  const canAssign = isAdmin || isProductionManager;
+  const canAssign = isAdmin || isProductionManager || canReassign;
 
   useEffect(() => {
     if (canAssign) {

@@ -115,7 +115,8 @@ export async function listTargets(
     ? (profile as any).roles
     : [(profile as any)?.role].filter(Boolean);
   const isFinance = userRoles.includes('finance');
-  const canSeeAll = isAdmin || isFinance;
+  const isSalesManager = userRoles.includes('sales_manager');
+  const canSeeAll = isAdmin || isFinance || isSalesManager;
 
   // 农历年范围过滤订单（取消的不算）
   const { startStr, endStr } = getLunarYearRange(year);

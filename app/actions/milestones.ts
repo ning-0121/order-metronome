@@ -11,7 +11,7 @@ import {
 import { isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
-import { isAdminRole } from '@/lib/domain/roles';
+import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 // TODO(Sprint-1): merchGroup (~L180) 应迁移到 ROLE_GROUPS.EXECUTION，但 EXECUTION 含 production_manager
 //                 而原 merchGroup 不含，直接迁移会改变权限（属 P0 候选 bug），等 P0 评估后再动
 
@@ -1218,8 +1218,8 @@ export async function assignMilestoneOwner(milestoneId: string, userId: string) 
 
   // admin + production_manager 可以指定执行人
   // CEO 2026-04-09：生产主管需要能指定跟单
-  if (!userRoles.includes('admin') && !userRoles.includes('production_manager')) {
-    return { error: '只有管理员或生产主管可以指定执行人' };
+  if (!hasRoleInGroup(userRoles, 'CAN_REASSIGN_OWNER')) {
+    return { error: '只有管理员、生产主管或业务部经理可以指定执行人' };
   }
 
   // 使用 repository 更新
@@ -1532,8 +1532,8 @@ export async function updateMilestoneOwner(
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  if (!userRoles.includes('admin') && !userRoles.includes('production_manager')) {
-    return { error: '只有管理员或生产主管可以指定执行人' };
+  if (!hasRoleInGroup(userRoles, 'CAN_REASSIGN_OWNER')) {
+    return { error: '只有管理员、生产主管或业务部经理可以指定执行人' };
   }
 
   // Get milestone to get order_id for logging

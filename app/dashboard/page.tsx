@@ -194,7 +194,7 @@ export default async function DashboardPage() {
   }
 
   // 权限过滤：管理员/财务/行政/生产主管看所有订单，其他员工只看自己的
-  const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager'].includes(r));
+  const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager', 'sales_manager'].includes(r));
   const filterByMyOrders = (list: any[]) => canSeeAll ? list : list.filter((m: any) => myOrderIds.has(m.order_id));
   const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
   const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);

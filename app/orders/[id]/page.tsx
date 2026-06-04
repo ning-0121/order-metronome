@@ -526,8 +526,8 @@ export default async function OrderDetailPage({
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">📎 订单资料</h2>
               {(() => {
                 const sensitiveTypes = ['customer_po', 'internal_quote', 'customer_quote'];
-                // 价格文件权限：只有 admin + 财务 + 订单创建者（业务）可以看，跟单/生产部不能看
-                const canSeeSensitive = isAdmin || isOrderOwner || currentRoles.includes('finance');
+                // 价格文件权限：admin + 财务 + 业务部经理 + 订单创建者（业务）可以看，跟单/生产部不能看
+                const canSeeSensitive = isAdmin || isOrderOwner || currentRoles.includes('finance') || currentRoles.includes('sales_manager');
                 const visibleAttachments = attachments.filter((att: any) =>
                   !sensitiveTypes.includes(att.file_type) || canSeeSensitive
                 );
@@ -751,7 +751,8 @@ export default async function OrderDetailPage({
               <DelayRequestsList
                 delayRequests={delayRequests}
                 orderId={id}
-                isAdmin={isAdmin}
+                // 业务部经理与 admin 同样可审批延期（按钮显隐；服务端 delays.ts 已按 CAN_APPROVE_DELAY 兜底校验）
+                isAdmin={isAdmin || currentRoles.includes('sales_manager')}
                 isOrderOwner={isOrderOwner}
               />
             ) : (

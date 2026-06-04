@@ -44,7 +44,7 @@ export async function exportProductionTrackingSheet(): Promise<{
     (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
 
   const canSeeAll = userRoles.some((r: string) =>
-    ['admin', 'finance', 'production_manager', 'admin_assistant', 'procurement'].includes(r)
+    ['admin', 'finance', 'production_manager', 'admin_assistant', 'procurement', 'sales_manager'].includes(r)
   );
   const canSeeOwn = userRoles.some((r: string) => ['merchandiser', 'sales'].includes(r));
 

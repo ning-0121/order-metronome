@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 const ALL_ROLES = [
   { value: 'admin', label: 'CEO/管理员', desc: '全览所有数据，审批延期，指定人员，不操作节点' },
   { value: 'sales', label: '业务/理单', desc: '客户对接、PO确认、生产单制作、原辅料验收、订舱报关' },
+  { value: 'sales_manager', label: '业务部经理', desc: '查看所有订单、调配负责人、看金额利润、审批延期与价格、查看销售目标（不操作节点、不绕过付款门禁）' },
   { value: 'merchandiser', label: '跟单', desc: '工厂协调、生产跟进、中查尾查、验货放行、品质管控' },
   { value: 'finance', label: '财务', desc: '订单审核、加工费确认、成本核算、收款' },
   { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认' },

@@ -40,7 +40,7 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
   // Runtime Phase 1：投影数据，null 表示 flag off / 没数据 → fallback 老风险卡
   const [runtimeData, setRuntimeData] = useState<any | null>(null);
 
-  const canSeeFinancials = isAdmin || userRoles.some(r => ['finance', 'production_manager'].includes(r));
+  const canSeeFinancials = isAdmin || userRoles.some(r => ['finance', 'production_manager', 'sales_manager'].includes(r));
   const canUpload = isAdmin || userRoles.includes('finance');
 
   const reload = () => {

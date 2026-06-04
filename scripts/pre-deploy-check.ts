@@ -147,7 +147,7 @@ for (const [type, config] of Object.entries(ACTION_CONFIG)) {
 // ════ 4. 角色定义完整性 ════
 console.log('\n👥 角色');
 const { ROLE_MAP_TO_DB, ROLE_MAP_FROM_DB } = require('../lib/domain/roles');
-const requiredRoles = ['sales', 'merchandiser', 'finance', 'procurement', 'production', 'production_manager', 'admin_assistant', 'admin'];
+const requiredRoles = ['sales', 'sales_manager', 'merchandiser', 'finance', 'procurement', 'production', 'production_manager', 'admin_assistant', 'admin'];
 for (const role of requiredRoles) {
   assert(role in ROLE_MAP_TO_DB, `ROLE_MAP_TO_DB 包含 ${role}`);
   assert(role in ROLE_MAP_FROM_DB, `ROLE_MAP_FROM_DB 包含 ${role}`);

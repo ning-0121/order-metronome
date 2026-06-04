@@ -7,7 +7,7 @@ import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 // updateMilestone/updateMilestones 不再在 recalculateSchedule 中使用
 // （系统级联操作直接走 supabase，避免 repo 层权限校验干扰）
 import { sendEmailNotification } from '@/lib/utils/notifications';
-import { isAdminRole } from '@/lib/domain/roles';
+import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { type ActionResult, success, failure, toLegacyResult } from '@/lib/types/action-result';
 import { isBlockedStatus, isDoneStatus, isPendingStatus } from '@/lib/domain/types';
 type MilestoneLogAction =
@@ -381,9 +381,10 @@ async function approveDelayRequestCore(
     .eq('user_id', user.id)
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const isAdmin = isAdminRole(userRoles);
-  // 2026-05-18 CEO 决策：所有延期申请一律由 CEO/admin 审批，不分级。
-  if (!isAdmin) return failure('延期审批权属 CEO，仅管理员可批准。请联系管理员处理。', 'PERMISSION_DENIED');
+  // 2026-06 起：CEO/admin 与业务部经理可审批延期（业务经理对客户交期负责）
+  if (!hasRoleInGroup(userRoles, 'CAN_APPROVE_DELAY')) {
+    return failure('延期审批权限不足，仅 CEO/管理员或业务部经理可批准。', 'PERMISSION_DENIED');
+  }
 
   // 鉴权通过后，所有数据操作用 service-role 客户端 — 绕过 delay_requests RLS 的
   // 多角色 / 老策略残留问题（2026-05-26 事故）。
@@ -621,11 +622,10 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
     .eq('user_id', user.id)
     .single();
   const rejectUserRoles: string[] = (rejectProfile as any)?.roles?.length > 0 ? (rejectProfile as any).roles : [(rejectProfile as any)?.role].filter(Boolean);
-  const isRejectAdmin = rejectUserRoles.includes('admin');
 
-  if (!isRejectAdmin) {
-    // 2026-05-18 CEO 决策：延期审批一律 CEO 拍板（驳回也是）
-    return { error: '延期审批权属 CEO，仅管理员可驳回。请联系管理员处理。' };
+  if (!hasRoleInGroup(rejectUserRoles, 'CAN_APPROVE_DELAY')) {
+    // 审批/驳回同权：CEO/管理员或业务部经理
+    return { error: '延期审批权限不足，仅 CEO/管理员或业务部经理可驳回。' };
   }
 
   // Update delay request
@@ -1217,8 +1217,8 @@ export async function bulkApproveAllPendingDelays(
     (profile as any)?.roles?.length > 0
       ? (profile as any).roles
       : [(profile as any)?.role].filter(Boolean);
-  if (!isAdminRole(userRoles)) {
-    return { ok: false, approved: 0, failed: 0, total: 0, message: '仅管理员可批准延期申请' };
+  if (!hasRoleInGroup(userRoles, 'CAN_APPROVE_DELAY')) {
+    return { ok: false, approved: 0, failed: 0, total: 0, message: '仅管理员或业务部经理可批准延期申请' };
   }
 
   // 拉所有 pending 延期申请 — 用 service-role 绕过 RLS（admin 已校验过）

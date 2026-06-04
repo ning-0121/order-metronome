@@ -31,7 +31,7 @@ async function canViewPriceSensitiveDoc(
     .single();
 
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
-  if (roles.includes('finance') || roles.includes('admin')) return true;
+  if (roles.includes('finance') || roles.includes('admin') || roles.includes('sales_manager')) return true;
 
   // 查询订单：是否为此订单的负责人/创建者/跟单员
   const { data: order } = await (supabase.from('orders') as any)

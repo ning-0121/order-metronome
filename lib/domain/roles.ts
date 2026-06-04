@@ -14,7 +14,7 @@
 export type DbUserRole = 'sales' | 'finance' | 'procurement' | 'production' | 'quality' | 'admin' | 'logistics' | 'qc';
 
 // 代码中使用的角色值（业务层）
-export type AppRole = 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'production_manager' | 'qc' | 'logistics' | 'admin' | 'admin_assistant';
+export type AppRole = 'sales' | 'sales_manager' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'production_manager' | 'qc' | 'logistics' | 'admin' | 'admin_assistant';
 
 /**
  * 角色映射表：代码角色 -> 数据库枚举值（优先值）
@@ -22,6 +22,7 @@ export type AppRole = 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'pr
  */
 export const ROLE_MAP_TO_DB: Record<AppRole, string> = {
   'sales': 'sales',
+  'sales_manager': 'sales_manager',
   'merchandiser': 'merchandiser',
   'finance': 'finance',
   'procurement': 'procurement',
@@ -46,6 +47,7 @@ const ROLE_FALLBACK: Record<string, DbUserRole> = {
  */
 export const ROLE_MAP_FROM_DB: Record<string, AppRole> = {
   'sales': 'sales',
+  'sales_manager': 'sales_manager',
   'merchandiser': 'merchandiser',
   'finance': 'finance',
   'procurement': 'procurement',
@@ -78,7 +80,7 @@ export function normalizeRoleToDb(
   const normalized = input.trim().toLowerCase();
   
   // 如果是已知的数据库枚举值，直接返回
-  const knownDbRoles = ['sales', 'merchandiser', 'finance', 'procurement', 'production', 'production_manager', 'admin_assistant', 'quality', 'admin', 'logistics', 'qc'];
+  const knownDbRoles = ['sales', 'sales_manager', 'merchandiser', 'finance', 'procurement', 'production', 'production_manager', 'admin_assistant', 'quality', 'admin', 'logistics', 'qc'];
   if (knownDbRoles.includes(normalized)) {
     return normalized;
   }
@@ -174,19 +176,25 @@ export const ROLE_GROUPS = {
   /** 执行类角色：跟单 / 生产 / 质检 / 品控 / 生产主管 */
   EXECUTION: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
 
-  /** 可看所有订单（跨负责人）：管理类 + 生产主管 */
-  CAN_SEE_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager'] as const,
+  /** 可看所有订单（跨负责人）：管理类 + 生产主管 + 业务部经理 */
+  CAN_SEE_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager'] as const,
 
-  /** 可看金额/利润等敏感财务数据：admin / finance / 业务（仅自己订单） */
-  CAN_SEE_FINANCIALS: ['admin', 'finance', 'sales'] as const,
+  /** 可看金额/利润等敏感财务数据：admin / finance / 业务（仅自己订单）/ 业务部经理 */
+  CAN_SEE_FINANCIALS: ['admin', 'finance', 'sales', 'sales_manager'] as const,
 
-  /** 可审批延期申请 */
-  CAN_APPROVE_DELAY: ['admin'] as const,
+  /** 可审批延期申请：admin + 业务部经理（对客户交期负责） */
+  CAN_APPROVE_DELAY: ['admin', 'sales_manager'] as const,
 
-  /** 可绕过经营门禁（付款锁、确认链阻塞等） */
+  /** 可审批客户价格申请：admin + 业务部经理 */
+  CAN_APPROVE_PRICE: ['admin', 'sales_manager'] as const,
+
+  /** 可改派订单/节点负责人：admin + 生产主管 + 业务部经理 */
+  CAN_REASSIGN_OWNER: ['admin', 'production_manager', 'sales_manager'] as const,
+
+  /** 可绕过经营门禁（付款锁、确认链阻塞等）—— 业务部经理不在内，避免越权放货 */
   CAN_OVERRIDE_BUSINESS_BLOCK: ['admin'] as const,
 
-  /** 可执行里程碑（去处理/完成节点） */
+  /** 可执行里程碑（去处理/完成节点）—— 业务部经理是监督角色，不在内 */
   CAN_OPERATE_MILESTONES: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
 } as const;
 

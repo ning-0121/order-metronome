@@ -3,8 +3,21 @@
 import { createClient } from '@/lib/supabase/server';
 import { friendlyError } from '@/lib/utils/db-error';
 import { isPendingStatus } from '@/lib/domain/types';
-import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { revalidatePath } from 'next/cache';
+import { hasRoleInGroup } from '@/lib/domain/roles';
+
+/**
+ * 价格审批权限（基于角色，非邮箱白名单）：admin / 业务部经理
+ * 2026-06 起从 getCurrentUserRole（邮箱白名单）切到 profiles.roles 角色判断。
+ */
+async function canApprovePrice(supabase: any, userId: string): Promise<boolean> {
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', userId).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0
+    ? (profile as any).roles
+    : [(profile as any)?.role].filter(Boolean);
+  return hasRoleInGroup(roles, 'CAN_APPROVE_PRICE');
+}
 
 /**
  * 订单创建前的价格审批
@@ -93,8 +106,7 @@ export async function approvePriceApproval(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员/CEO 可审批价格' };
+  if (!(await canApprovePrice(supabase, user.id))) return { error: '仅管理员/CEO 或业务部经理可审批价格' };
 
   const { data: row } = await (supabase.from('pre_order_price_approvals') as any)
     .select('id, status, requested_by, customer_name, po_number')
@@ -151,8 +163,7 @@ export async function getPendingPriceApprovalsCount(): Promise<number> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return 0;
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return 0;
+  if (!(await canApprovePrice(supabase, user.id))) return 0;
   const { count } = await (supabase.from('pre_order_price_approvals') as any)
     .select('id', { count: 'exact', head: true })
     .eq('status', 'pending')
@@ -168,8 +179,7 @@ export async function listPendingPriceApprovals() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录', data: null };
 
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可查看', data: null };
+  if (!(await canApprovePrice(supabase, user.id))) return { error: '仅管理员或业务部经理可查看', data: null };
 
   const { data, error } = await (supabase.from('pre_order_price_approvals') as any)
     .select('id, customer_name, po_number, form_snapshot, price_diffs, summary, status, created_at, expires_at, review_note, reviewed_at, requested_by')
