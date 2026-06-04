@@ -18,6 +18,7 @@ import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
+import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
 import { RescheduleBanner } from '@/components/RescheduleBanner';
 import { OrderDelayPanel } from '@/components/OrderDelayPanel';
@@ -319,6 +320,9 @@ export default async function OrderDetailPage({
                   isFinance={currentRoles.includes('finance')}
                 />
                 {isAdmin && <RecalcButton orderId={id} orderNo={orderData.order_no} />}
+                {(orderData.order_type === 'sample' || (orderData as any).order_purpose === 'sample') && (
+                  <ExportSampleRequestButton orderId={id} />
+                )}
               </div>
             </div>
             <div className="flex flex-col items-end gap-1.5">
