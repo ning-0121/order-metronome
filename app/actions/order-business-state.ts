@@ -44,7 +44,7 @@ export async function getOrderBusinessState(orderId: string): Promise<{
       .select('module, status, data, customer_confirmed')
       .eq('order_id', orderId),
     (supabase.from('milestones') as any)
-      .select('step_key, status, due_at')
+      .select('step_key, status, due_at, name, sequence_number, owner_role')
       .eq('order_id', orderId),
   ]);
 
