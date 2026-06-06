@@ -398,14 +398,27 @@ export async function approveDocument(docId: string): Promise<{ error?: string }
     }
   }
 
-  // 将同类型旧版本的 is_official 设为 false
-  await (supabase.from('order_documents') as any)
+  // ── 正式版切换：保证「恰好 1 个正式版」──
+  // 非事务环境下用「记录原正式版 → 降级旧版(查错) → 升级当前版(查错) → 升级失败则回滚」，
+  // 杜绝「0 个正式版」(降级成功但升级失败) 与「2 个正式版」(降级被吞错)。
+  // 1. 记录同类型当前正式版（用于回滚）
+  const { data: prevOfficial } = await (supabase.from('order_documents') as any)
+    .select('id')
+    .eq('order_id', doc.order_id)
+    .eq('document_type', doc.document_type)
+    .eq('is_official', true)
+    .neq('id', docId);
+  const prevOfficialIds: string[] = (prevOfficial || []).map((r: any) => r.id);
+
+  // 2. 降级同类型所有其它版本（检查 error；失败则中止，原状态不变）
+  const { error: demoteErr } = await (supabase.from('order_documents') as any)
     .update({ is_official: false })
     .eq('order_id', doc.order_id)
     .eq('document_type', doc.document_type)
     .neq('id', docId);
+  if (demoteErr) return { error: `切换正式版失败（降级旧版）：${demoteErr.message}` };
 
-  // 审批当前版本
+  // 3. 升级当前版本为正式版 + 审批
   const { error } = await (supabase.from('order_documents') as any)
     .update({
       status: 'approved',
@@ -417,7 +430,15 @@ export async function approveDocument(docId: string): Promise<{ error?: string }
     })
     .eq('id', docId);
 
-  if (error) return { error: error.message };
+  if (error) {
+    // 回滚：恢复刚降级的旧正式版，避免出现「0 个正式版」
+    if (prevOfficialIds.length > 0) {
+      await (supabase.from('order_documents') as any)
+        .update({ is_official: true })
+        .in('id', prevOfficialIds);
+    }
+    return { error: error.message };
+  }
 
   await logDocAction(supabase, docId, doc.order_id, 'approved', user.id);
   revalidatePath(`/orders/${doc.order_id}`);

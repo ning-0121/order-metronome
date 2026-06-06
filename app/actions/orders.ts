@@ -1262,10 +1262,13 @@ export async function approveImportOrder(orderId: string): Promise<{ error?: str
   const importCurrentStep = order.import_current_step;
   if (!importCurrentStep) return { error: '缺少导入当前步骤' };
 
-  // 激活订单
-  await (supabase.from('orders') as any)
+  // 激活订单（必须先成功，否则不推进任何节点，避免「节点已推进但订单仍待审批」的错乱）
+  const { error: activateErr } = await (supabase.from('orders') as any)
     .update({ lifecycle_status: 'active' })
     .eq('id', orderId);
+  if (activateErr) {
+    return { error: `激活订单失败，审批已中止：${activateErr.message}` };
+  }
 
   // 获取所有里程碑，标记已过步骤为 done，当前步骤为 in_progress
   const templates = (await import('@/lib/milestoneTemplate')).MILESTONE_TEMPLATE_V1;
@@ -1288,13 +1291,23 @@ export async function approveImportOrder(orderId: string): Promise<{ error?: str
           updates.status = 'in_progress';
         }
         if (Object.keys(updates).length > 0) {
-          await (supabase.rpc as any)('admin_update_milestone', {
-            _milestone_id: ms.id,
-            _updates: updates,
-          }).catch(() => {
-            // 兜底直接 update
-            (supabase.from('milestones') as any).update(updates).eq('id', ms.id);
-          });
+          // 优先走 RPC；失败则兜底直接 update —— 两条路径都 await 并检查 error，禁止悬空 Promise
+          let rpcOk = false;
+          try {
+            const { error: rpcErr } = await (supabase.rpc as any)('admin_update_milestone', {
+              _milestone_id: ms.id,
+              _updates: updates,
+            });
+            rpcOk = !rpcErr;
+          } catch { rpcOk = false; }
+          if (!rpcOk) {
+            const { error: fbErr } = await (supabase.from('milestones') as any)
+              .update(updates)
+              .eq('id', ms.id);
+            if (fbErr) {
+              console.error('[approveImportedOrder] 里程碑推进失败:', ms.id, fbErr.message);
+            }
+          }
         }
       }
     }
