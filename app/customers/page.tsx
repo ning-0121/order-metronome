@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { CustomerEmailMappingPanel } from '@/components/CustomerEmailMappingPanel';
+import { AddCustomerMemoForm } from '@/components/AddCustomerMemoForm';
+import { CATEGORY_LABELS } from '@/lib/domain/customer-memory';
 import { getOffPriceRetailer, getOffPriceMonthlyPush } from '@/lib/agent/industryKnowledge';
 
 const TIER_STYLES: Record<string, string> = {
@@ -242,25 +244,43 @@ export default async function CustomersPage() {
                   </details>
                 </div>
 
-                {/* 客户记忆 */}
-                {mems.length > 0 && (
-                  <div className="px-5 pb-2">
-                    <details>
-                      <summary className="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">
-                        📋 客户记忆（{mems.length} 条）
-                      </summary>
-                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                        {mems.slice(0, 5).map((m: any, i: number) => (
-                          <div key={i} className={`text-xs px-2 py-1 rounded ${
-                            m.risk_level === 'high' ? 'bg-red-50 text-red-700' : 'bg-gray-50 text-gray-600'
-                          }`}>
-                            {m.content}
+                {/* 客户档案备忘（按维度分段，便于交接看全局） */}
+                <div className="px-5 pb-2">
+                  <details open={mems.length > 0}>
+                    <summary className="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">
+                      📋 客户档案备忘（{mems.length} 条）
+                    </summary>
+                    <div className="mt-2 max-h-56 overflow-y-auto space-y-2">
+                      {(() => {
+                        const byCat = new Map<string, any[]>();
+                        for (const m of mems) {
+                          const k = m.category || 'general';
+                          if (!byCat.has(k)) byCat.set(k, []);
+                          byCat.get(k)!.push(m);
+                        }
+                        return [...byCat.entries()].map(([cat, list]) => (
+                          <div key={cat}>
+                            <div className="text-[10px] font-semibold text-gray-400 mb-0.5">
+                              {(CATEGORY_LABELS as Record<string, string>)[cat] || cat}
+                            </div>
+                            <div className="space-y-1">
+                              {list.map((m: any, i: number) => (
+                                <div key={i} className={`text-xs px-2 py-1 rounded ${
+                                  m.risk_level === 'high' ? 'bg-red-50 text-red-700' : 'bg-gray-50 text-gray-600'
+                                }`}>
+                                  {m.content}
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    </details>
-                  </div>
-                )}
+                        ));
+                      })()}
+                    </div>
+                    <div className="mt-2">
+                      <AddCustomerMemoForm customerName={c.name} />
+                    </div>
+                  </details>
+                </div>
 
                 {/* 订单列表 */}
                 <div className="border-t border-gray-100">

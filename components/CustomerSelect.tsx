@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getCustomers, createCustomer, type Customer } from '@/app/actions/customers';
+import { CustomerMemoReminder } from './CustomerMemoReminder';
 
 export function CustomerSelect() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -110,6 +111,9 @@ export function CustomerSelect() {
       {/* Hidden inputs for form submission */}
       <input type="hidden" name="customer_id" value={selected?.id || ''} />
       <input type="hidden" name="customer_name" value={selected?.customer_name || ''} />
+
+      {/* 建单时客户经验提醒（Phase 1：只读提醒） */}
+      <CustomerMemoReminder customerName={selected?.customer_name || null} />
 
       {/* 下拉列表 */}
       {open && !showCreate && (

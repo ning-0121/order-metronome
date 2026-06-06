@@ -30,7 +30,15 @@ export type CustomerMemoryCategory =
   | 'plus_size_stretch'
   | 'approval_speed'       // V1.2: 客户审批速度（产前样/文件确认）
   | 'payment_behavior'     // V1.2: 付款行为（T/T 到账速度、尾款跟催情况）
-  | 'communication_style'; // V1.2: 沟通风格（响应速度、确认细节度）
+  | 'communication_style'  // V1.2: 沟通风格（响应速度、确认细节度）
+  // V1.3: 客户档案维度（业务员手填，交接知识库）
+  | 'brand'                // 客户品牌
+  | 'order_habit'          // 下单习惯
+  | 'sample_confirm'       // 样衣确认规则与时间
+  | 'pricing'              // 固定品价格 / 价格演变原因
+  | 'inspection'           // 验货标准
+  | 'lead_time'            // 订单周期
+  | 'special_requirement'; // 重要事项 / 个性化品质要求
 
 export type CustomerMemoryRiskLevel = 'low' | 'medium' | 'high';
 
@@ -68,6 +76,13 @@ export const CATEGORY_LABELS: Record<CustomerMemoryCategory, string> = {
   approval_speed: '审批速度',
   payment_behavior: '付款行为',
   communication_style: '沟通风格',
+  brand: '客户品牌',
+  order_habit: '下单习惯',
+  sample_confirm: '样衣确认',
+  pricing: '价格/价格演变',
+  inspection: '验货标准',
+  lead_time: '订单周期',
+  special_requirement: '个性化要求',
 };
 
 export const RISK_LABELS: Record<CustomerMemoryRiskLevel, string> = {
