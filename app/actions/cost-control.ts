@@ -89,19 +89,26 @@ export async function uploadCostSheet(
     updated_at: new Date().toISOString(),
   };
 
-  // Upsert（一个订单只有一条基线）
+  // Upsert（一个订单只有一条基线）—— 必须检查 error，不再静默
   const { data: existing } = await (supabase.from('order_cost_baseline') as any)
     .select('id')
     .eq('order_id', orderId)
     .single();
 
-  if (existing) {
-    await (supabase.from('order_cost_baseline') as any)
-      .update(baselineData)
-      .eq('order_id', orderId);
-  } else {
-    await (supabase.from('order_cost_baseline') as any).insert(baselineData);
+  const { error: baselineErr } = existing
+    ? await (supabase.from('order_cost_baseline') as any).update(baselineData).eq('order_id', orderId)
+    : await (supabase.from('order_cost_baseline') as any).insert(baselineData);
+  if (baselineErr) {
+    return { error: `成本基线写入失败：${baselineErr.message}` };
   }
+
+  // 解析完整性检查：关键字段缺失则收集，前端据此显示「解析不完整」而非「已解析 ✅」
+  const missingFields: string[] = [];
+  if (!matched.fabric_consumption_kg && !matched.fabric_area_m2) missingFields.push('单件用量');
+  if (!matched.fabric_price_per_kg) missingFields.push('净布价');
+  if (!matched.cmt_price && !matched.factory_cmt_quote) missingFields.push('加工费');
+  const totalCostUnknown = !matched.total_cost;
+  const warnings = [...result.warnings];
 
   // 如果解析到了 FOB 售价，同步写入 order_financials.sale_price_per_piece（仅当字段为空时）
   if (matched.fob_price) {
@@ -123,8 +130,13 @@ export async function uploadCostSheet(
       });
     }
 
-    // 触发利润快照重算
-    void calculateProfitSnapshot(supabase, { orderId, snapshotType: 'live' });
+    // 触发利润快照重算 —— 失败记 warning 但不阻断上传
+    try {
+      await calculateProfitSnapshot(supabase, { orderId, snapshotType: 'live' });
+    } catch (e: any) {
+      warnings.push(`利润快照重算失败（不影响成本基线）：${e?.message || '未知错误'}`);
+      console.warn('[uploadCostSheet] profit snapshot failed:', e?.message);
+    }
   }
 
   revalidatePath(`/orders/${orderId}`);
@@ -135,7 +147,10 @@ export async function uploadCostSheet(
       cmt_price: matched.cmt_price,
       budget_kg: budget?.grossUsage,
       fob_price: matched.fob_price,
-      warnings: result.warnings,
+      missingFields,
+      totalCostUnknown,
+      parseComplete: missingFields.length === 0,
+      warnings,
     },
   };
 }
@@ -385,7 +400,11 @@ export async function autoParseExistingCostSheet(orderId: string): Promise<{
     updated_at: new Date().toISOString(),
   };
 
-  await (supabase.from('order_cost_baseline') as any).insert(baselineData);
+  const { error: autoInsErr } = await (supabase.from('order_cost_baseline') as any).insert(baselineData);
+  if (autoInsErr) {
+    console.warn('[autoParseExistingCostSheet] 成本基线写入失败:', autoInsErr.message);
+    return { parsed: false, error: autoInsErr.message };
+  }
   revalidatePath(`/orders/${orderId}`);
 
   return { parsed: true };

@@ -43,12 +43,18 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
     if (res.error) {
       alert('解析失败：' + res.error);
     } else {
+      const d = res.data as any;
+      const missing: string[] = d?.missingFields || [];
+      const complete = d?.parseComplete !== false && missing.length === 0;
+      const head = complete
+        ? '✅ 解析成功'
+        : `⚠️ 解析不完整 — 以下关键字段未能从 Excel 提取：${missing.join('、')}${d?.totalCostUnknown ? '；单件总成本无法计算' : ''}\n请核对核算单表头或手工补录。`;
       alert(
-        `✅ 解析成功\n款号：${res.data?.style}\n` +
-        `单耗：${res.data?.fabric_consumption_kg} KG/件\n` +
-        `加工费：¥${res.data?.cmt_price}\n` +
-        `面料预算：${res.data?.budget_kg} KG` +
-        (res.data?.warnings?.length > 0 ? `\n\n⚠ 警告：${res.data.warnings.join('; ')}` : ''),
+        `${head}\n款号：${d?.style ?? '—'}\n` +
+        `单耗：${d?.fabric_consumption_kg ?? '—'} KG/件\n` +
+        `加工费：${d?.cmt_price != null ? '¥' + d.cmt_price : '—'}\n` +
+        `面料预算：${d?.budget_kg ?? '—'} KG` +
+        (d?.warnings?.length > 0 ? `\n\n⚠ 警告：${d.warnings.join('; ')}` : ''),
       );
       load();
     }
@@ -90,11 +96,25 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
               />
             </label>
           </div>
-          {hasBaseline && (
-            <p className="text-xs text-green-600 mt-2">
-              ✅ 已解析：{b.source_file_name}（{new Date(b.parsed_at).toLocaleDateString('zh-CN')}）
-            </p>
-          )}
+          {hasBaseline && (() => {
+            // 解析完整性：关键字段缺失则不显示「已解析✅」，明确告知缺哪些
+            const missing: string[] = [];
+            if (!b.fabric_consumption_kg && !b.fabric_area_m2) missing.push('单件用量');
+            if (!b.fabric_price_per_kg) missing.push('净布价');
+            if (!b.cmt_factory_quote && !b.cmt_internal_estimate) missing.push('加工费');
+            const totalCostUnknown = !b.total_cost_per_piece;
+            const fileLabel = `${b.source_file_name}（${new Date(b.parsed_at).toLocaleDateString('zh-CN')}）`;
+            if (missing.length === 0) {
+              return <p className="text-xs text-green-600 mt-2">✅ 已解析：{fileLabel}</p>;
+            }
+            return (
+              <div className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded-lg p-2 space-y-0.5">
+                <p className="font-semibold">⚠️ 解析不完整：{fileLabel}</p>
+                <p>未能从 Excel 自动提取：{missing.join('、')}{totalCostUnknown ? '；单件总成本无法计算' : ''}</p>
+                <p className="text-amber-600">请核对核算单表头命名，或重新上传 / 手工补录这些字段。</p>
+              </div>
+            );
+          })()}
         </div>
       )}
 
