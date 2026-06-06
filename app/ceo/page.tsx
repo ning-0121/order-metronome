@@ -63,7 +63,7 @@ export default async function CEOWarRoom() {
   const orderIds = (orders || []).map((o: any) => o.id);
   const { data: allMilestones } = orderIds.length > 0
     ? await supabase.from('milestones')
-        .select('id, name, step_key, status, due_at, actual_at, owner_role, owner_user_id, order_id, sequence_number')
+        .select('id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id, order_id, sequence_number')
         .in('order_id', orderIds)
     : { data: [] };
   // 按 order_id 分组
