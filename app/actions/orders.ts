@@ -90,12 +90,12 @@ export async function createOrder(
     return { ok: false, error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
   }
 
-  // 权限：仅业务/理单角色可创建订单
+  // 权限：业务/理单(sales)、业务部经理(sales_manager)、管理员(admin) 可创建订单
   const { data: creatorProfile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const creatorRoles: string[] = (creatorProfile as any)?.roles?.length > 0 ? (creatorProfile as any).roles : [(creatorProfile as any)?.role].filter(Boolean);
-  const canCreate = creatorRoles.some(r => r === 'sales');
+  const canCreate = creatorRoles.some(r => ['sales', 'sales_manager', 'admin'].includes(r));
   if (!canCreate) {
-    return { ok: false, error: '仅业务/理单角色可以创建订单' };
+    return { ok: false, error: '仅业务/理单、业务部经理或管理员可以创建订单（当前账号角色：' + (creatorRoles.join('、') || '未设置') + '）' };
   }
 
   if (!preGeneratedOrderNo) {

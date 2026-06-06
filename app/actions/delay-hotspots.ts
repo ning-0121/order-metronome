@@ -232,7 +232,7 @@ export async function attributeDelay(
   const roles: string[] = (profile as any)?.roles?.length > 0
     ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const canAttribute = roles.some(r =>
-    ['sales', 'merchandiser', 'procurement', 'finance', 'admin'].includes(r)
+    ['sales', 'sales_manager', 'merchandiser', 'procurement', 'finance', 'admin'].includes(r)
   );
   if (!canAttribute) return { error: '无权限归因' };
 

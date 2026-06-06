@@ -9,7 +9,7 @@ import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 import { sendEmailNotification } from '@/lib/utils/notifications';
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { type ActionResult, success, failure, toLegacyResult } from '@/lib/types/action-result';
-import { isBlockedStatus, isDoneStatus, isPendingStatus } from '@/lib/domain/types';
+import { isBlockedStatus, isDoneStatus, isApprovalPending } from '@/lib/domain/types';
 type MilestoneLogAction =
   | 'mark_done'
   | 'mark_in_progress'
@@ -408,7 +408,7 @@ async function approveDelayRequestCore(
 
   const delayRequestData = delayRequest as any;
 
-  if (!isPendingStatus(delayRequestData.status)) {
+  if (!isApprovalPending(delayRequestData.status)) {
     return failure(
       `该延期申请已${delayRequestData.status === 'approved' ? '批准' : '处理'}，请刷新页面`,
       'CONFLICT',
@@ -1026,7 +1026,7 @@ export async function createOrderLevelDelayRequest(
   const userRoles: string[] = (profile as any)?.roles?.length > 0
     ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdmin = isAdminRole(userRoles);
-  const isSales = userRoles.some(r => ['sales', 'merchandiser'].includes(r));
+  const isSales = userRoles.some(r => ['sales', 'sales_manager', 'merchandiser'].includes(r));
   const isOwner = orderCheck.created_by === user.id || orderCheck.owner_user_id === user.id;
   if (!isAdmin && !isSales && !isOwner) {
     return { error: '仅订单负责人或管理员可申请延期' };

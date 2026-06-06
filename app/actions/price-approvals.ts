@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { friendlyError } from '@/lib/utils/db-error';
-import { isPendingStatus } from '@/lib/domain/types';
+import { isApprovalPending } from '@/lib/domain/types';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 
@@ -113,7 +113,7 @@ export async function approvePriceApproval(
     .eq('id', approvalId)
     .single();
   if (!row) return { error: '审批记录不存在' };
-  if (!isPendingStatus(row.status)) return { error: `该申请已是「${row.status}」状态，无法重复审批` };
+  if (!isApprovalPending(row.status)) return { error: `该申请已是「${row.status}」状态，无法重复审批` };
 
   const { error } = await (supabase.from('pre_order_price_approvals') as any)
     .update({

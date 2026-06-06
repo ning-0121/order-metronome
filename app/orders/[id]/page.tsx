@@ -302,7 +302,7 @@ export default async function OrderDetailPage({
                   orderId={id}
                   orderNo={orderData.order_no}
                   initialTags={orderData.special_tags || []}
-                  canEdit={isAdmin || isOrderOwner || currentRoles.includes('sales')}
+                  canEdit={isAdmin || isOrderOwner || currentRoles.includes('sales') || currentRoles.includes('sales_manager')}
                 />
               </div>
               <div className="flex items-center gap-3 mt-1">

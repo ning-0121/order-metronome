@@ -18,7 +18,7 @@ import {
   isShipmentStep,
 } from './criticalNodes';
 import { isCustomerShipHoldFromOrder } from '@/lib/domain/customerShipHold';
-import { isPendingStatus } from '@/lib/domain/types';
+import { isApprovalPending } from '@/lib/domain/types';
 import type {
   ConfidenceComputeInput,
   ConfidenceComputeOutput,
@@ -134,7 +134,7 @@ function hasApprovedDelayCovering(
 
 function hasPendingDelayRequest(milestoneId: string, delayRequests: any[] | undefined): boolean {
   if (!delayRequests) return false;
-  return delayRequests.some(d => d.milestone_id === milestoneId && isPendingStatus(d.status));
+  return delayRequests.some(d => d.milestone_id === milestoneId && isApprovalPending(d.status));
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
-import { isActiveStatus, isBlockedStatus, isDoneStatus, isPendingStatus, normalizeMilestoneStatus, transitionOrderLifecycle, type OrderLifecycleStatus } from '@/lib/domain/types';
+import { isActiveStatus, isBlockedStatus, isDoneStatus, isPendingStatus, isApprovalPending, normalizeMilestoneStatus, transitionOrderLifecycle, type OrderLifecycleStatus } from '@/lib/domain/types';
 import { createMilestone, transitionMilestoneStatus } from './milestonesRepo';
 
 // ⚠️ 系统级约束：order_no 只能由系统生成，禁止外部传入
@@ -705,7 +705,7 @@ export async function decideCancel(
   const order = cancelRequest.orders;
   
   // 校验：只有pending状态才能审批
-  if (!isPendingStatus(cancelRequest.status)) {
+  if (!isApprovalPending(cancelRequest.status)) {
     return { error: `取消申请状态为"${cancelRequest.status}"，无法审批。` };
   }
   

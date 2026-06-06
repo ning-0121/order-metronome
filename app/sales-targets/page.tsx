@@ -28,7 +28,7 @@ export default async function SalesTargetsPage({ searchParams }: PageProps) {
     ? (profile as any).roles
     : [(profile as any)?.role].filter(Boolean);
   const isFinance = userRoles.includes('finance');
-  const isSales = userRoles.includes('sales') || userRoles.includes('merchandiser');
+  const isSales = userRoles.includes('sales') || userRoles.includes('merchandiser') || userRoles.includes('sales_manager');
 
   if (!isAdmin && !isFinance && !isSales) {
     return (

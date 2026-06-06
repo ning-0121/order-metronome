@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { formatDate, isOverdue } from '@/lib/utils/date';
-import { isActiveStatus, isBlockedStatus, isPendingStatus } from '@/lib/domain/types';
+import { isActiveStatus, isBlockedStatus, isApprovalPending } from '@/lib/domain/types';
 import Link from 'next/link';
 import { DelayRequestActions } from '@/components/DelayRequestActions';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
@@ -54,7 +54,7 @@ export default async function CEODashboardPage() {
     if (drs) {
       for (const dr of drs as any[]) {
         const cur = ceoDelayMap[dr.milestone_id];
-        if (!cur || dr.status === 'approved' || (isPendingStatus(dr.status) && cur === 'rejected')) {
+        if (!cur || dr.status === 'approved' || (isApprovalPending(dr.status) && cur === 'rejected')) {
           ceoDelayMap[dr.milestone_id] = dr.status;
         }
       }

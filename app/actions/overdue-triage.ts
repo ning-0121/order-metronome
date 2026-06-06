@@ -411,7 +411,7 @@ export async function getTransferCandidates(): Promise<{
     .select('user_id, name, role, roles')
     .order('name', { ascending: true });
 
-  const allowed = ['sales', 'merchandiser', 'procurement', 'admin'];
+  const allowed = ['sales', 'sales_manager', 'merchandiser', 'procurement', 'admin'];
   const rows = (data || [])
     .filter((p: any) => {
       const roles: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);

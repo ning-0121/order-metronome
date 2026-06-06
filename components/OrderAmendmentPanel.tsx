@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { isPendingStatus } from '@/lib/domain/types';
+import { isApprovalPending } from '@/lib/domain/types';
 import {
   submitOrderAmendment,
   getOrderAmendments,
@@ -96,7 +96,7 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin, doneStepKeys = []
     else loadAmendments();
   }
 
-  const pendingCount = amendments.filter(a => isPendingStatus(a.status)).length;
+  const pendingCount = amendments.filter(a => isApprovalPending(a.status)).length;
 
   // 把规则分成 可改 / 锁定 两组，便于显示
   const allowedRules = AMENDMENT_RULES.filter(r => checkAmendmentAllowed(r.field, doneSet).allowed);
@@ -237,23 +237,23 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin, doneStepKeys = []
           </h3>
           {amendments.map((a: any) => (
             <div key={a.id} className={`p-4 rounded-xl border text-sm ${
-              isPendingStatus(a.status) ? 'border-amber-200 bg-amber-50' :
+              isApprovalPending(a.status) ? 'border-amber-200 bg-amber-50' :
               a.status === 'approved' ? 'border-green-200 bg-green-50' :
               'border-red-200 bg-red-50'
             }`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                    isPendingStatus(a.status) ? 'bg-amber-200 text-amber-800' :
+                    isApprovalPending(a.status) ? 'bg-amber-200 text-amber-800' :
                     a.status === 'approved' ? 'bg-green-200 text-green-800' :
                     'bg-red-200 text-red-800'
                   }`}>
-                    {isPendingStatus(a.status) ? '待审批' : a.status === 'approved' ? '已批准' : '已驳回'}
+                    {isApprovalPending(a.status) ? '待审批' : a.status === 'approved' ? '已批准' : '已驳回'}
                   </span>
                   <span className="text-gray-500">{a.requester?.name || a.requester?.email || '—'}</span>
                   <span className="text-gray-400">{new Date(a.created_at).toLocaleDateString('zh-CN')}</span>
                 </div>
-                {isAdmin && isPendingStatus(a.status) && (
+                {isAdmin && isApprovalPending(a.status) && (
                   <div className="flex gap-2">
                     <button onClick={() => handleApprove(a.id, true)} className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700">批准</button>
                     <button onClick={() => handleApprove(a.id, false)} className="px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700">驳回</button>

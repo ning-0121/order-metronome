@@ -33,7 +33,7 @@ export async function getCustomerSchedules(): Promise<{
 
   const { isAdmin } = await getCurrentUserRole(supabase);
   const roles = await getUserRoles(supabase, user.id);
-  const canRead = isAdmin || roles.some(r => ['sales', 'merchandiser'].includes(r));
+  const canRead = isAdmin || roles.some(r => ['sales', 'sales_manager', 'merchandiser'].includes(r));
   if (!canRead) return { error: '无权限查看' };
 
   const { data, error } = await (supabase.from('customers') as any)
@@ -66,7 +66,7 @@ export async function updateCustomerScheduleOverrides(
 
   const { isAdmin } = await getCurrentUserRole(supabase);
   const roles = await getUserRoles(supabase, user.id);
-  const canEdit = isAdmin || roles.some(r => ['sales', 'merchandiser'].includes(r));
+  const canEdit = isAdmin || roles.some(r => ['sales', 'sales_manager', 'merchandiser'].includes(r));
   if (!canEdit) return { error: '仅管理员/业务/跟单可编辑节奏偏好' };
 
   // 校验：anchor 合法 + offset_days 数字 + 范围

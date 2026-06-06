@@ -62,6 +62,15 @@ export const isBlockedStatus = (s: string | null | undefined): boolean => normal
 export const isPendingStatus = (s: string | null | undefined): boolean => normalizeMilestoneStatus(s) === '未开始';
 
 /**
+ * 审批类实体（延期申请 / 价格申请 / 变更申请 / 取消申请）的「待审批」判断。
+ * ⚠️ 这些实体的状态是 pending / approved / rejected，**绝不能用 isPendingStatus**——
+ *    isPendingStatus 走里程碑归一化，approved/rejected 不在映射表里会默认成「未开始」=pending，
+ *    导致「审批后仍显示待审批」（2026-06 订单列表「延期申请中」不消失的根因）。
+ */
+export const isApprovalPending = (s: string | null | undefined): boolean =>
+  (s ?? '').trim().toLowerCase() === 'pending';
+
+/**
  * 状态转换规则定义
  */
 export const STATUS_TRANSITIONS: Record<MilestoneStatus, MilestoneStatus[]> = {

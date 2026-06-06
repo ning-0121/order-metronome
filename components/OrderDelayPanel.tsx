@@ -15,7 +15,7 @@
  */
 
 import { useState, useRef } from 'react';
-import { isPendingStatus } from '@/lib/domain/types';
+import { isApprovalPending } from '@/lib/domain/types';
 import { useRouter } from 'next/navigation';
 import { createOrderLevelDelayRequest } from '@/app/actions/delays';
 import { createClient } from '@/lib/supabase/client';
@@ -101,7 +101,7 @@ export function OrderDelayPanel({
   const evidenceInputRef = useRef<HTMLInputElement>(null);
 
   const approvedCount = delayHistory.filter(d => d.status === 'approved').length;
-  const pendingCount = delayHistory.filter(d => isPendingStatus(d.status)).length;
+  const pendingCount = delayHistory.filter(d => isApprovalPending(d.status)).length;
   const totalCount = delayHistory.length;
 
   // 客户原因必须上传客户同意证据

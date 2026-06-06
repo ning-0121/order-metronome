@@ -13,7 +13,7 @@ export default async function CustomerSchedulesPage() {
 
   const { isAdmin } = await getCurrentUserRole(supabase);
   const roles = await getUserRoles(supabase, user.id);
-  const canRead = isAdmin || roles.some(r => ['sales', 'merchandiser'].includes(r));
+  const canRead = isAdmin || roles.some(r => ['sales', 'sales_manager', 'merchandiser'].includes(r));
   if (!canRead) redirect('/dashboard');
 
   const result = await getCustomerSchedules();

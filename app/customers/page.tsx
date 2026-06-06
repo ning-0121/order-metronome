@@ -35,7 +35,7 @@ export default async function CustomersPage() {
   // 权限：仅业务/跟单/管理员/行政可访问
   const { data: profile } = await supabase.from('profiles').select('roles, role').eq('user_id', user.id).single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  if (!userRoles.some(r => ['admin', 'sales', 'merchandiser', 'admin_assistant', 'production_manager'].includes(r))) {
+  if (!userRoles.some(r => ['admin', 'sales', 'sales_manager', 'merchandiser', 'admin_assistant', 'production_manager'].includes(r))) {
     redirect('/dashboard');
   }
 
