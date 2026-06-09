@@ -15,6 +15,7 @@ import type {
   CustomerRhythmSyncResult,
 } from './types'
 import { createSystemAlert, resolveAlertByKey } from './alerts.service'
+import { getUsdToRmbRate, normalizeAmountToUsd } from '@/lib/utils/exchange-rate'
 
 // ── 客户分级阈值 ──────────────────────────────────────────────
 const TIER_THRESHOLDS = {
@@ -203,7 +204,7 @@ export async function updateCustomerRhythm(
   try {
     // 1. 读取该客户所有订单聚合数据
     const { data: orders, error: ordersErr } = await (supabase.from('orders') as any)
-      .select('id, order_no, total_amount_usd, created_at, lifecycle_status, incoterm')
+      .select('id, order_no, total_amount, currency, created_at, lifecycle_status, incoterm')
       .eq('customer_name', customerName)
       .order('created_at', { ascending: false })
 
@@ -214,10 +215,15 @@ export async function updateCustomerRhythm(
       !['completed', 'cancelled', '已完成', '已取消'].includes(o.lifecycle_status || '')
     )
 
+    // USD 归一化：total_amount 以 orders.currency 计价（RMB 单 incoterm 为 RMB_*）。
+    // 取一次汇率（1h 缓存），各单折算成 USD 再聚合，否则 RMB 单会被按美元阈值高估约 7 倍。
+    const usdRmb = await getUsdToRmbRate()
+    const orderUsd = (o: any) => normalizeAmountToUsd(o?.total_amount, o?.currency, o?.incoterm, usdRmb)
+
     // 2. 计算聚合指标
     const totalOrderCount = allOrders.length
     const totalOrderValueUsd = allOrders.reduce(
-      (sum: number, o: any) => sum + (Number(o.total_amount_usd) || 0), 0
+      (sum: number, o: any) => sum + orderUsd(o), 0
     )
     const avgOrderValueUsd = totalOrderCount > 0 ? totalOrderValueUsd / totalOrderCount : 0
 
@@ -226,7 +232,7 @@ export async function updateCustomerRhythm(
     const lastOrderDaysAgo = lastOrderAt
       ? (Date.now() - new Date(lastOrderAt).getTime()) / (1000 * 60 * 60 * 24)
       : null
-    const lastOrderValueUsd = lastOrder ? Number(lastOrder.total_amount_usd) || null : null
+    const lastOrderValueUsd = lastOrder ? (orderUsd(lastOrder) || null) : null
 
     // 3. 读取现有记录（获取 last_contact_at 等手动字段）
     const { data: existing } = await (supabase.from('customer_rhythm') as any)

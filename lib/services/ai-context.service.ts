@@ -8,6 +8,7 @@ import { isDoneStatus, isPendingStatus } from '@/lib/domain/types';
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ok, err, type ServiceResult } from './types'
 import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus'
+import { getUsdToRmbRate, normalizeAmountToUsd } from '@/lib/utils/exchange-rate'
 import type {
   AIContextCache,
   ContextType,
@@ -146,7 +147,7 @@ export async function buildCustomerContext(
   // 缓存未命中 → 重新构建
   const [ordersRes, rhythmRes] = await Promise.allSettled([
     (supabase.from('orders') as any)
-      .select('order_no, total_amount_usd, lifecycle_status, created_at, incoterm, order_type')
+      .select('order_no, total_amount, currency, lifecycle_status, created_at, incoterm, order_type')
       .eq('customer_name', customerName)
       .order('created_at', { ascending: false })
       .limit(20),
@@ -159,8 +160,12 @@ export async function buildCustomerContext(
   const orders = ordersRes.status === 'fulfilled' ? (ordersRes.value.data || []) : []
   const rhythm = rhythmRes.status === 'fulfilled' ? rhythmRes.value.data : null
 
+  // USD 归一化：total_amount 以 orders.currency 计价，按汇率折成 USD（RMB 单 incoterm 为 RMB_*）
+  const usdRmb = await getUsdToRmbRate()
+  const orderUsd = (o: any) => normalizeAmountToUsd(o?.total_amount, o?.currency, o?.incoterm, usdRmb)
+
   // 构建结构化摘要
-  const totalValue = orders.reduce((s: number, o: any) => s + (Number(o.total_amount_usd) || 0), 0)
+  const totalValue = orders.reduce((s: number, o: any) => s + orderUsd(o), 0)
   const activeOrders = orders.filter((o: any) =>
     !['completed', 'cancelled'].includes(o.lifecycle_status || '')
   )
@@ -192,7 +197,7 @@ export async function buildCustomerContext(
   if (recentOrders.length > 0) {
     lines.push('- 最近5单：')
     recentOrders.forEach((o: any) => {
-      lines.push(`  · ${o.order_no}（${o.lifecycle_status}，$${Number(o.total_amount_usd || 0).toLocaleString()}）`)
+      lines.push(`  · ${o.order_no}（${o.lifecycle_status}，$${Math.round(orderUsd(o)).toLocaleString()}）`)
     })
   }
 

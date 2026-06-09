@@ -54,6 +54,32 @@ export async function getUsdToRmbRate(): Promise<number> {
 }
 
 /**
+ * 把订单金额归一化为 USD（同步；需先用 getUsdToRmbRate() 取好汇率传入，避免逐单网络请求）。
+ *
+ * 口径：
+ * - incoterm 以 RMB 开头（RMB_EX_TAX / RMB_INC_TAX）或 currency 为 RMB/CNY → 视为人民币，按汇率折美元
+ * - 其余（含 currency 默认值 USD）→ 视为美元，原值返回
+ * - EUR 等小币种暂按 USD 近似：占比极低，且 tier 为粗分级 A/B/C，不影响分级结论
+ *
+ * 背景：orders.total_amount 以 orders.currency 计价；此前代码误读不存在的 total_amount_usd 列，
+ * 导致 customer_rhythm 物化全量报错、表空、客户画像全员"暂无数据"。
+ */
+export function normalizeAmountToUsd(
+  amount: number | null | undefined,
+  currency: string | null | undefined,
+  incoterm: string | null | undefined,
+  usdRmbRate: number,
+): number {
+  const amt = Number(amount) || 0
+  if (amt === 0) return 0
+  const inco = (incoterm || '').toUpperCase()
+  const cur = (currency || 'USD').toUpperCase()
+  const isRmb = inco.startsWith('RMB') || cur === 'RMB' || cur === 'CNY'
+  if (isRmb) return amt / (usdRmbRate > 0 ? usdRmbRate : 7.2)
+  return amt
+}
+
+/**
  * 获取任意货币 → RMB 汇率
  */
 export async function getCurrencyToRmbRate(currency: string): Promise<number> {
