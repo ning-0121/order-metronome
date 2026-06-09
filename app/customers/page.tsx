@@ -81,7 +81,7 @@ export default async function CustomersPage() {
   const customerNames = customers.map(c => c.name);
 
   // 批量查询（单次拉取，不 N+1）
-  const [{ data: memories }, { data: rhythms }] = await Promise.all([
+  const [{ data: memories }, { data: rhythms, error: rhythmError }] = await Promise.all([
     (supabase.from('customer_memory') as any)
       .select('customer_id, content, risk_level, category, created_at')
       .order('created_at', { ascending: false })
@@ -90,6 +90,12 @@ export default async function CustomersPage() {
       .select('customer_name, tier, risk_score, followup_status, next_followup_at, last_contact_at, total_order_value_usd, risk_factors')
       .in('customer_name', customerNames),
   ]);
+
+  // 不要静默吞 error：查询失败（列名/关系/RLS 等）会让画像静默全空，
+  // 之前 total_amount_usd 幽灵列 bug 就是因此藏了很久。记录后仍降级显示（rhythms 为 null 时画像区显示「暂无画像数据」），不 crash。
+  if (rhythmError) {
+    console.error('[customers] failed to load customer_rhythm', rhythmError);
+  }
 
   const memoryMap = new Map<string, any[]>();
   for (const m of memories || []) {
