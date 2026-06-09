@@ -191,6 +191,55 @@
 
 ---
 
+## customer-specification-library `[SHARED]`
+
+**适用场景**：服装外贸公司的固定客户，其辅料清单 / 尺寸表 / 包装规则 / 唛头等资料基本固定，每单重复填写浪费且易错。本模块把这些**客户×品牌级标准资料**沉淀为可复用母版，建单时一键复制进订单，再按本单微调。**通用于所有服装外贸公司，不含任何 Qimo 专属数据。**
+
+**模块定位**：Customer Specification Library（客户标准资料库）。一个**表族**，所有库共享基座列，按需扩展新库类型，不引入 tenant_id。
+
+**基座约定**（所有 `customer_*_library` 表共享）：
+```
+id, customer_name(键), brand(可空=客户通用), name, sort_order,
+active, created_by, created_at, updated_at
+```
+
+**库类型清单**：
+
+| 库 | 状态 | 类型专属字段 |
+|----|------|-------------|
+| `customer_trim_library` | Phase 1（设计完成，未建） | material_name, material_type, placement, color, qty_per_piece, unit, supplier, spec, notes |
+| `customer_size_library` | 预留 | garment_type, size_chart(jsonb) |
+| `customer_packaging_library` | 预留 | packaging_type, spec(jsonb) |
+| `customer_label_library` | 预留 | label_type, placement, artwork_ref |
+| `customer_lead_time_rule` | 预留（远期，warning 不 block） | min_lead_days, note |
+| 客户特殊备注 | 复用现有 `customer_memory` | — |
+
+**核心原则**：
+> 库 = 母版，订单 = 拷贝。带入即复制快照，**之后改订单不回写库、改库不动已建订单**。同名辅料默认**跳过不覆盖**，保护人工数据。
+
+**带入流程**（Phase 1）：BOM tab「从客户标准库带入」→ 选品牌 → 拉该客户(品牌+通用) active 辅料 → 本单无同名才插入 `materials_bom`（复制规格类字段，**不带 total_qty / unit_cost** 等订单级字段）。
+
+**通用性保证**（[SHARED] 红线）：
+- 不硬编码任何客户名 / 品牌名（全为数据行）
+- 带入只写通用表 `materials_bom`，不依赖 18 关卡 SOP
+- 不引入 tenant_id；多租户由「每客户独立 Supabase project」处理（见 product-boundary）
+
+| 治理字段 | 值 |
+|------|------|
+| `release_status` | `planned`（代码已实现 + 本地 build/check 通过；DB migration 已在 Supabase 执行；待 push + 线上验证后升 `internal_validated`） |
+| `synced_to_commercial` | ❌ |
+| `last_sync_commit` | pending |
+
+**Phase 1 实现落地（2026-06-06）**：
+- DB：`supabase/migrations/20260606_customer_trim_library.sql`（`customer_trim_library` 表 + active 部分唯一索引 `NULLS NOT DISTINCT`；`materials_bom` 加 `placement/color/spec`，`qty_per_piece/material_code` 放宽为可空）
+- 母版 CRUD：`app/actions/customer-trim-library.ts`（软删除走 `active=false`）
+- 一键带入：`app/actions/bom.ts → getTrimLibraryBrands / importFromTrimLibrary`（只复制规格类字段，按 名称+部位+颜色 去重跳过，不带 total_qty/unit_cost/material_code）
+- UI：`components/CustomerTrimLibraryPanel.tsx`（客户卡折叠块维护）+ `components/tabs/BomTab.tsx`（带入按钮，并在订单详情 bom tab 重新挂载——此前 BomTab 被孤立未渲染）
+
+> 晋升路径：main 自用版建库验证 → `internal_validated` → audited → 进 commercial-sync-backlog → released。
+
+---
+
 ## 同步策略
 
 每次 `[SHARED]` 模块更新 main 时：

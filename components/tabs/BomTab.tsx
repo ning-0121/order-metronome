@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, updateBomItem, deleteBomItem } from '@/app/actions/bom';
+import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary } from '@/app/actions/bom';
 
 const TYPES = [
   { value: 'fabric', label: '面料' }, { value: 'trim', label: '辅料' },
@@ -8,7 +8,10 @@ const TYPES = [
   { value: 'packing', label: '包装' }, { value: 'other', label: '其他' },
 ];
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '' };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '' };
+
+// 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
+const GENERIC = '__generic__';
 
 export function BomTab({ orderId }: { orderId: string }) {
   const [items, setItems] = useState<any[]>([]);
@@ -18,6 +21,15 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // 从客户标准库带入
+  const [showImport, setShowImport] = useState(false);
+  const [brandData, setBrandData] = useState<{ customerName: string; brands: string[]; hasGeneric: boolean; total: number } | null>(null);
+  const [brandLoading, setBrandLoading] = useState(false);
+  const [selectedBrand, setSelectedBrand] = useState<string>('');
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
+  const [importErr, setImportErr] = useState('');
 
   const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
@@ -29,9 +41,10 @@ export function BomTab({ orderId }: { orderId: string }) {
     const payload = {
       material_name: form.material_name, material_type: form.material_type,
       material_code: form.material_code || undefined,
+      placement: form.placement || undefined, color: form.color || undefined,
       qty_per_piece: form.qty_per_piece ? parseFloat(form.qty_per_piece) : undefined,
       total_qty: form.total_qty ? parseFloat(form.total_qty) : undefined,
-      unit: form.unit, supplier: form.supplier || undefined,
+      unit: form.unit, supplier: form.supplier || undefined, spec: form.spec || undefined,
     };
     const result = editId
       ? await updateBomItem(editId, orderId, payload)
@@ -51,10 +64,38 @@ export function BomTab({ orderId }: { orderId: string }) {
     setEditId(item.id);
     setForm({
       material_name: item.material_name || '', material_type: item.material_type || 'other',
-      material_code: item.material_code || '', qty_per_piece: item.qty_per_piece?.toString() || '',
+      material_code: item.material_code || '', placement: item.placement || '', color: item.color || '',
+      qty_per_piece: item.qty_per_piece?.toString() || '',
       total_qty: item.total_qty?.toString() || '', unit: item.unit || 'meter', supplier: item.supplier || '',
+      spec: item.spec || '',
     });
     setShowAdd(true);
+  }
+
+  async function openImport() {
+    setShowImport(true); setImportMsg(''); setImportErr(''); setSelectedBrand('');
+    setBrandLoading(true); setBrandData(null);
+    const { data, error: err } = await getTrimLibraryBrands(orderId);
+    if (err) { setImportErr(err); }
+    else {
+      setBrandData(data as any);
+      // 默认选中：有品牌选第一个品牌，否则选通用
+      if (data) setSelectedBrand(data.brands.length > 0 ? data.brands[0] : (data.hasGeneric ? GENERIC : ''));
+    }
+    setBrandLoading(false);
+  }
+
+  async function handleImport() {
+    if (!selectedBrand) return;
+    setImporting(true); setImportMsg(''); setImportErr('');
+    const brand = selectedBrand === GENERIC ? null : selectedBrand;
+    const res = await importFromTrimLibrary(orderId, brand);
+    if (res.error) { setImportErr(res.error); }
+    else {
+      setImportMsg(`带入完成：新增 ${res.inserted} 条，跳过 ${res.skipped} 条（同名已存在）`);
+      await reload();
+    }
+    setImporting(false);
   }
 
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
@@ -72,6 +113,12 @@ export function BomTab({ orderId }: { orderId: string }) {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="供应商" value={form.supplier} onChange={e => set('supplier', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <input placeholder="部位 placement" value={form.placement} onChange={e => set('placement', e.target.value)}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <input placeholder="颜色 color" value={form.color} onChange={e => set('color', e.target.value)}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <input placeholder="规格 spec" value={form.spec} onChange={e => set('spec', e.target.value)}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
       </div>
       <div className="grid grid-cols-3 gap-3">
         <input placeholder="单件用量" type="number" step="0.01" value={form.qty_per_piece} onChange={e => set('qty_per_piece', e.target.value)}
@@ -93,15 +140,63 @@ export function BomTab({ orderId }: { orderId: string }) {
     </div>
   );
 
+  const importPanel = (
+    <div className="bg-emerald-50 rounded-xl p-4 mb-4 space-y-3 border border-emerald-200">
+      <div className="text-sm font-medium text-gray-700">📥 从客户标准库带入</div>
+      {brandLoading ? (
+        <p className="text-xs text-gray-400">读取客户标准库…</p>
+      ) : importErr ? (
+        <p className="text-xs text-red-600">{importErr}</p>
+      ) : brandData && brandData.total === 0 ? (
+        <p className="text-xs text-gray-500">
+          客户「{brandData.customerName}」暂无标准辅料。请先在 <span className="font-medium">客户管理页 → 该客户 → 🧵 客户标准辅料库</span> 维护。
+        </p>
+      ) : brandData ? (
+        <>
+          <div className="text-xs text-gray-500">客户：<span className="font-medium text-gray-700">{brandData.customerName}</span>，选择品牌（含该客户通用辅料）：</div>
+          <div className="flex flex-wrap gap-2">
+            {brandData.brands.map(b => (
+              <label key={b} className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer border ${selectedBrand === b ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-300'}`}>
+                <input type="radio" name="brand" value={b} checked={selectedBrand === b} onChange={() => setSelectedBrand(b)} className="hidden" />
+                {b}
+              </label>
+            ))}
+            {brandData.hasGeneric && (
+              <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer border ${selectedBrand === GENERIC ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-300'}`}>
+                <input type="radio" name="brand" value={GENERIC} checked={selectedBrand === GENERIC} onChange={() => setSelectedBrand(GENERIC)} className="hidden" />
+                仅通用辅料
+              </label>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400">规则：选品牌 = 带入该品牌 + 通用辅料；同名（名称+部位+颜色）已存在则跳过不覆盖；不带入数量/成本等订单级数据。</p>
+          {importMsg && <p className="text-xs text-emerald-700 font-medium">{importMsg}</p>}
+          <div className="flex gap-2">
+            <button onClick={handleImport} disabled={importing || !selectedBrand}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+              {importing ? '带入中…' : '确认带入'}
+            </button>
+            <button onClick={() => setShowImport(false)}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">关闭</button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm text-gray-500">{items.length} 条物料记录</span>
-        {!showAdd && (
-          <button onClick={() => { setShowAdd(true); setEditId(null); setForm(emptyForm); }}
-            className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">+ 新增物料</button>
+        {!showAdd && !showImport && (
+          <div className="flex gap-2">
+            <button onClick={openImport}
+              className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">📥 从客户标准库带入</button>
+            <button onClick={() => { setShowAdd(true); setEditId(null); setForm(emptyForm); }}
+              className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">+ 新增物料</button>
+          </div>
         )}
       </div>
+      {showImport && importPanel}
       {showAdd && formRow}
       {items.length === 0 && !showAdd ? (
         <div className="text-center py-12 text-gray-400">
@@ -112,8 +207,8 @@ export function BomTab({ orderId }: { orderId: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100">
-              {['物料代码','物料名称','类型','单件用量','总需','单位','供应商','操作'].map(h => (
-                <th key={h} className="py-2 px-3 text-gray-500 font-medium text-left">{h}</th>
+              {['物料代码','物料名称','类型','部位','颜色','单件用量','总需','单位','供应商','规格','操作'].map(h => (
+                <th key={h} className="py-2 px-3 text-gray-500 font-medium text-left whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
             <tbody>
@@ -122,10 +217,13 @@ export function BomTab({ orderId }: { orderId: string }) {
                   <td className="py-2 px-3 font-mono text-xs text-gray-500">{item.material_code || '—'}</td>
                   <td className="py-2 px-3 font-medium text-gray-900">{item.material_name}</td>
                   <td className="py-2 px-3"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{TYPES.find(t=>t.value===item.material_type)?.label || item.material_type}</span></td>
+                  <td className="py-2 px-3 text-gray-600">{item.placement || '—'}</td>
+                  <td className="py-2 px-3 text-gray-600">{item.color || '—'}</td>
                   <td className="py-2 px-3 text-gray-700">{item.qty_per_piece ?? '—'}</td>
                   <td className="py-2 px-3 font-medium text-gray-900">{item.total_qty ?? '—'}</td>
                   <td className="py-2 px-3 text-gray-600">{item.unit}</td>
                   <td className="py-2 px-3 text-gray-500">{item.supplier || '—'}</td>
+                  <td className="py-2 px-3 text-gray-500">{item.spec || '—'}</td>
                   <td className="py-2 px-3">
                     <div className="flex gap-1">
                       <button onClick={() => startEdit(item)} className="text-xs text-indigo-600 hover:underline">编辑</button>

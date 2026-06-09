@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { CustomerEmailMappingPanel } from '@/components/CustomerEmailMappingPanel';
 import { AddCustomerMemoForm } from '@/components/AddCustomerMemoForm';
+import { CustomerTrimLibraryPanel } from '@/components/CustomerTrimLibraryPanel';
 import { CATEGORY_LABELS } from '@/lib/domain/customer-memory';
 import { getOffPriceRetailer, getOffPriceMonthlyPush } from '@/lib/agent/industryKnowledge';
 
@@ -242,6 +243,11 @@ export default async function CustomersPage() {
                       <p className="mt-2 text-xs text-gray-400 px-1">暂无画像数据</p>
                     )}
                   </details>
+                </div>
+
+                {/* 客户标准辅料库（库=母版，建单时在订单 BOM 页一键带入） */}
+                <div className="px-5 pb-2">
+                  <CustomerTrimLibraryPanel customerName={c.name} />
                 </div>
 
                 {/* 客户档案备忘（按维度分段，便于交接看全局） */}

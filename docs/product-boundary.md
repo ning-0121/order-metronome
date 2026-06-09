@@ -87,6 +87,7 @@ main                       Qimo 内部生产，[SHARED] 模块的 SSOT
 | `customer_rhythm` SoT 模式 | `lib/services/customer-rhythm.service.ts` | nightly cron 物化客户画像 |
 | `finance-resync` 模式 | `app/actions/finance-resync.ts` | 单向手动同步骨架，env var 不同 |
 | `TODO(SoT)` 标注约定 | 9 处读取点 | 跨系统 SoT 边界文档化 |
+| **Customer Specification Library**（客户标准资料库） | `customer_trim_library`（规划中）+ 客户页/BOM tab | **未来可同步商业版**：客户×品牌辅料/尺寸/包装标准模板，一键带入订单。纯数据驱动，**不含 Qimo 客户名/SOP**，不引入 tenant_id。登记见 [shared-core-registry.md](./shared-core-registry.md)。当前 `release_status: planned`，需先在 main 自用版建库验证后才进同步队列。 |
 
 ---
 
