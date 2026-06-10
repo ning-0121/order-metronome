@@ -151,7 +151,7 @@ npm run build && npm run check
 ```
 
 回归检查脚本 `scripts/pre-deploy-check.ts` 会自动验证：
-- 里程碑模板完整性（生产≥20节点，打样=7节点）
+- 里程碑模板完整性（生产≥20节点，打样=8节点）
 - 模板路由正确（export/domestic/sample 分别返回正确模板）
 - Agent 配置完整（8种动作、熔断限制、Feature Flag）
 - 角色定义完整（8个角色全部注册）

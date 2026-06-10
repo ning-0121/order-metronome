@@ -156,7 +156,7 @@ const DOMESTIC_MILESTONES: Array<{
 ];
 
 /**
- * 打样专用里程碑模板（7个节点，14天周期）
+ * 打样专用里程碑模板（8个节点，14天周期）
  */
 export const SAMPLE_MILESTONE_TEMPLATE: Array<{
   step_key: string;
