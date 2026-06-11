@@ -11,6 +11,7 @@ import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
 import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 import { getPendingApprovalsCount } from '@/lib/services/pending-approvals.service';
 import { CeoInsightButton } from '@/components/CeoInsightButton';
+import { CustomerMattersPanel } from '@/components/CustomerMattersPanel';
 // 邮件晨报（briefing.service / MorningBriefingCard）已下线 — 用户反馈"太费钱用处不大"
 // 服务代码保留在 lib/services/briefing.service.ts，仅移除 UI 入口
 // RecalcButton removed from global — now per-order only
@@ -45,6 +46,15 @@ export default async function CEOWarRoom() {
   ]);
   const agentSuggestions = agentResult.data || [];
   const approvals = approvalsResult.ok ? approvalsResult.data : { total: 0, byCategory: {} as any, actionableCount: 0 };
+
+  // 客户事项分级（Phase 1：只读物化表 customer_matters，手动 dry_run/execute 物化）
+  // 不吞 error：表缺失/查询失败要在日志里冒出来（教训见 customer_rhythm/customer_memory）
+  const { data: customerMatters, error: customerMattersError } = await (supabase
+    .from('customer_matters') as any)
+    .select('id, customer_name, order_id, order_no, matter_type, severity, title, evidence, detected_at, materialized_at');
+  if (customerMattersError) {
+    console.error('[ceo] failed to load customer_matters', customerMattersError);
+  }
 
   const now = new Date();
   const today = now.toISOString().split('T')[0];
@@ -775,6 +785,12 @@ export default async function CEOWarRoom() {
       </Link>
 
       {/* 执行力快报、AI 智能助手已下线（2026-04-27）— 数据请去 /analytics/execution 查看 */}
+
+      {/* ===== 3. 客户事项分级（Phase 1 只读；物化走 /api/admin/customer-matters-materialize） ===== */}
+      <CustomerMattersPanel
+        matters={customerMatters || []}
+        loadError={!!customerMattersError}
+      />
 
       {/* ===== 4. 订单三阶段分析 ===== */}
       <div className="grid md:grid-cols-3 gap-4">
