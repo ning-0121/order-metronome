@@ -12,6 +12,14 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import {
+  isValidLineTransition,
+  LINE_STATUS_LABELS,
+  CHASE_ESCALATION_THRESHOLD,
+  ACTIVE_LINE_STATUSES,
+  type ProcurementLineStatus,
+} from '@/lib/domain/procurement';
+import { isAdminRole } from '@/lib/domain/roles';
 
 export interface ProcurementLineItem {
   id: string;
@@ -518,4 +526,200 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
   const fileName = `对账单_${(order as any).order_no}_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
   return { base64, fileName };
+}
+
+// ════════════════════════════════════════════════════════════
+// 采购中心 V1 — 行级状态机 + 催货（契约：docs/procurement-center-design.md §4/§11）
+// ════════════════════════════════════════════════════════════
+
+/** 可操作采购行流转的角色（查看权限沿用上方 ALLOWED_ROLES，更宽） */
+const OPERATOR_ROLES = ['procurement', 'admin', 'admin_assistant'];
+
+async function checkOperator(): Promise<{ ok: boolean; userId?: string; roles?: string[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '请先登录' };
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!isAdminRole(roles) && !roles.some(r => OPERATOR_ROLES.includes(r))) {
+    return { ok: false, error: '无权限：仅采购/管理员可操作采购行' };
+  }
+  return { ok: true, userId: user.id, roles };
+}
+
+/** 让步接收审批权（决策3）。procurement_manager 角色注册后自动生效，当前仅 admin。 */
+function canApproveConcession(roles: string[]): boolean {
+  return isAdminRole(roles) || roles.includes('procurement_manager');
+}
+
+/** 采购操作日志（复制 milestone_logs 模式：失败不阻断主流程，但要冒出来） */
+async function logProcurement(
+  supabase: any, lineItemId: string, orderId: string, action: string,
+  fromStatus: string | null, toStatus: string | null, note?: string | null, payload?: any,
+) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await (supabase.from('procurement_logs') as any).insert({
+    line_item_id: lineItemId, order_id: orderId, actor_user_id: user?.id ?? null,
+    action, from_status: fromStatus, to_status: toStatus,
+    note: note || null, payload: payload || null,
+  });
+  if (error) console.error('[procurement] log insert failed:', error.message);
+}
+
+/** 历史中位价（同物料名，全供应商）。无样本返回 null。 */
+async function medianHistoricalPrice(supabase: any, materialName: string): Promise<number | null> {
+  const { data, error } = await (supabase.from('price_history') as any)
+    .select('unit_price').eq('material_name', materialName)
+    .order('quoted_at', { ascending: false }).limit(50);
+  if (error) { console.error('[procurement] price_history read failed:', error.message); return null; }
+  const prices = (data || []).map((r: any) => Number(r.unit_price)).filter((n: number) => n > 0).sort((a: number, b: number) => a - b);
+  if (prices.length === 0) return null;
+  const mid = Math.floor(prices.length / 2);
+  return prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+}
+
+export interface TransitionPayload {
+  po_no?: string;
+  unit_price?: number;
+  promised_date?: string;     // YYYY-MM-DD
+  expected_arrival?: string;  // YYYY-MM-DD
+  supplier_id?: string;
+  supplier_name?: string;
+  note?: string;
+}
+
+/**
+ * 采购行状态流转（唯一入口）。
+ * 规则：状态机校验（lib/domain/procurement）；cancelled 必填理由；
+ *       concession 仅 procurement_manager/admin（决策3）；
+ *       → ordered 时写价格快照（price_baseline=历史中位价）+ price_history（决策4：只记录不阻断）。
+ */
+export async function transitionProcurementLine(
+  lineItemId: string,
+  nextStatus: ProcurementLineStatus,
+  payload?: TransitionPayload,
+): Promise<{ data?: any; error?: string }> {
+  const access = await checkOperator();
+  if (!access.ok) return { error: access.error };
+  const supabase = await createClient();
+
+  const { data: line, error: getErr } = await (supabase.from('procurement_line_items') as any)
+    .select('id, order_id, line_status, material_name, specification, category, supplier_id, supplier_name, unit_price, ordered_unit, ordered_qty')
+    .eq('id', lineItemId).single();
+  if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
+
+  const fromStatus = (line.line_status || 'draft') as ProcurementLineStatus;
+  if (!isValidLineTransition(fromStatus, nextStatus)) {
+    return { error: `不允许从「${LINE_STATUS_LABELS[fromStatus] || fromStatus}」转到「${LINE_STATUS_LABELS[nextStatus] || nextStatus}」` };
+  }
+  if (nextStatus === 'cancelled' && !payload?.note?.trim()) {
+    return { error: '取消采购行必须填写理由' };
+  }
+  if (nextStatus === 'concession' && !canApproveConcession(access.roles || [])) {
+    return { error: '让步接收需采购经理或管理员审批' };
+  }
+
+  const now = new Date().toISOString();
+  const update: Record<string, any> = { line_status: nextStatus, updated_at: now };
+  if (payload?.promised_date !== undefined) update.promised_date = payload.promised_date || null;
+  if (payload?.expected_arrival !== undefined) update.expected_arrival = payload.expected_arrival || null;
+  if (payload?.supplier_id !== undefined) update.supplier_id = payload.supplier_id || null;
+  if (payload?.supplier_name !== undefined) update.supplier_name = payload.supplier_name || null;
+
+  let priceSnapshotNote: string | null = null;
+  if (nextStatus === 'ordered') {
+    update.ordered_at = now;
+    update.ordered_by = access.userId;
+    if (payload?.po_no !== undefined) update.po_no = payload.po_no || null;
+    if (payload?.unit_price !== undefined && payload.unit_price !== null) {
+      update.unit_price = payload.unit_price;
+      // 价格快照：基线=历史中位价（决策4：V1 只标色提醒，不阻断）
+      const baseline = await medianHistoricalPrice(supabase, line.material_name);
+      if (baseline !== null) update.price_baseline = baseline;
+      priceSnapshotNote = baseline !== null
+        ? `价格快照：本次 ${payload.unit_price}，历史中位 ${baseline}`
+        : `价格快照：本次 ${payload.unit_price}，无历史基线（首单）`;
+    }
+  }
+  if (nextStatus === 'confirmed') update.confirmed_at = now;
+  if (nextStatus === 'shipped') update.shipped_at = now;
+
+  const { data: updated, error: upErr } = await (supabase.from('procurement_line_items') as any)
+    .update(update).eq('id', lineItemId).select().single();
+  if (upErr) return { error: upErr.message };
+
+  // → ordered 且有单价：写价格库（自动沉淀；失败不阻断但记日志）
+  if (nextStatus === 'ordered' && payload?.unit_price) {
+    const { error: phErr } = await (supabase.from('price_history') as any).insert({
+      order_id: line.order_id, line_item_id: lineItemId,
+      supplier_id: payload.supplier_id ?? line.supplier_id ?? null,
+      material_name: line.material_name, specification: line.specification ?? null,
+      category: line.category ?? null,
+      unit_price: payload.unit_price, unit: line.ordered_unit ?? null,
+      qty: line.ordered_qty ?? null, quoted_at: now, source: 'order',
+    });
+    if (phErr) console.error('[procurement] price_history insert failed:', phErr.message);
+  }
+
+  await logProcurement(supabase, lineItemId, line.order_id, 'status_transition',
+    fromStatus, nextStatus, payload?.note ?? priceSnapshotNote,
+    { po_no: payload?.po_no, unit_price: payload?.unit_price, promised_date: payload?.promised_date, expected_arrival: payload?.expected_arrival });
+
+  revalidatePath(`/orders/${line.order_id}`);
+  revalidatePath('/procurement');
+  return { data: updated };
+}
+
+/**
+ * 催货留痕：chase_count+1 + last_chased_at + 日志；
+ * 达到 CHASE_ESCALATION_THRESHOLD 的整数倍 → 通知管理员（procurement_manager 角色注册后改发 PM）。
+ */
+export async function chaseProcurementLine(
+  lineItemId: string, note?: string,
+): Promise<{ data?: { chase_count: number }; error?: string }> {
+  const access = await checkOperator();
+  if (!access.ok) return { error: access.error };
+  const supabase = await createClient();
+
+  const { data: line, error: getErr } = await (supabase.from('procurement_line_items') as any)
+    .select('id, order_id, line_status, chase_count, material_name, supplier_name')
+    .eq('id', lineItemId).single();
+  if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
+
+  if (!ACTIVE_LINE_STATUSES.includes(line.line_status as ProcurementLineStatus)) {
+    return { error: `仅在途行可催货（当前：${LINE_STATUS_LABELS[line.line_status as ProcurementLineStatus] || line.line_status}）` };
+  }
+
+  const newCount = (line.chase_count || 0) + 1;
+  const { error: upErr } = await (supabase.from('procurement_line_items') as any)
+    .update({ chase_count: newCount, last_chased_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', lineItemId);
+  if (upErr) return { error: upErr.message };
+
+  await logProcurement(supabase, lineItemId, line.order_id, 'chase', null, null,
+    note || `第 ${newCount} 次催货`, { chase_count: newCount });
+
+  // 升级：3 次（及其倍数）无果 → 通知管理员
+  if (newCount >= CHASE_ESCALATION_THRESHOLD && newCount % CHASE_ESCALATION_THRESHOLD === 0) {
+    try {
+      const { data: admins } = await (supabase.from('profiles') as any)
+        .select('user_id').or('role.eq.admin,roles.cs.{admin}');
+      for (const a of admins || []) {
+        await (supabase.from('notifications') as any).insert({
+          user_id: a.user_id,
+          type: 'procurement_chase_escalation',
+          title: `⚠️ 催货 ${newCount} 次未果：${line.material_name}`,
+          message: `供应商「${line.supplier_name || '未填'}」的「${line.material_name}」已催 ${newCount} 次仍未推进，请介入。`,
+          related_order_id: line.order_id,
+        });
+      }
+    } catch (e: any) {
+      console.error('[procurement] chase escalation notify failed:', e?.message);
+    }
+  }
+
+  revalidatePath(`/orders/${line.order_id}`);
+  revalidatePath('/procurement');
+  return { data: { chase_count: newCount } };
 }
