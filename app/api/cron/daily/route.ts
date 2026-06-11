@@ -6,10 +6,11 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { syncAllCustomerRhythms, rebuildAllCustomerRhythmPnl } from '@/lib/services/customer-rhythm.service'
 import { resolveStaleAlerts } from '@/lib/services/alerts.service'
 import { generateDailyTasks } from '@/lib/services/daily-tasks.service'
+import { materializeCustomerMatters } from '@/lib/services/customer-matters.service'
 
 export async function GET(req: NextRequest) {
   // Vercel Cron 鉴权（生产环境必须）
@@ -68,6 +69,22 @@ export async function GET(req: NextRequest) {
       }
     } else {
       log.push(`  ✗ Tasks failed: ${taskResult.error}`)
+    }
+
+    // Step 5: 物化 CEO 客户事项分级（customer_matters，零 AI 纯规则）
+    // 表无 authenticated 写策略 → 必须 service-role；失败不阻断其余 cron 步骤
+    log.push('→ Materializing customer matters...')
+    try {
+      const svc = createServiceRoleClient()
+      const mattersResult = await materializeCustomerMatters(svc as any, { mode: 'execute' })
+      if (mattersResult.ok) {
+        const s = mattersResult.data.stats
+        log.push(`  ✓ Matters: ${s.written ?? 0} written, ${s.deleted ?? 0} stale removed (${s.customers} customers)`)
+      } else {
+        log.push(`  ✗ Matters failed: ${mattersResult.error}`)
+      }
+    } catch (e: any) {
+      log.push(`  ✗ Matters exception: ${e?.message}`)
     }
 
     const duration = Date.now() - startTime
