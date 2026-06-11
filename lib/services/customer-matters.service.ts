@@ -23,7 +23,7 @@ export interface CustomerMatterDraft {
   customer_name: string
   order_id: string | null
   order_no: string | null
-  matter_type: 'suspected_complaint' | 'delivery_risk' | 'overdue'
+  matter_type: 'suspected_complaint' | 'delivery_risk' | 'overdue_summary'
   severity: 'high' | 'medium'
   title: string
   evidence: Record<string, unknown>
@@ -38,7 +38,7 @@ export interface MaterializeStats {
   total: number
   suspected_complaint: { high: number; medium: number }
   delivery_risk: { high: number; medium: number }
-  overdue: { high: number; medium: number }
+  overdue_summary: { high: number; medium: number }
   emails_scanned: number
   emails_matched_customer: number
   written?: number
@@ -195,36 +195,93 @@ export async function materializeCustomerMatters(
       })
     }
 
-    // B2. 关键节点逾期（≥8 天 high / 3–7 天 medium / <3 天不收录）
+    // B2. 关键节点逾期 → 客户级聚合（overdue_summary，每客户最多一条）
+    // 粒度教训（2026-06-11 dry_run）：节点级 Matter 313 条直接淹没 CEO 看板，
+    // 改为按客户聚合，明细进 evidence（top_steps/top_orders），CEO 看汇总、点订单下钻。
     const { data: overdueRows, error: odErr } = await (supabase.from('milestones') as any)
       .select('id, order_id, step_key, name, due_at, actual_at, orders(order_no, customer_name, lifecycle_status)')
       .is('actual_at', null)
       .lt('due_at', new Date(nowMs).toISOString())
       .in('step_key', [...CRITICAL_STEP_KEYS])
     if (odErr) return err(`读取逾期 milestones 失败: ${odErr.message}`)
+
+    type OverdueNode = {
+      orderId: string; orderNo: string | null
+      stepKey: string; stepName: string; dueAt: string; overdueDays: number
+    }
+    const nodesByCustomer = new Map<string, OverdueNode[]>()
     for (const m of overdueRows || []) {
       const o = m.orders
       if (!o?.customer_name || TERMINAL_LIFECYCLE.has(o.lifecycle_status || '')) continue
       const overdueDays = Math.floor((nowMs - new Date(m.due_at).getTime()) / 86400000)
-      if (overdueDays < 3) continue
-      const severity: 'high' | 'medium' = overdueDays >= 8 ? 'high' : 'medium'
+      if (overdueDays < 3) continue // 轻于 3 天不计入
+      const list = nodesByCustomer.get(o.customer_name) || []
+      list.push({
+        orderId: m.order_id, orderNo: o.order_no || null,
+        stepKey: m.step_key, stepName: m.name || m.step_key,
+        dueAt: m.due_at, overdueDays,
+      })
+      nodesByCustomer.set(o.customer_name, list)
+    }
+
+    for (const [customer, nodes] of nodesByCustomer) {
+      const overdueCount = nodes.length
+      const overdueOrderCount = new Set(nodes.map(n => n.orderId)).size
+      const maxOverdueDays = Math.max(...nodes.map(n => n.overdueDays))
+      const highOverdueCount = nodes.filter(n => n.overdueDays >= 15).length
+      const mediumOverdueCount = nodes.filter(n => n.overdueDays >= 3 && n.overdueDays <= 14).length
+
+      let severity: 'high' | 'medium' | null = null
+      if (maxOverdueDays >= 15 || overdueCount >= 10 || overdueOrderCount >= 5) severity = 'high'
+      else if (maxOverdueDays >= 3 || overdueCount >= 3) severity = 'medium'
+      if (!severity) continue
+
+      // Top 5 节点类型（按 step_name 计数）
+      const stepCounts = new Map<string, number>()
+      for (const n of nodes) stepCounts.set(n.stepName, (stepCounts.get(n.stepName) || 0) + 1)
+      const topSteps = [...stepCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([step_name, count]) => ({ step_name, count }))
+
+      // Top 5 订单（按订单聚合，最长超期优先）
+      const orderAgg = new Map<string, { order_id: string; order_no: string | null; max_overdue_days: number; overdue_count: number }>()
+      for (const n of nodes) {
+        const agg = orderAgg.get(n.orderId) || { order_id: n.orderId, order_no: n.orderNo, max_overdue_days: 0, overdue_count: 0 }
+        agg.max_overdue_days = Math.max(agg.max_overdue_days, n.overdueDays)
+        agg.overdue_count += 1
+        orderAgg.set(n.orderId, agg)
+      }
+      const topOrders = [...orderAgg.values()]
+        .sort((a, b) => (b.max_overdue_days - a.max_overdue_days) || (b.overdue_count - a.overdue_count))
+        .slice(0, 5)
+
+      // detected_at：最严重超期节点的 due_at（稳定，重建不漂移）
+      const worst = nodes.reduce((w, n) => (n.overdueDays > w.overdueDays ? n : w), nodes[0])
+
       matters.push({
-        customer_name: o.customer_name,
-        order_id: m.order_id,
-        order_no: o.order_no || null,
-        matter_type: 'overdue',
+        customer_name: customer,
+        order_id: null,
+        order_no: null,
+        matter_type: 'overdue_summary',
         severity,
-        title: `关键节点逾期 ${overdueDays} 天：${m.name || m.step_key}`,
+        title: severity === 'high'
+          ? `${customer} 有 ${overdueCount} 个关键节点超期，涉及 ${overdueOrderCount} 个订单`
+          : `${customer} 有 ${overdueCount} 个节点临近/轻度超期`,
         evidence: {
-          step_key: m.step_key,
-          step_name: m.name,
-          due_at: m.due_at,
-          overdue_days: overdueDays,
+          aggregation: 'customer_overdue_summary',
+          overdue_count: overdueCount,
+          overdue_order_count: overdueOrderCount,
+          max_overdue_days: maxOverdueDays,
+          high_overdue_count: highOverdueCount,
+          medium_overdue_count: mediumOverdueCount,
+          top_steps: topSteps,
+          top_orders: topOrders,
         },
         source: 'order',
-        source_ref: `order:${m.order_id}:${m.step_key}`,
-        matter_key: `order:${m.order_id}:overdue:${m.step_key}`,
-        detected_at: m.due_at,
+        source_ref: customer,
+        matter_key: `overdue_summary:${customer}`,
+        detected_at: worst.dueAt,
       })
     }
 
@@ -238,7 +295,7 @@ export async function materializeCustomerMatters(
       total: matters.length,
       suspected_complaint: countBy('suspected_complaint'),
       delivery_risk: countBy('delivery_risk'),
-      overdue: countBy('overdue'),
+      overdue_summary: countBy('overdue_summary'),
       emails_scanned: emailsScanned,
       emails_matched_customer: emailsMatchedCustomer,
     }

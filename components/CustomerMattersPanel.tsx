@@ -12,7 +12,7 @@ interface Matter {
   customer_name: string;
   order_id: string | null;
   order_no: string | null;
-  matter_type: 'suspected_complaint' | 'delivery_risk' | 'overdue';
+  matter_type: 'suspected_complaint' | 'delivery_risk' | 'overdue_summary';
   severity: 'high' | 'medium';
   title: string;
   evidence: Record<string, any> | null;
@@ -20,11 +20,12 @@ interface Matter {
   materialized_at: string;
 }
 
-const TYPE_META: Record<Matter['matter_type'], { icon: string; label: string }> = {
+const TYPE_META: Record<string, { icon: string; label: string }> = {
   suspected_complaint: { icon: '📧', label: '疑似投诉' },
   delivery_risk: { icon: '🟠', label: '交期风险' },
-  overdue: { icon: '⏰', label: '节点逾期' },
+  overdue_summary: { icon: '⏰', label: '超期汇总' },
 };
+const FALLBACK_META = { icon: '•', label: '事项' };
 
 function evidenceLine(m: Matter): string {
   const ev = m.evidence || {};
@@ -35,7 +36,13 @@ function evidenceLine(m: Matter): string {
   if (m.matter_type === 'delivery_risk') {
     return ev.headline ? String(ev.headline) : `置信度 ${ev.delivery_confidence ?? '?'}%（${ev.risk_level ?? '?'}）`;
   }
-  return `截止 ${ev.due_at ? formatDate(ev.due_at) : '?'} · 已逾期 ${ev.overdue_days ?? '?'} 天`;
+  if (m.matter_type === 'overdue_summary') {
+    const steps = Array.isArray(ev.top_steps)
+      ? ev.top_steps.map((s: any) => `${s.step_name}×${s.count}`).join('、')
+      : '';
+    return `最长超期 ${ev.max_overdue_days ?? '?'} 天 · 重度(≥15天)×${ev.high_overdue_count ?? 0} 中度×${ev.medium_overdue_count ?? 0}${steps ? ` · Top节点: ${steps}` : ''}`;
+  }
+  return `截止 ${ev.due_at ? formatDate(ev.due_at) : '?'}`;
 }
 
 export function CustomerMattersPanel({ matters, loadError }: { matters: Matter[]; loadError?: boolean }) {
@@ -91,7 +98,10 @@ export function CustomerMattersPanel({ matters, loadError }: { matters: Matter[]
               </summary>
               <div className="px-5 pb-3 space-y-2">
                 {c.list.map(m => {
-                  const meta = TYPE_META[m.matter_type];
+                  const meta = TYPE_META[m.matter_type] || FALLBACK_META;
+                  const topOrders = m.matter_type === 'overdue_summary' && Array.isArray(m.evidence?.top_orders)
+                    ? m.evidence!.top_orders
+                    : [];
                   return (
                     <div key={m.id}
                       className={`rounded-lg border px-3 py-2 text-sm ${
@@ -109,6 +119,16 @@ export function CustomerMattersPanel({ matters, loadError }: { matters: Matter[]
                         </span>
                       </div>
                       <p className="text-xs text-gray-500 mt-0.5 ml-1">↳ {evidenceLine(m)}</p>
+                      {topOrders.length > 0 && (
+                        <p className="text-xs mt-1 ml-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                          {topOrders.map((o: any) => (
+                            <Link key={o.order_id} href={`/orders/${o.order_id}`}
+                              className="text-indigo-600 hover:underline whitespace-nowrap">
+                              {o.order_no || o.order_id?.slice(0, 8)}（{o.max_overdue_days}天×{o.overdue_count}）
+                            </Link>
+                          ))}
+                        </p>
+                      )}
                     </div>
                   );
                 })}
