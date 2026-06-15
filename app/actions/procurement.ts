@@ -723,3 +723,152 @@ export async function chaseProcurementLine(
   revalidatePath('/procurement');
   return { data: { chase_count: newCount } };
 }
+
+/**
+ * 到货验收：写 goods_receipts + 流转采购行（决策3：让步仅 PM/admin）。
+ * result: 'pass'→accepted / 'concession'→concession / 'reject'→rejected。
+ * arrived→accepted/concession/rejected 走状态机校验（lib/domain）。
+ */
+export async function recordGoodsReceipt(
+  lineItemId: string,
+  payload: {
+    received_qty: number;
+    received_unit?: string;
+    result: 'pass' | 'concession' | 'reject';
+    aql_level?: string;
+    defect_notes?: string;
+    return_required?: boolean;
+  },
+): Promise<{ error?: string }> {
+  const access = await checkOperator();
+  if (!access.ok) return { error: access.error };
+  const supabase = await createClient();
+
+  const { data: line, error: getErr } = await (supabase.from('procurement_line_items') as any)
+    .select('id, order_id, line_status, ordered_unit')
+    .eq('id', lineItemId).single();
+  if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
+
+  const nextStatus = payload.result === 'pass' ? 'accepted'
+    : payload.result === 'concession' ? 'concession' : 'rejected';
+  if (!isValidLineTransition(line.line_status, nextStatus as ProcurementLineStatus)) {
+    return { error: `仅「已到厂」可验收（当前：${LINE_STATUS_LABELS[line.line_status as ProcurementLineStatus] || line.line_status}）` };
+  }
+  if (payload.result === 'concession' && !canApproveConcession(access.roles || [])) {
+    return { error: '让步接收需采购经理或管理员审批' };
+  }
+  if (!(payload.received_qty >= 0)) return { error: '实收数量无效' };
+
+  const now = new Date().toISOString();
+  const { error: grErr } = await (supabase.from('goods_receipts') as any).insert({
+    line_item_id: lineItemId, order_id: line.order_id,
+    received_qty: payload.received_qty,
+    received_unit: payload.received_unit || line.ordered_unit || null,
+    received_by: access.userId,
+    inspection_result: payload.result === 'pass' ? 'pass' : payload.result === 'concession' ? 'concession' : 'reject',
+    aql_level: payload.aql_level || null,
+    defect_notes: payload.defect_notes || null,
+    concession_approved_by: payload.result === 'concession' ? access.userId : null,
+    return_required: payload.result === 'reject' ? (payload.return_required ?? true) : false,
+    return_status: payload.result === 'reject' ? 'pending' : null,
+  });
+  if (grErr) return { error: grErr.message };
+
+  // 汇总该行已验收数量，回写 received_qty
+  const { data: receipts } = await (supabase.from('goods_receipts') as any)
+    .select('received_qty').eq('line_item_id', lineItemId);
+  const totalReceived = (receipts || []).reduce((s: number, r: any) => s + (Number(r.received_qty) || 0), 0);
+
+  const { error: upErr } = await (supabase.from('procurement_line_items') as any)
+    .update({ line_status: nextStatus, received_qty: totalReceived, received_at: now, received_by: access.userId, updated_at: now })
+    .eq('id', lineItemId);
+  if (upErr) return { error: upErr.message };
+
+  await logProcurement(supabase, lineItemId, line.order_id, 'inspect',
+    line.line_status, nextStatus,
+    `验收 ${payload.result === 'pass' ? '通过' : payload.result === 'concession' ? '让步接收' : '拒收'}：实收 ${payload.received_qty}${payload.defect_notes ? '，' + payload.defect_notes : ''}`,
+    { result: payload.result, received_qty: payload.received_qty, aql: payload.aql_level });
+
+  revalidatePath(`/orders/${line.order_id}`);
+  revalidatePath('/procurement');
+  return {};
+}
+
+// ── 采购中心工作队列（跨订单，供 /procurement 页只读渲染）──
+export interface QueueLine {
+  id: string;
+  order_id: string;
+  order_no: string | null;
+  customer_name: string | null;
+  material_name: string;
+  category: string | null;
+  supplier_name: string | null;
+  line_status: string;
+  required_by: string | null;
+  promised_date: string | null;
+  expected_arrival: string | null;
+  po_no: string | null;
+  unit_price: number | null;
+  price_variance_pct: number | null;
+  ordered_qty: number | null;
+  ordered_unit: string | null;
+  chase_count: number | null;
+  last_chased_at: string | null;
+  lamp: 'red' | 'yellow' | 'green' | null;
+}
+
+export async function getProcurementQueues(): Promise<{
+  data?: {
+    pendingOrder: QueueLine[];
+    chase: QueueLine[];
+    receive: QueueLine[];
+    counts: { pendingOrder: number; chase: number; receive: number; red: number };
+  };
+  error?: string;
+}> {
+  const auth = await checkAccess(); // 查看权限沿用较宽的 ALLOWED_ROLES
+  if (!auth.ok) return { error: auth.error };
+  const supabase = await createClient();
+
+  const { computeLineLamp, ACTIVE_LINE_STATUSES: ACTIVE } = await import('@/lib/domain/procurement');
+
+  const { data, error } = await (supabase.from('procurement_line_items') as any)
+    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, unit_price, price_variance_pct, ordered_qty, ordered_unit, chase_count, last_chased_at, orders(order_no, customer_name, lifecycle_status)')
+    .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'shipped', 'arrived']);
+  if (error) return { error: error.message };
+
+  const now = new Date();
+  const rows: QueueLine[] = (data || [])
+    .filter((r: any) => {
+      const ls = r.orders?.lifecycle_status || '';
+      return !['completed', '已完成', 'cancelled', '已取消'].includes(ls);
+    })
+    .map((r: any) => ({
+      id: r.id, order_id: r.order_id,
+      order_no: r.orders?.order_no ?? null, customer_name: r.orders?.customer_name ?? null,
+      material_name: r.material_name, category: r.category, supplier_name: r.supplier_name,
+      line_status: r.line_status, required_by: r.required_by,
+      promised_date: r.promised_date, expected_arrival: r.expected_arrival,
+      po_no: r.po_no, unit_price: r.unit_price, price_variance_pct: r.price_variance_pct,
+      ordered_qty: r.ordered_qty, ordered_unit: r.ordered_unit,
+      chase_count: r.chase_count, last_chased_at: r.last_chased_at,
+      lamp: computeLineLamp(r, { now }),
+    }));
+
+  const lampRank = (l: string | null) => (l === 'red' ? 0 : l === 'yellow' ? 1 : l === 'green' ? 2 : 3);
+  const byLamp = (a: QueueLine, b: QueueLine) => lampRank(a.lamp) - lampRank(b.lamp);
+
+  const pendingOrder = rows.filter(r => r.line_status === 'pending_order').sort(byLamp);
+  const chase = rows.filter(r => (ACTIVE as string[]).includes(r.line_status)).sort(byLamp);
+  const receive = rows.filter(r => r.line_status === 'arrived');
+
+  return {
+    data: {
+      pendingOrder, chase, receive,
+      counts: {
+        pendingOrder: pendingOrder.length, chase: chase.length, receive: receive.length,
+        red: rows.filter(r => r.lamp === 'red').length,
+      },
+    },
+  };
+}

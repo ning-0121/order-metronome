@@ -9,9 +9,10 @@ import { getPendingPriceApprovalsCount } from '@/app/actions/price-approvals';
 
 interface NavbarProps {
   isAdmin?: boolean;
+  isProcurement?: boolean;
 }
 
-export function Navbar({ isAdmin = false }: NavbarProps) {
+export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -48,7 +49,10 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
         { href: '/dashboard', label: '我的工作台', icon: '📋' },
         { href: '/my-customers', label: '我的客户', icon: '🎯' },
         { href: '/orders', label: '订单列表', icon: '📦' },
-        { href: '/briefing', label: '今日简报', icon: '📧' },
+        // 采购员：把"今日简报"换成"采购中心"作为核心入口
+        isProcurement
+          ? { href: '/procurement', label: '采购中心', icon: '🛒' }
+          : { href: '/briefing', label: '今日简报', icon: '📧' },
       ];
 
   // 更多菜单分组（admin）
@@ -76,6 +80,12 @@ export function Navbar({ isAdmin = false }: NavbarProps) {
           label: '邮件',
           links: [
             { href: '/admin/mail-monitor', label: '今日邮件晨报', icon: '📧' },
+          ],
+        },
+        {
+          label: '采购 / 供应链',
+          links: [
+            { href: '/procurement', label: '采购中心', icon: '🛒' },
           ],
         },
         {

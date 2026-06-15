@@ -33,6 +33,14 @@ export default async function RootLayout({
   const role = user ? getUserRoleFromEmail(user.email) : undefined;
   const isAdmin = role === 'admin';
 
+  // 采购中心导航可见性：采购/采购经理/管理员（轻量 profile 角色查询，单次索引命中）
+  let isProcurement = isAdmin;
+  if (user && !isAdmin) {
+    const { data: prof } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+    const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+    isProcurement = roles.some(r => ['procurement', 'procurement_manager', 'admin'].includes(r));
+  }
+
   const currentYear = new Date().getFullYear();
 
   return (
@@ -40,7 +48,7 @@ export default async function RootLayout({
       <body
         className="bg-white text-gray-900 antialiased flex flex-col min-h-screen font-sans"
       >
-        <Navbar isAdmin={isAdmin} />
+        <Navbar isAdmin={isAdmin} isProcurement={isProcurement} />
         <PWARegister />
         <main className="container mx-auto bg-white px-4 py-8 flex-1">
           {children}
