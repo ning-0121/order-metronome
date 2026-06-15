@@ -794,8 +794,8 @@ export async function getOrders() {
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
   const isAdmin = roles.includes('admin');
 
-  // 管理员/财务/行政/生产主管看全部订单
-  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager'].includes(r));
+  // 管理/生产主管/各经理/业务开发(只读全程) 看全部订单
+  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager', 'sales'].includes(r));
 
   // 辅助：把 delay_requests 按 order_id 分组合并进 orders
   async function attachDelayRequests(orderList: any[]): Promise<any[]> {

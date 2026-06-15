@@ -8,14 +8,16 @@
  */
 export function getRoleLabel(role: string): string {
   const roleMap: Record<string, string> = {
-    'sales': '业务/理单',
-    'sales_manager': '业务部经理',
-    'merchandiser': '跟单',
+    'sales': '业务开发',       // 2026版:开发业务部，PO前主导，PO后只读全程可见
+    'sales_manager': '开发业务经理',
+    'merchandiser': '理单/订单执行',  // 订单管理部
+    'order_manager': '订单管理经理',
     'finance': '财务',
     'procurement': '采购',
-    'production': '跟单',     // 生产已合并到跟单
-    'qc': '跟单',             // 质检已合并到跟单
-    'quality': '跟单',        // 质检（旧值）已合并到跟单
+    'procurement_manager': '采购经理',
+    'production': '生产跟单',   // 生产部:工厂侧大货跟进
+    'qc': '生产跟单',          // 质检并入生产跟单
+    'quality': '生产跟单',     // 质检（旧值）并入生产跟单
     'logistics': '物流/仓库',
     'production_manager': '生产主管',
     'admin_assistant': '行政督办',

@@ -14,7 +14,9 @@
 export type DbUserRole = 'sales' | 'finance' | 'procurement' | 'production' | 'quality' | 'admin' | 'logistics' | 'qc';
 
 // 代码中使用的角色值（业务层）
-export type AppRole = 'sales' | 'sales_manager' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'production_manager' | 'qc' | 'logistics' | 'admin' | 'admin_assistant';
+// 2026版组织:开发业务部(sales=业务开发) / 订单管理部(merchandiser=理单·订单执行 + order_manager=订单管理经理)
+// / 采购部(procurement + procurement_manager=采购经理) / 生产(production=生产跟单)
+export type AppRole = 'sales' | 'sales_manager' | 'merchandiser' | 'order_manager' | 'finance' | 'procurement' | 'procurement_manager' | 'production' | 'production_manager' | 'qc' | 'logistics' | 'admin' | 'admin_assistant';
 
 /**
  * 角色映射表：代码角色 -> 数据库枚举值（优先值）
@@ -24,8 +26,10 @@ export const ROLE_MAP_TO_DB: Record<AppRole, string> = {
   'sales': 'sales',
   'sales_manager': 'sales_manager',
   'merchandiser': 'merchandiser',
+  'order_manager': 'order_manager',
   'finance': 'finance',
   'procurement': 'procurement',
+  'procurement_manager': 'procurement_manager',
   'production': 'production',
   'qc': 'qc', // 优先尝试 qc，如果数据库没有则回退到 quality
   'logistics': 'logistics',
@@ -49,8 +53,10 @@ export const ROLE_MAP_FROM_DB: Record<string, AppRole> = {
   'sales': 'sales',
   'sales_manager': 'sales_manager',
   'merchandiser': 'merchandiser',
+  'order_manager': 'order_manager',
   'finance': 'finance',
   'procurement': 'procurement',
+  'procurement_manager': 'procurement_manager',
   'production': 'production',
   'quality': 'qc', // 数据库是 quality，代码用 qc
   'qc': 'qc', // 如果数据库有 qc，直接使用
@@ -80,7 +86,7 @@ export function normalizeRoleToDb(
   const normalized = input.trim().toLowerCase();
   
   // 如果是已知的数据库枚举值，直接返回
-  const knownDbRoles = ['sales', 'sales_manager', 'merchandiser', 'finance', 'procurement', 'production', 'production_manager', 'admin_assistant', 'quality', 'admin', 'logistics', 'qc'];
+  const knownDbRoles = ['sales', 'sales_manager', 'merchandiser', 'order_manager', 'finance', 'procurement', 'procurement_manager', 'production', 'production_manager', 'admin_assistant', 'quality', 'admin', 'logistics', 'qc'];
   if (knownDbRoles.includes(normalized)) {
     return normalized;
   }
@@ -173,29 +179,30 @@ export const ROLE_GROUPS = {
   /** 管理类角色：admin / 财务 / 行政督察 */
   MANAGEMENT: ['admin', 'finance', 'admin_assistant'] as const,
 
-  /** 执行类角色：跟单 / 生产 / 质检 / 品控 / 生产主管 */
-  EXECUTION: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
+  /** 执行类角色：理单(订单执行) / 生产跟单 / 质检 / 品控 / 生产主管 / 订单管理经理 / 采购经理 */
+  EXECUTION: ['merchandiser', 'order_manager', 'production', 'qc', 'quality', 'production_manager', 'procurement_manager'] as const,
 
-  /** 可看所有订单（跨负责人）：管理类 + 生产主管 + 业务部经理 */
-  CAN_SEE_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager'] as const,
+  /** 可看所有订单（跨负责人）：管理类 + 生产主管 + 业务部经理 + 订单管理经理 + 采购经理
+   *  + 业务开发(sales,只读全程可见 — 2026版组织:PO后移交订单管理部，但业务全程可看进度) */
+  CAN_SEE_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager', 'sales'] as const,
 
-  /** 可看金额/利润等敏感财务数据：admin / finance / 业务（仅自己订单）/ 业务部经理 */
-  CAN_SEE_FINANCIALS: ['admin', 'finance', 'sales', 'sales_manager'] as const,
+  /** 可看金额/利润等敏感财务数据：admin / finance / 业务开发 / 业务部经理 / 订单管理经理 */
+  CAN_SEE_FINANCIALS: ['admin', 'finance', 'sales', 'sales_manager', 'order_manager'] as const,
 
-  /** 可审批延期申请：admin + 业务部经理（对客户交期负责） */
-  CAN_APPROVE_DELAY: ['admin', 'sales_manager'] as const,
+  /** 可审批延期申请：admin + 订单管理经理（交期归订单管理部）+ 业务部经理（对客户交期负责） */
+  CAN_APPROVE_DELAY: ['admin', 'order_manager', 'sales_manager'] as const,
 
-  /** 可审批客户价格申请：admin + 业务部经理 */
+  /** 可审批客户价格申请：admin + 业务部经理（客户价格归开发业务） */
   CAN_APPROVE_PRICE: ['admin', 'sales_manager'] as const,
 
-  /** 可改派订单/节点负责人：admin + 生产主管 + 业务部经理 */
-  CAN_REASSIGN_OWNER: ['admin', 'production_manager', 'sales_manager'] as const,
+  /** 可改派订单/节点负责人：admin + 生产主管 + 业务部经理 + 订单管理经理 */
+  CAN_REASSIGN_OWNER: ['admin', 'production_manager', 'sales_manager', 'order_manager'] as const,
 
-  /** 可绕过经营门禁（付款锁、确认链阻塞等）—— 业务部经理不在内，避免越权放货 */
+  /** 可绕过经营门禁（付款锁、确认链阻塞等）—— 仅 admin，避免越权放货 */
   CAN_OVERRIDE_BUSINESS_BLOCK: ['admin'] as const,
 
-  /** 可执行里程碑（去处理/完成节点）—— 业务部经理是监督角色，不在内 */
-  CAN_OPERATE_MILESTONES: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
+  /** 可执行里程碑（去处理/完成节点）—— 经理可代操作；业务开发是只读监督，不在内 */
+  CAN_OPERATE_MILESTONES: ['merchandiser', 'order_manager', 'production', 'qc', 'quality', 'production_manager', 'procurement_manager'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;
