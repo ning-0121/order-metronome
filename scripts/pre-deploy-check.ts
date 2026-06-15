@@ -28,11 +28,11 @@ console.log('📋 里程碑模板');
 assert(MILESTONE_TEMPLATE_V1.length >= 20, `生产模板有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥20)`);
 assert(SAMPLE_MILESTONE_TEMPLATE.length === 8, `打样模板有 ${SAMPLE_MILESTONE_TEMPLATE.length} 个节点 (=8)`);
 
-// 生产模板必须包含关键节点（含跟单/业务双重验货）
+// 生产模板必须包含关键节点（2026版组织:业务中/尾查已取消，仅保留跟单中/尾查→生产跟单）
 const requiredSteps = [
   'po_confirmed', 'finance_approval', 'production_kickoff',
-  'mid_qc_check', 'mid_qc_sales_check',
-  'final_qc_check', 'final_qc_sales_check',
+  'mid_qc_check',
+  'final_qc_check',
   'inspection_release', 'payment_received',
 ];
 for (const step of requiredSteps) {

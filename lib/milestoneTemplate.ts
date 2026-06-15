@@ -30,42 +30,40 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   evidence_required: boolean;
   evidence_note?: string;
 }> = [
-  // 阶段1：订单评审
+  // 阶段1：订单评审 ── 2026版组织:PO确认=业务开发(交接点);评审/单据起由订单管理部(理单)
   { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true },
   { step_key: "finance_approval", name: "财务审核", owner_role: "finance", is_critical: true, evidence_required: false },
-  { step_key: "order_kickoff_meeting", name: "订单评审会", owner_role: "sales", is_critical: true, evidence_required: false },
-  { step_key: "production_order_upload", name: "生产单上传", owner_role: "sales", is_critical: true, evidence_required: true },
+  { step_key: "order_kickoff_meeting", name: "订单评审会", owner_role: "merchandiser", is_critical: true, evidence_required: false },
+  { step_key: "production_order_upload", name: "生产单上传", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   // 阶段2：预评估
   { step_key: "order_docs_bom_complete", name: "BOM/采购预评估", owner_role: "procurement", is_critical: true, evidence_required: false },
   { step_key: "bulk_materials_confirmed", name: "生产预评估", owner_role: "production_manager", is_critical: true, evidence_required: false },
-  // 阶段3：工厂匹配 & 产前样
+  // 阶段3：工厂匹配 & 产前样 ── 工厂匹配=生产主管;产前样准备=生产跟单(工厂做样);寄送/客户确认=理单(交付对接)
   { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "production_manager", is_critical: true, evidence_required: true },
-  { step_key: "factory_confirmed", name: "工厂匹配确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "pre_production_sample_ready", name: "产前样准备完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "sales", is_critical: true, evidence_required: false },
-  { step_key: "pre_production_sample_approved", name: "产前样客户确认", owner_role: "sales", is_critical: true, evidence_required: true },
-  // 阶段4：采购与生产准备
+  { step_key: "factory_confirmed", name: "工厂匹配确认", owner_role: "production_manager", is_critical: true, evidence_required: true },
+  { step_key: "pre_production_sample_ready", name: "产前样准备完成", owner_role: "production", is_critical: true, evidence_required: true },
+  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "merchandiser", is_critical: true, evidence_required: false },
+  { step_key: "pre_production_sample_approved", name: "产前样客户确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  // 阶段4：采购与生产准备 ── 到料验收=理单;产前会/开裁=生产跟单
   // 顺序修复（2026-04-08）：产前会必须在原料到货后、开裁前
   { step_key: "procurement_order_placed", name: "采购订单下达", owner_role: "procurement", is_critical: true, evidence_required: true },
   { step_key: "materials_received_inspected", name: "原辅料到货验收", owner_role: "merchandiser", is_critical: true, evidence_required: false },
-  { step_key: "pre_production_meeting", name: "产前会", owner_role: "merchandiser", is_critical: false, evidence_required: false },
-  { step_key: "production_kickoff", name: "生产启动/开裁", owner_role: "merchandiser", is_critical: true, evidence_required: false },
-  // 阶段5：过程控制（验货分跟单 + 业务双重把关）
-  { step_key: "mid_qc_check", name: "跟单中查", owner_role: "merchandiser", is_critical: false, evidence_required: true },
-  { step_key: "mid_qc_sales_check", name: "业务中查", owner_role: "sales", is_critical: false, evidence_required: true },
-  // 阶段6：出货控制
+  { step_key: "pre_production_meeting", name: "产前会", owner_role: "production", is_critical: false, evidence_required: false },
+  { step_key: "production_kickoff", name: "生产启动/开裁", owner_role: "production", is_critical: true, evidence_required: false },
+  // 阶段5：过程控制 ── 验货归生产跟单（业务中/尾查已取消，2026版业务部纯开发）
+  { step_key: "mid_qc_check", name: "跟单中查", owner_role: "production", is_critical: false, evidence_required: true },
+  // 阶段6：出货控制 ── 包装规格/船样/订舱/报关=理单(订单管理部:出货安排/物流对接);尾查/工厂完成/回收=生产跟单
   // 顺序修复（2026-04-08）：包装确认 → 船样寄送 → 尾查 → 工厂完成 → 验货放行
   { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "shipping_sample_send", name: "船样寄送", owner_role: "sales", is_critical: false, evidence_required: false },
-  { step_key: "final_qc_check", name: "跟单尾查", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "final_qc_sales_check", name: "业务尾查", owner_role: "sales", is_critical: true, evidence_required: true },
-  { step_key: "factory_completion", name: "工厂完成", owner_role: "merchandiser", is_critical: true, evidence_required: false },
-  { step_key: "leftover_collection", name: "剩余物料回收", owner_role: "merchandiser", is_critical: false, evidence_required: true, evidence_note: "提交剩余面料/辅料数量 + 废料数量" },
+  { step_key: "shipping_sample_send", name: "船样寄送", owner_role: "merchandiser", is_critical: false, evidence_required: false },
+  { step_key: "final_qc_check", name: "跟单尾查", owner_role: "production", is_critical: true, evidence_required: true },
+  { step_key: "factory_completion", name: "工厂完成", owner_role: "production", is_critical: true, evidence_required: false },
+  { step_key: "leftover_collection", name: "剩余物料回收", owner_role: "production", is_critical: false, evidence_required: true, evidence_note: "提交剩余面料/辅料数量 + 废料数量" },
   { step_key: "finished_goods_warehouse", name: "成品入库", owner_role: "logistics", is_critical: true, evidence_required: true, evidence_note: "提交入库单（成品数量/次品/余量/样品扣除）" },
   { step_key: "inspection_release", name: "验货/放行", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   // 阶段7：物流收款
-  { step_key: "booking_done", name: "订舱完成", owner_role: "sales", is_critical: true, evidence_required: true },
-  { step_key: "customs_export", name: "报关安排出运", owner_role: "sales", is_critical: true, evidence_required: true },
+  { step_key: "booking_done", name: "订舱完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  { step_key: "customs_export", name: "报关安排出运", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "finance_shipment_approval", name: "核准出运", owner_role: "finance", is_critical: true, evidence_required: false },
   { step_key: "shipment_execute", name: "出运", owner_role: "logistics", is_critical: true, evidence_required: true },
   { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false },
@@ -115,7 +113,7 @@ const DEV_SAMPLE_MILESTONES: Array<{
   evidence_required: boolean;
   evidence_note?: string;
 }> = [
-  { step_key: "dev_sample_making", name: "头样制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+  { step_key: "dev_sample_making", name: "头样制作", owner_role: "production", is_critical: true, evidence_required: true,
     evidence_note: "上传头样照片（正面/背面/细节/尺寸测量）" },
   { step_key: "dev_sample_sent", name: "头样寄出", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "上传快递单号 + 面单照片" },
@@ -134,7 +132,7 @@ const DEV_SAMPLE_REVISION_MILESTONES: Array<{
   evidence_required: boolean;
   evidence_note?: string;
 }> = [
-  { step_key: "dev_sample_revision", name: "二次样制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+  { step_key: "dev_sample_revision", name: "二次样制作", owner_role: "production", is_critical: true, evidence_required: true,
     evidence_note: "上传二次样照片 + 与头样修改对比说明" },
   { step_key: "dev_sample_revision_sent", name: "二次样寄出", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "上传快递单号 + 面单照片" },
@@ -171,9 +169,9 @@ export const SAMPLE_MILESTONE_TEMPLATE: Array<{
     evidence_note: "上传客户打样需求（Tech Pack/参考图/尺码表/面料要求）" },
   // 阶段2：面料与制作
   { step_key: "sample_material", name: "打样面料采购", owner_role: "procurement", is_critical: true, evidence_required: false },
-  { step_key: "sample_making", name: "打样制作", owner_role: "merchandiser", is_critical: true, evidence_required: false },
+  { step_key: "sample_making", name: "打样制作", owner_role: "production", is_critical: true, evidence_required: false },
   // 阶段3：检验
-  { step_key: "sample_qc", name: "打样检验", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+  { step_key: "sample_qc", name: "打样检验", owner_role: "production", is_critical: true, evidence_required: true,
     evidence_note: "上传样品照片（正面/背面/细节/尺寸测量）" },
   // 阶段4：寄样
   { step_key: "sample_shipping_arrange", name: "寄样安排", owner_role: "sales", is_critical: true, evidence_required: true,
