@@ -28,9 +28,9 @@
 | sales 业务开发 | ✅只读 | ✅(自己单) | — | — | — | — | — |
 | sales_manager 开发业务经理 | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | merchandiser 理单 | 自己单 | — | — | — | — | ✅ | — |
-| order_manager 订单管理经理 | ✅ | ✅ | ✅ | — | ✅ | ✅ | — |
+| order_manager 订单管理经理 | ✅ | ✅ | ✅ | — | ✅ | —(监督) | — |
 | procurement 采购 | 自己单 | — | — | — | — | ✅ | — |
-| procurement_manager 采购经理 | ✅ | — | — | — | — | ✅ | ✅ |
+| procurement_manager 采购经理 | ✅ | — | — | — | — | —(监督) | ✅ |
 | production 生产跟单 | 自己单 | — | — | — | — | ✅ | — |
 | production_manager 生产主管 | ✅ | — | — | — | ✅ | ✅ | — |
 | finance / admin_assistant / logistics | 见 ROLE_GROUPS | | | | | | |

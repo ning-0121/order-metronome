@@ -179,8 +179,9 @@ export const ROLE_GROUPS = {
   /** 管理类角色：admin / 财务 / 行政督察 */
   MANAGEMENT: ['admin', 'finance', 'admin_assistant'] as const,
 
-  /** 执行类角色：理单(订单执行) / 生产跟单 / 质检 / 品控 / 生产主管 / 订单管理经理 / 采购经理 */
-  EXECUTION: ['merchandiser', 'order_manager', 'production', 'qc', 'quality', 'production_manager', 'procurement_manager'] as const,
+  /** 执行类角色：理单(订单执行) / 生产跟单 / 质检 / 品控 / 生产主管
+   *  注：订单管理经理 / 采购经理 是【监督】角色 — 看所有订单 + 审批，但不操作执行节点，故不在内 */
+  EXECUTION: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
 
   /** 可看所有订单（跨负责人）：管理类 + 生产主管 + 业务部经理 + 订单管理经理 + 采购经理
    *  + 业务开发(sales,只读全程可见 — 2026版组织:PO后移交订单管理部，但业务全程可看进度) */
@@ -201,8 +202,8 @@ export const ROLE_GROUPS = {
   /** 可绕过经营门禁（付款锁、确认链阻塞等）—— 仅 admin，避免越权放货 */
   CAN_OVERRIDE_BUSINESS_BLOCK: ['admin'] as const,
 
-  /** 可执行里程碑（去处理/完成节点）—— 经理可代操作；业务开发是只读监督，不在内 */
-  CAN_OPERATE_MILESTONES: ['merchandiser', 'order_manager', 'production', 'qc', 'quality', 'production_manager', 'procurement_manager'] as const,
+  /** 可执行里程碑（去处理/完成节点）—— 业务开发/订单管理经理/采购经理 均为监督角色，看得到但不操作节点 */
+  CAN_OPERATE_MILESTONES: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;
