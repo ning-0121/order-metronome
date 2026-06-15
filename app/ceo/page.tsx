@@ -450,6 +450,30 @@ export default async function CEOWarRoom() {
     const ls = o.lifecycle_status || '';
     return ls === '已完成' || ls === 'completed' || ls === '待复盘' || ls === '已复盘';
   });
+
+  // ===== 上周新增订单 + 订单趋势（纯页面计算，复用已查询的 orders.created_at，零新增查询）=====
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const nowMs = now.getTime();
+  // 近 8 周滚动桶（旧 → 新，weekTrend[7] = 最近 7 天）
+  const weekTrend = Array.from({ length: 8 }, (_, i) => {
+    const end = nowMs - i * WEEK_MS;
+    const start = end - WEEK_MS;
+    const count = (orders || []).filter((o: any) => {
+      if (!o.created_at) return false;
+      const t = new Date(o.created_at).getTime();
+      return t > start && t <= end;
+    }).length;
+    return { count };
+  }).reverse();
+  const thisWeekCount = weekTrend[7].count;       // 近 7 天
+  const lastWeekCount = weekTrend[6].count;       // 前 7 天（上周）
+  const wowDelta = thisWeekCount - lastWeekCount; // 环比
+  const trendMax = Math.max(1, ...weekTrend.map(w => w.count));
+  // 上周（近 7 天）新增订单清单
+  const lastWeekOrders = (orders || [])
+    .filter((o: any) => o.created_at && new Date(o.created_at).getTime() > nowMs - WEEK_MS)
+    .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
   // 保留旧分类（兼容）
   const inProgress = ordersWithMilestones.filter(o => {
     const ms = o.milestones || [];
@@ -791,6 +815,67 @@ export default async function CEOWarRoom() {
         matters={customerMatters || []}
         loadError={!!customerMattersError}
       />
+
+      {/* ===== 3.5 上周新增订单 + 订单趋势 ===== */}
+      <div className="bg-white rounded-xl border border-emerald-200 shadow-sm overflow-hidden">
+        <div className="bg-emerald-50 px-5 py-3 border-b border-emerald-100 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-emerald-900">📈 上周新增订单 · 订单趋势</h2>
+          <span className="text-xs text-gray-500">近 8 周（每桶 7 天）</span>
+        </div>
+        <div className="p-5 grid gap-5 md:grid-cols-2">
+
+          {/* 左：上周新增数 + 环比 + 趋势柱 */}
+          <div>
+            <div className="flex items-end gap-3">
+              <div>
+                <div className="text-xs text-gray-500">近 7 天新增</div>
+                <div className="text-3xl font-bold text-emerald-700">{thisWeekCount}</div>
+              </div>
+              <div className={`text-sm font-medium mb-1 ${wowDelta > 0 ? 'text-emerald-600' : wowDelta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                {wowDelta > 0 ? `▲ +${wowDelta}` : wowDelta < 0 ? `▼ ${wowDelta}` : '— 持平'}
+                <span className="text-xs text-gray-400 ml-1">环比上周（{lastWeekCount}）</span>
+              </div>
+            </div>
+            {/* 8 周迷你柱状图（CSS，无依赖） */}
+            <div className="mt-4 flex items-end gap-1.5 h-24">
+              {weekTrend.map((w, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                  <span className="text-[10px] text-gray-500">{w.count}</span>
+                  <div
+                    className={`w-full rounded-t ${i === 7 ? 'bg-emerald-500' : 'bg-emerald-200'}`}
+                    style={{ height: `${Math.max(4, Math.round((w.count / trendMax) * 72))}px` }}
+                    title={`${i === 7 ? '本周' : i === 6 ? '上周' : `${7 - i} 周前`}：${w.count} 单`}
+                  />
+                  <span className="text-[9px] text-gray-400">{i === 7 ? '本周' : i === 6 ? '上周' : `-${7 - i}w`}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 右：上周新增订单清单 */}
+          <div>
+            <div className="text-xs text-gray-500 mb-2">近 7 天新增订单（{lastWeekOrders.length}）</div>
+            {lastWeekOrders.length === 0 ? (
+              <div className="text-sm text-gray-400 py-6 text-center">近 7 天暂无新增订单</div>
+            ) : (
+              <div className="space-y-1 max-h-40 overflow-y-auto">
+                {lastWeekOrders.map((o: any) => (
+                  <Link key={o.id} href={`/orders/${o.id}`}
+                    className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-emerald-50 text-sm">
+                    <span className="truncate">
+                      <span className="font-medium text-gray-900">{o.order_no}</span>
+                      <span className="text-gray-500 ml-1">{o.customer_name}</span>
+                    </span>
+                    <span className="text-xs text-gray-400 shrink-0 ml-2">
+                      {o.quantity ? `${o.quantity}件 · ` : ''}{formatDate(o.created_at)}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ===== 4. 订单三阶段分析 ===== */}
       <div className="grid md:grid-cols-3 gap-4">
