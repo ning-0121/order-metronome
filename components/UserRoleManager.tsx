@@ -4,16 +4,20 @@ import { useState } from 'react';
 import { updateUserRoles, adminResetPassword, checkUserDeletable, deleteUser } from '@/app/actions/users';
 import { useRouter } from 'next/navigation';
 
+// 2026版组织角色（开发业务部 / 订单管理部 / 采购部 / 生产部）
 const ALL_ROLES = [
   { value: 'admin', label: 'CEO/管理员', desc: '全览所有数据，审批延期，指定人员，不操作节点' },
-  { value: 'sales', label: '业务/理单', desc: '客户对接、PO确认、生产单制作、原辅料验收、订舱报关' },
-  { value: 'sales_manager', label: '业务部经理', desc: '查看所有订单、调配负责人、看金额利润、审批延期与价格、查看销售目标（不操作节点、不绕过付款门禁）' },
-  { value: 'merchandiser', label: '跟单', desc: '工厂协调、生产跟进、中查尾查、验货放行、品质管控' },
+  { value: 'sales', label: '业务开发', desc: '开发业务部：新客户开发、客情维护、报价打样、PO确认；PO后只读全程可见订单进度，不再操作执行节点' },
+  { value: 'sales_manager', label: '开发业务经理', desc: '开发业务部负责人：查看所有订单、看金额利润、审批客户价格与延期、调配负责人（不操作节点、不绕过付款门禁）' },
+  { value: 'merchandiser', label: '理单/订单执行', desc: '订单管理部：订单评审、单据、到料跟踪、包装规格、产前样寄客户、订舱报关物流、验货放行、异常统筹' },
+  { value: 'order_manager', label: '订单管理经理', desc: '订单管理部负责人：查看所有订单、调配负责人、审批延期、代操作节点、统筹交付与异常' },
   { value: 'finance', label: '财务', desc: '订单审核、加工费确认、成本核算、收款' },
-  { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认' },
-  { value: 'production_manager', label: '生产主管', desc: '查看所有订单、指定跟单、只看生产单/装箱单' },
+  { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认、催货到货' },
+  { value: 'procurement_manager', label: '采购经理', desc: '采购部负责人：供应商开发与分级、价格成本控制、让步接收审批、采购异常处理（查看所有订单）' },
+  { value: 'production', label: '生产跟单', desc: '生产部：工厂排产跟进、产前样准备、开裁、生产进度、中查尾查、工厂完成' },
+  { value: 'production_manager', label: '生产主管', desc: '查看所有订单、工厂匹配确认、生产预评估、指定跟单' },
   { value: 'admin_assistant', label: '行政督办', desc: '查看所有订单进度、催办跟进、不可见价格文件' },
-  { value: 'logistics', label: '物流/仓库', desc: '出货签核、装箱、物流协调' },
+  { value: 'logistics', label: '物流/仓库', desc: '出货签核、装箱、物流协调、成品入库' },
 ];
 
 interface UserProfile {
