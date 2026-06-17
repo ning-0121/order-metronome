@@ -157,7 +157,7 @@ draft → pending_order → ordered → confirmed → [in_production] → shippe
 4. 待验收队列
 5. 到货验收（goods_receipts + 让步审批限 PM/admin）
 6. 行级红黄绿灯（required_by 倒推）
-7. 采购风险 matters（克隆 customer_matters：dry_run→人审→execute→nightly cron）
+7. 采购风险 matters（克隆 customer_matters：dry_run→人审→execute→nightly cron）✅ 已上线 2026-06-17：`lib/services/procurement-matters.service.ts`（6 类信号:缺料/供应商延期/催货停滞/价格异常/质量拒收;risk_schedule 留 V2）+ `/api/admin/procurement-matters-materialize`(dry_run/execute,admin/PM)+ 接入 `/api/cron/daily` Step6 + `/procurement` 风险中心只读区
 8. 价格快照（price_baseline + price_history 自动写入 + 页面标色提醒，不阻断）
 9. factories 供应商字段扩展 + 双表合并落地（tracking 冻结只读）
 

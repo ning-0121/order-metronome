@@ -11,6 +11,7 @@ import { syncAllCustomerRhythms, rebuildAllCustomerRhythmPnl } from '@/lib/servi
 import { resolveStaleAlerts } from '@/lib/services/alerts.service'
 import { generateDailyTasks } from '@/lib/services/daily-tasks.service'
 import { materializeCustomerMatters } from '@/lib/services/customer-matters.service'
+import { materializeProcurementMatters } from '@/lib/services/procurement-matters.service'
 
 export async function GET(req: NextRequest) {
   // Vercel Cron 鉴权（生产环境必须）
@@ -85,6 +86,22 @@ export async function GET(req: NextRequest) {
       }
     } catch (e: any) {
       log.push(`  ✗ Matters exception: ${e?.message}`)
+    }
+
+    // Step 6: 物化采购风险事项（procurement_matters，零 AI 纯规则）
+    // 同 customer_matters：service-role 写；失败不阻断其余 cron 步骤
+    log.push('→ Materializing procurement matters...')
+    try {
+      const svc = createServiceRoleClient()
+      const procResult = await materializeProcurementMatters(svc as any, { mode: 'execute' })
+      if (procResult.ok) {
+        const s = procResult.data.stats
+        log.push(`  ✓ Procurement matters: ${s.written ?? 0} written, ${s.deleted ?? 0} stale removed (${s.orders_affected} orders, ${s.suppliers_affected} suppliers)`)
+      } else {
+        log.push(`  ✗ Procurement matters failed: ${procResult.error}`)
+      }
+    } catch (e: any) {
+      log.push(`  ✗ Procurement matters exception: ${e?.message}`)
     }
 
     const duration = Date.now() - startTime

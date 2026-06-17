@@ -872,3 +872,51 @@ export async function getProcurementQueues(): Promise<{
     },
   };
 }
+
+// ── 采购风险中心（只读，读物化好的 procurement_matters）──
+export type ProcurementMatterType =
+  | 'material_shortage' | 'supplier_delay' | 'chase_stalled'
+  | 'price_anomaly' | 'quality_reject' | 'risk_schedule';
+
+export interface RiskMatter {
+  id: string;
+  order_id: string | null;
+  order_no: string | null;
+  line_item_id: string | null;
+  matter_type: ProcurementMatterType;
+  severity: 'high' | 'medium';
+  title: string;
+  evidence: Record<string, any>;
+  detected_at: string;
+}
+
+/**
+ * 采购风险中心数据（只读）。读 nightly cron 物化的 procurement_matters，
+ * 按严重度→检出时间排序。CEO/PM 看汇总、点订单下钻；零页面计算。
+ */
+export async function getProcurementMatters(): Promise<{
+  data?: { matters: RiskMatter[]; counts: { total: number; high: number; medium: number } };
+  error?: string;
+}> {
+  const auth = await checkAccess();
+  if (!auth.ok) return { error: auth.error };
+  const supabase = await createClient();
+
+  const { data, error } = await (supabase.from('procurement_matters') as any)
+    .select('id, order_id, order_no, line_item_id, matter_type, severity, title, evidence, detected_at')
+    .order('severity', { ascending: true }) // 'high' < 'medium' 字典序：high 在前
+    .order('detected_at', { ascending: true });
+  if (error) return { error: error.message };
+
+  const matters: RiskMatter[] = (data || []) as RiskMatter[];
+  return {
+    data: {
+      matters,
+      counts: {
+        total: matters.length,
+        high: matters.filter(m => m.severity === 'high').length,
+        medium: matters.filter(m => m.severity === 'medium').length,
+      },
+    },
+  };
+}
