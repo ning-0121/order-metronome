@@ -11,33 +11,54 @@ export interface User {
   full_name: string | null;
   role: string | null;
   roles: string[];
+  active?: boolean;
 }
 
-export async function getAllUsers(): Promise<{ data: User[] | null; error: string | null }> {
+/**
+ * 用户列表。
+ * 默认仅返回在职用户（active !== false）—— 指派人选择器(OwnerAssignment 等)直接用，
+ * 离职者不会再出现在任何下拉。传 includeInactive=true 才返回全部（如 admin 用户管理页）。
+ *
+ * 容错：若 active 列尚未迁移（20260617_profiles_active_offboarding.sql 未执行），
+ * 自动降级到不含 active 的查询，全部视为在职，避免列不存在导致用户列表白屏。
+ */
+export async function getAllUsers(
+  opts?: { includeInactive?: boolean }
+): Promise<{ data: User[] | null; error: string | null }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { data: null, error: 'Unauthorized' };
   }
 
-  const { data: profiles, error } = await (supabase.from('profiles') as any)
-    .select('user_id, email, name, role, roles')
+  let { data: profiles, error } = await (supabase.from('profiles') as any)
+    .select('user_id, email, name, role, roles, active')
     .order('email', { ascending: true });
+
+  // 降级：迁移尚未执行（无 active 列）时退回旧查询
+  if (error && /active|column|does not exist/i.test(error.message || '')) {
+    ({ data: profiles, error } = await (supabase.from('profiles') as any)
+      .select('user_id, email, name, role, roles')
+      .order('email', { ascending: true }));
+  }
 
   if (error) {
     return { data: null, error: friendlyError(error, '加载用户列表失败') };
   }
 
-  return {
-    data: (profiles || []).map((p: any) => ({
+  const includeInactive = opts?.includeInactive === true;
+  const mapped: User[] = (profiles || [])
+    .map((p: any) => ({
       user_id: p.user_id,
       email: p.email || '',
       full_name: p.name ?? p.email ?? null,
       role: p.role || null,
       roles: p.roles || [],
-    })),
-    error: null,
-  };
+      active: p.active !== false, // 缺列时默认在职
+    }))
+    .filter((u: User) => includeInactive || u.active !== false);
+
+  return { data: mapped, error: null };
 }
 
 /**
@@ -189,6 +210,139 @@ export async function deleteUser(
     if (authErr) {
       return { error: '删除 auth 用户失败：' + authErr.message };
     }
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: '操作失败：' + message };
+  }
+}
+
+/**
+ * 离职办理（推荐路径，替代硬删除）—— 仅管理员
+ * 一键完成三件事，杜绝漏步（尤其封号）：
+ *   1) 转派活跃工作：未完成节点 owner + 活跃订单 owner → 接手人（已完成/取消保留原 owner 作历史）
+ *   2) 封锁登录：ban auth 账号（保留行与全部历史、可逆）—— 关键！否则离职者仍能登录
+ *   3) 移出花名册：profiles.active=false（软停用，保留 name 让历史节点仍显示姓名）
+ * 二次确认：confirmName 必须与离职者姓名一致。
+ * 详见 docs/offboarding-sop.md。
+ */
+export async function offboardUser(
+  targetUserId: string,
+  handoverToUserId: string,
+  confirmName: string,
+): Promise<{ error?: string; success?: boolean; reassignedMilestones?: number; reassignedOrders?: number }> {
+  const supabase = await createClient();
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { error: '无权限：仅管理员可办理离职' };
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (user.id === targetUserId) return { error: '不能给自己办理离职' };
+  if (!handoverToUserId) return { error: '请选择接手人' };
+  if (handoverToUserId === targetUserId) return { error: '接手人不能是离职者本人' };
+
+  // 取离职者 + 接手人档案
+  const { data: target } = await (supabase.from('profiles') as any)
+    .select('user_id, email, name, active')
+    .eq('user_id', targetUserId)
+    .single();
+  if (!target) return { error: '离职员工不存在' };
+  if ((target as any).active === false) return { error: '该员工已是离职状态' };
+
+  const { data: handover } = await (supabase.from('profiles') as any)
+    .select('user_id, email, name, active')
+    .eq('user_id', handoverToUserId)
+    .single();
+  if (!handover) return { error: '接手人不存在' };
+  if ((handover as any).active === false) return { error: '接手人已离职，无法作为接手人' };
+
+  // 二次确认：输入姓名须与离职者一致（无 name 时回退邮箱）
+  const expected = ((target as any).name || (target as any).email || '').trim();
+  if (!confirmName || confirmName.trim() !== expected) {
+    return { error: `二次确认失败：请输入离职员工的姓名「${expected}」` };
+  }
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    return { error: '系统配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY' };
+  }
+
+  try {
+    const admin = createSupabaseClient(url, serviceKey);
+
+    // 1) 转派未完成节点 → 接手人（actual_at is null = 未完成）
+    const { data: msRows, error: msErr } = await (admin.from('milestones') as any)
+      .update({ owner_user_id: handoverToUserId, updated_at: new Date().toISOString() })
+      .eq('owner_user_id', targetUserId)
+      .is('actual_at', null)
+      .select('id');
+    if (msErr) return { error: '转派节点失败：' + msErr.message };
+    const reassignedMilestones = (msRows || []).length;
+
+    // 2) 转派活跃订单 owner → 接手人（已完成/取消/归档保留原 owner 作历史）
+    const { data: ordRows, error: ordErr } = await (admin.from('orders') as any)
+      .update({ owner_user_id: handoverToUserId })
+      .eq('owner_user_id', targetUserId)
+      .not('lifecycle_status', 'in', '("completed","archived","cancelled","已完成","已归档","已取消")')
+      .select('id');
+    if (ordErr) return { error: '转派订单失败：' + ordErr.message };
+    const reassignedOrders = (ordRows || []).length;
+
+    // 3) 封锁登录（关键）：ban auth，保留行与历史、可逆（~100 年）
+    const { error: banErr } = await admin.auth.admin.updateUserById(targetUserId, {
+      ban_duration: '876000h',
+    });
+    if (banErr) return { error: '封锁登录失败：' + banErr.message };
+
+    // 4) 移出花名册（软停用）
+    const { error: profErr } = await (admin.from('profiles') as any)
+      .update({
+        active: false,
+        departed_at: new Date().toISOString(),
+        handover_to: handoverToUserId,
+      })
+      .eq('user_id', targetUserId);
+    if (profErr) return { error: '停用档案失败：' + profErr.message };
+
+    return { success: true, reassignedMilestones, reassignedOrders };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: '离职办理失败：' + message };
+  }
+}
+
+/**
+ * 恢复在职（离职误操作 / 返聘）—— 仅管理员
+ * 解封 auth + active=true。不会自动把转派出去的工作收回（需手动再指派）。
+ */
+export async function reactivateUser(
+  targetUserId: string,
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const { isAdmin } = await getCurrentUserRole(supabase);
+  if (!isAdmin) return { error: '无权限：仅管理员可恢复在职' };
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    return { error: '系统配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY' };
+  }
+
+  try {
+    const admin = createSupabaseClient(url, serviceKey);
+
+    // 解封登录
+    const { error: banErr } = await admin.auth.admin.updateUserById(targetUserId, {
+      ban_duration: 'none',
+    });
+    if (banErr) return { error: '解封登录失败：' + banErr.message };
+
+    const { error: profErr } = await (admin.from('profiles') as any)
+      .update({ active: true, departed_at: null })
+      .eq('user_id', targetUserId);
+    if (profErr) return { error: '恢复档案失败：' + profErr.message };
+
     return { success: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

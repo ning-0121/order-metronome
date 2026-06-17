@@ -1,7 +1,8 @@
 # 员工离职处理 SOP + 系统化方案（离职按钮）
 
 > 适用：绮陌自用版 + 未来商用 SaaS 版（离职是高频事件，必须标准化、系统化）。
-> 状态：SOP 已验证（2026-06-15 处理许继平/马鑫）；系统「离职按钮」待开发（设计见 §4）。
+> 状态：SOP 已验证（2026-06-15 处理许继平/马鑫）；**系统「离职按钮」已上线（2026-06-17）**，实现见 §4。
+> 日常离职 → 直接用 `/admin/users` 的「离职交接」按钮；手动 SQL（§2）仅作兜底/无 UI 时参考。
 
 ---
 
@@ -58,42 +59,44 @@ END $$;
 
 ---
 
-## 3. 已处理记录 + 残留
+## 3. 已处理记录
 
 - **2026-06-15 许继平 / 马鑫离职**：未完成里程碑(约43)已转派给增富(qzf@qimoclothing.com)，profiles 已删。
-- ⚠️ **残留**：当时**未封 auth 账号** → 两人理论上仍可登录(被当 sales)。**需补一步封号**：
-  ```sql
-  update auth.users set banned_until = 'infinity'
-  where id in (select id from auth.users where email in ('许继平邮箱','马鑫邮箱'));
-  -- profile 已删，需用邮箱定位；邮箱见离职前记录
-  ```
+- **2026-06-17 补封号（残留已闭环）**：两人当时漏封 auth → 仍能登录(被当 sales)。已用守卫式 SQL 锁定"有 auth 无 profile"的 2 个孤儿账号(mxin@ / xujiping@qimoclothing.com)并 `banned_until = 'infinity'`，验证两行均为 infinity。许/马登录已封死。
+  > 教训：这正是"只删 profile 不封号"的坑(§1)，已由 §4 离职按钮固化为一步到位，杜绝再漏。
 
 ---
 
-## 4. 系统化方案：离职按钮（待开发）
+## 4. 系统化方案：离职按钮（✅ 已上线 2026-06-17）
 
-把上面三步固化成一个 admin-only 操作，杜绝漏步（尤其封号）。
+把上面三步固化成一个 admin-only 操作，杜绝漏步（尤其封号）。实现文件见文末。
 
-### 4.1 数据
-- `profiles` 加 `active boolean NOT NULL DEFAULT true`（**停用而非删除** → 保留 name，历史节点 owner 仍能显示姓名）。
-- 离职审计：写 `order_logs`/或新 `offboarding_log`（谁、何时、离职谁、转派给谁、影响数）。
+### 4.1 数据 — `supabase/migrations/20260617_profiles_active_offboarding.sql`
+- `profiles.active boolean NOT NULL DEFAULT true`（**停用而非删除** → 保留 name，历史节点 owner 仍能显示姓名）。
+- `profiles.departed_at timestamptz`、`profiles.handover_to uuid`（审计：离职时间、转派给谁；handover_to 不加 FK，避免外键连锁）。
+- 索引 `idx_profiles_active`。**纯加列、幂等、无数据破坏；部署前在 Supabase SQL Editor 执行。**
 
-### 4.2 Server Action `offboardUser(targetId, handoverToId, confirmName)`（仅 admin）
-1. 校验：admin、不能离职自己、confirmName 与目标姓名一致（二次确认）。
-2. 转派活跃工作：`milestones.owner_user_id`(未完成) + `orders.owner_user_id`(活跃) → handoverToId。
-3. **封号**：service-role `auth.admin.updateUserById(targetId,{ban_duration:'876000h'})`（或 SQL `banned_until`）。
-4. 停用：`profiles.active=false`、清空 roles。
-5. 记审计日志。失败任一步整体报错，不留半成品。
-6. 可逆：配套 `reactivateUser`（解封 + active=true）。
+### 4.2 Server Action `offboardUser(targetId, handoverToId, confirmName)`（仅 admin，`app/actions/users.ts`）
+1. 校验：admin、不能离职自己、接手人非本人且在职、confirmName 与目标姓名一致（二次确认）。
+2. 转派活跃工作（service-role）：`milestones.owner_user_id`(actual_at is null=未完成) + `orders.owner_user_id`(非 completed/archived/cancelled) → handoverToId；返回转派条数。
+3. **封号**：`auth.admin.updateUserById(targetId,{ban_duration:'876000h'})`（~100 年）。
+4. 停用：`profiles.active=false` + `departed_at=now()` + `handover_to`。
+5. 失败任一步即返回错误并停止（已完成的步骤不回退，但顺序保证最关键的封号在停用前；可重跑——幂等校验"已离职"会拦）。
+6. 可逆：配套 `reactivateUser(targetId)`（`ban_duration:'none'` 解封 + `active=true` + 清 departed_at；不自动收回已转派工作）。
 
-### 4.3 UI（UserRoleManager）
-- 每个用户行：把现有「删除」替换/降级为 **「离职交接」** 按钮。
-- 点击 → 弹窗：选**接手人**(下拉) + 输入姓名二次确认 → 调 `offboardUser`。
-- 用户列表分「在职 / 已离职」两区；已离职区可「恢复」。
-- 指派人选择器(`OwnerAssignment` 等)、`getAllUsers` 默认只列 `active=true`。
+### 4.3 UI（`components/UserRoleManager.tsx`）
+- 在职行：用 **「离职交接」**(橙) 按钮替代原「删除」。点击 → 内联面板：选**接手人**(下拉，仅在职) + 输入姓名二次确认 → 调 `offboardUser`，完成弹转派条数。
+- 列表分 **「在职 / 已离职」** 两区；已离职区灰显划线 + 显示离职日期/交接给谁 + **「恢复在职」** 按钮。
+- `getAllUsers` 默认只返回 `active!==false`（含缺列降级容错）→ `OwnerAssignment` 等所有指派下拉自动屏蔽离职者。`admin/users` 页查全量(含离职字段)分区展示。
 
 ### 4.4 与"删除"的关系
-保留一个 admin-only 的**彻底删除**(硬删 auth+历史)仅用于极端场景(如误建账号、合规要求)，且明确警告其代价；**离职默认走"交接+封号+停用"**，不走删除。
+**彻底删除**(硬删 auth+历史) 降级为离职面板里的小号红字按钮，仅用于误建账号等极端场景并明确警告其代价；**常规离职一律走「离职交接」**(可保留历史、可恢复)。
+
+### 4.5 实现文件清单
+- `supabase/migrations/20260617_profiles_active_offboarding.sql`（加列）
+- `app/actions/users.ts`（`offboardUser` / `reactivateUser` / `getAllUsers` 过滤 active）
+- `app/admin/users/page.tsx`（查离职字段，降级容错）
+- `components/UserRoleManager.tsx`（在职/已离职分区 + 离职交接/恢复 UI）
 
 ---
 

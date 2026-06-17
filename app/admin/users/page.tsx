@@ -16,9 +16,15 @@ export default async function AdminUsersPage() {
     redirect('/dashboard');
   }
 
-  const { data: profiles } = await (supabase.from('profiles') as any)
-    .select('user_id, email, name, role, roles, wechat_push_key')
+  // 含离职字段；若迁移(20260617)未执行则降级到旧列，避免页面崩溃
+  let { data: profiles } = await (supabase.from('profiles') as any)
+    .select('user_id, email, name, role, roles, wechat_push_key, active, departed_at, handover_to')
     .order('email', { ascending: true });
+  if (!profiles) {
+    ({ data: profiles } = await (supabase.from('profiles') as any)
+      .select('user_id, email, name, role, roles, wechat_push_key')
+      .order('email', { ascending: true }));
+  }
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
