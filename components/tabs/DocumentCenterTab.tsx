@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useTransition } from 'react';
-import { getOrderDocuments, uploadDocument, aiGenerateDocument, submitForReview, approveDocument, rejectDocument } from '@/app/actions/documents';
+import { getOrderDocuments, uploadDocument, aiGenerateDocument, submitForReview, approveDocument, rejectDocument, pushDocumentToWecom } from '@/app/actions/documents';
 import { DOCUMENT_TYPES, SOURCE_MODES, DOCUMENT_STATUSES, type DocumentType } from '@/lib/domain/document-templates';
 import { createClient } from '@/lib/supabase/client';
 import { FILE_NAMING_BY_DOC_TYPE, validateFileNameForLabel, renameFile } from '@/lib/domain/fileNaming';
@@ -59,10 +59,19 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
   const [generating, setGenerating] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState<string | null>(null);
+  const [pushingWecomId, setPushingWecomId] = useState<string | null>(null);
 
   useEffect(() => {
     loadDocs();
   }, [orderId]);
+
+  async function handlePushWecom(docId: string) {
+    setPushingWecomId(docId);
+    const res = await pushDocumentToWecom(docId);
+    setPushingWecomId(null);
+    if (res.error) alert(res.error);
+    else alert('✅ 已发送到企业微信群，团队可在群里下载或转存微盘');
+  }
 
   async function loadDocs() {
     setLoading(true);
@@ -225,6 +234,15 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
               className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-gray-50">
               查看
             </a>
+          )}
+
+          {/* 发企业微信群（有文件才显示；团队可直接下载/转存微盘）*/}
+          {doc.file_name && (
+            <button onClick={() => handlePushWecom(doc.id)} disabled={pushingWecomId === doc.id}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+              title="把该单据发到企业微信群，团队可直接下载或一键转存微盘">
+              {pushingWecomId === doc.id ? '发送中…' : '📤 发企业微信群'}
+            </button>
           )}
 
           {/* 提交审核（生产部不可操作） */}

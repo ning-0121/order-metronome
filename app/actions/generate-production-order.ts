@@ -3,6 +3,7 @@
 import type { POParsedData, POStyleData, GarmentCategory } from './po-parser';
 import { MEASUREMENT_TEMPLATES } from '@/lib/domain/measurement-templates';
 import { createClient } from '@/lib/supabase/server';
+import { pushFileToWecomGroup, wecomGroupConfigured } from '@/lib/utils/wecom-file';
 
 // ── 配色常量（对齐用户模板） ──
 const COLORS = {
@@ -453,6 +454,19 @@ export async function generateProductionOrder(
     const xlsxBuffer = await workbook.xlsx.writeBuffer();
     const base64 = Buffer.from(xlsxBuffer).toString('base64');
     const fileName = `${data.order_no}_生产单_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    // 方案B：为【真实订单】生成生产单后，自动发到企业微信群（团队可在群里直接拿到 + 一键转存微盘）。
+    // 仅 options.orderId 存在时触发（排除报价/草稿预览，避免刷屏）；fire-and-forget，永不阻塞生成。
+    if (options?.orderId && wecomGroupConfigured()) {
+      try {
+        await pushFileToWecomGroup(
+          { content: base64, filename: fileName },
+          { caption: `🏭 生产单已生成：${data.order_no}（${data.customer_name || '—'}）` },
+        );
+      } catch (e: unknown) {
+        console.warn('[generateProductionOrder] WeCom 推送失败:', e instanceof Error ? e.message : String(e));
+      }
+    }
 
     // P0-1: 成功生成 Excel 后清掉草稿（数据已经下载到用户手里了，草稿失去意义）
     if (options?.draftId) {

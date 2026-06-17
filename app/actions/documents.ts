@@ -1,9 +1,10 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { DOCUMENT_TYPES, COMPANY_INFO, type DocumentType } from '@/lib/domain/document-templates';
 import { isAdmin as checkIsAdmin } from '@/lib/utils/user-role';
+import { pushFileToWecomGroup, wecomGroupConfigured } from '@/lib/utils/wecom-file';
 import Anthropic from '@anthropic-ai/sdk';
 
 // ══════ 价格敏感单据 ══════
@@ -476,6 +477,54 @@ export async function rejectDocument(docId: string, reason: string): Promise<{ e
     revalidatePath(`/orders/${doc.order_id}`);
   }
   return {};
+}
+
+// ══════ 发送到企业微信群（方案B：团队直接拿文件，可一键转存微盘）══════
+
+/**
+ * 把一份单据文件发到企业微信群（群机器人，免可信IP）。
+ * 权限：登录 + 价格敏感单据(PI/CI)需通过 canViewPriceSensitiveDoc。
+ * 文件用 service-role 从 order-docs 桶下载后推送（已先做权限校验）。
+ */
+export async function pushDocumentToWecom(documentId: string): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  if (!wecomGroupConfigured()) return { error: '未配置企业微信群机器人（WECOM_WEBHOOK_URL）' };
+
+  const { data: doc } = await (supabase.from('order_documents') as any)
+    .select('id, order_id, document_type, document_no, file_name, file_path')
+    .eq('id', documentId)
+    .single();
+  if (!doc) return { error: '单据不存在' };
+  if (!doc.file_path) return { error: '该单据没有可发送的文件' };
+
+  // 价格敏感单据需授权
+  if (PRICE_SENSITIVE_DOC_TYPES.includes(doc.document_type)) {
+    const canView = await canViewPriceSensitiveDoc(supabase, user.id, user.email || '', doc.order_id);
+    if (!canView) return { error: '无权发送价格相关单据' };
+  }
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('order_no, customer_name').eq('id', doc.order_id).single();
+
+  // service-role 下载文件字节（权限已校验）
+  let svc;
+  try { svc = createServiceRoleClient(); } catch (e: any) { return { error: `service-role 不可用: ${e?.message}` }; }
+  const { data: blob, error: dlErr } = await svc.storage.from('order-docs').download(doc.file_path);
+  if (dlErr || !blob) return { error: `读取文件失败: ${dlErr?.message || '文件不存在'}` };
+  const buf = Buffer.from(await blob.arrayBuffer());
+
+  const label = DOCUMENT_TYPES[doc.document_type as DocumentType]?.label || doc.document_type;
+  const r = await pushFileToWecomGroup(
+    { content: buf, filename: doc.file_name || `${doc.document_no || 'document'}.xlsx` },
+    { caption: `📄 ${label}：${order?.order_no || ''}（${order?.customer_name || '—'}）` },
+  );
+  if (!r.ok) return { error: r.reason || '发送失败' };
+
+  await logDocAction(supabase, doc.id, doc.order_id, 'pushed_wecom', user.id, { fileName: doc.file_name });
+  return { ok: true };
 }
 
 // ══════ 日志辅助 ══════
