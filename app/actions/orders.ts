@@ -1241,16 +1241,14 @@ export async function approveImportOrder(orderId: string): Promise<{ error?: str
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  // Sprint 1 / A：批准导入权限改为「仅财务」
-  // 业务上由财务定夺成本/利润，再决定订单是否进入执行
-  // admin 兜底：如财务暂离，临时给某账号加 finance role 即可，无需改代码
+  // 批准进行中导入订单：管理员(CEO) 或 财务（2026-06-18：原仅财务，admin 看不到审批入口）
   const { data: profile } = await supabase
     .from('profiles').select('role, roles').eq('user_id', user.id).single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0
     ? (profile as any).roles
     : [(profile as any)?.role].filter(Boolean);
-  const isFinance = userRoles.includes('finance');
-  if (!isFinance) return { error: '仅财务可审批进行中订单（如需变更，请联系系统管理员调整角色）' };
+  const canApprove = userRoles.includes('finance') || userRoles.includes('admin');
+  if (!canApprove) return { error: '仅财务或管理员可审批进行中订单' };
 
   const { data: order } = await (supabase.from('orders') as any)
     .select('id, order_no, lifecycle_status, import_current_step, incoterm, etd, warehouse_due_date, eta')
@@ -1338,8 +1336,15 @@ export async function rejectImportOrder(orderId: string, reason?: string): Promi
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可拒绝' };
+  // 拒绝进行中导入订单：管理员或财务（与批准对齐，避免财务看得到按钮却批不了/拒不了）
+  const { data: rejecterProfile } = await supabase
+    .from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const rejecterRoles: string[] = (rejecterProfile as any)?.roles?.length > 0
+    ? (rejecterProfile as any).roles
+    : [(rejecterProfile as any)?.role].filter(Boolean);
+  if (!rejecterRoles.includes('admin') && !rejecterRoles.includes('finance')) {
+    return { error: '仅管理员或财务可拒绝' };
+  }
 
   const { data: order } = await (supabase.from('orders') as any)
     .select('id, order_no, created_by')
