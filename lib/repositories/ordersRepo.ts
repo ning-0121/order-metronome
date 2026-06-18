@@ -644,7 +644,18 @@ export async function requestCancel(
   if (getError || !order) {
     return { error: getError?.message || 'Order not found' };
   }
-  
+
+  // 防重：同一订单已有待审批的取消申请时，不允许重复提交（对齐延期流程的守卫）
+  const { data: existingPending } = await (supabase
+    .from('cancel_requests') as any)
+    .select('id')
+    .eq('order_id', orderId)
+    .eq('status', 'pending')
+    .limit(1);
+  if (existingPending && existingPending.length > 0) {
+    return { error: '该订单已有待审批的取消申请，请等待管理员处理后再提交' };
+  }
+
   // 插入取消申请
   const { data: cancelRequest, error: insertError } = await (supabase
     .from('cancel_requests') as any)
@@ -742,6 +753,7 @@ export async function decideCancel(
     const { data: updatedOrder, error: orderUpdateError } = await (supabase
       .from('orders') as any)
       .update({
+        lifecycle_status: 'cancelled', // 关键修复：之前只写 termination_*，没改 lifecycle → 半状态
         termination_type: '取消',
         termination_reason: cancelRequest.reason_detail,
         termination_approved_by: user.id,
@@ -749,7 +761,7 @@ export async function decideCancel(
       .eq('id', orderId)
       .select()
       .single();
-    
+
     if (orderUpdateError) {
       return { error: orderUpdateError.message };
     }
@@ -783,11 +795,21 @@ export async function decideCancel(
         }
       }
     }
-    
-    
+    // 同一订单的其它待审批取消申请：本单已取消，一并关闭，避免残留 pending 刷屏
+    await (supabase.from('cancel_requests') as any)
+      .update({
+        status: 'rejected',
+        decided_by: user.id,
+        decided_at: new Date().toISOString(),
+        decision_note: '订单已因其它取消申请而取消，本申请自动关闭',
+      })
+      .eq('order_id', orderId)
+      .eq('status', 'pending')
+      .neq('id', cancelRequestId);
+
     return { data: { cancelRequest: updatedRequest, order: updatedOrder } };
   }
-  
+
   return { data: { cancelRequest: updatedRequest } };
 }
 
