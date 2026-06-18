@@ -148,7 +148,9 @@ async function collectCeoImportApprovals(
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
   // CEO 审批进行中导入订单：lifecycle_status='pending_approval'
-  const { data } = await (supabase.from('orders') as any)
+  // clientFor：admin 走 service-role，避免 orders RLS 对 admin 不全 → 漏看待审批订单（同 delays 的修复）
+  const client = clientFor(ctx, supabase);
+  const { data } = await (client.from('orders') as any)
     .select('id, order_no, customer_name, import_current_step, import_reason, imported_at, notes, created_at')
     .eq('lifecycle_status', 'pending_approval')
     .order('imported_at', { ascending: true, nullsFirst: false })
@@ -179,7 +181,8 @@ async function collectPriceApprovals(
   supabase: any,
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
-  const { data } = await (supabase.from('pre_order_price_approvals') as any)
+  const client = clientFor(ctx, supabase);
+  const { data } = await (client.from('pre_order_price_approvals') as any)
     .select('id, customer_name, po_number, summary, status, created_at, expires_at, requested_by')
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
@@ -204,7 +207,8 @@ async function collectAgentActions(
   supabase: any,
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
-  const { data } = await (supabase.from('agent_actions') as any)
+  const client = clientFor(ctx, supabase);
+  const { data } = await (client.from('agent_actions') as any)
     .select('id, order_id, action_type, title, summary, status, created_at, orders(order_no, customer_name)')
     .eq('status', 'pending')
     .order('created_at', { ascending: false }) // 最新建议优先
@@ -231,7 +235,8 @@ async function collectPaymentHolds(
   supabase: any,
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
-  const { data } = await (supabase.from('order_financials') as any)
+  const client = clientFor(ctx, supabase);
+  const { data } = await (client.from('order_financials') as any)
     .select('id, order_id, payment_hold, updated_at, orders(order_no, customer_name, lifecycle_status)')
     .eq('payment_hold', true)
     .limit(100);
@@ -262,7 +267,8 @@ async function collectOrderConfirmations(
 ): Promise<PendingApprovalItem[]> {
   // 订单确认模块（面料/颜色/印花/包装）not_started 或 pending
   // 只对 active/draft 订单关注
-  const { data } = await (supabase.from('order_confirmations') as any)
+  const client = clientFor(ctx, supabase);
+  const { data } = await (client.from('order_confirmations') as any)
     .select('id, order_id, module, status, updated_at, orders(order_no, customer_name, lifecycle_status, factory_date)')
     .in('status', ['not_started', 'pending'])
     .limit(200);
