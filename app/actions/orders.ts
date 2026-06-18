@@ -90,12 +90,14 @@ export async function createOrder(
     return { ok: false, error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
   }
 
-  // 权限：业务/理单(sales)、业务部经理(sales_manager)、管理员(admin) 可创建订单
+  // 权限：业务开发(sales)、理单/订单执行(merchandiser)、业务部经理(sales_manager)、
+  //       订单管理经理(order_manager)、管理员(admin) 可创建订单。
+  //       绮陌政策：业务开发与理单都能建单，方便操作（2026-06-18）。
   const { data: creatorProfile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const creatorRoles: string[] = (creatorProfile as any)?.roles?.length > 0 ? (creatorProfile as any).roles : [(creatorProfile as any)?.role].filter(Boolean);
-  const canCreate = creatorRoles.some(r => ['sales', 'sales_manager', 'admin'].includes(r));
+  const canCreate = creatorRoles.some(r => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'].includes(r));
   if (!canCreate) {
-    return { ok: false, error: '仅业务/理单、业务部经理或管理员可以创建订单（当前账号角色：' + (creatorRoles.join('、') || '未设置') + '）' };
+    return { ok: false, error: '仅业务开发/理单、业务部或订单管理经理、管理员可以创建订单（当前账号角色：' + (creatorRoles.join('、') || '未设置') + '）' };
   }
 
   if (!preGeneratedOrderNo) {
