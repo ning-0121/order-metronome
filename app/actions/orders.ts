@@ -179,9 +179,10 @@ export async function createOrder(
   const sample_confirm_days_override = sampleConfirmRaw ? parseInt(sampleConfirmRaw, 10) : null;
   const totalQuantity = formData.get('total_quantity') as string | null;
   const quantityUnit = formData.get('quantity_unit') as string || '件';
-  // 统一按件数存储：套 = 数量 × 2
+  // 统一按件数存储：套（2件）= 数量 × 2，套（3件/三件套）= 数量 × 3，件 = ×1
   const rawQty = totalQuantity ? parseInt(totalQuantity, 10) : null;
-  const quantity = rawQty && quantityUnit === '套' ? rawQty * 2 : rawQty;
+  const setMultiplier = quantityUnit === '套' ? 2 : quantityUnit === '三件套' ? 3 : 1;
+  const quantity = rawQty ? rawQty * setMultiplier : rawQty;
   const styleCount = formData.get('style_count') as string | null;
   const colorCount = formData.get('color_count') as string | null;
 

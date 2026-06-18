@@ -1158,6 +1158,7 @@ function NewOrderWizard() {
                       className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
                       <option value="件">件</option>
                       <option value="套">套（2件）</option>
+                      <option value="三件套">套（3件）</option>
                     </select>
                   </div>
                 </div>
