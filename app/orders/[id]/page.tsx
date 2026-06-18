@@ -24,6 +24,7 @@ import { RescheduleBanner } from '@/components/RescheduleBanner';
 import { OrderDelayPanel } from '@/components/OrderDelayPanel';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
+import { CancelRequestPanel } from '@/components/CancelRequestPanel';
 import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { SplitShipmentTag } from '@/components/SplitShipmentTag';
@@ -252,6 +253,9 @@ export default async function OrderDetailPage({
           }
           isAdmin={isAdmin}
         />
+
+        {/* 取消订单申请：待审批横幅 + 管理员审批入口 */}
+        <CancelRequestPanel orderId={id} isAdmin={isAdmin} />
       </div>
 
       {/* 顶部 Header */}
