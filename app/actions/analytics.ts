@@ -75,11 +75,17 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   if (!user) throw new Error('请先登录');
   const now = new Date();
 
-  // 总订单数
-  const { count: totalOrders } = await supabase.from('orders').select('*', { count: 'exact', head: true });
+  // 总订单数（生产口径:仅 order_purpose='production'，排除 trade/sample/inquiry）
+  const { count: totalOrders, error: totalOrdersErr } = await supabase
+    .from('orders').select('*', { count: 'exact', head: true })
+    .eq('order_purpose', 'production');
+  if (totalOrdersErr) throw new Error(`加载订单数失败: ${totalOrdersErr.message}`);
 
-  // 所有里程碑（带order_id用于按订单聚合）
-  const { data: allMilestones } = await (supabase.from('milestones') as any).select('id, order_id, status, due_at, actual_at, updated_at, step_key');
+  // 所有生产订单的里程碑（orders!inner + order_purpose='production' 过滤；带order_id用于按订单聚合）
+  const { data: allMilestones, error: msErr } = await (supabase.from('milestones') as any)
+    .select('id, order_id, status, due_at, actual_at, updated_at, step_key, orders!inner(order_purpose)')
+    .eq('orders.order_purpose', 'production');
+  if (msErr) throw new Error(`加载里程碑失败: ${msErr.message}`);
   const milestones = allMilestones || [];
   const totalMilestones = milestones.length;
   const completedMilestones = milestones.filter(m => _isDone((m as any).status)).length;
@@ -125,16 +131,22 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   const startOfLastWeek = new Date(startOfWeek);
   startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
 
-  const { count: thisWeekCompleted } = await (supabase.from('milestone_logs') as any)
-    .select('*', { count: 'exact', head: true })
+  // 本周/上周完成数:只计生产订单节点（按上面已过滤的生产里程碑 id 集在内存过滤）
+  const prodMsIds = new Set(milestones.map((m: any) => m.id));
+  const { data: thisWeekLogs, error: twErr } = await (supabase.from('milestone_logs') as any)
+    .select('milestone_id')
     .eq('action', 'mark_done')
     .gte('created_at', startOfWeek.toISOString());
+  if (twErr) throw new Error(`加载本周完成日志失败: ${twErr.message}`);
+  const thisWeekCompleted = (thisWeekLogs || []).filter((l: any) => prodMsIds.has(l.milestone_id)).length;
 
-  const { count: lastWeekCompleted } = await (supabase.from('milestone_logs') as any)
-    .select('*', { count: 'exact', head: true })
+  const { data: lastWeekLogs, error: lwErr } = await (supabase.from('milestone_logs') as any)
+    .select('milestone_id')
     .eq('action', 'mark_done')
     .gte('created_at', startOfLastWeek.toISOString())
     .lt('created_at', startOfWeek.toISOString());
+  if (lwErr) throw new Error(`加载上周完成日志失败: ${lwErr.message}`);
+  const lastWeekCompleted = (lastWeekLogs || []).filter((l: any) => prodMsIds.has(l.milestone_id)).length;
 
   return {
     totalOrders: totalOrders || 0,
@@ -157,10 +169,14 @@ export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('请先登录');
 
-  const { data: milestones } = await (supabase.from('milestones') as any).select('id, status, due_at, actual_at, updated_at, step_key');
-  const { data: doneLogs } = await (supabase.from('milestone_logs') as any)
+  const { data: milestones, error: msErr } = await (supabase.from('milestones') as any)
+    .select('id, status, due_at, actual_at, updated_at, step_key, orders!inner(order_purpose)')
+    .eq('orders.order_purpose', 'production');
+  if (msErr) throw new Error(`加载里程碑失败: ${msErr.message}`);
+  const { data: doneLogs, error: logErr } = await (supabase.from('milestone_logs') as any)
     .select('milestone_id, created_at')
     .eq('action', 'mark_done');
+  if (logErr) throw new Error(`加载完成日志失败: ${logErr.message}`);
 
   const doneLogMap = new Map<string, string>();
   (doneLogs || []).forEach((l: any) => {
@@ -212,16 +228,20 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
   const { isBlockedStatus } = await import('@/lib/domain/types');
 
   // 加载所有里程碑（含 order_id 用于按订单聚合）
-  const { data: roleMilestones } = await (supabase.from('milestones') as any)
-    .select('id, order_id, status, due_at, actual_at, updated_at, owner_role, name');
+  const { data: roleMilestones, error: msErr } = await (supabase.from('milestones') as any)
+    .select('id, order_id, status, due_at, actual_at, updated_at, owner_role, name, orders!inner(order_purpose)')
+    .eq('orders.order_purpose', 'production');
+  if (msErr) throw new Error(`加载里程碑失败: ${msErr.message}`);
 
   // 加载所有延期申请（用于扣分）
-  const { data: allDelays } = await (supabase.from('delay_requests') as any)
+  const { data: allDelays, error: delayErr } = await (supabase.from('delay_requests') as any)
     .select('milestone_id, status').in('status', ['pending', 'approved']);
+  if (delayErr) throw new Error(`加载延期申请失败: ${delayErr.message}`);
 
   // 加载阻塞日志（实际有过被阻塞历史的节点）
-  const { data: blockLogs } = await (supabase.from('milestone_logs') as any)
+  const { data: blockLogs, error: blockErr } = await (supabase.from('milestone_logs') as any)
     .select('milestone_id').eq('action', 'mark_blocked');
+  if (blockErr) throw new Error(`加载阻塞日志失败: ${blockErr.message}`);
 
   const roleData: Record<string, {
     completed: number;
@@ -334,18 +354,22 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
   const supabase = await createClient();
   // 注意：不再 fallback 到 etd 当出厂日（etd 是离港日，差 25 天）
   // 也不再 fallback 到 created_at 当下单日（created_at 是行插入时间，与业务无关）
-  const { data: orders } = await (supabase.from('orders') as any)
+  const { data: orders, error: ordErr } = await (supabase.from('orders') as any)
     .select('id, order_no, customer_name, factory_name, quantity, factory_date, order_date, lifecycle_status')
     // 仅排除已取消订单（含中英文），保留已完成订单用于历史分析
-    .not('lifecycle_status', 'in', '("cancelled","已取消")');
+    .not('lifecycle_status', 'in', '("cancelled","已取消")')
+    // 产能/生产排布口径:只看生产订单（trade/sample 不进产能）
+    .eq('order_purpose', 'production');
+  if (ordErr) throw new Error(`加载订单失败: ${ordErr.message}`);
   if (!orders || orders.length === 0) return [];
 
   // 获取所有订单的关键里程碑（po_confirmed 实际/计划 + production_kickoff 实际/计划）
   const orderIds = orders.map((o: any) => o.id);
-  const { data: keyMilestones } = await (supabase.from('milestones') as any)
+  const { data: keyMilestones, error: kmErr } = await (supabase.from('milestones') as any)
     .select('order_id, step_key, due_at, actual_at')
     .in('order_id', orderIds)
     .in('step_key', ['po_confirmed', 'production_kickoff']);
+  if (kmErr) throw new Error(`加载里程碑失败: ${kmErr.message}`);
 
   const poDateMap = new Map<string, string>();      // 下单 = po_confirmed.actual_at || due_at || order_date
   const prodDateMap = new Map<string, string>();    // 生产上线 = production_kickoff.actual_at || due_at

@@ -40,11 +40,12 @@ export async function getFactoryScores(): Promise<{
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  // 获取所有有工厂名的订单
-  const { data: orders } = await (supabase.from('orders') as any)
+  // 获取所有有工厂名的订单（工厂评分/产能/质量口径:只看生产订单,trade 是外购成品、供应商≠生产工厂）
+  const { data: orders, error: ordErr } = await (supabase.from('orders') as any)
     .select('id, factory_name, customer_name, lifecycle_status')
-    .not('factory_name', 'is', null);
-
+    .not('factory_name', 'is', null)
+    .eq('order_purpose', 'production');
+  if (ordErr) return { error: `加载订单失败: ${ordErr.message}` };
   if (!orders) return { data: [] };
 
   // 按工厂分组
@@ -69,11 +70,12 @@ export async function getFactoryScores(): Promise<{
     const orderIds = fOrders.map(o => o.id);
 
     // 查 factory_completion + QC 节点
-    const { data: milestones } = await (supabase.from('milestones') as any)
+    const { data: milestones, error: msErr } = await (supabase.from('milestones') as any)
       .select('order_id, step_key, due_at, actual_at, status')
       .in('order_id', orderIds.slice(0, 30))
       .in('step_key', ['factory_completion', 'mid_qc_check', 'final_qc_check'])
       .in('status', ['done', '已完成']);
+    if (msErr) return { error: `加载里程碑失败: ${msErr.message}` };
 
     const ms = (milestones || []) as any[];
 
