@@ -37,6 +37,7 @@ export interface OrderParams {
   incoterm: 'FOB' | 'DDP';
   order_type: OrderType;
   packaging_type: PackagingType;
+  order_purpose?: string;
   needs_pp_sample?: boolean;
   needs_ship_sample?: boolean;
   needs_qc?: boolean;
@@ -53,6 +54,7 @@ export function generateGateSchedule(params: OrderParams): GateSchedule[] {
     incoterm,
     order_type,
     packaging_type,
+    order_purpose,
     needs_pp_sample = true,
     needs_ship_sample = false,
     needs_qc = true,
@@ -78,6 +80,7 @@ export function generateGateSchedule(params: OrderParams): GateSchedule[] {
   const order = {
     order_type,
     packaging_type,
+    order_purpose,
     needs_pp_sample,
     needs_ship_sample,
     needs_qc,

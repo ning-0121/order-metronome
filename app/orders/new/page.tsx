@@ -153,6 +153,8 @@ function NewOrderWizard() {
   const [poAutoFilled, setPoAutoFilled] = useState(false);
   const isSampleOrder = searchParams.get('type') === 'sample';
   const [orderType, setOrderType] = useState('');
+  // 订单用途:production(默认) | trade(采购成品/贸易订单)。sample 由独立入口决定。
+  const [orderPurpose, setOrderPurpose] = useState('production');
 
   // 模板相关状态
   const [templates, setTemplates] = useState<OrderTemplate[]>([]);
@@ -837,9 +839,11 @@ function NewOrderWizard() {
   /** 实际创建订单 */
   async function doCreateOrder(rawFormData: FormData, filesToUpload: { file: File; fileType: string; label: string }[]) {
     setLoading(true);
-    // 样品单标记
+    // 订单用途标记:样品单 > 采购成品/贸易订单 > 生产(默认)
     if (isSampleOrder) {
       rawFormData.set('order_purpose', 'sample');
+    } else if (orderPurpose === 'trade') {
+      rawFormData.set('order_purpose', 'trade');
     }
     // 已批准的价格审批 ID 透传到服务端校验
     if (priceApprovalId) {
@@ -1107,6 +1111,24 @@ function NewOrderWizard() {
                   <input type="date" name="order_date" required
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
+                {/* 订单用途:生产订单 vs 采购成品/贸易订单(trade)。样品单由独立入口,不在此选。
+                    注意:与 order_type(试单/正常/翻单=风险口味)是不同维度,故叫"用途"不叫"性质" */}
+                {!isSampleOrder && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      订单用途 <span className="text-red-500">*</span>
+                    </label>
+                    <select value={orderPurpose}
+                      onChange={e => setOrderPurpose(e.target.value)}
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                      <option value="production">生产订单</option>
+                      <option value="trade">采购成品/贸易订单</option>
+                    </select>
+                    {orderPurpose === 'trade' && (
+                      <p className="text-xs text-amber-600 mt-1">采购成品/贸易订单:只走 采购→验收→出运→回款,不生成开裁/中查/尾查/工厂生产等节点。</p>
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     订单类型 <span className="text-red-500">*</span>

@@ -298,6 +298,26 @@ export const GATE_TEMPLATES_V1: GateTemplate[] = [
 export const GATE_TEMPLATES: GateTemplate[] = GATE_TEMPLATES_V1;
 
 /**
+ * 生产专属门禁 gate_key —— 采购成品/经销单(order_purpose='trade')不生成这些
+ * (trade 无原料/产前样/开裁/中查尾查/QC/包材到货等生产环节;保留 po/finance/booking/shipment/payment 通用门禁)
+ */
+export const PRODUCTION_ONLY_GATE_KEYS = new Set<string>([
+  'order_docs_complete',
+  'raw_materials_procurement',
+  'raw_materials_arrival',
+  'raw_materials_inspection',
+  'pp_sample_production',
+  'pp_sample_sent',
+  'pp_sample_confirmed',
+  'production_start',
+  'mid_inspection',
+  'final_inspection',
+  'packaging_materials_arrival',
+  'qc_appointment',
+  'qc_inspection_complete',
+]);
+
+/**
  * 检查 Gate 是否应该生成（根据订单特征）
  */
 export function shouldGenerateGate(
@@ -305,11 +325,17 @@ export function shouldGenerateGate(
   order: {
     order_type: OrderType;
     packaging_type: PackagingType;
+    order_purpose?: string;
     needs_pp_sample?: boolean;
     needs_ship_sample?: boolean;
     needs_qc?: boolean;
   }
 ): boolean {
+  // 采购成品/经销单:跳过所有生产专属门禁(否则会卡在永远无法满足的生产 gate 上)
+  if (order.order_purpose === 'trade' && PRODUCTION_ONLY_GATE_KEYS.has(gate.gate_key)) {
+    return false;
+  }
+
   // 如果没有条件，默认生成
   if (!gate.condition) {
     return true;

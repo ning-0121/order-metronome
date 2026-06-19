@@ -5,7 +5,8 @@
  * 用法：npx tsx scripts/pre-deploy-check.ts
  */
 
-import { MILESTONE_TEMPLATE_V1, SAMPLE_MILESTONE_TEMPLATE, getApplicableMilestones } from '../lib/milestoneTemplate';
+import { MILESTONE_TEMPLATE_V1, SAMPLE_MILESTONE_TEMPLATE, TRADE_MILESTONE_TEMPLATE, getApplicableMilestones } from '../lib/milestoneTemplate';
+import { calcDueDates } from '../lib/schedule';
 import { CIRCUIT_BREAKER, ACTION_CONFIG } from '../lib/agent/types';
 
 let passed = 0;
@@ -57,6 +58,37 @@ assert(!domesticMilestones.some(m => m.step_key === 'booking_done'), 'domestic�
 
 const sampleMilestones = getApplicableMilestones('sample', false, 'domestic', 'sample');
 assert(sampleMilestones.length === 8, `sample订单返回 ${sampleMilestones.length} 个节点 (=8)`);
+
+// ════ 2b. trade(采购成品/经销单)模板 ════
+console.log('\n🛒 trade 模板');
+// 1) 能生成
+assert(TRADE_MILESTONE_TEMPLATE.length > 0, `trade 模板有 ${TRADE_MILESTONE_TEMPLATE.length} 个节点 (>0)`);
+const tradeExport = getApplicableMilestones('bulk', false, 'export', 'trade');
+assert(tradeExport.length > 0, `trade export 返回 ${tradeExport.length} 个节点`);
+// 2) export 含出运/回款
+for (const step of ['po_confirmed', 'procurement_order_placed', 'inspection_release', 'booking_done', 'customs_export', 'shipment_execute', 'payment_received']) {
+  assert(tradeExport.some(m => m.step_key === step), `trade export 包含 ${step}`);
+}
+// 4) 不含生产节点
+const tradeForbidden = ['production_kickoff', 'cutting_start', 'mid_qc_check', 'final_qc_check', 'factory_completion', 'pre_production_sample_ready', 'pre_production_sample_approved', 'dev_sample_making'];
+for (const step of tradeForbidden) {
+  assert(!tradeExport.some(m => m.step_key === step), `trade export 不含生产节点 ${step}`);
+}
+// 3) domestic 用 domestic_delivery 替代出口三件
+const tradeDomestic = getApplicableMilestones('bulk', false, 'domestic', 'trade');
+assert(tradeDomestic.some(m => m.step_key === 'domestic_delivery'), 'trade domestic 包含 domestic_delivery');
+assert(!tradeDomestic.some(m => m.step_key === 'booking_done'), 'trade domestic 不含 booking_done');
+assert(!tradeDomestic.some(m => m.step_key === 'shipment_execute'), 'trade domestic 不含 shipment_execute');
+
+// 5) 所有 trade step_key 必须能被 schedule 排期(防止未来新增未知 key 导致 calcDueDates/排期 throw)
+const tradeScheduleKeys = new Set<string>([
+  ...tradeExport.map(m => m.step_key),
+  ...tradeDomestic.map(m => m.step_key),
+]);
+const tradeDue = calcDueDates({ orderDate: '2026-01-01', createdAt: new Date('2026-01-01'), incoterm: 'FOB', etd: '2026-03-01' });
+for (const k of tradeScheduleKeys) {
+  assert(tradeDue[k] instanceof Date && !isNaN(tradeDue[k].getTime()), `trade step_key ${k} 能被 schedule 排期(calcDueDates 返回有效日期)`);
+}
 
 // 跳过产前样（skip_all）：3 个产前样节点应被过滤掉
 const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);

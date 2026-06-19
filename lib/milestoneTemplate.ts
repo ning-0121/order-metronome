@@ -185,6 +185,34 @@ export const SAMPLE_MILESTONE_TEMPLATE: Array<{
 ];
 
 /**
+ * 采购成品 / 经销单 (trade order) 模板 — MVP
+ * 直接采购成品/现货,不开裁/中查/尾查/工厂生产,只走 采购→验收→出运→回款。
+ * 【全部复用现有 step_key】(都已在 schedule.ts TIMELINE / criticalNodes / 门禁中登记,零新接线)。
+ * 此处为 export(出口)形态;getApplicableMilestones 对 domestic 会过滤 EXPORT_ONLY_STEPS 并追加 DOMESTIC_MILESTONES。
+ * 供应商备货/交期/催货 在【采购中心】(procurement_line_items)跟踪,不占里程碑。
+ */
+export const TRADE_MILESTONE_TEMPLATE: Array<{
+  step_key: string;
+  name: string;
+  owner_role: OwnerRole;
+  is_critical: boolean;
+  evidence_required: boolean;
+  evidence_note?: string;
+}> = [
+  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true },
+  { step_key: "finance_approval", name: "订单审核", owner_role: "finance", is_critical: true, evidence_required: false },
+  { step_key: "procurement_order_placed", name: "供应商下单", owner_role: "procurement", is_critical: true, evidence_required: true },
+  { step_key: "packing_method_confirmed", name: "包装资料确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  { step_key: "inspection_release", name: "成品验货/放行", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  // ── 出运三件(EXPORT_ONLY,domestic 会被过滤) ──
+  { step_key: "booking_done", name: "订舱完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  { step_key: "customs_export", name: "报关安排出运", owner_role: "merchandiser", is_critical: true, evidence_required: true },
+  { step_key: "shipment_execute", name: "出运", owner_role: "logistics", is_critical: true, evidence_required: true },
+  // ── 回款 ──
+  { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false },
+];
+
+/**
  * 根据订单类型和交付方式返回适用的里程碑模板
  *
  * 出运流程判定：deliveryType === 'export' → 走 DDP 出运流程
@@ -192,7 +220,7 @@ export const SAMPLE_MILESTONE_TEMPLATE: Array<{
  * 表单层面会根据 incoterm 自动设置 deliveryType（DDP→export，其余→domestic）。
  *
  * @param deliveryType - 'export'(DDP出口) | 'domestic'(送仓)
- * @param orderPurpose - 'production' | 'sample'
+ * @param orderPurpose - 'production' | 'sample' | 'trade'
  * @param skipPreProductionSample - 是否跳过产前样（兼容旧调用，新流程用 samplePhase）
  * @param samplePhase - 样品阶段：confirmed/dev_sample/dev_sample_with_revision/skip_all
  */
@@ -207,6 +235,15 @@ export function getApplicableMilestones(
   // 打样单用简化模板
   if (orderPurpose === 'sample') {
     return SAMPLE_MILESTONE_TEMPLATE;
+  }
+
+  // 采购成品 / 经销单:精简模板(全复用现有 key);domestic 过滤出运三件、追加送仓
+  if (orderPurpose === 'trade') {
+    if (deliveryType !== 'export') {
+      const filtered = TRADE_MILESTONE_TEMPLATE.filter(m => !EXPORT_ONLY_STEPS.has(m.step_key));
+      return [...filtered, ...DOMESTIC_MILESTONES];
+    }
+    return [...TRADE_MILESTONE_TEMPLATE];
   }
 
   // 兼容：旧的 skipPreProductionSample 映射到 samplePhase
