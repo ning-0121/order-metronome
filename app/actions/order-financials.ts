@@ -231,18 +231,28 @@ export async function recordPayment(
   if (!roles.some(r => ['admin', 'finance'].includes(r))) {
     return { error: '仅财务和管理员可标记收款' };
   }
+  if (!(amount > 0)) return { error: '收款金额必须大于 0' };
+
+  // 读当前累计，本次金额按"增量"累加（原先是覆盖 + 一律标全收，分次收款会错）
+  const { data: fin } = await (supabase.from('order_financials') as any)
+    .select('deposit_amount, deposit_received, balance_amount, balance_received')
+    .eq('order_id', orderId).single();
 
   const now = new Date().toISOString();
   const updates: any = { updated_by: user.id, updated_at: now };
 
   if (type === 'deposit') {
-    updates.deposit_received = amount;
+    const cum = (Number((fin as any)?.deposit_received) || 0) + amount;
+    const due = Number((fin as any)?.deposit_amount) || 0;
+    updates.deposit_received = cum;
     updates.deposit_received_at = now;
-    updates.deposit_status = 'received';
+    updates.deposit_status = due > 0 && cum + 0.01 >= due ? 'received' : 'partial';
   } else {
-    updates.balance_received = amount;
+    const cum = (Number((fin as any)?.balance_received) || 0) + amount;
+    const due = Number((fin as any)?.balance_amount) || 0;
+    updates.balance_received = cum;
     updates.balance_received_at = now;
-    updates.balance_status = 'received';
+    updates.balance_status = due > 0 && cum + 0.01 >= due ? 'received' : 'partial';
   }
 
   const { error } = await (supabase.from('order_financials') as any)
@@ -304,6 +314,16 @@ export async function updateConfirmation(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '未登录' };
+
+  // 角色守卫：确认链会改 customer_confirmed（影响出货门禁），限运营角色
+  const { data: confProfile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const confRoles: string[] = (confProfile as any)?.roles?.length > 0
+    ? (confProfile as any).roles
+    : [(confProfile as any)?.role].filter(Boolean);
+  if (!confRoles.some(r => ['admin', 'finance', 'sales', 'merchandiser', 'sales_manager', 'order_manager'].includes(r))) {
+    return { error: '无权操作确认链' };
+  }
 
   // 获取当前状态（用于记录历史）
   const { data: current } = await (supabase.from('order_confirmations') as any)

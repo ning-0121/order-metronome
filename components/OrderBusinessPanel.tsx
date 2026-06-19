@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { getOrderBusinessState } from '@/app/actions/order-business-state';
+import { getOrderBusinessState, overrideBusinessControl } from '@/app/actions/order-business-state';
 import { uploadCostSheet } from '@/app/actions/cost-control';
+import { recordPayment, updateConfirmation } from '@/app/actions/order-financials';
 import { getRuntimeOrderForDisplay } from '@/app/actions/runtime-confidence';
 import { RuntimeRiskCard } from './RuntimeRiskCard';
 import type { OrderBusinessState, StatusLevel } from '@/lib/engine/orderBusinessEngine';
@@ -44,6 +45,9 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
   // 红线：production_manager 不可见利润；统一走 CAN_SEE_FINANCIALS（含 sales/order_manager）
   const canSeeFinancials = isAdmin || hasRoleInGroup(userRoles, 'CAN_SEE_FINANCIALS');
   const canUpload = isAdmin || userRoles.includes('finance');
+  // 收款 / 覆盖经营闸门：仅财务/admin；确认链：运营角色均可推进
+  const canFinance = isAdmin || userRoles.includes('finance');
+  const canConfirm = isAdmin || userRoles.some(r => ['finance', 'sales', 'merchandiser', 'sales_manager', 'order_manager'].includes(r));
 
   const reload = () => {
     getOrderBusinessState(orderId)
@@ -86,7 +90,7 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
         <ProfitCardLite state={state} />
       )}
       {/* 收款卡 */}
-      <PaymentCard state={state} canSeeFinancials={canSeeFinancials} orderId={orderId} />
+      <PaymentCard state={state} canSeeFinancials={canSeeFinancials} orderId={orderId} canFinance={canFinance} reload={reload} />
       {/* 风险卡 — runtime 优先，没数据 fallback 老卡 */}
       {showRuntimeRisk ? (
         <RuntimeRiskCard
@@ -100,7 +104,7 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
         <RiskCard state={state} orderId={orderId} />
       )}
       {/* 确认链 */}
-      <ConfirmationCard state={state} orderId={orderId} />
+      <ConfirmationCard state={state} orderId={orderId} canConfirm={canConfirm} reload={reload} />
     </div>
   );
 }
@@ -234,8 +238,35 @@ function ProfitCardLite({ state }: { state: OrderBusinessState }) {
 // ═══════════════════════════════════════════════
 // 收款卡
 // ═══════════════════════════════════════════════
-function PaymentCard({ state, canSeeFinancials, orderId }: { state: OrderBusinessState; canSeeFinancials: boolean; orderId: string }) {
+function PaymentCard({ state, canSeeFinancials, orderId, canFinance, reload }: { state: OrderBusinessState; canSeeFinancials: boolean; orderId: string; canFinance?: boolean; reload?: () => void }) {
   const s = LEVEL_STYLES[state.payment_status.level];
+  const [busy, setBusy] = useState(false);
+
+  async function handleRecord(type: 'deposit' | 'balance') {
+    const raw = prompt(`本次${type === 'deposit' ? '定金' : '尾款'}收款金额（元，累加；分次收就分次填）：`);
+    if (raw === null) return;
+    const amount = parseFloat(raw);
+    if (!(amount > 0)) { alert('金额必须大于 0'); return; }
+    setBusy(true);
+    const res = await recordPayment(orderId, type, amount);
+    setBusy(false);
+    if (res.error) { alert(res.error); return; }
+    reload?.();
+  }
+
+  async function handleOverride(field: 'allow_production' | 'allow_shipment', current: boolean) {
+    const next = !current;
+    const label = field === 'allow_production' ? '生产' : '出货';
+    const reason = prompt(`将「允许${label}」从 ${current ? '✓' : '✗'} 覆盖为 ${next ? '✓ 放行' : '✗ 卡住'}，请填原因（审计）：`);
+    if (reason === null) return;
+    if (!reason.trim()) { alert('必须填写覆盖原因'); return; }
+    setBusy(true);
+    const res = await overrideBusinessControl(orderId, field, next, reason.trim());
+    setBusy(false);
+    if (res.error) { alert(res.error); return; }
+    reload?.();
+  }
+
   return (
     <div className={`rounded-xl border p-4 ${s.bg} ${s.border}`}>
       <div className="flex items-center justify-between mb-2">
@@ -249,8 +280,22 @@ function PaymentCard({ state, canSeeFinancials, orderId }: { state: OrderBusines
       )}
       <p className={`text-[11px] leading-relaxed ${s.text}`}>{state.payment_status.explain}</p>
 
-      {/* 生产/出货控制 */}
-      <div className="flex gap-3 mt-2 pt-2 border-t border-gray-200/50">
+      {/* 收款登记（仅财务/admin） */}
+      {canFinance && (
+        <div className="flex gap-2 mt-2">
+          <button disabled={busy} onClick={() => handleRecord('deposit')}
+            className="flex-1 text-[11px] font-medium px-2 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 disabled:opacity-50">
+            记定金
+          </button>
+          <button disabled={busy} onClick={() => handleRecord('balance')}
+            className="flex-1 text-[11px] font-medium px-2 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 disabled:opacity-50">
+            记尾款
+          </button>
+        </div>
+      )}
+
+      {/* 生产/出货控制 + 覆盖（仅财务/admin） */}
+      <div className="flex items-center gap-3 mt-2 pt-2 border-t border-gray-200/50">
         <ControlBadge
           label="生产"
           allowed={state.can_proceed_production.value}
@@ -263,8 +308,19 @@ function PaymentCard({ state, canSeeFinancials, orderId }: { state: OrderBusines
           overridden={state.can_ship.overridden}
           explain={state.can_ship.explain}
         />
+        {canFinance && (
+          <div className="ml-auto flex gap-1">
+            <button disabled={busy} onClick={() => handleOverride('allow_production', state.can_proceed_production.value)}
+              className="text-[9px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-white disabled:opacity-50" title="覆盖生产闸门">
+              覆盖生产
+            </button>
+            <button disabled={busy} onClick={() => handleOverride('allow_shipment', state.can_ship.value)}
+              className="text-[9px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-white disabled:opacity-50" title="覆盖出货闸门">
+              覆盖出货
+            </button>
+          </div>
+        )}
       </div>
-      {/* NextAction 按钮已移除 */}
     </div>
   );
 }
@@ -333,9 +389,19 @@ function RiskCard({ state, orderId }: { state: OrderBusinessState; orderId: stri
 // ═══════════════════════════════════════════════
 // 确认链进度卡
 // ═══════════════════════════════════════════════
-function ConfirmationCard({ state, orderId }: { state: OrderBusinessState; orderId: string }) {
+function ConfirmationCard({ state, orderId, canConfirm, reload }: { state: OrderBusinessState; orderId: string; canConfirm?: boolean; reload?: () => void }) {
   const rate = state.confirmation_completion_rate;
   const barColor = rate === 100 ? 'bg-green-500' : rate >= 50 ? 'bg-amber-500' : rate > 0 ? 'bg-red-500' : 'bg-gray-300';
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function confirmModule(module: string, label: string) {
+    if (!confirm(`确认「${label}」？标记为已确认（客户已确认）。`)) return;
+    setBusy(module);
+    const res = await updateConfirmation(orderId, module, { status: 'confirmed', customer_confirmed: true });
+    setBusy(null);
+    if (res.error) { alert(res.error); return; }
+    reload?.();
+  }
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -367,6 +433,16 @@ function ConfirmationCard({ state, orderId }: { state: OrderBusinessState; order
                 <div className="text-[10px] font-medium text-gray-800 truncate">{d.label}</div>
                 <div className={`text-[9px] ${s.text}`}>{statusLabel}</div>
               </div>
+              {canConfirm && d.status !== 'confirmed' && (
+                <button
+                  disabled={busy === d.module}
+                  onClick={() => confirmModule(d.module, d.label)}
+                  className="text-[9px] px-1.5 py-0.5 rounded bg-white border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-50 shrink-0"
+                  title="标记该模块已确认"
+                >
+                  {busy === d.module ? '…' : '确认'}
+                </button>
+              )}
             </div>
           );
         })}
