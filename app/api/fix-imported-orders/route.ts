@@ -6,9 +6,13 @@
 import { createClient } from '@/lib/supabase/server';
 import { isActiveStatus, isDoneStatus } from '@/lib/domain/types';
 import { NextResponse } from 'next/server';
+import { guardAdminRoute } from '@/lib/utils/admin-route-guard';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const guard = await guardAdminRoute(req);
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Not logged in' }, { status: 401 });

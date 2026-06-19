@@ -14,6 +14,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { guardAdminRoute } from '@/lib/utils/admin-route-guard';
 
 export const maxDuration = 60;
 
@@ -25,6 +26,9 @@ const DEFAULT_ITEMS = [
 ];
 
 export async function POST(req: Request) {
+  const guard = await guardAdminRoute(req);
+  if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {

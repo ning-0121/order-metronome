@@ -10,9 +10,14 @@
 import { backfillConfirmationsForExistingOrders } from '@/app/actions/order-financials';
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { guardAdminRoute } from '@/lib/utils/admin-route-guard';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    // 鉴权放最前：原先 Step 1 在任何校验前就执行，且 Step 2 把确认链置 customer_confirmed=true
+    const guard = await guardAdminRoute(req);
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+
     // Step 1: 创建缺失的记录
     const result = await backfillConfirmationsForExistingOrders();
 

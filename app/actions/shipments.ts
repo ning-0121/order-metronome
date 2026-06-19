@@ -2,6 +2,16 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { isAdminRole } from '@/lib/domain/roles';
+
+/** 读取当前用户角色集合（roles[] 优先，回退 role） */
+async function getRoles(supabase: any, userId: string): Promise<string[]> {
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', userId).single();
+  return (profile as any)?.roles?.length > 0
+    ? (profile as any).roles
+    : [(profile as any)?.role].filter(Boolean);
+}
 
 export async function getShipmentConfirmation(orderId: string) {
   const supabase = await createClient();
@@ -67,6 +77,19 @@ export async function approveShipment(id: string, orderId: string, decision: 'ap
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
+  // 仅财务/管理员可审批出货（原先任何登录用户都能批，越过财务闸门）
+  const roles = await getRoles(supabase, user.id);
+  if (!isAdminRole(roles) && !roles.includes('finance')) {
+    return { error: '仅财务或管理员可审批出货' };
+  }
+  // 前置状态守卫：仅"业务已签、待财务"可审批，防重复审批 / 把已完成记录打回
+  const { data: cur } = await (supabase.from('shipment_confirmations') as any)
+    .select('status').eq('id', id).single();
+  if (!cur) return { error: '出货记录不存在' };
+  if (cur.status !== 'sales_signed') {
+    return { error: `当前状态(${cur.status})不可审批，仅待财务审批的记录可操作` };
+  }
+
   const now = new Date().toISOString();
   const patch: Record<string, any> = {
     finance_sign_id: user.id,
@@ -103,6 +126,19 @@ export async function executeShipment(id: string, orderId: string, rec: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+
+  // 仅物流/管理员可执行出货
+  const roles = await getRoles(supabase, user.id);
+  if (!isAdminRole(roles) && !roles.includes('logistics')) {
+    return { error: '仅物流或管理员可执行出货' };
+  }
+  // 前置状态守卫：必须财务审批通过(warehouse_signed)后才能执行，防绕过财务闸门
+  const { data: cur } = await (supabase.from('shipment_confirmations') as any)
+    .select('status').eq('id', id).single();
+  if (!cur) return { error: '出货记录不存在' };
+  if (cur.status !== 'warehouse_signed') {
+    return { error: `需财务审批通过后才能执行出货，当前状态：${cur.status}` };
+  }
 
   const now = new Date().toISOString();
   const { error } = await (supabase.from('shipment_confirmations') as any)

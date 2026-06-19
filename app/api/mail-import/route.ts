@@ -11,28 +11,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { fetchNewEmails } from '@/lib/utils/imap-fetch';
 import { NextResponse } from 'next/server';
+import { guardAdminRoute } from '@/lib/utils/admin-route-guard';
 
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
-  // GET 用于浏览器一键触发，使用 cookie 或 cron secret
-  const authHeader = req.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  const cookies = req.headers.get('cookie') || '';
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && !cookies.includes('sb-')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  // 鉴权：CRON_SECRET 或登录 admin（fail-closed；原先 cookie 即放行、secret 未设则短路）
+  const guard = await guardAdminRoute(req);
+  if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
   return handleImport(req);
 }
 
 export async function POST(req: Request) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-    const cookies = req.headers.get('cookie') || '';
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}` && !cookies.includes('sb-')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const guard = await guardAdminRoute(req);
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     return handleImport(req);
   } catch (err: any) {
     return NextResponse.json({ error: err?.message }, { status: 500 });
