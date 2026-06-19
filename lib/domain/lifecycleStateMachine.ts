@@ -27,6 +27,7 @@ export type LifecycleStatus =
   | 'draft'
   | 'pending_approval'
   | 'active'
+  | 'paused'
   | 'completed'
   | 'cancelled'
   | 'archived';
@@ -38,7 +39,8 @@ export type LifecycleStatus =
 export const LIFECYCLE_TRANSITIONS: Record<LifecycleStatus, LifecycleStatus[]> = {
   draft:            ['pending_approval', 'active', 'cancelled'],
   pending_approval: ['active', 'cancelled', 'draft'],   // 拒绝可退回 draft
-  active:           ['completed', 'cancelled'],
+  active:           ['completed', 'cancelled', 'paused'],
+  paused:           ['active', 'cancelled'],             // 治理台暂停，可恢复或取消
   completed:        ['archived'],
   cancelled:        [],   // 终态
   archived:         [],   // 终态
@@ -51,6 +53,7 @@ export const LIFECYCLE_LABEL: Record<LifecycleStatus, string> = {
   draft:            '草稿',
   pending_approval: '待审批',
   active:           '执行中',
+  paused:           '已暂停',
   completed:        '已完成',
   cancelled:        '已取消',
   archived:         '已归档',
@@ -69,6 +72,8 @@ export function normalizeLifecycleEnum(s: string | null | undefined): LifecycleS
     '待审批': 'pending_approval',
     'active': 'active',
     '执行中': 'active',
+    'paused': 'paused',
+    '已暂停': 'paused',
     'completed': 'completed',
     '已完成': 'completed',
     'cancelled': 'cancelled',

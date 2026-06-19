@@ -86,6 +86,7 @@ export async function createDelayRequest(
     const ls = orderCheck.lifecycle_status;
     if (ls === 'completed' || ls === '已完成') return { error: '该订单已完成，不能申请延期' };
     if (ls === 'cancelled' || ls === '已取消') return { error: '该订单已取消，不能申请延期' };
+    if (ls === 'paused' || ls === '已暂停') return { error: '该订单已暂停，不能申请延期' };
   }
 
   // Get order separately
@@ -1019,6 +1020,7 @@ export async function createOrderLevelDelayRequest(
   const ls = orderCheck.lifecycle_status;
   if (ls === 'completed' || ls === '已完成') return { error: '该订单已完成，不能申请延期' };
   if (ls === 'cancelled' || ls === '已取消') return { error: '该订单已取消，不能申请延期' };
+  if (ls === 'paused' || ls === '已暂停') return { error: '该订单已暂停，不能申请延期' };
 
   // 权限：订单创建者、负责人或管理员可申请
   const { data: profile } = await (supabase.from('profiles') as any)

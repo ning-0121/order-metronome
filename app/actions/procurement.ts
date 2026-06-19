@@ -339,12 +339,13 @@ export async function recordReceipt(
     .single();
   if (!item) return { error: '明细不存在' };
 
-  // 判断状态
+  // 判断状态（旧 status 列 + 同步新 line_status，否则采购中心队列会永远显示在途/待催）
   let status = 'complete';
+  let lineStatus = 'accepted';        // 收齐/超发 → 验收通过，移出所有在途队列
   const diff = receivedQty - (item as any).ordered_qty;
-  if (receivedQty === 0) status = 'cancelled';
-  else if (diff < -((item as any).ordered_qty * 0.03)) status = 'partial'; // 短缺 > 3%
-  else if (diff > (item as any).ordered_qty * 0.03) status = 'over';      // 超发 > 3%
+  if (receivedQty === 0) { status = 'cancelled'; lineStatus = 'cancelled'; }
+  else if (diff < -((item as any).ordered_qty * 0.03)) { status = 'partial'; lineStatus = 'arrived'; } // 短缺>3% → 进待验收
+  else if (diff > (item as any).ordered_qty * 0.03) { status = 'over'; lineStatus = 'accepted'; }      // 超发>3%
 
   const { error } = await (supabase.from('procurement_line_items') as any)
     .update({
@@ -353,6 +354,7 @@ export async function recordReceipt(
       received_at: new Date().toISOString(),
       received_by: auth.userId,
       status,
+      line_status: lineStatus,
       notes: notes || null,
       updated_at: new Date().toISOString(),
     })
