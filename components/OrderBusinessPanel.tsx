@@ -14,6 +14,7 @@ import {
   EMPTY_STATE_TEXT,
   type NextAction,
 } from '@/lib/engine/nextActions';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 interface Props {
   orderId: string;
@@ -40,7 +41,8 @@ export function OrderBusinessPanel({ orderId, isAdmin, userRoles }: Props) {
   // Runtime Phase 1：投影数据，null 表示 flag off / 没数据 → fallback 老风险卡
   const [runtimeData, setRuntimeData] = useState<any | null>(null);
 
-  const canSeeFinancials = isAdmin || userRoles.some(r => ['finance', 'production_manager', 'sales_manager'].includes(r));
+  // 红线：production_manager 不可见利润；统一走 CAN_SEE_FINANCIALS（含 sales/order_manager）
+  const canSeeFinancials = isAdmin || hasRoleInGroup(userRoles, 'CAN_SEE_FINANCIALS');
   const canUpload = isAdmin || userRoles.includes('finance');
 
   const reload = () => {

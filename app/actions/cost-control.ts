@@ -19,6 +19,17 @@ import {
   checkCmtReasonability,
   type CostSheetRow,
 } from '@/lib/finance/costSheetParser';
+import { hasRoleInGroup } from '@/lib/domain/roles';
+
+/** 价格红线：仅可见财务的角色能读成本数据 */
+async function assertCanSeeFinancials(supabase: any, userId: string): Promise<boolean> {
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', userId).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0
+    ? (profile as any).roles
+    : [(profile as any)?.role].filter(Boolean);
+  return hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
+}
 
 // ════════════════════════════════════════════════
 // 1. 上传内部成本核算单 → 解析 → 写入基线
@@ -183,6 +194,9 @@ export async function getCostControlSummary(orderId: string): Promise<{
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  if (!(await assertCanSeeFinancials(supabase, user.id))) {
+    return { error: '无权查看成本数据' };
+  }
 
   // 基线
   const { data: baseline } = await (supabase.from('order_cost_baseline') as any)

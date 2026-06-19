@@ -15,6 +15,7 @@ import { isActiveStatus, isDoneStatus, normalizeMilestoneStatus } from '@/lib/do
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { OrderActions } from '@/components/OrderActions';
@@ -93,6 +94,8 @@ export default async function OrderDetailPage({
       currentRoles = (profile as any).roles;
     }
   }
+  // 价格/利润可见性（红线：production/merchandiser/admin_assistant/procurement/logistics 不可见）
+  const canSeeFinancials = isAdmin || hasRoleInGroup(currentRoles, 'CAN_SEE_FINANCIALS');
 
   // ── 并行加载 5 个独立查询（owner profile 之前是串行额外查询，2026-05-19 合并到并行池）──
   const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult, ownerProfileResult] = await Promise.all([
@@ -404,7 +407,7 @@ export default async function OrderDetailPage({
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料和包装' },
           { key: 'procurement', label: '📦 采购进度' },
-          { key: 'cost_control', label: '💰 成本控制' },
+          ...(canSeeFinancials ? [{ key: 'cost_control', label: '💰 成本控制' }] : []),
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
               { key: 'documents', label: '单据中心' },
@@ -900,8 +903,8 @@ export default async function OrderDetailPage({
           />
         )}
 
-        {/* Tab: 成本控制 */}
-        {activeTab === 'cost_control' && (
+        {/* Tab: 成本控制（红线：仅可见财务的角色） */}
+        {activeTab === 'cost_control' && canSeeFinancials && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">💰 成本控制</h2>
             <p className="text-xs text-gray-500 mb-5">

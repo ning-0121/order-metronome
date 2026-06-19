@@ -18,6 +18,7 @@ import {
   type EngineInput,
 } from '@/lib/engine/orderBusinessEngine';
 import { isCustomerShipHoldFromOrder } from '@/lib/domain/customerShipHold';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 /**
  * 获取订单经营状态（一次调用，返回所有计算结果）
@@ -79,6 +80,19 @@ export async function getOrderBusinessState(orderId: string): Promise<{
   };
 
   const state = computeOrderBusinessState(input);
+
+  // 价格红线：非可见财务角色，后端抹掉利润字段（不能只靠前端隐藏 —— 直接调 action 也拿不到）
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0
+    ? (profile as any).roles
+    : [(profile as any)?.role].filter(Boolean);
+  if (!hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')) {
+    state.margin_pct = null;
+    state.gross_profit_rmb = null;
+    state.order_profit_status = { value: 'unknown', level: 'gray', explain: '无权查看利润' } as typeof state.order_profit_status;
+  }
+
   return { data: state };
 }
 
