@@ -26,14 +26,14 @@ console.log('\n🔍 部署前回归检查\n');
 
 // ════ 1. 里程碑模板完整性 ════
 console.log('📋 里程碑模板');
-assert(MILESTONE_TEMPLATE_V1.length >= 20, `生产模板有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥20)`);
+// 2026-06-19 极简骨架:生产模板 28→11(只留重点节点)
+assert(MILESTONE_TEMPLATE_V1.length >= 11, `生产模板有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥11)`);
 assert(SAMPLE_MILESTONE_TEMPLATE.length === 8, `打样模板有 ${SAMPLE_MILESTONE_TEMPLATE.length} 个节点 (=8)`);
 
-// 生产模板必须包含关键节点（2026版组织:业务中/尾查已取消，仅保留跟单中/尾查→生产跟单）
+// 生产模板必须包含的重点节点(极简后:订单评审会/中查/预评估等已删)
 const requiredSteps = [
-  'po_confirmed', 'finance_approval', 'production_kickoff',
-  'mid_qc_check',
-  'final_qc_check',
+  'po_confirmed', 'finance_approval', 'procurement_order_placed', 'production_kickoff',
+  'final_qc_check', 'factory_completion',
   'inspection_release', 'payment_received',
 ];
 for (const step of requiredSteps) {
@@ -49,7 +49,7 @@ for (const step of sampleSteps) {
 // ════ 2. getApplicableMilestones 路由正确 ════
 console.log('\n🔀 模板路由');
 const prodMilestones = getApplicableMilestones('bulk', false, 'export');
-assert(prodMilestones.length >= 20, `export订单返回 ${prodMilestones.length} 个节点`);
+assert(prodMilestones.length >= 11, `export订单返回 ${prodMilestones.length} 个节点 (≥11)`);
 
 const domesticMilestones = getApplicableMilestones('bulk', false, 'domestic');
 assert(domesticMilestones.length < prodMilestones.length, `domestic订单节点数(${domesticMilestones.length}) < export(${prodMilestones.length})`);
@@ -90,15 +90,15 @@ for (const k of tradeScheduleKeys) {
   assert(tradeDue[k] instanceof Date && !isNaN(tradeDue[k].getTime()), `trade step_key ${k} 能被 schedule 排期(calcDueDates 返回有效日期)`);
 }
 
-// 跳过产前样（skip_all）：3 个产前样节点应被过滤掉
+// 跳过产前样（skip_all）：极简模板里产前样只剩"产前样客户确认"一个 → 应被过滤掉
 const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);
 assert(
-  !skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_ready'),
-  '跳过产前样模式：不包含 pre_production_sample_ready'
+  !skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_approved'),
+  '跳过产前样模式：不包含 pre_production_sample_approved'
 );
 assert(
-  skipSampleMilestones.length === prodMilestones.length - 3,
-  `跳过产前样模式节点数(${skipSampleMilestones.length}) = 标准export(${prodMilestones.length}) - 3`
+  skipSampleMilestones.length === prodMilestones.length - 1,
+  `跳过产前样模式节点数(${skipSampleMilestones.length}) = 标准export(${prodMilestones.length}) - 1`
 );
 
 // 头样模式：增加 3 个头样节点
@@ -131,34 +131,28 @@ assert(
   `二次样模式节点数(${devRevisionMilestones.length}) = 标准export(${prodMilestones.length}) + 6`
 );
 
-// 头样节点顺序正确：dev_sample → pre_production_sample
+// 头样节点顺序:头样确认 在 产前样客户确认 之前(极简模板锚点改为 approved)
 const devIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'dev_sample_customer_confirm');
-const preIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'pre_production_sample_ready');
-assert(devIdx < preIdx, `头样确认(${devIdx}) 在产前样准备(${preIdx})之前`);
+const devPreIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'pre_production_sample_approved');
+assert(devIdx >= 0 && devIdx < devPreIdx, `头样确认(${devIdx}) 在产前样客户确认(${devPreIdx})之前`);
 
-// ════ 2b. 生产模板节点顺序正确性 ════
+// ════ 2b. 极简生产模板(11 节点骨架)节点顺序正确性 ════
 console.log('\n📐 节点顺序');
 function stepIdx(template: typeof prodMilestones, key: string) {
   return template.findIndex((m: any) => m.step_key === key);
 }
-// 包装确认 → 船样寄送 → 尾查 → 工厂完成
-const packingIdx = stepIdx(prodMilestones, 'packing_method_confirmed');
-const shippingSampleIdx = stepIdx(prodMilestones, 'shipping_sample_send');
-const finalQcIdx = stepIdx(prodMilestones, 'final_qc_check');
-const factoryCompIdx = stepIdx(prodMilestones, 'factory_completion');
-const bookingIdx = stepIdx(prodMilestones, 'booking_done');
-assert(packingIdx < shippingSampleIdx, `包装确认(${packingIdx}) 在船样寄送(${shippingSampleIdx})之前`);
-assert(shippingSampleIdx < finalQcIdx, `船样寄送(${shippingSampleIdx}) 在尾查(${finalQcIdx})之前`);
-assert(finalQcIdx < factoryCompIdx, `尾查(${finalQcIdx}) 在工厂完成(${factoryCompIdx})之前`);
-assert(factoryCompIdx < bookingIdx, `工厂完成(${factoryCompIdx}) 在订舱(${bookingIdx})之前`);
-// 产前样流程顺序
-const ppReadyIdx = stepIdx(prodMilestones, 'pre_production_sample_ready');
-const ppSentIdx = stepIdx(prodMilestones, 'pre_production_sample_sent');
-const ppApprovedIdx = stepIdx(prodMilestones, 'pre_production_sample_approved');
-const kickoffIdx = stepIdx(prodMilestones, 'production_kickoff');
-assert(ppReadyIdx < ppSentIdx, `产前样准备(${ppReadyIdx}) 在产前样寄出(${ppSentIdx})之前`);
-assert(ppSentIdx < ppApprovedIdx, `产前样寄出(${ppSentIdx}) 在客户确认(${ppApprovedIdx})之前`);
-assert(ppApprovedIdx < kickoffIdx, `客户确认产前样(${ppApprovedIdx}) 在生产启动(${kickoffIdx})之前`);
+// 骨架顺序:PO→财务→采购→产前样确认→开裁→尾查→工厂完成→验货→订舱→出运→收款
+const spine = [
+  'po_confirmed', 'finance_approval', 'procurement_order_placed', 'pre_production_sample_approved',
+  'production_kickoff', 'final_qc_check', 'factory_completion', 'inspection_release',
+  'booking_done', 'shipment_execute', 'payment_received',
+];
+let prevIdx = -1;
+for (const key of spine) {
+  const idx = stepIdx(prodMilestones, key);
+  assert(idx > prevIdx, `节点顺序:${key}(${idx}) 在前一节点之后`);
+  prevIdx = idx;
+}
 
 // ════ 3. Agent 配置完整性 ════
 console.log('\n🤖 Agent 配置');

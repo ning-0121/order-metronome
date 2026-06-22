@@ -192,6 +192,9 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
   const [laneFilter, setLaneFilter] = useState<SwimLane[] | null>(
     defaultLanes.length === 3 ? null : defaultLanes,
   );
+  // 只看关键节点（节拍器审计:关键已收敛到 ~10;开启后只显示真正决定交付的节点,缓解报警疲劳）
+  const [criticalOnly, setCriticalOnly] = useState(false);
+  const criticalCount = useMemo(() => milestones.filter(m => (m as any).is_critical).length, [milestones]);
   const totalByLane = useMemo(() => {
     const acc: Record<SwimLane, number> = { sales: 0, production: 0, sync: 0 };
     for (const m of milestones) {
@@ -250,12 +253,16 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
     return aN - bN;
   });
 
-  // Swim-lane 过滤：null = 全部；否则只保留指定 lane 的节点
+  // Swim-lane 过滤：null = 全部；否则只保留指定 lane 的节点；再叠加"只看关键"
   const laneFilteredMilestones = useMemo(() => {
-    if (laneFilter === null) return milestones;
-    const allowed = new Set(laneFilter);
-    return milestones.filter(m => allowed.has(getSwimLane((m as any).step_key)));
-  }, [milestones, laneFilter]);
+    let list = milestones;
+    if (laneFilter !== null) {
+      const allowed = new Set(laneFilter);
+      list = list.filter(m => allowed.has(getSwimLane((m as any).step_key)));
+    }
+    if (criticalOnly) list = list.filter(m => (m as any).is_critical);
+    return list;
+  }, [milestones, laneFilter, criticalOnly]);
 
   // 阶段内：按 stepKeys 数组里的位置排序（永久固定的逻辑顺序）
   const grouped = MILESTONE_GROUPS.map(g => {
@@ -332,6 +339,17 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
             {laneFilteredMilestones.length === 0 ? '当前 filter 下无节点' : `共 ${laneFilteredMilestones.length} 节点`}
           </span>
         )}
+
+        {/* 只看关键:聚焦真正决定交付的关键节点,过滤流程节点的噪音 */}
+        <button
+          onClick={() => setCriticalOnly(v => !v)}
+          className={`text-xs px-3 py-1.5 rounded-full transition ml-auto ${
+            criticalOnly ? 'bg-red-600 text-white' : 'bg-white border border-red-300 text-red-700 hover:bg-red-50'
+          }`}
+          title="只显示关键节点(关键已收敛,聚焦真正决定交付的节点)"
+        >
+          {criticalOnly ? '✓ 只看关键' : `只看关键 (${criticalCount})`}
+        </button>
       </div>
 
       {grouped.map(group => {

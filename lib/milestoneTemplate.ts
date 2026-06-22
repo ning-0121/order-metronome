@@ -30,41 +30,20 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   evidence_required: boolean;
   evidence_note?: string;
 }> = [
-  // 阶段1：订单评审 ── 2026版组织:PO确认=业务开发(交接点);评审/单据起由订单管理部(理单)
-  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true },
+  // 2026-06-19 极简骨架(节拍器审计 134 单数据驱动):28 → 11,只保留真正"卡交付风险"的重点节点。
+  //   被砍的(流程会议/重复预评估/低完成率 剩余物料回收12%·成品入库10%/与出货模块重复的核准/录入滞后的早期节点)
+  //   不再占节拍;"料到没到"在【采购中心】可见、"哪个工厂"在订单字段可见,故不再单列节点。
+  //   仅影响【新单】;存量 134 单结构不变(用时间线「只看关键」聚焦,关键回填见迁移)。
+  //   排序=按 schedule.ts 工期(TIMELINE)递增,保证显示顺序与日期一致。
+  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: false, evidence_required: true },
   { step_key: "finance_approval", name: "财务审核", owner_role: "finance", is_critical: true, evidence_required: false },
-  { step_key: "order_kickoff_meeting", name: "订单评审会", owner_role: "merchandiser", is_critical: true, evidence_required: false },
-  { step_key: "production_order_upload", name: "生产单上传", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  // 阶段2：预评估
-  { step_key: "order_docs_bom_complete", name: "BOM/采购预评估", owner_role: "procurement", is_critical: true, evidence_required: false },
-  { step_key: "bulk_materials_confirmed", name: "生产预评估", owner_role: "production_manager", is_critical: true, evidence_required: false },
-  // 阶段3：工厂匹配 & 产前样 ── 工厂匹配=生产主管;产前样准备=生产跟单(工厂做样);寄送/客户确认=理单(交付对接)
-  { step_key: "processing_fee_confirmed", name: "加工费确认", owner_role: "production_manager", is_critical: true, evidence_required: true },
-  { step_key: "factory_confirmed", name: "工厂匹配确认", owner_role: "production_manager", is_critical: true, evidence_required: true },
-  { step_key: "pre_production_sample_ready", name: "产前样准备完成", owner_role: "production", is_critical: true, evidence_required: true },
-  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "merchandiser", is_critical: true, evidence_required: false },
-  { step_key: "pre_production_sample_approved", name: "产前样客户确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  // 阶段4：采购与生产准备 ── 到料验收=理单;产前会/开裁=生产跟单
-  // 顺序修复（2026-04-08）：产前会必须在原料到货后、开裁前
   { step_key: "procurement_order_placed", name: "采购订单下达", owner_role: "procurement", is_critical: true, evidence_required: true },
-  { step_key: "materials_received_inspected", name: "原辅料到货验收", owner_role: "merchandiser", is_critical: true, evidence_required: false },
-  { step_key: "pre_production_meeting", name: "产前会", owner_role: "production", is_critical: false, evidence_required: false },
+  { step_key: "pre_production_sample_approved", name: "产前样客户确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "production_kickoff", name: "生产启动/开裁", owner_role: "production", is_critical: true, evidence_required: false },
-  // 阶段5：过程控制 ── 验货归生产跟单（业务中/尾查已取消，2026版业务部纯开发）
-  { step_key: "mid_qc_check", name: "跟单中查", owner_role: "production", is_critical: false, evidence_required: true },
-  // 阶段6：出货控制 ── 包装规格/船样/订舱/报关=理单(订单管理部:出货安排/物流对接);尾查/工厂完成/回收=生产跟单
-  // 顺序修复（2026-04-08）：包装确认 → 船样寄送 → 尾查 → 工厂完成 → 验货放行
-  { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "shipping_sample_send", name: "船样寄送", owner_role: "merchandiser", is_critical: false, evidence_required: false },
   { step_key: "final_qc_check", name: "跟单尾查", owner_role: "production", is_critical: true, evidence_required: true },
   { step_key: "factory_completion", name: "工厂完成", owner_role: "production", is_critical: true, evidence_required: false },
-  { step_key: "leftover_collection", name: "剩余物料回收", owner_role: "production", is_critical: false, evidence_required: true, evidence_note: "提交剩余面料/辅料数量 + 废料数量" },
-  { step_key: "finished_goods_warehouse", name: "成品入库", owner_role: "logistics", is_critical: true, evidence_required: true, evidence_note: "提交入库单（成品数量/次品/余量/样品扣除）" },
   { step_key: "inspection_release", name: "验货/放行", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  // 阶段7：物流收款
   { step_key: "booking_done", name: "订舱完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "customs_export", name: "报关安排出运", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "finance_shipment_approval", name: "核准出运", owner_role: "finance", is_critical: true, evidence_required: false },
   { step_key: "shipment_execute", name: "出运", owner_role: "logistics", is_critical: true, evidence_required: true },
   { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false },
 ];
@@ -257,8 +236,10 @@ export function getApplicableMilestones(
     // 跳过产前样（翻单/老款/客户用设计样直接做大货）
     template = template.filter(m => !PRE_PRODUCTION_SAMPLE_STEPS.has(m.step_key));
   } else if (phase === 'dev_sample' || phase === 'dev_sample_with_revision') {
-    // 需要做头样：在 factory_confirmed 之后插入头样节点
-    const insertIdx = template.findIndex(m => m.step_key === 'pre_production_sample_ready');
+    // 需要做头样：在「产前样客户确认」之前插入头样节点
+    // (极简模板已删 pre_production_sample_ready,改锚 pre_production_sample_approved)
+    let insertIdx = template.findIndex(m => m.step_key === 'pre_production_sample_approved');
+    if (insertIdx === -1) insertIdx = template.findIndex(m => m.step_key === 'pre_production_sample_ready');
     if (insertIdx !== -1) {
       const devNodes = phase === 'dev_sample_with_revision'
         ? [...DEV_SAMPLE_MILESTONES, ...DEV_SAMPLE_REVISION_MILESTONES]
