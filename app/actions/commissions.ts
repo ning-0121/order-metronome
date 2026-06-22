@@ -24,8 +24,9 @@ const MERCHANDISER_STEPS = [
 // 品质相关关卡
 const QC_STEPS = ['mid_qc_check', 'final_qc_check'];
 
-// 出运关卡（用于准时交付判断）
-const SHIPMENT_STEP = 'customs_export';
+// 出运关卡（用于准时交付判断）—— 2026-06-19:customs_export 已从精简模板删除,
+// 改为按优先级取真正存在的出运/送仓节点(出口=出运、国内=送仓),否则准时绩效会恒满分。
+const SHIPMENT_STEP_PRIORITY = ['shipment_execute', 'domestic_delivery', 'booking_done', 'customs_export'];
 
 interface ScoreDetail {
   ontime: { score: number; max: 40; overdueSteps: string[] };
@@ -108,8 +109,10 @@ export async function calculateOrderScore(
     midPassed: !midBlocked, finalPassed: !finalBlocked,
   };
 
-  // 准时交付（共享）
-  const shipmentMilestone = milestones.find((m: any) => m.step_key === SHIPMENT_STEP);
+  // 准时交付（共享）—— 按优先级取存在的出运/送仓节点
+  const shipmentMilestone = SHIPMENT_STEP_PRIORITY
+    .map((k) => milestones.find((m: any) => m.step_key === k))
+    .find(Boolean);
   const targetDate = order.incoterm === 'FOB' ? order.etd : order.warehouse_due_date;
   let deliveryScore = 10;
   let daysLate: number | null = null;

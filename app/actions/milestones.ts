@@ -880,14 +880,17 @@ export async function markMilestoneDone(
   // Auto-advance to next milestone
   await autoAdvanceNextMilestone(supabase, milestoneData.order_id);
 
-  // 阶段1全部完成 → 自动激活订单（草稿→已生效）
-  const stage1Keys = ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'];
+  // 阶段1完成 → 自动激活订单（草稿→已生效）
+  // 2026-06-19 修复:模板精简(28→11)删了 order_kickoff_meeting/production_order_upload,
+  //   原来要这 4 个全完成才激活 → 新单永远凑不齐、卡 draft、风险徽章不显示。
+  //   改为只看 po_confirmed + finance_approval(各模板都有的早期闸门),按实际存在数判定。
+  const stage1Keys = ['po_confirmed', 'finance_approval'];
   if (stage1Keys.includes(milestoneData.step_key)) {
     const { data: stage1Milestones } = await (supabase.from('milestones') as any)
       .select('step_key, status')
       .eq('order_id', milestoneData.order_id)
       .in('step_key', stage1Keys);
-    const allStage1Done = stage1Milestones && stage1Milestones.length === 4 &&
+    const allStage1Done = stage1Milestones && stage1Milestones.length === stage1Keys.length &&
       stage1Milestones.every((m: any) => isDoneStatus(m.status));
     if (allStage1Done) {
       const { data: orderCheck } = await (supabase.from('orders') as any)
