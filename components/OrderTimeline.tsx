@@ -265,6 +265,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
   }, [milestones, laneFilter, criticalOnly]);
 
   // 阶段内：按 stepKeys 数组里的位置排序（永久固定的逻辑顺序）
+  // 隐藏空阶段:极简模板(11节点)或 lane/只看关键 过滤后,某阶段无节点时不渲染其标题
   const grouped = MILESTONE_GROUPS.map(g => {
     const items = laneFilteredMilestones.filter(m => g.stepKeys.includes((m as any).step_key));
     items.sort((a, b) => {
@@ -273,7 +274,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
       return aIdx - bIdx;
     });
     return { ...g, items };
-  });
+  }).filter(g => g.items.length > 0);
 
   // Lane filter helpers
   const isLaneActive = (lane: SwimLane) => laneFilter !== null && laneFilter.length === 1 && laneFilter[0] === lane;
