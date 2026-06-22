@@ -505,6 +505,12 @@ function NewOrderWizard() {
 
     const rawFormData = new FormData(e.currentTarget);
 
+    // 把 PO 解析出的逐款逐色明细一并提交 → 建单时落库 order_line_items,
+    // 供碎单预警/生产单/客户报告复用,避免日后重复调 AI 解析(浪费钱)。
+    if (poParseResult?.styles?.length) {
+      rawFormData.set('line_items', JSON.stringify(poParseResult.styles));
+    }
+
     try {
       await handleStep1SubmitCore(rawFormData);
     } catch (err: any) {

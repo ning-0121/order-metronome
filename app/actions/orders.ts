@@ -769,6 +769,96 @@ export async function createOrder(
     }
   }
 
+  // ── STEP 10: 落库 PO 明细行 + 碎单预警 ──
+  // 建单时 AI 已解析出逐款逐色明细,这里落入 order_line_items(只存一次,日后生产单/单据/
+  // 客户报告复用,避免重复调 AI 解析烧钱);同时检查碎单(每色 < 150 件)→ 站内通知业务主管 + CEO。
+  // 全程 fire-and-forget,任何失败都不阻断订单创建(沿用 Runtime 钩子哲学)。
+  try {
+    const { assessSmallBatchFromLineItems, assessSmallBatchFromAverage } =
+      await import('@/lib/services/small-batch');
+
+    let assessment: ReturnType<typeof assessSmallBatchFromLineItems> | null = null;
+
+    // 1) 有解析明细 → 展开成 (款×色) 行,落库 + 逐色精确判定
+    const lineItemsRaw = formData.get('line_items') as string | null;
+    let parsedStyles: any[] = [];
+    if (lineItemsRaw) {
+      try { parsedStyles = JSON.parse(lineItemsRaw); } catch { parsedStyles = []; }
+    }
+
+    if (Array.isArray(parsedStyles) && parsedStyles.length > 0) {
+      const rows: any[] = [];
+      let lineNo = 0;
+      for (const st of parsedStyles) {
+        const colors = Array.isArray(st?.colors) ? st.colors : [];
+        for (const c of colors) {
+          lineNo++;
+          rows.push({
+            order_id: orderData.id,
+            line_no: lineNo,
+            style_no: st?.style_no || null,
+            product_name: st?.product_name || st?.name || null,
+            color_cn: c?.color_cn || null,
+            color_en: c?.color_en || null,
+            sizes: c?.sizes || {},
+            unit: 'pcs',
+            set_multiplier: 1,
+            qty_pcs: Number(c?.qty ?? 0) || null,
+            qty_raw: Number(c?.qty ?? 0) || null,
+            source: 'po_parse',
+          });
+        }
+      }
+      if (rows.length > 0) {
+        const { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
+        if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);
+        assessment = assessSmallBatchFromLineItems(rows);
+      }
+    }
+
+    // 2) 没有明细 → 用「总件数 ÷ 颜色数」平均值回退判定(老单/手填单)
+    if (!assessment) {
+      const cc = colorCount ? parseInt(colorCount, 10) : 0;
+      assessment = assessSmallBatchFromAverage(quantity || 0, cc);
+    }
+
+    // 3) 碎单 + 生产订单 → 站内通知业务主管(sales_manager)+ CEO(admin)
+    if (assessment.triggered && order_purpose === 'production') {
+      const { data: managers } = await (supabase.from('profiles') as any)
+        .select('user_id')
+        .or('role.eq.sales_manager,roles.cs.{sales_manager},role.eq.admin,roles.cs.{admin}');
+      const recipientIds = Array.from(
+        new Set(((managers || []) as any[]).map((m) => m.user_id).filter(Boolean)),
+      );
+
+      const minQty = assessment.minColorQty ?? '?';
+      const detail = assessment.precise
+        ? assessment.smallColors.slice(0, 5)
+            .map((c) => `${c.style_no ? c.style_no + ' ' : ''}${c.color}:${c.qty_pcs}件`)
+            .join('、')
+        : `平均每色约 ${minQty} 件`;
+      const title = `⚠️ 碎单预警 — ${orderData.order_no}`;
+      const message =
+        `客户：${customer_name} · 共 ${quantity || '?'} 件 / ${assessment.totalColors || colorCount || '?'} 色\n` +
+        `最小颜色仅 ${minQty} 件(预警线 ${assessment.threshold} 件/色）${assessment.precise ? '' : '【按平均值估算】'}\n` +
+        `碎单明细：${detail}\n` +
+        `碎单工艺/排产成本高,若按大货价报价恐亏损,请评估报价或与客户协商起订量。`;
+
+      for (const uid of recipientIds) {
+        await (supabase.from('notifications') as any).insert({
+          user_id: uid,
+          type: 'small_batch_warning',
+          title,
+          message,
+          related_order_id: orderData.id,
+          status: 'unread',
+        });
+      }
+    }
+  } catch (sbErr: any) {
+    console.warn('[createOrder] 碎单预警/明细落库失败(不阻断订单创建):', sbErr?.message);
+  }
+
   // ── DONE ──
   revalidatePath('/orders');
   revalidatePath('/dashboard');
