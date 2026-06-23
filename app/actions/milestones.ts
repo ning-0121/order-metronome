@@ -1101,6 +1101,51 @@ async function applyChecklistDateOverrides(
   }
 }
 
+/**
+ * 财务审批节点激活时，提醒财务去「💰 成本控制」tab 录入/确认预算。
+ * 收件人：优先该节点指定的财务负责人；未指定则所有 finance 角色。
+ */
+async function notifyFinanceBudgetEntry(
+  supabase: any,
+  orderId: string,
+  assignedUserId: string | null,
+) {
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('order_no, customer_name, quantity')
+    .eq('id', orderId)
+    .single();
+  if (!order) return;
+
+  let recipientIds: string[] = [];
+  if (assignedUserId) {
+    recipientIds = [assignedUserId];
+  } else {
+    const { data: fins } = await (supabase.from('profiles') as any)
+      .select('user_id')
+      .or('role.eq.finance,roles.cs.{finance}');
+    recipientIds = ((fins || []) as any[]).map((f) => f.user_id).filter(Boolean);
+  }
+  recipientIds = Array.from(new Set(recipientIds));
+  if (recipientIds.length === 0) return;
+
+  const title = `💰 请完成预算录入 — ${order.order_no}`;
+  const message =
+    `客户：${order.customer_name || '?'} · ${order.quantity || '?'} 件\n` +
+    `该订单已进入财务审批。请到订单「💰 成本控制」tab，对照 PO 核对成本核算单，` +
+    `录入/确认预算（成本、售价、面料预算），系统会自动算出利润。`;
+
+  for (const uid of recipientIds) {
+    await (supabase.from('notifications') as any).insert({
+      user_id: uid,
+      type: 'finance_budget_entry',
+      title,
+      message,
+      related_order_id: orderId,
+      status: 'unread',
+    });
+  }
+}
+
 async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
   const { data: pendingMilestones } = await (supabase
     .from('milestones') as any)
@@ -1114,6 +1159,15 @@ async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
 
     // 推进为进行中
     await transitionMilestoneStatus(next.id, '进行中', '自动推进：上一节点已完成');
+
+    // 财务审批节点激活 → 提醒财务完成预算录入（过渡方案 B 的"提醒"环，fire-and-forget）
+    if (next.step_key === 'finance_approval') {
+      try {
+        await notifyFinanceBudgetEntry(supabase, orderId, next.owner_user_id);
+      } catch (e: any) {
+        console.warn('[autoAdvanceNextMilestone] 财务预算提醒失败(不阻断):', e?.message);
+      }
+    }
 
     // 如果该节点的 due_at 已过期，自动延后到今天+2个工作日
     // 避免"一推进就逾期"的问题

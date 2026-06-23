@@ -6,6 +6,7 @@ import {
   getCostControlSummary,
   sendCostAlert,
   autoParseExistingCostSheet,
+  saveCostBaselineManual,
   type CostControlSummary,
 } from '@/app/actions/cost-control';
 
@@ -24,7 +25,41 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 手工录入/修改预算（AI 解析准确率不够时的权威入口）
+  const [showManual, setShowManual] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
+  const [manual, setManual] = useState<Record<string, string>>({});
+
   useEffect(() => { load(); }, [orderId]);
+
+  // 打开表单时用现有 baseline（可能是 AI 解析结果）预填，财务对照 PO 改对
+  function openManual() {
+    const b = summary?.baseline;
+    setManual({
+      fabric_consumption_kg: b?.fabric_consumption_kg ?? '',
+      fabric_price_per_kg: b?.fabric_price_per_kg ?? '',
+      waste_pct: b?.waste_pct ?? 3,
+      cmt_factory_quote: b?.cmt_factory_quote ?? '',
+      total_cost_per_piece: b?.total_cost_per_piece ?? '',
+      fob_price: b?.fob_price ?? '',
+      ddp_price: b?.ddp_price ?? '',
+      exchange_rate: b?.exchange_rate ?? 7.2,
+    });
+    setShowManual(true);
+  }
+
+  async function handleSaveManual() {
+    setSavingManual(true);
+    const res = await saveCostBaselineManual(orderId, manual as any);
+    setSavingManual(false);
+    if (res.error) {
+      alert('保存失败：' + res.error);
+      return;
+    }
+    setShowManual(false);
+    alert('✅ 预算已保存，利润已重算');
+    load();
+  }
 
   async function load() {
     setLoading(true);
@@ -115,6 +150,75 @@ export function CostControlTab({ orderId, orderNo, styleNo, quantity, isAdmin, c
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* 手工录入/修改预算 —— AI 解析准确率不够时，财务对照 PO 直接填权威数字 */}
+      {canEdit && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">✏️ 手工录入 / 修改预算</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                财务对照 PO 核对后直接填，保存即生效（不依赖 AI 解析）。已解析的数值会自动预填，改对即可。
+              </p>
+            </div>
+            {!showManual && (
+              <button
+                onClick={openManual}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+              >
+                {hasBaseline ? '✏️ 核对 / 修改' : '✏️ 录入预算'}
+              </button>
+            )}
+          </div>
+
+          {showManual && (
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {([
+                  { k: 'fabric_consumption_kg', label: '面料单耗', unit: 'KG/件' },
+                  { k: 'fabric_price_per_kg', label: '面料净布价', unit: '¥/KG' },
+                  { k: 'waste_pct', label: '损耗率', unit: '%' },
+                  { k: 'cmt_factory_quote', label: '加工费(工厂报价)', unit: '¥/件' },
+                  { k: 'total_cost_per_piece', label: '总单件成本', unit: '¥/件' },
+                  { k: 'fob_price', label: 'FOB 售价', unit: 'USD' },
+                  { k: 'ddp_price', label: 'DDP 售价', unit: 'USD' },
+                  { k: 'exchange_rate', label: '汇率', unit: 'CNY→USD' },
+                ] as const).map(({ k, label, unit }) => (
+                  <label key={k} className="block">
+                    <span className="text-xs text-gray-600">{label}<span className="text-gray-400 ml-1">({unit})</span></span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={manual[k] ?? ''}
+                      onChange={(e) => setManual((m) => ({ ...m, [k]: e.target.value }))}
+                      className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-gray-300 text-sm font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400">
+                面料预算总量/总额由「单耗 × 订单数量 × 含损耗」自动算出；售价按贸易条款写入利润核算。
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveManual}
+                  disabled={savingManual}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {savingManual ? '保存中...' : '💾 保存预算并重算利润'}
+                </button>
+                <button
+                  onClick={() => setShowManual(false)}
+                  disabled={savingManual}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

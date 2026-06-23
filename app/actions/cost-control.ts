@@ -167,6 +167,108 @@ export async function uploadCostSheet(
 }
 
 // ════════════════════════════════════════════════
+// 1b. 手工录入/修改成本预算（财务过渡表单，不依赖 AI 解析）
+// ════════════════════════════════════════════════
+// 背景：AI 解析成本单准确率不够，财务本就要对照 PO 核对。让财务把权威数字直接填进来、
+// 保存，比解析靠谱。AI 解析结果作为预填草稿（前端用现有 baseline 预填），财务改对即可。
+
+export interface ManualBaselineInput {
+  fabric_consumption_kg?: number | string | null;
+  fabric_price_per_kg?: number | string | null;
+  waste_pct?: number | string | null;
+  cmt_factory_quote?: number | string | null;
+  total_cost_per_piece?: number | string | null;
+  fob_price?: number | string | null;
+  ddp_price?: number | string | null;
+  exchange_rate?: number | string | null;
+}
+
+export async function saveCostBaselineManual(
+  orderId: string,
+  input: ManualBaselineInput,
+): Promise<{ error?: string; data?: any }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!(await assertCanSeeFinancials(supabase, user.id))) {
+    return { error: '无权录入成本数据（仅财务/管理员/业务）' };
+  }
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('id, quantity, incoterm')
+    .eq('id', orderId)
+    .single();
+  if (!order) return { error: '订单不存在' };
+  const quantity = (order as any).quantity || 0;
+
+  const num = (v: any) =>
+    v === '' || v === null || v === undefined || isNaN(Number(v)) ? null : Number(v);
+  const consumption = num(input.fabric_consumption_kg);
+  const pricePerKg = num(input.fabric_price_per_kg);
+  const waste = num(input.waste_pct) ?? 3;
+
+  // 面料预算（单耗 × 数量 × 含损耗）
+  const budget = consumption && consumption > 0 && quantity > 0
+    ? calculateMaterialBudget(consumption, quantity, waste)
+    : null;
+
+  const baselineData: any = {
+    order_id: orderId,
+    fabric_consumption_kg: consumption,
+    fabric_price_per_kg: pricePerKg,
+    waste_pct: waste,
+    budget_fabric_kg: budget?.grossUsage ?? null,
+    budget_fabric_amount: budget && pricePerKg
+      ? Number((budget.grossUsage * pricePerKg).toFixed(2))
+      : null,
+    cmt_factory_quote: num(input.cmt_factory_quote),
+    total_cost_per_piece: num(input.total_cost_per_piece),
+    fob_price: num(input.fob_price),
+    ddp_price: num(input.ddp_price),
+    exchange_rate: num(input.exchange_rate) ?? 7.2,
+    source_file_name: '[手工录入]',
+    parsed_at: new Date().toISOString(),
+    parsed_by: user.id,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: existing } = await (supabase.from('order_cost_baseline') as any)
+    .select('id').eq('order_id', orderId).single();
+  const { error: baselineErr } = existing
+    ? await (supabase.from('order_cost_baseline') as any).update(baselineData).eq('order_id', orderId)
+    : await (supabase.from('order_cost_baseline') as any).insert(baselineData);
+  if (baselineErr) return { error: `成本基线写入失败：${baselineErr.message}` };
+
+  // 同步售价到 order_financials（按 incoterm 取 FOB/DDP；国内单为 CNY）
+  const isDomestic = ['RMB_EX_TAX', 'RMB_INC_TAX'].includes((order as any).incoterm);
+  const salePrice = (order as any).incoterm === 'DDP' ? num(input.ddp_price) : num(input.fob_price);
+  if (salePrice) {
+    const { data: fin } = await (supabase.from('order_financials') as any)
+      .select('id').eq('order_id', orderId).maybeSingle();
+    const finPayload = {
+      sale_price_per_piece: salePrice,
+      sale_currency: isDomestic ? 'CNY' : 'USD',
+      updated_at: new Date().toISOString(),
+    };
+    if (fin) {
+      await (supabase.from('order_financials') as any).update(finPayload).eq('order_id', orderId);
+    } else {
+      await (supabase.from('order_financials') as any).insert({ order_id: orderId, ...finPayload });
+    }
+  }
+
+  // 重算利润快照（失败不阻断）
+  try {
+    await calculateProfitSnapshot(supabase, { orderId, snapshotType: 'live' });
+  } catch (e: any) {
+    console.warn('[saveCostBaselineManual] profit snapshot failed:', e?.message);
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { data: { ok: true, budget_fabric_kg: budget?.grossUsage ?? null } };
+}
+
+// ════════════════════════════════════════════════
 // 2. 获取订单成本控制全景
 // ════════════════════════════════════════════════
 
