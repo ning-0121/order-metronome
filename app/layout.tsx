@@ -11,6 +11,8 @@ import { getUserRoleFromEmail } from "@/lib/utils/user-role";
 export const metadata: Metadata = {
   title: "绮陌服饰智能系统",
   description: "Qimo Activewear 智能订单管理系统",
+  // 内部系统，禁止搜索引擎收录（防止"搜绮陌服饰能搜到节拍器"）
+  robots: { index: false, follow: false, nocache: true },
   manifest: "/manifest.json",
   themeColor: "#4f46e5",
   appleWebApp: {
