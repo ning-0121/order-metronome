@@ -19,6 +19,23 @@
 
 ---
 
+## 文档体系（四层固定）+ 修宪纪律
+
+QIMO OS 文档固定四层（详见 `docs/00-Constitution/README.md`）：
+
+| 层 | 位置 | 变更频率 |
+|---|---|---|
+| **Constitution** | `docs/00-Constitution/Constitution.md` | 几乎不改（V1.0 Frozen，**≤10 条**）|
+| **ADR** | `docs/ADR/` | 经常新增（重要架构决策）|
+| **Domain** | `docs/Domains/` | 稳定演进（各业务域长期设计）|
+| **Design** | `docs/Designs/` | 短期（每阶段 O1/O2… 实施方案）|
+
+**修宪纪律（重要）**：发现新设计方向时，**优先修改 Domain Design 或 ADR，而不是频繁修改 Constitution**。只有经过多个阶段验证、确认能长期成立的原则，才允许升级进入 Constitution。→ Constitution 越来越稳，不是越来越长。
+
+**Constitution 是最高原则**，任何设计与之冲突以 Constitution 为准。10 条核心：业务对象优先（非部门）/ 单一真相源 / 生命周期非复制 / 字段归属 / Evidence≠Data / AI 是助手非真相源 / Manufacturing Order 是生产任务非工艺 / Order 表达需求 ⊥ Production 实现需求 / Build once generate everywhere / Evolution not Rewrite。
+
+---
+
 ## 技术栈
 
 | 层级 | 技术 |
