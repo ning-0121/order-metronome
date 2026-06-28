@@ -18,7 +18,7 @@ export function NotificationBell() {
       // 浏览器弹窗：有新通知时触发
       if (hasPermission && data && data.length > prev && prev > 0) {
         const latest = data[0];
-        new Notification('订单节拍器', {
+        new Notification('QIMO OS', {
           body: latest.title || latest.message,
           icon: '/icon-192.png',
         });

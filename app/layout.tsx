@@ -4,13 +4,14 @@ import { Navbar } from "@/components/Navbar";
 import { PWARegister } from "@/components/PWARegister";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRoleFromEmail } from "@/lib/utils/user-role";
+import { PRODUCT_NAME, PRODUCT_DESC, PRODUCT_TAGLINE_EN } from "@/lib/branding/constants";
 
 // 去掉 Google Fonts — Vercel 构建时经常拉不到导致部署失败
 // 改用系统字体栈，视觉差异极小但部署 100% 稳定
 
 export const metadata: Metadata = {
-  title: "绮陌服饰智能系统",
-  description: "Qimo Activewear 智能订单管理系统",
+  title: PRODUCT_NAME,
+  description: PRODUCT_DESC,
   // 内部系统，禁止搜索引擎收录（防止"搜绮陌服饰能搜到节拍器"）
   robots: { index: false, follow: false, nocache: true },
   manifest: "/manifest.json",
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "绮陌服饰智能系统",
+    title: PRODUCT_NAME,
   },
   other: {
     "mobile-web-app-capable": "yes",
@@ -48,21 +49,22 @@ export default async function RootLayout({
   return (
     <html lang="zh-CN">
       <body
-        className="bg-white text-gray-900 antialiased flex flex-col min-h-screen font-sans"
+        className="bg-white text-gray-900 antialiased font-sans min-h-screen"
       >
         <Navbar isAdmin={isAdmin} isProcurement={isProcurement} />
         <PWARegister />
-        <main className="container mx-auto bg-white px-4 py-8 flex-1">
-          {children}
-        </main>
-        <footer className="border-t border-gray-200 bg-gray-50 py-6 mt-auto">
+        {/* 左侧控制中心宽 60(15rem),桌面端正文留出左边距 */}
+        <div className="md:pl-60 flex flex-col min-h-screen">
+          <main className="container mx-auto bg-white px-4 py-8 flex-1">
+            {children}
+          </main>
+          <footer className="border-t border-gray-200 bg-gray-50 py-6 mt-auto">
           <div className="container mx-auto px-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs text-gray-500">
               <div className="flex items-center gap-2">
-                <span className="text-base">⏱</span>
-                <span className="font-semibold text-gray-700">绮陌服饰智能系统</span>
+                <span className="font-semibold text-gray-700">{PRODUCT_NAME}</span>
                 <span className="text-gray-400">·</span>
-                <span>Qimo Activewear Intelligent System</span>
+                <span>{PRODUCT_TAGLINE_EN}</span>
               </div>
               <div className="flex items-center gap-4">
                 <span>© {currentYear} 义乌绮陌服饰有限公司</span>
@@ -75,6 +77,7 @@ export default async function RootLayout({
             </div>
           </div>
         </footer>
+        </div>
       </body>
     </html>
   );

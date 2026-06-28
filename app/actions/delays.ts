@@ -308,7 +308,7 @@ export async function createDelayRequest(
         </div>
 
         <p style="color: #9ca3af; font-size: 12px; margin-top: 20px; margin-bottom: 0; text-align: center;">
-          绮陌服饰智能系统 · 延期申请自动通知
+          QIMO OS · 延期申请自动通知
         </p>
       </div>
     </div>

@@ -843,7 +843,7 @@ async function generateBusinessNarrative(
   const knowledge = getKnowledgeByTags(tags, { maxItems: 6 });
   const knowledgeBlock = formatKnowledgeForPrompt(knowledge);
 
-  const systemPrompt = `你是订单节拍器的风险分析引擎。你的工作是把系统检测到的事实数据用简洁的业务语言表达出来。
+  const systemPrompt = `你是 QIMO OS 的风险分析引擎。你的工作是把系统检测到的事实数据用简洁的业务语言表达出来。
 
 **核心原则：只说有数据支撑的话，不编造、不猜测、不推测。**
 

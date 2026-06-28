@@ -102,11 +102,11 @@ export async function sendPasswordResetEmail(email: string): Promise<{ error?: s
     await transporter.sendMail({
       from: process.env.SMTP_FROM || smtpUser,
       to: email,
-      subject: '【订单节拍器】密码重置',
+      subject: '【QIMO OS】密码重置',
       html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h2 style="color: #1a1a2e; margin: 0;">订单节拍器</h2>
+          <h2 style="color: #1a1a2e; margin: 0;">QIMO OS</h2>
           <p style="color: #666; font-size: 14px;">密码重置请求</p>
         </div>
         <p style="color: #333; font-size: 14px;">你好 ${userName}，</p>
@@ -121,7 +121,7 @@ export async function sendPasswordResetEmail(email: string): Promise<{ error?: s
         <p style="color: #999; font-size: 12px;">如果按钮无法点击，请复制以下链接到浏览器：</p>
         <p style="color: #4f46e5; font-size: 11px; word-break: break-all;">${resetLink}</p>
         <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
-        <p style="color: #bbb; font-size: 11px; text-align: center;">订单节拍器 · 绮陌科技</p>
+        <p style="color: #bbb; font-size: 11px; text-align: center;">QIMO OS · 绮陌科技</p>
       </div>`,
     });
 

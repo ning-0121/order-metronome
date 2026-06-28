@@ -278,7 +278,7 @@ export async function askAgent(
     //   → 这部分所有用户共用，5 分钟内命中 cache 只收 10%
     // 动态层（不缓存）：用户角色信息 → 追加到第一条 user message
     //   → 每个用户不同，不值得缓存
-    const staticSystemPrompt = `你是「绮陌服饰智能系统」的 AI 业务助手，名字叫"小绮"。
+    const staticSystemPrompt = `你是「QIMO OS」的 AI 业务助手，名字叫"小绮"。
 
 **你的身份**：10年外贸服装行业专家 + 公司内部知识专家。
 

@@ -437,7 +437,7 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = '订单节拍器';
+  wb.creator = 'QIMO OS';
   const ws = wb.addWorksheet('采购对账单', { views: [{ state: 'frozen', ySplit: 3 }] });
 
   // 标题

@@ -6,19 +6,30 @@ import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
 import { NotificationBell } from '@/components/NotificationBell';
 import { getPendingPriceApprovalsCount } from '@/app/actions/price-approvals';
+import { PRODUCT_NAME } from '@/lib/branding/constants';
 
 interface NavbarProps {
   isAdmin?: boolean;
   isProcurement?: boolean;
 }
 
+interface NavLink {
+  href: string;
+  label: string;
+  icon: string;
+  badge?: 'price';
+}
+interface NavSection {
+  label?: string;
+  links: NavLink[];
+}
+
 export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [pendingPriceCount, setPendingPriceCount] = useState(0);
 
-  // 价格审批待办数量 — 仅管理员，每 60s 刷新
+  // 价格审批待办数量 — 仅管理员，每 120s 刷新
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
@@ -37,237 +48,192 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
     return null;
   }
 
-  // 主导航（精简核心入口）
-  const navLinks = isAdmin
-    ? [
-        { href: '/ceo', label: '我的节拍', icon: '🎯' },
-        { href: '/orders', label: '订单列表', icon: '📦' },
-        { href: '/analytics', label: '数据分析', icon: '📊' },
-        { href: '/admin/users', label: '用户', icon: '👥' },
-      ]
-    : [
-        { href: '/dashboard', label: '我的工作台', icon: '📋' },
-        { href: '/my-customers', label: '我的客户', icon: '🎯' },
-        { href: '/orders', label: '订单列表', icon: '📦' },
-        // 采购员：把"今日简报"换成"采购中心"作为核心入口
-        isProcurement
-          ? { href: '/procurement', label: '采购中心', icon: '🛒' }
-          : { href: '/briefing', label: '今日简报', icon: '📧' },
-      ];
-
-  // 更多菜单分组（admin）
-  const moreGroups = isAdmin
+  // ── 控制中心菜单（QIMO OS：左侧 = 各控制中心，订单只是其中一个）──
+  const sections: NavSection[] = isAdmin
     ? [
         {
-          label: '业务工具',
           links: [
-            { href: '/my-customers', label: '我的客户面板', icon: '👤' },
+            { href: '/ceo', label: '我的节拍', icon: '🎯' },
+            { href: '/orders', label: '订单中心', icon: '📦' },
+            { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
+            { href: '/warehouse', label: '仓库中心', icon: '🏬' },
+            { href: '/analytics', label: '数据分析', icon: '📊' },
+          ],
+        },
+        {
+          label: '业务',
+          links: [
+            { href: '/my-customers', label: '我的客户', icon: '👤' },
+            { href: '/customers', label: '客户管理', icon: '🤝' },
             { href: '/sales-targets', label: '客户年度目标', icon: '🎯' },
-            { href: '/quoter',     label: '报价员',   icon: '💰' },
-            { href: '/customers',  label: '客户管理', icon: '🤝' },
-            { href: '/factories',  label: '工厂管理', icon: '🏭' },
-            { href: '/memos',      label: '备忘录',   icon: '📝' },
+            { href: '/quoter', label: '报价员', icon: '💰' },
+            { href: '/factories', label: '工厂管理', icon: '🏭' },
+            { href: '/memos', label: '备忘录', icon: '📝' },
           ],
         },
         {
           label: 'AI',
           links: [
             { href: '/ai-knowledge', label: 'AI 知识库', icon: '🧠' },
-            { href: '/my-assistant', label: 'AI 助手',   icon: '🤖' },
+            { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
           ],
         },
         {
-          label: '邮件',
+          label: '治理',
           links: [
+            { href: '/admin/price-approvals', label: '价格审批', icon: '💰', badge: 'price' },
+            { href: '/admin/system-health', label: '系统守护', icon: '🛡' },
+            { href: '/admin/overdue', label: '逾期治理', icon: '🚨' },
+            { href: '/admin/delay-hotspots', label: '延误排行榜', icon: '📉' },
+            { href: '/admin/customer-schedules', label: '客户节奏', icon: '🎼' },
             { href: '/admin/mail-monitor', label: '今日邮件晨报', icon: '📧' },
           ],
         },
         {
-          label: '采购 / 供应链',
-          links: [
-            { href: '/procurement', label: '采购中心', icon: '🛒' },
-          ],
-        },
-        {
-          label: '审批 / 治理',
-          links: [
-            { href: '/admin/price-approvals',    label: '价格审批',   icon: '💰' },
-            { href: '/admin/system-health',      label: '系统守护',   icon: '🛡' },
-            { href: '/admin/overdue',            label: '逾期治理',   icon: '🚨' },
-            { href: '/admin/delay-hotspots',     label: '延误排行榜', icon: '📉' },
-            { href: '/admin/customer-schedules', label: '客户节奏',   icon: '🎼' },
-          ],
-        },
-        {
-          label: '配置',
+          label: '系统',
           links: [
             { href: '/admin/order-templates', label: '订单模板', icon: '📋' },
-          ],
-        },
-        {
-          label: '帮助',
-          links: [
+            { href: '/admin/users', label: '用户管理', icon: '👥' },
             { href: '/guide', label: '操作说明', icon: '📖' },
           ],
         },
       ]
-    : [];
-
-  // 非 admin 平铺列表（保持原样）
-  const moreLinks = isAdmin
-    ? moreGroups.flatMap(g => g.links)
     : [
-        { href: '/sales-targets', label: '年度目标', icon: '🎯' },
-        { href: '/quoter',       label: '报价员',   icon: '💰' },
-        { href: '/memos',        label: '备忘录',   icon: '📝' },
-        { href: '/my-assistant', label: 'AI 助手',  icon: '🤖' },
-        { href: '/guide',        label: '操作说明', icon: '📖' },
+        {
+          links: [
+            { href: '/dashboard', label: '我的工作台', icon: '📋' },
+            { href: '/my-customers', label: '我的客户', icon: '🎯' },
+            { href: '/orders', label: '订单列表', icon: '📦' },
+            isProcurement
+              ? { href: '/procurement', label: '采购中心', icon: '🛒' }
+              : { href: '/briefing', label: '今日简报', icon: '📧' },
+          ],
+        },
+        {
+          label: '工具',
+          links: [
+            { href: '/sales-targets', label: '年度目标', icon: '🎯' },
+            { href: '/quoter', label: '报价员', icon: '💰' },
+            { href: '/memos', label: '备忘录', icon: '📝' },
+            { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
+            { href: '/guide', label: '操作说明', icon: '📖' },
+          ],
+        },
       ];
 
   const logoHref = isAdmin ? '/ceo' : '/dashboard';
 
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+
+  const renderLink = (link: NavLink, onNavigate?: () => void) => {
+    const active = isActive(link.href);
+    const showBadge = link.badge === 'price' && pendingPriceCount > 0;
+    return (
+      <Link
+        key={link.href}
+        href={link.href}
+        onClick={onNavigate}
+        className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+          active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+        }`}
+      >
+        <span className="flex items-center gap-2.5">
+          <span className="text-base">{link.icon}</span>
+          {link.label}
+        </span>
+        {showBadge && (
+          <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold min-w-[18px] text-center">
+            {pendingPriceCount}
+          </span>
+        )}
+      </Link>
+    );
+  };
+
+  const Logo = ({ onNavigate }: { onNavigate?: () => void }) => (
+    <Link href={logoHref} onClick={onNavigate} className="flex items-center gap-2">
+      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-sm font-bold">
+        Q
+      </div>
+      <span className="text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+        {PRODUCT_NAME}
+      </span>
+    </Link>
+  );
+
+  const navContent = (onNavigate?: () => void) => (
+    <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+      {sections.map((section, si) => (
+        <div key={section.label || `sec-${si}`}>
+          {section.label && (
+            <p className="px-3 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+              {section.label}
+            </p>
+          )}
+          <div className="space-y-0.5">
+            {section.links.map((link) => renderLink(link, onNavigate))}
+          </div>
+        </div>
+      ))}
+    </nav>
+  );
+
   return (
-    <nav className="sticky top-0 z-50 border-b border-gray-200/80 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-14 md:h-16 items-center justify-between">
-          {/* Logo + Desktop Nav */}
-          <div className="flex items-center gap-6 lg:gap-10">
-            <Link href={logoHref} className="flex items-center gap-2">
-              <div className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-base md:text-lg">
-                ⏱
-              </div>
-              <span className="hidden sm:block text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                绮陌服饰智能系统
-              </span>
-            </Link>
-
-            {/* Desktop nav links */}
-            <div className="hidden md:flex items-center gap-1">
-              {navLinks.map((link) => {
-                const isActive = pathname === link.href || pathname.startsWith(link.href + '/');
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                      isActive
-                        ? 'bg-indigo-50 text-indigo-700'
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                    }`}
-                  >
-                    <span className="text-sm">{link.icon}</span>
-                    {link.label}
-                  </Link>
-                );
-              })}
-              {/* 更多下拉 */}
-              {moreLinks.length > 0 && (
-                <div className="relative">
-                  <button onClick={() => setMoreOpen(!moreOpen)}
-                    className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all relative">
-                    更多 <svg className={`w-3 h-3 transition-transform ${moreOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                    {pendingPriceCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white" />
-                    )}
-                  </button>
-                  {moreOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-                      <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-xl border border-gray-200 shadow-lg z-50 py-1 max-h-[80vh] overflow-y-auto">
-                        {isAdmin
-                          ? moreGroups.map((group, gi) => (
-                              <div key={group.label}>
-                                {gi > 0 && <div className="mx-3 my-1 border-t border-gray-100" />}
-                                <p className="px-4 pt-2 pb-0.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
-                                  {group.label}
-                                </p>
-                                {group.links.map(link => {
-                                  const showBadge = link.href === '/admin/price-approvals' && pendingPriceCount > 0;
-                                  return (
-                                    <Link key={link.href} href={link.href} onClick={() => setMoreOpen(false)}
-                                      className="flex items-center justify-between gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
-                                      <span className="flex items-center gap-2"><span>{link.icon}</span>{link.label}</span>
-                                      {showBadge && (
-                                        <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold min-w-[18px] text-center">
-                                          {pendingPriceCount}
-                                        </span>
-                                      )}
-                                    </Link>
-                                  );
-                                })}
-                              </div>
-                            ))
-                          : moreLinks.map(link => (
-                              <Link key={link.href} href={link.href} onClick={() => setMoreOpen(false)}
-                                className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
-                                <span>{link.icon}</span>{link.label}
-                              </Link>
-                            ))
-                        }
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right: notification + logout + hamburger */}
-          <div className="flex items-center gap-1">
-            <NotificationBell />
-            <form action={signOut} className="hidden sm:block">
-              <button
-                type="submit"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-                退出
-              </button>
-            </form>
-            {/* Mobile hamburger */}
+    <>
+      {/* Desktop 左侧控制中心 */}
+      <aside className="hidden md:flex fixed left-0 top-0 h-screen w-60 flex-col border-r border-gray-200 bg-white z-40">
+        <div className="h-16 px-4 flex items-center border-b border-gray-100 shrink-0">
+          <Logo />
+        </div>
+        {navContent()}
+        <div className="border-t border-gray-100 px-3 py-2 flex items-center justify-between shrink-0">
+          <NotificationBell />
+          <form action={signOut}>
             <button
-              onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100"
+              type="submit"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all"
             >
-              {mobileOpen ? (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              )}
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              退出
             </button>
-          </div>
+          </form>
+        </div>
+      </aside>
+
+      {/* Mobile 顶栏 */}
+      <div className="md:hidden sticky top-0 z-40 flex items-center justify-between h-14 px-4 border-b border-gray-200 bg-white/90 backdrop-blur-md">
+        <Logo />
+        <div className="flex items-center gap-1">
+          <NotificationBell />
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="p-2 rounded-lg text-gray-600 hover:bg-gray-100"
+            aria-label="菜单"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         </div>
       </div>
 
-      {/* Mobile drawer */}
+      {/* Mobile 抽屉 */}
       {mobileOpen && (
-        <div className="md:hidden border-t border-gray-200 bg-white">
-          <div className="px-4 py-3 space-y-1">
-            {[...navLinks, ...moreLinks].map((link) => {
-              const isActive = pathname === link.href || pathname.startsWith(link.href + '/');
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all ${
-                    isActive
-                      ? 'bg-indigo-50 text-indigo-700'
-                      : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <span className="text-lg">{link.icon}</span>
-                  {link.label}
-                </Link>
-              );
-            })}
-            <form action={signOut} className="sm:hidden pt-2 border-t border-gray-100">
+        <div className="md:hidden fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setMobileOpen(false)} />
+          <div className="absolute left-0 top-0 h-full w-72 max-w-[80vw] bg-white shadow-xl flex flex-col">
+            <div className="h-14 px-4 flex items-center justify-between border-b border-gray-100 shrink-0">
+              <Logo onNavigate={() => setMobileOpen(false)} />
+              <button onClick={() => setMobileOpen(false)} className="p-2 rounded-lg text-gray-600 hover:bg-gray-100" aria-label="关闭">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {navContent(() => setMobileOpen(false))}
+            <form action={signOut} className="border-t border-gray-100 p-3 shrink-0">
               <button
                 type="submit"
                 className="flex items-center gap-3 w-full px-3 py-3 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-all"
@@ -281,6 +247,6 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
           </div>
         </div>
       )}
-    </nav>
+    </>
   );
 }

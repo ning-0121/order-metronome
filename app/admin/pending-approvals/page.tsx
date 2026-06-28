@@ -8,7 +8,7 @@ import { BulkApproveDelaysButton } from '@/components/BulkApproveDelaysButton';
 export const dynamic = 'force-dynamic';
 
 export const metadata = {
-  title: '待审批中心 — Order Metronome',
+  title: '待审批中心 — QIMO OS',
 };
 
 interface PageProps {

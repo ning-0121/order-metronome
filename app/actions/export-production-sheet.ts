@@ -120,7 +120,7 @@ export async function exportProductionTrackingSheet(): Promise<{
   // 生成 Excel
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = '订单节拍器';
+  wb.creator = 'QIMO OS';
   wb.created = new Date();
   const ws = wb.addWorksheet('生产订单一览', { views: [{ state: 'frozen', ySplit: 2 }] });
 

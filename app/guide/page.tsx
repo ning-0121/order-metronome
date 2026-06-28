@@ -160,7 +160,7 @@ export default function GuidePage() {
       {/* 标题 */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">操作说明 & SOP</h1>
-        <p className="text-sm text-gray-500 mt-1">订单节拍器系统 — 员工操作手册</p>
+        <p className="text-sm text-gray-500 mt-1">QIMO OS — 员工操作手册</p>
       </div>
 
       {/* 目录导航 */}
@@ -1019,7 +1019,7 @@ export default function GuidePage() {
 
       {/* 页脚 */}
       <div className="text-center py-6 border-t border-gray-200">
-        <p className="text-xs text-gray-400">订单节拍器 v3.2 | 更新于 2026-03-31 | 访问 order.qimoactivewear.com | 如有问题请联系管理员</p>
+        <p className="text-xs text-gray-400">QIMO OS | 访问 order.qimoactivewear.com | 如有问题请联系管理员</p>
       </div>
     </div>
   );

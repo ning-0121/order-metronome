@@ -5,7 +5,7 @@ import { getMyDashboard } from '@/app/actions/my-customers';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: '我的客户面板 — Order Metronome' };
+export const metadata = { title: '我的客户面板 — QIMO OS' };
 
 const fmtWan = (n: number) => n >= 10000 ? `${(n / 10000).toFixed(1)} 万件` : `${n.toLocaleString('zh-CN')} 件`;
 

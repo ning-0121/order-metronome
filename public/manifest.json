@@ -1,7 +1,7 @@
 {
-  "name": "绮陌服饰智能系统",
-  "short_name": "绮陌智能",
-  "description": "Qimo Activewear 智能订单管理系统 — 订单节拍器",
+  "name": "QIMO OS",
+  "short_name": "QIMO OS",
+  "description": "QIMO OS — 服装 OEM/ODM 的 AI 企业操作系统",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#ffffff",

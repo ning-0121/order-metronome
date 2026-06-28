@@ -8,7 +8,7 @@ import { TargetEditor } from '@/components/TargetEditor';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: '客户年度销售目标 — Order Metronome' };
+export const metadata = { title: '客户年度销售目标 — QIMO OS' };
 
 interface PageProps {
   searchParams?: Promise<{ year?: string }>;

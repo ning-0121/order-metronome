@@ -7,7 +7,7 @@ import { TaskList } from '@/components/TaskList';
 export const dynamic = 'force-dynamic';
 
 export const metadata = {
-  title: '今日任务 — Order Metronome',
+  title: '今日任务 — QIMO OS',
 };
 
 const DAILY_QUOTES = [
