@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   listMaterialMaster, createMaterialMaster, updateMaterialMaster, archiveMaterialMaster,
-  listPendingPromotion, promoteTemporaryMaterial, canManageMaster, type MasterInput,
+  listPendingPromotion, promoteTemporaryMaterial, canManageMaster, findSimilarMaterials, type MasterInput,
 } from '@/app/actions/material-master';
 
 const CATEGORIES: { value: string; label: string }[] = [
@@ -28,6 +28,7 @@ export default function MaterialMasterPage() {
   // 新建/编辑表单
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [editingCode, setEditingCode] = useState<string | null>(null);
   const [form, setForm] = useState<MasterInput>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [similar, setSimilar] = useState<any[] | null>(null);
@@ -47,22 +48,34 @@ export default function MaterialMasterPage() {
   useEffect(() => { canManageMaster().then(setCanManage); }, []);
   useEffect(() => { if (tab === 'lib') loadLib(); else loadPending(); }, [tab, loadLib, loadPending]);
 
-  function openNew() { setEditId(null); setForm(emptyForm); setSimilar(null); setShowForm(true); }
+  function openNew() { setEditId(null); setEditingCode(null); setForm(emptyForm); setSimilar(null); setShowForm(true); }
   function openEdit(r: any) {
-    setEditId(r.id);
+    setEditId(r.id); setEditingCode(r.material_code || null);
     setForm({ material_name: r.material_name || '', category: r.category || 'other', default_unit: r.default_unit || '', default_consumption: r.default_consumption ?? '', default_supplier_name: r.default_supplier_name || '', default_lead_days: r.default_lead_days ?? '', specification: r.specification || '' });
     setSimilar(null); setShowForm(true);
   }
 
-  async function save(force = false) {
-    setSaving(true); setMsg(''); setSimilar(null);
+  // 实时相似搜索:输入名称即查(debounce 300ms),仅新建时
+  useEffect(() => {
+    if (!showForm || editId) { setSimilar(null); return; }
+    const name = (form.material_name || '').trim();
+    if (name.length < 2) { setSimilar(null); return; }
+    const t = setTimeout(async () => {
+      const res = await findSimilarMaterials(name, form.category, form.specification || undefined);
+      setSimilar(res.data || []);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [form.material_name, form.category, form.specification, showForm, editId]);
+
+  async function save() {
+    setSaving(true); setMsg('');
     const res = editId
       ? await updateMaterialMaster(editId, form)
-      : await createMaterialMaster(form, { force });
+      : await createMaterialMaster(form, { force: true });  // 实时相似已提示,这里直接建(V1 不阻止)
     setSaving(false);
-    if ((res as any).similar) { setSimilar((res as any).similar); return; }  // 相似提示,不阻断
     if (res.error) { setMsg('保存失败：' + res.error); return; }
-    setShowForm(false); setMsg(editId ? '✅ 已更新' : `✅ 已新建（${(res as any).data?.material_code || ''}）`);
+    setShowForm(false); setSimilar(null);
+    setMsg(editId ? '✅ 已更新' : `✅ 已新建（编号 ${(res as any).data?.material_code || ''}）`);
     loadLib();
   }
 
@@ -204,6 +217,9 @@ export default function MaterialMasterPage() {
           <div className="relative bg-white rounded-2xl border border-gray-200 shadow-xl p-6 w-full max-w-lg">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">{editId ? '编辑物料' : '新建物料'}</h2>
             <div className="grid grid-cols-2 gap-3">
+              <label className="col-span-2 text-xs text-gray-600">编号(系统自动生成,不可填)
+                <input readOnly value={editId ? (editingCode || '—') : '保存后自动生成（如 FAB-0001）'}
+                  className="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-400 cursor-not-allowed" /></label>
               <label className="col-span-2 text-xs text-gray-600">物料名称 *
                 <input value={form.material_name} onChange={e => setForm(f => ({ ...f, material_name: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
@@ -229,18 +245,27 @@ export default function MaterialMasterPage() {
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
             </div>
 
-            {similar && (
-              <div className="mt-3 text-xs bg-amber-50 border border-amber-200 rounded-lg p-2">
-                <p className="text-amber-700 font-medium">⚠️ 可能已有类似物料(不强制阻止):</p>
-                <ul className="text-amber-700 mt-1 space-y-0.5">
-                  {similar.map(s => <li key={s.id}>· {s.material_name} {s.material_code ? `(${s.material_code})` : ''} {s.specification || ''}</li>)}
+            {!editId && similar && similar.length > 0 && (
+              <div className="mt-3 text-xs bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-amber-800 font-medium mb-1.5">⚠ 可能已有:</p>
+                <ul className="space-y-1">
+                  {similar.map(s => (
+                    <li key={s.id} className="flex items-center gap-2 text-amber-800">
+                      <span className="font-mono text-amber-600 shrink-0">{s.material_code || '—'}</span>
+                      <span className="font-medium shrink-0">{s.material_name}</span>
+                      <span className="text-amber-600 truncate">{s.specification || ''}</span>
+                    </li>
+                  ))}
                 </ul>
-                <button onClick={() => save(true)} className="mt-2 text-amber-800 underline">仍要新建</button>
+                <div className="flex gap-2 mt-2.5">
+                  <button onClick={() => save()} disabled={saving} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">继续创建</button>
+                  <button onClick={() => { setShowForm(false); setSearch(similar[0].material_name); }} className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100">使用已有</button>
+                </div>
               </div>
             )}
 
             <div className="flex gap-2 mt-5">
-              <button onClick={() => save(false)} disabled={saving || !form.material_name.trim()}
+              <button onClick={() => save()} disabled={saving || !form.material_name.trim()}
                 className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
                 {saving ? '保存中...' : editId ? '更新' : '保存'}
               </button>

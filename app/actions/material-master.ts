@@ -51,18 +51,23 @@ export async function listMaterialMaster(params: { search?: string; category?: s
   return { data };
 }
 
-/** 相似物料提示:同类别 + 名称包含(V1 简单匹配,不阻断)。 */
-export async function findSimilarMaterials(name: string, category: string) {
+/** 相似物料提示:同类别 + 名称包含 +(可选)规格相似(V1 简单匹配,不阻断)。 */
+export async function findSimilarMaterials(name: string, category: string, spec?: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: [] };
-  const token = (name || '').trim();
-  if (token.length < 2) return { data: [] };
-  const { data } = await (supabase.from('material_master') as any)
+  // 去掉会破坏 PostgREST or() 语法的字符(逗号/括号/百分号)
+  const clean = (s: string) => s.replace(/[%,()]/g, ' ').trim();
+  const token = clean(name || '');
+  if (token.length < 2 || !category) return { data: [] };
+  const specTok = clean(spec || '');
+  let q = (supabase.from('material_master') as any)
     .select('id, material_code, material_name, specification')
-    .eq('is_temporary', false).eq('status', 'active').eq('category', category)
-    .ilike('material_name', `%${token}%`)
-    .limit(5);
+    .eq('is_temporary', false).eq('status', 'active').eq('category', category);
+  q = specTok.length >= 2
+    ? q.or(`material_name.ilike.%${token}%,specification.ilike.%${specTok}%`)
+    : q.ilike('material_name', `%${token}%`);
+  const { data } = await q.limit(6);
   return { data: data || [] };
 }
 
