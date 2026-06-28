@@ -56,7 +56,6 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
             { href: '/ceo', label: '我的节拍', icon: '🎯' },
             { href: '/orders', label: '订单中心', icon: '📦' },
             { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
-            { href: '/warehouse', label: '仓库中心', icon: '🏬' },
             { href: '/analytics', label: '数据分析', icon: '📊' },
           ],
         },

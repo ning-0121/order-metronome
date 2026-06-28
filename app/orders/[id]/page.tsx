@@ -40,6 +40,7 @@ import { rootCauseEngineEnabled } from '@/lib/engine/featureFlags';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
 import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
 import { CostControlTab } from '@/components/tabs/CostControlTab';
+import { SupplyChainTab } from '@/components/tabs/SupplyChainTab';
 import { BackButton } from '@/components/BackButton';
 import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
@@ -72,7 +73,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -407,6 +408,7 @@ export default async function OrderDetailPage({
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料和包装' },
           { key: 'procurement', label: '📦 采购进度' },
+          { key: 'supply_chain', label: '🔗 供应链' },
           ...(canSeeFinancials ? [{ key: 'cost_control', label: '💰 成本控制' }] : []),
           { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '出货管理' },
@@ -945,6 +947,13 @@ export default async function OrderDetailPage({
               canRecordReceipt={isAdmin || currentRoles.some(r => ['merchandiser'].includes(r))}
             />
           </div>
+          </div>
+        )}
+
+        {/* Tab: 供应链概览（Phase 1 — 只读归集，不改采购主流程） */}
+        {activeTab === 'supply_chain' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <SupplyChainTab orderId={id} />
           </div>
         )}
 
