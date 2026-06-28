@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem } from '@/app/actions/bom';
+import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder } from '@/app/actions/bom';
 import { listMaterialMaster } from '@/app/actions/material-master';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
@@ -54,6 +54,17 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [tempForm, setTempForm] = useState(emptyTempForm);
   const [tempSaving, setTempSaving] = useState(false);
   const [tempErr, setTempErr] = useState('');
+
+  // 复制上一单原辅料（O1b-3）
+  const [showCopy, setShowCopy] = useState(false);
+  const [copySearch, setCopySearch] = useState('');
+  const [copyOrders, setCopyOrders] = useState<any[]>([]);
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [copySource, setCopySource] = useState<any | null>(null);
+  const [copyPreview, setCopyPreview] = useState<any[]>([]);
+  const [copyMode, setCopyMode] = useState<'append' | 'replace'>('append');
+  const [copySaving, setCopySaving] = useState(false);
+  const [copyErr, setCopyErr] = useState('');
 
   const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
@@ -139,7 +150,7 @@ export function BomTab({ orderId }: { orderId: string }) {
   }
 
   function openMaster() {
-    setShowMaster(true); setShowAdd(false); setShowImport(false);
+    setShowMaster(true); setShowAdd(false); setShowImport(false); setShowCopy(false);
     setMasterSearch(''); setPicked(null); setMasterErr(''); setCreatingTemp(false);
     setMasterLoading(true);
     listMaterialMaster({}).then(res => { setMasterResults(res.data || []); setMasterLoading(false); });
@@ -194,6 +205,39 @@ export function BomTab({ orderId }: { orderId: string }) {
     setTempSaving(false);
     if (res.error) { setTempErr(res.error); return; }
     setCreatingTemp(false); setShowMaster(false); await reload();
+  }
+
+  function openCopy() {
+    setShowCopy(true); setShowAdd(false); setShowImport(false); setShowMaster(false);
+    setCopySearch(''); setCopySource(null); setCopyPreview([]); setCopyMode('append'); setCopyErr('');
+    setCopyLoading(true);
+    listCopyableOrders(orderId).then(res => { setCopyOrders(res.data || []); setCopyLoading(false); });
+  }
+
+  // 搜索历史订单（debounce 300ms，列表态）
+  useEffect(() => {
+    if (!showCopy || copySource) return;
+    const t = setTimeout(async () => {
+      setCopyLoading(true);
+      const res = await listCopyableOrders(orderId, copySearch.trim() || undefined);
+      setCopyOrders(res.data || []); setCopyLoading(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [copySearch, showCopy, copySource, orderId]);
+
+  async function selectCopySource(o: any) {
+    setCopySource(o); setCopyErr(''); setCopyPreview([]);
+    const { data } = await getBomItems(o.id);
+    setCopyPreview(data || []);
+  }
+
+  async function doCopy() {
+    if (!copySource) return;
+    setCopySaving(true); setCopyErr('');
+    const res = await copyBomFromOrder(orderId, copySource.id, items.length > 0 ? copyMode : 'append');
+    setCopySaving(false);
+    if (res.error) { setCopyErr(res.error); return; }
+    setShowCopy(false); setCopySource(null); await reload();
   }
 
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
@@ -422,14 +466,99 @@ export function BomTab({ orderId }: { orderId: string }) {
     </div>
   );
 
+  const copyPanel = (
+    <div className="bg-violet-50 rounded-xl p-4 mb-4 border border-violet-200">
+      {!copySource ? (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-medium text-gray-700">📋 复制上一单原辅料</div>
+            <button onClick={() => setShowCopy(false)} className="text-xs text-gray-400 hover:text-gray-600">关闭</button>
+          </div>
+          <input autoFocus placeholder="搜索订单号 / 客户 / 款号 / 产品…" value={copySearch} onChange={e => setCopySearch(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-3" />
+          {copyLoading ? (
+            <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
+          ) : copyOrders.length === 0 ? (
+            <p className="text-xs text-gray-500 py-4 text-center">没有可复制的历史订单(候选订单需已录入原辅料)。</p>
+          ) : (
+            <div className="max-h-72 overflow-y-auto divide-y divide-violet-100 bg-white rounded-lg border border-violet-100">
+              {copyOrders.map(o => (
+                <button key={o.id} onClick={() => selectCopySource(o)}
+                  className="w-full text-left py-2 px-3 hover:bg-violet-50 flex items-center gap-2 text-xs">
+                  <span className="font-mono text-violet-600 shrink-0 w-28 truncate">{o.order_no}</span>
+                  <span className="text-gray-700 shrink-0 w-24 truncate">{o.customer_name || '—'}</span>
+                  <span className="text-gray-500 flex-1 truncate">{o.product_name || o.style_no || '—'}</span>
+                  <span className="text-gray-400 shrink-0">{(o.etd || o.factory_date || '').slice(0, 10) || '—'}</span>
+                  <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 shrink-0">{o.bom_count} 行</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={() => { setCopySource(null); setCopyPreview([]); }} className="text-xs text-violet-600 hover:underline">← 返回</button>
+            <span className="text-sm font-medium text-gray-700">预览 {copySource.order_no} 的原辅料({copyPreview.length} 行)</span>
+          </div>
+          <div className="max-h-56 overflow-y-auto bg-white rounded-lg border border-violet-100 mb-3">
+            <table className="w-full text-xs">
+              <thead><tr className="border-b border-gray-100 text-gray-500">
+                {['', '名称', '类别', '单耗', '单位', '颜色', '位置', '备注'].map((h, i) => (
+                  <th key={i} className="py-1.5 px-2 text-left font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {copyPreview.map(r => (
+                  <tr key={r.id} className="border-b border-gray-50">
+                    <td className="py-1.5 px-2 whitespace-nowrap">{r.material_master_id ? (r.material_code ? '🔗' : '🔗临') : ''}</td>
+                    <td className="py-1.5 px-2 font-medium text-gray-800">{r.material_name}</td>
+                    <td className="py-1.5 px-2 text-gray-500">{CAT_LABEL[r.material_type] || r.material_type}</td>
+                    <td className="py-1.5 px-2 text-gray-600">{r.qty_per_piece ?? '—'}</td>
+                    <td className="py-1.5 px-2 text-gray-500">{r.unit || '—'}</td>
+                    <td className="py-1.5 px-2 text-gray-500">{r.color || '—'}</td>
+                    <td className="py-1.5 px-2 text-gray-500">{r.placement || '—'}</td>
+                    <td className="py-1.5 px-2 text-gray-400 max-w-[120px] truncate">{r.notes || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {items.length > 0 && (
+            <div className="flex items-center gap-4 text-xs mb-3">
+              <span className="text-gray-500">当前订单已有 {items.length} 行:</span>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="copyMode" checked={copyMode === 'append'} onChange={() => setCopyMode('append')} /> 追加
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="copyMode" checked={copyMode === 'replace'} onChange={() => setCopyMode('replace')} />
+                <span className="text-red-600">清空后复制</span>
+              </label>
+            </div>
+          )}
+          {copyErr && <p className="text-xs text-red-600 mb-2">{copyErr}</p>}
+          <div className="flex gap-2">
+            <button onClick={doCopy} disabled={copySaving || copyPreview.length === 0}
+              className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
+              {copySaving ? '复制中…' : `确认复制 ${copyPreview.length} 行${items.length > 0 && copyMode === 'replace' ? '(清空现有)' : ''}`}</button>
+            <button onClick={() => { setCopySource(null); setCopyPreview([]); }}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">取消</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm text-gray-500">{items.length} 条物料记录</span>
-        {!showAdd && !showImport && !showMaster && (
-          <div className="flex gap-2">
+        {!showAdd && !showImport && !showMaster && !showCopy && (
+          <div className="flex flex-wrap gap-2 justify-end">
             <button onClick={openMaster}
               className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">+ 从物料库选择</button>
+            <button onClick={openCopy}
+              className="text-sm px-3 py-1.5 rounded-lg border border-violet-300 text-violet-700 font-medium hover:bg-violet-50">📋 复制上一单</button>
             <button onClick={openImport}
               className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">📥 从客户标准库带入</button>
             <button onClick={() => { setShowAdd(true); setEditId(null); setForm(emptyForm); }}
@@ -457,9 +586,10 @@ export function BomTab({ orderId }: { orderId: string }) {
         </div>
       )}
       {showMaster && masterPanel}
+      {showCopy && copyPanel}
       {showImport && importPanel}
       {showAdd && formRow}
-      {items.length === 0 && !showAdd && !showMaster ? (
+      {items.length === 0 && !showAdd && !showMaster && !showCopy ? (
         <div className="text-center py-12 text-gray-400">
           <p className="mb-2">暂无原辅料数据</p>
           <button onClick={openMaster} className="text-indigo-600 text-sm font-medium hover:underline">+ 从物料库选择录入</button>

@@ -160,6 +160,111 @@ export async function addTemporaryBomItem(orderId: string, input: {
   return {};
 }
 
+/**
+ * O1b-3:列出可复制原辅料的历史订单(只含有 BOM 的)。
+ * 优先级:同客户 > 同 style_no > 最近;v1 简单实现(同客户∪全局近30 → 过滤有 BOM → top30)。
+ */
+export async function listCopyableOrders(currentOrderId: string, search?: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: [], error: '请先登录' };
+
+  const { data: cur } = await (supabase.from('orders') as any)
+    .select('customer_name, style_no').eq('id', currentOrderId).single();
+  const curCustomer = (cur as any)?.customer_name || null;
+  const curStyle = (cur as any)?.style_no || null;
+
+  const cols = 'id, order_no, customer_name, style_no, product_name, factory_date, etd, created_at';
+  const pool = new Map<string, any>();
+  const addAll = (rows: any[]) => { for (const r of rows || []) if (r.id !== currentOrderId) pool.set(r.id, r); };
+
+  // 去掉破坏 PostgREST or() 语法的字符
+  const s = (search || '').replace(/[%,()]/g, ' ').trim();
+  if (s) {
+    const { data } = await (supabase.from('orders') as any)
+      .select(cols)
+      .or(`order_no.ilike.%${s}%,customer_name.ilike.%${s}%,style_no.ilike.%${s}%,product_name.ilike.%${s}%`)
+      .order('created_at', { ascending: false }).limit(50);
+    addAll(data);
+  } else {
+    if (curCustomer) {
+      const { data } = await (supabase.from('orders') as any)
+        .select(cols).eq('customer_name', curCustomer)
+        .order('created_at', { ascending: false }).limit(30);
+      addAll(data);
+    }
+    const { data } = await (supabase.from('orders') as any)
+      .select(cols).order('created_at', { ascending: false }).limit(30);
+    addAll(data);
+  }
+
+  const ids = Array.from(pool.keys());
+  if (ids.length === 0) return { data: [] };
+
+  // 统计每单 BOM 行数,过滤 0 行
+  const { data: bomRows } = await (supabase.from('materials_bom') as any)
+    .select('order_id').in('order_id', ids);
+  const countMap = new Map<string, number>();
+  for (const b of (bomRows || [])) countMap.set(b.order_id, (countMap.get(b.order_id) || 0) + 1);
+
+  const score = (o: any) => (o.customer_name === curCustomer ? 2 : 0) + (curStyle && o.style_no === curStyle ? 1 : 0);
+  const result = ids
+    .filter(id => (countMap.get(id) || 0) > 0)
+    .map(id => ({ ...pool.get(id), bom_count: countMap.get(id) || 0 }))
+    .sort((a, b) => (score(b) - score(a)) || String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, 30);
+
+  return { data: result };
+}
+
+/**
+ * O1b-3:把历史订单 materials_bom 复制到当前订单。
+ * 保留 master 链接 + 物料定义 + 逐单字段;不复制 total_qty / 提交状态 / 样品;新行 draft、version 默认 1、created_by=当前用户。
+ * mode='replace' 先清当前订单 BOM;'append' 直接追加(不去重)。权限仅登录(与其他录入一致)。
+ */
+export async function copyBomFromOrder(
+  currentOrderId: string, sourceOrderId: string, mode: 'append' | 'replace' = 'append',
+): Promise<{ count?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!sourceOrderId || sourceOrderId === currentOrderId) return { error: '请选择有效的历史订单' };
+
+  // 服务端读 source BOM(只取要复制的列)
+  const { data: src, error: sErr } = await (supabase.from('materials_bom') as any)
+    .select('material_master_id, material_name, material_type, material_code, qty_per_piece, unit, supplier, placement, color, spec, notes, special_requirements')
+    .eq('order_id', sourceOrderId);
+  if (sErr) return { error: sErr.message };
+  if (!src || src.length === 0) return { error: '该历史订单没有原辅料行可复制' };
+
+  if (mode === 'replace') {
+    const { error: dErr } = await (supabase.from('materials_bom') as any).delete().eq('order_id', currentOrderId);
+    if (dErr) return { error: `清空当前 BOM 失败:${dErr.message}` };
+  }
+
+  const rows = src.map((r: any) => ({
+    order_id: currentOrderId, created_by: user.id,
+    material_master_id: r.material_master_id ?? null,
+    material_name: r.material_name,
+    material_type: r.material_type || 'other',
+    material_code: r.material_code ?? null,
+    qty_per_piece: r.qty_per_piece ?? null,
+    unit: r.unit || 'meter',
+    supplier: r.supplier ?? null,
+    placement: r.placement ?? null,
+    color: r.color ?? null,
+    spec: r.spec ?? null,
+    notes: r.notes ?? null,
+    special_requirements: r.special_requirements ?? null,
+    // 不复制:total_qty / submit_status / submitted_at / submitted_by / sample_given;version 默认 1
+  }));
+  const { error: iErr } = await (supabase.from('materials_bom') as any).insert(rows);
+  if (iErr) return { error: `复制失败:${iErr.message}` };
+
+  revalidatePath(`/orders/${currentOrderId}`);
+  return { count: rows.length };
+}
+
 export async function updateBomItem(id: string, orderId: string, patch: Record<string, any>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
