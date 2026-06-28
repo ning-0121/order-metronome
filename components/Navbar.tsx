@@ -67,6 +67,7 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
             { href: '/sales-targets', label: '客户年度目标', icon: '🎯' },
             { href: '/quoter', label: '报价员', icon: '💰' },
             { href: '/factories', label: '工厂管理', icon: '🏭' },
+            { href: '/material-master', label: '物料主数据', icon: '🧱' },
             { href: '/memos', label: '备忘录', icon: '📝' },
           ],
         },
@@ -113,6 +114,7 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
           links: [
             { href: '/sales-targets', label: '年度目标', icon: '🎯' },
             { href: '/quoter', label: '报价员', icon: '💰' },
+            { href: '/material-master', label: '物料主数据', icon: '🧱' },
             { href: '/memos', label: '备忘录', icon: '📝' },
             { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
             { href: '/guide', label: '操作说明', icon: '📖' },
