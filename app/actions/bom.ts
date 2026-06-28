@@ -22,6 +22,7 @@ export async function addBomItem(orderId: string, item: {
   material_code?: string; qty_per_piece?: number; total_qty?: number;
   unit?: string; supplier?: string;
   placement?: string; color?: string; spec?: string;
+  notes?: string; special_requirements?: string;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -40,8 +41,59 @@ export async function addBomItem(orderId: string, item: {
     placement: item.placement || null,
     color: item.color || null,
     spec: item.spec || null,
+    notes: item.notes || null,
+    special_requirements: item.special_requirements || null,
   });
   if (error) return { error: error.message };
+  revalidatePath(`/orders/${orderId}`);
+  return {};
+}
+
+/**
+ * O1b:从 Material Master「选料」录入。
+ * 服务端按 masterId 取正式主数据(防客户端伪造物料定义)→ 快照式写入 materials_bom:
+ * 物料定义(名/类别→material_type/编码/单位/规格/默认供应商)来自 master;
+ * 业务只填逐单字段(单耗/颜色/位置/备注/特殊要求)。写 material_master_id 建立链接。
+ * material_type = master.category 直写(CHECK 已扩容至 10 值,B1/MRP 已支持)。
+ */
+export async function addBomItemFromMaster(orderId: string, masterId: string, perOrder: {
+  qty_per_piece?: number; color?: string; placement?: string; notes?: string; special_requirements?: string;
+}) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!masterId) return { error: '请选择物料' };
+
+  const { data: m, error: mErr } = await (supabase.from('material_master') as any)
+    .select('id, material_code, material_name, category, default_unit, default_consumption, default_supplier_name, specification, is_temporary, status, usage_count')
+    .eq('id', masterId).single();
+  if (mErr || !m) return { error: '物料主数据不存在' };
+  if ((m as any).is_temporary || (m as any).status !== 'active') return { error: '该物料不可选用(临时或已归档)' };
+
+  const qpp = perOrder.qty_per_piece ?? (m as any).default_consumption ?? null;
+  const { error } = await (supabase.from('materials_bom') as any).insert({
+    order_id: orderId, created_by: user.id,
+    material_master_id: (m as any).id,
+    material_name: (m as any).material_name,
+    material_type: (m as any).category || 'other',   // master.category 直写(CHECK 已扩容)
+    material_code: (m as any).material_code || null,
+    unit: (m as any).default_unit || 'meter',
+    spec: (m as any).specification || null,
+    supplier: (m as any).default_supplier_name || null,
+    qty_per_piece: qpp,
+    color: perOrder.color || null,
+    placement: perOrder.placement || null,
+    notes: perOrder.notes || null,
+    special_requirements: perOrder.special_requirements || null,
+  });
+  if (error) return { error: error.message };
+
+  // usage_count +1(fire-and-forget,软统计,失败不阻断)
+  try {
+    await (supabase.from('material_master') as any)
+      .update({ usage_count: ((m as any).usage_count ?? 0) + 1 }).eq('id', masterId);
+  } catch { /* 忽略 */ }
+
   revalidatePath(`/orders/${orderId}`);
   return {};
 }
