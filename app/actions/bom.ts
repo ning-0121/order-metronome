@@ -98,6 +98,68 @@ export async function addBomItemFromMaster(orderId: string, masterId: string, pe
   return {};
 }
 
+/**
+ * O1b-2:订单内「创建临时物料」——物料库搜不到时,直接建临时料并加入本单 BOM。
+ * 复用 O1a 字段(无新 migration):material_master.is_temporary=true + source_order_id=本单 + 无码,
+ * 自动写 materials_bom(material_master_id 指向临时料)。临时料随即出现在「物料主数据 → 待转正」。
+ * 权限:仅登录(与 addBomItem 一致;控制点在转正 = promoteTemporaryMaterial 受 Helen/admin 管)。
+ */
+export async function addTemporaryBomItem(orderId: string, input: {
+  material_name: string; category: string;
+  default_unit?: string; specification?: string; default_supplier_name?: string;
+  qty_per_piece?: number; color?: string; placement?: string; notes?: string; special_requirements?: string;
+}) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!input.material_name?.trim()) return { error: '物料名称不能为空' };
+  if (!input.category) return { error: '请选择类别' };
+
+  const num = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
+  const qpp = num(input.qty_per_piece);
+
+  // ── 1) 建临时物料(is_temporary=true,无码,挂当前订单)──
+  const { data: m, error: mErr } = await (supabase.from('material_master') as any).insert({
+    material_name: input.material_name.trim(),
+    category: input.category,
+    default_unit: input.default_unit || null,
+    specification: input.specification || null,
+    default_supplier_name: input.default_supplier_name || null,
+    default_consumption: qpp,                 // 用本单单耗作默认单耗初值(转正后可改)
+    is_temporary: true,
+    source_order_id: orderId,
+    status: 'active',
+    seed_source: 'order_entry',
+    created_by: user.id,
+  }).select('id').single();
+  if (mErr || !m) return { error: `临时物料创建失败:${mErr?.message || '未知'}` };
+
+  // ── 2) 写 materials_bom(链接临时料,material_code 留空)──
+  const { error: bErr } = await (supabase.from('materials_bom') as any).insert({
+    order_id: orderId, created_by: user.id,
+    material_master_id: (m as any).id,
+    material_name: input.material_name.trim(),
+    material_type: input.category || 'other',
+    material_code: null,
+    unit: input.default_unit || 'meter',
+    spec: input.specification || null,
+    supplier: input.default_supplier_name || null,
+    qty_per_piece: qpp,
+    color: input.color || null,
+    placement: input.placement || null,
+    notes: input.notes || null,
+    special_requirements: input.special_requirements || null,
+  });
+  if (bErr) {
+    // best-effort 删孤儿临时料(RLS 无 DELETE 策略可能拦,无害)
+    try { await (supabase.from('material_master') as any).delete().eq('id', (m as any).id); } catch { /* 忽略 */ }
+    return { error: `BOM 写入失败:${bErr.message}` };
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  return {};
+}
+
 export async function updateBomItem(id: string, orderId: string, patch: Record<string, any>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

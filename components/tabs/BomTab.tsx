@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster } from '@/app/actions/bom';
+import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem } from '@/app/actions/bom';
 import { listMaterialMaster } from '@/app/actions/material-master';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
@@ -8,6 +8,9 @@ const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', lining: '里料', label: '标签', packing: '包装',
   print: '印花', washing: '水洗', embroidery: '绣花', service: '服务', other: '其他',
 };
+// 临时物料/主数据可选的 8 类别(不含 BOM 专用的 lining/label)
+const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
+const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
 const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '' };
 
@@ -45,6 +48,12 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [poForm, setPoForm] = useState({ qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' });
   const [masterSaving, setMasterSaving] = useState(false);
   const [masterErr, setMasterErr] = useState('');
+
+  // 订单内创建临时物料（O1b-2）
+  const [creatingTemp, setCreatingTemp] = useState(false);
+  const [tempForm, setTempForm] = useState(emptyTempForm);
+  const [tempSaving, setTempSaving] = useState(false);
+  const [tempErr, setTempErr] = useState('');
 
   const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
@@ -131,7 +140,7 @@ export function BomTab({ orderId }: { orderId: string }) {
 
   function openMaster() {
     setShowMaster(true); setShowAdd(false); setShowImport(false);
-    setMasterSearch(''); setPicked(null); setMasterErr('');
+    setMasterSearch(''); setPicked(null); setMasterErr(''); setCreatingTemp(false);
     setMasterLoading(true);
     listMaterialMaster({}).then(res => { setMasterResults(res.data || []); setMasterLoading(false); });
   }
@@ -163,6 +172,28 @@ export function BomTab({ orderId }: { orderId: string }) {
     setMasterSaving(false);
     if (res.error) { setMasterErr(res.error); return; }
     setPicked(null); setShowMaster(false); await reload();
+  }
+
+  function openTempCreate(prefillName: string) {
+    setTempForm({ ...emptyTempForm, material_name: prefillName || '' });
+    setTempErr(''); setCreatingTemp(true);
+  }
+  const setT = (k: string, v: string) => setTempForm(f => ({ ...f, [k]: v }));
+
+  async function saveTempCreate() {
+    if (!tempForm.material_name.trim()) { setTempErr('物料名称不能为空'); return; }
+    setTempSaving(true); setTempErr('');
+    const res = await addTemporaryBomItem(orderId, {
+      material_name: tempForm.material_name, category: tempForm.category,
+      default_unit: tempForm.default_unit || undefined, specification: tempForm.specification || undefined,
+      default_supplier_name: tempForm.default_supplier_name || undefined,
+      qty_per_piece: tempForm.qty_per_piece ? parseFloat(tempForm.qty_per_piece) : undefined,
+      color: tempForm.color || undefined, placement: tempForm.placement || undefined,
+      notes: tempForm.notes || undefined, special_requirements: tempForm.special_requirements || undefined,
+    });
+    setTempSaving(false);
+    if (res.error) { setTempErr(res.error); return; }
+    setCreatingTemp(false); setShowMaster(false); await reload();
   }
 
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
@@ -259,7 +290,59 @@ export function BomTab({ orderId }: { orderId: string }) {
 
   const masterPanel = (
     <div className="bg-indigo-50 rounded-xl p-4 mb-4 border border-indigo-200">
-      {!picked ? (
+      {creatingTemp ? (
+        <>
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={() => setCreatingTemp(false)} className="text-xs text-indigo-600 hover:underline">← 返回搜索</button>
+            <span className="text-sm font-medium text-gray-700">创建临时物料(加入本单)</span>
+          </div>
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-3">
+            临时物料只服务本单、不进公司物料库;会出现在「物料主数据 → 待转正」,管理员审核后转正即可全公司复用。
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-gray-600 col-span-2">物料名称 *
+              <input autoFocus value={tempForm.material_name} onChange={e => setT('material_name', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600">类别 *
+              <select value={tempForm.category} onChange={e => setT('category', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                {MASTER_CATS.map(c => <option key={c} value={c}>{CAT_LABEL[c]}</option>)}
+              </select></label>
+            <label className="text-xs text-gray-600">单位
+              <input value={tempForm.default_unit} onChange={e => setT('default_unit', e.target.value)} placeholder="kg/pcs/m/yard"
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600 col-span-2">规格
+              <input value={tempForm.specification} onChange={e => setT('specification', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600 col-span-2">默认供应商(可选)
+              <input value={tempForm.default_supplier_name} onChange={e => setT('default_supplier_name', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600">单耗(单件用量)
+              <input type="number" step="0.0001" value={tempForm.qty_per_piece} onChange={e => setT('qty_per_piece', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600">颜色
+              <input value={tempForm.color} onChange={e => setT('color', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600">位置(部位)
+              <input value={tempForm.placement} onChange={e => setT('placement', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600">备注
+              <input value={tempForm.notes} onChange={e => setT('notes', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+            <label className="text-xs text-gray-600 col-span-2">特殊要求
+              <input value={tempForm.special_requirements} onChange={e => setT('special_requirements', e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
+          </div>
+          {tempErr && <p className="text-xs text-red-600 mt-2">{tempErr}</p>}
+          <div className="flex gap-2 mt-3">
+            <button onClick={saveTempCreate} disabled={tempSaving || !tempForm.material_name.trim()}
+              className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50">
+              {tempSaving ? '保存中…' : '创建临时物料并加入本单'}</button>
+            <button onClick={() => setCreatingTemp(false)}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">取消</button>
+          </div>
+        </>
+      ) : !picked ? (
         <>
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-medium text-gray-700">🧱 从物料主数据选择</div>
@@ -270,9 +353,11 @@ export function BomTab({ orderId }: { orderId: string }) {
           {masterLoading ? (
             <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
           ) : masterResults.length === 0 ? (
-            <div className="text-xs text-gray-500 py-4 text-center leading-relaxed">
-              物料库暂无匹配。请去「<span className="font-medium">物料主数据</span>」页维护,
-              或用「<span className="font-medium">手动新增</span>」先录入(不挂主数据)。
+            <div className="py-4 text-center">
+              <p className="text-xs text-gray-500 mb-3">物料库{masterSearch.trim() ? `搜不到「${masterSearch.trim()}」` : '暂无物料'}。</p>
+              <button onClick={() => openTempCreate(masterSearch.trim())}
+                className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700">+ 创建临时物料</button>
+              <p className="text-[11px] text-gray-400 mt-2">临时物料加入本单并进「待转正」;或用「手动新增」先录(不挂主数据)。</p>
             </div>
           ) : (
             <div className="max-h-64 overflow-y-auto divide-y divide-indigo-100 bg-white rounded-lg border border-indigo-100">
@@ -286,6 +371,10 @@ export function BomTab({ orderId }: { orderId: string }) {
                 </button>
               ))}
             </div>
+          )}
+          {!masterLoading && masterResults.length > 0 && (
+            <button onClick={() => openTempCreate(masterSearch.trim())}
+              className="mt-2 text-xs text-amber-700 hover:underline">找不到?+ 创建临时物料</button>
           )}
         </>
       ) : (
@@ -387,7 +476,10 @@ export function BomTab({ orderId }: { orderId: string }) {
               {items.map(item => (
                 <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="py-2 px-3 font-mono text-xs text-gray-500 whitespace-nowrap">
-                    {item.material_master_id && <span title="来自物料主数据">🔗 </span>}{item.material_code || '—'}</td>
+                    {item.material_master_id && (item.material_code
+                      ? <span title="来自物料主数据">🔗 </span>
+                      : <span title="临时物料(待转正)" className="text-amber-600 font-sans">🔗临时 </span>)}
+                    {item.material_code || '—'}</td>
                   <td className="py-2 px-3 font-medium text-gray-900">{item.material_name}</td>
                   <td className="py-2 px-3"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{CAT_LABEL[item.material_type] || item.material_type}</span></td>
                   <td className="py-2 px-3 text-gray-600">{item.placement || '—'}</td>
