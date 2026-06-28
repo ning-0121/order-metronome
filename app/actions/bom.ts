@@ -169,3 +169,81 @@ export async function importFromTrimLibrary(orderId: string, brand: string | nul
   revalidatePath(`/orders/${orderId}`);
   return { inserted: toInsert.length, skipped };
 }
+
+// ════════════════════════════════════════════════
+// 采购流 Step A:业务「提交采购」+ 已交样标记(只动 materials_bom,不碰采购主流程)
+// ════════════════════════════════════════════════
+
+/**
+ * 业务提交原辅料单给采购:把本订单所有 BOM 行标为已提交,并通知采购去汇总/询价/下单。
+ * 这是采购流的"起点"。不下采购单、不改采购状态机,仅标记 + 通知。
+ */
+export async function submitBomToProcurement(
+  orderId: string,
+): Promise<{ ok?: boolean; count?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  // 权限:业务/理单/业务经理/订单经理/管理员可提交
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles, name').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0
+    ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const canSubmit = roles.some(r => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'].includes(r));
+  if (!canSubmit) return { error: '仅业务/理单/管理员可提交原辅料单' };
+
+  // 必须先有 BOM 才能提交
+  const { data: bomRows, error: bomErr } = await (supabase.from('materials_bom') as any)
+    .select('id').eq('order_id', orderId);
+  if (bomErr) return { error: bomErr.message };
+  if (!bomRows || bomRows.length === 0) return { error: '原辅料单为空,请先录入物料再提交' };
+
+  // 标记本订单 BOM 已提交采购
+  const { error: updErr } = await (supabase.from('materials_bom') as any)
+    .update({ submit_status: 'submitted', submitted_at: new Date().toISOString(), submitted_by: user.id })
+    .eq('order_id', orderId);
+  if (updErr) return { error: updErr.message };
+
+  // 通知采购(fire-and-forget,失败不阻断提交)
+  try {
+    const { data: order } = await (supabase.from('orders') as any)
+      .select('order_no, customer_name').eq('id', orderId).single();
+    const { data: procs } = await (supabase.from('profiles') as any)
+      .select('user_id')
+      .or('role.eq.procurement,roles.cs.{procurement},role.eq.procurement_manager,roles.cs.{procurement_manager}');
+    const ids = Array.from(new Set(((procs || []) as any[]).map(p => p.user_id).filter(Boolean)));
+    const submitter = (profile as any)?.name || user.email?.split('@')[0] || '业务';
+    for (const uid of ids) {
+      await (supabase.from('notifications') as any).insert({
+        user_id: uid,
+        type: 'bom_submitted_to_procurement',
+        title: `🧵 原辅料单已提交 — ${order?.order_no || ''}`,
+        message: `客户：${order?.customer_name || '?'}\n${submitter} 提交了原辅料单(${bomRows.length} 项物料)。请到「采购 / 供应链」按 PO 数量汇总、询价、下单。`,
+        related_order_id: orderId,
+        status: 'unread',
+      });
+    }
+  } catch (e: any) {
+    console.warn('[submitBomToProcurement] 通知采购失败(不阻断):', e?.message);
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, count: bomRows.length };
+}
+
+/** 标记某物料"已交样品给采购"(线下样品的轻量标记) */
+export async function setBomSampleGiven(
+  id: string,
+  orderId: string,
+  given: boolean,
+): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { error } = await (supabase.from('materials_bom') as any)
+    .update({ sample_given: given }).eq('id', id).eq('order_id', orderId);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}

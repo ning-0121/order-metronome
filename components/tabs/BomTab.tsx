@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary } from '@/app/actions/bom';
+import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven } from '@/app/actions/bom';
 
 const TYPES = [
   { value: 'fabric', label: '面料' }, { value: 'trim', label: '辅料' },
@@ -21,6 +21,10 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // 提交采购 / 样品
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState('');
 
   // 从客户标准库带入
   const [showImport, setShowImport] = useState(false);
@@ -57,6 +61,21 @@ export function BomTab({ orderId }: { orderId: string }) {
   async function handleDelete(id: string) {
     if (!confirm('确定删除此物料？')) return;
     await deleteBomItem(id, orderId);
+    await reload();
+  }
+
+  async function handleSubmitProcurement() {
+    if (!confirm('确认把原辅料单提交给采购？\n提交后会通知采购按 PO 数量汇总、询价、下单。')) return;
+    setSubmitting(true); setSubmitMsg('');
+    const res = await submitBomToProcurement(orderId);
+    setSubmitting(false);
+    if (res.error) { setSubmitMsg('提交失败：' + res.error); return; }
+    setSubmitMsg(`✅ 已提交采购（${res.count} 项），采购已收到通知`);
+    await reload();
+  }
+
+  async function toggleSample(item: any) {
+    await setBomSampleGiven(item.id, orderId, !item.sample_given);
     await reload();
   }
 
@@ -99,6 +118,9 @@ export function BomTab({ orderId }: { orderId: string }) {
   }
 
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
+
+  const submitted = items.some(i => i.submit_status === 'submitted');
+  const submittedAt = items.find(i => i.submitted_at)?.submitted_at || null;
 
   const formRow = (
     <div className="bg-indigo-50 rounded-xl p-4 mb-4 space-y-3">
@@ -196,6 +218,25 @@ export function BomTab({ orderId }: { orderId: string }) {
           </div>
         )}
       </div>
+      {/* 提交采购(采购流起点)*/}
+      {items.length > 0 && (
+        <div className="flex items-center justify-between gap-3 mb-4 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40">
+          <div className="text-sm min-w-0">
+            {submitted ? (
+              <span className="text-emerald-700 font-medium">
+                ✅ 已提交采购{submittedAt ? `（${new Date(submittedAt).toLocaleString('zh-CN')}）` : ''}
+              </span>
+            ) : (
+              <span className="text-gray-600">原辅料单录好后,提交给采购按 PO 数量汇总、询价、下单。</span>
+            )}
+            {submitMsg && <span className="block text-xs text-gray-500 mt-0.5">{submitMsg}</span>}
+          </div>
+          <button onClick={handleSubmitProcurement} disabled={submitting}
+            className="shrink-0 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+            {submitting ? '提交中...' : submitted ? '重新提交采购' : '✅ 提交采购'}
+          </button>
+        </div>
+      )}
       {showImport && importPanel}
       {showAdd && formRow}
       {items.length === 0 && !showAdd ? (
@@ -207,7 +248,7 @@ export function BomTab({ orderId }: { orderId: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100">
-              {['物料代码','物料名称','类型','部位','颜色','单件用量','总需','单位','供应商','规格','操作'].map(h => (
+              {['物料代码','物料名称','类型','部位','颜色','单件用量','总需','单位','供应商','规格','样品','操作'].map(h => (
                 <th key={h} className="py-2 px-3 text-gray-500 font-medium text-left whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
@@ -224,6 +265,13 @@ export function BomTab({ orderId }: { orderId: string }) {
                   <td className="py-2 px-3 text-gray-600">{item.unit}</td>
                   <td className="py-2 px-3 text-gray-500">{item.supplier || '—'}</td>
                   <td className="py-2 px-3 text-gray-500">{item.spec || '—'}</td>
+                  <td className="py-2 px-3">
+                    <button onClick={() => toggleSample(item)}
+                      className={`text-xs px-2 py-0.5 rounded-full ${item.sample_given ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+                      title="样品是否已线下交给采购">
+                      {item.sample_given ? '已交样' : '未交样'}
+                    </button>
+                  </td>
                   <td className="py-2 px-3">
                     <div className="flex gap-1">
                       <button onClick={() => startEdit(item)} className="text-xs text-indigo-600 hover:underline">编辑</button>
