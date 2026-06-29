@@ -9,3 +9,4 @@
 | [ADR-001](ADR-001-doc-structure-and-constitution-freeze.md) | 文档四层体系 + Constitution V1.0 冻结 | Accepted |
 | [ADR-002](ADR-002-material-requirement-spine.md) | Material Requirement 为跨域脊柱 + Explainable 时间分段 MRP | Accepted |
 | [ADR-003](ADR-003-order-production-decoupling.md) | Order Domain ⊥ Production Domain(经 Manufacturing Order 解耦)| Accepted(已升级为 Constitution 07/08) |
+| [ADR-004](ADR-004-procurement-domain-layering.md) | Procurement Domain 分层与核料原则(Procurement Item 采购核料项 / 开发单耗≠大货单耗 / 系统归并采购确认)| Accepted(P1′ 验证) |
