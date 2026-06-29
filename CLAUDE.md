@@ -19,20 +19,32 @@
 
 ---
 
-## 文档体系（四层固定）+ 修宪纪律
+## 文档体系（五层）+ 统一开发流程 + 修宪纪律
 
-QIMO OS 文档固定四层（详见 `docs/00-Constitution/README.md`）：
+QIMO OS 文档五层 + 七段流程（详见 `docs/00-Constitution/README.md`）：
 
-| 层 | 位置 | 变更频率 |
+```
+Constitution → Development Principles → ADR → Domain → Design → Coding → DoD
+```
+
+| 层 | 位置 | 描述什么 / 变更频率 |
 |---|---|---|
-| **Constitution** | `docs/00-Constitution/Constitution.md` | 几乎不改（V1.0 Frozen，**≤10 条**）|
-| **ADR** | `docs/ADR/` | 经常新增（重要架构决策）|
-| **Domain** | `docs/Domains/` | 稳定演进（各业务域长期设计）|
-| **Design** | `docs/Designs/` | 短期（每阶段 O1/O2… 实施方案）|
+| **Constitution** | `docs/00-Constitution/Constitution.md` | **系统是什么**；几乎不改（V1.0 Frozen，**≤10 条**）|
+| **Development Principles** | `docs/00-Constitution/Development-Principles.md` | **我们怎么造**（DP-1~5）；长期稳定 |
+| **Definition of Done** | `docs/00-Constitution/Definition-of-Done.md` | **何谓"完成"**（DoD，每次开发必过）|
+| **ADR** | `docs/ADR/` | 重要架构决策；经常新增 |
+| **Domain** | `docs/Domains/` | 各业务域长期设计；稳定演进 |
+| **Design** | `docs/Designs/` | 阶段实施方案（O1/P1…）；短期归档 |
 
-**修宪纪律（重要）**：发现新设计方向时，**优先修改 Domain Design 或 ADR，而不是频繁修改 Constitution**。只有经过多个阶段验证、确认能长期成立的原则，才允许升级进入 Constitution。→ Constitution 越来越稳，不是越来越长。
+**分层铁律**：Constitution 只写"系统是什么"；Development Principles 只写"怎么造"；二者**严格分层不混杂**。域规则进 ADR/Domain，阶段细节进 Design。
 
-**Constitution 是最高原则**，任何设计与之冲突以 Constitution 为准。10 条核心：业务对象优先（非部门）/ 单一真相源 / 生命周期非复制 / 字段归属 / Evidence≠Data / AI 是助手非真相源 / Manufacturing Order 是生产任务非工艺 / Order 表达需求 ⊥ Production 实现需求 / Build once generate everywhere / Evolution not Rewrite。
+**修宪纪律**：发现新设计方向，**优先改 ADR / Domain / Design，不改 Constitution**。多阶段验证、确认长期成立才允许升级进 Constitution → Constitution 越来越稳，不越来越长。
+
+**Constitution（系统是什么）**：业务对象优先 / 单一真相源 / 生命周期非复制 / 字段归属 / Evidence≠Data / AI 是助手 / Manufacturing Order 非工艺 / Order 表达需求 ⊥ Production 实现需求 / Build once generate everywhere / Evolution not Rewrite。
+**工作姿态**：不说"写代码"，说"**建设 Domain**"。每次先想 对象/生命周期/数据流/数据所有权/扩展性，而不是直接写页面。
+**Development Principles（怎么造，DP-1~8）**：1 业务优先于软件 / 2 先完成业务闭环 / 3 一次只建一个业务对象（不围绕页面）/ 4 系统计算·人决策（ERP 灵魂）/ 5 AI 永不拥有企业真相 / 6 面向十年 / 7 分阶段不追完美（Phase1闭环→2优化→3 AI）/ 8 重复劳动全交系统（不让人做 Excel）。
+**对象准入双门禁（新增对象/表前必过）**：🏛 Architecture Gate（属哪个 Domain？数据所有权谁？有无重复真相？）+ 🔮 Future Gate（3年后/10工厂还成立吗？否则重设计）。
+**DoD push 硬闸（任一不满足禁止 push）**：① 数据库门禁未 PASS（涉 migration 时）② build/check 未过 ③ 未经用户 diff 审查 ④ 改了"不改清单"/影响线上。
 
 ---
 
