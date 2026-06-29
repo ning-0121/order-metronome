@@ -17,12 +17,13 @@ Constitution（系统是什么,冻结)
 ```
 /docs
 ├── 00-Constitution/
+│     Enterprise-Architecture.md  ← 总蓝图(企业操作系统 7 层栈 + 13 域,V1.0)
 │     Constitution.md            ← 系统是什么(架构最高原则,10 条,Frozen)
-│     Development-Principles.md   ← 我们怎么造(开发哲学 DP-1~5)
+│     Development-Principles.md   ← 我们怎么造(开发哲学 DP-1~8)
 │     Definition-of-Done.md       ← 交付标准(DoD,每次开发必过)
 │     README.md                   ← 本文件(体系地图)
 ├── ADR/                          ← 架构决策记录(经常新增)
-├── Domains/                      ← 各业务域长期设计(稳定演进)
+├── Domains/                      ← 各业务域长期设计(Domain-Map.md = 13 域详情)
 └── Designs/                      ← 阶段实施方案(短期、可归档)
 ```
 
@@ -42,6 +43,12 @@ Constitution（系统是什么,冻结)
 **发现新设计方向时,优先改 ADR / Domain / Design,而不是改 Constitution。** 只有经多阶段验证、确认长期成立的原则才允许升级进 Constitution → Constitution 越来越稳,不越来越长。(同条已写入 `../../CLAUDE.md`)
 
 ## 当前索引
+- **Enterprise Architecture V1.0**:[Enterprise-Architecture.md](Enterprise-Architecture.md) — 总蓝图(8 层栈 + 灵魂句 + EA 驱动 4 问)。组成章节:
+  - [Capability-Map.md](Capability-Map.md) — 能力地图(②层)
+  - [Domains/Domain-Map.md](../Domains/Domain-Map.md) — 13 域(③层,谁负责)
+  - [Object-Relationship-Map.md](Object-Relationship-Map.md) — **对象关系图(数据怎么流,优先级最高)**
+  - [Event-Catalog.md](Event-Catalog.md) — 业务事件目录(⑤层)
+  - [Domain-Template.md](Domain-Template.md) — 每个域必备九章节标准
 - **Constitution**:[Constitution.md](Constitution.md) — V1.0 Frozen(10 条)
 - **Development Principles**:[Development-Principles.md](Development-Principles.md) — DP-1 闭环优先 / DP-2 先 80% / DP-3 系统做机械活 / DP-4 面向十年 / DP-5 业务优先于软件
 - **Definition of Done**:[Definition-of-Done.md](Definition-of-Done.md) — 设计/编码/数据库门禁/交付 四段 DoD + 硬闸
