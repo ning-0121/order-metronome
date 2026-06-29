@@ -18,6 +18,7 @@ import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
+import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
 import { OrderActions } from '@/components/OrderActions';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
@@ -73,7 +74,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'manufacturing_order', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -407,6 +408,7 @@ export default async function OrderDetailPage({
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
           { key: 'bom', label: '原辅料和包装' },
+          { key: 'manufacturing_order', label: '🏭 生产任务单' },
           { key: 'procurement', label: '📦 采购进度' },
           { key: 'supply_chain', label: '🔗 供应链' },
           ...(canSeeFinancials ? [{ key: 'cost_control', label: '💰 成本控制' }] : []),
@@ -838,6 +840,13 @@ export default async function OrderDetailPage({
                 </div>
               </details>
             </div>
+          </div>
+        )}
+        {/* Tab: 生产任务单（Manufacturing Order）*/}
+        {activeTab === 'manufacturing_order' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">🏭 生产任务单</h2>
+            <ManufacturingOrderTab orderId={id} />
           </div>
         )}
 
