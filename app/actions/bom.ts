@@ -43,6 +43,7 @@ export async function addBomItem(orderId: string, item: {
     spec: item.spec || null,
     notes: item.notes || null,
     special_requirements: item.special_requirements || null,
+    source: 'manual',                      // 手动新增(Phase 2A 来源标记)
   });
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
@@ -265,13 +266,93 @@ export async function copyBomFromOrder(
   return { count: rows.length };
 }
 
+/**
+ * Product Phase 2A:从订单行绑定的 Product Variant → Product → active Definition → BOM Template
+ * 实例化进 materials_bom(写 product_bom_template_id + source='template')。
+ * 单向、手动、不自动重算;不接 P1′、不改 B1、不改 product_bom_templates(只读)。
+ * 大货单耗(production_consumption)不写入 —— 留 2B 带入采购;materials_bom 用开发单耗作 qty_per_piece(与 O1 一致)。
+ */
+export async function instantiateOrderMaterialPackage(
+  orderId: string, mode: 'append' | 'replace' = 'append',
+): Promise<{ ok?: boolean; count?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  // 1) 订单行绑定的 Variant
+  const { data: lines } = await (supabase.from('order_line_items') as any)
+    .select('product_variant_id').eq('order_id', orderId);
+  const variantIds = Array.from(new Set((lines || []).map((l: any) => l.product_variant_id).filter(Boolean)));
+  if (variantIds.length === 0) return { error: '订单行未关联 Product Variant,请先在「🧬 产品款」Tab 关联' };
+
+  // 2) Variant → Product
+  const { data: variants } = await (supabase.from('product_variants') as any).select('id, product_id').in('id', variantIds);
+  const productIds = Array.from(new Set((variants || []).map((v: any) => v.product_id).filter(Boolean)));
+  if (productIds.length === 0) return { error: '变体无对应产品款' };
+
+  // 3) Product → active(否则最新版本)Definition
+  const { data: defs } = await (supabase.from('product_definitions') as any)
+    .select('id, product_id, version, status').in('product_id', productIds);
+  const defByProduct = new Map<string, any>();
+  for (const d of (defs || [])) {
+    const cur = defByProduct.get(d.product_id);
+    const better = !cur || (d.status === 'active' && cur.status !== 'active')
+      || (d.status === cur.status && (d.version || 0) > (cur.version || 0));
+    if (better) defByProduct.set(d.product_id, d);
+  }
+  const defIds = Array.from(new Set([...defByProduct.values()].map((d: any) => d.id)));
+  if (defIds.length === 0) return { error: '产品款暂无 Definition' };
+
+  // 4) Definition → BOM Template
+  const { data: tpls } = await (supabase.from('product_bom_templates') as any).select('*').in('definition_id', defIds);
+  if (!tpls || tpls.length === 0) return { error: '关联产品款的 BOM Template 为空,请先在产品款库录入' };
+
+  // 5) replace 先清当前订单 BOM;append 去重(同模板行已实例化跳过)
+  if (mode === 'replace') {
+    const { error: dErr } = await (supabase.from('materials_bom') as any).delete().eq('order_id', orderId);
+    if (dErr) return { error: `清空失败:${dErr.message}` };
+  }
+  const { data: existing } = await (supabase.from('materials_bom') as any)
+    .select('product_bom_template_id').eq('order_id', orderId);
+  const seen = new Set<string>((existing || []).map((e: any) => e.product_bom_template_id).filter(Boolean));
+
+  const rows = (tpls as any[]).filter(t => !seen.has(t.id)).map(t => ({
+    order_id: orderId, created_by: user.id,
+    material_master_id: t.material_master_id || null,
+    material_name: t.material_name,
+    material_type: t.category || 'other',                 // 模板采购分类 → materials_bom.material_type(10 值含之)
+    qty_per_piece: t.development_consumption ?? null,       // 开发单耗(大货单耗留 2B 带入采购)
+    unit: t.unit || 'meter',
+    color: t.default_color || null,
+    placement: t.default_placement || null,
+    special_requirements: t.special_requirements || null,
+    product_bom_template_id: t.id,
+    source: 'template',
+  }));
+  if (rows.length === 0) return { ok: true, count: 0 };
+
+  const { error } = await (supabase.from('materials_bom') as any).insert(rows);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, count: rows.length };
+}
+
 export async function updateBomItem(id: string, orderId: string, patch: Record<string, any>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  const { error } = await (supabase.from('materials_bom') as any)
-    .update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
+  // 该行来自产品款模板(有 product_bom_template_id)→ 编辑即记 Override 留痕(单向,不回写模板)
+  const { data: row } = await (supabase.from('materials_bom') as any)
+    .select('product_bom_template_id').eq('id', id).single();
+  const upd: any = { ...patch, updated_at: new Date().toISOString() };
+  if ((row as any)?.product_bom_template_id) {
+    upd.overridden_at = new Date().toISOString();
+    upd.overridden_by = user.id;
+    // override_reason:patch 带了就写(BomTab 编辑模板行的可选输入)
+  }
+
+  const { error } = await (supabase.from('materials_bom') as any).update(upd).eq('id', id);
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
   return {};

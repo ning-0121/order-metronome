@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder } from '@/app/actions/bom';
+import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
 import { listMaterialMaster } from '@/app/actions/material-master';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
@@ -12,7 +12,7 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '' };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '' };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -66,6 +66,11 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [copySaving, setCopySaving] = useState(false);
   const [copyErr, setCopyErr] = useState('');
 
+  // Product Phase 2A:从产品款实例化 + 编辑模板行 Override
+  const [instantiating, setInstantiating] = useState(false);
+  const [instMsg, setInstMsg] = useState('');
+  const [editingTemplate, setEditingTemplate] = useState(false);  // 正在编辑的行是否来自产品款模板
+
   const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
 
@@ -81,12 +86,14 @@ export function BomTab({ orderId }: { orderId: string }) {
       total_qty: form.total_qty ? parseFloat(form.total_qty) : undefined,
       unit: form.unit, supplier: form.supplier || undefined, spec: form.spec || undefined,
       notes: form.notes || undefined, special_requirements: form.special_requirements || undefined,
+      // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
+      ...(editId && editingTemplate ? { override_reason: form.override_reason || undefined } : {}),
     };
     const result = editId
       ? await updateBomItem(editId, orderId, payload)
       : await addBomItem(orderId, payload);
     if (result.error) { setError(result.error); }
-    else { setShowAdd(false); setEditId(null); setForm(emptyForm); await reload(); }
+    else { setShowAdd(false); setEditId(null); setEditingTemplate(false); setForm(emptyForm); await reload(); }
     setSaving(false);
   }
 
@@ -113,14 +120,26 @@ export function BomTab({ orderId }: { orderId: string }) {
 
   function startEdit(item: any) {
     setEditId(item.id);
+    setEditingTemplate(!!item.product_bom_template_id);   // 来自产品款模板 → 编辑时显示 Override 原因
     setForm({
       material_name: item.material_name || '', material_type: item.material_type || 'other',
       material_code: item.material_code || '', placement: item.placement || '', color: item.color || '',
       qty_per_piece: item.qty_per_piece?.toString() || '',
       total_qty: item.total_qty?.toString() || '', unit: item.unit || 'meter', supplier: item.supplier || '',
       spec: item.spec || '', notes: item.notes || '', special_requirements: item.special_requirements || '',
+      override_reason: item.override_reason || '',
     });
     setShowAdd(true);
+  }
+
+  async function doInstantiate() {
+    const replace = items.length > 0 && confirm('当前已有原辅料。\n确定 = 清空后从产品款实例化\n取消 = 追加(跳过已实例化的)');
+    setInstantiating(true); setInstMsg('');
+    const res = await instantiateOrderMaterialPackage(orderId, replace ? 'replace' : 'append');
+    setInstantiating(false);
+    if ((res as any).error) { setInstMsg('实例化失败：' + (res as any).error); return; }
+    setInstMsg(`✅ 已从产品款实例化 ${(res as any).count} 行`);
+    await reload();
   }
 
   async function openImport() {
@@ -277,13 +296,19 @@ export function BomTab({ orderId }: { orderId: string }) {
         <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
+      {editId && editingTemplate && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">
+          <input placeholder="Override 原因(本行来自产品款模板,改动会记录)" value={form.override_reason} onChange={e => set('override_reason', e.target.value)}
+            className="w-full rounded-lg border border-amber-200 px-3 py-2 text-sm" />
+        </div>
+      )}
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button onClick={handleSave} disabled={saving || !form.material_name.trim()}
           className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
           {saving ? '保存中...' : editId ? '更新' : '保存'}
         </button>
-        <button onClick={() => { setShowAdd(false); setEditId(null); setForm(emptyForm); setError(''); }}
+        <button onClick={() => { setShowAdd(false); setEditId(null); setEditingTemplate(false); setForm(emptyForm); setError(''); }}
           className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">取消</button>
       </div>
     </div>
@@ -555,17 +580,20 @@ export function BomTab({ orderId }: { orderId: string }) {
         <span className="text-sm text-gray-500">{items.length} 条物料记录</span>
         {!showAdd && !showImport && !showMaster && !showCopy && (
           <div className="flex flex-wrap gap-2 justify-end">
+            <button onClick={doInstantiate} disabled={instantiating}
+              className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{instantiating ? '实例化中…' : '🧬 从产品款实例化'}</button>
             <button onClick={openMaster}
               className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">+ 从物料库选择</button>
             <button onClick={openCopy}
               className="text-sm px-3 py-1.5 rounded-lg border border-violet-300 text-violet-700 font-medium hover:bg-violet-50">📋 复制上一单</button>
             <button onClick={openImport}
               className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">📥 从客户标准库带入</button>
-            <button onClick={() => { setShowAdd(true); setEditId(null); setForm(emptyForm); }}
+            <button onClick={() => { setShowAdd(true); setEditId(null); setEditingTemplate(false); setForm(emptyForm); }}
               className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-50">手动新增</button>
           </div>
         )}
       </div>
+      {instMsg && <p className="text-xs text-gray-600 mb-2">{instMsg}</p>}
       {/* 提交采购(采购流起点)*/}
       {items.length > 0 && (
         <div className="flex items-center justify-between gap-3 mb-4 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40">
@@ -598,13 +626,20 @@ export function BomTab({ orderId }: { orderId: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100">
-              {['物料代码','物料名称','类型','部位','颜色','单件用量','总需','单位','供应商','规格','特殊要求','样品','操作'].map(h => (
+              {['来源','物料代码','物料名称','类型','部位','颜色','单件用量','总需','单位','供应商','规格','特殊要求','样品','操作'].map(h => (
                 <th key={h} className="py-2 px-3 text-gray-500 font-medium text-left whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {items.map(item => (
                 <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="py-2 px-3 whitespace-nowrap">
+                    {item.product_bom_template_id
+                      ? (item.overridden_at
+                          ? <span title={item.override_reason || '已改'} className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">✏️已改</span>
+                          : <span title="来自产品款模板" className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">🧬模板</span>)
+                      : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">手动</span>}
+                  </td>
                   <td className="py-2 px-3 font-mono text-xs text-gray-500 whitespace-nowrap">
                     {item.material_master_id && (item.material_code
                       ? <span title="来自物料主数据">🔗 </span>
