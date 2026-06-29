@@ -20,6 +20,7 @@ import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
+import { ProductVariantPicker } from '@/components/ProductVariantPicker';
 import { OrderActions } from '@/components/OrderActions';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
@@ -75,7 +76,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -408,6 +409,7 @@ export default async function OrderDetailPage({
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
               { key: 'logs', label: '操作日志' },
+          { key: 'product_link', label: '🧬 产品款' },
           { key: 'bom', label: '原辅料和包装' },
           { key: 'manufacturing_order', label: '🏭 生产任务单' },
           { key: 'procurement_items', label: '🛒 采购核料' },
@@ -849,6 +851,13 @@ export default async function OrderDetailPage({
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">🏭 生产任务单</h2>
             <ManufacturingOrderTab orderId={id} />
+          </div>
+        )}
+        {/* Tab: 产品款（Order Line ↔ Product Variant)*/}
+        {activeTab === 'product_link' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">🧬 产品款关联</h2>
+            <ProductVariantPicker orderId={id} />
           </div>
         )}
         {/* Tab: 采购核料（Procurement Items）*/}
