@@ -4,10 +4,17 @@ import { useState, useEffect, useRef } from 'react';
 import { getCustomers, createCustomer, type Customer } from '@/app/actions/customers';
 import { CustomerMemoReminder } from './CustomerMemoReminder';
 
-export function CustomerSelect() {
+interface CustomerSelectProps {
+  /** 选中/清空回调（供受控父表单读取 customer_id；不传则维持原隐藏 input 行为） */
+  onSelect?: (customer: Customer | null) => void;
+  /** 初始显示名（可选） */
+  initialName?: string;
+}
+
+export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = {}) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selected, setSelected] = useState<Customer | null>(null);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialName ?? '');
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -56,6 +63,7 @@ export function CustomerSelect() {
     setSelected(c);
     setQuery(c.customer_name);
     setOpen(false);
+    onSelect?.(c);
   }
 
   async function handleCreate() {
@@ -92,6 +100,7 @@ export function CustomerSelect() {
           value={query}
           onChange={e => {
             setQuery(e.target.value);
+            if (selected) onSelect?.(null);
             setSelected(null);
             setOpen(true);
           }}

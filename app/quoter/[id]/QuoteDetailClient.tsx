@@ -22,11 +22,12 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 
 interface Props {
   quote: any;
+  lines: any[];
   feedback: any[];
   creatorName: string;
 }
 
-export function QuoteDetailClient({ quote: q, feedback, creatorName }: Props) {
+export function QuoteDetailClient({ quote: q, lines, feedback, creatorName }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState('');
   const [fbType, setFbType] = useState<'fabric_consumption' | 'cmt_cost' | 'total_price'>('total_price');
@@ -182,6 +183,47 @@ export function QuoteDetailClient({ quote: q, feedback, creatorName }: Props) {
           </div>
         </div>
       </div>
+
+      {/* 报价行（quote_line） — 子阶段1只读展示。子阶段4起支持多款多行 */}
+      {lines && lines.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">
+            报价行 <span className="text-xs font-normal text-gray-400">（{lines.length} 行）</span>
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 text-left text-gray-500">
+                  <th className="px-3 py-2 font-medium">#</th>
+                  <th className="px-3 py-2 font-medium">款号</th>
+                  <th className="px-3 py-2 font-medium">名称</th>
+                  <th className="px-3 py-2 font-medium">颜色</th>
+                  <th className="px-3 py-2 font-medium text-center">数量</th>
+                  <th className="px-3 py-2 font-medium text-right">单耗 KG</th>
+                  <th className="px-3 py-2 font-medium text-right">成本/件</th>
+                  <th className="px-3 py-2 font-medium text-right">报价/件</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {lines.map((ln: any) => (
+                  <tr key={ln.id}>
+                    <td className="px-3 py-1.5 font-mono text-gray-400">{ln.line_no}</td>
+                    <td className="px-3 py-1.5">{ln.style_no || '—'}</td>
+                    <td className="px-3 py-1.5 text-gray-600">{ln.style_name || '—'}</td>
+                    <td className="px-3 py-1.5 text-gray-600">{ln.color || '—'}</td>
+                    <td className="px-3 py-1.5 text-center">{ln.quantity ?? 0}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{ln.fabric_consumption_kg?.toFixed(3) ?? '—'}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">¥{ln.total_cost_per_piece?.toFixed(2) ?? '—'}</td>
+                    <td className="px-3 py-1.5 text-right font-mono font-semibold text-indigo-700">
+                      {ln.currency || currency} {ln.quoted_price_per_piece?.toFixed(3) ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 工序明细 */}
       {q.cmt_operations && (q.cmt_operations as any[]).length > 0 && (

@@ -6,12 +6,14 @@ import { previewQuote, saveQuote } from '@/app/actions/quoter';
 import type { QuoteInput, QuoteOutput, GarmentType, StandardSize } from '@/lib/quoter/types';
 import { GARMENT_TYPE_LABELS, SUBTYPE_LABELS } from '@/lib/quoter/types';
 import { getChartOptions, DEFAULT_SIZE_CHARTS } from '@/lib/quoter/fabric/defaultSizeCharts';
+import { CustomerSelect } from '@/components/CustomerSelect';
 
 export function NewQuoteForm() {
   const router = useRouter();
 
   // 基础信息
-  const [customerName, setCustomerName] = useState('');
+  const [customerId, setCustomerId] = useState<string | null>(null); // 客户真相（customers.id）
+  const [customerName, setCustomerName] = useState('');               // 显示快照
   const [styleNo, setStyleNo] = useState('');
   const [styleName, setStyleName] = useState('');
   const [garmentType, setGarmentType] = useState<GarmentType>('knit_top');
@@ -58,6 +60,7 @@ export function NewQuoteForm() {
   function buildInput(): QuoteInput {
     const chart = DEFAULT_SIZE_CHARTS[chartKey];
     return {
+      customer_id: customerId || undefined,
       customer_name: customerName || undefined,
       style_no: styleNo || undefined,
       style_name: styleName || undefined,
@@ -103,6 +106,7 @@ export function NewQuoteForm() {
 
   async function handleSave() {
     if (!result) return;
+    if (!customerId) { alert('请先选择客户'); return; }
     setSaving(true);
     try {
       const input = buildInput();
@@ -128,22 +132,19 @@ export function NewQuoteForm() {
         {/* 基础信息 */}
         <section className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
           <h2 className="text-sm font-semibold text-gray-800">① 基础信息</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              type="text"
-              value={customerName}
-              onChange={e => setCustomerName(e.target.value)}
-              placeholder="客户名称"
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="text"
-              value={styleNo}
-              onChange={e => setStyleNo(e.target.value)}
-              placeholder="款号"
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
+          <CustomerSelect
+            onSelect={(c) => {
+              setCustomerId(c?.id ?? null);
+              setCustomerName(c?.customer_name ?? '');
+            }}
+          />
+          <input
+            type="text"
+            value={styleNo}
+            onChange={e => setStyleNo(e.target.value)}
+            placeholder="款号"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
           <input
             type="text"
             value={styleName}

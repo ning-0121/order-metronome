@@ -21,6 +21,10 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
     );
   }
 
+  // 获取报价行（子阶段1：Header + Line）。旧报价已由 migration 回填 1 行。
+  const { data: lines } = await (supabase.from('quote_line') as any)
+    .select('*').eq('quote_id', id).order('line_no', { ascending: true });
+
   // 获取训练反馈
   const { data: feedback } = await (supabase.from('quoter_training_feedback') as any)
     .select('*').eq('quote_id', id).order('created_at', { ascending: false });
@@ -38,7 +42,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
       <div className="mb-2">
         <Link href="/quoter" className="text-sm text-gray-500 hover:text-indigo-600">← 报价列表</Link>
       </div>
-      <QuoteDetailClient quote={quote as any} feedback={(feedback || []) as any[]} creatorName={creatorName} />
+      <QuoteDetailClient quote={quote as any} lines={(lines || []) as any[]} feedback={(feedback || []) as any[]} creatorName={creatorName} />
     </div>
   );
 }

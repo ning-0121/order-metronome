@@ -9,6 +9,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { generateQuoteWithRAG } from '@/lib/quoter/api';
+import { buildQuoteLineRow } from '@/lib/quoter/types';
 import type { QuoteInput, QuoteOutput } from '@/lib/quoter/types';
 
 const QUOTER_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement'];
@@ -58,6 +59,9 @@ export async function saveQuote(
   const auth = await checkQuoterAccess();
   if (!auth.ok || !auth.userId) return { error: auth.error };
 
+  // 子阶段1：客户单一真相 = customers.id；新建报价必须选客户
+  if (!input.customer_id) return { error: '请先选择客户' };
+
   const supabase = await createClient();
 
   // 生成报价编号 QT-20260409-001
@@ -71,7 +75,8 @@ export async function saveQuote(
   const { data, error } = await (supabase.from('quoter_quotes') as any)
     .insert({
       quote_no: quoteNo,
-      customer_name: input.customer_name || null,
+      customer_id: input.customer_id,            // ← 客户真相（引用）
+      customer_name: input.customer_name || null, // ← 显示快照 + 旧链路兼容（继续写）
       style_no: input.style_no || null,
       style_name: input.style_name || null,
       garment_type: input.garment_type,
@@ -102,8 +107,21 @@ export async function saveQuote(
 
   if (error) return { error: '保存失败：' + error.message };
 
+  const quoteId = (data as any).id as string;
+
+  // 子阶段1：Header + Line 重构 —— 每张报价产出 exactly 1 条 quote_line（line_no=1）。
+  // 行的稳定 uuid 由 DB 默认生成，是未来 Customer PO Line 的映射锚。
+  const { error: lineErr } = await (supabase.from('quote_line') as any)
+    .insert(buildQuoteLineRow(quoteId, 1, input, result));
+
+  if (lineErr) {
+    // 避免产生"无行 Header"孤儿：回滚刚建的 Header（supabase-js 无事务，尽力清理）
+    await (supabase.from('quoter_quotes') as any).delete().eq('id', quoteId);
+    return { error: '保存报价行失败：' + lineErr.message };
+  }
+
   revalidatePath('/quoter');
-  return { quoteNo: (data as any).quote_no, id: (data as any).id };
+  return { quoteNo: (data as any).quote_no, id: quoteId };
 }
 
 /**

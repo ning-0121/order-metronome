@@ -189,6 +189,9 @@ export interface CmtCalculationResult {
 // ════════════════════════════════════════════════
 
 export interface QuoteInput {
+  /** 客户引用（customers.id）—— 单一客户真相。子阶段1起新建报价必填 */
+  customer_id?: string;
+  /** 客户名（显示快照 + 旧链路兼容；不再是客户真相） */
   customer_name?: string;
   style_no?: string;
   style_name?: string;
@@ -230,4 +233,84 @@ export interface QuoteOutput {
   effective_margin_pct: number;
   /** 整体置信度 */
   overall_confidence: number;
+}
+
+// ════════════════════════════════════════════════
+// Quote Line（子阶段1：Header + Line 重构）
+//
+// quote_line 行的插入载荷（不含 DB 自动列 id / created_at / updated_at）。
+// 口径与 quoter_quotes(Header) 写入及 20260630 回填 migration 完全一致。
+// 行的稳定 uuid 由 DB 默认 gen_random_uuid() 生成（= 未来 Customer PO Line 映射锚）。
+// ════════════════════════════════════════════════
+
+export interface QuoteLineRow {
+  quote_id: string;
+  line_no: number;
+  style_no: string | null;
+  style_name: string | null;
+  garment_type: string | null;
+  garment_subtype: string | null;
+  color: string | null;
+  quantity: number | null;
+  size_distribution: Partial<Record<StandardSize, number>> | null;
+  fabric_type: string | null;
+  fabric_composition: string | null;
+  fabric_width_cm: number | null;
+  fabric_price_per_kg: number | null;
+  fabric_consumption_kg: number | null;
+  fabric_cost_per_piece: number | null;
+  cmt_factory: string | null;
+  cmt_operations: unknown;
+  cmt_cost_per_piece: number | null;
+  trim_cost_per_piece: number;
+  packing_cost_per_piece: number;
+  logistics_cost_per_piece: number;
+  total_cost_per_piece: number | null;
+  margin_rate: number | null;
+  quoted_price_per_piece: number | null;
+  currency: string | null;
+  exchange_rate: number | null;
+  status: string;
+}
+
+/**
+ * 由 Header 输入 + 计算结果派生一条 quote_line 插入载荷。
+ * 纯函数、无副作用、可单测。子阶段1每张报价产出 1 行（line_no=1）；
+ * 子阶段4多款表单时按 N 行循环复用本函数。
+ */
+export function buildQuoteLineRow(
+  quoteId: string,
+  lineNo: number,
+  input: QuoteInput,
+  result: QuoteOutput,
+): QuoteLineRow {
+  return {
+    quote_id: quoteId,
+    line_no: lineNo,
+    style_no: input.style_no ?? null,
+    style_name: input.style_name ?? null,
+    garment_type: input.garment_type ?? null,
+    garment_subtype: input.subtype ?? null,
+    color: null, // 单款表单无颜色字段；逐色拆行留待子阶段4
+    quantity: input.quantity ?? 0,
+    size_distribution: input.size_distribution ?? null,
+    fabric_type: input.fabric.fabric_type ?? null,
+    fabric_composition: input.fabric.composition ?? null,
+    fabric_width_cm: input.fabric.width_cm ?? null,
+    fabric_price_per_kg: input.fabric.price_per_kg ?? null,
+    fabric_consumption_kg: result.fabric.avg_kg,
+    fabric_cost_per_piece: result.costs.fabric_rmb,
+    cmt_factory: input.cmt_factory ?? null,
+    cmt_operations: result.cmt.operations,
+    cmt_cost_per_piece: result.costs.cmt_rmb,
+    trim_cost_per_piece: input.trim_cost_per_piece ?? 0,
+    packing_cost_per_piece: input.packing_cost_per_piece ?? 0,
+    logistics_cost_per_piece: input.logistics_cost_per_piece ?? 0,
+    total_cost_per_piece: result.costs.subtotal_rmb,
+    margin_rate: input.margin_rate ?? 15.0,
+    quoted_price_per_piece: result.quote_currency_per_piece,
+    currency: input.currency ?? 'USD',
+    exchange_rate: input.exchange_rate ?? 7.2,
+    status: 'draft',
+  };
 }
