@@ -204,6 +204,15 @@ export const ROLE_GROUPS = {
 
   /** 可执行里程碑（去处理/完成节点）—— 业务开发/订单管理经理/采购经理 均为监督角色，看得到但不操作节点 */
   CAN_OPERATE_MILESTONES: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
+
+  /** 可见大货采购底价(unit_price)：采购/采购经理/财务/admin —— 业务只看采购建议价(price_baseline) */
+  CAN_SEE_PROCUREMENT_FLOOR: ['admin', 'finance', 'procurement', 'procurement_manager'] as const,
+
+  /** 可编辑供应商业务字段(名/址/电话/联系人/主营品类)：业务/采购/admin */
+  CAN_EDIT_SUPPLIER_BASIC: ['admin', 'sales', 'sales_manager', 'merchandiser', 'procurement', 'procurement_manager'] as const,
+
+  /** 可编辑供应商财务字段(付款方式/账期/银行/税号)：财务/admin */
+  CAN_EDIT_SUPPLIER_FINANCE: ['admin', 'finance'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;
