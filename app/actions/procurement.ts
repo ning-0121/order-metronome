@@ -792,6 +792,12 @@ export async function recordGoodsReceipt(
     .eq('id', lineItemId);
   if (upErr) return { error: upErr.message };
 
+  // W1: QC 验收也自动入库(增量 delta,与 recordReceipt 同函数,补挂不双计)。
+  try {
+    const { recordInventoryReceipt } = await import('@/app/actions/inventory');
+    await recordInventoryReceipt(lineItemId);
+  } catch { /* 入库失败不影响验收 */ }
+
   await logProcurement(supabase, lineItemId, line.order_id, 'inspect',
     line.line_status, nextStatus,
     `验收 ${payload.result === 'pass' ? '通过' : payload.result === 'concession' ? '让步接收' : '拒收'}：实收 ${payload.received_qty}${payload.defect_notes ? '，' + payload.defect_notes : ''}`,

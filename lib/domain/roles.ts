@@ -219,6 +219,9 @@ export const ROLE_GROUPS = {
 
   /** 可审批采购单（财务视角:付得起/账期/信用）：admin + 财务 */
   CAN_APPROVE_PROC_FINANCE: ['admin', 'finance'] as const,
+
+  /** 可录领料/退料(发料出库):生产/物流/采购/admin —— 谁管发料谁录 */
+  CAN_ISSUE_MATERIAL: ['admin', 'production', 'production_manager', 'logistics', 'procurement', 'procurement_manager'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;
