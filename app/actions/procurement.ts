@@ -368,6 +368,12 @@ export async function recordReceipt(
     await recordInventoryReceipt(itemId);
   } catch { /* 入库失败不影响收货 */ }
 
+  // B3a: 收货 → 联动关联采购项收货状态(fire-and-forget)。
+  try {
+    const { syncProcurementItemReceivingStatus } = await import('@/app/actions/procurement-items');
+    await syncProcurementItemReceivingStatus(orderId);
+  } catch { /* 状态联动失败不影响收货 */ }
+
   // 到货校验：实收 vs 预算（如果有预算的话）
   const { data: fullItem } = await (supabase.from('procurement_line_items') as any)
     .select('budget_qty, material_name, ordered_unit, order_id')
@@ -797,6 +803,12 @@ export async function recordGoodsReceipt(
     const { recordInventoryReceipt } = await import('@/app/actions/inventory');
     await recordInventoryReceipt(lineItemId);
   } catch { /* 入库失败不影响验收 */ }
+
+  // B3a: QC 验收 → 联动关联采购项收货状态(fire-and-forget)。
+  try {
+    const { syncProcurementItemReceivingStatus } = await import('@/app/actions/procurement-items');
+    await syncProcurementItemReceivingStatus(line.order_id);
+  } catch { /* 状态联动失败不影响验收 */ }
 
   await logProcurement(supabase, lineItemId, line.order_id, 'inspect',
     line.line_status, nextStatus,

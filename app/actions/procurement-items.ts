@@ -11,6 +11,10 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
+import {
+  buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment,
+} from '@/lib/services/procurement-execution';
+import { getOrderLeftover } from '@/app/actions/inventory';
 
 const num = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
 
@@ -234,4 +238,112 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
   if (error) return { error: friendlyError(error) };
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// B3a 执行链打通:采购项(确认)→ 执行行 · 收货状态联动 · 领料核销派生
+// ADR-004 第3层→第4层。本阶段起本 action 可写 procurement_line_items(桥),
+// 老手工建行入口不动(并存);FK=procurement_item_id(不锚易失 requirement_id)。
+// ════════════════════════════════════════════════════════════════════════
+
+/** 桥:已确认(confirmed)且未生成过的采购项 → 生成采购执行行(挂 procurement_item_id)。幂等。 */
+export async function generateExecutionLines(orderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: items, error: iErr } = await (supabase.from('procurement_items') as any)
+    .select('id, order_id, consolidation_key, material_name, specification, category, unit, purchase_unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, confirmed_supplier_name, unit_price, status')
+    .eq('order_id', orderId).eq('status', 'confirmed');
+  if (iErr) return { error: friendlyError(iErr) };
+  if (!items || items.length === 0) return { error: '无已确认的采购项(请先在采购项上「确认」)' };
+
+  // 已生成过执行行的 item(幂等,不重建)
+  const { data: existLines } = await (supabase.from('procurement_line_items') as any)
+    .select('procurement_item_id').eq('order_id', orderId).not('procurement_item_id', 'is', null);
+  const done = new Set((existLines || []).map((l: any) => l.procurement_item_id));
+
+  const now = new Date().toISOString();
+  const rows = (items as any[])
+    .filter((it) => !done.has(it.id) && canGenerateExecution(it))
+    .map((it) => ({ ...buildExecutionLineRow(it, user.id), ordered_at: now }));
+  if (rows.length === 0) return { ok: true, created: 0, message: '已确认项均已生成执行行' };
+
+  const { error: insErr } = await (supabase.from('procurement_line_items') as any).insert(rows);
+  if (insErr) return { error: friendlyError(insErr) };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, created: rows.length };
+}
+
+/** 领料核销派生视图:逐采购项 需求/下单/收货/消耗/尾货(单一来源,不落库)。 */
+export async function getOrderProcurementFulfillment(orderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: items } = await (supabase.from('procurement_items') as any)
+    .select('id, consolidation_key, material_name, unit, total_required_qty, status').eq('order_id', orderId);
+  if (!items || items.length === 0) return { data: [] };
+
+  const itemIds = (items as any[]).map((i) => i.id);
+  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+    .select('procurement_item_id, ordered_qty, received_qty').eq('order_id', orderId).in('procurement_item_id', itemIds);
+  const lo = await getOrderLeftover(orderId);
+  const leftoverRows = (lo as any).data || [];
+  return { data: deriveFulfillment(items as any[], (lines || []) as any[], leftoverRows) };
+}
+
+/** 状态联动:按执行行收货量重算该订单关联采购项收货状态(只进不退)。收货钩子 fire-and-forget 调用。 */
+export async function syncProcurementItemReceivingStatus(orderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: items } = await (supabase.from('procurement_items') as any)
+    .select('id, status').eq('order_id', orderId);
+  if (!items || items.length === 0) return { ok: true, changed: 0 };
+  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+    .select('procurement_item_id, ordered_qty, received_qty').eq('order_id', orderId).not('procurement_item_id', 'is', null);
+
+  const agg = new Map<string, { ordered: number; received: number }>();
+  for (const l of (lines || []) as any[]) {
+    const a = agg.get(l.procurement_item_id) || { ordered: 0, received: 0 };
+    a.ordered += Number(l.ordered_qty) || 0; a.received += Number(l.received_qty) || 0;
+    agg.set(l.procurement_item_id, a);
+  }
+  let changed = 0;
+  const now = new Date().toISOString();
+  for (const it of (items as any[])) {
+    const a = agg.get(it.id); if (!a) continue;
+    const next = resolveReceivingStatus(it.status, a.received, a.ordered);
+    if (next !== it.status) {
+      await (supabase.from('procurement_items') as any).update({ status: next, updated_at: now }).eq('id', it.id);
+      changed++;
+    }
+  }
+  return { ok: true, changed };
+}
+
+/** 状态联动:采购单 placed → 该单执行行关联采购项 confirmed→ordered。下单钩子 fire-and-forget 调用。 */
+export async function syncProcurementItemsOrderedForPO(purchaseOrderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+    .select('procurement_item_id').eq('purchase_order_id', purchaseOrderId).not('procurement_item_id', 'is', null);
+  const ids = Array.from(new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean)));
+  if (ids.length === 0) return { ok: true, changed: 0 };
+
+  const { data: items } = await (supabase.from('procurement_items') as any).select('id, status').in('id', ids);
+  let changed = 0;
+  const now = new Date().toISOString();
+  for (const it of (items || []) as any[]) {
+    const next = resolveOrderedStatus(it.status);
+    if (next !== it.status) {
+      await (supabase.from('procurement_items') as any).update({ status: next, updated_at: now }).eq('id', it.id);
+      changed++;
+    }
+  }
+  return { ok: true, changed };
 }

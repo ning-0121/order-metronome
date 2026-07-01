@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus,
+  generateExecutionLines, getOrderProcurementFulfillment,
 } from '@/app/actions/procurement-items';
 
 const CAT_LABEL: Record<string, string> = {
@@ -32,14 +33,27 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [sources, setSources] = useState<any[]>([]);
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
+  const [fulfillment, setFulfillment] = useState<any[]>([]);
 
   const reload = async () => {
     const res = await listProcurementItems(orderId);
     if ((res as any).error) { setMsg((res as any).error); }
     else setItems((res as any).data || []);
+    const ff = await getOrderProcurementFulfillment(orderId);
+    if ((ff as any).data) setFulfillment((ff as any).data);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [orderId]);
+
+  const confirmedCount = items.filter(i => i.status === 'confirmed').length;
+  async function genLines() {
+    setBusy(true); setMsg('');
+    const res = await generateExecutionLines(orderId);
+    setBusy(false);
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    setMsg((res as any).created > 0 ? `✅ 已生成 ${(res as any).created} 条采购执行行(去采购中心下单)` : ((res as any).message || '无新执行行'));
+    await reload();
+  }
 
   async function consolidate() {
     setBusy(true); setMsg('');
@@ -87,9 +101,17 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       {/* 顶部 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-gray-500">{items.length} 个采购核料项 · 同订单按 物料+颜色+单位 自动归并</div>
-        <button onClick={consolidate} disabled={busy}
-          className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {busy ? '核料中…' : '🔄 核料归并 / 刷新'}</button>
+        <div className="flex items-center gap-2">
+          {confirmedCount > 0 && (
+            <button onClick={genLines} disabled={busy}
+              className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50"
+              title="把已确认采购项生成采购执行行(下单/收货用)">
+              {busy ? '生成中…' : `➡️ 生成执行行（${confirmedCount} 已确认）`}</button>
+          )}
+          <button onClick={consolidate} disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+            {busy ? '核料中…' : '🔄 核料归并 / 刷新'}</button>
+        </div>
       </div>
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
 
@@ -127,6 +149,37 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* 执行 / 核销进度(B3a:需求→下单→收货→消耗→尾货)*/}
+      {fulfillment.some(f => f.ordered > 0 || f.received > 0 || f.consumed > 0) && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="text-sm font-semibold text-gray-800 mb-1">执行 / 核销进度</div>
+          <p className="text-[11px] text-gray-400 mb-3">下单/收货来自采购执行行 · 消耗/尾货来自库存领料流水(按物料身份核销)</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-gray-500 border-b border-gray-100">
+                {['物料', '状态', '需求', '下单', '收货', '消耗(领料)', '尾货', '单位'].map(h => (
+                  <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {fulfillment.filter(f => f.ordered > 0 || f.received > 0 || f.consumed > 0).map(f => (
+                  <tr key={f.procurement_item_id} className="border-b border-gray-50">
+                    <td className="py-1.5 px-2 text-gray-800">{f.material_name || '—'}</td>
+                    <td className="py-1.5 px-2"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{statusLabel(f.status)}</span></td>
+                    <td className="py-1.5 px-2 text-gray-500 font-mono">{f.required}</td>
+                    <td className="py-1.5 px-2 text-gray-700 font-mono">{f.ordered}</td>
+                    <td className="py-1.5 px-2 text-gray-700 font-mono">{f.received}</td>
+                    <td className="py-1.5 px-2 text-indigo-700 font-mono">{f.consumed}</td>
+                    <td className={`py-1.5 px-2 font-mono font-semibold ${f.leftover < 0 ? 'text-red-600' : f.leftover > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{f.leftover}</td>
+                    <td className="py-1.5 px-2 text-gray-400">{f.unit || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

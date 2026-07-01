@@ -192,6 +192,11 @@ export async function placePurchaseOrder(poId: string): Promise<{
       const { data: full } = await (supabase.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
       if (full) await syncPurchaseOrderToFinance(full);
     } catch { /* 财务同步失败不影响下单 */ }
+    // B3a: placed → 关联采购项 confirmed→ordered(fire-and-forget)。
+    try {
+      const { syncProcurementItemsOrderedForPO } = await import('@/app/actions/procurement-items');
+      await syncProcurementItemsOrderedForPO(poId);
+    } catch { /* 状态联动失败不影响下单 */ }
     revalidatePath(`/procurement/po/${poId}`);
     return { ok: true };
   };
