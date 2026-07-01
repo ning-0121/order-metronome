@@ -44,6 +44,21 @@ export function computeReceiptDelta(currentReceived: number, priorReceiptSum: nu
   return round3((Number(currentReceived) || 0) - (Number(priorReceiptSum) || 0));
 }
 
+/**
+ * 某物料在库量(W3b MRP 扣库存用,按 名+单位 best-effort 匹配)。
+ * ⚠️ 粗匹配(忽略规格);material_master 统一 key 后可精确。仅 flag 开时用。
+ */
+export function onHandForMaterial(balance: InvBalance[], materialName?: string | null, unit?: string | null): number {
+  const norm = (v: unknown) => (v ?? '').toString().trim().toLowerCase();
+  const n = norm(materialName);
+  const u = norm(unit);
+  let sum = 0;
+  for (const b of balance) {
+    if (norm(b.material_name) === n && norm(b.unit) === u) sum += b.on_hand;
+  }
+  return round3(sum);
+}
+
 export interface LeftoverRow {
   material_key: string;
   material_name: string | null;

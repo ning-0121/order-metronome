@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { computeMaterialRequirement } from '@/lib/services/mrp';
+import { aggregateInventoryBalance, onHandForMaterial } from '@/lib/services/inventory';
 import { subtractWorkingDays } from '@/lib/utils/date';
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
@@ -613,14 +614,24 @@ export async function submitBomToProcurement(
   const { data: snapLines } = await (supabase.from('material_package_snapshot_lines') as any)
     .select('*').eq('snapshot_id', snapshotId!);
   const today = toYmd(new Date());
+  // ── W3b:MRP 扣库存(flag MRP_INVENTORY_DEDUCT 默认关)。开 → 喂真 on_hand;关 → 0(现状不变)。──
+  const deductInv = process.env.MRP_INVENTORY_DEDUCT === 'on';
+  let invBalance: ReturnType<typeof aggregateInventoryBalance> = [];
+  if (deductInv) {
+    const { data: invTxns } = await (supabase.from('inventory_transactions') as any)
+      .select('material_key, material_name, unit, qty');
+    invBalance = aggregateInventoryBalance((invTxns || []) as any[]);
+  }
   const reqRows = (snapLines || []).map((line: any) => {
+    // flag 开:按 名+单位 best-effort 取在库量(负库存钳到 0,不反向抬高采购)。关:0。
+    const inventoryQty = deductInv ? Math.max(0, onHandForMaterial(invBalance, line.material_name, line.unit)) : 0;
     const r = computeMaterialRequirement({
       material: {
         material_name: line.material_name, material_type: line.material_type,
         material_code: line.material_code, unit: line.unit,
         qty_per_piece: line.qty_per_piece, loss_rate: line.loss_rate,
       },
-      po_quantity: order.quantity, stageAnchors, inventoryQty: 0, reuseQty: 0, today,
+      po_quantity: order.quantity, stageAnchors, inventoryQty, reuseQty: 0, today,
     });
     return {
       material_plan_id: planId, order_id: orderId, snapshot_line_id: line.id,
