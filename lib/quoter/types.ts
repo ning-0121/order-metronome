@@ -314,3 +314,56 @@ export function buildQuoteLineRow(
     status: 'draft',
   };
 }
+
+// ════════════════════════════════════════════════
+// Quote Version + Approval（子阶段2）
+//
+// 冻结快照 payload + 毛利门控，均为纯函数，无副作用、可单测。
+// Approved 由 quoter_quotes.approved_version 表达，不新增 status 值。
+// ════════════════════════════════════════════════
+
+/** 冻结快照载荷（写入 quote_version_snapshot.snapshot jsonb；写后不可改） */
+export interface QuoteSnapshot {
+  version: number;
+  /** 冻结时刻的 Header 行（原样） */
+  header: Record<string, unknown>;
+  /** 冻结时刻的 Lines 行（原样） */
+  lines: Record<string, unknown>[];
+}
+
+/**
+ * 由已落库的 Header 行 + Line 行组装冻结快照。
+ * 不 stamp 时间（freeze 时间由 DB created_at 记录），保证纯函数确定性。
+ */
+export function buildQuoteSnapshot(
+  header: Record<string, unknown> & { version?: number | null },
+  lines: Record<string, unknown>[] | null | undefined,
+): QuoteSnapshot {
+  return {
+    version: (header.version as number) ?? 1,
+    header,
+    lines: lines ?? [],
+  };
+}
+
+export interface ApprovalGateResult {
+  /** 是否需要价格审批权限（存在低于目标毛利的行） */
+  needsPriceApproval: boolean;
+  /** 命中的低毛利行 */
+  lowMarginLines: Array<{ line_no: number | null; margin_rate: number | null }>;
+}
+
+/**
+ * 毛利门控（§8）：任一行毛利 < 目标毛利 → 需 CAN_APPROVE_PRICE。
+ * 无目标毛利（null）→ 不设地板，业务自定快路径。与角色判断解耦，便于单测。
+ */
+export function evaluateApprovalGate(
+  lines: Array<{ line_no?: number | null; margin_rate?: number | null }>,
+  marginTarget: number | null | undefined,
+): ApprovalGateResult {
+  if (marginTarget == null) return { needsPriceApproval: false, lowMarginLines: [] };
+  const lowMarginLines = (lines ?? [])
+    .filter((l) => l.margin_rate != null && (l.margin_rate as number) < marginTarget)
+    .map((l) => ({ line_no: l.line_no ?? null, margin_rate: l.margin_rate ?? null }));
+  return { needsPriceApproval: lowMarginLines.length > 0, lowMarginLines };
+}

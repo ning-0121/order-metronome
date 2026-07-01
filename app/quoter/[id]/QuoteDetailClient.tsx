@@ -9,6 +9,8 @@ import {
   updateQuoteStatus,
   deleteQuote,
   submitQuoteFeedback,
+  approveQuote,
+  createVersion,
 } from '@/app/actions/quoter';
 import { GARMENT_TYPE_LABELS } from '@/lib/quoter/types';
 
@@ -23,16 +25,46 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 interface Props {
   quote: any;
   lines: any[];
+  versions: any[];
   feedback: any[];
   creatorName: string;
 }
 
-export function QuoteDetailClient({ quote: q, lines, feedback, creatorName }: Props) {
+export function QuoteDetailClient({ quote: q, lines, versions, feedback, creatorName }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState('');
   const [fbType, setFbType] = useState<'fabric_consumption' | 'cmt_cost' | 'total_price'>('total_price');
   const [fbValue, setFbValue] = useState('');
   const [showFeedback, setShowFeedback] = useState(false);
+  const [priceFloor, setPriceFloor] = useState(
+    q.price_floor != null ? String(q.price_floor)
+      : q.quote_price_per_piece != null ? String(q.quote_price_per_piece) : '',
+  );
+
+  const currentVersion: number = q.version ?? 1;
+  const currentApproved = q.approved_version === currentVersion;
+
+  async function handleApprove() {
+    const floor = Number(priceFloor);
+    if (!priceFloor || Number.isNaN(floor)) { alert('请填写价格地板'); return; }
+    setLoading('approve');
+    const res = await approveQuote(q.id, floor);
+    if (res.error) { alert(res.error); setLoading(''); return; }
+    alert(`✅ 已审批，冻结基线 v${res.approvedVersion}`);
+    setLoading('');
+    router.refresh();
+  }
+
+  async function handleReVersion() {
+    const reason = window.prompt('Re-quote 原因（可选）：');
+    if (reason === null) return; // 取消
+    setLoading('version');
+    const res = await createVersion(q.id, reason || undefined);
+    if (res.error) { alert(res.error); setLoading(''); return; }
+    alert(`✅ 已开新版 v${res.newVersion}`);
+    setLoading('');
+    router.refresh();
+  }
 
   const sc = STATUS_CONFIG[q.status] || STATUS_CONFIG.draft;
 
@@ -224,6 +256,78 @@ export function QuoteDetailClient({ quote: q, lines, feedback, creatorName }: Pr
           </div>
         </div>
       )}
+
+      {/* 审批 / 版本（子阶段2） */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-800">审批 / 版本</h3>
+          <span className="text-xs text-gray-400">当前 v{currentVersion}</span>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 text-sm mb-4">
+          <div>
+            <div className="text-xs text-gray-500">审批基线</div>
+            <div className="font-medium text-gray-900">
+              {q.approved_version ? `已审批 v${q.approved_version}` : '未审批'}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">目标毛利</div>
+            <div className="font-medium text-gray-900">{q.margin_target != null ? `${q.margin_target}%` : '—'}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">价格地板</div>
+            <div className="font-medium text-gray-900">{q.price_floor != null ? `${q.currency || ''} ${q.price_floor}` : '—'}</div>
+          </div>
+        </div>
+
+        {/* Action Center — AI 不自动点 */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">价格地板 / 件</label>
+            <input
+              type="number" step="0.001" value={priceFloor}
+              onChange={e => setPriceFloor(e.target.value)}
+              className="w-32 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+            />
+          </div>
+          <button
+            onClick={handleApprove}
+            disabled={loading === 'approve' || currentApproved}
+            className="text-xs px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium disabled:opacity-50"
+          >
+            {loading === 'approve' ? '审批中...' : currentApproved ? '✓ 当前版已审批' : '✅ 审批并冻结'}
+          </button>
+          <button
+            onClick={handleReVersion}
+            disabled={loading === 'version'}
+            className="text-xs px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-medium disabled:opacity-50"
+          >
+            {loading === 'version' ? '处理中...' : '🔁 Re-quote（开新版）'}
+          </button>
+        </div>
+
+        {/* 版本历史（只读） */}
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <div className="text-xs font-semibold text-gray-600 mb-2">版本历史</div>
+          {!versions || versions.length === 0 ? (
+            <p className="text-xs text-gray-400">暂无冻结版本（审批或 Re-quote 后产生）</p>
+          ) : (
+            <div className="space-y-1">
+              {versions.map((v: any) => (
+                <div key={v.id} className="flex items-center gap-3 text-xs">
+                  <span className="font-mono text-gray-500 w-10">v{v.version}</span>
+                  <span className={v.is_approved ? 'text-emerald-700 font-medium' : 'text-gray-400'}>
+                    {v.is_approved ? '✅ 已审批基线' : '历史版'}
+                  </span>
+                  <span className="text-gray-400 flex-1 truncate">{v.reason || '—'}</span>
+                  <span className="text-gray-400">{new Date(v.created_at).toLocaleDateString('zh-CN')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* 工序明细 */}
       {q.cmt_operations && (q.cmt_operations as any[]).length > 0 && (

@@ -9,12 +9,13 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { generateQuoteWithRAG } from '@/lib/quoter/api';
-import { buildQuoteLineRow } from '@/lib/quoter/types';
+import { buildQuoteLineRow, buildQuoteSnapshot, evaluateApprovalGate } from '@/lib/quoter/types';
 import type { QuoteInput, QuoteOutput } from '@/lib/quoter/types';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 const QUOTER_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement'];
 
-async function checkQuoterAccess(): Promise<{ ok: boolean; userId?: string; error?: string }> {
+async function checkQuoterAccess(): Promise<{ ok: boolean; userId?: string; roles?: string[]; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: '请先登录' };
@@ -27,7 +28,7 @@ async function checkQuoterAccess(): Promise<{ ok: boolean; userId?: string; erro
     (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const allowed = userRoles.some((r: string) => QUOTER_ROLES.includes(r));
   if (!allowed) return { ok: false, error: '无权访问报价员' };
-  return { ok: true, userId: user.id };
+  return { ok: true, userId: user.id, roles: userRoles };
 }
 
 /**
@@ -122,6 +123,123 @@ export async function saveQuote(
 
   revalidatePath('/quoter');
   return { quoteNo: (data as any).quote_no, id: quoteId };
+}
+
+/**
+ * 审批报价（子阶段2）—— 毛利驱动，人工执行。
+ * 效果：冻结当前版快照(is_approved=true) + 置 approved_version + 写 price_floor。
+ * 不改 status；不写任何 AI 字段。低毛利行需 CAN_APPROVE_PRICE。
+ */
+export async function approveQuote(
+  quoteId: string,
+  priceFloor: number,
+): Promise<{ error?: string; success?: boolean; approvedVersion?: number }> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok || !auth.userId) return { error: auth.error };
+
+  const supabase = await createClient();
+
+  const { data: quote, error: qErr } = await (supabase.from('quoter_quotes') as any)
+    .select('*').eq('id', quoteId).single();
+  if (qErr || !quote) return { error: '报价不存在' };
+
+  const version: number = (quote as any).version ?? 1;
+
+  // 当前版已是审批基线 → 幂等返回
+  if ((quote as any).approved_version === version) {
+    return { success: true, approvedVersion: version };
+  }
+
+  const { data: lines, error: lErr } = await (supabase.from('quote_line') as any)
+    .select('*').eq('quote_id', quoteId).order('line_no', { ascending: true });
+  if (lErr) return { error: '读取报价行失败：' + lErr.message };
+
+  // 毛利门控（§8）
+  const gate = evaluateApprovalGate((lines || []) as any[], (quote as any).margin_target ?? null);
+  if (gate.needsPriceApproval && !hasRoleInGroup(auth.roles ?? [], 'CAN_APPROVE_PRICE')) {
+    const tags = gate.lowMarginLines.map((l) => `L${l.line_no}`).join('、');
+    return { error: `存在低于目标毛利的行（${tags}），需价格审批权限（业务经理/管理员）` };
+  }
+
+  // 该版是否已有冻结快照（恢复 partial-failure / 防 UNIQUE 冲突）
+  const { data: existing } = await (supabase.from('quote_version_snapshot') as any)
+    .select('id, is_approved').eq('quote_id', quoteId).eq('version', version).maybeSingle();
+
+  if (existing && !(existing as any).is_approved) {
+    return { error: '该版本已被冻结为历史版本，请 Re-quote 开新版后再审批' };
+  }
+
+  if (!existing) {
+    // snapshot 只能 INSERT，不能 UPDATE（DB 触发器禁改）
+    const { error: snapErr } = await (supabase.from('quote_version_snapshot') as any).insert({
+      quote_id: quoteId,
+      version,
+      snapshot: buildQuoteSnapshot(quote as any, (lines || []) as any[]),
+      reason: gate.needsPriceApproval ? '低毛利审批通过' : null,
+      is_approved: true,
+      created_by: auth.userId,
+    });
+    if (snapErr) return { error: '冻结快照失败：' + snapErr.message };
+  }
+
+  // 置 approved_version + price_floor（不动 status）
+  const { error: updErr } = await (supabase.from('quoter_quotes') as any)
+    .update({ approved_version: version, price_floor: priceFloor, updated_at: new Date().toISOString() })
+    .eq('id', quoteId);
+  if (updErr) return { error: '更新审批基线失败：' + updErr.message };
+
+  revalidatePath(`/quoter/${quoteId}`);
+  revalidatePath('/quoter');
+  return { success: true, approvedVersion: version };
+}
+
+/**
+ * 开新版 / Re-quote（子阶段2）—— 人工执行。
+ * 效果：冻结当前版快照 + version+1 + 清 approved_version（新工作版待批）。
+ * 本阶段不做新版行编辑（保守口径，留待子阶段4）。
+ */
+export async function createVersion(
+  quoteId: string,
+  reason?: string,
+): Promise<{ error?: string; newVersion?: number }> {
+  const auth = await checkQuoterAccess();
+  if (!auth.ok || !auth.userId) return { error: auth.error };
+
+  const supabase = await createClient();
+
+  const { data: quote, error: qErr } = await (supabase.from('quoter_quotes') as any)
+    .select('*').eq('id', quoteId).single();
+  if (qErr || !quote) return { error: '报价不存在' };
+
+  const version: number = (quote as any).version ?? 1;
+
+  // 冻结当前版（若尚未冻结）。is_approved = 当前版是否为已审批基线。
+  const { data: existing } = await (supabase.from('quote_version_snapshot') as any)
+    .select('id').eq('quote_id', quoteId).eq('version', version).maybeSingle();
+
+  if (!existing) {
+    const { data: lines } = await (supabase.from('quote_line') as any)
+      .select('*').eq('quote_id', quoteId).order('line_no', { ascending: true });
+    const { error: snapErr } = await (supabase.from('quote_version_snapshot') as any).insert({
+      quote_id: quoteId,
+      version,
+      snapshot: buildQuoteSnapshot(quote as any, (lines || []) as any[]),
+      reason: reason || null,
+      is_approved: (quote as any).approved_version === version,
+      created_by: auth.userId,
+    });
+    if (snapErr) return { error: '冻结当前版失败：' + snapErr.message };
+  }
+
+  // version+1，清 approved_version（新工作版未审批）
+  const { error: updErr } = await (supabase.from('quoter_quotes') as any)
+    .update({ version: version + 1, approved_version: null, updated_at: new Date().toISOString() })
+    .eq('id', quoteId);
+  if (updErr) return { error: '开新版失败：' + updErr.message };
+
+  revalidatePath(`/quoter/${quoteId}`);
+  revalidatePath('/quoter');
+  return { newVersion: version + 1 };
 }
 
 /**
