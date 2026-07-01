@@ -9,7 +9,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
-import { aggregateInventoryBalance, computeReceiptDelta, materialKeyForLine } from '@/lib/services/inventory';
+import { aggregateInventoryBalance, computeReceiptDelta, computeOrderLeftover, materialKeyForLine } from '@/lib/services/inventory';
 
 async function authIssueRoles() {
   const supabase = await createClient();
@@ -116,6 +116,17 @@ export async function getInventoryTransactions(materialKey?: string): Promise<{ 
   const { data, error } = await q;
   if (error) return { error: error.message };
   return { data: data || [] };
+}
+
+/** 真尾货(按订单,逐物料)= received − consumed。派生,单一来源 inventory_transactions。 */
+export async function getOrderLeftover(orderId: string): Promise<{ data?: any[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: txns, error } = await (supabase.from('inventory_transactions') as any)
+    .select('material_key, material_name, unit, txn_type, qty').eq('order_id', orderId);
+  if (error) return { error: error.message };
+  return { data: computeOrderLeftover((txns || []) as any[]) };
 }
 
 /** 领料可挂的订单列表(CAN_ISSUE_MATERIAL)。 */

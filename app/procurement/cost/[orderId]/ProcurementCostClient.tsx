@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { backfillActualMaterialCost } from '@/app/actions/procurement-cost';
 
-export function ProcurementCostClient({ data, orderId }: { data: any; orderId: string }) {
+export function ProcurementCostClient({ data, orderId, leftover }: { data: any; orderId: string; leftover: any[] }) {
   const router = useRouter();
   const { order, summary, receivingDiff, current_actual_material_cost } = data;
   const [busy, setBusy] = useState(false);
@@ -56,11 +56,47 @@ export function ProcurementCostClient({ data, orderId }: { data: any; orderId: s
         </button>
       </section>
 
-      {/* 订收差异（非真尾货） */}
+      {/* 真尾货（W2：received − consumed，逐物料） */}
+      <section className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-baseline gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-gray-800">真尾货（余料）</h3>
+          <span className="text-[11px] text-gray-400">= 采购收货 − 实际消耗(领料−退料) · 依赖领料真被录</span>
+        </div>
+        {!leftover || leftover.length === 0 ? (
+          <p className="text-sm text-gray-400">暂无数据(需该订单有入库+领料流水)</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 text-left text-gray-500">
+                  <th className="px-3 py-2">物料</th>
+                  <th className="px-3 py-2 text-right">采购收货</th>
+                  <th className="px-3 py-2 text-right">实际消耗</th>
+                  <th className="px-3 py-2 text-right">尾货</th>
+                  <th className="px-3 py-2">单位</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {leftover.map((l: any) => (
+                  <tr key={l.material_key}>
+                    <td className="px-3 py-1.5">{l.material_name || l.material_key}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{l.received}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{l.consumed}</td>
+                    <td className={`px-3 py-1.5 text-right font-mono font-semibold ${l.leftover < 0 ? 'text-red-600' : l.leftover > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{l.leftover}</td>
+                    <td className="px-3 py-1.5 text-gray-500">{l.unit || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* 订收差异（辅助口径 · 非真尾货） */}
       <section className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-baseline gap-2 mb-3">
           <h3 className="text-sm font-semibold text-gray-800">订收差异</h3>
-          <span className="text-[11px] text-amber-600">⚠️ 订了 vs 收了,**非真尾货**(真尾货=收了vs用了,需生产消耗链)</span>
+          <span className="text-[11px] text-amber-600">⚠️ 订了 vs 收了(辅助口径),真尾货看上方</span>
         </div>
         {receivingDiff.over.length === 0 && receivingDiff.short.length === 0 ? (
           <p className="text-sm text-gray-400">无订收差异(或均未收货)</p>

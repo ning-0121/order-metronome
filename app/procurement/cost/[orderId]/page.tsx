@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getProcurementCostSummary } from '@/app/actions/procurement-cost';
+import { getOrderLeftover } from '@/app/actions/inventory';
 import { ProcurementCostClient } from './ProcurementCostClient';
 
 export default async function ProcurementCostDetailPage({ params }: { params: Promise<{ orderId: string }> }) {
@@ -11,6 +12,7 @@ export default async function ProcurementCostDetailPage({ params }: { params: Pr
   if (!user) redirect('/login');
 
   const { data, error } = await getProcurementCostSummary(orderId);
+  const leftover = error ? [] : ((await getOrderLeftover(orderId)).data || []);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
@@ -20,7 +22,7 @@ export default async function ProcurementCostDetailPage({ params }: { params: Pr
       {error ? (
         <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-600">{error}</div>
       ) : (
-        <ProcurementCostClient data={data} orderId={orderId} />
+        <ProcurementCostClient data={data} orderId={orderId} leftover={leftover} />
       )}
     </div>
   );
