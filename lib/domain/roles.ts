@@ -213,6 +213,12 @@ export const ROLE_GROUPS = {
 
   /** 可编辑供应商财务字段(付款方式/账期/银行/税号)：财务/admin */
   CAN_EDIT_SUPPLIER_FINANCE: ['admin', 'finance'] as const,
+
+  /** 可审批采购单（采购视角:买得对，供应商/价/量）：admin + 采购经理 */
+  CAN_APPROVE_PROCUREMENT: ['admin', 'procurement_manager'] as const,
+
+  /** 可审批采购单（财务视角:付得起/账期/信用）：admin + 财务 */
+  CAN_APPROVE_PROC_FINANCE: ['admin', 'finance'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;

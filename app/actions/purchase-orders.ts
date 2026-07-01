@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
+import { evaluateProcurementApproval, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 
 const CAN_PROCURE = ['admin', 'procurement', 'procurement_manager'];
 
@@ -132,7 +133,93 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
   const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   const maskedLines = maskFloorForLines((lines || []) as any[], canSeeFloor);
 
-  return { data: { po, lines: maskedLines, orderRefs, canSeeFloor } };
+  const canProcure = roles.some((r) => CAN_PROCURE.includes(r));
+  const canApproveProcurement = hasRoleInGroup(roles, 'CAN_APPROVE_PROCUREMENT');
+  const canApproveFinance = hasRoleInGroup(roles, 'CAN_APPROVE_PROC_FINANCE');
+
+  return { data: { po, lines: maskedLines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance } };
+}
+
+/** 审批采购单（P2a 单签：取最高所需角色）。采购经理 / 财务按 scope 门控。 */
+export async function approvePurchaseOrder(poId: string, note?: string): Promise<{ error?: string; ok?: boolean }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+
+  const { data: po } = await (supabase.from('purchase_orders') as any)
+    .select('approval_status, approval_required_by').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).approval_status !== 'pending') return { error: '非待审批状态' };
+
+  const scope = topRequiredScope(((po as any).approval_required_by || []) as ApprovalScope[]);
+  const authorized = scope === 'finance'
+    ? hasRoleInGroup(roles, 'CAN_APPROVE_PROC_FINANCE')
+    : hasRoleInGroup(roles, 'CAN_APPROVE_PROCUREMENT');
+  if (!authorized) return { error: scope === 'finance' ? '需财务审批权限' : '需采购经理审批权限' };
+
+  const { error } = await (supabase.from('purchase_orders') as any).update({
+    approval_status: 'approved', approved_by: userId, approved_at: new Date().toISOString(),
+    approval_note: note || null, updated_at: new Date().toISOString(),
+  }).eq('id', poId);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/procurement/po/${poId}`);
+  return { ok: true };
+}
+
+/**
+ * 下单（P2a）：draft → placed。**始终跑风险闸**（无法绕过审批）。
+ * 已 approved → 直接下单;否则评估:有风险 → 转 pending 并阻断;无风险 → 直接下单。
+ */
+export async function placePurchaseOrder(poId: string): Promise<{
+  error?: string; ok?: boolean; pendingApproval?: boolean; reasons?: string[];
+}> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '无采购权限' };
+
+  const { data: po } = await (supabase.from('purchase_orders') as any)
+    .select('status, approval_status, total_amount, supplier_id, suppliers(net_days)').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') return { error: '仅草稿可下单' };
+
+  const place = async () => {
+    const { error } = await (supabase.from('purchase_orders') as any)
+      .update({ status: 'placed', updated_at: new Date().toISOString() }).eq('id', poId);
+    revalidatePath(`/procurement/po/${poId}`);
+    return error ? { error: error.message } : { ok: true };
+  };
+
+  // 已审批通过 → 直接下单
+  if ((po as any).approval_status === 'approved') return place();
+
+  // 否则跑风险闸（无法绕过）
+  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+    .select('unit_price, price_baseline').eq('purchase_order_id', poId);
+  const { count } = await (supabase.from('purchase_orders') as any)
+    .select('id', { count: 'exact', head: true })
+    .eq('supplier_id', (po as any).supplier_id).neq('id', poId)
+    .in('status', ['placed', 'confirmed', 'receiving', 'received', 'closed']);
+
+  const decision = evaluateProcurementApproval({
+    totalAmount: (po as any).total_amount ?? 0,
+    lines: (lines || []) as any[],
+    supplierNetDays: (po as any).suppliers?.net_days ?? null,
+    isNewSupplier: (count || 0) === 0,
+    orderBudget: null,
+  });
+
+  if (decision.needsApproval) {
+    await (supabase.from('purchase_orders') as any).update({
+      approval_status: 'pending', approval_required_by: decision.requiredBy,
+      approval_reasons: decision.reasons, updated_at: new Date().toISOString(),
+    }).eq('id', poId);
+    revalidatePath(`/procurement/po/${poId}`);
+    return { pendingApproval: true, reasons: decision.reasons };
+  }
+
+  await (supabase.from('purchase_orders') as any)
+    .update({ approval_status: 'not_required', updated_at: new Date().toISOString() }).eq('id', poId);
+  return place();
 }
 
 /** 导出采购单 Excel（发供应商；采购专用，含底价）。 */

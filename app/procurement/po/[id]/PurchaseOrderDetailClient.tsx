@@ -1,12 +1,38 @@
 'use client';
 
 import { useState } from 'react';
-import { exportPurchaseOrder } from '@/app/actions/purchase-orders';
+import { useRouter } from 'next/navigation';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder } from '@/app/actions/purchase-orders';
+
+const REASON_LABELS: Record<string, string> = {
+  large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
+  over_budget: '超预算', non_standard_terms: '非标账期(<60天)',
+};
 
 export function PurchaseOrderDetailClient({ view }: { view: any }) {
-  const { po, lines, orderRefs, canSeeFloor } = view;
+  const router = useRouter();
+  const { po, lines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance } = view;
   const sup = po.suppliers || {};
   const [exporting, setExporting] = useState(false);
+  const [busy, setBusy] = useState('');
+
+  async function handlePlace() {
+    setBusy('place');
+    const res = await placePurchaseOrder(po.id);
+    setBusy('');
+    if (res.error) { alert(res.error); return; }
+    if (res.pendingApproval) { alert('已转审批 · 触发:' + (res.reasons || []).map((r: string) => REASON_LABELS[r] || r).join('、')); router.refresh(); return; }
+    alert('✅ 已下单'); router.refresh();
+  }
+  async function handleApprove() {
+    const note = window.prompt('审批意见（可选）:');
+    if (note === null) return;
+    setBusy('approve');
+    const res = await approvePurchaseOrder(po.id, note || undefined);
+    setBusy('');
+    if (res.error) { alert(res.error); return; }
+    alert('✅ 审批通过'); router.refresh();
+  }
 
   const dualNo = `${po.po_no} · 订单 ${(orderRefs || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
 
@@ -39,6 +65,39 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
           </button>
         )}
       </div>
+
+      {/* 审批 / 下单（P2a）—— 卡风险不走流程 */}
+      {po.status === 'draft' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800">审批 / 下单</h3>
+            {po.approval_status === 'pending' ? (
+              <p className="text-sm text-amber-700 mt-1">
+                ⏳ 待审批 · 触发:{(po.approval_reasons || []).map((r: string) => REASON_LABELS[r] || r).join('、')}
+                {' '}· 需 {(po.approval_required_by || []).join(' + ')} 审批
+              </p>
+            ) : po.approval_status === 'approved' ? (
+              <p className="text-sm text-emerald-700 mt-1">✅ 已审批,可下单</p>
+            ) : (
+              <p className="text-sm text-gray-500 mt-1">草稿 · 点"下单"自动查风险:标准单直接下单,风险单转审批</p>
+            )}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {po.approval_status === 'pending' && (canApproveProcurement || canApproveFinance) && (
+              <button onClick={handleApprove} disabled={busy !== ''}
+                className="text-xs px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium disabled:opacity-50">
+                {busy === 'approve' ? '审批中…' : '✅ 审批通过'}
+              </button>
+            )}
+            {canProcure && po.approval_status !== 'pending' && (
+              <button onClick={handlePlace} disabled={busy !== ''}
+                className="text-xs px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium disabled:opacity-50">
+                {busy === 'place' ? '处理中…' : '📦 下单'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-5 text-sm space-y-1.5">
