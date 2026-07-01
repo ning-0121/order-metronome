@@ -362,6 +362,12 @@ export async function recordReceipt(
 
   if (error) return { error: error.message };
 
+  // W0: 采购收货 → 自动入库(增量 delta)。fire-and-forget，不阻断收货主流程。
+  try {
+    const { recordInventoryReceipt } = await import('@/app/actions/inventory');
+    await recordInventoryReceipt(itemId);
+  } catch { /* 入库失败不影响收货 */ }
+
   // 到货校验：实收 vs 预算（如果有预算的话）
   const { data: fullItem } = await (supabase.from('procurement_line_items') as any)
     .select('budget_qty, material_name, ordered_unit, order_id')
