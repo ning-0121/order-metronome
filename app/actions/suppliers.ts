@@ -12,6 +12,15 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { pickEditableSupplierFields } from '@/lib/procurement/purchaseOrder';
+import { syncSupplierToFinance } from '@/lib/integration/finance-sync';
+
+/** 供应商 upsert 后同步财务（P2b，未配置即跳过，绝不阻塞主链）。 */
+async function pushSupplierToFinance(supabase: any, id: string) {
+  try {
+    const { data: full } = await (supabase.from('suppliers') as any).select('*').eq('id', id).maybeSingle();
+    if (full) await syncSupplierToFinance(full);
+  } catch { /* 财务同步失败不影响供应商主流程 */ }
+}
 
 async function authRoles(): Promise<{ userId?: string; roles: string[]; error?: string }> {
   const supabase = await createClient();
@@ -65,6 +74,7 @@ export async function createSupplier(input: SupplierInput): Promise<{ id?: strin
   const { data, error } = await (supabase.from('suppliers') as any)
     .insert({ ...fields, created_by: auth.userId }).select('id').single();
   if (error) return { error: '创建失败：' + error.message };
+  await pushSupplierToFinance(supabase, (data as any).id);
   revalidatePath('/suppliers');
   return { id: (data as any).id };
 }
@@ -84,6 +94,7 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
   const supabase = await createClient();
   const { error } = await (supabase.from('suppliers') as any).update(fields).eq('id', id);
   if (error) return { error: error.message };
+  await pushSupplierToFinance(supabase, id);
   revalidatePath('/suppliers');
   return { success: true };
 }

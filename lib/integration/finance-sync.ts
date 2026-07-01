@@ -19,6 +19,8 @@ type WebhookEventType =
   | 'milestone.updated'
   | 'price_approval.requested'
   | 'delay.requested'
+  | 'supplier.upserted'
+  | 'purchase_order.placed'
 
 interface WebhookPayload {
   event: WebhookEventType
@@ -163,6 +165,54 @@ export async function pushDelayApprovalToFinance(delay: {
   created_at: string
 }) {
   return sendToFinanceSystem('delay.requested', delay as unknown as Record<string, unknown>)
+}
+
+// ============================================================
+// 采购 P2b — 供应商 + 采购单 → 财务系统同步
+// 财务侧建应付主体 / 应付+付款计划。共享 supplier_id / po_no，幂等 upsert。
+// 端到端需财务 repo 实现 accept（见 docs/integration/15）。未配置即静默跳过。
+// ============================================================
+
+/** 供应商同步 payload（纯，可测）。含财务字段供财务建应付主体。 */
+export function buildSupplierSyncPayload(s: Record<string, unknown>): Record<string, unknown> {
+  return {
+    supplier_id: s.id,
+    supplier_code: s.supplier_code ?? null,
+    name: s.name,
+    main_category: s.main_category ?? null,
+    payment_method: s.payment_method ?? null,
+    net_days: s.net_days ?? null,
+    bank_info: s.bank_info ?? null,
+    tax_id: s.tax_id ?? null,
+    status: s.status ?? null,
+    updated_at: s.updated_at ?? null,
+  }
+}
+
+/** 采购单同步 payload（纯，可测）。placed 时推金额/账期供财务建应付+付款计划。 */
+export function buildPurchaseOrderSyncPayload(po: Record<string, unknown>, orderRefs?: unknown[]): Record<string, unknown> {
+  return {
+    po_no: po.po_no,
+    purchase_order_id: po.id,
+    supplier_id: po.supplier_id,
+    total_amount: po.total_amount ?? null,
+    currency: po.currency ?? null,
+    payment_terms: po.payment_terms ?? null,
+    delivery_date: po.delivery_date ?? null,
+    order_refs: orderRefs ?? (po.order_ids as unknown[]) ?? [],
+    status: po.status ?? null,
+    placed_at: po.updated_at ?? null,
+  }
+}
+
+/** 供应商 upsert（财务字段完善时）→ 财务应付主体 */
+export async function syncSupplierToFinance(supplier: Record<string, unknown>) {
+  return sendToFinanceSystem('supplier.upserted', buildSupplierSyncPayload(supplier))
+}
+
+/** 采购单 placed → 财务应付 + 付款计划 */
+export async function syncPurchaseOrderToFinance(po: Record<string, unknown>, orderRefs?: unknown[]) {
+  return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs))
 }
 
 /** 检查财务系统连通性 */

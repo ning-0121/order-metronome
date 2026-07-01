@@ -14,6 +14,7 @@ import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
 import { evaluateProcurementApproval, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
+import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
 
 const CAN_PROCURE = ['admin', 'procurement', 'procurement_manager'];
 
@@ -185,8 +186,14 @@ export async function placePurchaseOrder(poId: string): Promise<{
   const place = async () => {
     const { error } = await (supabase.from('purchase_orders') as any)
       .update({ status: 'placed', updated_at: new Date().toISOString() }).eq('id', poId);
+    if (error) { revalidatePath(`/procurement/po/${poId}`); return { error: error.message }; }
+    // P2b: placed → 财务同步（应付/付款计划）。未配置即跳过，绝不阻塞下单。
+    try {
+      const { data: full } = await (supabase.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
+      if (full) await syncPurchaseOrderToFinance(full);
+    } catch { /* 财务同步失败不影响下单 */ }
     revalidatePath(`/procurement/po/${poId}`);
-    return error ? { error: error.message } : { ok: true };
+    return { ok: true };
   };
 
   // 已审批通过 → 直接下单
