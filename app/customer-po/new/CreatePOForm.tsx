@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { listQuotes } from '@/app/actions/quoter';
 import { getApprovedQuoteForCompare } from '@/app/actions/quote-consumption';
 import { createPO } from '@/app/actions/customer-po';
 import type { CompareBasis } from '@/lib/quoter/consumption';
 
 export function CreatePOForm() {
+  const searchParams = useSearchParams();
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [quoteId, setQuoteId] = useState('');
@@ -18,9 +20,14 @@ export function CreatePOForm() {
   const [createdId, setCreatedId] = useState('');
 
   useEffect(() => {
+    const preQuote = searchParams.get('quote'); // P1a:从报价详情「立即建 PO」带过来的报价
     listQuotes(100)
       .then((r) => setQuotes((r.data || []).filter((q: any) => q.approved_version != null)))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        if (preQuote) handleSelect(preQuote);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSelect(id: string) {
@@ -52,8 +59,8 @@ export function CreatePOForm() {
         <p className="text-emerald-800 font-semibold mb-1">✅ 客户 PO 已创建</p>
         <p className="text-xs text-emerald-700 font-mono mb-4">customer_po.id = {createdId}</p>
         <div className="flex gap-2">
-          <Link href="/orders/new" className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700">
-            去建单（/orders/new → 从 PO 创建）
+          <Link href={`/orders/new?po=${createdId}`} className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700">
+            ➡️ 从此 PO 建单
           </Link>
           <button onClick={() => { setCreatedId(''); setQuoteId(''); setPoNumber(''); setBasis(null); }}
             className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">

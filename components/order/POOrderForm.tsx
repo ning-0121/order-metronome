@@ -14,7 +14,7 @@ import { getApprovedQuoteForCompare } from '@/app/actions/quote-consumption';
 import { createOrderFromPO } from '@/app/actions/order-from-po';
 import type { CompareBasis } from '@/lib/quoter/consumption';
 
-export function POOrderForm() {
+export function POOrderForm({ initialPoId }: { initialPoId?: string }) {
   const router = useRouter();
   const [pos, setPos] = useState<IntakePoRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,16 +27,22 @@ export function POOrderForm() {
 
   useEffect(() => {
     listCustomerPOsForIntake()
-      .then((r) => setPos(r.data || []))
+      .then((r) => {
+        const list = r.data || [];
+        setPos(list);
+        // P1a:从 PO 页带 ?po= 过来 → 自动预选并跑校验（用刚拿到的 list,避开 state 异步）
+        if (initialPoId && list.some((p) => p.id === initialPoId)) handleSelect(initialPoId, list);
+      })
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedPo = pos.find((p) => p.id === selectedId) || null;
 
-  async function handleSelect(id: string) {
+  async function handleSelect(id: string, list: IntakePoRow[] = pos) {
     setSelectedId(id);
     setBasis(null);
-    const po = pos.find((p) => p.id === id);
+    const po = list.find((p) => p.id === id);
     if (!po) return;
     setChecking(true);
     const b = await getApprovedQuoteForCompare(po.quote_id); // 只读消费闸门

@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { listCustomerPOsForIntake } from '@/app/actions/order-intake-read';
 import { POOrderForm } from './POOrderForm';
 import { LegacyOrderForm } from './LegacyOrderForm';
@@ -15,14 +16,17 @@ import { LegacyOrderForm } from './LegacyOrderForm';
 type Mode = 'po' | 'legacy';
 
 export function OrderIntakeModeSelector() {
-  const [mode, setMode] = useState<Mode>('legacy'); // 默认回退，探测到 PO 再切主
+  const searchParams = useSearchParams();
+  const initialPo = searchParams.get('po'); // P1a:从 PO 页「从此 PO 建单」带过来
+  const [mode, setMode] = useState<Mode>(initialPo ? 'po' : 'legacy'); // 带 ?po= 直接进 PO 模式,否则默认回退
   const [hasPo, setHasPo] = useState(false);
 
   useEffect(() => {
     // 软 PO-first：存在 PO → 默认进 PO 模式（不阻断 legacy）
     listCustomerPOsForIntake(1).then((r) => {
-      if ((r.data?.length || 0) > 0) { setHasPo(true); setMode('po'); }
+      if ((r.data?.length || 0) > 0) { setHasPo(true); if (!initialPo) setMode('po'); }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -53,7 +57,7 @@ export function OrderIntakeModeSelector() {
       </div>
 
       {/* 条件渲染：两条路径逻辑各自不变 */}
-      {mode === 'po' ? <POOrderForm /> : <LegacyOrderForm />}
+      {mode === 'po' ? <POOrderForm initialPoId={initialPo || undefined} /> : <LegacyOrderForm />}
     </div>
   );
 }

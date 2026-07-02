@@ -305,6 +305,15 @@ export function QuoteDetailClient({ quote: q, lines, versions, feedback, creator
           >
             {loading === 'version' ? '处理中...' : '🔁 Re-quote（开新版）'}
           </button>
+          {/* P1a 快捷入口:已审批 → 一键去建 PO(预选本报价) */}
+          {q.approved_version != null && (
+            <button
+              onClick={() => router.push(`/customer-po/new?quote=${q.id}`)}
+              className="text-xs px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
+            >
+              ➡️ 立即建 PO
+            </button>
+          )}
         </div>
 
         {/* 版本历史（只读） */}
