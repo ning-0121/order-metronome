@@ -43,7 +43,7 @@ export async function getManufacturingOrder(orderId: string) {
     .select('*').eq('order_id', orderId).maybeSingle();
 
   const { data: lineItems } = await (supabase.from('order_line_items') as any)
-    .select('line_no, style_no, product_name, color_cn, color_en, sizes, unit, qty_pcs')
+    .select('line_no, style_no, product_name, color_cn, color_en, sizes, unit, qty_pcs, image_url')
     .eq('order_id', orderId).order('line_no');
 
   const { data: bom } = await (supabase.from('materials_bom') as any)
@@ -131,143 +131,228 @@ export async function generateManufacturingOrderSheet(
   if (!mo) return { error: '请先创建并保存生产任务单' };
 
   // ── 名字解析(owner/confirmed/released → profiles.name)+ 格式化 ──
-  const userIds = [order.owner_user_id, mo.confirmed_by, mo.released_to_factory_by].filter(Boolean);
+  const userIds = [order.owner_user_id, mo.confirmed_by, mo.released_to_factory_by, mo.created_by].filter(Boolean);
   const nameMap: Record<string, string> = {};
   if (userIds.length > 0) {
     const { data: profs } = await (supabase.from('profiles') as any).select('user_id, name').in('user_id', userIds);
     for (const p of (profs || [])) nameMap[(p as any).user_id] = (p as any).name;
   }
-  const nameOf = (uid: any) => (uid && nameMap[uid]) ? nameMap[uid] : '—';
+  const nameOf = (uid: any) => (uid && nameMap[uid]) ? nameMap[uid] : '';
   const fmtDate = (v: any) => (v ? String(v).slice(0, 10) : '');
-  const fmtDateTime = (v: any) => {
-    if (!v) return '';
-    try { return new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }); } catch { return String(v); }
-  };
-  const STATUS_CN: Record<string, string> = { draft: '草稿', reviewing: '复核中', confirmed: '已确认', executing: '已下发生产', closed: '完成' };
 
-  // ── 配码表尺码列(标准序)──
+  // ══ 按范本《生产任务单范本.xlsx》生成:每款一个 sheet,A-K 共 11 列,宋体 14 ══
   const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'XXXL', '3XL', '4XL', '5XL', '6XL'];
-  const sizeSet = new Set<string>();
-  for (const li of lineItems) {
-    if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) sizeSet.add(k);
-  }
-  const sizeKeys = Array.from(sizeSet).sort((a, b) => {
+  const sortSizes = (keys: string[]) => keys.sort((a, b) => {
     const ia = SIZE_ORDER.indexOf(a.toUpperCase()), ib = SIZE_ORDER.indexOf(b.toUpperCase());
     if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
     const na = parseFloat(a), nb = parseFloat(b);
     if (!isNaN(na) && !isNaN(nb)) return na - nb;
     return a.localeCompare(b);
   });
-  const TOTAL_COLS = Math.max(7, 2 + sizeKeys.length + 1);  // 至少 7 列(原辅料表用 7 列)
+
+  // 按款分组(无明细则单 sheet 用订单头字段)
+  const styleGroups: { style_no: string; product_name: string; image_url: string; items: any[] }[] = [];
+  for (const li of lineItems) {
+    const key = li.style_no || order.style_no || '';
+    let g = styleGroups.find(x => x.style_no === key);
+    if (!g) { g = { style_no: key, product_name: li.product_name || order.product_description || '', image_url: li.image_url || '', items: [] }; styleGroups.push(g); }
+    if (!g.image_url && li.image_url) g.image_url = li.image_url;
+    g.items.push(li);
+  }
+  if (styleGroups.length === 0) styleGroups.push({ style_no: order.style_no || '', product_name: order.product_description || '', image_url: '', items: [] });
+
+  // 范本尺码明细表左列(工厂手填数值;标签沿用范本)
+  const MEASURE_LABELS = [
+    '胸围(缝下1")', '肩带宽', '肩宽', '前胸宽（高肩点下5"）', '后胸宽（高肩点下5"）', '肩斜', '领宽',
+    '前领深', '后领深', '袖笼直量', '腰围（高肩点下15"）', '下摆', '前总长（从高肩点）', '内衬前中长',
+  ];
+
+  const fabrics = bom.filter((b: any) => b.material_type === 'fabric');
+  const fabricText = (f: any) => f ? [f.material_name, f.color].filter(Boolean).join(' ') : '';
+  const fabricUsage = (f: any) => (f && f.qty_per_piece != null) ? `${f.qty_per_piece}${f.unit || ''}/件` : '';
+  const bomJoin = (types: string[]) => bom
+    .filter((b: any) => types.includes(b.material_type))
+    .map((b: any) => [b.material_name, b.color, b.qty_per_piece != null ? `${b.qty_per_piece}${b.unit || ''}/件` : ''].filter(Boolean).join(' '))
+    .join('；');
+  const joinTxt = (...vs: any[]) => vs.filter(Boolean).join('；');
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  const ws = wb.addWorksheet('生产任务单');
+  const FONT: any = { name: '宋体', size: 14 };
   const thin: any = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-  ws.columns = Array.from({ length: TOTAL_COLS }, (_, i) => ({ width: i === 0 ? 18 : i === 1 ? 20 : 12 }));
-  const mergeAcross = (n: number) => ws.mergeCells(n, 1, n, TOTAL_COLS);
+  const COL = (n: number) => String.fromCharCode(64 + n); // 1→A … 11→K
 
-  const titleRow = ws.addRow([`生产任务单　${mo.mo_no || ''}`]);
-  mergeAcross(titleRow.number);
-  titleRow.getCell(1).font = { bold: true, size: 16 };
-  titleRow.getCell(1).alignment = { horizontal: 'center' };
-  ws.addRow([]);
-
-  const sectionTitle = (t: string) => {
-    const r = ws.addRow([t]); mergeAcross(r.number);
-    r.getCell(1).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
-    r.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF006400' } };
-  };
-  const headerRow = (cells: any[]) => {
-    const r = ws.addRow(cells);
-    r.eachCell((c: any) => { c.font = { bold: true }; c.border = thin; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } }; });
-    return r;
-  };
-  // KV 行:label(col1) · value(col2-3 merge) · label2(col4) · value2(col5-end merge)
-  const kv = (label: string, v: any, label2?: string, v2?: any) => {
-    const r = ws.addRow([label, v ?? '', '', label2 || '', v2 ?? '']);
-    r.getCell(1).font = { bold: true }; r.getCell(4).font = { bold: true };
-    ws.mergeCells(r.number, 2, r.number, 3);
-    if (TOTAL_COLS > 5) ws.mergeCells(r.number, 5, r.number, TOTAL_COLS);
+  // 产品图:公开桶 URL,服务端抓取失败不阻塞生成
+  const fetchImage = async (url: string): Promise<{ buffer: Buffer; extension: 'jpeg' | 'png' | 'gif' } | null> => {
+    if (!url || !/^https?:\/\//.test(url)) return null;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const resp = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!resp.ok) return null;
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
+      const extension = ct.includes('png') ? 'png' : ct.includes('gif') ? 'gif' : 'jpeg';
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      if (buffer.length === 0 || buffer.length > 8 * 1024 * 1024) return null;
+      return { buffer, extension: extension as any };
+    } catch { return null; }
   };
 
-  // ── 一、订单基本信息 ──
-  sectionTitle('一、订单基本信息');
-  kv('订单号', order.order_no, '客户', order.customer_name);
-  kv('款号', order.style_no, '产品名称', order.product_description);
-  kv('数量', order.quantity, '生产工厂', order.factory_name || '—');
-  kv('工厂交期', fmtDate(order.factory_date), 'ETD（出货交期）', fmtDate(order.etd));
-  kv('业务员', nameOf(order.owner_user_id), '状态', STATUS_CN[mo.status] || mo.status);
-  ws.addRow([]);
+  for (const [gi, g] of styleGroups.entries()) {
+    const sheetName = (g.style_no || `款${gi + 1}`).replace(/[\\/*?:[\]]/g, '_').slice(0, 28) || `款${gi + 1}`;
+    const ws = wb.addWorksheet(wb.worksheets.some(w => w.name === sheetName) ? `${sheetName}_${gi + 1}` : sheetName);
+    ws.getColumn(1).width = 21;
+    for (let c = 2; c <= 11; c++) ws.getColumn(c).width = 10.6;
 
-  // ── 二、款色码明细(配码表矩阵)──
-  sectionTitle('二、款色码明细（配码表）');
-  headerRow(['款号', '颜色', ...sizeKeys, '合计']);
-  if (lineItems.length === 0) {
-    const r = ws.addRow(['（无款色码明细，请在 PO 解析 / 订单明细录入）']); mergeAcross(r.number);
-  } else {
-    const colTotals: Record<string, number> = {}; let grand = 0;
-    for (const li of lineItems) {
-      const color = [li.color_cn, li.color_en].filter(Boolean).join(' / ');
-      let rowTotal = 0;
-      const sizeCells = sizeKeys.map(k => {
-        const q = li.sizes && typeof li.sizes === 'object' ? Number(li.sizes[k]) : 0;
-        const n = isNaN(q) ? 0 : q;
-        if (n) { rowTotal += n; colTotals[k] = (colTotals[k] || 0) + n; }
-        return n || '';
-      });
-      grand += rowTotal;
-      const r = ws.addRow([li.style_no || order.style_no || '', color, ...sizeCells, rowTotal || '']);
-      r.eachCell((c: any) => { c.border = thin; });
+    // 该款尺码集 + 数量矩阵
+    const sizeSet = new Set<string>();
+    for (const li of g.items) if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) sizeSet.add(k);
+    const sizeKeys = sortSizes([...sizeSet]).slice(0, 10);
+    const styleTotal = g.items.reduce((a, li) => a + (Number(li.qty_pcs) || 0), 0) || (styleGroups.length === 1 ? order.quantity : 0);
+
+    // 通用写格
+    const put = (addr: string, v: any, opt: { bold?: boolean; size?: number; align?: 'left' | 'center' | 'right'; wrap?: boolean; border?: boolean; formula?: string } = {}) => {
+      const cell = ws.getCell(addr);
+      cell.value = opt.formula ? ({ formula: opt.formula } as any) : v;
+      cell.font = { ...FONT, size: opt.size || 14, bold: !!opt.bold };
+      cell.alignment = { horizontal: opt.align || 'center', vertical: 'middle', wrapText: !!opt.wrap };
+      if (opt.border) cell.border = thin;
+    };
+    const boxBorder = (r1: number, c1: number, r2: number, c2: number) => {
+      for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) ws.getCell(r, c).border = thin;
+    };
+
+    // ── 头部(范本 1-3 行)──
+    ws.mergeCells('A1:K1'); put('A1', '义乌市绮陌服饰有限公司', { bold: true, size: 22 });
+    ws.getRow(1).height = 27;
+    ws.mergeCells('A2:K2'); put('A2', '生产任务单', {});
+    ws.getRow(2).height = 22;
+    put('A3', '订单号：', { align: 'right' });
+    ws.mergeCells('B3:C3'); put('B3', order.order_no || '', { align: 'left' });
+    put('D3', '总数量:', { align: 'right' });
+    ws.mergeCells('E3:F3'); put('E3', styleTotal ? `${styleTotal}件` : '', { align: 'left' });
+    put('G3', '制单日期：', { align: 'right' });
+    put('H3', fmtDate(new Date().toISOString()), { align: 'left' });
+    put('I3', '发货日期：', { align: 'right' });
+    ws.mergeCells('J3:K3'); put('J3', fmtDate(order.etd), { align: 'left' });
+    for (let c = 1; c <= 11; c++) ws.getCell(3, c).border = { bottom: { style: 'thin' } } as any;
+
+    // ── 款号/品名/面料(范本 4-6 行)──
+    put('A4', '款    号', { border: true });
+    ws.mergeCells('B4:F4'); put('B4', g.style_no, { bold: true });
+    put('G4', '品    名', { border: true });
+    ws.mergeCells('H4:K4'); put('H4', g.product_name, {});
+    put('A5', '主 面 料', { border: true });
+    ws.mergeCells('B5:F5'); put('B5', fabricText(fabrics[0]), {});
+    put('G5', '网    纱', { border: true });
+    ws.mergeCells('H5:K5'); put('H5', fabricText(fabrics[1]), {});
+    put('A6', '主面料用料', { border: true });
+    ws.mergeCells('B6:F6'); put('B6', fabricUsage(fabrics[0]), {});
+    put('G6', '网纱用料', { border: true });
+    ws.mergeCells('H6:K6'); put('H6', fabricUsage(fabrics[1]), {});
+    boxBorder(4, 1, 6, 11);
+
+    // ── 尺码明细表 + 产品图片(范本 7-23 行)──
+    put('A7', '分    类', { border: true });
+    ws.mergeCells('B7:G7'); put('B7', '尺码明细表单位：CM', {});
+    ws.mergeCells('H7:K7'); put('H7', '产品图片', {});
+    put('A8', '尺    码', {});
+    sizeKeys.slice(0, 5).forEach((s, i) => put(`${COL(2 + i)}8`, s, {}));
+    put('G8', '公差', {});
+    MEASURE_LABELS.forEach((label, i) => put(`A${9 + i}`, label, {}));
+    put('A23', '胸垫型号', {});
+    boxBorder(7, 1, 23, 7);
+    boxBorder(7, 8, 7, 11);
+    ws.mergeCells('H8:K23');
+    boxBorder(8, 8, 23, 11);
+    for (let r = 4; r <= 23; r++) ws.getRow(r).height = 25;
+
+    // 嵌产品图(取不到就留空白区)
+    const img = await fetchImage(g.image_url);
+    if (img) {
+      const imgId = wb.addImage({ buffer: img.buffer as any, extension: img.extension });
+      ws.addImage(imgId, 'H8:K23');
     }
-    const totalRow = ws.addRow(['总计', '', ...sizeKeys.map(k => colTotals[k] || ''), grand]);
-    totalRow.eachCell((c: any) => { c.border = thin; c.font = { bold: true }; });
-    ws.mergeCells(totalRow.number, 1, totalRow.number, 2);
+
+    // ── 颜色 × 订单数量矩阵(范本 24-29 行,动态多颜色)──
+    // 尺码槽位:B..K 共 10 列均分
+    const n = Math.max(sizeKeys.length, 1);
+    const base = Math.floor(10 / n), rem = 10 % n;
+    let cur = 2;
+    const slots: { start: number; end: number }[] = [];
+    for (let i = 0; i < n; i++) { const w = base + (i < rem ? 1 : 0); slots.push({ start: cur, end: cur + w - 1 }); cur += w; }
+    const mergeSlotRow = (r: number) => slots.forEach(s => { if (s.end > s.start) ws.mergeCells(r, s.start, r, s.end); });
+
+    let row = 24;
+    ws.mergeCells(`A24:A26`); put('A24', '颜色', {});
+    ws.mergeCells(`B24:K24`); put('B24', '订单数量', {});
+    row = 25;
+    mergeSlotRow(25);
+    sizeKeys.forEach((s, i) => put(`${COL(slots[i].start)}25`, s, {}));
+    row = 26;
+    for (const [ci, li] of g.items.entries()) {
+      const skuRow = ci === 0 ? 26 : row; // 第一个颜色的 SKU 行在 A24:A26 合并区内
+      if (ci > 0) put(`A${skuRow}`, '', {});
+      mergeSlotRow(skuRow);
+      sizeKeys.forEach((s, i) => put(`${COL(slots[i].start)}${skuRow}`, `${g.style_no}${(li.color_en || '').toUpperCase()}${s}`, {}));
+      row = skuRow + 1;
+      const qtyRow = row;
+      put(`A${qtyRow}`, [li.color_cn, li.color_en].filter(Boolean).join('/') || '—', {});
+      mergeSlotRow(qtyRow);
+      sizeKeys.forEach((s, i) => {
+        const q = li.sizes && typeof li.sizes === 'object' ? Number(li.sizes[s]) || 0 : 0;
+        put(`${COL(slots[i].start)}${qtyRow}`, q || '', {});
+      });
+      row = qtyRow + 1;
+      const boxRow = row;
+      put(`A${boxRow}`, '每箱件数', {});
+      mergeSlotRow(boxRow);
+      row = boxRow + 1;
+      const cartonRow = row;
+      put(`A${cartonRow}`, '箱数', {});
+      mergeSlotRow(cartonRow);
+      sizeKeys.forEach((s, i) => {
+        const c = COL(slots[i].start);
+        put(`${c}${cartonRow}`, '', { formula: `IF(${c}${boxRow}>0,${c}${qtyRow}/${c}${boxRow},"")` });
+      });
+      row = cartonRow + 1;
+    }
+    if (g.items.length === 0) row = 27; // 无明细:只留表头结构
+    boxBorder(24, 1, row - 1, 11);
+    for (let r = 24; r < row; r++) ws.getRow(r).height = 25;
+
+    // ── 工厂要求(范本 30-37 行,标签沿用范本;空的留白手填)──
+    const reqRows: [string, string][] = [
+      ['成衣辅料：', bomJoin(['trim', 'lining', 'label'])],
+      ['包装辅料：', bomJoin(['packing'])],
+      ['裁剪要求：', ''],
+      ['缝制要求：', joinTxt(mo.print_embroidery_requirements, mo.special_requirements)],
+      ['检验要求：', mo.qc_focus || ''],
+      ['包装要求', mo.factory_packing_instructions || ''],
+      ['装箱要求', ''],
+      ['注意事项', joinTxt(mo.risk_notes, mo.factory_notes)],
+    ];
+    for (const [label, text] of reqRows) {
+      put(`A${row}`, label, {});
+      ws.mergeCells(`B${row}:K${row}`);
+      put(`B${row}`, text, { align: 'left', wrap: true });
+      boxBorder(row, 1, row, 11);
+      ws.getRow(row).height = text && text.length > 40 ? 50 : 25;
+      row++;
+    }
+
+    // ── 抄送 + 签名(范本 38-39 行)──
+    ws.mergeCells(`A${row}:K${row}`);
+    put(`A${row}`, `抄送:采购、面料仓、辅料仓${order.factory_name ? '、' + order.factory_name : ''}、QC、包装组长、打包组长`, { align: 'left' });
+    for (let c = 1; c <= 11; c++) ws.getCell(row, c).border = { top: { style: 'thin' } } as any;
+    ws.getRow(row).height = 21;
+    row++;
+    put(`A${row}`, `制单：${nameOf(mo.created_by)}`, { align: 'left' });
+    put(`C${row}`, '跟单：', { align: 'left' });
+    put(`I${row}`, '批准：', { align: 'left' });
+    ws.getRow(row).height = 25;
   }
-  ws.addRow([]);
-
-  // ── 三、原辅料摘要(+ 特殊要求)──
-  sectionTitle('三、原辅料摘要');
-  headerRow(['物料名称', '类型', '颜色', '位置', '单耗', '单位', '特殊要求']);
-  for (const b of bom) {
-    const r = ws.addRow([b.material_name, CAT_LABEL[b.material_type] || b.material_type, b.color || '', b.placement || '', b.qty_per_piece ?? '', b.unit || '', b.special_requirements || '']);
-    r.eachCell((c: any) => { c.border = thin; });
-    r.getCell(7).alignment = { wrapText: true, vertical: 'top' };
-  }
-  if (bom.length === 0) { const r = ws.addRow(['（无原辅料明细，请在「原辅料和包装」录入）']); mergeAcross(r.number); }
-  ws.addRow([]);
-
-  // ── 四、生产执行说明(MO 6 字段)──
-  sectionTitle('四、生产执行说明');
-  const field = (label: string, v: any) => {
-    const r = ws.addRow([label, v ?? '']);
-    ws.mergeCells(r.number, 2, r.number, TOTAL_COLS);
-    r.getCell(1).font = { bold: true };
-    r.getCell(1).border = thin; r.getCell(2).border = thin;
-    r.getCell(2).alignment = { wrapText: true, vertical: 'top' };
-  };
-  field('印绣要求', mo.print_embroidery_requirements);
-  field('内部包装说明', mo.factory_packing_instructions);
-  field('QC 重点', mo.qc_focus);
-  field('特殊要求', mo.special_requirements);
-  field('风险提醒', mo.risk_notes);
-  field('其他下厂说明', mo.factory_notes);
-  ws.addRow([]);
-
-  // ── 五、确认信息 ──
-  sectionTitle('五、确认信息');
-  kv('MO 号', mo.mo_no || '', '当前状态', STATUS_CN[mo.status] || mo.status);
-  kv('内容确认人', nameOf(mo.confirmed_by), '确认时间', fmtDateTime(mo.confirmed_at));
-  kv('下发人', nameOf(mo.released_to_factory_by), '下发时间', fmtDateTime(mo.released_to_factory_at));
-  kv('打印时间', new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }), '', '');
-  ws.addRow([]);
-
-  // ── 六、附件提示(静态,Evidence≠Data)──
-  sectionTitle('六、附件提示');
-  const note = ws.addRow(['客户原始 PO / Tech Pack / 图片等请在系统订单附件中查看；本表不复制附件内容。']);
-  mergeAcross(note.number);
-  note.getCell(1).alignment = { wrapText: true };
-  note.getCell(1).font = { italic: true, color: { argb: 'FF888888' } };
 
   const buffer = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buffer).toString('base64');
