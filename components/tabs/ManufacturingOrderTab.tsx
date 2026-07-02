@@ -282,6 +282,8 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
               ['注意事项', joinTxt(mo.risk_notes, mo.factory_notes)],
             ];
             const nCols = Math.max(sizeKeys.length, 1) + 5;
+            // S1.2 按款过滤 BOM:该款专属(含同步布料) + 整单通用
+            const bomForStyle = bomSorted.filter((b: any) => !b.style_no || b.style_no === g.style_no);
             return (
               <div key={gi} className="text-[13px] text-gray-900" style={{ fontFamily: 'SimSun, 宋体, serif' }}>
                 <div className="text-center text-xl font-bold">义乌市绮陌服饰有限公司</div>
@@ -355,7 +357,7 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
                       <td className={`${td} font-bold w-20`}>颜色</td><td className={`${td} font-bold w-20`}>单耗/件</td>
                       <td className={`${td} font-bold w-14`}>单位</td><td className={`${td} font-bold`}>备注</td>
                     </tr>
-                    {bomSorted.length > 0 ? bomSorted.map((b: any, i: number) => (
+                    {bomForStyle.length > 0 ? bomForStyle.map((b: any, i: number) => (
                       <tr key={i}>
                         <td className={tdL}>{b.material_name}</td>
                         <td className={td}>{CAT_LABEL[b.material_type] || b.material_type}</td>

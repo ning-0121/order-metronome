@@ -286,7 +286,10 @@ export async function generateManufacturingOrderSheet(
     put(bh, 5, '单位', { bold: true, fill: 'FFFAFAFA' });
     mergeR(bh, 6, NC); put(bh, 6, '备注', { bold: true, fill: 'FFFAFAFA' });
     row++;
-    const bomSorted = [...bom].sort((a: any, b: any) => (a.material_type === 'fabric' ? 0 : 1) - (b.material_type === 'fabric' ? 0 : 1));
+    // S1.2 按款过滤:该款专属行(含同步的布料) + 整单通用行(style_no 空)
+    const bomSorted = [...bom]
+      .filter((b: any) => !b.style_no || b.style_no === g.style_no)
+      .sort((a: any, b: any) => (a.material_type === 'fabric' ? 0 : 1) - (b.material_type === 'fabric' ? 0 : 1));
     if (bomSorted.length > 0) {
       for (const b of bomSorted) {
         put(row, 1, b.material_name || '', { align: 'left', wrap: true });

@@ -354,6 +354,10 @@ function NewOrderWizard() {
           style_no: st.style_no || '',
           product_name: st.product_name || '',
           image_url: st.image_url || '',
+          fabric_name: [st.material, st.fabric_weight].filter(Boolean).join(' '),
+          fabric_width: '',
+          fabric_consumption: '',
+          fabric_unit: 'kg',
           colors: (st.colors || []).map((c: any) => ({
             color_cn: c.color_cn || '',
             color_en: c.color_en || '',

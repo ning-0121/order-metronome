@@ -12,7 +12,7 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '' };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '' };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -129,6 +129,7 @@ export function BomTab({ orderId }: { orderId: string }) {
       total_qty: form.total_qty ? parseFloat(form.total_qty) : undefined,
       unit: form.unit, supplier: form.supplier || undefined, spec: form.spec || undefined,
       notes: form.notes || undefined, special_requirements: form.special_requirements || undefined,
+      style_no: form.style_no?.trim() || undefined,
       // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
       ...(editId && editingTemplate ? { override_reason: form.override_reason || undefined } : {}),
     };
@@ -170,7 +171,7 @@ export function BomTab({ orderId }: { orderId: string }) {
       qty_per_piece: item.qty_per_piece?.toString() || '',
       total_qty: item.total_qty?.toString() || '', unit: item.unit || 'meter', supplier: item.supplier || '',
       spec: item.spec || '', notes: item.notes || '', special_requirements: item.special_requirements || '',
-      override_reason: item.override_reason || '',
+      override_reason: item.override_reason || '', style_no: item.style_no || '',
     });
     setShowAdd(true);
   }
@@ -310,6 +311,8 @@ export function BomTab({ orderId }: { orderId: string }) {
   const formRow = (
     <div className="bg-indigo-50 rounded-xl p-4 mb-4 space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <input placeholder="归属款号(空=整单通用)" value={form.style_no} onChange={e => set('style_no', e.target.value)}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="物料名称 *" value={form.material_name} onChange={e => set('material_name', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <select value={form.material_type} onChange={e => set('material_type', e.target.value)}
@@ -727,14 +730,31 @@ export function BomTab({ orderId }: { orderId: string }) {
               ))}
             </tr></thead>
             <tbody>
-              {items.map(item => (
+              {/* S1.2 按款分组:每款一个原辅料表(第一行=同步的布料),整单通用排最后 */}
+              {[...new Set(items.map((it: any) => it.style_no || ''))]
+                .sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
+                .flatMap(sk => {
+                  const group = items.filter((it: any) => (it.style_no || '') === sk);
+                  return [
+                    <tr key={`grp-${sk}`} className="bg-indigo-50/70">
+                      <td colSpan={14} className="py-1.5 px-3 text-xs font-semibold text-indigo-800">
+                        {sk ? `👕 款 ${sk}` : '📦 整单通用'}（{group.length} 行）
+                        <button onClick={() => { setShowAdd(true); setEditId(null); setEditingTemplate(false); setForm({ ...emptyForm, style_no: sk }); }}
+                          className="ml-3 text-indigo-600 font-normal hover:underline">+ 加原辅料到{sk ? '此款' : '整单'}</button>
+                      </td>
+                    </tr>,
+                    ...group.map(item => (
                 <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="py-2 px-3 whitespace-nowrap">
                     {item.product_bom_template_id
                       ? (item.overridden_at
                           ? <span title={item.override_reason || '已改'} className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">✏️已改</span>
                           : <span title="来自产品款模板" className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">🧬模板</span>)
-                      : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">手动</span>}
+                      : item.source === 'line_items_sync'
+                        ? <span title="同步自逐款明细的布料;改布料去「逐款明细」改,这里改会被下次保存明细覆盖" className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🧵布料同步</span>
+                        : item.source === 'file_parse'
+                          ? <span title="原辅料单 AI 识别入库" className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">📄识别</span>
+                          : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">手动</span>}
                   </td>
                   <td className="py-2 px-3 font-mono text-xs text-gray-500 whitespace-nowrap">
                     {item.material_master_id && (item.material_code
@@ -765,7 +785,9 @@ export function BomTab({ orderId }: { orderId: string }) {
                     </div>
                   </td>
                 </tr>
-              ))}
+                    )),
+                  ];
+                })}
             </tbody>
           </table>
         </div>

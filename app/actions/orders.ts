@@ -791,6 +791,7 @@ export async function createOrder(
       let lineNo = 0;
       for (const st of parsedStyles) {
         const colors = Array.isArray(st?.colors) ? st.colors : [];
+        const fabricCons = st?.fabric_consumption === '' || st?.fabric_consumption == null ? null : Number(st.fabric_consumption);
         for (const c of colors) {
           lineNo++;
           // qty 优先取 c.qty;富录入表不维护 qty 字段 → 从 sizes 求和兜底
@@ -810,6 +811,10 @@ export async function createOrder(
             qty_raw: qty || null,
             image_url: st?.image_url || null,
             remark: c?.remark || null,
+            fabric_name: st?.fabric_name?.trim?.() || null,
+            fabric_width: st?.fabric_width?.trim?.() || null,
+            fabric_consumption: fabricCons != null && !isNaN(fabricCons) ? fabricCons : null,
+            fabric_unit: st?.fabric_unit?.trim?.() || null,
             source: 'po_parse',
           });
         }
@@ -818,6 +823,11 @@ export async function createOrder(
         const { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
         if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);
         assessment = assessSmallBatchFromLineItems(rows);
+        // S1.2:每款布料 → 同步该款 BOM 第一行(失败不阻断建单)
+        try {
+          const { syncStyleFabricsToBom } = await import('@/lib/services/style-fabric-sync');
+          await syncStyleFabricsToBom(supabase, orderData.id, user.id, parsedStyles);
+        } catch (e: any) { console.warn('[createOrder] 布料同步 BOM 失败(不阻断):', e?.message); }
       }
     }
 

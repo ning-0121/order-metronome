@@ -25,6 +25,7 @@ export async function addBomItem(orderId: string, item: {
   unit?: string; supplier?: string;
   placement?: string; color?: string; spec?: string;
   notes?: string; special_requirements?: string;
+  style_no?: string;   // S1.2:归属款号(空 = 整单通用)
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -45,6 +46,7 @@ export async function addBomItem(orderId: string, item: {
     spec: item.spec || null,
     notes: item.notes || null,
     special_requirements: item.special_requirements || null,
+    style_no: item.style_no?.trim() || null,
     source: 'manual',                      // 手动新增(Phase 2A 来源标记)
   });
   if (error) return { error: error.message };

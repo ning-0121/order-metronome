@@ -12,7 +12,11 @@ import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys } from '@/lib/utils/size-sort';
 
 type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string };
-type Style = { style_no: string; product_name: string; image_url: string; colors: Color[] };
+type Style = {
+  style_no: string; product_name: string; image_url: string; colors: Color[];
+  // S1.2 每款布料(自动同步成该款 BOM 第一行 + 生产任务单用料)
+  fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
+};
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
 const sumSizes = (s: Record<string, number>) => Object.values(s || {}).reduce((a, v) => a + (Number(v) || 0), 0);
@@ -68,7 +72,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
   };
 
   // ── 款 ──
-  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
+  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
   const removeStyle = (i: number) => setStyles(styles.filter((_, x) => x !== i));
   // 复制款:深拷贝(颜色/尺码件数/图片全带上),插在原款正下方,款号加「-副本」提示改;再改数量/图片即可
   const copyStyle = (i: number) => {
@@ -77,6 +81,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
       style_no: src.style_no ? `${src.style_no}-副本` : '',
       product_name: src.product_name,
       image_url: src.image_url,
+      fabric_name: src.fabric_name || '', fabric_width: src.fabric_width || '',
+      fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg',
       colors: src.colors.map((c) => ({ ...c, sizes: { ...c.sizes } })),
     };
     setStyles([...styles.slice(0, i + 1), dup, ...styles.slice(i + 1)]);
@@ -169,6 +175,18 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
             <span className="text-xs text-gray-500">款小计 <b>{styleTotal(st)}</b></span>
             {canEdit && <button onClick={() => copyStyle(si)} className="text-xs text-indigo-600 hover:underline">复制款</button>}
             {canEdit && <button onClick={() => removeStyle(si)} className="text-xs text-red-500 hover:underline">删款</button>}
+          </div>
+
+          {/* 每款布料(S1.2):自动同步成该款 BOM 第一行 + 生产任务单用料单耗 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-gray-400 w-14 shrink-0">🧵 布料</span>
+            <input value={st.fabric_name || ''} onChange={(e) => setStyleField(si, 'fabric_name', e.target.value)} placeholder="布料名(如 280g 仿锦)" disabled={!canEdit} className={`${inp} w-44`} />
+            <input value={st.fabric_width || ''} onChange={(e) => setStyleField(si, 'fabric_width', e.target.value)} placeholder="门幅(如 150cm)" disabled={!canEdit} className={`${inp} w-28`} />
+            <input type="number" min="0" step="0.001" value={st.fabric_consumption ?? ''} onChange={(e) => setStyleField(si, 'fabric_consumption', e.target.value)} placeholder="单耗/件" disabled={!canEdit} className={`${inp} w-20 text-right`} />
+            <select value={st.fabric_unit || 'kg'} onChange={(e) => setStyleField(si, 'fabric_unit', e.target.value)} disabled={!canEdit} className={`${inp} bg-white`}>
+              {['kg', '米', '平方', '码'].map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <span className="text-[11px] text-gray-400">录了会自动进该款 BOM 和生产任务单用料</span>
           </div>
 
           {/* 颜色 × 尺码 矩阵 */}
