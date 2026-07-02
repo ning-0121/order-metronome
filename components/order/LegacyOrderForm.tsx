@@ -521,6 +521,7 @@ function NewOrderWizard() {
     { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
     { formKey: 'internal_quote_file', fileType: 'internal_quote', label: '内部成本核算单' },
     { formKey: 'customer_quote_file', fileType: 'customer_quote', label: '客户最终报价单' },
+    { formKey: 'size_chart_file', fileType: 'size_chart', label: '尺码表' },
     { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
     { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
     { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
@@ -1501,9 +1502,10 @@ function NewOrderWizard() {
               </h3>
               <div className="space-y-3">
                 {([
-                  // 2026-07 用户拍板:只留 客户PO + 客户报价单,其余移除(内部成本核算单/生产制单/辅料表/装箱/工艺单)
+                  // 2026-07 用户拍板:只留 客户PO + 客户报价单 + 尺码表,其余移除(内部成本核算单/生产制单/辅料表/装箱/工艺单)
                   { name: 'customer_po_file',        label: '客户 PO（可多个）',  required: true,  multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
                   { name: 'customer_quote_file',     label: '客户报价单（可多个）',  required: true,  multiple: true, stepKey: '_customer_quote' },
+                  { name: 'size_chart_file',         label: '尺码表（可多个）',  required: false, multiple: true, stepKey: '_size_chart', hint: '客户/技术部的尺寸表,生产任务单 tab 可直接查看' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
                   .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (
                   <div key={name} className="rounded-lg border border-gray-200 p-3">

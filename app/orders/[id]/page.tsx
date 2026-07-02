@@ -805,30 +805,25 @@ export default async function OrderDetailPage({
             )}
           </div>
         )}
-        {/* Tab: 原辅料和包装 */}
+        {/* Tab: 原辅料和包装 —— BOM 录入是主体(喂 MRP/采购核料/生产任务单用料),文件只是佐证 */}
         {activeTab === 'bom' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
             <h2 className="text-lg font-semibold text-gray-900">📋 原辅料和包装资料</h2>
-            {/* 包装资料文件 */}
+            {/* BOM 结构化录入(2026-07-02 从底部折叠区提到顶部展开:业务找不到入口,以为没法填) */}
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">📦 包装资料</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">🧾 原辅料清单（BOM 录入 / 客户标准库带入）</h3>
+              <p className="text-xs text-gray-400 mb-3">在这里录面料/辅料/包装的单耗,是采购核料和生产任务单「用料」的数据源。</p>
+              <BomTab orderId={id} />
+            </div>
+            {/* 包装资料文件 */}
+            <div className="pt-4 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">📦 包装资料（文件）</h3>
               <PackingFilesSection orderId={id} fileTypes={['packing_requirement', 'tech_pack']} emptyText="业务在「生产单上传」节点上传的包装资料将显示在这里" />
             </div>
             {/* 原辅料单文件 */}
             <div className="pt-4 border-t border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">🧵 原辅料单</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">🧵 原辅料单（文件）</h3>
               <PackingFilesSection orderId={id} fileTypes={['trims_sheet', 'production_order']} emptyText="业务在「生产单上传」节点上传的原辅料单将显示在这里" />
-            </div>
-            {/* BOM 结构化清单（默认折叠，可从客户标准辅料库一键带入） */}
-            <div className="pt-4 border-t border-gray-200">
-              <details>
-                <summary className="text-sm font-semibold text-gray-700 cursor-pointer hover:text-gray-900 select-none">
-                  🧾 辅料清单 BOM / 客户标准库带入
-                </summary>
-                <div className="mt-3">
-                  <BomTab orderId={id} />
-                </div>
-              </details>
             </div>
           </div>
         )}
@@ -836,6 +831,11 @@ export default async function OrderDetailPage({
         {activeTab === 'manufacturing_order' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">🏭 生产任务单</h2>
+            {/* 建单时上传的尺码表(尺寸表数据源,下载任务单后按它填尺寸) */}
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-gray-600 mb-2">📐 尺码表</h3>
+              <PackingFilesSection orderId={id} fileTypes={['size_chart']} emptyText="建单时未上传尺码表;可在新建订单页「尺码表」处补传" />
+            </div>
             <ManufacturingOrderTab orderId={id} />
           </div>
         )}

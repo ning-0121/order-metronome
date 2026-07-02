@@ -231,12 +231,10 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   );
 }
 
-/** 生产任务单预览 —— 按范本版式(每款一页),数据与下载 Excel 同源。 */
+/** 生产任务单预览 —— V2 版式(每款一页),数据与下载 Excel 同源。 */
 function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
   order: any; mo: any; lineItems: any[]; bom: any[]; onClose: () => void; onDownload: () => void;
 }) {
-  const sortSizes = sortSizeKeys;
-
   // 按款分组(与服务端生成同口径)
   const groups: { style_no: string; product_name: string; image_url: string; items: any[] }[] = [];
   for (const li of lineItems) {
@@ -248,23 +246,18 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
   }
   if (groups.length === 0) groups.push({ style_no: order.style_no || '', product_name: order.product_description || '', image_url: '', items: [] });
 
-  const fabrics = bom.filter((b: any) => b.material_type === 'fabric');
-  const fabricText = (f: any) => f ? [f.material_name, f.color].filter(Boolean).join(' ') : '';
-  const fabricUsage = (f: any) => (f && f.qty_per_piece != null) ? `${f.qty_per_piece}${f.unit || ''}/件` : '';
-  const bomJoin = (types: string[]) => bom
-    .filter((b: any) => types.includes(b.material_type))
-    .map((b: any) => [b.material_name, b.color, b.qty_per_piece != null ? `${b.qty_per_piece}${b.unit || ''}/件` : ''].filter(Boolean).join(' '))
-    .join('；');
   const joinTxt = (...vs: any[]) => vs.filter(Boolean).join('；');
   const today = new Date().toISOString().slice(0, 10);
   const fmtD = (v: any) => (v ? String(v).slice(0, 10) : '');
+  const bomSorted = [...bom].sort((a: any, b: any) => (a.material_type === 'fabric' ? 0 : 1) - (b.material_type === 'fabric' ? 0 : 1));
 
   const td = 'border border-gray-400 px-2 py-1 text-center align-middle';
   const tdL = 'border border-gray-400 px-2 py-1 text-left align-middle';
+  const secCls = 'bg-gray-100 border border-gray-400 px-2 py-1 text-left font-bold';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-4xl w-full my-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl max-w-5xl w-full my-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white rounded-t-xl border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
           <span className="text-sm font-semibold text-gray-800">👁 生产任务单预览（{groups.length} 款,与下载 Excel 同源）</span>
           <div className="flex gap-2">
@@ -273,111 +266,139 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
           </div>
         </div>
 
-        <div className="p-4 space-y-8">
+        <div className="p-4 space-y-10">
           {groups.map((g, gi) => {
             const sizeSet = new Set<string>();
             for (const li of g.items) if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) sizeSet.add(k);
-            const sizeKeys = sortSizes([...sizeSet]).slice(0, 10);
+            const sizeKeys = sortSizeKeys([...sizeSet]).slice(0, 8);
             const styleTotal = g.items.reduce((a, li) => a + (Number(li.qty_pcs) || 0), 0) || (groups.length === 1 ? order.quantity : 0);
+            const colTotals = sizeKeys.map(s => g.items.reduce((a, li) => a + ((li.sizes && Number(li.sizes[s])) || 0), 0));
             const reqRows: [string, string][] = [
-              ['成衣辅料：', bomJoin(['trim', 'lining', 'label'])],
-              ['包装辅料：', bomJoin(['packing'])],
-              ['裁剪要求：', ''],
-              ['缝制要求：', joinTxt(mo.print_embroidery_requirements, mo.special_requirements)],
-              ['检验要求：', mo.qc_focus || ''],
-              ['包装要求', mo.factory_packing_instructions || ''],
-              ['装箱要求', ''],
+              ['装箱方式', order.packaging_type === 'custom' ? '定制包装（按客户要求）' : '标准包装'],
+              ['包装方式', mo.factory_packing_instructions || ''],
+              ['裁剪要求', ''],
+              ['缝制要求', joinTxt(mo.print_embroidery_requirements, mo.special_requirements)],
+              ['检验要求', mo.qc_focus || ''],
               ['注意事项', joinTxt(mo.risk_notes, mo.factory_notes)],
             ];
+            const nCols = Math.max(sizeKeys.length, 1) + 5;
             return (
               <div key={gi} className="text-[13px] text-gray-900" style={{ fontFamily: 'SimSun, 宋体, serif' }}>
                 <div className="text-center text-xl font-bold">义乌市绮陌服饰有限公司</div>
-                <div className="text-center text-base mb-1">生产任务单</div>
-                <div className="flex flex-wrap gap-x-6 border-b border-gray-400 pb-1 mb-0">
-                  <span>订单号：<b>{order.order_no || '—'}</b></span>
-                  <span>总数量: <b>{styleTotal ? `${styleTotal}件` : '—'}</b></span>
-                  <span>制单日期：{today}</span>
-                  <span>发货日期：{fmtD(order.etd) || '—'}</span>
-                </div>
-                <table className="w-full border-collapse mt-0">
+                <div className="text-center text-base font-bold mb-2">生 产 任 务 单</div>
+
+                {/* 订单头 */}
+                <table className="w-full border-collapse">
                   <tbody>
                     <tr>
-                      <td className={`${td} w-28 whitespace-nowrap`}>款 号</td>
-                      <td className={`${td} font-bold`} colSpan={5}>{g.style_no || '—'}</td>
-                      <td className={`${td} w-24 whitespace-nowrap`}>品 名</td>
-                      <td className={td} colSpan={4}>{g.product_name || '—'}</td>
+                      <td className={`${td} w-24 font-bold`}>订单号</td><td className={tdL}>{order.order_no || '—'}</td>
+                      <td className={`${td} w-20 font-bold`}>客户</td><td className={tdL}>{order.customer_name || '—'}</td>
+                      <td className={`${td} w-24 font-bold`}>下单日期</td><td className={tdL}>{fmtD(order.order_date) || '—'}</td>
                     </tr>
                     <tr>
-                      <td className={td}>主 面 料</td><td className={td} colSpan={5}>{fabricText(fabrics[0])}</td>
-                      <td className={td}>网 纱</td><td className={td} colSpan={4}>{fabricText(fabrics[1])}</td>
+                      <td className={`${td} font-bold`}>款号</td><td className={`${tdL} font-bold`}>{g.style_no || '—'}</td>
+                      <td className={`${td} font-bold`}>品名</td><td className={tdL}>{g.product_name || '—'}</td>
+                      <td className={`${td} font-bold`}>该款数量</td><td className={tdL}>{styleTotal ? `${styleTotal}件` : '—'}</td>
                     </tr>
                     <tr>
-                      <td className={td}>主面料用料</td><td className={td} colSpan={5}>{fabricUsage(fabrics[0])}</td>
-                      <td className={td}>网纱用料</td><td className={td} colSpan={4}>{fabricUsage(fabrics[1])}</td>
-                    </tr>
-                    <tr>
-                      <td className={td}>分 类</td>
-                      <td className={td} colSpan={6}>尺码明细表单位：CM（尺寸工厂按样衣手填）</td>
-                      <td className={td} colSpan={4}>产品图片</td>
-                    </tr>
-                    <tr>
-                      <td className={td}>尺 码</td>
-                      {sizeKeys.slice(0, 5).map(s => <td key={s} className={td}>{s}</td>)}
-                      {Array.from({ length: Math.max(0, 5 - sizeKeys.length) }).map((_, i) => <td key={i} className={td}></td>)}
-                      <td className={td}>公差</td>
-                      <td className={`${td} align-middle`} colSpan={4} rowSpan={2}>
-                        {g.image_url
-                          ? <img src={g.image_url} alt="产品图" className="max-h-56 mx-auto object-contain" />
-                          : <span className="text-gray-400">（未上传产品图）</span>}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className={`${td} text-gray-400`} colSpan={7}>（胸围/肩宽/领宽…等尺寸行,下载后按范本填写）</td>
+                      <td className={`${td} font-bold`}>工厂交期</td><td className={tdL}>{fmtD(order.factory_date) || '—'}</td>
+                      <td className={`${td} font-bold`}>发货(ETD)</td><td className={tdL}>{fmtD(order.etd) || '—'}</td>
+                      <td className={`${td} font-bold`}>制单日期</td><td className={tdL}>{today}</td>
                     </tr>
                   </tbody>
                 </table>
 
-                {/* 颜色 × 订单数量 */}
-                <table className="w-full border-collapse mt-2">
+                {/* 一、订单数量明细 */}
+                <table className="w-full border-collapse mt-3">
                   <tbody>
+                    <tr><td className={secCls} colSpan={nCols}>一、订单数量明细</td></tr>
                     <tr>
-                      <td className={`${td} w-28`}>颜色</td>
-                      <td className={td} colSpan={Math.max(sizeKeys.length, 1)}>订单数量</td>
-                    </tr>
-                    <tr>
-                      <td className={td}></td>
-                      {sizeKeys.map(s => <td key={s} className={td}>{s}</td>)}
+                      <td className={`${td} font-bold`}>颜色</td>
+                      {sizeKeys.map(s => <td key={s} className={`${td} font-bold`}>{s}</td>)}
                       {sizeKeys.length === 0 && <td className={td}></td>}
+                      <td className={`${td} font-bold`}>合计</td>
+                      <td className={`${td} font-bold`}>每箱件数</td>
+                      <td className={`${td} font-bold`}>箱数</td>
+                      <td className={`${td} font-bold w-48`}>客户包装</td>
                     </tr>
                     {g.items.map((li, ci) => (
                       <tr key={ci}>
                         <td className={td}>{[li.color_cn, li.color_en].filter(Boolean).join('/') || '—'}</td>
-                        {sizeKeys.map(s => <td key={s} className={td}>{(li.sizes && typeof li.sizes === 'object' && Number(li.sizes[s])) || ''}</td>)}
+                        {sizeKeys.map(s => <td key={s} className={td}>{(li.sizes && Number(li.sizes[s])) || ''}</td>)}
                         {sizeKeys.length === 0 && <td className={td}></td>}
+                        <td className={`${td} font-bold`}>{sizeKeys.reduce((a, s) => a + ((li.sizes && Number(li.sizes[s])) || 0), 0) || ''}</td>
+                        <td className={`${td} text-gray-300`}>手填</td>
+                        <td className={`${td} text-gray-300`}>自动</td>
+                        <td className={`${tdL} text-xs`}>{li.remark || ''}</td>
                       </tr>
                     ))}
-                    {g.items.length === 0 && (
-                      <tr><td className={`${td} text-gray-400`} colSpan={Math.max(sizeKeys.length, 1) + 1}>（无逐款明细,先在上方「逐款明细」录入）</td></tr>
+                    {g.items.length === 0 && <tr><td className={`${td} text-gray-400`} colSpan={nCols}>（无逐款明细,先在「逐款明细」录入）</td></tr>}
+                    {g.items.length > 0 && (
+                      <tr>
+                        <td className={`${td} font-bold`}>总计</td>
+                        {colTotals.map((t, i) => <td key={i} className={`${td} font-bold`}>{t || ''}</td>)}
+                        {sizeKeys.length === 0 && <td className={td}></td>}
+                        <td className={`${td} font-bold`}>{styleTotal || ''}</td>
+                        <td className={td}></td><td className={td}></td><td className={td}></td>
+                      </tr>
                     )}
+                  </tbody>
+                </table>
+                <p className="text-[11px] text-gray-400 mt-0.5">「每箱件数」下载后手填,「箱数」Excel 自动算（=合计÷每箱件数）。</p>
+
+                {/* 二、用料单耗 */}
+                <table className="w-full border-collapse mt-3">
+                  <tbody>
+                    <tr><td className={secCls} colSpan={6}>二、用料单耗</td></tr>
                     <tr>
-                      <td className={td}>每箱件数</td>
-                      <td className={`${td} text-gray-400`} colSpan={Math.max(sizeKeys.length, 1)}>（下载后填,箱数自动算）</td>
+                      <td className={`${td} font-bold`}>物料</td><td className={`${td} font-bold w-16`}>类别</td>
+                      <td className={`${td} font-bold w-20`}>颜色</td><td className={`${td} font-bold w-20`}>单耗/件</td>
+                      <td className={`${td} font-bold w-14`}>单位</td><td className={`${td} font-bold`}>备注</td>
                     </tr>
+                    {bomSorted.length > 0 ? bomSorted.map((b: any, i: number) => (
+                      <tr key={i}>
+                        <td className={tdL}>{b.material_name}</td>
+                        <td className={td}>{CAT_LABEL[b.material_type] || b.material_type}</td>
+                        <td className={td}>{b.color || ''}</td>
+                        <td className={td}>{b.qty_per_piece ?? ''}</td>
+                        <td className={td}>{b.unit || ''}</td>
+                        <td className={`${tdL} text-xs`}>{joinTxt(b.placement, b.special_requirements)}</td>
+                      </tr>
+                    )) : (
+                      <tr><td className={`${td} text-gray-400`} colSpan={6}>（未录 BOM;在「原辅料和包装」录入后自动带出,Excel 中留白手填）</td></tr>
+                    )}
                   </tbody>
                 </table>
 
-                {/* 工厂要求 */}
-                <table className="w-full border-collapse mt-2">
+                {/* 三、装箱·包装·工艺要求 */}
+                <table className="w-full border-collapse mt-3">
                   <tbody>
+                    <tr><td className={secCls} colSpan={2}>三、装箱 · 包装 · 工艺要求</td></tr>
                     {reqRows.map(([label, text], i) => (
                       <tr key={i}>
-                        <td className={`${td} w-28 whitespace-nowrap`}>{label}</td>
+                        <td className={`${td} w-28 font-bold whitespace-nowrap`}>{label}</td>
                         <td className={`${tdL} ${text ? '' : 'text-gray-300'}`}>{text || '（留白手填）'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                <div className="border-t border-gray-400 mt-1 pt-1">抄送:采购、面料仓、辅料仓{order.factory_name ? `、${order.factory_name}` : ''}、QC、包装组长、打包组长</div>
+
+                {/* 四、尺寸表 + 产品图 */}
+                <div className="mt-3 flex gap-3 items-start">
+                  <div className="flex-1">
+                    <div className={secCls}>四、尺寸表（单位：CM · 按上传的尺码表填写,Excel 中留空格）</div>
+                    <div className="border border-t-0 border-gray-400 px-2 py-3 text-gray-400 text-xs">
+                      部位 × {sizeKeys.length > 0 ? sizeKeys.join(' / ') : '尺码'} × 公差 —— 共 10 行留白,下载后按尺码表填写
+                    </div>
+                  </div>
+                  <div className="w-48 border border-gray-400 min-h-[100px] flex items-center justify-center">
+                    {g.image_url
+                      ? <img src={g.image_url} alt="产品图" className="max-h-48 object-contain" />
+                      : <span className="text-gray-400 text-xs">（未上传产品图）</span>}
+                  </div>
+                </div>
+
+                <div className="mt-2 text-xs">抄送:采购、面料仓、辅料仓{order.factory_name ? `、${order.factory_name}` : ''}、QC、包装组长、打包组长</div>
                 <div className="flex gap-16 mt-1">
                   <span>制单：</span><span>跟单：</span><span>批准：</span>
                 </div>
