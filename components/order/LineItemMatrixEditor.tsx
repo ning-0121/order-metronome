@@ -15,26 +15,33 @@ type Style = { style_no: string; product_name: string; image_url: string; colors
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
 const sumSizes = (s: Record<string, number>) => Object.values(s || {}).reduce((a, v) => a + (Number(v) || 0), 0);
 
-export function LineItemMatrixEditor({ orderId, canEdit = true }: { orderId: string; canEdit?: boolean }) {
+export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange }: {
+  orderId?: string; canEdit?: boolean; value?: Style[]; onChange?: (styles: Style[]) => void;
+}) {
+  // 受控模式(建单页:父组件持有明细,无 orderId,不自加载/自保存);否则详情模式(自加载 orderId + 保存按钮)
+  const controlled = value !== undefined && !!onChange;
   const [sizeLabels, setSizeLabels] = useState<string[]>(DEFAULT_SIZES);
-  const [styles, setStyles] = useState<Style[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [internalStyles, setInternalStyles] = useState<Style[]>([]);
+  const styles = controlled ? (value as Style[]) : internalStyles;
+  const setStyles = (controlled ? onChange! : setInternalStyles) as (s: Style[]) => void;
+  const [loading, setLoading] = useState(!controlled && !!orderId);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [newSize, setNewSize] = useState('');
 
   const load = useCallback(async () => {
+    if (controlled || !orderId) { setLoading(false); return; }
     const res = await getOrderLineItems(orderId);
     if ((res as any).data) {
       const data = (res as any).data as Style[];
-      setStyles(data);
+      setInternalStyles(data);
       // 尺码集 = 已有 sizes 键的并集(保序);空则默认
       const labels = new Set<string>();
       for (const st of data) for (const c of st.colors) for (const k of Object.keys(c.sizes || {})) labels.add(k);
       setSizeLabels(labels.size > 0 ? [...labels] : DEFAULT_SIZES);
     }
     setLoading(false);
-  }, [orderId]);
+  }, [orderId, controlled]);
   useEffect(() => { load(); }, [load]);
 
   // ── 尺码列 ──
@@ -63,6 +70,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true }: { orderId: str
   const colorRows = styles.reduce((a, st) => a + st.colors.length, 0);
 
   async function save() {
+    if (!orderId) return;
     setSaving(true); setMsg('');
     const res = await saveOrderLineItems(orderId, styles);
     setSaving(false);
@@ -95,7 +103,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true }: { orderId: str
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-600">总量 <b className="text-gray-900">{orderTotal}</b> 件 · <b>{styles.length}</b> 款 · <b>{colorRows}</b> 颜色行</span>
-          {canEdit && <button onClick={save} disabled={saving} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">{saving ? '保存中…' : '💾 保存明细'}</button>}
+          {canEdit && !controlled && <button onClick={save} disabled={saving} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">{saving ? '保存中…' : '💾 保存明细'}</button>}
         </div>
       </div>
       {msg && <p className="text-xs text-gray-700">{msg}</p>}

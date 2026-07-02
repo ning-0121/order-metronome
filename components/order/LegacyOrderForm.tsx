@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { isDoneStatus, isActiveStatus } from '@/lib/domain/types';
 import { getActiveOrderTemplates } from '@/app/actions/order-templates';
 import type { OrderTemplate } from '@/app/actions/order-templates';
+import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
@@ -159,6 +160,21 @@ function NewOrderWizard() {
   // 模板相关状态
   const [templates, setTemplates] = useState<OrderTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  // S1b 富录入表:逐款明细(款/色/码×件数)。录了自动填 总量/款数/颜色数;提交时落 line_items。
+  const [lineStyles, setLineStyles] = useState<any[]>([]);
+  useEffect(() => {
+    if (lineStyles.length === 0) return;
+    const form = document.querySelector('form'); if (!form) return;
+    const total = lineStyles.reduce((a, st) => a + (st.colors || []).reduce((b: number, c: any) => b + Object.values(c.sizes || {}).reduce((s: number, v: any) => s + (Number(v) || 0), 0), 0), 0);
+    const colorCount = lineStyles.reduce((a, st) => a + (st.colors || []).length, 0);
+    const setN = (name: string, val: number) => {
+      const el = form.querySelector(`[name="${name}"]`) as HTMLInputElement | null;
+      if (!el) return;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(el, String(val));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    setN('total_quantity', total); setN('style_count', lineStyles.length); setN('color_count', colorCount);
+  }, [lineStyles]);
   // 追踪文件选择（用于命名检查）
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
 
@@ -505,10 +521,10 @@ function NewOrderWizard() {
 
     const rawFormData = new FormData(e.currentTarget);
 
-    // 把 PO 解析出的逐款逐色明细一并提交 → 建单时落库 order_line_items,
-    // 供碎单预警/生产单/客户报告复用,避免日后重复调 AI 解析(浪费钱)。
-    if (poParseResult?.styles?.length) {
-      rawFormData.set('line_items', JSON.stringify(poParseResult.styles));
+    // 逐款明细落库 order_line_items(喂生产任务单/PI):优先富录入表手工录入,否则用 AI 解析结果。
+    const submitStyles = lineStyles.length > 0 ? lineStyles : (poParseResult?.styles || []);
+    if (submitStyles.length) {
+      rawFormData.set('line_items', JSON.stringify(submitStyles));
     }
 
     try {
@@ -573,11 +589,10 @@ function NewOrderWizard() {
       rawFormData.delete(formKey);
     }
 
-    // 校验：3个必传文件
+    // 校验：必传文件(2026-07 简化为 客户PO + 客户报价单)
     const poFile = filesToUpload.find(f => f.fileType === 'customer_po');
     if (!poFile) { showError('请上传客户 PO 文件（必传）'); return; }
-    if (!filesToUpload.find(f => f.fileType === 'internal_quote')) { showError('请上传内部成本核算单（必传）'); return; }
-    if (!filesToUpload.find(f => f.fileType === 'customer_quote')) { showError('请上传客户最终报价单（必传）'); return; }
+    if (!filesToUpload.find(f => f.fileType === 'customer_quote')) { showError('请上传客户报价单（必传）'); return; }
 
     // ═══════════════════════════════════════════════════════
     // 入口把控（2026-04-28）— 所有上传文件必须命名合规才能创建
@@ -1207,6 +1222,13 @@ function NewOrderWizard() {
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
               </div>
+
+              {/* S1b 富录入表:逐款明细(款/颜色/尺码×件数)。录了这里,上面三个数字自动算;不录也能建单(手填上面) */}
+              <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/30 p-3">
+                <div className="text-sm font-semibold text-gray-800 mb-1">逐款明细(款 / 颜色 / 尺码 × 件数)</div>
+                <p className="text-[11px] text-gray-500 mb-3">手工录逐款明细 → 上面的总量/款数/颜色数自动算,且喂生产任务单和客户 PI。不录也能建单(上面三个数字手填)。</p>
+                <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit />
+              </div>
             </div>
 
             {/* ── 贸易 & 航运 ── */}
@@ -1463,13 +1485,9 @@ function NewOrderWizard() {
               </h3>
               <div className="space-y-3">
                 {([
+                  // 2026-07 用户拍板:只留 客户PO + 客户报价单,其余移除(内部成本核算单/生产制单/辅料表/装箱/工艺单)
                   { name: 'customer_po_file',        label: '客户 PO（可多个）',  required: true,  multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
-                  { name: 'internal_quote_file',     label: '内部成本核算单（可多个）',  required: true,  multiple: true, stepKey: '_internal_quote' },
-                  { name: 'customer_quote_file',     label: '客户最终报价单（可多个）',  required: true,  multiple: true, stepKey: '_customer_quote' },
-                  { name: 'production_order_file',   label: '生产制单',          required: false, stepKey: 'production_order_upload', hint: '财务审核后2日内上传' },
-                  { name: 'trims_sheet_file',        label: '辅料表',            required: false, stepKey: 'bulk_materials_confirmed' },
-                  { name: 'packing_requirement_file',label: '装箱要求',          required: false, stepKey: 'packing_method_confirmed' },
-                  { name: 'tech_pack_file',          label: '工艺单 Tech Pack',  required: false, stepKey: 'order_docs_bom_complete' },
+                  { name: 'customer_quote_file',     label: '客户报价单（可多个）',  required: true,  multiple: true, stepKey: '_customer_quote' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
                   .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (
                   <div key={name} className="rounded-lg border border-gray-200 p-3">
