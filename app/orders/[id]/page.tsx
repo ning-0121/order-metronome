@@ -405,29 +405,15 @@ export default async function OrderDetailPage({
           {/* Tab 导航（移动端可横向滚动） */}
           <div className="flex gap-1 mt-4 -mb-px overflow-x-auto scrollbar-hide">
             {[
+              // 精简为常用 8 个标签(用户 2026-07 拍板);其余隐藏、功能未删,仍可经 ?tab= URL 访问
               { key: 'basic', label: '基本信息' },
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
-              { key: 'delays', label: `延期申请 ${delayRequests && delayRequests.length > 0 ? '(' + delayRequests.length + ')' : ''}` },
-              { key: 'logs', label: '操作日志' },
-          { key: 'product_link', label: '🧬 产品款' },
-          { key: 'bom', label: '原辅料和包装' },
-          { key: 'manufacturing_order', label: '🏭 生产任务单' },
-          { key: 'procurement_items', label: '🛒 采购核料' },
-          { key: 'procurement', label: '📦 采购进度' },
-          { key: 'supply_chain', label: '🔗 供应链' },
-          ...(canSeeFinancials ? [{ key: 'cost_control', label: '💰 成本控制' }] : []),
-          { key: 'production', label: '生产进度' },
-              { key: 'shipment', label: '出货管理' },
-              { key: 'documents', label: '单据中心' },
-              { key: 'email_center', label: '邮件中心' },
-              { key: 'notes', label: '📝 备注' },
+              { key: 'manufacturing_order', label: '🏭 生产任务单' },
+              { key: 'bom', label: '原辅料和包装' },
+              { key: 'procurement_items', label: '🛒 采购核料' },
+              { key: 'procurement', label: '📦 采购进度' },
+              { key: 'production', label: '生产进度' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
-              // 复盘（订单完成 / 待复盘 / 已复盘时显示）
-              ...(['completed', '已完成', '待复盘', '已复盘'].includes(orderData.lifecycle_status)
-                ? [{ key: 'retrospective', label: '📋 复盘' }]
-                : []),
-              // 根因分析（仅 admin + 引擎启用时显示）
-              ...(isAdmin && rootCauseEngineEnabled() ? [{ key: 'root_causes', label: '🔬 根因' }] : []),
             ].map(t => (
               <Link
                 key={t.key}
