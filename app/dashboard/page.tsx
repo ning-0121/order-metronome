@@ -193,8 +193,8 @@ export default async function DashboardPage() {
     }
   }
 
-  // 权限过滤：管理/生产主管/各经理/业务开发(只读全程) 看所有订单，其他员工只看自己的
-  const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager', 'sales'].includes(r));
+  // 权限过滤：管理/生产主管/各经理 看所有订单，业务员(sales)及其他员工只看自己的(2026-07 拍板,sales 移出)
+  const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r));
   const filterByMyOrders = (list: any[]) => canSeeAll ? list : list.filter((m: any) => myOrderIds.has(m.order_id));
   const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
   const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);

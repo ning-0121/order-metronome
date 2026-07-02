@@ -888,7 +888,7 @@ export async function getOrders() {
   const isAdmin = roles.includes('admin');
 
   // 管理/生产主管/各经理/业务开发(只读全程) 看全部订单
-  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager', 'sales'].includes(r));
+  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r)); // 2026-07:业务员(sales)移出,只看自己的单
 
   // 辅助：把 delay_requests 按 order_id 分组合并进 orders
   async function attachDelayRequests(orderList: any[]): Promise<any[]> {
@@ -945,14 +945,17 @@ export async function getOrders() {
     return { data: enriched };
   }
 
-  // 普通员工：只看自己创建的 + 被分配了关卡的订单
+  // 普通员工(含业务员):只看自己创建的 + 自己负责的 + 被分配了关卡的订单
   const { data: ownedOrders } = await (supabase.from('orders') as any)
     .select('id').eq('owner_user_id', user.id);
+  const { data: createdOrders } = await (supabase.from('orders') as any)
+    .select('id').eq('created_by', user.id); // 2026-07:补 created_by,业务员看得到自己建的单
   const { data: assignedMilestones } = await (supabase.from('milestones') as any)
     .select('order_id').eq('owner_user_id', user.id);
 
   const myOrderIds = [...new Set([
     ...(ownedOrders || []).map((o: any) => o.id),
+    ...(createdOrders || []).map((o: any) => o.id),
     ...(assignedMilestones || []).map((m: any) => m.order_id),
   ])];
 
