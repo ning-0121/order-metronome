@@ -28,7 +28,7 @@ export async function recordInventoryReceipt(lineId: string): Promise<{ ok?: boo
   if (!user) return { error: '请先登录' };
 
   const { data: line } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, specification, category, ordered_unit, received_qty')
+    .select('id, order_id, material_name, specification, category, ordered_unit, received_qty, procurement_item_id')
     .eq('id', lineId).maybeSingle();
   if (!line) return { error: '采购行不存在' };
 
@@ -42,8 +42,17 @@ export async function recordInventoryReceipt(lineId: string): Promise<{ ok?: boo
   const delta = computeReceiptDelta(received, priorSum);
   if (delta === 0) return { ok: true, delta: 0 };
 
+  // P0:优先用采购项规范 consolidation_key(含 color+master),使库存 key 与采购项/内核同口径;
+  // 无 procurement_item_id 的老手工行 → 回退 materialKeyForLine(不含色,legacy)。
+  let materialKey = materialKeyForLine(line as any);
+  if ((line as any).procurement_item_id) {
+    const { data: pitem } = await (supabase.from('procurement_items') as any)
+      .select('consolidation_key').eq('id', (line as any).procurement_item_id).maybeSingle();
+    if ((pitem as any)?.consolidation_key) materialKey = (pitem as any).consolidation_key;
+  }
+
   const { error } = await (supabase.from('inventory_transactions') as any).insert({
-    material_key: materialKeyForLine(line as any),
+    material_key: materialKey,
     material_name: (line as any).material_name,
     unit: (line as any).ordered_unit,
     txn_type: 'receipt',

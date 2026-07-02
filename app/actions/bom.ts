@@ -612,25 +612,40 @@ export async function submitBomToProcurement(
 
   // ── d. 重算 material_requirements(B1:该 plan 下需求均无采购引用,安全删重建)──
   await (supabase.from('material_requirements') as any).delete().eq('material_plan_id', planId);
-  const { data: snapLines } = await (supabase.from('material_package_snapshot_lines') as any)
+  // P0:快照行查询失败必须抛,不静默零需求(CLAUDE.md 血泪教训)。
+  const { data: snapLines, error: snapErr } = await (supabase.from('material_package_snapshot_lines') as any)
     .select('*').eq('snapshot_id', snapshotId!);
+  if (snapErr) return { error: `快照行读取失败,已中止(避免零需求):${snapErr.message}` };
   const today = toYmd(new Date());
   // ── MRP 扣库存(flag MRP_INVENTORY_DEDUCT 默认关)。开 → 喂真 available=onHand−reserved(SC-P2 预留感知);关 → 0(现状不变)。──
   const deductInv = process.env.MRP_INVENTORY_DEDUCT === 'on';
   const balByKey = new Map<string, number>();
   const resByKey = new Map<string, number>();
+  const bomMaster = new Map<string, string | null>(); // bom_id → material_master_id(key 派生须与 procurement_items 一致)
   if (deductInv) {
-    const { data: invTxns } = await (supabase.from('inventory_transactions') as any).select('material_key, qty');
+    const { data: invTxns, error: invErr } = await (supabase.from('inventory_transactions') as any).select('material_key, qty');
+    if (invErr) console.warn('[MRP扣库存] 库存读取失败,保守按 0(宁多勿缺):', invErr.message);
     for (const b of aggregateInventoryBalance((invTxns || []) as any[])) balByKey.set(b.material_key, b.on_hand);
-    const { data: resv } = await (supabase.from('inventory_reservation') as any)
+    const { data: resv, error: resvErr } = await (supabase.from('inventory_reservation') as any)
       .select('material_key, qty, status').eq('status', 'reserved');
+    if (resvErr) console.warn('[MRP扣库存] 预留读取失败:', resvErr.message);
     for (const [k, v] of reservedByKey((resv || []) as any[])) resByKey.set(k, v);
+    // P0:解析 master_id,使扣库存 key 与 procurement_items/库存同口径(含 color+master),否则彩色物料 key 永远对不上→available 误读 0。
+    const bomIds = Array.from(new Set((snapLines || []).map((l: any) => l.bom_id).filter(Boolean)));
+    if (bomIds.length) {
+      const { data: bs } = await (supabase.from('materials_bom') as any).select('id, material_master_id').in('id', bomIds);
+      for (const b of (bs || [])) bomMaster.set(b.id, b.material_master_id);
+    }
   }
   const reqRows = (snapLines || []).map((line: any) => {
-    // flag 开:按 material_key(consolidationKey 同口径)取可用量 = onHand − reserved,负钳 0(不反向抬采购)。关:0。
+    // flag 开:规范 key(master_id + color + 名/规/类/单位,与 procurement_items/库存同口径)→ available=onHand−reserved,负钳 0。关:0。
     let inventoryQty = 0;
     if (deductInv) {
-      const key = consolidationKey({ material_name: line.material_name, specification: line.specification, category: line.category, unit: line.unit });
+      const key = consolidationKey({
+        material_master_id: line.bom_id ? (bomMaster.get(line.bom_id) || null) : null,
+        material_name: line.material_name, specification: line.specification,
+        category: line.category, color: line.color, unit: line.unit,
+      });
       inventoryQty = Math.max(0, (balByKey.get(key) || 0) - (resByKey.get(key) || 0));
     }
     const r = computeMaterialRequirement({
