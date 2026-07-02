@@ -35,7 +35,8 @@ export type AIApi =
   | 'capacity_analysis'  // 2026-05-19 补：app/actions/analytics.ts:getCapacityAIAnalysis
   | 'agent_chat'         // 2026-05-19 补：app/actions/agent-chat.ts:askAgent（用户输入最自由，最容易被刷）
   | 'smart_insights'     // 2026-05-19 补：app/actions/smart-insights.ts:getSmartInsights / getContextualAIAdvice
-  | 'po_extract';        // 2026-05-19 补：app/actions/po-extract.ts:extractPOFromAttachment
+  | 'po_extract'         // 2026-05-19 补：app/actions/po-extract.ts:extractPOFromAttachment
+  | 'bom_parse';         // 2026-07-02 补：app/actions/bom-parser.ts:parseBomFile(原辅料单批量识别)
 
 /** 每小时调用上限（per user） */
 const HOURLY_LIMIT: Record<AIApi, number> = {
@@ -50,6 +51,7 @@ const HOURLY_LIMIT: Record<AIApi, number> = {
   agent_chat:      40,   // 聊天会重复问，配额给宽一点
   smart_insights:  30,
   po_extract:      20,
+  bom_parse:       20,
 };
 
 /** 全 API 加起来的小时上限（防总量刷） */
@@ -174,6 +176,7 @@ function apiLabel(api: AIApi): string {
     agent_chat: 'AI 助手对话',
     smart_insights: 'AI 智能洞察',
     po_extract: 'PO 字段抽取',
+    bom_parse: '原辅料单识别',
   };
   return map[api] || api;
 }

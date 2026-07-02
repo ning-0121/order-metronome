@@ -52,6 +52,42 @@ export async function addBomItem(orderId: string, item: {
   return {};
 }
 
+/** 批量新增(原辅料单 AI 识别后确认入库)。逐行校验,空名跳过。 */
+export async function addBomItemsBatch(orderId: string, items: Array<{
+  material_name: string; material_type?: string;
+  qty_per_piece?: number | null; unit?: string; supplier?: string;
+  placement?: string; color?: string; spec?: string;
+  notes?: string; special_requirements?: string;
+}>): Promise<{ inserted?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const VALID_TYPES = ['fabric', 'trim', 'lining', 'label', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
+  const rows = (items || [])
+    .filter(i => i?.material_name?.trim())
+    .map(i => ({
+      order_id: orderId, created_by: user.id,
+      material_name: i.material_name.trim(),
+      material_type: VALID_TYPES.includes(i.material_type || '') ? i.material_type : 'other',
+      qty_per_piece: (i.qty_per_piece != null && !isNaN(Number(i.qty_per_piece))) ? Number(i.qty_per_piece) : null,
+      unit: i.unit?.trim() || null,
+      supplier: i.supplier?.trim() || null,
+      placement: i.placement?.trim() || null,
+      color: i.color?.trim() || null,
+      spec: i.spec?.trim() || null,
+      notes: i.notes?.trim() || null,
+      special_requirements: i.special_requirements?.trim() || null,
+      source: 'file_parse',                  // 原辅料单 AI 识别入库
+    }));
+  if (rows.length === 0) return { error: '没有可入库的行' };
+
+  const { error } = await (supabase.from('materials_bom') as any).insert(rows);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${orderId}`);
+  return { inserted: rows.length };
+}
+
 /**
  * O1b:从 Material Master「选料」录入。
  * 服务端按 masterId 取正式主数据(防客户端伪造物料定义)→ 快照式写入 materials_bom:

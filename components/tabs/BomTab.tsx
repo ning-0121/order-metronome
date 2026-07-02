@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
+import { getBomItems, addBomItem, addBomItemsBatch, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
 import { listMaterialMaster } from '@/app/actions/material-master';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
@@ -71,8 +71,51 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [instMsg, setInstMsg] = useState('');
   const [editingTemplate, setEditingTemplate] = useState(false);  // 正在编辑的行是否来自产品款模板
 
+  // 原辅料单批量识别(上传文件 → AI 读行 → 检查修改 → 批量入库)
+  const [parsing, setParsing] = useState(false);
+  const [parseRows, setParseRows] = useState<any[] | null>(null);
+  const [parseNotes, setParseNotes] = useState<string[]>([]);
+  const [parseFileName, setParseFileName] = useState('');
+  const [parseErr, setParseErr] = useState('');
+  const [batchSaving, setBatchSaving] = useState(false);
+
   const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
+
+  // ── 原辅料单批量识别 ──
+  async function handleParseFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setParsing(true); setParseErr(''); setParseRows(null);
+    try {
+      const { parseBomFile } = await import('@/app/actions/bom-parser');
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await parseBomFile(fd);
+      if (!res.ok || !res.data) { setParseErr(res.error || '解析失败'); return; }
+      setParseRows(res.data.items.map(i => ({ ...i })));
+      setParseNotes(res.data.confidence_notes || []);
+      setParseFileName(file.name);
+    } catch (err: any) {
+      setParseErr(err?.message || '解析异常');
+    } finally { setParsing(false); }
+  }
+  const setParseField = (i: number, k: string, v: string) =>
+    setParseRows(rows => (rows || []).map((r, x) => x === i ? { ...r, [k]: v } : r));
+  const removeParseRow = (i: number) => setParseRows(rows => (rows || []).filter((_, x) => x !== i));
+
+  async function confirmBatchInsert() {
+    if (!parseRows || parseRows.length === 0) return;
+    setBatchSaving(true); setParseErr('');
+    const res = await addBomItemsBatch(orderId, parseRows.map(r => ({
+      ...r, qty_per_piece: r.qty_per_piece === '' || r.qty_per_piece == null ? null : Number(r.qty_per_piece),
+    })));
+    setBatchSaving(false);
+    if (res.error) { setParseErr(res.error); return; }
+    setParseRows(null); setParseNotes([]); setParseFileName('');
+    await reload();
+  }
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -578,8 +621,12 @@ export function BomTab({ orderId }: { orderId: string }) {
     <div>
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm text-gray-500">{items.length} 条物料记录</span>
-        {!showAdd && !showImport && !showMaster && !showCopy && (
+        {!showAdd && !showImport && !showMaster && !showCopy && !parseRows && (
           <div className="flex flex-wrap gap-2 justify-end">
+            <label className={`text-sm px-3 py-1.5 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`}>
+              {parsing ? '识别中…' : '📄 上传原辅料单识别'}
+              <input type="file" accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" disabled={parsing} onChange={handleParseFile} />
+            </label>
             <button onClick={doInstantiate} disabled={instantiating}
               className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{instantiating ? '实例化中…' : '🧬 从产品款实例化'}</button>
             <button onClick={openMaster}
@@ -613,11 +660,60 @@ export function BomTab({ orderId }: { orderId: string }) {
           </button>
         </div>
       )}
+      {parseErr && !parseRows && <p className="text-xs text-red-600 mb-2">❌ {parseErr}</p>}
+      {/* 原辅料单识别结果:检查/修改/删行后批量入库 */}
+      {parseRows && (
+        <div className="mb-4 p-4 rounded-xl border border-amber-200 bg-amber-50/40">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-700">📄 识别结果:{parseFileName} · {parseRows.length} 行(可改可删,确认后入库)</span>
+            <button onClick={() => { setParseRows(null); setParseErr(''); }} className="text-xs text-gray-400 hover:text-gray-600">关闭</button>
+          </div>
+          {parseNotes.length > 0 && (
+            <p className="text-xs text-amber-700 mb-2">⚠ 需确认:{parseNotes.join('；')}</p>
+          )}
+          <div className="overflow-x-auto bg-white rounded-lg border border-amber-100 mb-3">
+            <table className="w-full text-xs">
+              <thead><tr className="border-b border-gray-100 text-gray-500">
+                {['物料名称 *', '类别', '颜色', '规格', '单耗/件', '单位', '位置', '特殊要求', ''].map((h, i) => (
+                  <th key={i} className="py-1.5 px-2 text-left font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {parseRows.map((r, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="py-1 px-2"><input value={r.material_name || ''} onChange={e => setParseField(i, 'material_name', e.target.value)} className="w-36 rounded border border-gray-200 px-1.5 py-1" /></td>
+                    <td className="py-1 px-2">
+                      <select value={r.material_type || 'other'} onChange={e => setParseField(i, 'material_type', e.target.value)} className="rounded border border-gray-200 px-1 py-1 bg-white">
+                        {Object.entries(CAT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      </select>
+                    </td>
+                    <td className="py-1 px-2"><input value={r.color || ''} onChange={e => setParseField(i, 'color', e.target.value)} className="w-16 rounded border border-gray-200 px-1.5 py-1" /></td>
+                    <td className="py-1 px-2"><input value={r.spec || ''} onChange={e => setParseField(i, 'spec', e.target.value)} className="w-20 rounded border border-gray-200 px-1.5 py-1" /></td>
+                    <td className="py-1 px-2"><input value={r.qty_per_piece ?? ''} onChange={e => setParseField(i, 'qty_per_piece', e.target.value)} className="w-16 rounded border border-gray-200 px-1.5 py-1 text-right" /></td>
+                    <td className="py-1 px-2"><input value={r.unit || ''} onChange={e => setParseField(i, 'unit', e.target.value)} className="w-12 rounded border border-gray-200 px-1.5 py-1" /></td>
+                    <td className="py-1 px-2"><input value={r.placement || ''} onChange={e => setParseField(i, 'placement', e.target.value)} className="w-24 rounded border border-gray-200 px-1.5 py-1" /></td>
+                    <td className="py-1 px-2"><input value={r.special_requirements || ''} onChange={e => setParseField(i, 'special_requirements', e.target.value)} className="w-40 rounded border border-gray-200 px-1.5 py-1" /></td>
+                    <td className="py-1 px-2"><button onClick={() => removeParseRow(i)} className="text-red-500 hover:text-red-700">×</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {parseErr && <p className="text-xs text-red-600 mb-2">❌ {parseErr}</p>}
+          <div className="flex gap-2">
+            <button onClick={confirmBatchInsert} disabled={batchSaving || parseRows.length === 0}
+              className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50">
+              {batchSaving ? '入库中…' : `✅ 确认入库 ${parseRows.length} 行`}</button>
+            <button onClick={() => { setParseRows(null); setParseErr(''); }}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">取消</button>
+          </div>
+        </div>
+      )}
       {showMaster && masterPanel}
       {showCopy && copyPanel}
       {showImport && importPanel}
       {showAdd && formRow}
-      {items.length === 0 && !showAdd && !showMaster && !showCopy ? (
+      {items.length === 0 && !showAdd && !showMaster && !showCopy && !parseRows ? (
         <div className="text-center py-12 text-gray-400">
           <p className="mb-2">暂无原辅料数据</p>
           <button onClick={openMaster} className="text-indigo-600 text-sm font-medium hover:underline">+ 从物料库选择录入</button>
