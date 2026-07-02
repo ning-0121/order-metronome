@@ -32,11 +32,22 @@ export async function addBomItem(orderId: string, item: {
   if (!user) return { error: '请先登录' };
   if (!item.material_name?.trim()) return { error: '物料名称不能为空' };
 
+  // 没手填代码 → 自动赋码(同名同类复用主数据码,没有就建主数据生成 FAB/TRM/PKG-xxxx)
+  let autoCode: { id: string; code: string } | null = null;
+  if (!item.material_code?.trim()) {
+    const { ensureMaterialMaster } = await import('@/lib/services/material-autocode');
+    autoCode = await ensureMaterialMaster(supabase, user.id, {
+      name: item.material_name, category: item.material_type || 'other',
+      spec: item.spec, unit: item.unit, supplier: item.supplier,
+    });
+  }
+
   const { error } = await (supabase.from('materials_bom') as any).insert({
     order_id: orderId, created_by: user.id,
     material_name: item.material_name.trim(),
     material_type: item.material_type || 'other',
-    material_code: item.material_code || null,
+    material_code: item.material_code?.trim() || autoCode?.code || null,
+    material_master_id: autoCode?.id || null,
     qty_per_piece: item.qty_per_piece || null,
     total_qty: item.total_qty || null,
     unit: item.unit || 'meter',
@@ -66,12 +77,32 @@ export async function addBomItemsBatch(orderId: string, items: Array<{
   if (!user) return { error: '请先登录' };
 
   const VALID_TYPES = ['fabric', 'trim', 'lining', 'label', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
-  const rows = (items || [])
-    .filter(i => i?.material_name?.trim())
-    .map(i => ({
+  const valid = (items || []).filter(i => i?.material_name?.trim());
+  if (valid.length === 0) return { error: '没有可入库的行' };
+
+  // 自动赋码:同 名+类别 只 ensure 一次(同名同类复用主数据码,没有就建主数据生成)
+  const { ensureMaterialMaster } = await import('@/lib/services/material-autocode');
+  const codeCache = new Map<string, { id: string; code: string } | null>();
+  const ensureFor = async (i: any) => {
+    const type = VALID_TYPES.includes(i.material_type || '') ? i.material_type : 'other';
+    const key = `${i.material_name.trim().toLowerCase()}¦${type}`;
+    if (!codeCache.has(key)) {
+      codeCache.set(key, await ensureMaterialMaster(supabase, user.id, {
+        name: i.material_name, category: type, spec: i.spec, unit: i.unit, supplier: i.supplier,
+      }));
+    }
+    return codeCache.get(key) || null;
+  };
+
+  const rows: any[] = [];
+  for (const i of valid) {
+    const auto = await ensureFor(i);
+    rows.push({
       order_id: orderId, created_by: user.id,
       material_name: i.material_name.trim(),
       material_type: VALID_TYPES.includes(i.material_type || '') ? i.material_type : 'other',
+      material_code: auto?.code || null,
+      material_master_id: auto?.id || null,
       qty_per_piece: (i.qty_per_piece != null && !isNaN(Number(i.qty_per_piece))) ? Number(i.qty_per_piece) : null,
       unit: i.unit?.trim() || null,
       supplier: i.supplier?.trim() || null,
@@ -81,8 +112,8 @@ export async function addBomItemsBatch(orderId: string, items: Array<{
       notes: i.notes?.trim() || null,
       special_requirements: i.special_requirements?.trim() || null,
       source: 'file_parse',                  // 原辅料单 AI 识别入库
-    }));
-  if (rows.length === 0) return { error: '没有可入库的行' };
+    });
+  }
 
   const { error } = await (supabase.from('materials_bom') as any).insert(rows);
   if (error) return { error: error.message };

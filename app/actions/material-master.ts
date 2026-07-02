@@ -11,26 +11,15 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { convertUnit, type UomRow } from '@/lib/services/material-catalog';
+// 编码规则(类别前缀 + 流水)统一在 material-autocode:BOM 各入库口共用同一套码
+import { genMaterialCode as genCode } from '@/lib/services/material-autocode';
 
-const CODE_PREFIX: Record<string, string> = {
-  fabric: 'FAB', trim: 'TRM', packing: 'PKG', print: 'PRT',
-  washing: 'WSH', embroidery: 'EMB', service: 'SVC', other: 'OTH',
-};
 const CREATE_ROLES = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'];
 const MANAGE_ROLES = ['merchandiser', 'procurement', 'procurement_manager', 'admin'];
 
 async function rolesOf(supabase: any, userId: string): Promise<string[]> {
   const { data: p } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', userId).single();
   return (p as any)?.roles?.length > 0 ? (p as any).roles : [(p as any)?.role].filter(Boolean);
-}
-
-/** 生成物料编码:类别前缀 + 4 位流水(如 FAB-0007)。冲突由 UNIQUE 兜底,重试一次。 */
-async function genCode(supabase: any, category: string): Promise<string> {
-  const prefix = CODE_PREFIX[category] || 'OTH';
-  const { count } = await (supabase.from('material_master') as any)
-    .select('id', { count: 'exact', head: true }).eq('category', category);
-  const seq = (count || 0) + 1;
-  return `${prefix}-${String(seq).padStart(4, '0')}`;
 }
 
 /** 列表 + 搜索(正式、未归档;按使用次数降序)。 */

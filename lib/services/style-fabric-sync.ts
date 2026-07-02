@@ -5,6 +5,8 @@
  * 服务端专用(saveOrderLineItems / createOrder 调),不是 server action。
  */
 
+import { ensureMaterialMaster } from '@/lib/services/material-autocode';
+
 export async function syncStyleFabricsToBom(supabase: any, orderId: string, userId: string, styles: any[]): Promise<void> {
   const wanted = (styles || [])
     .filter((st) => st?.style_no?.trim() && st?.fabric_name?.trim())
@@ -24,9 +26,14 @@ export async function syncStyleFabricsToBom(supabase: any, orderId: string, user
   const existingByStyle = new Map<string, string>((existing || []).map((r: any) => [r.style_no || '', r.id]));
 
   for (const w of wanted) {
+    // 自动赋码:同名布料复用主数据码,没有就建主数据生成 FAB-xxxx
+    const auto = await ensureMaterialMaster(supabase, userId, {
+      name: w.material_name, category: 'fabric', spec: w.spec, unit: w.unit,
+    });
     const patch = {
       material_name: w.material_name, material_type: 'fabric', spec: w.spec,
       qty_per_piece: w.qty_per_piece, unit: w.unit, style_no: w.style_no,
+      material_code: auto?.code || null, material_master_id: auto?.id || null,
     };
     const exist = existingByStyle.get(w.style_no);
     if (exist) {
