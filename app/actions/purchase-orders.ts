@@ -196,7 +196,7 @@ export async function placePurchaseOrder(poId: string): Promise<{
     try {
       const { syncProcurementItemsOrderedForPO } = await import('@/app/actions/procurement-items');
       await syncProcurementItemsOrderedForPO(poId);
-    } catch { /* 状态联动失败不影响下单 */ }
+    } catch (e: any) { console.warn('[placePurchaseOrder] 采购项状态联动失败(不阻断下单):', e?.message); }
     revalidatePath(`/procurement/po/${poId}`);
     return { ok: true };
   };
