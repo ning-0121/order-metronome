@@ -56,6 +56,17 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
   // ── 款 ──
   const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
   const removeStyle = (i: number) => setStyles(styles.filter((_, x) => x !== i));
+  // 复制款:深拷贝(颜色/尺码件数/图片全带上),插在原款正下方,款号加「-副本」提示改;再改数量/图片即可
+  const copyStyle = (i: number) => {
+    const src = styles[i];
+    const dup: Style = {
+      style_no: src.style_no ? `${src.style_no}-副本` : '',
+      product_name: src.product_name,
+      image_url: src.image_url,
+      colors: src.colors.map((c) => ({ ...c, sizes: { ...c.sizes } })),
+    };
+    setStyles([...styles.slice(0, i + 1), dup, ...styles.slice(i + 1)]);
+  };
   const setStyleField = (i: number, k: keyof Style, v: string) => setStyles(styles.map((st, x) => x === i ? { ...st, [k]: v } : st));
 
   // S1.1 上传产品图 → 公开桶 product-images → 存 publicUrl 进 image_url
@@ -142,6 +153,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
             )}
             {st.image_url && <a href={st.image_url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">看图</a>}
             <span className="text-xs text-gray-500">款小计 <b>{styleTotal(st)}</b></span>
+            {canEdit && <button onClick={() => copyStyle(si)} className="text-xs text-indigo-600 hover:underline">复制款</button>}
             {canEdit && <button onClick={() => removeStyle(si)} className="text-xs text-red-500 hover:underline">删款</button>}
           </div>
 
