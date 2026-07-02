@@ -53,6 +53,7 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
     ? [
         {
           links: [
+            { href: '/hub', label: '系统门户', icon: '🧭' },
             { href: '/ceo', label: '我的节拍', icon: '🎯' },
             { href: '/orders', label: '订单中心', icon: '📦' },
             { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
@@ -102,6 +103,7 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
     : [
         {
           links: [
+            { href: '/hub', label: '系统门户', icon: '🧭' },
             { href: '/dashboard', label: '我的工作台', icon: '📋' },
             { href: '/my-customers', label: '我的客户', icon: '🎯' },
             { href: '/orders', label: '订单列表', icon: '📦' },
