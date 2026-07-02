@@ -15,7 +15,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { OrderIntakeRouter } from '@/lib/order/intake-router';
-import { buildOrderFromPO } from '@/lib/order/from-po';
+import { buildOrderFromPO, buildLineItemsFromSnapshot } from '@/lib/order/from-po';
 import { getApprovedQuoteForCompare } from '@/app/actions/quote-consumption';
 import { createOrder, preGenerateOrderNo } from '@/app/actions/orders';
 
@@ -94,7 +94,15 @@ export async function createOrderFromPO(
   const totalQty = (draft.lines as any[]).reduce((s, l) => s + (Number(l?.quantity) || 0), 0);
   fd.set('total_quantity', String(totalQty));
   fd.set('quantity_unit', input.operational.quantity_unit || '件');
-  fd.set('style_count', String((draft.lines as any[]).length || 1));
+
+  // 逐款明细:从 approved 快照重建(款/色/码×件数 + 每款布料),交 createOrder 写 order_line_items
+  //   + 同步布料到 BOM。补此前 PO 路径不写明细、BOM 无布料的断点(审计 R-PO,2026-07-02)。
+  const lineItems = buildLineItemsFromSnapshot(draft.lines as any[]);
+  if (lineItems.length > 0) fd.set('line_items', JSON.stringify(lineItems));
+  fd.set('style_count', String(lineItems.length || (draft.lines as any[]).length || 1));
+  // color_count 必填(createOrder 硬校验);此前 PO 路径漏设 → 建单必报「请填写颜色数」。
+  const colorCount = lineItems.reduce((a, st) => a + (st.colors?.length || 0), 0) || (draft.lines as any[]).length || 1;
+  fd.set('color_count', String(colorCount));
 
   const op = input.operational;
   fd.set('internal_order_no', op.internal_order_no);

@@ -71,6 +71,53 @@ export function buildOrderDraftFromPO(
 }
 
 /**
+ * 快照行 → 逐款明细(line_items)结构,供 createOrder 写 order_line_items + 同步布料到 BOM。
+ * 纯函数、可单测。按 style_no 分组(无款号则各自成款);每行一个颜色,size_distribution 即尺码×件数。
+ * 布料信息(名/门幅/单耗)取该款首行,喂 syncStyleFabricsToBom → 生产任务单用料 + 该款 BOM 第一行。
+ * 2026-07-02:补「从 PO 创建」路径此前不写明细、不同步布料的断点(审计 R-PO)。
+ */
+export function buildLineItemsFromSnapshot(lines: unknown[]): any[] {
+  const groups = new Map<string, any>();
+  let seq = 0;
+  for (const raw of (lines || [])) {
+    const l = raw as Record<string, any>;
+    const styleNo = (l.style_no ?? '').toString().trim();
+    const key = styleNo || `__line_${seq++}`;   // 无款号 → 每行独立成款
+    let g = groups.get(key);
+    if (!g) {
+      const fabricName = [l.fabric_type, l.fabric_composition].filter(Boolean).join(' ').trim();
+      g = {
+        style_no: styleNo,
+        product_name: (l.style_name ?? '').toString().trim(),
+        image_url: '',
+        fabric_name: fabricName,
+        fabric_width: l.fabric_width_cm != null ? `${l.fabric_width_cm}cm` : '',
+        fabric_consumption: l.fabric_consumption_kg != null ? Number(l.fabric_consumption_kg) : '',
+        fabric_unit: 'kg',
+        colors: [],
+      };
+      groups.set(key, g);
+    }
+    const color = (l.color ?? '').toString().trim();
+    const sizes: Record<string, number> = {};
+    const sd = l.size_distribution && typeof l.size_distribution === 'object' ? l.size_distribution : {};
+    for (const [k, v] of Object.entries(sd)) {
+      const n = Number(v) || 0;
+      if (n > 0) sizes[k] = n;
+    }
+    const sizeSum = Object.values(sizes).reduce((a, v) => a + v, 0);
+    g.colors.push({
+      color_cn: color,
+      color_en: '',
+      sizes,
+      qty: sizeSum || (Number(l.quantity) || 0),   // 无尺码分布 → 用行总数
+      remark: '',
+    });
+  }
+  return [...groups.values()];
+}
+
+/**
  * 从消费闸门结果（CompareBasis）派生 Order 草稿 —— 带 **approval 硬门**。
  * snapshot 非 approved / 不可消费 / 版本不符 → HARD FAIL（抛错）。
  * 这是 createOrder PO 路径的入口映射：真相只从 approved 冻结快照来。
