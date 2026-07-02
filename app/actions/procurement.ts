@@ -822,6 +822,84 @@ export async function recordGoodsReceipt(
   return {};
 }
 
+/**
+ * 收货登记(分时间分批次)—— 每批追加 goods_receipts 一行,自动汇总回写 received_qty,
+ * 未收齐留在「待验收」可继续录下一批,收齐(或勾"收齐")→ accepted 离队。码单存 order-docs(photos jsonb)。
+ * 与 recordGoodsReceipt(QC 让步/拒收)分工:本函数=实收入账的日常收货。
+ */
+export async function recordReceiptBatch(
+  lineItemId: string,
+  payload: { received_qty: number; received_date?: string; slip_paths?: string[]; note?: string; mark_complete?: boolean },
+): Promise<{ error?: string; ok?: boolean; total_received?: number; ordered?: number; complete?: boolean }> {
+  const access = await checkOperator();
+  if (!access.ok || !access.userId) return { error: access.error };
+  if (!(payload.received_qty > 0)) return { error: '本批实收数量必须大于 0' };
+  const supabase = await createClient();
+
+  const { data: line } = await (supabase.from('procurement_line_items') as any)
+    .select('id, order_id, line_status, ordered_qty, ordered_unit, received_qty').eq('id', lineItemId).single();
+  if (!line) return { error: '采购行不存在' };
+
+  const now = new Date().toISOString();
+  const receivedAt = payload.received_date ? new Date(payload.received_date + 'T00:00:00+08:00').toISOString() : now;
+
+  // 1. 追加一批
+  const { error: grErr } = await (supabase.from('goods_receipts') as any).insert({
+    line_item_id: lineItemId, order_id: line.order_id,
+    received_qty: payload.received_qty, received_unit: line.ordered_unit || null,
+    received_at: receivedAt, received_by: access.userId,
+    inspection_result: 'pass',
+    defect_notes: payload.note || null,
+    photos: (payload.slip_paths && payload.slip_paths.length) ? payload.slip_paths : null,
+  });
+  if (grErr) return { error: grErr.message };
+
+  // 2. 汇总实收 → 回写
+  const { data: receipts } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId);
+  const total = ((receipts || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
+  const ordered = Number(line.ordered_qty) || 0;
+  const complete = payload.mark_complete === true || (ordered > 0 && total >= ordered);
+  const nextStatus = complete ? 'accepted' : 'arrived';   // 收齐→离队;未齐→留待验收继续录
+  await (supabase.from('procurement_line_items') as any).update({
+    received_qty: total, received_at: now, received_by: access.userId, line_status: nextStatus, updated_at: now,
+  }).eq('id', lineItemId);
+
+  // 3. 自动入库(增量 delta)
+  try { const { recordInventoryReceipt } = await import('@/app/actions/inventory'); await recordInventoryReceipt(lineItemId); }
+  catch (e: any) { console.warn('[recordReceiptBatch] 自动入库失败(不阻断):', e?.message); }
+  // 4. 联动采购项收货状态
+  try { const { syncProcurementItemReceivingStatus } = await import('@/app/actions/procurement-items'); await syncProcurementItemReceivingStatus(line.order_id); }
+  catch (e: any) { console.warn('[recordReceiptBatch] 采购项联动失败(不阻断):', e?.message); }
+
+  await logProcurement(supabase, lineItemId, line.order_id, 'receive', line.line_status, nextStatus,
+    `收货登记:本批 ${payload.received_qty}${line.ordered_unit || ''},累计 ${total}/${ordered}${complete ? '(已收齐)' : ''}`,
+    { batch: payload.received_qty, total });
+  revalidatePath(`/orders/${line.order_id}`);
+  revalidatePath('/procurement');
+  return { ok: true, total_received: total, ordered, complete };
+}
+
+/** 某采购行的全部收货批次(含码单 signed URL)。 */
+export async function listReceiptBatches(lineItemId: string): Promise<{ data?: any[]; error?: string }> {
+  const access = await checkAccess();   // 只读:可见采购的角色都能看(业务/生产/仓库也要看到货进度)
+  if (!access.ok) return { error: access.error };
+  const supabase = await createClient();
+  const { data, error } = await (supabase.from('goods_receipts') as any)
+    .select('id, received_qty, received_unit, received_at, defect_notes, photos, inspection_result')
+    .eq('line_item_id', lineItemId).order('received_at', { ascending: true });
+  if (error) return { error: error.message };
+  const rows: any[] = [];
+  for (const r of (data || []) as any[]) {
+    const slipUrls: string[] = [];
+    for (const p of (r.photos || [])) {
+      const { data: signed } = await supabase.storage.from('order-docs').createSignedUrl(p, 3600);
+      if (signed?.signedUrl) slipUrls.push(signed.signedUrl);
+    }
+    rows.push({ ...r, slip_urls: slipUrls });
+  }
+  return { data: rows };
+}
+
 // ── 采购中心工作队列（跨订单，供 /procurement 页只读渲染）──
 export interface QueueLine {
   id: string;

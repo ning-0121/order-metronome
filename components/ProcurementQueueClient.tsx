@@ -1,14 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   transitionProcurementLine,
   chaseProcurementLine,
   recordGoodsReceipt,
+  recordReceiptBatch,
+  listReceiptBatches,
   type QueueLine,
 } from '@/app/actions/procurement';
+import { createClient as createBrowserClient } from '@/lib/supabase/client';
 
 const LAMP: Record<string, string> = {
   red: 'bg-red-500', yellow: 'bg-yellow-400', green: 'bg-emerald-500',
@@ -127,10 +130,15 @@ export function ProcurementQueueClient({
         {receive.length === 0 ? <Empty /> : receive.map(l => (
           <div key={l.id}>
             <RowShell line={l}>
-              <span className="text-xs text-gray-400">订购 {l.ordered_qty ?? '—'} {l.ordered_unit}</span>
+              <span className="text-xs text-gray-400">订购 {l.ordered_qty ?? '—'} {l.ordered_unit}{l.received_qty ? ` · 已收 ${l.received_qty}` : ''}</span>
               <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`}
-                onClick={() => setOpenForm(openForm === `${l.id}:recv` ? null : `${l.id}:recv`)}>验收</button>
+                onClick={() => setOpenForm(openForm === `${l.id}:reg` ? null : `${l.id}:reg`)}>📥 收货登记</button>
+              <button className={`${btn} bg-white text-gray-600 border border-gray-300 hover:bg-gray-50`}
+                onClick={() => setOpenForm(openForm === `${l.id}:recv` ? null : `${l.id}:recv`)}>验收判定</button>
             </RowShell>
+            {openForm === `${l.id}:reg` && (
+              <ReceiptRegisterForm line={l} onDone={() => { setOpenForm(null); router.refresh(); }} />
+            )}
             {openForm === `${l.id}:recv` && (
               <ReceiveForm line={l} busy={!!busy && busy.startsWith(`${l.id}:recv`)}
                 onSubmit={(p) => run(`${l.id}:recv:${p.result}`, () => recordGoodsReceipt(l.id, p))} />
@@ -190,6 +198,96 @@ function ReceiveForm({ line, busy, onSubmit }: {
       <button disabled={busy} className="text-xs px-2 py-1 rounded bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50" onClick={() => submit('pass')}>通过</button>
       <button disabled={busy} className="text-xs px-2 py-1 rounded bg-amber-500 text-white font-medium hover:bg-amber-600 disabled:opacity-50" onClick={() => submit('concession')} title="需采购经理/管理员">让步</button>
       <button disabled={busy} className="text-xs px-2 py-1 rounded bg-red-500 text-white font-medium hover:bg-red-600 disabled:opacity-50" onClick={() => submit('reject')}>拒收</button>
+    </div>
+  );
+}
+
+/** 收货登记(分批次 + 码单上传 + 累计汇总)。仓库把实收数据交采购,采购在此逐批录入。 */
+function ReceiptRegisterForm({ line, onDone }: { line: QueueLine; onDone: () => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [batches, setBatches] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [qty, setQty] = useState('');
+  const [date, setDate] = useState(today);
+  const [note, setNote] = useState('');
+  const [complete, setComplete] = useState(false);
+  const [slipPaths, setSlipPaths] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const reload = () => listReceiptBatches(line.id).then(r => { setBatches((r as any).data || []); setLoading(false); });
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [line.id]);
+
+  const received = batches.reduce((s, b) => s + (Number(b.received_qty) || 0), 0);
+  const ordered = Number(line.ordered_qty) || 0;
+
+  async function uploadSlips(files: FileList) {
+    setUploading(true); setErr('');
+    try {
+      const supabase = createBrowserClient();
+      const paths: string[] = [];
+      for (const f of Array.from(files)) {
+        const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
+        const path = `receipts/${line.order_id}/${line.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        const { error } = await supabase.storage.from('order-docs').upload(path, f, { contentType: f.type, upsert: false });
+        if (error) { setErr('码单上传失败:' + error.message); continue; }
+        paths.push(path);
+      }
+      setSlipPaths(p => [...p, ...paths]);
+    } finally { setUploading(false); }
+  }
+
+  async function submit() {
+    const q = parseFloat(qty);
+    if (!(q > 0)) { setErr('请填本批实收数量'); return; }
+    setSaving(true); setErr('');
+    const res = await recordReceiptBatch(line.id, {
+      received_qty: q, received_date: date, note: note || undefined,
+      slip_paths: slipPaths.length ? slipPaths : undefined, mark_complete: complete,
+    });
+    setSaving(false);
+    if ((res as any).error) { setErr((res as any).error); return; }
+    if ((res as any).complete) { onDone(); return; }   // 收齐离队
+    setQty(''); setNote(''); setSlipPaths([]);          // 未收齐:清本批,留着继续录
+    reload();
+  }
+
+  return (
+    <div className="bg-emerald-50/50 px-3 py-3 border-b border-gray-100 space-y-2">
+      <div className="text-xs text-gray-600">
+        订购 <b>{ordered || '—'}</b> {line.ordered_unit} · 已收 <b className={received >= ordered && ordered > 0 ? 'text-emerald-600' : 'text-amber-600'}>{received}</b>
+        {ordered > 0 && <> · 差 <b>{Math.max(0, Math.round((ordered - received) * 1000) / 1000)}</b></>}
+      </div>
+      {/* 已收批次 */}
+      {loading ? <div className="text-xs text-gray-400">加载批次…</div> : batches.length > 0 && (
+        <div className="text-xs text-gray-500 space-y-0.5">
+          {batches.map((b, i) => (
+            <div key={b.id} className="flex items-center gap-2">
+              <span>第{i + 1}批 {b.received_at?.slice(0, 10)}:</span>
+              <b className="text-gray-700">{b.received_qty} {b.received_unit || ''}</b>
+              {b.defect_notes && <span className="text-gray-400">· {b.defect_notes}</span>}
+              {(b.slip_urls || []).map((u: string, j: number) => (
+                <a key={j} href={u} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">码单{j + 1}</a>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {/* 录本批 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input className="rounded border border-gray-300 px-2 py-1 text-xs w-24" placeholder={`本批实收`} type="number" step="0.01" value={qty} onChange={e => setQty(e.target.value)} />
+        <input className="rounded border border-gray-300 px-2 py-1 text-xs" type="date" value={date} onChange={e => setDate(e.target.value)} title="收货日期" />
+        <input className="rounded border border-gray-300 px-2 py-1 text-xs flex-1 min-w-[120px]" placeholder="备注(可选)" value={note} onChange={e => setNote(e.target.value)} />
+        <label className="text-xs px-2 py-1 rounded bg-white border border-gray-300 cursor-pointer hover:bg-gray-50 whitespace-nowrap">
+          {uploading ? '上传中…' : `📎 码单${slipPaths.length ? `(${slipPaths.length})` : ''}`}
+          <input type="file" accept="image/*,.pdf" multiple className="hidden" disabled={uploading}
+            onChange={e => { if (e.target.files?.length) uploadSlips(e.target.files); e.currentTarget.value = ''; }} />
+        </label>
+        <label className="text-xs flex items-center gap-1 text-gray-600"><input type="checkbox" checked={complete} onChange={e => setComplete(e.target.checked)} />收齐</label>
+        <button disabled={saving || uploading} className="text-xs px-3 py-1 rounded bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50" onClick={submit}>{saving ? '登记中…' : '登记本批'}</button>
+      </div>
+      {err && <div className="text-xs text-red-600">{err}</div>}
     </div>
   );
 }
