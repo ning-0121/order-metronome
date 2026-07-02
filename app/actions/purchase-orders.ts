@@ -15,6 +15,7 @@ import { hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
 import { evaluateProcurementApproval, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
+import { consolidationKey } from '@/lib/services/procurement-consolidation';
 
 const CAN_PROCURE = ['admin', 'procurement', 'procurement_manager'];
 
@@ -51,6 +52,8 @@ export async function createPurchaseOrder(input: {
   paymentTerms?: string;
   deliveryDate?: string;
   notes?: string;
+  /** C:合并同料 —— 导出给供应商时同 consolidation_key 行并为一行;DB 行不合并(order_id peg 不丢) */
+  mergeSameMaterials?: boolean;
 }): Promise<{ id?: string; poNo?: string; error?: string }> {
   const { supabase, roles, userId } = await authRoles();
   if (!userId) return { error: '请先登录' };
@@ -81,6 +84,7 @@ export async function createPurchaseOrder(input: {
       po_no: poNo, supplier_id: input.supplierId, order_ids: orderIds, status: 'draft',
       total_amount: total, payment_terms: input.paymentTerms || null,
       delivery_date: input.deliveryDate || null, notes: input.notes || null, created_by: userId,
+      merge_same_materials: input.mergeSameMaterials === true,
     })
     .select('id').single();
   if (poErr) return { error: '创建采购单失败：' + poErr.message };
@@ -244,10 +248,35 @@ export async function exportPurchaseOrder(id: string): Promise<{ base64?: string
     .select('*, suppliers(*)').eq('id', id).maybeSingle();
   if (!po) return { error: '采购单不存在' };
   const { data: lines } = await (supabase.from('procurement_line_items') as any)
-    .select('material_name, specification, ordered_qty, ordered_unit, unit_price, ordered_amount')
+    .select('material_name, specification, category, ordered_qty, ordered_unit, unit_price, ordered_amount')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
   const { data: ords } = await (supabase.from('orders') as any)
     .select('order_no, internal_order_no').in('id', ((po as any).order_ids || []) as string[]);
+
+  // C 合并同料:同 consolidation_key 并为一行(数量/金额求和;单价不一致时按 金额/数量 回算)。只影响导出,DB 行不动。
+  let exportLines = (lines || []) as any[];
+  if ((po as any).merge_same_materials) {
+    const groups = new Map<string, any>();
+    for (const l of exportLines) {
+      const key = consolidationKey({
+        material_name: l.material_name, specification: l.specification,
+        category: l.category, unit: l.ordered_unit,
+      });
+      const g = groups.get(key);
+      if (!g) { groups.set(key, { ...l, _prices: new Set([l.unit_price ?? null]) }); continue; }
+      g.ordered_qty = (Number(g.ordered_qty) || 0) + (Number(l.ordered_qty) || 0);
+      g.ordered_amount = (Number(g.ordered_amount) || 0) + (Number(l.ordered_amount) || 0);
+      g._prices.add(l.unit_price ?? null);
+    }
+    exportLines = [...groups.values()].map((g) => {
+      if (g._prices.size > 1) {
+        const qty = Number(g.ordered_qty) || 0;
+        g.unit_price = qty > 0 && g.ordered_amount != null ? Math.round((g.ordered_amount / qty) * 10000) / 10000 : null;
+      }
+      delete g._prices;
+      return g;
+    });
+  }
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
@@ -262,7 +291,7 @@ export async function exportPurchaseOrder(id: string): Promise<{ base64?: string
   ws.addRow(['交期', (po as any).delivery_date || '—']);
   ws.addRow([]);
   ws.addRow(['物料', '规格', '数量', '单位', '单价', '金额']);
-  for (const l of (lines || []) as any[]) {
+  for (const l of exportLines) {
     ws.addRow([l.material_name, l.specification || '', l.ordered_qty, l.ordered_unit, l.unit_price ?? '', l.ordered_amount ?? '']);
   }
   ws.addRow([]);

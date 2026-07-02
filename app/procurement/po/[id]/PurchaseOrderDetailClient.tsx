@@ -115,8 +115,13 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700">
+        <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700 flex items-center gap-2">
           采购行 {lines.length} {!canSeeFloor && <span className="text-xs font-normal text-gray-400">（业务视图:仅建议价）</span>}
+          {po.merge_same_materials && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+              🔗 合并同料 · 导出时同料并为一行
+            </span>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">

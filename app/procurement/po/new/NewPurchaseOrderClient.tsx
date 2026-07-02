@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createPurchaseOrder } from '@/app/actions/purchase-orders';
+import { consolidationKey } from '@/lib/services/procurement-consolidation';
 
 export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[]; lines: any[] }) {
   const router = useRouter();
@@ -19,11 +20,41 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
     setChecked(n);
   }
 
+  // C:勾选行里同 consolidation_key(名+规格+类别+单位;不同颜色不同 key)≥2 行 → 可合并组
+  function duplicateGroups() {
+    const groups = new Map<string, { label: string; count: number; qty: number; unit: string }>();
+    for (const l of lines.filter((x) => checked.has(x.id))) {
+      const key = consolidationKey({
+        material_name: l.material_name, specification: l.specification,
+        category: l.category, unit: l.ordered_unit,
+      });
+      const g = groups.get(key) || {
+        label: `${l.material_name}${l.specification ? ' / ' + l.specification : ''}`,
+        count: 0, qty: 0, unit: l.ordered_unit || '',
+      };
+      g.count += 1;
+      g.qty += Number(l.ordered_qty) || 0;
+      groups.set(key, g);
+    }
+    return [...groups.values()].filter((g) => g.count >= 2);
+  }
+
   async function submit() {
     if (!supplierId) { alert('请选择供应商'); return; }
     if (checked.size === 0) { alert('请勾选采购行'); return; }
+
+    let mergeSameMaterials = false;
+    const dups = duplicateGroups();
+    if (dups.length > 0) {
+      const list = dups.map((g) => `· ${g.label}:${g.count} 行,共 ${Math.round(g.qty * 1000) / 1000} ${g.unit}`).join('\n');
+      mergeSameMaterials = window.confirm(
+        `检测到 ${dups.length} 组同料同规格(同单位)采购行:\n\n${list}\n\n` +
+        `是否合并?\n【确定】导出给供应商时并为一行(系统内仍分订单核销,不影响对账)\n【取消】保持分行`
+      );
+    }
+
     setSaving(true);
-    const res = await createPurchaseOrder({ supplierId, lineItemIds: [...checked], paymentTerms, deliveryDate: deliveryDate || undefined });
+    const res = await createPurchaseOrder({ supplierId, lineItemIds: [...checked], paymentTerms, deliveryDate: deliveryDate || undefined, mergeSameMaterials });
     setSaving(false);
     if (res.error) { alert(res.error); return; }
     router.push(`/procurement/po/${res.id}`);
