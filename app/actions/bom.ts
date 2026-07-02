@@ -559,7 +559,7 @@ function bomSignature(rows: any[], f: { name: string; type: string; code: string
 
 export async function submitBomToProcurement(
   orderId: string,
-): Promise<{ ok?: boolean; count?: number; error?: string; plan_id?: string; snapshot_version?: number; requirement_count?: number }> {
+): Promise<{ ok?: boolean; count?: number; error?: string; plan_id?: string; snapshot_version?: number; requirement_count?: number; missing_consumption?: string[] }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -578,12 +578,27 @@ export async function submitBomToProcurement(
   if (!order) return { error: '订单不存在' };
   if (!order.quantity || order.quantity <= 0) return { error: '订单缺数量,无法生成物料需求' };
 
-  // live BOM(完整列,用于冻结快照)
+  // live BOM(完整列,用于冻结快照;style_no 用于 R1 按款算需求)
   const { data: bomRows, error: bomErr } = await (supabase.from('materials_bom') as any)
-    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier')
+    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier, style_no')
     .eq('order_id', orderId);
   if (bomErr) return { error: bomErr.message };
   if (!bomRows || bomRows.length === 0) return { error: '原辅料单为空,请先录入物料再提交' };
+
+  // R1(2026-07-02 审计):款级 BOM 行(style_no 非空)按该款件数算需求,不能用整单数量
+  const { data: liRows } = await (supabase.from('order_line_items') as any)
+    .select('style_no, qty_pcs').eq('order_id', orderId);
+  const styleQty = new Map<string, number>();
+  for (const r of (liRows || []) as any[]) {
+    if (!r.style_no) continue;
+    styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + (Number(r.qty_pcs) || 0));
+  }
+  const bomStyle = new Map<string, string | null>((bomRows as any[]).map(r => [r.id, r.style_no || null]));
+
+  // R2(2026-07-02 审计):缺单耗的行生成不了需求量,显式警示而不是静默吞掉
+  const missingConsumption = (bomRows as any[])
+    .filter(r => r.qty_per_piece == null || Number(r.qty_per_piece) <= 0)
+    .map(r => r.material_name);
 
   // 损耗率(来自成本基线,缺则默认 3)
   const { data: baseline } = await (supabase.from('order_cost_baseline') as any)
@@ -717,13 +732,16 @@ export async function submitBomToProcurement(
       });
       inventoryQty = Math.max(0, (balByKey.get(key) || 0) - (resByKey.get(key) || 0));
     }
+    // R1:款级行用该款件数(明细未录该款时兜底整单数量,宁多勿缺);整单通用行用整单数量
+    const lineStyle = line.bom_id ? bomStyle.get(line.bom_id) : null;
+    const poQty = (lineStyle && styleQty.get(lineStyle)) ? styleQty.get(lineStyle)! : order.quantity;
     const r = computeMaterialRequirement({
       material: {
         material_name: line.material_name, material_type: line.material_type,
         material_code: line.material_code, unit: line.unit,
         qty_per_piece: line.qty_per_piece, loss_rate: line.loss_rate,
       },
-      po_quantity: order.quantity, stageAnchors, inventoryQty, reuseQty: 0, today,
+      po_quantity: poQty, stageAnchors, inventoryQty, reuseQty: 0, today,
     });
     return {
       material_plan_id: planId, order_id: orderId, snapshot_line_id: line.id,
@@ -764,7 +782,7 @@ export async function submitBomToProcurement(
   }
 
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true, count: bomRows.length, plan_id: planId, snapshot_version: snapshotVersion!, requirement_count: reqRows.length };
+  return { ok: true, count: bomRows.length, plan_id: planId, snapshot_version: snapshotVersion!, requirement_count: reqRows.length, missing_consumption: missingConsumption };
 }
 
 /** 标记某物料"已交样品给采购"(线下样品的轻量标记) */

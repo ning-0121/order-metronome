@@ -350,21 +350,33 @@ function NewOrderWizard() {
 
       // ─── 逐款明细预填富录入表(业务可见可改;已手工录了就不覆盖)───
       if (lineStyles.length === 0) {
-        const parsedStyles = successes.flatMap(s => (s.data.styles || [])).map((st: any) => ({
+        // 从解析的单件用量文本(如"1.2平方,0.346kg/件")抽数字单耗:优先 kg,其次 米/码/平方
+        const parseConsumption = (txt: string): { qty: string; unit: string } => {
+          if (!txt) return { qty: '', unit: 'kg' };
+          for (const [re, unit] of [[/([\d.]+)\s*(?:kg|公斤)/i, 'kg'], [/([\d.]+)\s*米/, '米'], [/([\d.]+)\s*码/, '码'], [/([\d.]+)\s*平方/, '平方']] as [RegExp, string][]) {
+            const m = txt.match(re);
+            if (m) return { qty: m[1], unit };
+          }
+          return { qty: '', unit: 'kg' };
+        };
+        const parsedStyles = successes.flatMap(s => (s.data.styles || [])).map((st: any) => {
+          const cons = parseConsumption(st.unit_consumption || '');
+          return {
           style_no: st.style_no || '',
           product_name: st.product_name || '',
           image_url: st.image_url || '',
           fabric_name: [st.material, st.fabric_weight].filter(Boolean).join(' '),
           fabric_width: '',
-          fabric_consumption: '',
-          fabric_unit: 'kg',
+          fabric_consumption: cons.qty,
+          fabric_unit: cons.unit,
           colors: (st.colors || []).map((c: any) => ({
             color_cn: c.color_cn || '',
             color_en: c.color_en || '',
             sizes: (c.sizes && typeof c.sizes === 'object') ? c.sizes : {},
             remark: c.packaging || '',
           })),
-        })).filter((st: any) => st.style_no || st.colors.length > 0);
+          };
+        }).filter((st: any) => st.style_no || st.colors.length > 0);
         if (parsedStyles.length > 0) setLineStyles(parsedStyles);
       }
 

@@ -153,7 +153,10 @@ export function BomTab({ orderId }: { orderId: string }) {
     const res = await submitBomToProcurement(orderId);
     setSubmitting(false);
     if (res.error) { setSubmitMsg('提交失败：' + res.error); return; }
-    setSubmitMsg(`✅ 已提交采购（${res.count} 项），采购已收到通知`);
+    const missing = (res as any).missing_consumption || [];
+    setSubmitMsg(missing.length > 0
+      ? `✅ 已提交采购（${res.count} 项），但 ⚠ ${missing.length} 行缺单耗、生成不了需求量：${missing.join('、')} —— 补上单耗后重新提交`
+      : `✅ 已提交采购（${res.count} 项），采购已收到通知`);
     await reload();
   }
 

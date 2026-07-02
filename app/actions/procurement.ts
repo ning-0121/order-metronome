@@ -327,7 +327,9 @@ export async function recordReceipt(
   receivedQty: number,
   notes?: string,
 ): Promise<{ error?: string }> {
-  const auth = await checkAccess();
+  // O4(2026-07-02 审计):收货是库存动作,收紧到操作角色(采购/管理员),
+  // 与 recordGoodsReceipt 同一门槛;此前用 checkAccess 让 sales/finance 也能记收货。
+  const auth = await checkOperator();
   if (!auth.ok || !auth.userId) return { error: auth.error };
 
   const supabase = await createClient();

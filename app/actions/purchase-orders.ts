@@ -191,6 +191,13 @@ export async function placePurchaseOrder(poId: string): Promise<{
     const { error } = await (supabase.from('purchase_orders') as any)
       .update({ status: 'placed', updated_at: new Date().toISOString() }).eq('id', poId);
     if (error) { revalidatePath(`/procurement/po/${poId}`); return { error: error.message }; }
+    // R3:该单的行 draft/pending_order → ordered,进「待催货」队列(失败不阻断下单)
+    try {
+      await (supabase.from('procurement_line_items') as any)
+        .update({ line_status: 'ordered' })
+        .eq('purchase_order_id', poId)
+        .in('line_status', ['draft', 'pending_order']);
+    } catch (e: any) { console.warn('[placePurchaseOrder] 行状态推进失败(不阻断):', e?.message); }
     // P2b: placed → 财务同步（应付/付款计划）。未配置即跳过，绝不阻塞下单。
     try {
       const { data: full } = await (supabase.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();

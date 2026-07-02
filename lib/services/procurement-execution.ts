@@ -39,6 +39,8 @@ export function buildExecutionLineRow(item: ProcItem, userId: string): Record<st
     ordered_unit: item.purchase_unit || item.unit || null,
     unit_price: item.unit_price ?? null, // 大货底价,业务读时剥离
     ordered_by: userId,
+    // R3(2026-07-02 审计):DB 默认 'draft' 不在采购中心任何队列;显式置待下单
+    line_status: 'pending_order',
   };
 }
 
