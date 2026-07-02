@@ -35,7 +35,7 @@ export async function getManufacturingOrder(orderId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, product_name, style_no, quantity, etd, factory_date, packing_requirement, factory_name, owner_user_id')
+    .select('id, order_no, customer_name, product_description, style_no, quantity, etd, factory_date, packaging_type, factory_name, owner_user_id')
     .eq('id', orderId).single();
   if (oErr) return { error: friendlyError(oErr) };
 
@@ -194,7 +194,7 @@ export async function generateManufacturingOrderSheet(
   // ── 一、订单基本信息 ──
   sectionTitle('一、订单基本信息');
   kv('订单号', order.order_no, '客户', order.customer_name);
-  kv('款号', order.style_no, '产品名称', order.product_name);
+  kv('款号', order.style_no, '产品名称', order.product_description);
   kv('数量', order.quantity, '生产工厂', order.factory_name || '—');
   kv('工厂交期', fmtDate(order.factory_date), 'ETD（出货交期）', fmtDate(order.etd));
   kv('业务员', nameOf(order.owner_user_id), '状态', STATUS_CN[mo.status] || mo.status);

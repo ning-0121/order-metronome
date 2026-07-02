@@ -154,12 +154,12 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
           <div><span className="text-gray-400">客户：</span>{order.customer_name || '—'}</div>
           <div><span className="text-gray-400">订单号：</span>{order.order_no || '—'}</div>
           <div><span className="text-gray-400">款号：</span>{order.style_no || '—'}</div>
-          <div><span className="text-gray-400">产品：</span>{order.product_name || '—'}</div>
+          <div><span className="text-gray-400">产品：</span>{order.product_description || '—'}</div>
           <div><span className="text-gray-400">数量：</span>{order.quantity ?? '—'}</div>
           <div><span className="text-gray-400">工厂交期：</span>{order.factory_date ? String(order.factory_date).slice(0, 10) : '—'}</div>
         </div>
-        {order.packing_requirement && (
-          <div className="mt-2 text-xs text-gray-500"><span className="text-gray-400">客户原始包装要求：</span>{order.packing_requirement}</div>
+        {order.packaging_type && (
+          <div className="mt-2 text-xs text-gray-500"><span className="text-gray-400">包装类型：</span>{order.packaging_type === 'standard' ? '标准' : '定制'}</div>
         )}
       </div>
 
