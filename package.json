@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "npx tsx scripts/pre-deploy-check.ts && npx tsx scripts/test-runtime-confidence.ts && npx tsx scripts/test-mrp.ts && npx tsx scripts/test-inventory-w3.ts && npx tsx scripts/test-procurement-execution.ts && npx tsx scripts/test-material-catalog.ts && npx tsx scripts/test-inventory-scp2.ts",
+    "check": "npx tsx scripts/pre-deploy-check.ts && npx tsx scripts/test-runtime-confidence.ts && npx tsx scripts/test-mrp.ts && npx tsx scripts/test-inventory-w3.ts && npx tsx scripts/test-procurement-execution.ts && npx tsx scripts/test-material-catalog.ts && npx tsx scripts/test-inventory-scp2.ts && npx tsx scripts/test-procurement-kernel.ts",
     "test:runtime": "npx tsx scripts/test-runtime-confidence.ts",
     "test:mrp": "npx tsx scripts/test-mrp.ts",
     "test:inventory": "npx tsx scripts/test-inventory-w3.ts",
