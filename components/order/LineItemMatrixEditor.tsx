@@ -9,6 +9,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getOrderLineItems, saveOrderLineItems } from '@/app/actions/order-line-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
+import { sortSizeKeys } from '@/lib/utils/size-sort';
 
 type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string };
 type Style = { style_no: string; product_name: string; image_url: string; colors: Color[] };
@@ -37,17 +38,30 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
     if ((res as any).data) {
       const data = (res as any).data as Style[];
       setInternalStyles(data);
-      // 尺码集 = 已有 sizes 键的并集(保序);空则默认
+      // 尺码集 = 已有 sizes 键的并集,按标准序 XS→S→M→L→XL→…;空则默认
       const labels = new Set<string>();
       for (const st of data) for (const c of st.colors) for (const k of Object.keys(c.sizes || {})) labels.add(k);
-      setSizeLabels(labels.size > 0 ? [...labels] : DEFAULT_SIZES);
+      setSizeLabels(labels.size > 0 ? sortSizeKeys([...labels]) : DEFAULT_SIZES);
     }
     setLoading(false);
   }, [orderId, controlled]);
   useEffect(() => { load(); }, [load]);
 
+  // 受控模式(建单页):外部塞进来的明细(AI 解析/复制款)可能带新尺码 → 并入尺码列并保持标准序
+  useEffect(() => {
+    if (!controlled) return;
+    setSizeLabels(prev => {
+      const set = new Set(prev);
+      let changed = false;
+      for (const st of (value || [])) for (const c of (st.colors || [])) for (const k of Object.keys(c.sizes || {})) {
+        if (!set.has(k)) { set.add(k); changed = true; }
+      }
+      return changed ? sortSizeKeys([...set]) : prev;
+    });
+  }, [controlled, value]);
+
   // ── 尺码列 ──
-  const addSize = () => { const s = newSize.trim(); if (s && !sizeLabels.includes(s)) setSizeLabels([...sizeLabels, s]); setNewSize(''); };
+  const addSize = () => { const s = newSize.trim(); if (s && !sizeLabels.includes(s)) setSizeLabels(sortSizeKeys([...sizeLabels, s])); setNewSize(''); };
   const removeSize = (s: string) => {
     setSizeLabels(sizeLabels.filter((x) => x !== s));
     setStyles(styles.map((st) => ({ ...st, colors: st.colors.map((c) => { const { [s]: _, ...rest } = c.sizes; return { ...c, sizes: rest }; }) })));

@@ -5,6 +5,7 @@ import {
   generateManufacturingOrderSheet,
 } from '@/app/actions/manufacturing-order';
 import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
+import { sortSizeKeys, compareSizeKeys } from '@/lib/utils/size-sort';
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', lining: '里料', label: '标签', packing: '包装',
@@ -184,7 +185,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
               {lineItems.map((li: any, i: number) => (
                 <div key={i} className="flex gap-2">
                   <span className="text-gray-700 shrink-0">{[li.color_cn, li.color_en].filter(Boolean).join('/') || '—'}</span>
-                  <span className="text-gray-400 truncate">{li.sizes && typeof li.sizes === 'object' ? Object.entries(li.sizes).map(([k, v]) => `${k}:${v}`).join(' ') : ''}</span>
+                  <span className="text-gray-400 truncate">{li.sizes && typeof li.sizes === 'object' ? Object.entries(li.sizes).sort((a, b) => compareSizeKeys(a[0], b[0])).map(([k, v]) => `${k}:${v}`).join(' ') : ''}</span>
                   <span className="ml-auto text-gray-600 shrink-0">{li.qty_pcs ?? '—'} {li.unit || ''}</span>
                 </div>
               ))}
@@ -234,14 +235,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
 function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
   order: any; mo: any; lineItems: any[]; bom: any[]; onClose: () => void; onDownload: () => void;
 }) {
-  const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'XXXL', '3XL', '4XL', '5XL', '6XL'];
-  const sortSizes = (keys: string[]) => [...keys].sort((a, b) => {
-    const ia = SIZE_ORDER.indexOf(a.toUpperCase()), ib = SIZE_ORDER.indexOf(b.toUpperCase());
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    const na = parseFloat(a), nb = parseFloat(b);
-    if (!isNaN(na) && !isNaN(nb)) return na - nb;
-    return a.localeCompare(b);
-  });
+  const sortSizes = sortSizeKeys;
 
   // 按款分组(与服务端生成同口径)
   const groups: { style_no: string; product_name: string; image_url: string; items: any[] }[] = [];

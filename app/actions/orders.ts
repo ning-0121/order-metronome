@@ -793,6 +793,9 @@ export async function createOrder(
         const colors = Array.isArray(st?.colors) ? st.colors : [];
         for (const c of colors) {
           lineNo++;
+          // qty 优先取 c.qty;富录入表不维护 qty 字段 → 从 sizes 求和兜底
+          const sizesSum = Object.values(c?.sizes || {}).reduce((s: number, v: any) => s + (Number(v) || 0), 0);
+          const qty = Number(c?.qty ?? 0) || sizesSum;
           rows.push({
             order_id: orderData.id,
             line_no: lineNo,
@@ -803,8 +806,10 @@ export async function createOrder(
             sizes: c?.sizes || {},
             unit: 'pcs',
             set_multiplier: 1,
-            qty_pcs: Number(c?.qty ?? 0) || null,
-            qty_raw: Number(c?.qty ?? 0) || null,
+            qty_pcs: qty || null,
+            qty_raw: qty || null,
+            image_url: st?.image_url || null,
+            remark: c?.remark || null,
             source: 'po_parse',
           });
         }

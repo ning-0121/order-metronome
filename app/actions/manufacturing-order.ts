@@ -141,14 +141,7 @@ export async function generateManufacturingOrderSheet(
   const fmtDate = (v: any) => (v ? String(v).slice(0, 10) : '');
 
   // ══ 按范本《生产任务单范本.xlsx》生成:每款一个 sheet,A-K 共 11 列,宋体 14 ══
-  const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'XXXL', '3XL', '4XL', '5XL', '6XL'];
-  const sortSizes = (keys: string[]) => keys.sort((a, b) => {
-    const ia = SIZE_ORDER.indexOf(a.toUpperCase()), ib = SIZE_ORDER.indexOf(b.toUpperCase());
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    const na = parseFloat(a), nb = parseFloat(b);
-    if (!isNaN(na) && !isNaN(nb)) return na - nb;
-    return a.localeCompare(b);
-  });
+  const { sortSizeKeys: sortSizes } = await import('@/lib/utils/size-sort');
 
   // 按款分组(无明细则单 sheet 用订单头字段)
   const styleGroups: { style_no: string; product_name: string; image_url: string; items: any[] }[] = [];
