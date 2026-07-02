@@ -164,13 +164,54 @@ export function AgentChat({ userName }: { userName: string }) {
       content: m.content,
     }));
 
-    const result = await askAgent(q, history);
-
-    setMessages(prev => [...prev, {
-      role: 'agent',
-      content: result.error || result.answer,
-      timestamp: new Date(),
-    }]);
+    // 流式主路径:/api/agent-chat 边生成边显示;失败回退非流式 askAgent
+    try {
+      const resp = await fetch('/api/agent-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, history }),
+      });
+      if (resp.ok && resp.body) {
+        setMessages(prev => [...prev, { role: 'agent', content: '', timestamp: new Date() }]);
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          const text = acc;
+          setMessages(prev => {
+            const next = [...prev];
+            next[next.length - 1] = { ...next[next.length - 1], content: text };
+            return next;
+          });
+        }
+        if (!acc.trim()) throw new Error('empty stream');
+      } else {
+        // 非 200:读错误信息(限速/未登录等),4xx 直接展示不回退
+        let errText = '';
+        try { errText = (await resp.json())?.error || ''; } catch {}
+        if (resp.status >= 400 && resp.status < 500 && errText) {
+          setMessages(prev => [...prev, { role: 'agent', content: errText, timestamp: new Date() }]);
+        } else {
+          throw new Error(errText || `HTTP ${resp.status}`);
+        }
+      }
+    } catch {
+      // 回退:非流式 server action(内容构建同源)
+      const result = await askAgent(q, history);
+      setMessages(prev => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        const content = result.error || result.answer;
+        if (last?.role === 'agent' && !last.content.trim()) {
+          next[next.length - 1] = { ...last, content };
+          return next;
+        }
+        return [...next, { role: 'agent', content, timestamp: new Date() }];
+      });
+    }
     setLoading(false);
 
     // 回复完成后聚焦输入框
