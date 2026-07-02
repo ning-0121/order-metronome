@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { SystemHealthClient } from './SystemHealthClient';
+import { FinanceLinkCard } from './FinanceLinkCard';
 
 export default async function SystemHealthPage() {
   const supabase = await createClient();
@@ -32,6 +33,9 @@ export default async function SystemHealthPage() {
           </div>
         </div>
       </div>
+
+      {/* 财务系统联调(一键连通测试 + 签名 ping,验证两边密钥配对) */}
+      <FinanceLinkCard />
 
       <SystemHealthClient initialReports={(reports || []) as any[]} />
     </div>
