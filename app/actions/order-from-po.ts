@@ -27,6 +27,7 @@ export interface CreateOrderFromPOInput {
     incoterm: string;
     order_type: string;
     factory_date: string;
+    delivery_type?: string;
     factory_id?: string;
     factory_name?: string;
     etd?: string;
@@ -34,6 +35,10 @@ export interface CreateOrderFromPOInput {
     order_date?: string;
     cancel_date?: string;
     sample_phase?: string;
+    aql_standard?: string;
+    shipping_sample_required?: boolean;
+    shipping_sample_deadline?: string;
+    risk_flags?: string[]; // checkbox 键名:has_plus_size/high_stretch/light_color_risk/color_clash_risk/complex_print/tight_deadline
     order_purpose?: string;
     quantity_unit?: string;
   };
@@ -104,6 +109,14 @@ export async function createOrderFromPO(
   if (op.order_date) fd.set('order_date', op.order_date);
   if (op.cancel_date) fd.set('cancel_date', op.cancel_date);
   if (op.sample_phase) fd.set('sample_phase', op.sample_phase);
+  // P1b:补齐 legacy 认的运营键(交付方式/AQL/shipping sample/风险标记)
+  if (op.delivery_type) fd.set('delivery_type', op.delivery_type);
+  if (op.aql_standard) fd.set('aql_standard', op.aql_standard);
+  if (op.shipping_sample_required) {
+    fd.set('shipping_sample_required', 'true');
+    if (op.shipping_sample_deadline) fd.set('shipping_sample_deadline', op.shipping_sample_deadline);
+  }
+  for (const k of (op.risk_flags || [])) fd.set(k, 'true'); // 每个风险 checkbox 键置 'true'
 
   // 复用既有 createOrder 管线（里程碑/排期/财务）—— legacy 逻辑零改动
   const res = await createOrder(fd, pre.orderNo);
@@ -122,4 +135,24 @@ export async function createOrderFromPO(
   if (bindErr) return { ok: false, orderId: res.orderId, error: '订单已建但绑定写入失败：' + bindErr.message };
 
   return { ok: true, orderId: res.orderId };
+}
+
+/**
+ * P1b:客户上次订单的运营默认值(主数据预填,不靠 AI)。
+ * customers 表无默认列 → 取该客户最近一张订单实际用过的值,比静态默认更准。全部可覆盖。
+ */
+export async function getCustomerOrderDefaults(
+  customerId: string,
+): Promise<{ data: Record<string, any> | null }> {
+  if (!customerId) return { data: null };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null };
+  const { data } = await (supabase.from('orders') as any)
+    .select('order_type, incoterm, delivery_type, factory_name, factory_id, aql_standard, sample_phase')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return { data: (data as any) || null };
 }
