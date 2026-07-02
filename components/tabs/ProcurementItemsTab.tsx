@@ -60,7 +60,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     const res = await consolidateOrderProcurementItems(orderId);
     setBusy(false);
     if ((res as any).error) { setMsg((res as any).error); return; }
-    setMsg(`✅ 核料完成:新增 ${(res as any).created} / 刷新 ${(res as any).updated}${(res as any).flagged ? ` / 标记需重确认 ${(res as any).flagged}` : ''}`);
+    setMsg(`✅ 核料完成:新增 ${(res as any).created} / 刷新 ${(res as any).updated}${(res as any).flagged ? ` / 标记需重确认 ${(res as any).flagged}` : ''}${(res as any).removed ? ` / 清理孤儿 ${(res as any).removed}` : ''}`);
     await reload();
   }
 

@@ -92,7 +92,7 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     .eq('order_id', orderId);
   const exMap = new Map<string, any>((existing || []).map((e: any) => [e.consolidation_key, e]));
 
-  let created = 0, updated = 0, flagged = 0;
+  let created = 0, updated = 0, flagged = 0, removed = 0;
   let seq = (existing || []).length;
   const now = new Date().toISOString();
 
@@ -128,17 +128,35 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     }
   }
 
-  // 6) 旧项不再有来源(物料被删/改) → needs_reconfirm
+  // 6) 旧项不再有来源(物料被删/改) —— 二次提交后清孤儿(审计🟠:此前草稿孤儿被无视,滞留成过期垃圾项)
+  //    - 草稿孤儿 且 无执行行引用 → 直接删(未下游,无痕移除)
+  //    - 已确认/在采购中的孤儿(或草稿却已挂执行行)→ 保留 + 标 needs_reconfirm(已下游动过,人来决策)
   const liveKeys = new Set(groups.keys());
-  for (const e of (existing || [])) {
-    if (!liveKeys.has(e.consolidation_key) && e.status !== 'draft') {
-      await (supabase.from('procurement_items') as any).update({ needs_reconfirm: true, updated_at: now }).eq('id', e.id);
-      flagged++;
+  const orphans = (existing || []).filter((e: any) => !liveKeys.has(e.consolidation_key));
+  if (orphans.length > 0) {
+    const draftIds = orphans.filter((e: any) => e.status === 'draft').map((e: any) => e.id);
+    const flagIds = orphans.filter((e: any) => e.status !== 'draft').map((e: any) => e.id);
+    let deletable = draftIds;
+    if (draftIds.length > 0) {
+      // 双保险:草稿本不该有执行行,但若有(曾确认→生成→退回)则不删,降级为标记
+      const { data: refd } = await (supabase.from('procurement_line_items') as any)
+        .select('procurement_item_id').in('procurement_item_id', draftIds);
+      const refSet = new Set((refd || []).map((r: any) => r.procurement_item_id));
+      deletable = draftIds.filter((id: string) => !refSet.has(id));
+      flagIds.push(...draftIds.filter((id: string) => refSet.has(id)));
+    }
+    if (deletable.length > 0) {
+      await (supabase.from('procurement_items') as any).delete().in('id', deletable);
+      removed += deletable.length;
+    }
+    if (flagIds.length > 0) {
+      await (supabase.from('procurement_items') as any).update({ needs_reconfirm: true, updated_at: now }).in('id', flagIds);
+      flagged += flagIds.length;
     }
   }
 
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true, created, updated, flagged, total_items: groups.size };
+  return { ok: true, created, updated, flagged, removed, total_items: groups.size };
 }
 
 /** 来源明细(live):该采购项归并键命中的 requirements ⋈ snapshot_lines。粒度=物料行(产品维度缺口见 P1.md §5.1)。 */
