@@ -36,9 +36,9 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
 
   const dualNo = `${po.po_no} · 订单 ${(orderRefs || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
 
-  async function handleExport() {
+  async function handleExport(withPrice: boolean) {
     setExporting(true);
-    const res = await exportPurchaseOrder(po.id);
+    const res = await exportPurchaseOrder(po.id, { withPrice });
     setExporting(false);
     if (res.error) { alert(res.error); return; }
     if (res.base64 && res.fileName) {
@@ -58,12 +58,18 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
           <h1 className="text-2xl font-bold text-gray-900">{po.po_no}</h1>
           <p className="text-sm text-gray-500 mt-1">{dualNo}</p>
         </div>
-        {canSeeFloor && (
-          <button onClick={handleExport} disabled={exporting}
-            className="text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-medium disabled:opacity-50">
-            {exporting ? '导出中…' : '📥 导出采购单'}
+        <div className="flex gap-2 shrink-0">
+          {canSeeFloor && (
+            <button onClick={() => handleExport(true)} disabled={exporting}
+              className="text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-medium disabled:opacity-50">
+              {exporting ? '导出中…' : '📥 导出采购单(含价·发供应商)'}
+            </button>
+          )}
+          <button onClick={() => handleExport(false)} disabled={exporting}
+            className="text-xs px-3 py-2 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-medium disabled:opacity-50">
+            {exporting ? '导出中…' : '📤 导出无价版(发内部)'}
           </button>
-        )}
+        </div>
       </div>
 
       {/* 审批 / 下单（P2a）—— 卡风险不走流程 */}

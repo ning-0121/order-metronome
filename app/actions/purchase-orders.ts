@@ -246,10 +246,12 @@ export async function placePurchaseOrder(poId: string): Promise<{
 }
 
 /** 导出采购单 Excel（发供应商；采购专用，含底价）。 */
-export async function exportPurchaseOrder(id: string): Promise<{ base64?: string; fileName?: string; error?: string }> {
+export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolean } = {}): Promise<{ base64?: string; fileName?: string; error?: string }> {
+  const withPrice = opts.withPrice !== false;   // 默认含价(发供应商);false = 无价版(内部流转:业务/生产/仓库)
   const { supabase, roles, userId } = await authRoles();
   if (!userId) return { error: '请先登录' };
-  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可导出采购单' };
+  // 含价版仅采购可导;无价版无敏感价格,任何登录用户可导(供发内部群/生产跟单/仓库收货核对)
+  if (withPrice && !roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可导出含价采购单' };
 
   const { data: po } = await (supabase.from('purchase_orders') as any)
     .select('*, suppliers(*)').eq('id', id).maybeSingle();
@@ -290,21 +292,30 @@ export async function exportPurchaseOrder(id: string): Promise<{ base64?: string
   const ws = wb.addWorksheet('采购单');
   const sup = (po as any).suppliers || {};
   const dualNo = `${(po as any).po_no}  ·  订单 ${(ords || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
-  ws.addRow(['采购单 PURCHASE ORDER']);
+  ws.addRow([withPrice ? '采购单 PURCHASE ORDER' : '采购单(内部流转 · 无价)']);
   ws.addRow(['单号', dualNo]);
   ws.addRow(['供应商', sup.name || '—']);
   ws.addRow(['联系人/电话', `${sup.contact_name || ''} ${sup.phone || ''}`]);
-  ws.addRow(['付款方式/账期', `${sup.payment_method || '—'} / ${sup.net_days != null ? sup.net_days + '天' : '—'}`]);
+  if (withPrice) ws.addRow(['付款方式/账期', `${sup.payment_method || '—'} / ${sup.net_days != null ? sup.net_days + '天' : '—'}`]);
   ws.addRow(['交期', (po as any).delivery_date || '—']);
   ws.addRow([]);
-  ws.addRow(['物料', '规格', '数量', '单位', '单价', '金额']);
-  for (const l of exportLines) {
-    ws.addRow([l.material_name, l.specification || '', l.ordered_qty, l.ordered_unit, l.unit_price ?? '', l.ordered_amount ?? '']);
+  if (withPrice) {
+    ws.addRow(['物料', '规格', '数量', '单位', '单价', '金额']);
+    for (const l of exportLines) {
+      ws.addRow([l.material_name, l.specification || '', l.ordered_qty, l.ordered_unit, l.unit_price ?? '', l.ordered_amount ?? '']);
+    }
+    ws.addRow([]);
+    ws.addRow(['', '', '', '', '合计', (po as any).total_amount ?? '']);
+    [22, 22, 12, 8, 12, 14].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  } else {
+    // 无价版:去掉单价/金额/合计/账期,加收货栏(仓库到货核对手填)
+    ws.addRow(['物料', '规格', '数量', '单位', '实收数量', '备注']);
+    for (const l of exportLines) {
+      ws.addRow([l.material_name, l.specification || '', l.ordered_qty, l.ordered_unit, '', '']);
+    }
+    [22, 22, 12, 8, 12, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
   }
-  ws.addRow([]);
-  ws.addRow(['', '', '', '', '合计', (po as any).total_amount ?? '']);
-  [22, 22, 12, 8, 12, 14].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
-  return { base64, fileName: `采购单_${(po as any).po_no}_${sup.name || ''}.xlsx` };
+  return { base64, fileName: `采购单${withPrice ? '' : '_无价版'}_${(po as any).po_no}_${sup.name || ''}.xlsx` };
 }
