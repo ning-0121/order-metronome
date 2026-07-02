@@ -348,6 +348,22 @@ function NewOrderWizard() {
       } as any;
       setPoParseResult(aggregatedDisplay);
 
+      // ─── 逐款明细预填富录入表(业务可见可改;已手工录了就不覆盖)───
+      if (lineStyles.length === 0) {
+        const parsedStyles = successes.flatMap(s => (s.data.styles || [])).map((st: any) => ({
+          style_no: st.style_no || '',
+          product_name: st.product_name || '',
+          image_url: st.image_url || '',
+          colors: (st.colors || []).map((c: any) => ({
+            color_cn: c.color_cn || '',
+            color_en: c.color_en || '',
+            sizes: (c.sizes && typeof c.sizes === 'object') ? c.sizes : {},
+            remark: c.packaging || '',
+          })),
+        })).filter((st: any) => st.style_no || st.colors.length > 0);
+        if (parsedStyles.length > 0) setLineStyles(parsedStyles);
+      }
+
       // ─── 表单填充（保守：仅填空字段，不覆盖人工）───
       const form = e.target.closest('form');
       if (!form) return;
