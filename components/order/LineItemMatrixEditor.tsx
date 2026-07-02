@@ -8,6 +8,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { getOrderLineItems, saveOrderLineItems } from '@/app/actions/order-line-items';
+import { createClient as createBrowserClient } from '@/lib/supabase/client';
 
 type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string };
 type Style = { style_no: string; product_name: string; image_url: string; colors: Color[] };
@@ -28,6 +29,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [newSize, setNewSize] = useState('');
+  const [uploading, setUploading] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (controlled || !orderId) { setLoading(false); return; }
@@ -55,6 +57,20 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
   const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
   const removeStyle = (i: number) => setStyles(styles.filter((_, x) => x !== i));
   const setStyleField = (i: number, k: keyof Style, v: string) => setStyles(styles.map((st, x) => x === i ? { ...st, [k]: v } : st));
+
+  // S1.1 上传产品图 → 公开桶 product-images → 存 publicUrl 进 image_url
+  async function uploadImage(si: number, file: File) {
+    setUploading(si);
+    try {
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `styles/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type, upsert: false });
+      if (error) { alert('上传失败:' + error.message + '(请确认已建 product-images 公开桶)'); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      setStyleField(si, 'image_url', data.publicUrl);
+    } finally { setUploading(null); }
+  }
 
   // ── 颜色 ──
   const addColor = (si: number) => setStyles(styles.map((st, x) => x === si ? { ...st, colors: [...st.colors, { color_cn: '', color_en: '', sizes: {} }] } : st));
@@ -116,7 +132,14 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
           <div className="flex flex-wrap items-center gap-2">
             <input value={st.style_no} onChange={(e) => setStyleField(si, 'style_no', e.target.value)} placeholder="款号 *" disabled={!canEdit} className={`${inp} w-28`} />
             <input value={st.product_name} onChange={(e) => setStyleField(si, 'product_name', e.target.value)} placeholder="品名" disabled={!canEdit} className={`${inp} w-40`} />
-            <input value={st.image_url} onChange={(e) => setStyleField(si, 'image_url', e.target.value)} placeholder="产品图 URL(上传待 S1.1)" disabled={!canEdit} className={`${inp} flex-1 min-w-[160px]`} />
+            <input value={st.image_url} onChange={(e) => setStyleField(si, 'image_url', e.target.value)} placeholder="产品图 URL 或点上传" disabled={!canEdit} className={`${inp} flex-1 min-w-[140px]`} />
+            {canEdit && (
+              <label className="text-xs px-2 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 cursor-pointer hover:bg-indigo-100 whitespace-nowrap">
+                {uploading === si ? '上传中…' : '📷 上传'}
+                <input type="file" accept="image/*" className="hidden" disabled={uploading !== null}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadImage(si, f); e.currentTarget.value = ''; }} />
+              </label>
+            )}
             {st.image_url && <a href={st.image_url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">看图</a>}
             <span className="text-xs text-gray-500">款小计 <b>{styleTotal(st)}</b></span>
             {canEdit && <button onClick={() => removeStyle(si)} className="text-xs text-red-500 hover:underline">删款</button>}
