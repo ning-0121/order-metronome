@@ -68,6 +68,9 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
           <tr className="bg-gray-50 text-left text-xs text-gray-500">
             <th className="px-4 py-2 font-medium">物料</th>
             <th className="px-4 py-2 font-medium text-right">在库</th>
+            <th className="px-4 py-2 font-medium text-right">预留</th>
+            <th className="px-4 py-2 font-medium text-right">可用</th>
+            <th className="px-4 py-2 font-medium text-right">缺口</th>
             <th className="px-4 py-2 font-medium">单位</th>
             <th className="px-4 py-2 font-medium text-right">操作</th>
           </tr>
@@ -77,7 +80,10 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
             <Fragment key={b.material_key}>
               <tr className="hover:bg-gray-50">
                 <td className="px-4 py-2.5 text-gray-800">{b.material_name || b.material_key}</td>
-                <td className={`px-4 py-2.5 text-right font-mono font-semibold ${b.on_hand < 0 ? 'text-red-600' : 'text-gray-900'}`}>{b.on_hand}</td>
+                <td className={`px-4 py-2.5 text-right font-mono ${b.on_hand < 0 ? 'text-red-600' : 'text-gray-900'}`}>{b.on_hand}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-amber-700">{b.reserved || 0}</td>
+                <td className={`px-4 py-2.5 text-right font-mono font-semibold ${(b.available ?? b.on_hand) < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{b.available ?? b.on_hand}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-red-600">{b.shortage ? b.shortage : ''}</td>
                 <td className="px-4 py-2.5 text-gray-500 text-xs">{b.unit || '—'}</td>
                 <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   <button onClick={() => toggleDetail(b)} className="text-xs px-2 py-1 rounded bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 mr-1">{detailKey === b.material_key ? '收起' : '明细'}</button>
@@ -91,7 +97,7 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
               </tr>
               {active?.key === b.material_key && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-3 bg-gray-50">
+                  <td colSpan={7} className="px-4 py-3 bg-gray-50">
                     <div className="flex flex-wrap items-end gap-2">
                       <span className="text-xs font-medium text-gray-600">{active.mode === 'issue' ? '领料' : '退料'}:{b.material_name}</span>
                       <select value={orderId} onChange={(e) => setOrderId(e.target.value)} className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs bg-white">
@@ -108,7 +114,7 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
               )}
               {detailKey === b.material_key && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-3 bg-gray-50/60">
+                  <td colSpan={7} className="px-4 py-3 bg-gray-50/60">
                     {detailBusy ? (
                       <p className="text-xs text-gray-400">加载流水…</p>
                     ) : detailTxns.length === 0 ? (

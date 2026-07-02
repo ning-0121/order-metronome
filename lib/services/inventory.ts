@@ -98,6 +98,54 @@ export function computeOrderLeftover(txns: LeftoverTxn[]): LeftoverRow[] {
   return out.filter((r) => r.received !== 0 || r.consumed !== 0).sort((a, b) => (a.material_name || '').localeCompare(b.material_name || ''));
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// SC-P2 库存真相层:可用量 = onHand − reserved − safety(全系统唯一算法,勿在别处另算)
+// ════════════════════════════════════════════════════════════════════════
+
+export interface ReservationRow {
+  material_key: string;
+  qty: number;
+  status: string; // reserved / released / consumed
+}
+
+/** 预留量(只算 status='reserved';released/consumed 不占用),按 material_key。 */
+export function reservedByKey(reservations: ReservationRow[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of reservations || []) {
+    if (r.status !== 'reserved') continue;
+    m.set(r.material_key, (m.get(r.material_key) || 0) + (Number(r.qty) || 0));
+  }
+  for (const [k, v] of m) m.set(k, round3(v));
+  return m;
+}
+
+/** 唯一可用量公式。可为负(超卖/超预留信号,不钳)。 */
+export function availableToPromise(input: { onHand: number; reserved: number; safety?: number }): number {
+  return round3((Number(input.onHand) || 0) - (Number(input.reserved) || 0) - (Number(input.safety) || 0));
+}
+
+export interface AvailabilityRow extends InvBalance {
+  reserved: number;
+  safety: number;
+  available: number; // onHand − reserved − safety
+  shortage: number;  // max(0, −available):真实缺口
+}
+
+/** 派生可用量表:余额 + 预留 + 安全库存(safetyByKey 由调用方 best-effort 解析)。 */
+export function computeAvailability(
+  balance: InvBalance[],
+  reservations: ReservationRow[],
+  safetyByKey?: Map<string, number>,
+): AvailabilityRow[] {
+  const rmap = reservedByKey(reservations);
+  return balance.map((b) => {
+    const reserved = rmap.get(b.material_key) || 0;
+    const safety = safetyByKey?.get(b.material_key) || 0;
+    const available = availableToPromise({ onHand: b.on_hand, reserved, safety });
+    return { ...b, reserved, safety, available, shortage: available < 0 ? round3(-available) : 0 };
+  });
+}
+
 /** 采购行 → material_key（与 P3 netting 同口径）。 */
 export function materialKeyForLine(line: {
   material_name?: string | null; specification?: string | null; category?: string | null; ordered_unit?: string | null;

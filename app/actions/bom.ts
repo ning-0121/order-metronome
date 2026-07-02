@@ -3,7 +3,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { computeMaterialRequirement } from '@/lib/services/mrp';
-import { aggregateInventoryBalance, onHandForMaterial } from '@/lib/services/inventory';
+import { aggregateInventoryBalance, reservedByKey } from '@/lib/services/inventory';
+import { consolidationKey } from '@/lib/services/procurement-consolidation';
 import { subtractWorkingDays } from '@/lib/utils/date';
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
@@ -614,17 +615,24 @@ export async function submitBomToProcurement(
   const { data: snapLines } = await (supabase.from('material_package_snapshot_lines') as any)
     .select('*').eq('snapshot_id', snapshotId!);
   const today = toYmd(new Date());
-  // ── W3b:MRP 扣库存(flag MRP_INVENTORY_DEDUCT 默认关)。开 → 喂真 on_hand;关 → 0(现状不变)。──
+  // ── MRP 扣库存(flag MRP_INVENTORY_DEDUCT 默认关)。开 → 喂真 available=onHand−reserved(SC-P2 预留感知);关 → 0(现状不变)。──
   const deductInv = process.env.MRP_INVENTORY_DEDUCT === 'on';
-  let invBalance: ReturnType<typeof aggregateInventoryBalance> = [];
+  const balByKey = new Map<string, number>();
+  const resByKey = new Map<string, number>();
   if (deductInv) {
-    const { data: invTxns } = await (supabase.from('inventory_transactions') as any)
-      .select('material_key, material_name, unit, qty');
-    invBalance = aggregateInventoryBalance((invTxns || []) as any[]);
+    const { data: invTxns } = await (supabase.from('inventory_transactions') as any).select('material_key, qty');
+    for (const b of aggregateInventoryBalance((invTxns || []) as any[])) balByKey.set(b.material_key, b.on_hand);
+    const { data: resv } = await (supabase.from('inventory_reservation') as any)
+      .select('material_key, qty, status').eq('status', 'reserved');
+    for (const [k, v] of reservedByKey((resv || []) as any[])) resByKey.set(k, v);
   }
   const reqRows = (snapLines || []).map((line: any) => {
-    // flag 开:按 名+单位 best-effort 取在库量(负库存钳到 0,不反向抬高采购)。关:0。
-    const inventoryQty = deductInv ? Math.max(0, onHandForMaterial(invBalance, line.material_name, line.unit)) : 0;
+    // flag 开:按 material_key(consolidationKey 同口径)取可用量 = onHand − reserved,负钳 0(不反向抬采购)。关:0。
+    let inventoryQty = 0;
+    if (deductInv) {
+      const key = consolidationKey({ material_name: line.material_name, specification: line.specification, category: line.category, unit: line.unit });
+      inventoryQty = Math.max(0, (balByKey.get(key) || 0) - (resByKey.get(key) || 0));
+    }
     const r = computeMaterialRequirement({
       material: {
         material_name: line.material_name, material_type: line.material_type,
