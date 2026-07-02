@@ -10,6 +10,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
+import { convertUnit, type UomRow } from '@/lib/services/material-catalog';
 
 const CODE_PREFIX: Record<string, string> = {
   fabric: 'FAB', trim: 'TRM', packing: 'PKG', print: 'PRT',
@@ -203,4 +204,195 @@ export async function canManageMaster(): Promise<boolean> {
   if (!user) return false;
   const roles = await rolesOf(supabase, user.id);
   return roles.some(r => MANAGE_ROLES.includes(r));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// SC-P1 物料 OS 完整:多供应商图 · 单位换算 · 替代物料 · 库存策略
+// 写权限沿用 MANAGE_ROLES(理单/采购/采购经理/admin);读=登录即可。纯加法,不动既有列。
+// ════════════════════════════════════════════════════════════════════════
+
+const numOrNull = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
+/** 写权限门:返回 { supabase, userId } 或 { error }。 */
+async function requireManage(): Promise<{ supabase: any; userId?: string; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { supabase, error: '请先登录' };
+  const roles = await rolesOf(supabase, user.id);
+  if (!roles.some(r => MANAGE_ROLES.includes(r))) return { supabase, error: '仅理单/采购/管理员可维护' };
+  return { supabase, userId: user.id };
+}
+
+// ── 多供应商图 ──
+export async function listMaterialSuppliers(materialMasterId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data, error } = await (supabase.from('material_supplier') as any)
+    .select('id, supplier_id, unit_price, currency, lead_days, moq, purchase_unit, is_preferred, last_quoted_at, note, suppliers(name)')
+    .eq('material_master_id', materialMasterId)
+    .order('is_preferred', { ascending: false });
+  if (error) return { error: friendlyError(error) };
+  return { data: (data || []).map((r: any) => ({ ...r, supplier_name: r.suppliers?.name || null })) };
+}
+
+export async function upsertMaterialSupplier(input: {
+  id?: string; materialMasterId: string; supplierId: string;
+  unit_price?: any; currency?: string; lead_days?: any; moq?: any; purchase_unit?: string;
+  is_preferred?: boolean; last_quoted_at?: string | null; note?: string;
+}) {
+  const { supabase, userId, error } = await requireManage();
+  if (error) return { error };
+  if (!input.materialMasterId || !input.supplierId) return { error: '缺物料或供应商' };
+  const row: any = {
+    material_master_id: input.materialMasterId, supplier_id: input.supplierId,
+    unit_price: numOrNull(input.unit_price), currency: input.currency || 'CNY',
+    lead_days: numOrNull(input.lead_days), moq: numOrNull(input.moq),
+    purchase_unit: input.purchase_unit || null, is_preferred: !!input.is_preferred,
+    last_quoted_at: input.last_quoted_at || null, note: input.note || null,
+    created_by: userId, updated_at: new Date().toISOString(),
+  };
+  // 首选唯一:置为首选时,清掉同物料其他首选
+  if (row.is_preferred) {
+    await (supabase.from('material_supplier') as any)
+      .update({ is_preferred: false }).eq('material_master_id', input.materialMasterId);
+  }
+  const { error: upErr } = await (supabase.from('material_supplier') as any)
+    .upsert(row, { onConflict: 'material_master_id,supplier_id' });
+  if (upErr) return { error: friendlyError(upErr) };
+  revalidatePath('/material-master');
+  return { ok: true };
+}
+
+export async function deleteMaterialSupplier(id: string) {
+  const { supabase, error } = await requireManage();
+  if (error) return { error };
+  const { error: dErr } = await (supabase.from('material_supplier') as any).delete().eq('id', id);
+  if (dErr) return { error: friendlyError(dErr) };
+  revalidatePath('/material-master');
+  return { ok: true };
+}
+
+// ── 单位换算 ──
+export async function listMaterialUom(materialMasterId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data, error } = await (supabase.from('material_uom') as any)
+    .select('id, from_unit, to_unit, factor, note').eq('material_master_id', materialMasterId).order('from_unit');
+  if (error) return { error: friendlyError(error) };
+  return { data: data || [] };
+}
+
+export async function upsertMaterialUom(input: {
+  materialMasterId: string; from_unit: string; to_unit: string; factor: any; note?: string;
+}) {
+  const { supabase, error } = await requireManage();
+  if (error) return { error };
+  const factor = numOrNull(input.factor);
+  if (!input.from_unit?.trim() || !input.to_unit?.trim()) return { error: '单位不能为空' };
+  if (!(factor && factor > 0)) return { error: '换算系数必须 > 0' };
+  if (input.from_unit.trim() === input.to_unit.trim()) return { error: '源/目标单位不能相同' };
+  const { error: upErr } = await (supabase.from('material_uom') as any).upsert({
+    material_master_id: input.materialMasterId, from_unit: input.from_unit.trim(),
+    to_unit: input.to_unit.trim(), factor, note: input.note || null,
+  }, { onConflict: 'material_master_id,from_unit,to_unit' });
+  if (upErr) return { error: friendlyError(upErr) };
+  revalidatePath('/material-master');
+  return { ok: true };
+}
+
+export async function deleteMaterialUom(id: string) {
+  const { supabase, error } = await requireManage();
+  if (error) return { error };
+  const { error: dErr } = await (supabase.from('material_uom') as any).delete().eq('id', id);
+  if (dErr) return { error: friendlyError(dErr) };
+  revalidatePath('/material-master');
+  return { ok: true };
+}
+
+/** 单位换算(读 material_uom → 纯 convertUnit)。无路径返回 null + 提示。 */
+export async function convertMaterialUnit(materialMasterId: string, qty: number, from: string, to: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data } = await (supabase.from('material_uom') as any)
+    .select('from_unit, to_unit, factor').eq('material_master_id', materialMasterId);
+  const result = convertUnit(qty, from, to, (data || []) as UomRow[]);
+  return { data: result, hasPath: result != null };
+}
+
+// ── 替代物料图(双 FK 同表 → JS join,避开脆弱嵌套) ──
+export async function listMaterialAlternatives(materialMasterId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data, error } = await (supabase.from('material_alternative') as any)
+    .select('id, alt_material_master_id, relation, ratio, note').eq('material_master_id', materialMasterId);
+  if (error) return { error: friendlyError(error) };
+  const altIds = Array.from(new Set((data || []).map((r: any) => r.alt_material_master_id).filter(Boolean)));
+  const nameMap = new Map<string, any>();
+  if (altIds.length) {
+    const { data: ms } = await (supabase.from('material_master') as any)
+      .select('id, material_name, material_code').in('id', altIds);
+    for (const m of (ms || [])) nameMap.set(m.id, m);
+  }
+  return {
+    data: (data || []).map((r: any) => ({
+      ...r,
+      alt_material_name: nameMap.get(r.alt_material_master_id)?.material_name || null,
+      alt_material_code: nameMap.get(r.alt_material_master_id)?.material_code || null,
+    })),
+  };
+}
+
+export async function upsertMaterialAlternative(input: {
+  materialMasterId: string; altMaterialMasterId: string; relation?: string; ratio?: any; note?: string;
+}) {
+  const { supabase, userId, error } = await requireManage();
+  if (error) return { error };
+  if (!input.altMaterialMasterId) return { error: '请选择替代物料' };
+  if (input.altMaterialMasterId === input.materialMasterId) return { error: '不能替代自己' };
+  const rel = ['equivalent', 'substitute', 'upgrade'].includes(input.relation || '') ? input.relation : 'substitute';
+  const { error: upErr } = await (supabase.from('material_alternative') as any).upsert({
+    material_master_id: input.materialMasterId, alt_material_master_id: input.altMaterialMasterId,
+    relation: rel, ratio: numOrNull(input.ratio) ?? 1, note: input.note || null, created_by: userId,
+  }, { onConflict: 'material_master_id,alt_material_master_id' });
+  if (upErr) return { error: friendlyError(upErr) };
+  revalidatePath('/material-master');
+  return { ok: true };
+}
+
+export async function deleteMaterialAlternative(id: string) {
+  const { supabase, error } = await requireManage();
+  if (error) return { error };
+  const { error: dErr } = await (supabase.from('material_alternative') as any).delete().eq('id', id);
+  if (dErr) return { error: friendlyError(dErr) };
+  revalidatePath('/material-master');
+  return { ok: true };
+}
+
+// ── 库存策略(物料级安全库存/再订货点/最高库存;P3 补货引擎读) ──
+export async function setMaterialStockPolicy(id: string, patch: {
+  safety_stock_qty?: any; reorder_point?: any; max_stock?: any;
+}) {
+  const { supabase, error } = await requireManage();
+  if (error) return { error };
+  const upd: any = { updated_at: new Date().toISOString() };
+  if ('safety_stock_qty' in patch) upd.safety_stock_qty = numOrNull(patch.safety_stock_qty);
+  if ('reorder_point' in patch) upd.reorder_point = numOrNull(patch.reorder_point);
+  if ('max_stock' in patch) upd.max_stock = numOrNull(patch.max_stock);
+  const { error: uErr } = await (supabase.from('material_master') as any).update(upd).eq('id', id);
+  if (uErr) return { error: friendlyError(uErr) };
+  revalidatePath('/material-master');
+  return { ok: true };
+}
+
+/** 详情面板一次性拉:库存策略当前值(供 UI 预填)。 */
+export async function getMaterialStockPolicy(id: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data } = await (supabase.from('material_master') as any)
+    .select('safety_stock_qty, reorder_point, max_stock').eq('id', id).maybeSingle();
+  return { data: data || {} };
 }

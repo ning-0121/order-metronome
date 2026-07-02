@@ -5,6 +5,7 @@ import {
   listMaterialMaster, createMaterialMaster, updateMaterialMaster, archiveMaterialMaster,
   listPendingPromotion, promoteTemporaryMaterial, canManageMaster, findSimilarMaterials, type MasterInput,
 } from '@/app/actions/material-master';
+import { MaterialDetailPanel } from './MaterialDetailPanel';
 
 const CATEGORIES: { value: string; label: string }[] = [
   { value: 'fabric', label: '面料' }, { value: 'trim', label: '辅料' },
@@ -32,6 +33,7 @@ export default function MaterialMasterPage() {
   const [form, setForm] = useState<MasterInput>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [similar, setSimilar] = useState<any[] | null>(null);
+  const [detailMat, setDetailMat] = useState<any | null>(null); // SC-P1 供应链详情抽屉
 
   const loadLib = useCallback(async () => {
     setLoading(true);
@@ -154,12 +156,13 @@ export default function MaterialMasterPage() {
                       <td className="py-2 px-3 text-gray-500 max-w-[160px] truncate">{r.specification || '—'}</td>
                       <td className="py-2 px-3 text-gray-400 text-xs">{r.usage_count || 0}</td>
                       <td className="py-2 px-3 whitespace-nowrap">
-                        {canManage ? (
-                          <div className="flex gap-2">
+                        <div className="flex gap-2">
+                          <button onClick={() => setDetailMat(r)} className="text-xs text-emerald-600 hover:underline">供应链</button>
+                          {canManage && <>
                             <button onClick={() => openEdit(r)} className="text-xs text-indigo-600 hover:underline">编辑</button>
                             <button onClick={() => archive(r)} className="text-xs text-gray-400 hover:text-red-500 hover:underline">归档</button>
-                          </div>
-                        ) : <span className="text-xs text-gray-300">—</span>}
+                          </>}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -273,6 +276,11 @@ export default function MaterialMasterPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* SC-P1 供应链详情抽屉 */}
+      {detailMat && (
+        <MaterialDetailPanel material={detailMat} canManage={canManage} onClose={() => setDetailMat(null)} />
       )}
     </div>
   );
