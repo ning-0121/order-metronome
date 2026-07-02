@@ -4,6 +4,7 @@ import {
   getManufacturingOrder, upsertManufacturingOrder, updateManufacturingOrderStatus,
   generateManufacturingOrderSheet,
 } from '@/app/actions/manufacturing-order';
+import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', lining: '里料', label: '标签', packing: '包装',
@@ -107,6 +108,13 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         <button onClick={generate} disabled={generating || !mo}
           className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">
           {generating ? '生成中…' : '📄 生成生产任务单'}</button>
+      </div>
+
+      {/* S1 富明细录入(款/色/码/件数)—— 录/改在此,下方生成任务单读它 */}
+      <div className="bg-gray-50/60 rounded-xl border border-gray-200 p-3">
+        <div className="text-sm font-semibold text-gray-800 mb-2">逐款明细(款 / 颜色 / 尺码 × 件数)</div>
+        <p className="text-[11px] text-gray-400 mb-3">这里录/改逐款明细,是生产任务单和客户 PI 的数据源。手工录,或修正 AI 解析 PO 的结果。</p>
+        <LineItemMatrixEditor orderId={orderId} />
       </div>
 
       {/* 生命周期条 */}
