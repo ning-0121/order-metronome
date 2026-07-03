@@ -5,6 +5,7 @@ import {
   updateProcurementItem, updateProcurementItemStatus,
   generateExecutionLines, getOrderProcurementFulfillment,
 } from '@/app/actions/procurement-items';
+import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', packing: '包装', print: '印花',
@@ -34,13 +35,24 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [fulfillment, setFulfillment] = useState<any[]>([]);
+  // 尾料归库 + 库存抵扣
+  const [avail, setAvail] = useState<Record<string, { available: number; location: string | null }>>({});
+  const [stocktakeOpen, setStocktakeOpen] = useState(false);
+  const [stForm, setStForm] = useState<Record<string, { counted: string; location: string }>>({});
+  const [stBusy, setStBusy] = useState(false);
 
   const reload = async () => {
     const res = await listProcurementItems(orderId);
-    if ((res as any).error) { setMsg((res as any).error); }
-    else setItems((res as any).data || []);
+    const list = (res as any).error ? [] : ((res as any).data || []);
+    if ((res as any).error) setMsg((res as any).error); else setItems(list);
     const ff = await getOrderProcurementFulfillment(orderId);
     if ((ff as any).data) setFulfillment((ff as any).data);
+    // 各采购项的库存可用量(按 consolidation_key)
+    const keys = list.map((i: any) => i.consolidation_key).filter(Boolean);
+    if (keys.length) {
+      const av = await getAvailableStockByKeys(keys);
+      if ((av as any).data) setAvail((av as any).data);
+    }
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [orderId]);
@@ -62,6 +74,36 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     if ((res as any).error) { setMsg((res as any).error); return; }
     setMsg(`✅ 核料完成:新增 ${(res as any).created} / 刷新 ${(res as any).updated}${(res as any).flagged ? ` / 标记需重确认 ${(res as any).flagged}` : ''}${(res as any).removed ? ` / 清理孤儿 ${(res as any).removed}` : ''}`);
     await reload();
+  }
+
+  // 尾料清点归库:用 fulfillment(received>0)的行,默认清点数=当前尾货
+  const stocktakeRows = fulfillment.filter(f => f.received > 0);
+  function openStocktake() {
+    const init: Record<string, { counted: string; location: string }> = {};
+    for (const f of stocktakeRows) init[f.consolidation_key] = { counted: String(f.leftover ?? 0), location: '' };
+    setStForm(init); setStocktakeOpen(true);
+  }
+  async function submitStocktake() {
+    const payload = stocktakeRows.map(f => ({
+      materialKey: f.consolidation_key, materialName: f.material_name, unit: f.unit,
+      countedQty: Number(stForm[f.consolidation_key]?.counted ?? 0) || 0,
+      location: stForm[f.consolidation_key]?.location || null,
+    }));
+    setStBusy(true);
+    const res = await recordLeftoverStocktake(orderId, payload);
+    setStBusy(false);
+    if ((res as any).error) { setMsg('❌ ' + (res as any).error); return; }
+    setMsg(`✅ 尾料归库完成(${(res as any).adjusted} 项入账),余料已进库存,下次采购同料可抵扣`);
+    setStocktakeOpen(false); await reload();
+  }
+
+  // 用库存抵扣:把某采购项的最终采购量减去可用库存
+  function deductStock(item: any) {
+    const a = avail[item.consolidation_key];
+    if (!a || a.available <= 0) return;
+    const base = Number(form.final_purchase_qty) || Number(item.final_purchase_qty) || Number(item.suggested_purchase_qty) || 0;
+    const next = Math.max(0, Math.round((base - a.available) * 1000) / 1000);
+    setForm(f => ({ ...f, final_purchase_qty: String(next) }));
   }
 
   async function select(item: any) {
@@ -98,6 +140,54 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* 尾料清点归库弹窗 */}
+      {stocktakeOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={() => setStocktakeOpen(false)}>
+          <div className="bg-white rounded-xl max-w-2xl w-full my-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-800">📦 尾料清点归库(出货后)</span>
+              <button onClick={() => setStocktakeOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">关闭</button>
+            </div>
+            <div className="p-4">
+              <p className="text-xs text-gray-500 mb-3">清点每个物料实际剩多少,填实际尾料数 + 库位。系统把账面盘到实际数,余料进共享库存,下次采购同料自动抵扣。默认值=当前账面尾货,按实物改。</p>
+              <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-gray-50 text-left text-gray-500">
+                    {['物料', '单位', '当前账面尾货', '实际尾料 *', '库位'].map(h => <th key={h} className="px-2 py-1.5 font-medium whitespace-nowrap">{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {stocktakeRows.map(f => (
+                      <tr key={f.consolidation_key} className="border-t border-gray-50">
+                        <td className="px-2 py-1.5 text-gray-800">{f.material_name || '—'}</td>
+                        <td className="px-2 py-1.5 text-gray-400">{f.unit || '—'}</td>
+                        <td className={`px-2 py-1.5 font-mono ${f.leftover < 0 ? 'text-red-600' : 'text-amber-600'}`}>{f.leftover}</td>
+                        <td className="px-2 py-1.5">
+                          <input type="number" min="0" value={stForm[f.consolidation_key]?.counted ?? ''}
+                            onChange={e => setStForm(s => ({ ...s, [f.consolidation_key]: { ...s[f.consolidation_key], counted: e.target.value } }))}
+                            className="w-24 rounded border border-gray-300 px-2 py-1 text-right" />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input value={stForm[f.consolidation_key]?.location ?? ''} placeholder="如 A-03"
+                            onChange={e => setStForm(s => ({ ...s, [f.consolidation_key]: { ...s[f.consolidation_key], location: e.target.value } }))}
+                            className="w-28 rounded border border-gray-300 px-2 py-1" />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button onClick={submitStocktake} disabled={stBusy}
+                  className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50">
+                  {stBusy ? '归库中…' : '✅ 确认归库'}</button>
+                <button onClick={() => setStocktakeOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 顶部 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-gray-500">{items.length} 个采购核料项 · 同订单按 物料+颜色+单位 自动归并</div>
@@ -125,7 +215,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 text-left text-gray-500">
-              {['编号', '物料', '类别', '颜色', '单位', '总需求', '来源', '建议采购', '最终', '供应商', '状态', ''].map(h => (
+              {['编号', '物料', '类别', '颜色', '单位', '总需求', '库存可用', '来源', '建议采购', '最终', '供应商', '状态', ''].map(h => (
                 <th key={h} className="py-2 px-2 font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
@@ -139,6 +229,11 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                   <td className="py-2 px-2 text-gray-600">{it.color || '—'}</td>
                   <td className="py-2 px-2 text-gray-600">{it.unit || '—'}</td>
                   <td className="py-2 px-2 text-gray-700">{it.total_required_qty ?? '—'}</td>
+                  <td className="py-2 px-2">
+                    {avail[it.consolidation_key]?.available > 0
+                      ? <span title={avail[it.consolidation_key].location ? `库位 ${avail[it.consolidation_key].location}` : ''} className="text-emerald-700 font-medium">{avail[it.consolidation_key].available}{avail[it.consolidation_key].location ? ` @${avail[it.consolidation_key].location}` : ''}</span>
+                      : <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="py-2 px-2 text-gray-400">{it.source_count ?? '—'}</td>
                   <td className="py-2 px-2 text-gray-700">{it.suggested_purchase_qty ?? '—'}</td>
                   <td className="py-2 px-2 font-medium text-gray-900">{it.final_purchase_qty ?? '—'}</td>
@@ -155,8 +250,15 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       {/* 执行 / 核销进度(B3a:需求→下单→收货→消耗→尾货)*/}
       {fulfillment.some(f => f.ordered > 0 || f.received > 0 || f.consumed > 0) && (
         <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="text-sm font-semibold text-gray-800 mb-1">执行 / 核销进度</div>
-          <p className="text-[11px] text-gray-400 mb-3">下单/收货来自采购执行行 · 消耗/尾货来自库存领料流水(按物料身份核销)</p>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-sm font-semibold text-gray-800">执行 / 核销进度</div>
+            {stocktakeRows.length > 0 && (
+              <button onClick={openStocktake} className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700">
+                📦 尾料清点归库
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400 mb-3">下单/收货来自采购执行行 · 消耗/尾货来自库存领料流水(按物料身份核销)· 出货后点「尾料清点归库」把实物余料入库,下次采购同料自动抵扣</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-500 border-b border-gray-100">
@@ -220,6 +322,19 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             <Read label="建议采购(系统算)" value={sel.suggested_purchase_qty} />
             <Field label="最终采购量" k="final_purchase_qty" form={form} set={set} type="number" />
           </div>
+
+          {/* 库存抵扣:该物料有可用尾料 → 一键从最终采购量扣减 */}
+          {avail[sel.consolidation_key]?.available > 0 && (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-xs flex items-center justify-between gap-2">
+              <span className="text-emerald-800">
+                📦 库存有 <b>{avail[sel.consolidation_key].available}</b> {sel.unit || ''} 可用
+                {avail[sel.consolidation_key].location && <>(库位 {avail[sel.consolidation_key].location})</>}
+                ,可抵扣本次采购
+              </span>
+              <button onClick={() => deductStock(sel)}
+                className="shrink-0 px-3 py-1 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">用库存抵扣</button>
+            </div>
+          )}
 
           {/* 供应商 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">

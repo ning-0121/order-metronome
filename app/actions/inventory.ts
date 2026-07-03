@@ -113,6 +113,97 @@ async function writeInvOut(txnType: 'issue' | 'return', input: IssueInput): Prom
 export async function recordInventoryIssue(input: IssueInput) { return writeInvOut('issue', input); }
 export async function recordInventoryReturn(input: IssueInput) { return writeInvOut('return', input); }
 
+// ════════════════════════════════════════════════════════════════════════
+// 尾料清点归库(出货后)—— 采购清点每物料实际尾料,系统把该订单账面盘到清点数。
+// 账面高于清点 → 写 issue 核减(视作已消耗);账面低于清点 → 写 adjust 盘盈。
+// 余料留在共享库存池(material_key),下次采购同料自动抵扣。带库位。append-only。
+// ════════════════════════════════════════════════════════════════════════
+export interface StocktakeItem {
+  materialKey: string;
+  materialName?: string | null;
+  unit?: string | null;
+  countedQty: number;   // 清点实际尾料(≥0)
+  location?: string | null;  // 仓库库位
+}
+
+export async function recordLeftoverStocktake(
+  orderId: string, items: StocktakeItem[],
+): Promise<{ ok?: boolean; adjusted?: number; error?: string }> {
+  const { supabase, userId, roles } = await authIssueRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!hasRoleInGroup(roles, 'CAN_ISSUE_MATERIAL')) return { error: '无归库权限(需仓库/采购/管理员)' };
+  if (!orderId) return { error: '订单必填' };
+  const valid = (items || []).filter(i => i?.materialKey && i.countedQty != null && Number(i.countedQty) >= 0);
+  if (valid.length === 0) return { error: '没有可归库的物料' };
+
+  // 该订单每 material_key 的当前账面(receipt−issue+return±adjust)
+  const keys = [...new Set(valid.map(i => i.materialKey))];
+  const { data: txns } = await (supabase.from('inventory_transactions') as any)
+    .select('material_key, qty').eq('order_id', orderId).in('material_key', keys);
+  const onHandByKey = new Map<string, number>();
+  for (const t of (txns || []) as any[]) onHandByKey.set(t.material_key, (onHandByKey.get(t.material_key) || 0) + (Number(t.qty) || 0));
+
+  const rows: any[] = [];
+  for (const it of valid) {
+    const current = onHandByKey.get(it.materialKey) || 0;
+    const counted = Number(it.countedQty);
+    const delta = Math.round((counted - current) * 1000) / 1000;
+    if (delta === 0) continue;
+    rows.push({
+      material_key: it.materialKey,
+      material_name: it.materialName ?? null,
+      unit: it.unit ?? null,
+      // 账面高于清点 → 差额视作消耗(issue,−);账面低于清点 → 盘盈(adjust,+)
+      txn_type: delta < 0 ? 'issue' : 'adjust',
+      qty: delta,   // 已带符号
+      order_id: orderId,
+      location: it.location?.trim() || null,
+      created_by: userId,
+      note: `出货后尾料清点归库(账面 ${current} → 实际 ${counted})`,
+    });
+  }
+  if (rows.length === 0) return { ok: true, adjusted: 0 };
+
+  const { error } = await (supabase.from('inventory_transactions') as any).insert(rows);
+  if (error) return { error: error.message };
+  revalidatePath('/procurement/inventory');
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, adjusted: rows.length };
+}
+
+/** 批量取一组 material_key 的可用库存(onHand−reserved)+ 最近库位。供采购抵扣/展示。 */
+export async function getAvailableStockByKeys(
+  keys: string[],
+): Promise<{ data?: Record<string, { onHand: number; reserved: number; available: number; location: string | null }>; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const uniq = [...new Set((keys || []).filter(Boolean))];
+  if (uniq.length === 0) return { data: {} };
+
+  const { data: txns } = await (supabase.from('inventory_transactions') as any)
+    .select('material_key, qty, location, created_at').in('material_key', uniq).order('created_at', { ascending: false });
+  const { data: resv } = await (supabase.from('inventory_reservation') as any)
+    .select('material_key, qty').in('material_key', uniq).eq('status', 'reserved');
+
+  const onHand = new Map<string, number>();
+  const loc = new Map<string, string | null>();
+  for (const t of (txns || []) as any[]) {
+    onHand.set(t.material_key, (onHand.get(t.material_key) || 0) + (Number(t.qty) || 0));
+    if (!loc.has(t.material_key) && t.location) loc.set(t.material_key, t.location); // 最近一条有库位的
+  }
+  const reserved = new Map<string, number>();
+  for (const r of (resv || []) as any[]) reserved.set(r.material_key, (reserved.get(r.material_key) || 0) + (Number(r.qty) || 0));
+
+  const out: Record<string, any> = {};
+  for (const k of uniq) {
+    const oh = Math.round((onHand.get(k) || 0) * 1000) / 1000;
+    const rv = Math.round((reserved.get(k) || 0) * 1000) / 1000;
+    out[k] = { onHand: oh, reserved: rv, available: Math.max(0, Math.round((oh - rv) * 1000) / 1000), location: loc.get(k) || null };
+  }
+  return { data: out };
+}
+
 /** 库存流水(审计,可按物料筛)。 */
 export async function getInventoryTransactions(materialKey?: string): Promise<{ data?: any[]; error?: string }> {
   const supabase = await createClient();
