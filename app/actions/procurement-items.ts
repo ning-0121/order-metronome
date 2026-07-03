@@ -152,6 +152,7 @@ export async function consolidateOrderProcurementItems(orderId: string) {
         item_no: `PI-${orderNo}-${String(seq).padStart(3, '0')}`,
         material_master_id: g.material_master_id, material_name: g.material_name, specification: g.specification,
         category: g.category, color: g.color, unit: g.unit,
+        purchase_unit: g.unit,                // 采购计量单位默认=需求单位(物料录入时选过,买法不同采购再改)
         total_required_qty: g.total, source_count: g.count, development_consumption: g.devTop,
         procurement_loss_pct: g.lossTop,      // 预填损耗参考(可见可改;总需求已是裸数,不再暗含)
         suggested_purchase_qty: suggested, status: 'draft', created_by: user.id,
@@ -335,6 +336,31 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
   }
   const { error } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
   if (error) return { error: friendlyError(error) };
+
+  // 转复核 → 通知全体采购经理(拿不准的项由经理拍板;fire-and-forget 不阻塞)
+  if (status === 'reviewing') {
+    try {
+      const { data: it } = await (supabase.from('procurement_items') as any)
+        .select('item_no, material_name, color').eq('id', itemId).maybeSingle();
+      const { data: order } = await (supabase.from('orders') as any)
+        .select('order_no, customer_name').eq('id', orderId).maybeSingle();
+      const { data: profs } = await (supabase.from('profiles') as any).select('user_id, role, roles');
+      const managers = (profs || []).filter((p: any) => {
+        const rs: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
+        return rs.includes('procurement_manager') || rs.includes('admin');
+      });
+      if (managers.length > 0) {
+        await (supabase.from('notifications') as any).insert(managers.map((m: any) => ({
+          user_id: m.user_id,
+          type: 'procurement_review',
+          title: `⏳ 核料待复核:${(order as any)?.order_no || ''}`,
+          message: `采购项「${(it as any)?.material_name || ''}${(it as any)?.color ? ' · ' + (it as any).color : ''}」(${(it as any)?.item_no || ''})被转来复核,请到订单「采购核料」查看并确认。`,
+          related_order_id: orderId,
+        })));
+      }
+    } catch { /* 通知失败不阻塞转复核 */ }
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }

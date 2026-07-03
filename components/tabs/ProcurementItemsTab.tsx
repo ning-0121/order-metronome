@@ -127,6 +127,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setSelId(item.id); setSources([]);
     const f: Record<string, any> = {};
     for (const k of FORM_KEYS) f[k] = item[k] ?? '';
+    // 采购计量单位默认=该项单位(物料录入时就选过,不让采购重敲;按匹/按卷等买法不同才改)
+    if (!f.purchase_unit) f.purchase_unit = item.unit || '';
     setForm(f);
     const res = await getProcurementItemSources(item.id);
     if ((res as any).data) setSources((res as any).data);
@@ -519,8 +521,10 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             )}
             {sel.status === 'draft' && (
               <button onClick={() => advance('reviewing')} disabled={saving}
-                className="px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50">转复核</button>
+                title="拿不准的项(替代料/价格异常/有风险)转采购经理复核;经理会收到系统通知,由他复核后点「确认采购」"
+                className="px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50">转采购经理复核</button>
             )}
+            {sel.status === 'reviewing' && <span className="text-xs text-blue-600">⏳ 待采购经理复核(经理已收到通知)</span>}
             {sel.needs_reconfirm && <span className="text-xs text-amber-600">⚠ 来源需求已变,确认即清除标记</span>}
           </div>
         </div>
