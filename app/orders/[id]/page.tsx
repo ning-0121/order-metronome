@@ -319,6 +319,9 @@ export default async function OrderDetailPage({
               <div className="flex items-center gap-3 mt-1">
                 <p className="text-gray-500 text-sm">
                   {orderData.customer_name}
+                  {orderData.internal_order_no
+                    ? <span className="ml-3 font-medium text-gray-600">内部单号：{orderData.internal_order_no}</span>
+                    : <span className="ml-3 text-amber-600" title="财务核算靠内部单号对账;在下方「基本信息」的内部订单号处补填">⚠ 内部单号未填</span>}
                   {orderData.style_no && <span className="ml-3 text-gray-400">款号：{orderData.style_no}</span>}
                   {orderData.po_number && <span className="ml-3 text-gray-400">PO：{orderData.po_number}</span>}
                 </p>

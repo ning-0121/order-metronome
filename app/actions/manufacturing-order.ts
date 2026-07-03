@@ -35,7 +35,7 @@ export async function getManufacturingOrder(orderId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
-    .select('id, order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id')
+    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id')
     .eq('id', orderId).single();
   if (oErr) return { error: friendlyError(oErr) };
 
@@ -304,7 +304,11 @@ export async function generateManufacturingOrderSheet(
       boxBorder(r, 1, r, cRemark);
       ws.getRow(r).height = 32;
     };
-    headVal(1, '订单号', order.po_number ? `${order.order_no}（PO ${order.po_number}）` : order.order_no);
+    headVal(1, '订单号', [
+      order.internal_order_no,                              // 内部单号(订单册编号,财务口径)在最前
+      order.order_no,
+      order.po_number ? `PO ${order.po_number}` : null,
+    ].filter(Boolean).join(' | '));
     headVal(2, '品名', [g.product_name, (g.items[0] as any)?.product_name_en].filter(Boolean).join('  '));
     headVal(3, '交期', `${fmtDate(order.factory_date || order.etd)}（客户装柜日，不得延期）`, { fill: YELLOW });
     headVal(4, '数量', styleTotal || '');

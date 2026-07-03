@@ -905,6 +905,7 @@ export interface QueueLine {
   id: string;
   order_id: string;
   order_no: string | null;
+  internal_order_no: string | null;   // 内部单号(财务核算口径,随行显示)
   customer_name: string | null;
   material_name: string;
   category: string | null;
@@ -928,6 +929,7 @@ export interface QueueLine {
 export interface PendingProcurementOrder {
   order_id: string;
   order_no: string | null;
+  internal_order_no: string | null;  // 内部单号(订单册编号,财务核算口径)
   customer_name: string | null;
   submitted_at: string | null;   // 业务提交采购申请的时间(MRP 生成时间)
   req_count: number;             // 需求条数
@@ -957,7 +959,7 @@ export async function getProcurementQueues(): Promise<{
   const pendingRequests: PendingProcurementOrder[] = [];
   try {
     const { data: plans } = await (supabase.from('material_plans') as any)
-      .select('order_id, mrp_generated_at, orders(order_no, customer_name, lifecycle_status)')
+      .select('order_id, mrp_generated_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
       .eq('plan_status', 'active');
     const alive = (plans || []).filter((p: any) => {
       const ls = p.orders?.lifecycle_status || '';
@@ -985,6 +987,7 @@ export async function getProcurementQueues(): Promise<{
         pendingRequests.push({
           order_id: p.order_id,
           order_no: p.orders?.order_no ?? null,
+          internal_order_no: p.orders?.internal_order_no ?? null,
           customer_name: p.orders?.customer_name ?? null,
           submitted_at: p.mrp_generated_at ?? null,
           req_count: reqCount.get(p.order_id) || 0,
@@ -998,7 +1001,7 @@ export async function getProcurementQueues(): Promise<{
   }
 
   const { data, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, unit_price, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, customer_name, lifecycle_status)')
+    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, unit_price, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
     .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
   if (error) return { error: error.message };
 
@@ -1010,7 +1013,8 @@ export async function getProcurementQueues(): Promise<{
     })
     .map((r: any) => ({
       id: r.id, order_id: r.order_id,
-      order_no: r.orders?.order_no ?? null, customer_name: r.orders?.customer_name ?? null,
+      order_no: r.orders?.order_no ?? null, internal_order_no: r.orders?.internal_order_no ?? null,
+      customer_name: r.orders?.customer_name ?? null,
       material_name: r.material_name, category: r.category, supplier_name: r.supplier_name,
       line_status: r.line_status, required_by: r.required_by,
       promised_date: r.promised_date, expected_arrival: r.expected_arrival,

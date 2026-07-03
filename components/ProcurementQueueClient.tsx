@@ -47,7 +47,7 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
           <span className="font-medium text-gray-900 truncate">{line.material_name}</span>
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[line.category || 'other'] || line.category}</span>
           <Link href={`/orders/${line.order_id}`} className="text-xs text-indigo-600 hover:underline shrink-0">
-            {line.order_no}·{line.customer_name}
+            {line.internal_order_no ? `${line.internal_order_no} | ` : ''}{line.order_no}·{line.customer_name}
           </Link>
           {/* 数据链:采购随手打开该订单的生产任务单核对(2026-07-03 用户要求) */}
           <Link href={`/orders/${line.order_id}?tab=manufacturing_order`} className="text-xs text-gray-400 hover:text-indigo-600 shrink-0" title="打开该订单的生产任务单核对">
@@ -63,7 +63,7 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
 export function ProcurementQueueClient({
   pendingRequests = [], pendingOrder, chase, readyShip, receive,
 }: {
-  pendingRequests?: Array<{ order_id: string; order_no: string | null; customer_name: string | null; submitted_at: string | null; req_count: number; late_count: number }>;
+  pendingRequests?: Array<{ order_id: string; order_no: string | null; internal_order_no?: string | null; customer_name: string | null; submitted_at: string | null; req_count: number; late_count: number }>;
   pendingOrder: QueueLine[]; chase: QueueLine[]; readyShip: QueueLine[]; receive: QueueLine[];
 }) {
   const router = useRouter();
@@ -96,7 +96,7 @@ export function ProcurementQueueClient({
             {o.late_count > 0
               ? <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title={`${o.late_count} 项已过最晚下单日`} />
               : <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" />}
-            <span className="text-sm font-semibold text-gray-900">{o.order_no || '—'}</span>
+            <span className="text-sm font-semibold text-gray-900">{o.internal_order_no ? `${o.internal_order_no} | ` : ''}{o.order_no || '—'}</span>
             <span className="text-sm text-gray-600">{o.customer_name || ''}</span>
             <span className="text-xs text-gray-400">{o.req_count} 项物料需求 · 提交于 {fmt(o.submitted_at)}</span>
             {o.late_count > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">🔥 {o.late_count} 项超最晚下单日</span>}
