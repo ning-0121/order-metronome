@@ -109,8 +109,12 @@ export function computeMaterialRequirement(input: MrpInput): MrpResult {
     status = 'needs_input';   // 缺单耗
   } else {
     gross_requirement = round1(po_quantity * consumption);
+    // 2026-07-03(用户实测「系统多算两匹布」):损耗不再暗算进净需求。
+    // 净需求 = 业务口径的裸数(数量×单耗−库存−复用);损耗改为「采购损耗%」在
+    // 采购核料层明示可改(建议采购=净需求×(1+损耗%),口径唯一,不再双重叠加)。
+    // loss_qty 保留为参考值(核料项创建时预填采购损耗%用)。
     loss_qty = round1(gross_requirement * (loss_rate / 100));
-    const net_raw = gross_requirement + loss_qty - inv - reuse;
+    const net_raw = gross_requirement - inv - reuse;
     net_purchase_qty = Math.max(0, Math.ceil(net_raw));   // 宁多勿缺,向上取整
     if (net_purchase_qty === 0) status = 'fulfilled';
   }
@@ -146,7 +150,7 @@ export function computeMaterialRequirement(input: MrpInput): MrpResult {
         (order_by_date ? `,最晚 ${order_by_date} 前下单` : ''),
     factors: gross_requirement != null ? [
       { code: 'gross', label: `PO ${po_quantity} × 单耗 ${consumption}`, value: gross_requirement, unit: u },
-      { code: 'loss', label: `损耗 ${loss_rate}%`, value: loss_qty, unit: u },
+      { code: 'loss', label: `损耗参考 ${loss_rate}%(不计入净需求;由采购核料「采购损耗%」明控)`, value: loss_qty, unit: u },
       { code: 'inventory', label: '扣现有库存(v1=0)', value: -inv, unit: u },
       { code: 'reuse', label: '扣可复用余料(v1=0)', value: -reuse, unit: u },
     ] : [],

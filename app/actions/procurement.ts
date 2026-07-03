@@ -924,13 +924,25 @@ export interface QueueLine {
   lamp: 'red' | 'yellow' | 'green' | null;
 }
 
+/** 待采购订单(业务执行已提交采购申请,采购尚未完成下单)—— 订单级卡片 */
+export interface PendingProcurementOrder {
+  order_id: string;
+  order_no: string | null;
+  customer_name: string | null;
+  submitted_at: string | null;   // 业务提交采购申请的时间(MRP 生成时间)
+  req_count: number;             // 需求条数
+  late_count: number;            // 已过最晚下单日的需求数(紧急)
+}
+
 export async function getProcurementQueues(): Promise<{
   data?: {
+    /** 待采购订单:业务执行提交了采购申请 → 采购必须看见;完成「采购下单」节点后自动消失 */
+    pendingRequests: PendingProcurementOrder[];
     pendingOrder: QueueLine[];
     chase: QueueLine[];
     readyShip: QueueLine[];
     receive: QueueLine[];
-    counts: { pendingOrder: number; chase: number; readyShip: number; receive: number; red: number };
+    counts: { pendingRequests: number; pendingOrder: number; chase: number; readyShip: number; receive: number; red: number };
   };
   error?: string;
 }> {
@@ -939,6 +951,51 @@ export async function getProcurementQueues(): Promise<{
   const supabase = await createClient();
 
   const { computeLineLamp } = await import('@/lib/domain/procurement');
+
+  // ── 待采购订单(2026-07-03:业务执行「提交采购」后,采购中心必须出现这张订单)──
+  // 信号 = material_plans 活跃(业务提交采购申请生成);消失 = 该单「采购下单」节点完成。
+  const pendingRequests: PendingProcurementOrder[] = [];
+  try {
+    const { data: plans } = await (supabase.from('material_plans') as any)
+      .select('order_id, mrp_generated_at, orders(order_no, customer_name, lifecycle_status)')
+      .eq('plan_status', 'active');
+    const alive = (plans || []).filter((p: any) => {
+      const ls = p.orders?.lifecycle_status || '';
+      return !['completed', '已完成', 'cancelled', '已取消'].includes(ls);
+    });
+    const orderIds = alive.map((p: any) => p.order_id);
+    if (orderIds.length > 0) {
+      // 已完成「采购下单」节点的订单 → 出队
+      const { data: doneMs } = await (supabase.from('milestones') as any)
+        .select('order_id, status').in('order_id', orderIds).eq('step_key', 'procurement_order_placed');
+      const doneOrders = new Set((doneMs || [])
+        .filter((m: any) => ['done', '已完成'].includes(String(m.status || '').toLowerCase()))
+        .map((m: any) => m.order_id));
+      // 需求条数 + 紧急数(过最晚下单日)
+      const { data: reqs } = await (supabase.from('material_requirements') as any)
+        .select('order_id, timing_status').in('order_id', orderIds);
+      const reqCount = new Map<string, number>();
+      const lateCount = new Map<string, number>();
+      for (const r of (reqs || [])) {
+        reqCount.set(r.order_id, (reqCount.get(r.order_id) || 0) + 1);
+        if (r.timing_status === 'late') lateCount.set(r.order_id, (lateCount.get(r.order_id) || 0) + 1);
+      }
+      for (const p of alive) {
+        if (doneOrders.has(p.order_id)) continue;
+        pendingRequests.push({
+          order_id: p.order_id,
+          order_no: p.orders?.order_no ?? null,
+          customer_name: p.orders?.customer_name ?? null,
+          submitted_at: p.mrp_generated_at ?? null,
+          req_count: reqCount.get(p.order_id) || 0,
+          late_count: lateCount.get(p.order_id) || 0,
+        });
+      }
+      pendingRequests.sort((a, b) => (b.late_count - a.late_count) || String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')));
+    }
+  } catch (e: any) {
+    console.warn('[getProcurementQueues] 待采购订单查询失败(不阻断其余队列):', e?.message);
+  }
 
   const { data, error } = await (supabase.from('procurement_line_items') as any)
     .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, unit_price, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, customer_name, lifecycle_status)')
@@ -975,8 +1032,9 @@ export async function getProcurementQueues(): Promise<{
 
   return {
     data: {
-      pendingOrder, chase, readyShip, receive,
+      pendingRequests, pendingOrder, chase, readyShip, receive,
       counts: {
+        pendingRequests: pendingRequests.length,
         pendingOrder: pendingOrder.length, chase: chase.length,
         readyShip: readyShip.length, receive: receive.length,
         red: rows.filter(r => r.lamp === 'red').length,

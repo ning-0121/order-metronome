@@ -80,12 +80,12 @@ export async function addBomItemsBatch(orderId: string, items: Array<{
   const valid = (items || []).filter(i => i?.material_name?.trim());
   if (valid.length === 0) return { error: '没有可入库的行' };
 
-  // 自动赋码:同 名+类别 只 ensure 一次(同名同类复用主数据码,没有就建主数据生成)
+  // 自动赋码:同 名+类别+规格 只 ensure 一次(同名不同规格=不同变体行,各自成码)
   const { ensureMaterialMaster } = await import('@/lib/services/material-autocode');
   const codeCache = new Map<string, { id: string; code: string } | null>();
   const ensureFor = async (i: any) => {
     const type = VALID_TYPES.includes(i.material_type || '') ? i.material_type : 'other';
-    const key = `${i.material_name.trim().toLowerCase()}¦${type}`;
+    const key = `${i.material_name.trim().toLowerCase()}¦${type}¦${String(i.spec ?? '').trim().toLowerCase()}`;
     if (!codeCache.has(key)) {
       codeCache.set(key, await ensureMaterialMaster(supabase, user.id, {
         name: i.material_name, category: type, spec: i.spec, unit: i.unit, supplier: i.supplier,
@@ -586,12 +586,21 @@ export async function submitBomToProcurement(
   if (!bomRows || bomRows.length === 0) return { error: '原辅料单为空,请先录入物料再提交' };
 
   // R1(2026-07-02 审计):款级 BOM 行(style_no 非空)按该款件数算需求,不能用整单数量
+  // 2026-07-03:带颜色的行再往下钻一层 —— 按 款×色 件数算(布料按色下单,一色一数)
   const { data: liRows } = await (supabase.from('order_line_items') as any)
-    .select('style_no, qty_pcs').eq('order_id', orderId);
+    .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
   const styleQty = new Map<string, number>();
+  const styleColorQty = new Map<string, number>();      // key: style¦norm(color),中英文色名都登记
+  const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
   for (const r of (liRows || []) as any[]) {
     if (!r.style_no) continue;
-    styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + (Number(r.qty_pcs) || 0));
+    const q = Number(r.qty_pcs) || 0;
+    styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
+    for (const col of [r.color_cn, r.color_en]) {
+      if (!String(col ?? '').trim()) continue;
+      const k = `${r.style_no}¦${normColor(col)}`;
+      styleColorQty.set(k, (styleColorQty.get(k) || 0) + q);
+    }
   }
   const bomStyle = new Map<string, string | null>((bomRows as any[]).map(r => [r.id, r.style_no || null]));
 
@@ -733,8 +742,14 @@ export async function submitBomToProcurement(
       inventoryQty = Math.max(0, (balByKey.get(key) || 0) - (resByKey.get(key) || 0));
     }
     // R1:款级行用该款件数(明细未录该款时兜底整单数量,宁多勿缺);整单通用行用整单数量
+    // 2026-07-03:行带颜色且明细里有该 款×色 → 用该色件数(布料一色一数,不再全款重复算)
     const lineStyle = line.bom_id ? bomStyle.get(line.bom_id) : null;
-    const poQty = (lineStyle && styleQty.get(lineStyle)) ? styleQty.get(lineStyle)! : order.quantity;
+    let poQty = (lineStyle && styleQty.get(lineStyle)) ? styleQty.get(lineStyle)! : order.quantity;
+    if (lineStyle && String(line.color ?? '').trim()) {
+      const cq = styleColorQty.get(`${lineStyle}¦${normColor(line.color)}`);
+      if (cq && cq > 0) poQty = cq;
+      // 色名对不上明细 → 保持款级总量(宁多勿缺),核料里人工调
+    }
     const r = computeMaterialRequirement({
       material: {
         material_name: line.material_name, material_type: line.material_type,

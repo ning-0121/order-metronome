@@ -61,8 +61,11 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
 }
 
 export function ProcurementQueueClient({
-  pendingOrder, chase, readyShip, receive,
-}: { pendingOrder: QueueLine[]; chase: QueueLine[]; readyShip: QueueLine[]; receive: QueueLine[] }) {
+  pendingRequests = [], pendingOrder, chase, readyShip, receive,
+}: {
+  pendingRequests?: Array<{ order_id: string; order_no: string | null; customer_name: string | null; submitted_at: string | null; req_count: number; late_count: number }>;
+  pendingOrder: QueueLine[]; chase: QueueLine[]; readyShip: QueueLine[]; receive: QueueLine[];
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<string | null>(null); // `${rowId}:${kind}`
@@ -81,6 +84,26 @@ export function ProcurementQueueClient({
   return (
     <div className="space-y-6">
       {err && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{err}</div>}
+
+      {/* ── 待采购订单(业务执行提交采购申请 → 采购从这里接活;完成「采购下单」节点后自动消失)── */}
+      <section className="bg-white rounded-xl border-2 border-emerald-200 overflow-hidden">
+        <div className="bg-emerald-50 px-4 py-2.5 border-b border-emerald-100 font-bold text-emerald-900 text-sm">
+          📨 待采购订单（{pendingRequests.length}）<span className="font-normal text-emerald-700">— 业务执行已提交采购申请</span>
+        </div>
+        {pendingRequests.length === 0 ? <Empty /> : pendingRequests.map(o => (
+          <Link key={o.order_id} href={`/orders/${o.order_id}?tab=procurement_items`}
+            className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 hover:bg-emerald-50/50">
+            {o.late_count > 0
+              ? <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title={`${o.late_count} 项已过最晚下单日`} />
+              : <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" />}
+            <span className="text-sm font-semibold text-gray-900">{o.order_no || '—'}</span>
+            <span className="text-sm text-gray-600">{o.customer_name || ''}</span>
+            <span className="text-xs text-gray-400">{o.req_count} 项物料需求 · 提交于 {fmt(o.submitted_at)}</span>
+            {o.late_count > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">🔥 {o.late_count} 项超最晚下单日</span>}
+            <span className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium">去核料下单 →</span>
+          </Link>
+        ))}
+      </section>
 
       {/* ── 待下单 ── */}
       <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">

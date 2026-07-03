@@ -199,9 +199,27 @@ export async function placePurchaseOrder(poId: string): Promise<{
         .in('line_status', ['draft', 'pending_order']);
     } catch (e: any) { console.warn('[placePurchaseOrder] 行状态推进失败(不阻断):', e?.message); }
     // P2b: placed → 财务同步（应付/付款计划）。未配置即跳过，绝不阻塞下单。
+    // 2026-07-03:附带补采购预警——此单执行行若挂了补采购项,财务侧收到 has_supplement + 明细
     try {
       const { data: full } = await (supabase.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
-      if (full) await syncPurchaseOrderToFinance(full);
+      if (full) {
+        let supplements: Array<{ item_no?: string; material_name?: string; qty?: number; reason?: string }> = [];
+        try {
+          const { data: lines } = await (supabase.from('procurement_line_items') as any)
+            .select('procurement_item_id').eq('purchase_order_id', poId).not('procurement_item_id', 'is', null);
+          const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id))];
+          if (piIds.length > 0) {
+            const { data: suppItems } = await (supabase.from('procurement_items') as any)
+              .select('item_no, material_name, total_required_qty, supplement_reason')
+              .in('id', piIds).eq('is_supplement', true);
+            supplements = (suppItems || []).map((s: any) => ({
+              item_no: s.item_no, material_name: s.material_name,
+              qty: s.total_required_qty, reason: s.supplement_reason,
+            }));
+          }
+        } catch { /* 补采购列未建时静默(迁移前) */ }
+        await syncPurchaseOrderToFinance(full, undefined, supplements);
+      }
     } catch { /* 财务同步失败不影响下单 */ }
     // B3a: placed → 关联采购项 confirmed→ordered(fire-and-forget)。
     try {

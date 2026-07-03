@@ -5,7 +5,15 @@ import {
   updateProcurementItem, updateProcurementItemStatus,
   generateExecutionLines, getOrderProcurementFulfillment,
 } from '@/app/actions/procurement-items';
+import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
+
+/** 补采购财务审批状态 → 显示 */
+const SUPP_STATUS: Record<string, { label: string; cls: string }> = {
+  pending: { label: '待财务审批', cls: 'bg-amber-100 text-amber-700' },
+  approved: { label: '财务已批准', cls: 'bg-emerald-100 text-emerald-700' },
+  rejected: { label: '财务已驳回', cls: 'bg-red-100 text-red-700' },
+};
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', packing: '包装', print: '印花',
@@ -134,6 +142,36 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     await reload();
   }
 
+  // 数量补:对已有项申请补量(业务执行提交;服务端角色把关)
+  async function requestSupp(item: any) {
+    const qtyStr = window.prompt(`补采购「${item.material_name || ''}」\n\n补多少(单位:${item.unit || '同原项'})?只填数字:`, '');
+    if (qtyStr === null) return;
+    const qty = Number(qtyStr);
+    if (!qty || qty <= 0 || isNaN(qty)) { setMsg('补量必须是大于 0 的数字'); return; }
+    const reason = window.prompt('补采购原因(财务审批要看,必填):\n如「生产损耗超标」「裁剪数量不够」', '');
+    if (reason === null) return;
+    const res = await requestSupplementQty(orderId, item.id, qty, reason || '');
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    setMsg(`✅ 补料申请已提交(${(res as any).itemNo}),已通知财务审批`);
+    await reload();
+  }
+
+  // 财务审批补采购(服务端仅财务/管理员可批)
+  async function approveSupp(item: any, ok: boolean) {
+    let rejectReason: string | undefined;
+    if (!ok) {
+      const r = window.prompt('驳回原因(必填):', '');
+      if (r === null) return;
+      rejectReason = r;
+    } else if (!window.confirm(`批准补采购「${item.material_name}」${item.total_required_qty}${item.unit || ''}?\n批准后采购部即可确认并执行。`)) {
+      return;
+    }
+    const res = await approveSupplement(item.id, ok, rejectReason);
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    setMsg(ok ? '✅ 已批准,采购部可执行' : '已驳回');
+    await reload();
+  }
+
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
 
   const sel = items.find(i => i.id === selId);
@@ -223,7 +261,9 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               {items.map(it => (
                 <tr key={it.id} className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${selId === it.id ? 'bg-indigo-50/40' : ''}`} onClick={() => select(it)}>
                   <td className="py-2 px-2 font-mono text-xs text-indigo-600 whitespace-nowrap">
-                    {it.needs_reconfirm && <span title="需重新确认" className="text-amber-600">⚠ </span>}{it.item_no || '—'}</td>
+                    {it.needs_reconfirm && <span title="需重新确认" className="text-amber-600">⚠ </span>}
+                    {it.is_supplement && <span title={`补采购:${it.supplement_reason || ''}`} className={`mr-1 px-1.5 py-px rounded text-[10px] font-medium ${SUPP_STATUS[it.finance_approval_status]?.cls || 'bg-amber-100 text-amber-700'}`}>🟠补</span>}
+                    {it.item_no || '—'}</td>
                   <td className="py-2 px-2 font-medium text-gray-900">{it.material_name || '—'}</td>
                   <td className="py-2 px-2"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{CAT_LABEL[it.category] || it.category || '—'}</span></td>
                   <td className="py-2 px-2 text-gray-600">{it.color || '—'}</td>
@@ -288,10 +328,42 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       {/* 展开:来源明细 + 采购确认 */}
       {sel && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-4 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="text-sm font-semibold text-gray-800">{sel.item_no} · {sel.material_name} {sel.color ? `· ${sel.color}` : ''}</div>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">{statusLabel(sel.status)}</span>
+            <div className="flex items-center gap-2">
+              {!sel.is_supplement && (
+                <button onClick={() => requestSupp(sel)}
+                  title="生产中数量不够(损耗超标/裁剪不足)→ 业务执行提补量申请,财务批准后采购执行"
+                  className="text-xs px-2.5 py-1 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700">➕ 补数量申请</button>
+              )}
+              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">{statusLabel(sel.status)}</span>
+            </div>
           </div>
+
+          {/* 补采购信息 + 财务审批(服务端按角色把关:仅财务/管理员可批) */}
+          {sel.is_supplement && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-amber-800">🟠 补采购</span>
+                <span className={`px-2 py-0.5 rounded-full font-medium ${SUPP_STATUS[sel.finance_approval_status]?.cls || ''}`}>
+                  {SUPP_STATUS[sel.finance_approval_status]?.label || sel.finance_approval_status}
+                </span>
+                {sel.finance_approval_status === 'pending' && <>
+                  <button onClick={() => approveSupp(sel, true)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">✅ 批准(财务)</button>
+                  <button onClick={() => approveSupp(sel, false)}
+                    className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700">✖ 驳回(财务)</button>
+                </>}
+              </div>
+              <p className="text-amber-700">原因:{sel.supplement_reason || '—'}</p>
+              {sel.finance_approval_status === 'rejected' && sel.finance_reject_reason && (
+                <p className="text-red-600">驳回原因:{sel.finance_reject_reason}</p>
+              )}
+              {sel.finance_approval_status === 'pending' && (
+                <p className="text-amber-600">批准后采购部才能「确认→生成执行行→归采购单」;此项会同步进财务系统预警。</p>
+              )}
+            </div>
+          )}
 
           {/* 来源明细(live;粒度=物料行)*/}
           <div className="rounded-lg border border-gray-200 bg-white p-3">

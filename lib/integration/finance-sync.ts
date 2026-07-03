@@ -190,7 +190,11 @@ export function buildSupplierSyncPayload(s: Record<string, unknown>): Record<str
 }
 
 /** 采购单同步 payload（纯，可测）。placed 时推金额/账期供财务建应付+付款计划。 */
-export function buildPurchaseOrderSyncPayload(po: Record<string, unknown>, orderRefs?: unknown[]): Record<string, unknown> {
+export function buildPurchaseOrderSyncPayload(
+  po: Record<string, unknown>,
+  orderRefs?: unknown[],
+  supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
+): Record<string, unknown> {
   return {
     po_no: po.po_no,
     purchase_order_id: po.id,
@@ -202,6 +206,9 @@ export function buildPurchaseOrderSyncPayload(po: Record<string, unknown>, order
     order_refs: orderRefs ?? (po.order_ids as unknown[]) ?? [],
     status: po.status ?? null,
     placed_at: po.updated_at ?? null,
+    // 补采购预警(2026-07-03):此单含补采购项 → 财务侧应作预算外预警/归因
+    has_supplement: (supplements?.length || 0) > 0,
+    supplements: supplements ?? [],
   }
 }
 
@@ -210,9 +217,13 @@ export async function syncSupplierToFinance(supplier: Record<string, unknown>) {
   return sendToFinanceSystem('supplier.upserted', buildSupplierSyncPayload(supplier))
 }
 
-/** 采购单 placed → 财务应付 + 付款计划 */
-export async function syncPurchaseOrderToFinance(po: Record<string, unknown>, orderRefs?: unknown[]) {
-  return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs))
+/** 采购单 placed → 财务应付 + 付款计划(含补采购预警 flag) */
+export async function syncPurchaseOrderToFinance(
+  po: Record<string, unknown>,
+  orderRefs?: unknown[],
+  supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
+) {
+  return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs, supplements))
 }
 
 /** 检查财务系统连通性 */

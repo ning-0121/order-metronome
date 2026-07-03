@@ -17,7 +17,7 @@ const anchors = {
   shipment: '2026-08-01', sample: '2026-06-20', factory_date: '2026-07-20',
 };
 
-console.log('\n▶ Case 1 — 面料数量与阶段(PO 10000 × 单耗 0.265 × 损耗2%)');
+console.log('\n▶ Case 1 — 面料数量与阶段(PO 10000 × 单耗 0.265;损耗2%只作参考不进净需求)');
 {
   const r = computeMaterialRequirement({
     material: { material_name: '主面料', material_type: 'fabric', unit: 'kg', qty_per_piece: 0.265, loss_rate: 2 },
@@ -26,8 +26,9 @@ console.log('\n▶ Case 1 — 面料数量与阶段(PO 10000 × 单耗 0.265 × 
   ok(r.category === 'fabric', 'category=fabric');
   ok(r.required_stage === 'cutting', 'stage=cutting(面料影响开裁)');
   ok(r.gross_requirement === 2650, `gross=2650(实际 ${r.gross_requirement})`);
-  ok(r.loss_qty === 53, `loss=53(实际 ${r.loss_qty})`);
-  ok(r.net_purchase_qty === 2703, `net=2703 向上取整(实际 ${r.net_purchase_qty})`);
+  ok(r.loss_qty === 53, `loss=53 参考值(实际 ${r.loss_qty})`);
+  // 2026-07-03 用户实测「多算两匹布」:净需求=裸数(不再暗含损耗;损耗由采购核料「采购损耗%」明控)
+  ok(r.net_purchase_qty === 2650, `net=2650 裸数(实际 ${r.net_purchase_qty})`);
   ok(r.supplier_lead_days === 15, 'fabric 默认交期=15 工作日');
   ok(r.lead_days_source === 'default', 'lead 来源=default');
   ok(r.required_date === '2026-07-10', `required_date=开裁日(实际 ${r.required_date})`);

@@ -41,6 +41,16 @@ export async function consolidateOrderProcurementItems(orderId: string) {
   const { data: order } = await (supabase.from('orders') as any).select('order_no').eq('id', orderId).single();
   const orderNo = (order as any)?.order_no || orderId.slice(0, 8);
 
+  // 补采购判定(品类补):订单已过「采购下单」节点后核料出的【新】采购项 = 漏采补录
+  // → 自动标补采购 + 待财务审批(存量项/未下单前的核料完全不受影响)。
+  let afterProcurementPlaced = false;
+  {
+    const { data: poMs } = await (supabase.from('milestones') as any)
+      .select('status').eq('order_id', orderId).eq('step_key', 'procurement_order_placed').maybeSingle();
+    const st = String((poMs as any)?.status || '').toLowerCase();
+    afterProcurementPlaced = st === 'done' || st === '已完成';
+  }
+
   // 1) 需求
   const { data: reqs, error: rErr } = await (supabase.from('material_requirements') as any)
     .select('id, snapshot_line_id, material_name, material_code, category, unit, net_purchase_qty, version')
@@ -53,7 +63,7 @@ export async function consolidateOrderProcurementItems(orderId: string) {
   const slMap = new Map<string, any>();
   if (slIds.length) {
     const { data: sls } = await (supabase.from('material_package_snapshot_lines') as any)
-      .select('id, color, specification, qty_per_piece, bom_id, material_name').in('id', slIds);
+      .select('id, color, specification, qty_per_piece, bom_id, material_name, loss_rate').in('id', slIds);
     for (const s of (sls || [])) slMap.set(s.id, s);
   }
   // 3) materials_bom（master_id）
@@ -80,10 +90,11 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     const key = consolidationKey(identity);
     const net = Number(r.net_purchase_qty) || 0;
     const dev = sl?.qty_per_piece != null ? Number(sl.qty_per_piece) : null;
+    const loss = sl?.loss_rate != null ? Number(sl.loss_rate) : null;
     let g = groups.get(key);
-    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1 }; groups.set(key, g); }
+    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null }; groups.set(key, g); }
     g.total += net; g.count += 1;
-    if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; }   // 主导来源的开发单耗作代表值
+    if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; }   // 主导来源的开发单耗/损耗作代表值
   }
 
   // 5) 现有采购项
@@ -100,13 +111,16 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     const ex = exMap.get(g.key);
     if (ex) {
       const devRep = ex.development_consumption ?? g.devTop;
+      // 采购没填过损耗 → 预填来源损耗参考(原基线3%),从此损耗只在这一处明算
+      const lossRep = ex.procurement_loss_pct ?? g.lossTop;
       const suggested = computeSuggestedPurchaseQty({
         total_required_qty: g.total, development_consumption: devRep,
-        production_consumption: ex.production_consumption, procurement_loss_pct: ex.procurement_loss_pct,
+        production_consumption: ex.production_consumption, procurement_loss_pct: lossRep,
         safety_stock_qty: ex.safety_stock_qty, moq: ex.moq,
       });
       const upd: any = {
         total_required_qty: g.total, source_count: g.count, development_consumption: devRep,
+        procurement_loss_pct: lossRep,
         suggested_purchase_qty: suggested, updated_at: now,
       };
       if (Number(ex.total_required_qty) !== g.total && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
@@ -114,17 +128,39 @@ export async function consolidateOrderProcurementItems(orderId: string) {
       updated++;
     } else {
       seq++;
-      const suggested = computeSuggestedPurchaseQty({ total_required_qty: g.total, development_consumption: g.devTop });
-      const { error: iErr } = await (supabase.from('procurement_items') as any).insert({
+      const suggested = computeSuggestedPurchaseQty({
+        total_required_qty: g.total, development_consumption: g.devTop, procurement_loss_pct: g.lossTop,
+      });
+      const row: any = {
         order_id: orderId, consolidation_key: g.key,
         item_no: `PI-${orderNo}-${String(seq).padStart(3, '0')}`,
         material_master_id: g.material_master_id, material_name: g.material_name, specification: g.specification,
         category: g.category, color: g.color, unit: g.unit,
         total_required_qty: g.total, source_count: g.count, development_consumption: g.devTop,
+        procurement_loss_pct: g.lossTop,      // 预填损耗参考(可见可改;总需求已是裸数,不再暗含)
         suggested_purchase_qty: suggested, status: 'draft', created_by: user.id,
-      });
+      };
+      // 品类补:采购下单后才冒出来的新项 = 漏采补录 → 标补采购,待财务审批
+      if (afterProcurementPlaced) {
+        row.is_supplement = true;
+        row.supplement_reason = '采购下单后核料新增(品类补录)';
+        row.supplement_requested_by = user.id;
+        row.supplement_requested_at = now;
+        row.finance_approval_status = 'pending';
+      }
+      let { error: iErr } = await (supabase.from('procurement_items') as any).insert(row);
+      if (iErr && afterProcurementPlaced && /column .* does not exist|is_supplement|finance_approval/i.test(iErr.message || '')) {
+        // 补采购迁移未执行 → 降级为普通项插入(不 brick 核料),提醒执行迁移
+        console.warn('[consolidate] 补采购字段缺失,降级插入。请执行 20260703_procurement_supplement.sql');
+        const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, ...plain } = row;
+        ({ error: iErr } = await (supabase.from('procurement_items') as any).insert(plain));
+      }
       if (iErr) return { error: friendlyError(iErr) };
       created++;
+      if (afterProcurementPlaced) {
+        const { notifyFinanceSupplement } = await import('@/app/actions/procurement-supplement');
+        await notifyFinanceSupplement(supabase, orderId, g.material_name || '物料', g.total, g.unit, '采购下单后核料新增(品类补录)');
+      }
     }
   }
 
@@ -176,7 +212,7 @@ export async function getProcurementItemSources(itemId: string) {
   const slMap = new Map<string, any>();
   if (slIds.length) {
     const { data: sls } = await (supabase.from('material_package_snapshot_lines') as any)
-      .select('id, color, specification, qty_per_piece, bom_id, material_name').in('id', slIds);
+      .select('id, color, specification, qty_per_piece, bom_id, material_name, loss_rate').in('id', slIds);
     for (const s of (sls || [])) slMap.set(s.id, s);
   }
   const bomIds = Array.from(new Set([...slMap.values()].map((s: any) => s.bom_id).filter(Boolean)));
@@ -243,6 +279,17 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
   if (!user) return { error: '请先登录' };
   const VALID = ['draft', 'reviewing', 'confirmed', 'ordered', 'partially_received', 'completed', 'closed'];
   if (!VALID.includes(status)) return { error: '非法状态' };
+
+  // 补采购闸:未获财务批准的补采购项,不允许推进到 confirmed 及之后(生成执行行只认 confirmed)
+  if (['confirmed', 'ordered', 'partially_received', 'completed'].includes(status)) {
+    const { data: it } = await (supabase.from('procurement_items') as any)
+      .select('is_supplement, finance_approval_status, finance_reject_reason').eq('id', itemId).maybeSingle();
+    if ((it as any)?.is_supplement) {
+      const fs = (it as any).finance_approval_status;
+      if (fs === 'pending') return { error: '🟠 补采购待财务审批,批准后才能确认采购(财务已收到通知)' };
+      if (fs === 'rejected') return { error: `补采购已被财务驳回:${(it as any).finance_reject_reason || '无原因'}。如仍需采购请重新提交申请` };
+    }
+  }
 
   const now = new Date().toISOString();
   const upd: any = { status, updated_at: now };
