@@ -14,14 +14,7 @@ const CATEGORIES: { value: string; label: string }[] = [
   { value: 'service', label: '服务' }, { value: 'other', label: '其他' },
 ];
 const catLabel = (c: string) => CATEGORIES.find(x => x.value === c)?.label || c;
-// 类别下拉建议(可选可加):已知类别的中文标签 + 用户可自由输入新类别
-const CATEGORY_SUGGEST = CATEGORIES.map(c => c.label);
-// 已知标签 → value key(选到已知的映射回 fabric/trim… 保下游识别;自定义存原文)
-const labelToValue = (input: string): string => {
-  const hit = CATEGORIES.find(c => c.label === input.trim() || c.value === input.trim());
-  return hit ? hit.value : input.trim();
-};
-// 常用单位(可选可加)
+// 常用单位(下拉预置 + 可「➕添加新单位」自由填)
 const UNIT_SUGGEST = ['米', '码', 'kg', '克', '件', '个', '套', '打', '条', '卷', '张', '双'];
 const emptyForm: MasterInput = { material_name: '', category: 'fabric', default_unit: '', default_lead_days: '', specification: '', reference_price: '' };
 
@@ -41,6 +34,9 @@ export default function MaterialMasterPage() {
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [form, setForm] = useState<MasterInput>(emptyForm);
   const [saving, setSaving] = useState(false);
+  // 类别/单位:'preset'=从下拉选,'custom'=选了「➕添加新的」→ 显示输入框自由填
+  const [catMode, setCatMode] = useState<'preset' | 'custom'>('preset');
+  const [unitMode, setUnitMode] = useState<'preset' | 'custom'>('preset');
   const [similar, setSimilar] = useState<any[] | null>(null);
   const [detailMat, setDetailMat] = useState<any | null>(null); // SC-P1 供应链详情抽屉
 
@@ -59,10 +55,13 @@ export default function MaterialMasterPage() {
   useEffect(() => { canManageMaster().then(setCanManage); }, []);
   useEffect(() => { if (tab === 'lib') loadLib(); else loadPending(); }, [tab, loadLib, loadPending]);
 
-  function openNew() { setEditId(null); setEditingCode(null); setForm(emptyForm); setSimilar(null); setShowForm(true); }
+  function openNew() { setEditId(null); setEditingCode(null); setForm(emptyForm); setCatMode('preset'); setUnitMode('preset'); setSimilar(null); setShowForm(true); }
   function openEdit(r: any) {
     setEditId(r.id); setEditingCode(r.material_code || null);
     setForm({ material_name: r.material_name || '', category: r.category || 'other', default_unit: r.default_unit || '', default_lead_days: r.default_lead_days ?? '', specification: r.specification || '', reference_price: r.reference_price ?? '' });
+    // 已有值不在预置列表 → 进自定义模式(显示输入框回填)
+    setCatMode(CATEGORIES.some(c => c.value === r.category) ? 'preset' : 'custom');
+    setUnitMode(!r.default_unit || UNIT_SUGGEST.includes(r.default_unit) ? 'preset' : 'custom');
     setSimilar(null); setShowForm(true);
   }
 
@@ -234,16 +233,37 @@ export default function MaterialMasterPage() {
               <label className="col-span-2 text-xs text-gray-600">物料名称 *
                 <input value={form.material_name} onChange={e => setForm(f => ({ ...f, material_name: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
-              <label className="text-xs text-gray-600">类别 *（可选可加）
-                <input list="cat-suggest" value={catLabel(form.category)}
-                  onChange={e => setForm(f => ({ ...f, category: labelToValue(e.target.value) }))}
-                  placeholder="选或输入新类别" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                <datalist id="cat-suggest">{CATEGORY_SUGGEST.map(c => <option key={c} value={c} />)}</datalist></label>
-              <label className="text-xs text-gray-600">单位 *（可选可加）
-                <input list="unit-suggest" value={form.default_unit ?? ''} placeholder="米/码/kg/件…"
-                  onChange={e => setForm(f => ({ ...f, default_unit: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                <datalist id="unit-suggest">{UNIT_SUGGEST.map(u => <option key={u} value={u} />)}</datalist></label>
+              <label className="text-xs text-gray-600">类别 *
+                <select value={catMode === 'custom' ? '__custom__' : form.category}
+                  onChange={e => {
+                    if (e.target.value === '__custom__') { setCatMode('custom'); setForm(f => ({ ...f, category: '' })); }
+                    else { setCatMode('preset'); setForm(f => ({ ...f, category: e.target.value })); }
+                  }}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">
+                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  <option value="__custom__">➕ 添加新类别…</option>
+                </select>
+                {catMode === 'custom' && (
+                  <input value={form.category ?? ''} autoFocus placeholder="输入新类别名(如 里布)"
+                    onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-indigo-300 px-3 py-2 text-sm" />
+                )}</label>
+              <label className="text-xs text-gray-600">单位 *
+                <select value={unitMode === 'custom' ? '__custom__' : (form.default_unit || '')}
+                  onChange={e => {
+                    if (e.target.value === '__custom__') { setUnitMode('custom'); setForm(f => ({ ...f, default_unit: '' })); }
+                    else { setUnitMode('preset'); setForm(f => ({ ...f, default_unit: e.target.value })); }
+                  }}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">
+                  <option value="">— 选择单位 —</option>
+                  {UNIT_SUGGEST.map(u => <option key={u} value={u}>{u}</option>)}
+                  <option value="__custom__">➕ 添加新单位…</option>
+                </select>
+                {unitMode === 'custom' && (
+                  <input value={form.default_unit ?? ''} autoFocus placeholder="输入新单位(如 匹)"
+                    onChange={e => setForm(f => ({ ...f, default_unit: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-indigo-300 px-3 py-2 text-sm" />
+                )}</label>
               <label className="text-xs text-gray-600">参考价（不含税净价）
                 <input type="number" step="any" value={form.reference_price ?? ''} placeholder="单价" onChange={e => setForm(f => ({ ...f, reference_price: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
