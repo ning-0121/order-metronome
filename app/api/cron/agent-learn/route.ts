@@ -74,7 +74,7 @@ ${tuningResults.map(r => `${r.actionType}: 执行率${r.executionRate}% → ${r.
 直接输出文字，不要JSON。`;
 
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514', max_tokens: 500,
+        model: 'claude-haiku-4-5', max_tokens: 500,
         messages: [{ role: 'user', content: prompt }],
       });
       weeklyReport = response.content[0].type === 'text' ? response.content[0].text : '';

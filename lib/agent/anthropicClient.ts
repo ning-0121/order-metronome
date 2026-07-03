@@ -38,7 +38,7 @@ export interface ClaudeCallOptions {
   messages?: Anthropic.MessageParam[];
   /** System prompt（可选） */
   system?: string;
-  /** 模型 ID，默认 claude-sonnet-4-20250514 */
+  /** 模型 ID，默认 claude-haiku-4-5 */
   model?: string;
   /** max_tokens，默认 1024 */
   maxTokens?: number;
@@ -125,7 +125,7 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeRawResu
   }
 
   const timeoutMs = opts.timeoutMs ?? 30_000;
-  const model = opts.model ?? 'claude-sonnet-4-20250514';
+  const model = opts.model ?? 'claude-haiku-4-5';
   const maxTokens = opts.maxTokens ?? 1024;
   const cacheSystem = opts.cacheSystem !== false; // 默认 true
 
@@ -238,7 +238,7 @@ export async function submitBatch(requests: BatchRequest[]): Promise<string | nu
 
   try {
     const batchRequests: Anthropic.Messages.MessageCreateParamsNonStreaming[] = requests.map(req => {
-      const model = req.model ?? 'claude-sonnet-4-20250514';
+      const model = req.model ?? 'claude-haiku-4-5';
       const maxTokens = req.maxTokens ?? 1024;
       const cacheSystem = req.cacheSystem !== false;
 

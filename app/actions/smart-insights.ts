@@ -364,7 +364,7 @@ async function generateAIInsights(
   const aiStartedAt = Date.now();
   const client = new Anthropic({ apiKey });
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-haiku-4-5',
     max_tokens: 800,
     system: `你是服装外贸订单风险分析师。根据历史数据，分析出最关键的风险点和成功经验。
 要求：
@@ -503,7 +503,7 @@ export async function getContextualAIAdvice(params: {
   try {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-haiku-4-5',
       max_tokens: 500,
       system: prompts[params.scene] || prompts.dashboard,
       messages: [{ role: 'user', content: params.contextData }],

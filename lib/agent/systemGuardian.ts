@@ -727,7 +727,7 @@ ${digest}
 
     const result = await callClaudeJSON<GuardianReport['metaReview']>({
       scene: 'system_guardian_meta',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-haiku-4-5',
       prompt,
       maxTokens: 800,
       timeoutMs: 25000,

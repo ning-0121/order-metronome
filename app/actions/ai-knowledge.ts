@@ -648,7 +648,7 @@ export async function runAIAnalysis(): Promise<{ data?: AIAnalysisResult[]; erro
 
     try {
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5',
         max_tokens: 600,
         system: `你是服装外贸行业的客户分析专家。根据历史知识条目分析客户画像。
 返回JSON: {"summary":"一句话总结","key_findings":["发现1","发现2","发现3"],"risk_rating":"high/medium/low","recommendations":["建议1","建议2"]}
@@ -720,7 +720,7 @@ export async function runAIAnalysis(): Promise<{ data?: AIAnalysisResult[]; erro
 
     try {
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5',
         max_tokens: 600,
         system: `你是服装外贸行业的工厂评估专家。根据历史知识条目分析工厂表现。
 返回JSON: {"summary":"一句话总结","key_findings":["发现1","发现2","发现3"],"risk_rating":"high/medium/low","recommendations":["建议1","建议2"]}
@@ -782,7 +782,7 @@ export async function runAIAnalysis(): Promise<{ data?: AIAnalysisResult[]; erro
 
       try {
         const response = await client.messages.create({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-haiku-4-5',
           max_tokens: 600,
           system: `你是服装外贸订单流程优化专家。根据历史阻塞/延期/瓶颈记录，分析系统性流程问题。
 返回JSON: {"summary":"一句话总结","key_findings":["瓶颈1","瓶颈2","瓶颈3"],"risk_rating":"high/medium/low","recommendations":["改进1","改进2"]}
