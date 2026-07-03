@@ -10,6 +10,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
   buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment,
@@ -18,11 +19,15 @@ import { getOrderLeftover } from '@/app/actions/inventory';
 
 const num = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
 
-/** 列出某订单的采购核料项。 */
+/** 列出某订单的采购核料项。底价按角色 server 端剥离(红线③:业务/生产只见建议价)。 */
 export async function listProcurementItems(orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  // 底价可见性:非采购/财务/管理员 → 剥离 unit_price/金额/历史成交价(server 端剥,非 UI 隐藏)
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   const { data, error } = await (supabase.from('procurement_items') as any)
     .select('*').eq('order_id', orderId).order('item_no');
   if (error) return { error: friendlyError(error) };
@@ -80,7 +85,17 @@ export async function listProcurementItems(orderId: string) {
     }
   } catch { /* 历史建议失败不影响列表 */ }
 
-  return { data: data || [] };
+  // 底价剥离(红线③):非可见底价角色 → 删 unit_price/金额/历史成交价,server 端剥离
+  if (!canSeeFloor) {
+    for (const r of (data || [])) {
+      delete (r as any).unit_price;
+      delete (r as any).ordered_amount;
+      delete (r as any).difference_amount;
+      if ((r as any).last_purchase) delete (r as any).last_purchase.unit_price;
+    }
+  }
+
+  return { data: data || [], canSeeFloor };
 }
 
 /**
@@ -270,6 +285,11 @@ export async function consolidateOrderProcurementItems(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  // 归并会 写/删 采购项 + 触发财务通知 → 写路径必须采购/管理员(dryRun 只算不写,放宽给能看的角色)
+  if (!opts.dryRun) {
+    const roleErr = await requireProcurementRole(supabase, user.id);
+    if (roleErr) return { error: roleErr };
+  }
 
   const { data: order } = await (supabase.from('orders') as any).select('order_no').eq('id', orderId).single();
   const orderNo = (order as any)?.order_no || orderId.slice(0, 8);

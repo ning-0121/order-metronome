@@ -19,7 +19,8 @@ import {
   ACTIVE_LINE_STATUSES,
   type ProcurementLineStatus,
 } from '@/lib/domain/procurement';
-import { isAdminRole } from '@/lib/domain/roles';
+import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
+import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
 
 export interface ProcurementLineItem {
   id: string;
@@ -51,7 +52,7 @@ export interface ProcurementLineItem {
 //                 保留本地常量，待评估后整合到 ROLE_GROUPS（建议命名 CAN_VIEW_PROCUREMENT）。
 const ALLOWED_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement', 'production_manager'];
 
-async function checkAccess(): Promise<{ ok: boolean; userId?: string; error?: string }> {
+async function checkAccess(): Promise<{ ok: boolean; userId?: string; roles?: string[]; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: '请先登录' };
@@ -59,7 +60,7 @@ async function checkAccess(): Promise<{ ok: boolean; userId?: string; error?: st
     .select('role, roles').eq('user_id', user.id).single();
   const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   if (!roles.some(r => ALLOWED_ROLES.includes(r))) return { ok: false, error: '无权限' };
-  return { ok: true, userId: user.id };
+  return { ok: true, userId: user.id, roles };
 }
 
 /**
@@ -78,6 +79,7 @@ export async function getProcurementItems(orderId: string): Promise<{
 }> {
   const auth = await checkAccess();
   if (!auth.ok) return { error: auth.error };
+  const canSeeFloor = hasRoleInGroup(auth.roles || [], 'CAN_SEE_PROCUREMENT_FLOOR');
 
   const supabase = await createClient();
   const { data, error } = await (supabase.from('procurement_line_items') as any)
@@ -88,25 +90,28 @@ export async function getProcurementItems(orderId: string): Promise<{
 
   if (error) return { error: error.message };
 
-  const items = (data || []) as ProcurementLineItem[];
+  const rawItems = (data || []) as ProcurementLineItem[];
 
-  // 汇总
-  const totalOrdered = items.reduce((s, i) => s + (i.ordered_amount || 0), 0);
-  const totalReceived = items
+  // 汇总(用原始底价算,但对非底价角色不返回金额)
+  const totalOrdered = rawItems.reduce((s, i) => s + (i.ordered_amount || 0), 0);
+  const totalReceived = rawItems
     .filter(i => i.received_qty !== null)
     .reduce((s, i) => s + ((i.received_qty || 0) * (i.unit_price || 0)), 0);
-  const totalDifference = items.reduce((s, i) => s + (i.difference_amount || 0), 0);
-  const discrepancyCount = items.filter(
+  const totalDifference = rawItems.reduce((s, i) => s + (i.difference_amount || 0), 0);
+  const discrepancyCount = rawItems.filter(
     i => i.received_qty !== null && Math.abs(i.difference_pct || 0) > 3,
   ).length;
+
+  // 底价剥离(红线③):非可见底价角色 → 剥 unit_price/金额;汇总金额也归零
+  const items = maskFloorForLines(rawItems as any[], canSeeFloor) as ProcurementLineItem[];
 
   return {
     data: items,
     summary: {
-      totalOrdered: Number(totalOrdered.toFixed(2)),
-      totalReceived: Number(totalReceived.toFixed(2)),
-      totalDifference: Number(totalDifference.toFixed(2)),
-      itemCount: items.length,
+      totalOrdered: canSeeFloor ? Number(totalOrdered.toFixed(2)) : 0,
+      totalReceived: canSeeFloor ? Number(totalReceived.toFixed(2)) : 0,
+      totalDifference: canSeeFloor ? Number(totalDifference.toFixed(2)) : 0,
+      itemCount: rawItems.length,
       discrepancyCount,
     },
   };

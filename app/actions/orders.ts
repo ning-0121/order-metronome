@@ -996,22 +996,45 @@ export async function getOrders() {
 
 export async function getOrder(id: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
+
   const { data: order, error } = await supabase
     .from('orders')
     .select('*')
     .eq('id', id)
     .maybeSingle();
-  
+
   if (error) {
     return { error: error.message };
   }
-  
+  if (!order) return { data: null };
+
+  // 订单级访问控制(P0 审计:此前任意登录用户可凭 URL 拉任意订单 → 触达采购底价)。
+  // 放行:看全部订单的角色 / 创建者 / 跟单负责人 / 被指派了该单里程碑的人。
+  try {
+    const { getUserRoles } = await import('@/lib/utils/user-role');
+    const { hasRoleInGroup } = await import('@/lib/domain/roles');
+    const roles = await getUserRoles(supabase, user.id);
+    const canSeeAll = roles.includes('admin') || hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS');
+    const isOwner = (order as any).created_by === user.id || (order as any).owner_user_id === user.id;
+    let assigned = false;
+    if (!canSeeAll && !isOwner) {
+      const { data: ms } = await (supabase.from('milestones') as any)
+        .select('id').eq('order_id', id).eq('owner_user_id', user.id).limit(1);
+      assigned = (ms || []).length > 0;
+    }
+    if (!canSeeAll && !isOwner && !assigned) {
+      return { error: '无权查看此订单(仅创建者/负责人/被指派人/管理层可见)' };
+    }
+  } catch (e: any) {
+    // 权限判定异常 → 保守放行但记录(不因鉴权查询抖动锁死合法用户)
+    console.warn('[getOrder] 访问控制判定异常,保守放行:', e?.message);
+  }
+
   return { data: order };
 }
 
