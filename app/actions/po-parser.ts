@@ -218,25 +218,45 @@ export async function parsePO(
       return { ok: false, error: `不支持的文件格式：${file.type}。请上传 Excel、PDF 或图片文件。` };
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 55000); // 55 秒超时
-
     let response;
     try {
-      response = await client.messages.create({
-        model: 'claude-sonnet-5',            // 2026-07-03:老 sonnet-4-6 慢 → 最新最快的 Sonnet,提取更准
-        max_tokens: 4096,
-        system: SYSTEM_PROMPT,
-        messages,
-      }, { signal: controller.signal });     // 关键修复:此前 signal 没传给 SDK → 55秒超时形同虚设,请求会一直挂到 SDK 默认 10 分钟
-      // 注:不设 thinking,与小绮/原辅料识别等已验证能跑的 sonnet-5 调用对齐(避免个别参数触发 API 报错→静默失败)
+      // 2026-07-03:服务器偶发过载(529)/5xx → SDK 报「unexpected response」。
+      // 手动重试 2 次(指数退避),每次独立 55s 超时,把偶发抖动挡掉。
+      let lastErr: any;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 55000);
+        try {
+          response = await client.messages.create({
+            model: 'claude-sonnet-5',        // 最新最快的 Sonnet
+            max_tokens: 8192,                // 4096→8192:款多的 PO 避免响应截断→JSON解析失败
+            system: SYSTEM_PROMPT,
+            messages,
+          }, { signal: controller.signal });
+          clearTimeout(timeout);
+          break;                             // 成功,跳出重试
+        } catch (e: any) {
+          clearTimeout(timeout);
+          if (e?.name === 'AbortError' || e?.message?.includes('abort')) {
+            return { ok: false, error: 'AI 解析超时,请换更小的文件或拍图上传。' };
+          }
+          const st = e?.status ?? e?.statusCode;
+          const transient = st === 429 || st === 529 || (st >= 500 && st < 600) ||
+            /overload|unexpected response|internal server|timeout/i.test(e?.message || '');
+          lastErr = e;
+          if (transient && attempt < 2) {
+            await new Promise(r => setTimeout(r, 800 * (attempt + 1))); // 0.8s / 1.6s 退避
+            continue;
+          }
+          throw e;
+        }
+      }
+      if (!response) throw lastErr || new Error('AI 无响应');
     } catch (e: any) {
-      if (e.name === 'AbortError' || e.message?.includes('abort')) {
-        return { ok: false, error: 'AI 解析超时,请尝试上传更小的文件或使用图片格式。' };
+      if (e?.name === 'AbortError' || e?.message?.includes('abort')) {
+        return { ok: false, error: 'AI 解析超时,请换更小的文件或拍图上传。' };
       }
       throw e;
-    } finally {
-      clearTimeout(timeout);
     }
 
     const text = response.content
@@ -282,6 +302,10 @@ export async function parsePO(
     logAICall('po_parse', orderId || null, isTimeout ? 'timeout' : 'error', Date.now() - startedAt, message.slice(0, 200)).catch(() => {});
     if (message.includes('credit balance') || message.includes('billing')) {
       return { ok: false, error: 'AI 服务余额不足，请联系管理员充值 Anthropic API 额度。' };
+    }
+    // 服务器过载/5xx(重试3次仍失败)= 临时抖动,不是文件问题,提示稍后重试
+    if (/overload|unexpected response|internal server|529|5\d\d/i.test(message)) {
+      return { ok: false, error: 'AI 服务器繁忙(临时),已重试仍失败。请等 10 秒再点上传重试;这不是文件问题,同一份 PO 直接重试即可。' };
     }
     return { ok: false, error: `解析失败：${message}` };
   }

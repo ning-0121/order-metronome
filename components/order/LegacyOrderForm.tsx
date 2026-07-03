@@ -297,7 +297,7 @@ function NewOrderWizard() {
         console.error('[PO auto-parse] 全部解析失败', failures);
         // 2026-07-03:此前静默 return,用户只看到「快但啥也没填」。改成可见错误,暴露真实原因。
         const reasons = failures.map(f => `${f.fileName}: ${f.error}`).join('；');
-        showError(`PO 识别失败,未能预填:${reasons || '未知原因'}。可手工填写,或换更清晰的 PO(PDF/图片)重试。`);
+        showError(`PO 识别失败,未能预填:${reasons || '未知原因'}。（服务器繁忙类可直接重试;其余可手工填写)`);
         return;
       }
 
