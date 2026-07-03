@@ -74,7 +74,9 @@ export async function buildOrderDecisionContext(
       .eq('order_id', orderId)
       .maybeSingle(),
     (supabase.from('procurement_line_items') as any)
-      .select('*')
+      // 决策上下文只用 procurementItems.length(见 orderDecisionEngine),不需价列;
+      // 只取 id 避免触碰已列级封锁的 unit_price(20260704_pli_floor_column_revoke)。
+      .select('id')
       .eq('order_id', orderId),
     customerName
       ? (supabase.from('customers') as any)

@@ -10,7 +10,7 @@
  *   财务导出对账单 Excel → 发给供应商对账
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import {
   isValidLineTransition,
@@ -37,6 +37,8 @@ async function notifyFinanceOverReceipt(supabase: any, line: any, gate: { ordere
 }
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
+import { canUserAccessOrder } from '@/lib/domain/orderAccess';
+import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 
 export interface ProcurementLineItem {
   id: string;
@@ -94,11 +96,15 @@ export async function getProcurementItems(orderId: string): Promise<{
   };
 }> {
   const auth = await checkAccess();
-  if (!auth.ok) return { error: auth.error };
+  if (!auth.ok || !auth.userId) return { error: auth.error };
   const canSeeFloor = hasRoleInGroup(auth.roles || [], 'CAN_SEE_PROCUREMENT_FLOOR');
 
   const supabase = await createClient();
-  const { data, error } = await (supabase.from('procurement_line_items') as any)
+  // 价列已列级封锁 → 改走 service-role 读全列(免枚举/漏列);service-role 绕过 RLS,
+  // 故先补订单级鉴权,再读;非 floor 角色的底价由下方 maskFloorForLines 剥离。
+  if (!(await canUserAccessOrder(supabase, auth.userId, orderId)))
+    return { error: '无权查看此订单的采购信息' };
+  const { data, error } = await (createServiceRoleClient().from('procurement_line_items') as any)
     .select('*')
     .eq('order_id', orderId)
     .order('category', { ascending: true })
@@ -197,7 +203,8 @@ export async function addProcurementItem(
     }
   }
 
-  const { data, error } = await (supabase.from('procurement_line_items') as any)
+  // insert 后 .select('*') 返回价列 → 经 service-role(本函数已 CAN_EDIT_PROCUREMENT_EXEC 门禁)
+  const { data, error } = await (createServiceRoleClient().from('procurement_line_items') as any)
     .insert({
       order_id: orderId,
       material_name: item.material_name,
@@ -490,8 +497,8 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
     .single();
   if (!order) return { error: '订单不存在' };
 
-  // 获取采购明细
-  const { data: items } = await (supabase.from('procurement_line_items') as any)
+  // 获取采购明细(含底价 → 已列级封锁,经 service-role 读;本函数已 CAN_SEE_PROCUREMENT_FLOOR 门禁)
+  const { data: items } = await (createServiceRoleClient().from('procurement_line_items') as any)
     .select('*')
     .eq('order_id', orderId)
     .order('category')
@@ -669,8 +676,10 @@ export async function transitionProcurementLine(
   const access = await checkOperator();
   if (!access.ok) return { error: access.error };
   const supabase = await createClient();
+  // 读/写含底价列 → 经 service-role(本函数已 checkOperator=采购/admin 门禁,允许看价)
+  const svc = createServiceRoleClient();
 
-  const { data: line, error: getErr } = await (supabase.from('procurement_line_items') as any)
+  const { data: line, error: getErr } = await (svc.from('procurement_line_items') as any)
     .select('id, order_id, line_status, material_name, specification, category, supplier_id, supplier_name, unit_price, ordered_unit, ordered_qty')
     .eq('id', lineItemId).single();
   if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
@@ -711,7 +720,7 @@ export async function transitionProcurementLine(
   if (nextStatus === 'confirmed') update.confirmed_at = now;
   if (nextStatus === 'shipped') update.shipped_at = now;
 
-  const { data: updated, error: upErr } = await (supabase.from('procurement_line_items') as any)
+  const { data: updated, error: upErr } = await (svc.from('procurement_line_items') as any)
     .update(update).eq('id', lineItemId).select().single();
   if (upErr) return { error: upErr.message };
 
@@ -1033,8 +1042,9 @@ export async function getProcurementQueues(): Promise<{
   };
   error?: string;
 }> {
-  const auth = await checkAccess(); // 查看权限沿用较宽的 ALLOWED_ROLES
+  const auth = await checkAccess(); // 查看权限沿用较宽的 ALLOWED_ROLES(含 sales)
   if (!auth.ok) return { error: auth.error };
+  const canSeeFloor = hasRoleInGroup(auth.roles || [], 'CAN_SEE_PROCUREMENT_FLOOR');
   const supabase = await createClient();
 
   const { computeLineLamp } = await import('@/lib/domain/procurement');
@@ -1102,8 +1112,10 @@ export async function getProcurementQueues(): Promise<{
     console.warn('[getProcurementQueues] 待采购订单查询失败(不阻断其余队列):', e?.message);
   }
 
+  // 基础读走用户会话(RLS 管范围),不含已封锁的 unit_price(price_variance_pct 是百分比、非绝对价,保留);
+  // 底价对 floor 角色在下方经 service-role 补(此前此处直接返回 unit_price 未剥离,是泄价点)。
   const { data, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, unit_price, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
+    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
     .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
   if (error) return { error: error.message };
 
@@ -1126,6 +1138,12 @@ export async function getProcurementQueues(): Promise<{
       chase_count: r.chase_count, last_chased_at: r.last_chased_at,
       lamp: computeLineLamp(r, { now }),
     }));
+
+  // floor 角色 → 经 service-role 补回底价(基础读已剥离);非 floor 的 unit_price 保持 undefined
+  if (canSeeFloor && rows.length) {
+    const costs = await fetchLineCostsByIds(rows.map((r) => r.id));
+    for (const r of rows) { const c = costs.get(r.id); if (c) r.unit_price = c.unit_price; }
+  }
 
   const lampRank = (l: string | null) => (l === 'red' ? 0 : l === 'yellow' ? 1 : l === 'green' ? 2 : 3);
   const byLamp = (a: QueueLine, b: QueueLine) => lampRank(a.lamp) - lampRank(b.lamp);

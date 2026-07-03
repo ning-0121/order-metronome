@@ -6,9 +6,10 @@
  * 不新建仓库/库存/批次,不改采购主流程,不做拦截。成本字段按 CAN_SEE_FINANCIALS 红线门控。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { getUserRoles } from '@/lib/utils/user-role';
 
 async function canSeeFinancials(supabase: any, userId: string): Promise<boolean> {
   const { data: p } = await (supabase.from('profiles') as any)
@@ -57,11 +58,15 @@ export async function getOrderSupplyChainOverview(
 
   const fin = await canSeeFinancials(supabase, user.id);
 
-  // 采购物料行(成本敏感列仅财务可见)
+  // 采购物料行。unit_price=大货底价 → 归属 CAN_SEE_PROCUREMENT_FLOOR(采购/财务/admin),
+  // **不是** canSeeFinancials(含 sales!之前挂在 fin 上会把底价泄给业务)。
+  // 底价列已列级封锁 → 含价时经 service-role 读(本处 canSeeFloor 门禁),否则用户会话不取价。
+  const roles = await getUserRoles(supabase, user.id);
+  const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   const cols =
     'id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name' +
-    (fin ? ', unit_price' : '');
-  const { data: lines, error: linesErr } = await (supabase.from('procurement_line_items') as any)
+    (canSeeFloor ? ', unit_price' : '');
+  const { data: lines, error: linesErr } = await ((canSeeFloor ? createServiceRoleClient() : supabase).from('procurement_line_items') as any)
     .select(cols)
     .eq('order_id', orderId)
     .order('category', { ascending: true });

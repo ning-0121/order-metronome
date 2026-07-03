@@ -6,7 +6,7 @@
  * 回填 actual_material_cost 只在人工点回填时写（标来源=采购），避免与成本表双源。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { computeProcurementCostSummary, computeReceivingDiff } from '@/lib/services/procurement-cost';
@@ -47,7 +47,8 @@ export async function getProcurementCostSummary(orderId: string): Promise<{ data
     .select('id, order_no, internal_order_no, customer_name').eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
 
-  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+  // 价列已列级封锁,floor 角色经 service-role 读(本函数已 canFloor 门禁)
+  const { data: lines } = await (createServiceRoleClient().from('procurement_line_items') as any)
     .select('material_name, category, ordered_unit, ordered_qty, received_qty, unit_price, ordered_amount')
     .eq('order_id', orderId);
 
@@ -74,7 +75,8 @@ export async function backfillActualMaterialCost(orderId: string): Promise<{ err
   if (!userId) return { error: '请先登录' };
   if (!canFloor) return { error: '无权回填采购成本' };
 
-  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+  // 价列已列级封锁,floor 角色经 service-role 读(本函数已 canFloor 门禁)
+  const { data: lines } = await (createServiceRoleClient().from('procurement_line_items') as any)
     .select('ordered_qty, received_qty, unit_price, ordered_amount').eq('order_id', orderId);
   const summary = computeProcurementCostSummary((lines || []) as any[], null);
 

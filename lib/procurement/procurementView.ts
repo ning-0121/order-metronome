@@ -18,6 +18,7 @@ import type {
   MaterialReadiness,
 } from './types';
 import { deriveProductionStatus, type MilestoneInput } from './status';
+import { createServiceRoleClient } from '@/lib/supabase/server';
 
 interface OrderRow {
   id: string;
@@ -131,9 +132,14 @@ export async function buildProcurementView(
   const production_status = deriveProductionStatus((msd as MilestoneInput[] | null) ?? []);
 
   // ---- procurement execution lines (primary source) ----
-  const { data: pld } = await supabase
+  // unit_price 已列级封锁(20260704_pli_floor_column_revoke):仅 caps.procurementCost 才需价 →
+  // 经 service-role 读;否则走用户会话(RLS 管订单范围)且不取价列。
+  const pldReader = (caps.procurementCost ? createServiceRoleClient() : supabase) as any;
+  const { data: pld } = await pldReader
     .from('procurement_line_items')
-    .select('material_name, material_code, category, specification, supplier_name, ordered_qty, ordered_unit, unit_price, received_qty, status')
+    .select(caps.procurementCost
+      ? 'material_name, material_code, category, specification, supplier_name, ordered_qty, ordered_unit, unit_price, received_qty, status'
+      : 'material_name, material_code, category, specification, supplier_name, ordered_qty, ordered_unit, received_qty, status')
     .eq('order_id', orderId);
   const procLines = (pld as ProcLineRow[] | null) ?? [];
 

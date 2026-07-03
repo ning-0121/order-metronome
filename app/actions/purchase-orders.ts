@@ -9,10 +9,11 @@
  * 复用现有 procurement_line_items，不重造。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
+import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 import { evaluateProcurementApproval, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
 import { consolidationKey } from '@/lib/services/procurement-consolidation';
@@ -35,7 +36,8 @@ export async function listUnassignedProcurementLines(orderId?: string): Promise<
   const { supabase, roles, userId } = await authRoles();
   if (!userId) return { error: '请先登录' };
   if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可建采购单' };
-  let q = (supabase.from('procurement_line_items') as any)
+  // 采购专用含底价 → 价列已列级封锁,经 service-role 读(本函数已 CAN_PROCURE 门禁)
+  let q = (createServiceRoleClient().from('procurement_line_items') as any)
     .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, unit_price, price_baseline')
     .is('purchase_order_id', null)
     .order('created_at', { ascending: false });
@@ -61,8 +63,8 @@ export async function createPurchaseOrder(input: {
   if (!input.supplierId) return { error: '请选择供应商' };
   if (!input.lineItemIds?.length) return { error: '请勾选采购行' };
 
-  // 取选中行（校验未被占 + 汇总）
-  const { data: lines, error: lErr } = await (supabase.from('procurement_line_items') as any)
+  // 取选中行（校验未被占 + 汇总）——含 ordered_amount(已封锁),经 service-role 读(已 CAN_PROCURE 门禁)
+  const { data: lines, error: lErr } = await (createServiceRoleClient().from('procurement_line_items') as any)
     .select('id, order_id, ordered_amount, purchase_order_id')
     .in('id', input.lineItemIds);
   if (lErr) return { error: lErr.message };
@@ -172,8 +174,10 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
     .select('*, suppliers(*)').eq('id', id).maybeSingle();
   if (!po) return { error: '采购单不存在' };
 
+  // 基础读走用户会话(RLS 管订单范围),不含已封锁的价列(unit_price/ordered_amount);
+  // price_baseline(建议价)对业务可见,保留。floor 角色的底价在下方经 service-role 补。
   const { data: lines } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, unit_price, price_baseline, ordered_amount, received_qty, status, line_status, chase_count, last_chased_at')
+    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, price_baseline, received_qty, status, line_status, chase_count, last_chased_at')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
 
   // 进度档案(2026-07-03 用户拍板:分批收货后要能追整单全貌)——每行的收货批次历史
@@ -200,6 +204,14 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
   }
 
   const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
+  // floor 角色 → 经 service-role 把底价/金额补回(基础读已剥离);非 floor 不补
+  if (canSeeFloor) {
+    const costs = await fetchLineCostsByIds((lines || []).map((l: any) => l.id));
+    for (const l of (lines || [])) {
+      const c = costs.get((l as any).id);
+      if (c) { (l as any).unit_price = c.unit_price; (l as any).ordered_amount = c.ordered_amount; }
+    }
+  }
   const maskedLines = maskFloorForLines((lines || []) as any[], canSeeFloor);
 
   const canProcure = roles.some((r) => CAN_PROCURE.includes(r));
@@ -302,8 +314,8 @@ export async function placePurchaseOrder(poId: string): Promise<{
   // 已审批通过 → 直接下单
   if ((po as any).approval_status === 'approved') return place();
 
-  // 否则跑风险闸（无法绕过）
-  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+  // 否则跑风险闸（无法绕过）——读底价评估,经 service-role(已 CAN_PROCURE 门禁)
+  const { data: lines } = await (createServiceRoleClient().from('procurement_line_items') as any)
     .select('unit_price, price_baseline').eq('purchase_order_id', poId);
   const { count } = await (supabase.from('purchase_orders') as any)
     .select('id', { count: 'exact', head: true })
@@ -343,8 +355,11 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const { data: po } = await (supabase.from('purchase_orders') as any)
     .select('*, suppliers(*)').eq('id', id).maybeSingle();
   if (!po) return { error: '采购单不存在' };
-  const { data: lines } = await (supabase.from('procurement_line_items') as any)
-    .select('material_name, specification, category, ordered_qty, ordered_unit, unit_price, ordered_amount')
+  // 含价版(仅采购)经 service-role 读底价;无价版走用户会话(RLS 管范围),不取价列
+  const { data: lines } = await ((withPrice ? createServiceRoleClient() : supabase).from('procurement_line_items') as any)
+    .select(withPrice
+      ? 'material_name, specification, category, ordered_qty, ordered_unit, unit_price, ordered_amount'
+      : 'material_name, specification, category, ordered_qty, ordered_unit')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
   const { data: ords } = await (supabase.from('orders') as any)
     .select('order_no, internal_order_no').in('id', ((po as any).order_ids || []) as string[]);
