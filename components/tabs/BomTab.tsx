@@ -71,6 +71,25 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [instMsg, setInstMsg] = useState('');
   const [editingTemplate, setEditingTemplate] = useState(false);  // 正在编辑的行是否来自产品款模板
 
+  // 色卡/辅料图上传(公开桶 product-images/materials/,URL 追加进 materials_bom.image_urls)
+  const [imgUploadingId, setImgUploadingId] = useState<string | null>(null);
+  async function uploadBomImage(item: any, file: File) {
+    setImgUploadingId(item.id);
+    try {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client');
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `materials/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type });
+      if (upErr) { alert('上传失败:' + upErr.message); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      const next = [...(Array.isArray(item.image_urls) ? item.image_urls : []), data.publicUrl];
+      const res = await updateBomItem(item.id, orderId, { image_urls: next });
+      if ((res as any).error) { alert('保存失败:' + (res as any).error); return; }
+      await reload();
+    } finally { setImgUploadingId(null); }
+  }
+
   // 原辅料单批量识别(上传文件 → AI 读行 → 检查修改 → 批量入库)
   const [parsing, setParsing] = useState(false);
   const [parseRows, setParseRows] = useState<any[] | null>(null);
@@ -728,7 +747,7 @@ export function BomTab({ orderId }: { orderId: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100">
-              {['来源','物料代码','物料名称','类型','部位','颜色','单件用量','总需','单位','供应商','规格','特殊要求','样品','操作'].map(h => (
+              {['来源','物料代码','物料名称','类型','部位','颜色','图片/色卡','单件用量','总需','单位','供应商','规格','特殊要求','样品','操作'].map(h => (
                 <th key={h} className="py-2 px-3 text-gray-500 font-medium text-left whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
@@ -740,7 +759,7 @@ export function BomTab({ orderId }: { orderId: string }) {
                   const group = items.filter((it: any) => (it.style_no || '') === sk);
                   return [
                     <tr key={`grp-${sk}`} className="bg-indigo-50/70">
-                      <td colSpan={14} className="py-1.5 px-3 text-xs font-semibold text-indigo-800">
+                      <td colSpan={15} className="py-1.5 px-3 text-xs font-semibold text-indigo-800">
                         {sk ? `👕 款 ${sk}` : '📦 整单通用'}（{group.length} 行）
                         <button onClick={() => { setShowAdd(true); setEditId(null); setEditingTemplate(false); setForm({ ...emptyForm, style_no: sk }); }}
                           className="ml-3 text-indigo-600 font-normal hover:underline">+ 加原辅料到{sk ? '此款' : '整单'}</button>
@@ -768,6 +787,21 @@ export function BomTab({ orderId }: { orderId: string }) {
                   <td className="py-2 px-3"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{CAT_LABEL[item.material_type] || item.material_type}</span></td>
                   <td className="py-2 px-3 text-gray-600">{item.placement || '—'}</td>
                   <td className="py-2 px-3 text-gray-600">{item.color || '—'}</td>
+                  <td className="py-2 px-3">
+                    <div className="flex items-center gap-1">
+                      {(Array.isArray(item.image_urls) ? item.image_urls : []).slice(0, 3).map((u: string, i: number) => (
+                        <a key={i} href={u} target="_blank" rel="noreferrer">
+                          <img src={u} alt="色卡" className="w-7 h-7 rounded object-cover border border-gray-200 hover:scale-150 transition-transform" />
+                        </a>
+                      ))}
+                      <label className={`text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-200 cursor-pointer hover:bg-indigo-100 whitespace-nowrap ${imgUploadingId ? 'opacity-50 pointer-events-none' : ''}`}
+                        title="上传色卡/辅料参考图">
+                        {imgUploadingId === item.id ? '…' : '📷'}
+                        <input type="file" accept="image/*" className="hidden" disabled={!!imgUploadingId}
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBomImage(item, f); e.currentTarget.value = ''; }} />
+                      </label>
+                    </div>
+                  </td>
                   <td className="py-2 px-3 text-gray-700">{item.qty_per_piece ?? '—'}</td>
                   <td className="py-2 px-3 font-medium text-gray-900">{item.total_qty ?? '—'}</td>
                   <td className="py-2 px-3 text-gray-600">{item.unit}</td>
