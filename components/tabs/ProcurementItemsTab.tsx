@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
@@ -76,12 +77,20 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [orderId]);
 
   const confirmedCount = items.filter(i => i.status === 'confirmed').length;
+  const [linesReady, setLinesReady] = useState(false);   // 生成执行行后亮"去归采购单"通路
   async function genLines() {
     setBusy(true); setMsg('');
     const res = await generateExecutionLines(orderId);
     setBusy(false);
-    if ((res as any).error) { setMsg((res as any).error); return; }
-    setMsg((res as any).created > 0 ? `✅ 已生成 ${(res as any).created} 条采购执行行(去采购中心下单)` : ((res as any).message || '无新执行行'));
+    if ((res as any).error) {
+      const em = String((res as any).error || '');
+      setMsg(/RLS|无权操作|权限/.test(em)
+        ? `${em} — 采购角色操作执行行需先在 Supabase 执行 20260703_pli_procurement_access.sql`
+        : em);
+      return;
+    }
+    setLinesReady(true);
+    setMsg((res as any).created > 0 ? `✅ 已生成 ${(res as any).created} 条采购执行行` : ((res as any).message || '执行行已就绪'));
     await reload();
   }
 
@@ -428,6 +437,22 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
         </div>
       </div>
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
+
+      {/* 确认后的下文(2026-07-03 用户拍板:确认→采购单→给供应商→财务→追踪 一条路走亮) */}
+      {(linesReady || confirmedCount > 0) && (
+        <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3 flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-semibold text-emerald-900">
+            {linesReady ? '执行行已就绪,下一步:归成采购单发供应商' : '已确认的项:先点上方「➡️ 生成执行行」,再归采购单'}
+          </span>
+          <Link href="/procurement/po/new"
+            className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">
+            🧾 去归采购单 →
+          </Link>
+          <span className="text-xs text-emerald-700">
+            归单页勾选执行行 → 建采购单 → 点「下单」(财务自动收到应付+付款计划,行进入待催货追踪) → 「导出采购单(含价)」发供应商 / 无价版发内部
+          </span>
+        </div>
+      )}
 
       {/* ③ 核料完成度 + ② 批量确认 工具条 */}
       {items.length > 0 && (

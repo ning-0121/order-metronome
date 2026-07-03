@@ -35,7 +35,7 @@ export async function getManufacturingOrder(orderId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id')
+    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, po_parse_snapshot')
     .eq('id', orderId).single();
   if (oErr) return { error: friendlyError(oErr) };
 
@@ -480,10 +480,30 @@ export async function generateManufacturingOrderSheet(
       }
       sput(3, 1, 'POM (inch)', { name: 'Arial', size: 12 });
       sizeKeys.forEach((s, i) => sput(3, 2 + i, s, { name: 'Arial', size: 12, bold: true }));
-      for (let i = 0; i < 14; i++) ss.getRow(4 + i).height = 24;
-      for (let rr = 3; rr <= 17; rr++) for (let cc = 1; cc <= 1 + ns; cc++) ss.getCell(rr, cc).border = thin;
-      ss.mergeCells(18, 1, 18, 1 + ns);
-      sput(18, 1, '（按建单上传的尺码表填写;上传件见订单「附件」）', { name: '宋体', size: 11 });
+      // 尺寸数据:从 PO 冻结底档(po_parse_snapshot.styles[].measurements)拉入(2026-07-03 用户拍板)
+      const snapStyles: any[] = Array.isArray((order as any).po_parse_snapshot?.styles) ? (order as any).po_parse_snapshot.styles : [];
+      const snapStyle = snapStyles.find((s: any) => String(s?.style_no || '').trim() === String(g.style_no || '').trim());
+      const meas: Array<{ label?: string; values?: Record<string, any> }> =
+        Array.isArray(snapStyle?.measurements) ? snapStyle.measurements.slice(0, 14) : [];
+      const measVal = (values: Record<string, any> | undefined, key: string) => {
+        if (!values) return '';
+        if (values[key] != null) return String(values[key]);
+        const hit = Object.keys(values).find(k => k.trim().toLowerCase() === key.trim().toLowerCase());
+        return hit ? String(values[hit]) : '';
+      };
+      meas.forEach((m, i) => {
+        sput(4 + i, 1, m.label || '', { name: 'Arial', size: 12 });
+        ss.getCell(4 + i, 1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        sizeKeys.forEach((s, j) => sput(4 + i, 2 + j, measVal(m.values, s), { name: 'Arial', size: 12 }));
+      });
+      const lastRow = Math.max(17, 3 + meas.length);
+      for (let i = 0; i < lastRow - 3; i++) ss.getRow(4 + i).height = 24;
+      for (let rr = 3; rr <= lastRow; rr++) for (let cc = 1; cc <= 1 + ns; cc++) ss.getCell(rr, cc).border = thin;
+      ss.mergeCells(lastRow + 1, 1, lastRow + 1, 1 + ns);
+      sput(lastRow + 1, 1,
+        meas.length > 0 ? '（尺寸来自客户 PO 识别冻结底档;以客户原始尺寸表为准,修改请重传 PO 或手工调整）'
+          : '（PO 未含尺寸数据;按建单上传的尺码表填写,上传件见订单「附件」）',
+        { name: '宋体', size: 11 });
     }
   }
 
