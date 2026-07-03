@@ -622,10 +622,15 @@ function NewOrderWizard() {
       rawFormData.delete(formKey);
     }
 
-    // 校验：必传文件(2026-07 简化为 客户PO + 客户报价单)
+    // 校验：客户 PO / 报价单「至少给一个」(2026-07-03 放开:部分客户无正式 PO,允许纯手工建单)。
+    // 有 PO → 走上传预录;无 PO → 手工填明细即可。两者都没有才拦。
     const poFile = filesToUpload.find(f => f.fileType === 'customer_po');
-    if (!poFile) { showError('请上传客户 PO 文件（必传）'); return; }
-    if (!filesToUpload.find(f => f.fileType === 'customer_quote')) { showError('请上传客户报价单（必传）'); return; }
+    const quoteFile = filesToUpload.find(f => f.fileType === 'customer_quote');
+    const hasManualLines = (lineStyles.length > 0) || (poParseResult?.styles?.length > 0);
+    if (!poFile && !quoteFile && !hasManualLines) {
+      showError('请至少上传客户 PO / 报价单其中一份,或在下方「逐款明细」手工录入款色码');
+      return;
+    }
 
     // ═══════════════════════════════════════════════════════
     // 入口把控（2026-04-28）— 所有上传文件必须命名合规才能创建
@@ -1513,14 +1518,17 @@ function NewOrderWizard() {
 
             {/* ── 文件上传 ── */}
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4 pb-2 border-b border-gray-100">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2 pb-2 border-b border-gray-100">
                 文件上传
               </h3>
+              <p className="text-xs text-gray-500 mb-4">
+                有客户 PO → 上传自动预录款色码,业务再改;<b>没有 PO 的客户</b> → 可不传,直接在下方「逐款明细」手工录入。PO / 报价单至少给一样,或手工录明细即可建单。
+              </p>
               <div className="space-y-3">
                 {([
-                  // 2026-07 用户拍板:只留 客户PO + 客户报价单 + 尺码表,其余移除(内部成本核算单/生产制单/辅料表/装箱/工艺单)
-                  { name: 'customer_po_file',        label: '客户 PO（可多个）',  required: true,  multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
-                  { name: 'customer_quote_file',     label: '客户报价单（可多个）',  required: true,  multiple: true, stepKey: '_customer_quote' },
+                  // 2026-07-03 放开必传:PO/报价单改为可选(无PO客户可纯手工建单),提交时校验「至少一份文件或手工明细」
+                  { name: 'customer_po_file',        label: '客户 PO（可多个,可选）',  required: false, multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
+                  { name: 'customer_quote_file',     label: '客户报价单（可多个,可选）',  required: false, multiple: true, stepKey: '_customer_quote' },
                   { name: 'size_chart_file',         label: '尺码表（可多个）',  required: false, multiple: true, stepKey: '_size_chart', hint: '客户/技术部的尺寸表,生产任务单 tab 可直接查看' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
                   .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (
