@@ -3,7 +3,7 @@ import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { hasRoleInGroup } from '@/lib/domain/roles';
-import { getInventoryAvailability, listOrdersForIssue } from '@/app/actions/inventory';
+import { getInventoryBalance, listOrdersForIssue } from '@/app/actions/inventory';
 import { InventoryClient } from './InventoryClient';
 
 // 库存余额 + 领料/退料（W1）。收货自动入库;领料/退料由仓库/生产录。
@@ -25,8 +25,8 @@ export default async function InventoryPage() {
       <div className="mb-2">
         <Link href="/procurement" className="text-sm text-gray-500 hover:text-indigo-600">← 采购中心</Link>
       </div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">库存 · 可用量</h1>
-      <p className="text-sm text-gray-500 mb-6">可用 = 在库 − 预留 − 安全库存(SC-P2 唯一算法) · 收货自动入库 · 缺口红字。</p>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">🧱 库存中心</h1>
+      <p className="text-sm text-gray-500 mb-6">采购收货自动入库 · 生产领料/退料出入 · 出货尾料清点归库 · 可用 = 在库 − 预留 − 安全库存(唯一算法)。每笔进出都是 append-only 流水,余额实时派生。</p>
       {error ? (
         <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-600">{error}</div>
       ) : (

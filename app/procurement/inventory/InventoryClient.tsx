@@ -25,6 +25,13 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [detailTxns, setDetailTxns] = useState<any[]>([]);
   const [detailBusy, setDetailBusy] = useState(false);
+  // 库存中心汇总 + 搜索(W-P1)
+  const [search, setSearch] = useState('');
+  const s = search.trim().toLowerCase();
+  const filtered = s ? balance.filter((b: any) => String(b.material_name || b.material_key).toLowerCase().includes(s)) : balance;
+  const kinds = balance.length;
+  const shortageN = balance.filter((b: any) => Number(b.shortage) > 0).length;
+  const negN = balance.filter((b: any) => Number(b.on_hand) < 0).length;
   const orderLabel = (id: string) => {
     const o = orders.find((x: any) => x.id === id);
     return o ? (o.internal_order_no || o.order_no) : id.slice(0, 8);
@@ -62,7 +69,26 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div className="space-y-3">
+      {/* W-P1 库存中心汇总 + 搜索 */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+          <div className="text-2xl font-bold text-gray-900">{kinds}</div>
+          <div className="text-xs text-gray-500 mt-0.5">在库物料种数</div>
+        </div>
+        <div className={`rounded-xl border px-4 py-3 ${shortageN > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}>
+          <div className={`text-2xl font-bold ${shortageN > 0 ? 'text-amber-700' : 'text-gray-900'}`}>{shortageN}</div>
+          <div className="text-xs text-gray-500 mt-0.5">⚠ 缺口 / 需补货</div>
+        </div>
+        <div className={`rounded-xl border px-4 py-3 ${negN > 0 ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
+          <div className={`text-2xl font-bold ${negN > 0 ? 'text-red-600' : 'text-gray-900'}`}>{negN}</div>
+          <div className="text-xs text-gray-500 mt-0.5">🔴 负库存(领超/漏入)</div>
+        </div>
+      </div>
+      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索物料名称…"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gray-50 text-left text-xs text-gray-500">
@@ -76,7 +102,10 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {balance.map((b: any) => (
+          {filtered.length === 0 && (
+            <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-400">无匹配「{search}」的物料</td></tr>
+          )}
+          {filtered.map((b: any) => (
             <Fragment key={b.material_key}>
               <tr className="hover:bg-gray-50">
                 <td className="px-4 py-2.5 text-gray-800">{b.material_name || b.material_key}</td>
@@ -95,7 +124,7 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
                   )}
                 </td>
               </tr>
-              {active?.key === b.material_key && (
+              {active && active.key === b.material_key && (
                 <tr>
                   <td colSpan={7} className="px-4 py-3 bg-gray-50">
                     <div className="flex flex-wrap items-end gap-2">
@@ -153,6 +182,7 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
