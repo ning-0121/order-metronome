@@ -982,8 +982,25 @@ export async function getProcurementQueues(): Promise<{
         reqCount.set(r.order_id, (reqCount.get(r.order_id) || 0) + 1);
         if (r.timing_status === 'late') lateCount.set(r.order_id, (lateCount.get(r.order_id) || 0) + 1);
       }
+      // 自愈(2026-07-03):已全部下单但节点没完成的订单(如钩子上线前下的单)
+      // → 顺手自动完成「采购下单」节点并本次出队,不再挂着"待采购"
+      const { data: allItems } = await (supabase.from('procurement_items') as any)
+        .select('order_id, status').in('order_id', orderIds);
+      const ORDERED = ['ordered', 'partially_received', 'completed', 'closed'];
+      const itemsByOrder = new Map<string, string[]>();
+      for (const it of (allItems || [])) {
+        const arr = itemsByOrder.get(it.order_id) || [];
+        arr.push(it.status); itemsByOrder.set(it.order_id, arr);
+      }
       for (const p of alive) {
         if (doneOrders.has(p.order_id)) continue;
+        const sts = itemsByOrder.get(p.order_id) || [];
+        if (sts.length > 0 && sts.every(s => ORDERED.includes(s))) {
+          try {
+            const { autoCompleteProcurementPlacedForOrder } = await import('@/app/actions/procurement-items');
+            if (await autoCompleteProcurementPlacedForOrder(supabase, p.order_id)) { doneOrders.add(p.order_id); continue; }
+          } catch { /* 自愈失败不影响队列 */ }
+        }
         pendingRequests.push({
           order_id: p.order_id,
           order_no: p.orders?.order_no ?? null,

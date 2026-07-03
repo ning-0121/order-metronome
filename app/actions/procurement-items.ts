@@ -88,6 +88,65 @@ export async function listProcurementItems(orderId: string) {
  * 分步查询 + JS join(避开深层 PostgREST 嵌套 join 脆弱)。保留采购已填决策,仅刷新系统字段。
  */
 /**
+ * 采购下单节点自动完成(2026-07-03:下了采购单,「待采购订单」卡就该消失)。
+ * 条件:该订单有采购项 且 全部已下单(ordered 及之后)→ 自动完成
+ * procurement_order_placed 节点(系统内采购单即证据;留痕+触发置信度重算)。
+ * 幂等:节点不存在/已完成静默跳过。触发点:采购单下单钩子 + 采购中心队列自愈。
+ */
+export async function autoCompleteProcurementPlacedForOrder(supabase: any, orderId: string, poNo?: string | null): Promise<boolean> {
+  const ORDERED = ['ordered', 'partially_received', 'completed', 'closed'];
+  const { data: items } = await (supabase.from('procurement_items') as any)
+    .select('status').eq('order_id', orderId);
+  if (!items || items.length === 0) return false;
+  if (!items.every((i: any) => ORDERED.includes(i.status))) return false;
+
+  const { data: ms } = await (supabase.from('milestones') as any)
+    .select('id, status').eq('order_id', orderId).eq('step_key', 'procurement_order_placed').maybeSingle();
+  if (!ms) return false;
+  const st = String((ms as any).status || '').toLowerCase();
+  if (st === 'done' || st === '已完成') return false;
+
+  const now = new Date().toISOString();
+  const { error } = await (supabase.from('milestones') as any)
+    .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now }).eq('id', (ms as any).id);
+  if (error) return false;
+  await (supabase.from('milestone_logs') as any).insert({
+    milestone_id: (ms as any).id,
+    order_id: orderId,
+    action: 'status_transition',
+    note: `全部采购项已下单${poNo ? `(${poNo})` : ''} → 系统自动完成「采购下单」节点(系统内采购单即证据)`,
+    payload: { auto: true, source: 'purchase_order.placed', po_no: poNo || null },
+  }).then(() => {}, () => {});
+  void (async () => {
+    try {
+      const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');
+      await recomputeDeliveryConfidence(orderId, {
+        type: 'milestone_status_changed',
+        source: `milestone:${(ms as any).id}`,
+        severity: 'info',
+        payload: { milestone_id: (ms as any).id, new_status: 'done', auto: 'procurement_order_placed' },
+      });
+    } catch { /* 忽略 */ }
+  })();
+  return true;
+}
+
+/** 下单钩子:该采购单涉及的订单逐一尝试自动完成「采购下单」节点(fire-and-forget)。 */
+export async function autoCompleteProcurementPlacedForPO(poId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const { data: po } = await (supabase.from('purchase_orders') as any)
+    .select('po_no').eq('id', poId).maybeSingle();
+  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+    .select('order_id').eq('purchase_order_id', poId);
+  const orderIds = [...new Set((lines || []).map((l: any) => l.order_id).filter(Boolean))];
+  for (const oid of orderIds) {
+    try { await autoCompleteProcurementPlacedForOrder(supabase, oid as string, (po as any)?.po_no); } catch { /* 单个失败不阻断 */ }
+  }
+}
+
+/**
  * 按款核定大货单耗(2026-07-03 用户拍板:不填好每个单款的大货单耗,不许归并)。
  * 列出该订单 BOM 的用料行(布料必核;辅料/包装可选核),含开发单耗对照。
  */

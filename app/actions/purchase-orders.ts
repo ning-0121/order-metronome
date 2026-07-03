@@ -239,6 +239,11 @@ export async function placePurchaseOrder(poId: string): Promise<{
       const { syncProcurementItemsOrderedForPO } = await import('@/app/actions/procurement-items');
       await syncProcurementItemsOrderedForPO(poId);
     } catch (e: any) { console.warn('[placePurchaseOrder] 采购项状态联动失败(不阻断下单):', e?.message); }
+    // 全部采购项已下单 → 自动完成「采购下单」节点,「待采购订单」卡随之消失(2026-07-03)
+    try {
+      const { autoCompleteProcurementPlacedForPO } = await import('@/app/actions/procurement-items');
+      await autoCompleteProcurementPlacedForPO(poId);
+    } catch (e: any) { console.warn('[placePurchaseOrder] 采购下单节点自动完成失败(不阻断):', e?.message); }
     revalidatePath(`/procurement/po/${poId}`);
     return { ok: true };
   };
