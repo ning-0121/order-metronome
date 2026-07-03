@@ -258,10 +258,21 @@ export async function getProcurementItemSources(itemId: string) {
 }
 
 /** 采购确认:填大货单耗/损耗/安全库存/MOQ/供应商/价/决策,重算 suggested。 */
+/** 核料确认/参数编辑 = 采购的职权(2026-07-03 用户拍板:归并后必须采购确认才安全) */
+async function requireProcurementRole(supabase: any, userId: string): Promise<string | null> {
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', userId).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  return roles.some(r => ['procurement', 'procurement_manager', 'admin'].includes(r))
+    ? null : '仅采购/采购经理/管理员可编辑和确认核料(业务执行请走「补数量申请」)';
+}
+
 export async function updateProcurementItem(itemId: string, orderId: string, fields: Record<string, any>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
 
   const { data: item } = await (supabase.from('procurement_items') as any)
     .select('total_required_qty, development_consumption').eq('id', itemId).single();
@@ -298,6 +309,8 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
   const VALID = ['draft', 'reviewing', 'confirmed', 'ordered', 'partially_received', 'completed', 'closed'];
   if (!VALID.includes(status)) return { error: '非法状态' };
 

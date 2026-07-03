@@ -8,6 +8,7 @@ import {
 import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
+import { computeSuggestedPurchaseQty } from '@/lib/services/procurement-consolidation';
 
 /** 补采购财务审批状态 → 显示 */
 const SUPP_STATUS: Record<string, { label: string; cls: string }> = {
@@ -182,6 +183,16 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
 
   const sel = items.find(i => i.id === selId);
+  // 实时建议采购(2026-07-03 用户拍板:改任何数立即看到结果)——
+  // 与服务端保存时用的是同一个内核纯函数,单一算法口径(ADR-005),不会出现两套数
+  const liveSuggested = sel ? computeSuggestedPurchaseQty({
+    total_required_qty: sel.total_required_qty,
+    development_consumption: sel.development_consumption,
+    production_consumption: form.production_consumption,
+    procurement_loss_pct: form.procurement_loss_pct,
+    safety_stock_qty: form.safety_stock_qty,
+    moq: form.moq,
+  }) : null;
 
   return (
     <div className="space-y-4">
@@ -408,8 +419,31 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             <Field label="采购损耗%" k="procurement_loss_pct" form={form} set={set} type="number" />
             <Field label="安全库存" k="safety_stock_qty" form={form} set={set} type="number" />
             <Field label="MOQ" k="moq" form={form} set={set} type="number" />
-            <Read label="建议采购(系统算)" value={sel.suggested_purchase_qty} />
-            <Field label="最终采购量" k="final_purchase_qty" form={form} set={set} type="number" />
+            <div>
+              <span className="text-gray-500">建议采购(实时算)</span>
+              <div className="mt-1 w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 font-semibold text-emerald-800"
+                title="= 总需求 × (大货单耗÷开发单耗) × (1+采购损耗%) + 安全库存,按 MOQ 向上取整。改左边任何数,这里立即重算。">
+                {liveSuggested ?? '—'}
+                {liveSuggested != null && sel.suggested_purchase_qty != null && liveSuggested !== Number(sel.suggested_purchase_qty) && (
+                  <span className="ml-1 text-[10px] font-normal text-emerald-600">(保存前:{sel.suggested_purchase_qty})</span>
+                )}
+              </div>
+            </div>
+            <label className="block">
+              <span className="text-gray-500">最终采购量(人拍板)</span>
+              <div className="flex gap-1 mt-1">
+                <input type="number" step="any" value={form.final_purchase_qty ?? ''}
+                  placeholder={liveSuggested != null ? `留空=按建议 ${liveSuggested}` : ''}
+                  onChange={e => set('final_purchase_qty', e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-2 py-1.5" />
+                {liveSuggested != null && (
+                  <button onClick={() => set('final_purchase_qty', String(liveSuggested))}
+                    title="把系统建议填入最终采购量"
+                    className="shrink-0 text-[10px] px-1.5 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">按建议</button>
+                )}
+              </div>
+              <span className="text-[10px] text-gray-400">留空 = 下单时自动按建议采购量;要整匹/凑量就自己填,你说了算</span>
+            </label>
           </div>
 
           {/* 库存抵扣:该物料有可用尾料 → 一键从最终采购量扣减 */}
