@@ -82,12 +82,16 @@ export async function consolidateOrderProcurementItems(orderId: string) {
       .select('id, color, specification, qty_per_piece, bom_id, material_name, loss_rate').in('id', slIds);
     for (const s of (sls || [])) slMap.set(s.id, s);
   }
-  // 3) materials_bom（master_id）
+  // 3) materials_bom（master_id + 色卡/辅料图,图随归并流转到采购）
   const bomIds = Array.from(new Set([...slMap.values()].map((s: any) => s.bom_id).filter(Boolean)));
   const bomMaster = new Map<string, string | null>();
+  const bomImages = new Map<string, string[]>();
   if (bomIds.length) {
-    const { data: bs } = await (supabase.from('materials_bom') as any).select('id, material_master_id').in('id', bomIds);
-    for (const b of (bs || [])) bomMaster.set(b.id, b.material_master_id);
+    const { data: bs } = await (supabase.from('materials_bom') as any).select('id, material_master_id, image_urls').in('id', bomIds);
+    for (const b of (bs || [])) {
+      bomMaster.set(b.id, b.material_master_id);
+      if (Array.isArray(b.image_urls) && b.image_urls.length) bomImages.set(b.id, b.image_urls);
+    }
   }
 
   // 4) 按 key 分组
@@ -108,15 +112,17 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     const dev = sl?.qty_per_piece != null ? Number(sl.qty_per_piece) : null;
     const loss = sl?.loss_rate != null ? Number(sl.loss_rate) : null;
     let g = groups.get(key);
-    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null }; groups.set(key, g); }
+    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, imgs: [] as string[] }; groups.set(key, g); }
     g.total += net; g.count += 1;
     if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; }   // 主导来源的开发单耗/损耗作代表值
+    // 汇集来源图(去重,封顶 8 张)
+    const imgs = sl?.bom_id ? (bomImages.get(sl.bom_id) || []) : [];
+    for (const u of imgs) if (g.imgs.length < 8 && !g.imgs.includes(u)) g.imgs.push(u);
   }
 
-  // 5) 现有采购项
+  // 5) 现有采购项(select * :image_urls 等新列迁移未执行时也不报缺列)
   const { data: existing } = await (supabase.from('procurement_items') as any)
-    .select('id, consolidation_key, status, total_required_qty, production_consumption, development_consumption, procurement_loss_pct, safety_stock_qty, moq')
-    .eq('order_id', orderId);
+    .select('*').eq('order_id', orderId);
   const exMap = new Map<string, any>((existing || []).map((e: any) => [e.consolidation_key, e]));
 
   let created = 0, updated = 0, flagged = 0, removed = 0;
@@ -139,6 +145,13 @@ export async function consolidateOrderProcurementItems(orderId: string) {
         procurement_loss_pct: lossRep,
         suggested_purchase_qty: suggested, updated_at: now,
       };
+      // 图片合并:来源 BOM 新增的图并进去,采购已补拍的保留(union 去重,封顶 8)
+      if (g.imgs.length > 0 && 'image_urls' in (ex as any)) {
+        const cur: string[] = Array.isArray((ex as any).image_urls) ? (ex as any).image_urls : [];
+        const merged = [...cur];
+        for (const u of g.imgs) if (merged.length < 8 && !merged.includes(u)) merged.push(u);
+        if (merged.length !== cur.length) upd.image_urls = merged;
+      }
       if (Number(ex.total_required_qty) !== g.total && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
       await (supabase.from('procurement_items') as any).update(upd).eq('id', ex.id);
       updated++;
@@ -157,6 +170,7 @@ export async function consolidateOrderProcurementItems(orderId: string) {
         procurement_loss_pct: g.lossTop,      // 预填损耗参考(可见可改;总需求已是裸数,不再暗含)
         suggested_purchase_qty: suggested, status: 'draft', created_by: user.id,
       };
+      if (g.imgs.length > 0) row.image_urls = g.imgs;   // 业务传的色卡/辅料图随归并流转
       // 品类补:采购下单后才冒出来的新项 = 漏采补录 → 标补采购,待财务审批
       if (afterProcurementPlaced) {
         row.is_supplement = true;
@@ -166,10 +180,10 @@ export async function consolidateOrderProcurementItems(orderId: string) {
         row.finance_approval_status = 'pending';
       }
       let { error: iErr } = await (supabase.from('procurement_items') as any).insert(row);
-      if (iErr && afterProcurementPlaced && /column .* does not exist|is_supplement|finance_approval/i.test(iErr.message || '')) {
-        // 补采购迁移未执行 → 降级为普通项插入(不 brick 核料),提醒执行迁移
-        console.warn('[consolidate] 补采购字段缺失,降级插入。请执行 20260703_procurement_supplement.sql');
-        const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, ...plain } = row;
+      if (iErr && /column .* does not exist|is_supplement|finance_approval|image_urls/i.test(iErr.message || '')) {
+        // 补采购/图片迁移未执行 → 降级为普通项插入(不 brick 核料),提醒执行迁移
+        console.warn('[consolidate] 新列缺失,降级插入。请执行 20260703 系列迁移(supplement/images)');
+        const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, image_urls, ...plain } = row;
         ({ error: iErr } = await (supabase.from('procurement_items') as any).insert(plain));
       }
       if (iErr) return { error: friendlyError(iErr) };
@@ -301,6 +315,34 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
 
   const { error } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
   if (error) return { error: friendlyError(error) };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
+/**
+ * 更新采购项图片(色卡/辅料参考图)。
+ * 与核料参数不同:图片是证据,业务执行和采购都可增删(2026-07-03 用户拍板)。
+ */
+export async function updateProcurementItemImages(itemId: string, orderId: string, imageUrls: string[]) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!roles.some(r => ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
+    return { error: '无权更新图片' };
+  }
+  const clean = (Array.isArray(imageUrls) ? imageUrls : [])
+    .filter(u => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 8);
+  const { error } = await (supabase.from('procurement_items') as any)
+    .update({ image_urls: clean, updated_at: new Date().toISOString() }).eq('id', itemId);
+  if (error) {
+    if (/image_urls|column .* does not exist/i.test(error.message || '')) {
+      return { error: '图片列尚未建立:请先在 Supabase 执行 20260703_procurement_item_images.sql' };
+    }
+    return { error: friendlyError(error) };
+  }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }

@@ -2,9 +2,10 @@
 import { useEffect, useState } from 'react';
 import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
-  updateProcurementItem, updateProcurementItemStatus,
+  updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
 } from '@/app/actions/procurement-items';
+import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
@@ -150,6 +151,38 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setSaving(false);
     if ((res as any).error) { setMsg((res as any).error); return; }
     await reload();
+    // 日常连续核料:确认完自动展开下一项待核(2026-07-03 用户拍板加强确认流)
+    if (status === 'confirmed') {
+      const next = items.find(i => i.id !== selId && ['draft', 'reviewing'].includes(i.status));
+      if (next) { await select(next); setMsg(`✅ 已确认,自动跳到下一项:${next.material_name || ''}${next.color ? ' · ' + next.color : ''}`); }
+      else { setSelId(null); setMsg('✅ 已确认 — 该单核料全部处理完,可「生成执行行」'); }
+    }
+  }
+
+  // ── 色卡/辅料图(业务执行+采购都可传/删;上传进公开桶 product-images,与 BOM 同桶) ──
+  const [imgBusy, setImgBusy] = useState(false);
+  async function uploadItemImage(file: File) {
+    if (!sel) return;
+    setImgBusy(true); setMsg('');
+    try {
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `procurement/${orderId}/${sel.id}-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type });
+      if (error) { setMsg('上传失败:' + error.message); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      const next = [...(Array.isArray(sel.image_urls) ? sel.image_urls : []), data.publicUrl].slice(0, 8);
+      const res = await updateProcurementItemImages(sel.id, orderId, next);
+      if ((res as any).error) { setMsg((res as any).error); return; }
+      await reload();
+    } finally { setImgBusy(false); }
+  }
+  async function removeItemImage(url: string) {
+    if (!sel || !window.confirm('移除这张图?(不删除原文件,只从此项摘掉)')) return;
+    const next = (Array.isArray(sel.image_urls) ? sel.image_urls : []).filter((u: string) => u !== url);
+    const res = await updateProcurementItemImages(sel.id, orderId, next);
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    await reload();
   }
 
   // 数量补:对已有项申请补量(业务执行提交;服务端角色把关)
@@ -284,7 +317,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     {it.needs_reconfirm && <span title="需重新确认" className="text-amber-600">⚠ </span>}
                     {it.is_supplement && <span title={`补采购:${it.supplement_reason || ''}`} className={`mr-1 px-1.5 py-px rounded text-[10px] font-medium ${SUPP_STATUS[it.finance_approval_status]?.cls || 'bg-amber-100 text-amber-700'}`}>🟠补</span>}
                     {it.item_no || '—'}</td>
-                  <td className="py-2 px-2 font-medium text-gray-900">{it.material_name || '—'}</td>
+                  <td className="py-2 px-2 font-medium text-gray-900">
+                    <span className="inline-flex items-center gap-1.5">
+                      {Array.isArray(it.image_urls) && it.image_urls[0] && (
+                        <img src={it.image_urls[0]} alt="" className="w-7 h-7 rounded object-cover border border-gray-200 shrink-0" />
+                      )}
+                      {it.material_name || '—'}
+                    </span>
+                  </td>
                   <td className="py-2 px-2"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{CAT_LABEL[it.category] || it.category || '—'}</span></td>
                   <td className="py-2 px-2 text-gray-600">{it.color || '—'}</td>
                   <td className="py-2 px-2 text-gray-600">{it.unit || '—'}</td>
@@ -394,6 +434,33 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               )}
             </div>
           )}
+
+          {/* 色卡/辅料图(业务上传随归并流转;业务执行+采购都可补拍/移除) */}
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-500">🎨 色卡 / 辅料参考图({(sel.image_urls || []).length})<span className="font-normal text-gray-400"> · 业务「原辅料」传的图自动带过来;双方都可补</span></span>
+              <label className={`text-xs px-2.5 py-1 rounded-lg cursor-pointer font-medium ${imgBusy ? 'bg-gray-100 text-gray-400' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+                {imgBusy ? '上传中…' : '📷 上传图片'}
+                <input type="file" accept="image/*" className="hidden" disabled={imgBusy}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadItemImage(f); }} />
+              </label>
+            </div>
+            {(sel.image_urls || []).length === 0 ? (
+              <p className="text-xs text-gray-400">暂无图片 — 业务在「原辅料」上传色卡后点「核料归并/刷新」会自动带入;或直接点上方上传</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(sel.image_urls as string[]).map((u, i) => (
+                  <span key={i} className="relative group">
+                    <a href={u} target="_blank" rel="noreferrer">
+                      <img src={u} alt={`图${i + 1}`} className="w-16 h-16 rounded-lg object-cover border border-gray-200 hover:scale-[2.2] hover:z-10 transition-transform origin-top-left" />
+                    </a>
+                    <button onClick={() => removeItemImage(u)} title="移除"
+                      className="absolute -top-1.5 -right-1.5 hidden group-hover:flex w-4 h-4 items-center justify-center rounded-full bg-red-500 text-white text-[10px]">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* 来源明细(live;粒度=物料行)*/}
           <div className="rounded-lg border border-gray-200 bg-white p-3">
