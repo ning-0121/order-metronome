@@ -26,6 +26,22 @@ export async function listProcurementItems(orderId: string) {
   const { data, error } = await (supabase.from('procurement_items') as any)
     .select('*').eq('order_id', orderId).order('item_no');
   if (error) return { error: friendlyError(error) };
+  // 录入留痕:创建/确认/补采购申请/财务审批 → 姓名(一次查全,失败不阻断)
+  try {
+    const uids = [...new Set((data || []).flatMap((r: any) =>
+      [r.created_by, r.confirmed_by, r.supplement_requested_by, r.finance_approved_by]).filter(Boolean))];
+    if (uids.length > 0) {
+      const { data: profs } = await (supabase.from('profiles') as any).select('user_id, name').in('user_id', uids);
+      const nameMap = new Map<string, string>((profs || []).map((p: any) => [p.user_id, p.name]));
+      const nm = (uid: any) => (uid ? nameMap.get(uid) || null : null);
+      for (const r of (data || [])) {
+        (r as any).created_by_name = nm(r.created_by);
+        (r as any).confirmed_by_name = nm(r.confirmed_by);
+        (r as any).supplement_requested_by_name = nm(r.supplement_requested_by);
+        (r as any).finance_approved_by_name = nm(r.finance_approved_by);
+      }
+    }
+  } catch { /* 姓名解析失败不影响列表 */ }
   return { data: data || [] };
 }
 

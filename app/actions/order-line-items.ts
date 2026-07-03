@@ -127,6 +127,7 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
         fabric_consumption: fabricCons != null && !isNaN(fabricCons) ? fabricCons : null,
         fabric_unit: st?.fabric_unit?.trim() || null,
         source: 'manual',
+        created_by: user.id,        // 录入留痕(整单替换式保存=最后保存人)
       });
     }
   }
@@ -143,10 +144,10 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
   }
   if (rows.length > 0) {
     let { error: insErr } = await (supabase.from('order_line_items') as any).insert(rows);
-    if (insErr && /product_name_en|carton_count|column .* does not exist/i.test(insErr.message || '')) {
-      // 双语/箱数迁移未执行 → 降级去掉新列重插(不 brick 保存),提醒执行迁移
-      console.warn('[saveOrderLineItems] 双语/箱数列缺失,降级保存。请执行 20260703_line_items_bilingual_cartons.sql');
-      const plain = rows.map(({ product_name_en, carton_count, ...rest }) => rest);
+    if (insErr && /product_name_en|carton_count|created_by|column .* does not exist/i.test(insErr.message || '')) {
+      // 新列迁移未执行 → 降级去掉新列重插(不 brick 保存),提醒执行迁移
+      console.warn('[saveOrderLineItems] 双语/箱数/录入人列缺失,降级保存。请执行 20260703 系列迁移');
+      const plain = rows.map(({ product_name_en, carton_count, created_by, ...rest }) => rest);
       ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(plain));
     }
     if (insErr) return { error: '写明细失败:' + insErr.message };

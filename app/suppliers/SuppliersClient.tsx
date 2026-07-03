@@ -221,6 +221,7 @@ export function SuppliersClient({ suppliers, canBasic, canFinance, error }: {
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">
                     {s.contact_name || ''} {s.phone || ''} · 账期 {s.net_days != null ? s.net_days + '天' : '—'}
+                    {s.created_by_name && <span className="text-gray-300"> · {s.created_by_name} 录入{s.created_at ? ` ${new Date(s.created_at).getMonth() + 1}/${new Date(s.created_at).getDate()}` : ''}</span>}
                   </div>
                 </button>
                 {canBasic && (

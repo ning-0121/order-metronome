@@ -282,7 +282,7 @@ export default function MaterialMasterPage() {
             <div className="overflow-x-auto bg-white rounded-xl border border-gray-200">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-gray-100 text-left text-gray-500">
-                  {['编码', '名称', '类别', '单位', '参考价(净)', '交期', '规格', '用过', ''].map(h => (
+                  {['编码', '名称', '类别', '单位', '参考价(净)', '交期', '规格', '用过', '录入', ''].map(h => (
                     <th key={h} className="py-2 px-3 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr></thead>
@@ -297,6 +297,9 @@ export default function MaterialMasterPage() {
                       <td className="py-2 px-3 text-gray-600">{r.default_lead_days ?? '—'}</td>
                       <td className="py-2 px-3 text-gray-500 max-w-[160px] truncate">{r.specification || '—'}</td>
                       <td className="py-2 px-3 text-gray-400 text-xs">{r.usage_count || 0}</td>
+                      <td className="py-2 px-3 text-gray-400 text-xs whitespace-nowrap" title={r.created_at ? `录入于 ${String(r.created_at).slice(0, 16).replace('T', ' ')}` : ''}>
+                        {r.created_by_name || '—'}{r.created_at ? ` ${new Date(r.created_at).getMonth() + 1}/${new Date(r.created_at).getDate()}` : ''}
+                      </td>
                       <td className="py-2 px-3 whitespace-nowrap">
                         <div className="flex gap-2">
                           <button onClick={() => setDetailMat(r)} className="text-xs text-emerald-600 hover:underline">供应链</button>

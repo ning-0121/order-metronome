@@ -25,6 +25,7 @@ const STATUS_FLOW = [
   { key: 'completed', label: '完成' }, { key: 'closed', label: '关闭' },
 ];
 const statusLabel = (s: string) => STATUS_FLOW.find(x => x.key === s)?.label || s;
+const fmtD = (iso: any) => iso ? `${new Date(iso).getMonth() + 1}/${new Date(iso).getDate()}` : '';
 
 const FORM_KEYS = [
   'production_consumption', 'procurement_loss_pct', 'safety_stock_qty', 'moq', 'purchase_unit', 'final_purchase_qty',
@@ -329,7 +330,13 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       {sel && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-4 space-y-4">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-sm font-semibold text-gray-800">{sel.item_no} · {sel.material_name} {sel.color ? `· ${sel.color}` : ''}</div>
+            <div className="text-sm font-semibold text-gray-800">
+              {sel.item_no} · {sel.material_name} {sel.color ? `· ${sel.color}` : ''}
+              <span className="ml-2 font-normal text-[11px] text-gray-400">
+                {sel.created_by_name ? `录入:${sel.created_by_name} ${fmtD(sel.created_at)}` : ''}
+                {sel.confirmed_by_name ? ` · 确认:${sel.confirmed_by_name} ${fmtD(sel.confirmed_at)}` : ''}
+              </span>
+            </div>
             <div className="flex items-center gap-2">
               {!sel.is_supplement && (
                 <button onClick={() => requestSupp(sel)}
@@ -355,7 +362,11 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700">✖ 驳回(财务)</button>
                 </>}
               </div>
-              <p className="text-amber-700">原因:{sel.supplement_reason || '—'}</p>
+              <p className="text-amber-700">
+                原因:{sel.supplement_reason || '—'}
+                {sel.supplement_requested_by_name && <span className="text-amber-500"> · 申请人:{sel.supplement_requested_by_name} {fmtD(sel.supplement_requested_at)}</span>}
+                {sel.finance_approved_by_name && <span className="text-amber-500"> · 审批:{sel.finance_approved_by_name} {fmtD(sel.finance_approved_at)}</span>}
+              </p>
               {sel.finance_approval_status === 'rejected' && sel.finance_reject_reason && (
                 <p className="text-red-600">驳回原因:{sel.finance_reject_reason}</p>
               )}

@@ -28,7 +28,7 @@ export async function listMaterialMaster(params: { search?: string; category?: s
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   let q = (supabase.from('material_master') as any)
-    .select('id, material_code, material_name, category, default_unit, default_consumption, default_supplier_name, default_lead_days, specification, reference_price, usage_count, status')
+    .select('id, material_code, material_name, category, default_unit, default_consumption, default_supplier_name, default_lead_days, specification, reference_price, usage_count, status, created_by, created_at')
     .eq('is_temporary', false)
     .eq('status', 'active');
   if (params.category) q = q.eq('category', params.category);
@@ -38,6 +38,15 @@ export async function listMaterialMaster(params: { search?: string; category?: s
   }
   const { data, error } = await q.order('usage_count', { ascending: false }).order('material_name').limit(500);
   if (error) return { error: friendlyError(error) };
+  // 录入留痕:created_by → 姓名(一次查全,失败不阻断列表)
+  try {
+    const uids = [...new Set((data || []).map((r: any) => r.created_by).filter(Boolean))];
+    if (uids.length > 0) {
+      const { data: profs } = await (supabase.from('profiles') as any).select('user_id, name').in('user_id', uids);
+      const nameMap = new Map<string, string>((profs || []).map((p: any) => [p.user_id, p.name]));
+      for (const r of (data || [])) (r as any).created_by_name = r.created_by ? (nameMap.get(r.created_by) || null) : null;
+    }
+  } catch { /* 姓名解析失败不影响列表 */ }
   return { data };
 }
 
