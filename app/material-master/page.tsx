@@ -120,6 +120,25 @@ export default function MaterialMasterPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ summary: string; details: Array<{ row: number; name: string; reason: string }> } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ⚡ 页面内批量录入(不用 Excel):多行表格一键提交,复用 bulkImportMaterials 同查重同报告
+  const emptyBatchRow = () => ({ material_name: '', category: 'fabric', default_unit: '', specification: '', reference_price: '', default_lead_days: '' });
+  const [batchRows, setBatchRows] = useState<any[] | null>(null);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const setBatchCell = (i: number, k: string, v: string) =>
+    setBatchRows(rows => (rows || []).map((r, x) => x === i ? { ...r, [k]: v } : r));
+
+  async function submitBatch() {
+    const rows = (batchRows || []).filter(r => String(r.material_name || '').trim());
+    if (rows.length === 0) { alert('至少填一行物料名称'); return; }
+    setBatchSaving(true); setImportResult(null); setMsg('');
+    const res = await bulkImportMaterials(rows as any);
+    setBatchSaving(false);
+    if (res.error) { alert(res.error); return; }
+    setImportResult({ summary: importResultText(res), details: [...(res.skipped || []), ...(res.failed || [])] });
+    if ((res.created || 0) > 0) setBatchRows(null);   // 有成功→收起;全被跳过→留着改
+    loadLib();
+  }
   async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -191,6 +210,10 @@ export default function MaterialMasterPage() {
             <button onClick={loadLib} className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">搜索</button>
             <button onClick={openNew} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">+ 新建物料</button>
             {canManage && <>
+              <button onClick={() => setBatchRows(batchRows ? null : Array.from({ length: 5 }, emptyBatchRow))}
+                className="px-3 py-2 rounded-lg bg-indigo-500 text-white text-sm font-medium hover:bg-indigo-600">
+                {batchRows ? '收起批量' : '⚡ 批量录入'}
+              </button>
               <button onClick={() => downloadExcelTemplate('物料导入模板.xlsx',
                 ['物料名称*', '类别*', '单位', '规格(成分/克重)', '参考价(不含税)', '默认损耗率%', '默认交期(天)'],
                 [['例:280g仿锦棉', '面料', '米', '96%锦纶4%氨纶 280g', '23.5', '3', '15']])}
@@ -202,6 +225,44 @@ export default function MaterialMasterPage() {
               <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
             </>}
           </div>
+
+          {batchRows && (
+            <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/30 p-3 space-y-2">
+              <p className="text-xs text-gray-600">⚡ 批量录入:名称+类别必填;同名同类别同规格自动跳过;编码自动生成。布料变体(不同克重)在「规格」里区分。</p>
+              <div className="overflow-x-auto">
+                <table className="text-xs w-full">
+                  <thead><tr className="text-gray-400 text-left">
+                    {['名称 *', '类别 *', '单位', '规格(克重/门幅)', '参考价(净)', '交期(天)'].map(h => (
+                      <th key={h} className="px-1 py-1 font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {batchRows.map((r, i) => (
+                      <tr key={i}>
+                        <td className="px-1 py-0.5"><input value={r.material_name} onChange={e => setBatchCell(i, 'material_name', e.target.value)} placeholder="仿锦直贡呢拉毛" className="w-full min-w-[140px] rounded border border-gray-300 px-2 py-1.5 bg-white" /></td>
+                        <td className="px-1 py-0.5">
+                          <select value={r.category} onChange={e => setBatchCell(i, 'category', e.target.value)} className="w-20 rounded border border-gray-300 px-1 py-1.5 bg-white">
+                            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-1 py-0.5"><input value={r.default_unit} onChange={e => setBatchCell(i, 'default_unit', e.target.value)} placeholder="米/kg/个" className="w-16 rounded border border-gray-300 px-2 py-1.5 bg-white" /></td>
+                        <td className="px-1 py-0.5"><input value={r.specification} onChange={e => setBatchCell(i, 'specification', e.target.value)} placeholder="260g 门幅150" className="w-32 rounded border border-gray-300 px-2 py-1.5 bg-white" /></td>
+                        <td className="px-1 py-0.5"><input type="number" step="any" value={r.reference_price} onChange={e => setBatchCell(i, 'reference_price', e.target.value)} className="w-20 rounded border border-gray-300 px-2 py-1.5 bg-white" /></td>
+                        <td className="px-1 py-0.5"><input type="number" value={r.default_lead_days} onChange={e => setBatchCell(i, 'default_lead_days', e.target.value)} className="w-16 rounded border border-gray-300 px-2 py-1.5 bg-white" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setBatchRows([...batchRows, emptyBatchRow()])} className="text-xs text-indigo-600 hover:underline">+ 加行</button>
+                <button onClick={submitBatch} disabled={batchSaving}
+                  className="ml-auto px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                  {batchSaving ? '提交中…' : `提交(${batchRows.filter(r => String(r.material_name || '').trim()).length} 条)`}
+                </button>
+              </div>
+            </div>
+          )}
 
           {importResult && (
             <div className="mb-4 text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1">

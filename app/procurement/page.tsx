@@ -58,6 +58,9 @@ export default async function ProcurementCenterPage() {
           <Link href="/suppliers" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50">
             🏢 供应商
           </Link>
+          <Link href="/material-master" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50">
+            🧱 物料库
+          </Link>
           <Link href="/procurement/cost" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50">
             💰 成本核算
           </Link>

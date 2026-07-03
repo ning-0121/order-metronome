@@ -20,6 +20,26 @@ export function SuppliersClient({ suppliers, canBasic, canFinance, error }: {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ summary: string; details: Array<{ row: number; name: string; reason: string }> } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // ⚡ 页面内批量录入(不用 Excel):多行表格,一键提交,复用同一套查重+报告
+  const emptyBatchRow = () => ({ name: '', main_category: '', contact_name: '', phone: '', net_days: '' });
+  const [batchRows, setBatchRows] = useState<any[] | null>(null);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const setBatchCell = (i: number, k: string, v: string) =>
+    setBatchRows(rows => (rows || []).map((r, x) => x === i ? { ...r, [k]: v } : r));
+
+  async function submitBatch() {
+    const rows = (batchRows || []).filter(r => String(r.name || '').trim());
+    if (rows.length === 0) { alert('至少填一行供应商名称'); return; }
+    setBatchSaving(true); setImportResult(null);
+    const res = await bulkImportSuppliers(rows.map(r => ({
+      ...r, net_days: r.net_days === '' ? null : Number(r.net_days),
+    })));
+    setBatchSaving(false);
+    if (res.error) { alert(res.error); return; }
+    setImportResult({ summary: importResultText(res), details: [...(res.skipped || []), ...(res.failed || [])] });
+    setBatchRows((res.created || 0) > 0 ? null : batchRows);   // 有成功→收起;全被跳过→留着改
+    router.refresh();
+  }
 
   function loadRow(s: any) {
     setEditId(s.id);
@@ -120,20 +140,58 @@ export function SuppliersClient({ suppliers, canBasic, canFinance, error }: {
           </div>
         </section>
 
-        {/* Excel 批量导入 */}
+        {/* 批量录入(页面内多行) + Excel 批量导入 */}
         {canBasic && (
           <section className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-            <h2 className="text-sm font-semibold text-gray-800">📥 Excel 批量导入</h2>
-            <p className="text-xs text-gray-500">按模板格式填写后上传,同名供应商自动跳过不重复。{!canFinance && '(付款方式/账期等财务列需财务角色导入才生效)'}</p>
-            <div className="flex gap-2">
+            <h2 className="text-sm font-semibold text-gray-800">📥 批量添加供应商</h2>
+            <p className="text-xs text-gray-500">几条 → 用「⚡ 批量录入」直接填;一大批 → 下载模板填好后 Excel 导入。同名自动跳过不重复。{!canFinance && '(账期等财务列需财务角色导入才生效)'}</p>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setBatchRows(batchRows ? null : Array.from({ length: 5 }, emptyBatchRow))}
+                className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+                {batchRows ? '收起批量录入' : '⚡ 批量录入'}
+              </button>
               <button onClick={() => downloadExcelTemplate('供应商导入模板.xlsx', TEMPLATE_HEADERS, TEMPLATE_EXAMPLE)}
                 className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">📄 下载模板</button>
               <button onClick={() => fileRef.current?.click()} disabled={importing}
                 className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
-                {importing ? '导入中…' : '📥 选择 Excel 导入'}
+                {importing ? '导入中…' : '📥 Excel 导入'}
               </button>
               <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
             </div>
+
+            {batchRows && (
+              <div className="space-y-2">
+                <div className="overflow-x-auto">
+                  <table className="text-xs w-full">
+                    <thead><tr className="text-gray-400 text-left">
+                      {['名称 *', '主营品类', '联系人', '电话', canFinance ? '账期(天)' : '账期(财务填)'].map(h => (
+                        <th key={h} className="px-1 py-1 font-medium whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {batchRows.map((r, i) => (
+                        <tr key={i}>
+                          <td className="px-1 py-0.5"><input value={r.name} onChange={e => setBatchCell(i, 'name', e.target.value)} placeholder="XX面料有限公司" className="w-full rounded border border-gray-300 px-2 py-1.5" /></td>
+                          <td className="px-1 py-0.5"><input value={r.main_category} onChange={e => setBatchCell(i, 'main_category', e.target.value)} placeholder="面料" className="w-24 rounded border border-gray-300 px-2 py-1.5" /></td>
+                          <td className="px-1 py-0.5"><input value={r.contact_name} onChange={e => setBatchCell(i, 'contact_name', e.target.value)} className="w-20 rounded border border-gray-300 px-2 py-1.5" /></td>
+                          <td className="px-1 py-0.5"><input value={r.phone} onChange={e => setBatchCell(i, 'phone', e.target.value)} className="w-28 rounded border border-gray-300 px-2 py-1.5" /></td>
+                          <td className="px-1 py-0.5"><input type="number" value={r.net_days} disabled={!canFinance} onChange={e => setBatchCell(i, 'net_days', e.target.value)} className="w-16 rounded border border-gray-300 px-2 py-1.5 disabled:bg-gray-50" /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setBatchRows([...batchRows, emptyBatchRow()])}
+                    className="text-xs text-indigo-600 hover:underline">+ 加行</button>
+                  <button onClick={submitBatch} disabled={batchSaving}
+                    className="ml-auto px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                    {batchSaving ? '提交中…' : `提交(${batchRows.filter(r => r.name.trim()).length} 条)`}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {importResult && (
               <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1">
                 <p className="font-medium text-gray-800">{importResult.summary}</p>
