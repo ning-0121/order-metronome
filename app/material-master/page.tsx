@@ -282,7 +282,7 @@ export default function MaterialMasterPage() {
             <div className="overflow-x-auto bg-white rounded-xl border border-gray-200">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-gray-100 text-left text-gray-500">
-                  {['编码', '名称', '类别', '单位', '参考价(净)', '交期', '规格', '用过', '录入', ''].map(h => (
+                  {['编码', '名称', '类别', '单位', '当前库存', '参考价(净)', '交期', '规格', '用过', '录入', ''].map(h => (
                     <th key={h} className="py-2 px-3 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr></thead>
@@ -293,6 +293,11 @@ export default function MaterialMasterPage() {
                       <td className="py-2 px-3 font-medium text-gray-900">{r.material_name}</td>
                       <td className="py-2 px-3"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{catLabel(r.category)}</span></td>
                       <td className="py-2 px-3 text-gray-600">{r.default_unit || '—'}</td>
+                      <td className="py-2 px-3 text-right font-mono" title="所有颜色的在库合计(收货入库/领料出库派生);← 去库存中心看流水">
+                        {r.stock_on_hand == null
+                          ? <span className="text-gray-300">—</span>
+                          : <span className={r.stock_on_hand < 0 ? 'text-red-600 font-medium' : r.stock_on_hand > 0 ? 'text-emerald-700 font-medium' : 'text-gray-400'}>{r.stock_on_hand}{r.default_unit || ''}</span>}
+                      </td>
                       <td className="py-2 px-3 text-gray-700">{r.reference_price != null ? `¥${r.reference_price}` : '—'}</td>
                       <td className="py-2 px-3 text-gray-600">{r.default_lead_days ?? '—'}</td>
                       <td className="py-2 px-3 text-gray-500 max-w-[160px] truncate">{r.specification || '—'}</td>

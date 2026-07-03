@@ -47,6 +47,22 @@ export async function listMaterialMaster(params: { search?: string; category?: s
       for (const r of (data || [])) (r as any).created_by_name = r.created_by ? (nameMap.get(r.created_by) || null) : null;
     }
   } catch { /* 姓名解析失败不影响列表 */ }
+
+  // 当前库存(2026-07-03 绑定深化):库存 key=consolidationKey,master 分支=`m:<id>¦c:色¦u:单位`。
+  // 一个物料主数据可能对应多颜色 key → 按 master_id 前缀聚合各色在库之和。失败不阻断列表。
+  try {
+    const { data: txns } = await (supabase.from('inventory_transactions') as any).select('material_key, qty');
+    const stockByMaster = new Map<string, number>();
+    for (const t of (txns || [])) {
+      const m = String(t.material_key || '').match(/^m:([^¦]+)¦/);
+      if (m) stockByMaster.set(m[1], (stockByMaster.get(m[1]) || 0) + (Number(t.qty) || 0));
+    }
+    for (const r of (data || [])) {
+      const v = stockByMaster.get((r as any).id);
+      (r as any).stock_on_hand = v == null ? null : Math.round(v * 1000) / 1000;
+    }
+  } catch { /* 库存聚合失败不影响列表 */ }
+
   return { data };
 }
 

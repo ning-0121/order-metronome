@@ -504,6 +504,9 @@ export function BomTab({ orderId }: { orderId: string }) {
                   <span className="font-mono text-xs text-indigo-500 shrink-0 w-20">{m.material_code || '—'}</span>
                   <span className="font-medium text-gray-900 shrink-0">{m.material_name}</span>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 shrink-0">{CAT_LABEL[m.category] || m.category}</span>
+                  {m.stock_on_hand != null && m.stock_on_hand !== 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${m.stock_on_hand < 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'}`} title="当前库存(所有颜色合计)">库存 {m.stock_on_hand}</span>
+                  )}
                   <span className="text-xs text-gray-400 truncate">{m.specification || ''}</span>
                 </button>
               ))}
