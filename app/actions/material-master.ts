@@ -28,7 +28,7 @@ export async function listMaterialMaster(params: { search?: string; category?: s
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   let q = (supabase.from('material_master') as any)
-    .select('id, material_code, material_name, category, default_unit, default_consumption, default_supplier_name, default_lead_days, specification, usage_count, status')
+    .select('id, material_code, material_name, category, default_unit, default_consumption, default_supplier_name, default_lead_days, specification, reference_price, usage_count, status')
     .eq('is_temporary', false)
     .eq('status', 'active');
   if (params.category) q = q.eq('category', params.category);
@@ -70,6 +70,7 @@ export interface MasterInput {
   default_lead_days?: number | string | null;
   specification?: string | null;
   default_loss_rate?: number | string | null;
+  reference_price?: number | string | null;   // 参考价·不含税净价
 }
 
 /** 新建正式主数据。!force 且发现相似 → 返回 similar 不创建;force=true → 直接建。 */
@@ -99,6 +100,7 @@ export async function createMaterialMaster(input: MasterInput, opts: { force?: b
     default_lead_days: num(input.default_lead_days),
     specification: input.specification || null,
     default_loss_rate: num(input.default_loss_rate),
+    reference_price: num(input.reference_price),
     is_temporary: false,
     seed_source: 'manual',
     created_by: user.id,
@@ -126,6 +128,7 @@ export async function updateMaterialMaster(id: string, patch: Partial<MasterInpu
   if (patch.default_lead_days !== undefined) upd.default_lead_days = num(patch.default_lead_days);
   if (patch.specification !== undefined) upd.specification = patch.specification || null;
   if (patch.default_loss_rate !== undefined) upd.default_loss_rate = num(patch.default_loss_rate);
+  if (patch.reference_price !== undefined) upd.reference_price = num(patch.reference_price);
   const { error } = await (supabase.from('material_master') as any).update(upd).eq('id', id);
   if (error) return { error: friendlyError(error) };
   revalidatePath('/material-master');

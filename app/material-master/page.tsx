@@ -14,7 +14,16 @@ const CATEGORIES: { value: string; label: string }[] = [
   { value: 'service', label: '服务' }, { value: 'other', label: '其他' },
 ];
 const catLabel = (c: string) => CATEGORIES.find(x => x.value === c)?.label || c;
-const emptyForm: MasterInput = { material_name: '', category: 'fabric', default_unit: '', default_consumption: '', default_supplier_name: '', default_lead_days: '', specification: '' };
+// 类别下拉建议(可选可加):已知类别的中文标签 + 用户可自由输入新类别
+const CATEGORY_SUGGEST = CATEGORIES.map(c => c.label);
+// 已知标签 → value key(选到已知的映射回 fabric/trim… 保下游识别;自定义存原文)
+const labelToValue = (input: string): string => {
+  const hit = CATEGORIES.find(c => c.label === input.trim() || c.value === input.trim());
+  return hit ? hit.value : input.trim();
+};
+// 常用单位(可选可加)
+const UNIT_SUGGEST = ['米', '码', 'kg', '克', '件', '个', '套', '打', '条', '卷', '张', '双'];
+const emptyForm: MasterInput = { material_name: '', category: 'fabric', default_unit: '', default_lead_days: '', specification: '', reference_price: '' };
 
 export default function MaterialMasterPage() {
   const [tab, setTab] = useState<'lib' | 'pending'>('lib');
@@ -53,7 +62,7 @@ export default function MaterialMasterPage() {
   function openNew() { setEditId(null); setEditingCode(null); setForm(emptyForm); setSimilar(null); setShowForm(true); }
   function openEdit(r: any) {
     setEditId(r.id); setEditingCode(r.material_code || null);
-    setForm({ material_name: r.material_name || '', category: r.category || 'other', default_unit: r.default_unit || '', default_consumption: r.default_consumption ?? '', default_supplier_name: r.default_supplier_name || '', default_lead_days: r.default_lead_days ?? '', specification: r.specification || '' });
+    setForm({ material_name: r.material_name || '', category: r.category || 'other', default_unit: r.default_unit || '', default_lead_days: r.default_lead_days ?? '', specification: r.specification || '', reference_price: r.reference_price ?? '' });
     setSimilar(null); setShowForm(true);
   }
 
@@ -139,7 +148,7 @@ export default function MaterialMasterPage() {
             <div className="overflow-x-auto bg-white rounded-xl border border-gray-200">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-gray-100 text-left text-gray-500">
-                  {['编码', '名称', '类别', '默认单耗', '单位', '默认供应商', '交期', '规格', '用过', ''].map(h => (
+                  {['编码', '名称', '类别', '单位', '参考价(净)', '交期', '规格', '用过', ''].map(h => (
                     <th key={h} className="py-2 px-3 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr></thead>
@@ -149,9 +158,8 @@ export default function MaterialMasterPage() {
                       <td className="py-2 px-3 font-mono text-xs text-gray-500">{r.material_code || '—'}</td>
                       <td className="py-2 px-3 font-medium text-gray-900">{r.material_name}</td>
                       <td className="py-2 px-3"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{catLabel(r.category)}</span></td>
-                      <td className="py-2 px-3 text-gray-700">{r.default_consumption ?? '—'}</td>
                       <td className="py-2 px-3 text-gray-600">{r.default_unit || '—'}</td>
-                      <td className="py-2 px-3 text-gray-600">{r.default_supplier_name || '—'}</td>
+                      <td className="py-2 px-3 text-gray-700">{r.reference_price != null ? `¥${r.reference_price}` : '—'}</td>
                       <td className="py-2 px-3 text-gray-600">{r.default_lead_days ?? '—'}</td>
                       <td className="py-2 px-3 text-gray-500 max-w-[160px] truncate">{r.specification || '—'}</td>
                       <td className="py-2 px-3 text-gray-400 text-xs">{r.usage_count || 0}</td>
@@ -226,22 +234,21 @@ export default function MaterialMasterPage() {
               <label className="col-span-2 text-xs text-gray-600">物料名称 *
                 <input value={form.material_name} onChange={e => setForm(f => ({ ...f, material_name: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
-              <label className="text-xs text-gray-600">类别 *
-                <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select></label>
-              <label className="text-xs text-gray-600">默认单位
-                <input value={form.default_unit ?? ''} placeholder="kg/pcs/m" onChange={e => setForm(f => ({ ...f, default_unit: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
-              <label className="text-xs text-gray-600">默认单耗
-                <input type="number" step="any" value={form.default_consumption ?? ''} onChange={e => setForm(f => ({ ...f, default_consumption: e.target.value }))}
+              <label className="text-xs text-gray-600">类别 *（可选可加）
+                <input list="cat-suggest" value={catLabel(form.category)}
+                  onChange={e => setForm(f => ({ ...f, category: labelToValue(e.target.value) }))}
+                  placeholder="选或输入新类别" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                <datalist id="cat-suggest">{CATEGORY_SUGGEST.map(c => <option key={c} value={c} />)}</datalist></label>
+              <label className="text-xs text-gray-600">单位 *（可选可加）
+                <input list="unit-suggest" value={form.default_unit ?? ''} placeholder="米/码/kg/件…"
+                  onChange={e => setForm(f => ({ ...f, default_unit: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                <datalist id="unit-suggest">{UNIT_SUGGEST.map(u => <option key={u} value={u} />)}</datalist></label>
+              <label className="text-xs text-gray-600">参考价（不含税净价）
+                <input type="number" step="any" value={form.reference_price ?? ''} placeholder="单价" onChange={e => setForm(f => ({ ...f, reference_price: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
               <label className="text-xs text-gray-600">默认交期(工作日)
                 <input type="number" value={form.default_lead_days ?? ''} onChange={e => setForm(f => ({ ...f, default_lead_days: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
-              <label className="col-span-2 text-xs text-gray-600">默认供应商
-                <input value={form.default_supplier_name ?? ''} onChange={e => setForm(f => ({ ...f, default_supplier_name: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
               <label className="col-span-2 text-xs text-gray-600">规格(成分/克重/纱支)
                 <input value={form.specification ?? ''} onChange={e => setForm(f => ({ ...f, specification: e.target.value }))}
