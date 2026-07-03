@@ -5,6 +5,7 @@ import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
+  listBomConsumptionLines, saveBomProductionConsumption,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
@@ -49,6 +50,29 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [saving, setSaving] = useState(false);
   const [fulfillment, setFulfillment] = useState<any[]>([]);
   const [checked, setChecked] = useState<Set<string>>(new Set());   // ② 批量确认勾选
+
+  // ── 按款核定大货单耗(2026-07-03 用户拍板:布料不逐款核定单耗,不许归并)──
+  const [consLines, setConsLines] = useState<any[]>([]);
+  const [consEdit, setConsEdit] = useState<Record<string, string>>({});
+  const [consSaving, setConsSaving] = useState(false);
+  const loadCons = async () => {
+    const r = await listBomConsumptionLines(orderId);
+    if ((r as any).data) {
+      setConsLines((r as any).data);
+      setConsEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.production_consumption ?? ''])));
+    }
+  };
+  useEffect(() => { loadCons(); /* eslint-disable-next-line */ }, [orderId]);
+  const consMissing = consLines.filter(l => l.required && !(Number(l.production_consumption) > 0));
+  async function saveCons() {
+    setConsSaving(true); setMsg('');
+    const entries = Object.fromEntries(Object.entries(consEdit).map(([id, v]) => [id, v === '' ? null : Number(v)]));
+    const r = await saveBomProductionConsumption(orderId, entries as any);
+    setConsSaving(false);
+    if ((r as any).error) { setMsg((r as any).error); return; }
+    setMsg(`✅ 大货单耗已保存(${(r as any).saved} 行)`);
+    await loadCons();
+  }
   // 供应商主数据(确认供应商下拉用;不再手敲名字)
   const [supplierOptions, setSupplierOptions] = useState<any[]>([]);
   useEffect(() => {
@@ -438,6 +462,50 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       </div>
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
 
+      {/* ⓪ 按款核定大货单耗(布料必核;不核定完不能归并——归并=Σ 每款件数×该款大货单耗) */}
+      {consLines.length > 0 && (
+        <div className={`rounded-xl border-2 p-3 space-y-2 ${consMissing.length > 0 ? 'border-amber-300 bg-amber-50/60' : 'border-gray-200 bg-white'}`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-gray-800">📐 按款核定大货单耗</span>
+            {consMissing.length > 0
+              ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">🔒 还差 {consMissing.length} 条布料未核定 — 核定完才能归并</span>
+              : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 布料已全部核定,可归并</span>}
+            <button onClick={saveCons} disabled={consSaving}
+              className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+              {consSaving ? '保存中…' : '💾 保存核定'}
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-500">每款排料不同,大货单耗必须逐款填;总需求 = Σ(每款件数 × 该款大货单耗),不做平均/折算。辅料默认按开发单耗,可选核。</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-gray-400">
+                {['款号', '颜色', '物料', '类型', '开发单耗(业务)', '大货单耗(采购核定)', '单位'].map(h => (
+                  <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {consLines.map(l => (
+                  <tr key={l.id} className={`border-t border-gray-100 ${l.required && !(Number(l.production_consumption) > 0) ? 'bg-amber-50' : ''}`}>
+                    <td className="py-1.5 px-2 font-mono">{l.style_no || '—'}</td>
+                    <td className="py-1.5 px-2">{l.color || '—'}</td>
+                    <td className="py-1.5 px-2 text-gray-800">{l.material_name || '—'}</td>
+                    <td className="py-1.5 px-2">{l.required ? <span className="text-amber-700 font-medium">布料·必核</span> : <span className="text-gray-400">辅料·可选</span>}</td>
+                    <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
+                    <td className="py-1.5 px-2">
+                      <input type="number" step="0.001" min="0" value={consEdit[l.id] ?? ''}
+                        placeholder={l.required ? '必填' : `默认 ${l.development_consumption ?? '—'}`}
+                        onChange={e => setConsEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
+                        className={`w-24 rounded border px-2 py-1 ${l.required && !(Number(consEdit[l.id]) > 0) ? 'border-amber-400 bg-white' : 'border-gray-300'}`} />
+                    </td>
+                    <td className="py-1.5 px-2 text-gray-400">{l.unit || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* 确认后的下文(2026-07-03 用户拍板:确认→采购单→给供应商→财务→追踪 一条路走亮) */}
       {(linesReady || confirmedCount > 0) && (
         <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3 flex items-center gap-3 flex-wrap">
@@ -685,7 +753,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             <Read label="总需求(系统)" value={sel.total_required_qty} />
             <Read label="开发单耗(系统)" value={sel.development_consumption} />
-            <Field label="大货单耗" k="production_consumption" form={form} set={set} type="number" />
+            {/* 汇总级大货单耗已废除(2026-07-03:不同款单耗不同,平均/折算是错的)——改「按款核定大货单耗」表格,总需求=Σ每款件数×该款大货单耗 */}
             <Field label="采购损耗%" k="procurement_loss_pct" form={form} set={set} type="number" />
             <Field label="安全库存" k="safety_stock_qty" form={form} set={set} type="number" />
             {/* MOQ 字段撤掉(2026-07-03 用户拍板不需要);列保留,已录过的旧值仍参与建议量取整 */}

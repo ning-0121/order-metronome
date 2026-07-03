@@ -39,19 +39,20 @@ export interface SuggestInput {
 }
 
 /**
- * 建议采购量 = 净需求 × (大货单耗 / 开发单耗) × (1 + 采购损耗%) + 安全库存,再按 MOQ 向上取整。
- * 大货/开发 比:两者都有且 dev>0 才放大,否则比 = 1(无大货单耗时不放大)。
+ * 建议采购量 = 总需求 × (1 + 采购损耗%) + 安全库存,再按 MOQ 向上取整。
+ *
+ * 2026-07-03 用户拍板废除「大货/开发比例折算」:同一物料不同款的大货单耗不同,
+ * 折一个统一比例数学上就是错的。大货口径改在归并层逐行精确算——
+ * 总需求 = Σ(每款件数 × 该款大货单耗)(consolidate 完成;布料未核定单耗不许归并)。
+ * development/production_consumption 入参保留仅为兼容,本函数不再使用。
  */
 export function computeSuggestedPurchaseQty(input: SuggestInput): number | null {
   const net = num(input.total_required_qty);
   if (net == null) return null;
-  const dev = num(input.development_consumption);
-  const prod = num(input.production_consumption);
-  const ratio = (dev && dev > 0 && prod && prod > 0) ? prod / dev : 1;
   const loss = num(input.procurement_loss_pct) ?? 0;
   const safety = num(input.safety_stock_qty) ?? 0;
 
-  let qty = net * ratio * (1 + loss / 100) + safety;
+  let qty = net * (1 + loss / 100) + safety;
   const moq = num(input.moq);
   if (moq && moq > 0) {
     qty = Math.ceil(qty / moq) * moq;   // 向上取到 MOQ 整数倍(保证 ≥ MOQ 且对齐)

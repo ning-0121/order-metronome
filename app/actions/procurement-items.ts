@@ -88,6 +88,57 @@ export async function listProcurementItems(orderId: string) {
  * 分步查询 + JS join(避开深层 PostgREST 嵌套 join 脆弱)。保留采购已填决策,仅刷新系统字段。
  */
 /**
+ * 按款核定大货单耗(2026-07-03 用户拍板:不填好每个单款的大货单耗,不许归并)。
+ * 列出该订单 BOM 的用料行(布料必核;辅料/包装可选核),含开发单耗对照。
+ */
+export async function listBomConsumptionLines(orderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data, error } = await (supabase.from('materials_bom') as any)
+    .select('*').eq('order_id', orderId).order('style_no').order('color');
+  if (error) return { error: friendlyError(error) };
+  const rows = (data || []).map((b: any) => ({
+    id: b.id,
+    style_no: b.style_no || null,
+    color: b.color || null,
+    material_name: b.material_name || null,
+    material_type: b.material_type || null,
+    spec: b.spec || null,
+    unit: b.unit || null,
+    development_consumption: b.qty_per_piece ?? null,          // 开发单耗(业务,只读)
+    production_consumption: b.production_consumption ?? null,  // 大货单耗(采购核定)
+    required: b.material_type === 'fabric' || b.material_type === 'lining',  // 布料必核
+  }));
+  return { data: rows };
+}
+
+/** 保存按款大货单耗(采购职权;批量 {bom_id: 值})。 */
+export async function saveBomProductionConsumption(orderId: string, entries: Record<string, number | null>) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
+
+  let saved = 0;
+  for (const [bomId, val] of Object.entries(entries || {})) {
+    const v = val === null || val === undefined || isNaN(Number(val)) || Number(val) <= 0 ? null : Number(val);
+    const { error } = await (supabase.from('materials_bom') as any)
+      .update({ production_consumption: v }).eq('id', bomId).eq('order_id', orderId);
+    if (error) {
+      if (/production_consumption|column .* does not exist/i.test(error.message || '')) {
+        return { error: '大货单耗列尚未建立:请先在 Supabase 执行 20260703_per_style_production_consumption.sql' };
+      }
+      return { error: friendlyError(error) };
+    }
+    saved++;
+  }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, saved };
+}
+
+/**
  * 核料归并 —— 两步制(2026-07-03 用户拍板:不许一键直写):
  *  dryRun:true → 只算不写,返回变更计划(新增/改数/参数同步/孤儿清理,逐项旧→新);
  *  执行 → 按 apply 勾选项落库(create=建新项 refresh=刷新数量参数 cleanup=清孤儿)。
@@ -113,10 +164,9 @@ export async function consolidateOrderProcurementItems(
     afterProcurementPlaced = st === 'done' || st === '已完成';
   }
 
-  // 1) 需求
+  // 1) 需求(pieces_qty=件数基数;迁移前老行为空,按 net/dev 反推兜底)
   const { data: reqs, error: rErr } = await (supabase.from('material_requirements') as any)
-    .select('id, snapshot_line_id, material_name, material_code, category, unit, net_purchase_qty, version, required_date, order_by_date')
-    .eq('order_id', orderId);
+    .select('*').eq('order_id', orderId);
   if (rErr) return { error: friendlyError(rErr) };
   if (!reqs || reqs.length === 0) return { error: '该订单暂无物料需求(请先在「原辅料和包装」提交采购,跑出 MRP)' };
 
@@ -128,20 +178,27 @@ export async function consolidateOrderProcurementItems(
       .select('id, color, specification, qty_per_piece, bom_id, material_name, loss_rate').in('id', slIds);
     for (const s of (sls || [])) slMap.set(s.id, s);
   }
-  // 3) materials_bom（master_id + 色卡/辅料图,图随归并流转到采购）
+  // 3) materials_bom（master_id + 色卡图 + 按款核定的大货单耗,select * 抗迁移未跑）
   const bomIds = Array.from(new Set([...slMap.values()].map((s: any) => s.bom_id).filter(Boolean)));
   const bomMaster = new Map<string, string | null>();
   const bomImages = new Map<string, string[]>();
+  const bomExtra = new Map<string, { prod: number | null; style_no: string | null }>();
   if (bomIds.length) {
-    const { data: bs } = await (supabase.from('materials_bom') as any).select('id, material_master_id, image_urls').in('id', bomIds);
+    const { data: bs } = await (supabase.from('materials_bom') as any).select('*').in('id', bomIds);
     for (const b of (bs || [])) {
       bomMaster.set(b.id, b.material_master_id);
       if (Array.isArray(b.image_urls) && b.image_urls.length) bomImages.set(b.id, b.image_urls);
+      bomExtra.set(b.id, {
+        prod: b.production_consumption != null && Number(b.production_consumption) > 0 ? Number(b.production_consumption) : null,
+        style_no: b.style_no || null,
+      });
     }
   }
 
-  // 4) 按 key 分组
+  // 4) 按 key 分组 —— 逐行精确算(2026-07-03 用户拍板:废除代表单耗/平均,
+  //    每行 = 该款件数 × 该款大货单耗;布料未核定大货单耗 → 不许归并)
   const groups = new Map<string, any>();
+  const missingProd: Array<{ style_no: string | null; color: string | null; material_name: string | null }> = [];
   for (const r of reqs) {
     const sl = r.snapshot_line_id ? slMap.get(r.snapshot_line_id) : null;
     const master_id = sl?.bom_id ? (bomMaster.get(sl.bom_id) || null) : null;
@@ -157,16 +214,45 @@ export async function consolidateOrderProcurementItems(
     const net = Number(r.net_purchase_qty) || 0;
     const dev = sl?.qty_per_piece != null ? Number(sl.qty_per_piece) : null;
     const loss = sl?.loss_rate != null ? Number(sl.loss_rate) : null;
+    const extra = sl?.bom_id ? bomExtra.get(sl.bom_id) : null;
+    // 件数基数:优先需求行存的 pieces_qty;老行(迁移前)按 net/开发单耗 反推(单行反推=精确)
+    const pieces = r.pieces_qty != null && Number(r.pieces_qty) > 0
+      ? Number(r.pieces_qty)
+      : (dev && dev > 0 && net > 0 ? net / dev : null);
+    const isFabric = r.category === 'fabric';
+    // 行贡献:布料必须用该款核定的大货单耗;辅料/包装核定了用核定,没核定按开发口径
+    let lineTotal: number;
+    if (isFabric) {
+      if (extra?.prod == null) {
+        missingProd.push({ style_no: extra?.style_no ?? null, color: sl?.color ?? null, material_name: r.material_name ?? null });
+        lineTotal = 0;   // 有缺口整单不落库,此值不会被使用
+      } else {
+        lineTotal = (pieces ?? 0) * extra.prod;
+      }
+    } else {
+      lineTotal = (extra?.prod != null && pieces != null) ? pieces * extra.prod : net;
+    }
     let g = groups.get(key);
     if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, imgs: [] as string[], reqDate: null, orderBy: null }; groups.set(key, g); }
-    g.total += net; g.count += 1;
-    if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; }   // 主导来源的开发单耗/损耗作代表值
+    g.total += lineTotal; g.count += 1;
+    if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; }   // 主导来源的开发单耗/损耗作展示参考
     // 汇集来源图(去重,封顶 8 张)
     const imgs = sl?.bom_id ? (bomImages.get(sl.bom_id) || []) : [];
     for (const u of imgs) if (g.imgs.length < 8 && !g.imgs.includes(u)) g.imgs.push(u);
     // 到货倒推:取各来源最早的 需到日/最晚下单日(宁早勿晚)
     if (r.required_date && (!g.reqDate || r.required_date < g.reqDate)) g.reqDate = r.required_date;
     if (r.order_by_date && (!g.orderBy || r.order_by_date < g.orderBy)) g.orderBy = r.order_by_date;
+  }
+  // 数量取整到 1 位小数(布料 kg 口径;逐行乘完再取整,不再逐行 ceil 叠误差)
+  for (const g of groups.values()) g.total = Math.round(g.total * 10) / 10;
+
+  // 布料未核定大货单耗 → 拒绝归并(dryRun 和执行都拦),列出缺口
+  if (missingProd.length > 0) {
+    const list = missingProd.slice(0, 6).map(m => `${m.style_no || '?'}·${m.color || '无色'}·${m.material_name || ''}`).join(';');
+    return {
+      error: `不能归并:${missingProd.length} 条布料来源未核定大货单耗(${list}${missingProd.length > 6 ? ' 等' : ''})。请先在「按款核定大货单耗」表格里逐款填写`,
+      missingProd,
+    };
   }
 
   // 5) 现有采购项(select * :image_urls 等新列迁移未执行时也不报缺列)

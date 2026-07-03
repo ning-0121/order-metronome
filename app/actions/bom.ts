@@ -771,6 +771,7 @@ export async function submitBomToProcurement(
       material_plan_id: planId, order_id: orderId, snapshot_line_id: line.id,
       material_name: r.material_name, material_type: r.material_type, category: r.category,
       material_code: r.material_code, unit: r.unit,
+      pieces_qty: poQty,   // 件数基数(款×色):归并层按款精确乘大货单耗用
       gross_requirement: r.gross_requirement, loss_qty: r.loss_qty,
       inventory_deduct: r.inventory_deduct, reuse_deduct: r.reuse_deduct, net_purchase_qty: r.net_purchase_qty,
       required_stage: r.required_stage, required_date: r.required_date,
@@ -780,7 +781,13 @@ export async function submitBomToProcurement(
     };
   });
   if (reqRows.length > 0) {
-    const { error: reqErr } = await (supabase.from('material_requirements') as any).insert(reqRows);
+    let { error: reqErr } = await (supabase.from('material_requirements') as any).insert(reqRows);
+    if (reqErr && /pieces_qty|column .* does not exist/i.test(reqErr.message || '')) {
+      // 件数基数列迁移未执行 → 降级插入(归并将退回按净需求推算),提醒执行迁移
+      console.warn('[submitBom] pieces_qty 列缺失,降级插入。请执行 20260703_per_style_production_consumption.sql');
+      const plain = reqRows.map(({ pieces_qty, ...rest }: any) => rest);
+      ({ error: reqErr } = await (supabase.from('material_requirements') as any).insert(plain));
+    }
     if (reqErr) return { error: `物料需求生成失败:${reqErr.message}` };
   }
 
