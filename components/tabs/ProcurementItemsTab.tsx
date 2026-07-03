@@ -6,6 +6,7 @@ import {
   generateExecutionLines, getOrderProcurementFulfillment,
 } from '@/app/actions/procurement-items';
 import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
+import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
 
 /** 补采购财务审批状态 → 显示 */
@@ -44,6 +45,11 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [fulfillment, setFulfillment] = useState<any[]>([]);
+  // 供应商主数据(确认供应商下拉用;不再手敲名字)
+  const [supplierOptions, setSupplierOptions] = useState<any[]>([]);
+  useEffect(() => {
+    listSuppliers().then(r => { if ((r as any).data) setSupplierOptions((r as any).data); });
+  }, []);
   // 尾料归库 + 库存抵扣
   const [avail, setAvail] = useState<Record<string, { available: number; location: string | null }>>({});
   const [stocktakeOpen, setStocktakeOpen] = useState(false);
@@ -419,13 +425,30 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             </div>
           )}
 
-          {/* 供应商 */}
+          {/* 供应商(从供应商主数据选,不再手敲;选中自动带联系人) */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <Field label="确认供应商" k="confirmed_supplier_name" form={form} set={set} />
-            <Field label="备用供应商" k="backup_supplier_name" form={form} set={set} />
+            <label className="block">
+              <span className="text-gray-500">确认供应商</span>
+              <select value={form.confirmed_supplier_name ?? ''}
+                onChange={e => {
+                  const name = e.target.value;
+                  set('confirmed_supplier_name', name);
+                  const sup = supplierOptions.find(s => s.name === name);
+                  if (sup?.contact_name && !form.supplier_contact) set('supplier_contact', sup.contact_name);
+                }}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1.5 bg-white">
+                <option value="">— 选择供应商 —</option>
+                {/* 旧数据手敲的名字不在主数据里 → 保留为一个选项,不丢 */}
+                {form.confirmed_supplier_name && !supplierOptions.some(s => s.name === form.confirmed_supplier_name) && (
+                  <option value={form.confirmed_supplier_name}>{form.confirmed_supplier_name}(手工历史)</option>
+                )}
+                {supplierOptions.map(s => <option key={s.id} value={s.name}>{s.name}{s.main_category ? `(${s.main_category})` : ''}</option>)}
+              </select>
+              <a href="/suppliers" target="_blank" className="text-[10px] text-indigo-500 hover:underline">没有?去建供应商 →</a>
+            </label>
             <Field label="联系人" k="supplier_contact" form={form} set={set} />
             <Field label="Lead(天)" k="lead_days" form={form} set={set} type="number" />
-            <Field label="采购单位" k="purchase_unit" form={form} set={set} />
+            <Field label="采购计量单位(米/kg/匹)" k="purchase_unit" form={form} set={set} />
           </div>
 
           {/* 价格 */}
