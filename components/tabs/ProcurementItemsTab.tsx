@@ -826,12 +826,16 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           </div>
 
           {/* 已用库存抵扣的记录(进采购单·标库存·不采购) */}
-          {Number(sel.stock_deduct_qty) > 0 && (
-            <div className="rounded-lg bg-sky-50 border border-sky-200 p-2.5 text-xs text-sky-800">
-              📦 已用库存抵扣 <b>{sel.stock_deduct_qty}</b> {sel.unit || ''}(已预留锁定给本单,<b>不采购</b>,发货时领料核销)
-              · 采购量 = 需求 {sel.total_required_qty} − 库存 {sel.stock_deduct_qty} = <b>{sel.final_purchase_qty ?? '—'}</b>
-            </div>
-          )}
+          {Number(sel.stock_deduct_qty) > 0 && (() => {
+            const gross = Number(sel.final_purchase_qty ?? sel.suggested_purchase_qty) || 0;
+            const toBuy = Math.max(0, Math.round((gross - Number(sel.stock_deduct_qty)) * 1000) / 1000);
+            return (
+              <div className="rounded-lg bg-sky-50 border border-sky-200 p-2.5 text-xs text-sky-800">
+                📦 已用库存抵扣 <b>{sel.stock_deduct_qty}</b> {sel.unit || ''}(已预留锁定给本单,<b>不采购</b>,发货时领料核销)
+                · 实际向供应商采购 = 定案 {gross} − 库存 {sel.stock_deduct_qty} = <b>{toBuy}</b>{sel.unit || ''}{toBuy === 0 ? '(全用库存,不下单)' : ''}
+              </div>
+            );
+          })()}
 
           {/* 库存抵扣:该物料有可用尾料 → 一键从最终采购量扣减 */}
           {avail[sel.consolidation_key]?.available > 0 && (

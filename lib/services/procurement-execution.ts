@@ -21,14 +21,22 @@ export interface ProcItem {
   total_required_qty?: number | null;
   suggested_purchase_qty?: number | null;
   final_purchase_qty?: number | null;
+  stock_deduct_qty?: number | null;      // 库存抵扣量(独立;不采购,发货领用核销)
+  order_by_date?: string | null;         // 最晚下单日(到货倒推;执行行 required_by 用)
+  required_date?: string | null;         // 需到日
   confirmed_supplier_name?: string | null;
   unit_price?: number | null;
   status?: string | null;
 }
 
+/** 出单量(向供应商采购的量)= 定案采购量 − 库存抵扣量。final 只承载"人工定案量",抵扣独立。 */
+export function orderableQty(item: Pick<ProcItem, 'final_purchase_qty' | 'suggested_purchase_qty' | 'stock_deduct_qty'>): number {
+  const gross = Number(item.final_purchase_qty ?? item.suggested_purchase_qty ?? 0) || 0;
+  return Math.max(0, round3(gross - (Number(item.stock_deduct_qty) || 0)));
+}
+
 /** 执行行插入行(action 再补 ordered_at / created_at 由 DB 默认)。ordered_qty NOT NULL,兜底 0。 */
 export function buildExecutionLineRow(item: ProcItem, userId: string): Record<string, any> {
-  const qty = item.final_purchase_qty ?? item.suggested_purchase_qty ?? 0;
   return {
     order_id: item.order_id,
     procurement_item_id: item.id,
@@ -36,9 +44,11 @@ export function buildExecutionLineRow(item: ProcItem, userId: string): Record<st
     specification: item.specification ?? null,
     category: item.category ?? null,
     supplier_name: item.confirmed_supplier_name ?? null,
-    ordered_qty: round3(qty),
+    ordered_qty: orderableQty(item),                       // 定案量 − 库存抵扣(不重复采购)
     ordered_unit: item.purchase_unit || item.unit || null,
     unit_price: item.unit_price ?? null, // 大货底价,业务读时剥离
+    // 到货倒推日 → required_by:采购中心灯/超期判定用(修 P0 审计:B3a 行原无灯)
+    required_by: item.order_by_date ?? item.required_date ?? null,
     ordered_by: userId,
     // R3(2026-07-02 审计):DB 默认 'draft' 不在采购中心任何队列;显式置待下单
     line_status: 'pending_order',

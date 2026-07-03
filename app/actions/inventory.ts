@@ -106,6 +106,18 @@ async function writeInvOut(txnType: 'issue' | 'return', input: IssueInput): Prom
     note: input.note || null,
   });
   if (error) return { error: error.message };
+  // 领料兑现库存抵扣预留(2026-07-04 审计修:consumeReservation 原零调用 → 预留永久锁死、消耗蒸发)。
+  // 该订单该物料若有 reserved 预留(来自采购 deductFromStock),领料即兑现 → 转 consumed,释放可用量占用。
+  if (txnType === 'issue' && input.orderId) {
+    try {
+      const { data: rvs } = await (supabase.from('inventory_reservation') as any)
+        .select('id').eq('order_id', input.orderId).eq('material_key', input.materialKey).eq('status', 'reserved');
+      for (const r of (rvs || [])) {
+        await (supabase.from('inventory_reservation') as any)
+          .update({ status: 'consumed', consumed_at: new Date().toISOString() }).eq('id', (r as any).id).eq('status', 'reserved');
+      }
+    } catch { /* 预留兑现失败不阻断领料 */ }
+  }
   revalidatePath('/procurement/inventory');
   return { ok: true };
 }
