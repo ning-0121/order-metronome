@@ -795,8 +795,10 @@ function NewOrderWizard() {
 
     // ═══════════════════════════════════════════════════════
     // Phase 2: PO 内容自检 — 数量 / 交期 / 客户名 / 文件类型
+    // 省 token(2026-07-03):上传时已 AI 解析并预填/冲突检测过(poParseResult 冻结在手),
+    // 提交时不再第二次调 AI 核对同一份 PO;仅当预填失败/没走解析时才兜底自检。
     // ═══════════════════════════════════════════════════════
-    if (poFile && isVerifiable(poFile.file)) {
+    if (poFile && isVerifiable(poFile.file) && !poParseResult) {
       setVerifying(true);
       try {
         const buffer = await poFile.file.arrayBuffer();

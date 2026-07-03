@@ -152,6 +152,28 @@ export async function parsePO(
     };
   }
 
+  // 省 token(2026-07-03):同名同大小文件 30 分钟内已解析过 → 直接复用冻结草稿,零 AI 调用。
+  // 覆盖:上传后重试、误操作二次上传、建单失败后重传同一 PO。
+  try {
+    const supabaseCache = await createClient();
+    const { data: { user: cacheUser } } = await supabaseCache.auth.getUser();
+    if (cacheUser) {
+      const cutoff = new Date(Date.now() - DRAFT_FRESH_MINUTES * 60 * 1000).toISOString();
+      const { data: cached } = await (supabaseCache.from('po_parse_drafts') as any)
+        .select('id, parsed_json')
+        .eq('user_id', cacheUser.id)
+        .eq('file_name', file.name)
+        .eq('file_size_bytes', file.size)
+        .gte('created_at', cutoff)
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle();
+      if (cached?.parsed_json) {
+        console.log('[parsePO] 命中冻结草稿,跳过 AI 调用(零token):', file.name);
+        return { ok: true, data: cached.parsed_json as POParsedData, draftId: cached.id };
+      }
+    }
+  } catch { /* 缓存查询失败不阻断,继续走 AI */ }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: 'AI 服务未配置，请联系管理员' };
 
