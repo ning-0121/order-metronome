@@ -221,34 +221,45 @@ export async function parsePO(
     let response;
     try {
       // 2026-07-03:服务器偶发过载(529)/5xx → SDK 报「unexpected response」。
-      // 手动重试 2 次(指数退避),每次独立 55s 超时,把偶发抖动挡掉。
+      // 彻底解法 = 时间退避 + 模型备胎(不同模型是不同容量池,sonnet-5 过载不代表 4-6/haiku 也过载):
+      //   尝试1-2:claude-sonnet-5(2s 退避) → 尝试3:claude-sonnet-4-6(5s) → 尝试4:claude-haiku-4-5(8s)
+      // 过载错误秒回,总耗时 ~20s 内,留在 Vercel maxDuration=60s 预算里;首次真超时不重试,立即返回。
       let lastErr: any;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      let usedModel = '';
+      const MODEL_CHAIN = ['claude-sonnet-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+      const BACKOFF_MS = [2000, 5000, 8000];
+      for (let attempt = 0; attempt < MODEL_CHAIN.length; attempt++) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 55000);
+        const timeout = setTimeout(() => controller.abort(), attempt === 0 ? 45000 : 12000);
         try {
           response = await client.messages.create({
-            model: 'claude-sonnet-5',        // 最新最快的 Sonnet
+            model: MODEL_CHAIN[attempt],
             max_tokens: 8192,                // 4096→8192:款多的 PO 避免响应截断→JSON解析失败
             system: SYSTEM_PROMPT,
             messages,
           }, { signal: controller.signal });
           clearTimeout(timeout);
+          usedModel = MODEL_CHAIN[attempt];
+          if (attempt > 0) console.warn(`[parsePO] 主模型过载,备胎成功:${usedModel}(第 ${attempt + 1} 次尝试)`);
           break;                             // 成功,跳出重试
         } catch (e: any) {
           clearTimeout(timeout);
           if (e?.name === 'AbortError' || e?.message?.includes('abort')) {
-            return { ok: false, error: 'AI 解析超时,请换更小的文件或拍图上传。' };
+            if (attempt === 0) return { ok: false, error: 'AI 解析超时,请换更小的文件或拍图上传。' };
+            lastErr = e;                     // 重试轮的短超时也算 transient,继续下一轮
+          } else {
+            const st = e?.status ?? e?.statusCode;
+            const transient = st === 429 || st === 529 || (st >= 500 && st < 600) ||
+              /overload|unexpected response|internal server|timeout/i.test(e?.message || '');
+            lastErr = e;
+            console.warn(`[parsePO] attempt ${attempt + 1} (${MODEL_CHAIN[attempt]}) failed (status=${st ?? '?'}):`, String(e?.message || '').slice(0, 120));
+            if (!transient) throw e;
           }
-          const st = e?.status ?? e?.statusCode;
-          const transient = st === 429 || st === 529 || (st >= 500 && st < 600) ||
-            /overload|unexpected response|internal server|timeout/i.test(e?.message || '');
-          lastErr = e;
-          if (transient && attempt < 2) {
-            await new Promise(r => setTimeout(r, 800 * (attempt + 1))); // 0.8s / 1.6s 退避
+          if (attempt < MODEL_CHAIN.length - 1) {
+            await new Promise(r => setTimeout(r, BACKOFF_MS[attempt] || 8000));
             continue;
           }
-          throw e;
+          throw lastErr;
         }
       }
       if (!response) throw lastErr || new Error('AI 无响应');
@@ -303,9 +314,9 @@ export async function parsePO(
     if (message.includes('credit balance') || message.includes('billing')) {
       return { ok: false, error: 'AI 服务余额不足，请联系管理员充值 Anthropic API 额度。' };
     }
-    // 服务器过载/5xx(重试3次仍失败)= 临时抖动,不是文件问题,提示稍后重试
+    // 服务器过载/5xx(自动重试4次、退避15s仍失败)= Anthropic 端持续过载,不是文件问题
     if (/overload|unexpected response|internal server|529|5\d\d/i.test(message)) {
-      return { ok: false, error: 'AI 服务器繁忙(临时),已重试仍失败。请等 10 秒再点上传重试;这不是文件问题,同一份 PO 直接重试即可。' };
+      return { ok: false, error: 'AI 服务器繁忙(Anthropic 端临时过载),系统已自动重试 4 次仍失败。请等 1-2 分钟再重传同一份 PO;这不是文件问题。' };
     }
     return { ok: false, error: `解析失败：${message}` };
   }

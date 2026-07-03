@@ -52,9 +52,9 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  // select * :双语/箱数列(20260703 迁移)未执行时也不报缺列
   const { data, error } = await (supabase.from('order_line_items') as any)
-    .select('id, line_no, style_no, product_name, color_cn, color_en, sizes, qty_pcs, image_url, remark, fabric_name, fabric_width, fabric_consumption, fabric_unit')
-    .eq('order_id', orderId).order('line_no', { ascending: true });
+    .select('*').eq('order_id', orderId).order('line_no', { ascending: true });
   if (error) return { error: error.message };
 
   const map = new Map<string, any>();
@@ -63,7 +63,8 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
     let st = map.get(key);
     if (!st) {
       st = {
-        style_no: r.style_no || '', product_name: r.product_name || '', image_url: r.image_url || '',
+        style_no: r.style_no || '', product_name: r.product_name || '',
+        product_name_en: r.product_name_en || '', image_url: r.image_url || '',
         fabric_name: r.fabric_name || '', fabric_width: r.fabric_width || '',
         fabric_consumption: r.fabric_consumption ?? '', fabric_unit: r.fabric_unit || 'kg',
         colors: [],
@@ -71,11 +72,12 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
       map.set(key, st);
     }
     if (!st.image_url && r.image_url) st.image_url = r.image_url;
+    if (!st.product_name_en && r.product_name_en) st.product_name_en = r.product_name_en;
     if (!st.fabric_name && r.fabric_name) {
       st.fabric_name = r.fabric_name; st.fabric_width = r.fabric_width || '';
       st.fabric_consumption = r.fabric_consumption ?? ''; st.fabric_unit = r.fabric_unit || 'kg';
     }
-    st.colors.push({ color_cn: r.color_cn || '', color_en: r.color_en || '', sizes: r.sizes || {}, qty: Number(r.qty_pcs) || 0, remark: r.remark || '' });
+    st.colors.push({ color_cn: r.color_cn || '', color_en: r.color_en || '', sizes: r.sizes || {}, qty: Number(r.qty_pcs) || 0, remark: r.remark || '', carton_count: r.carton_count ?? '' });
   }
   return { data: [...map.values()] };
 }
@@ -110,12 +112,15 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
         const n = Number(v) || 0;
         if (n > 0) { sizes[k] = n; qty += n; }
       }
+      const cartons = c?.carton_count === '' || c?.carton_count == null ? null : Number(c.carton_count);
       rows.push({
         order_id: orderId, line_no: lineNo,
         style_no: st?.style_no?.trim() || null, product_name: st?.product_name?.trim() || null,
+        product_name_en: st?.product_name_en?.trim() || null,     // 款式英文描述(双语)
         color_cn: c?.color_cn?.trim() || null, color_en: c?.color_en?.trim() || null,
         sizes, unit: 'pcs', set_multiplier: 1,
         qty_pcs: qty || null, qty_raw: qty || null,
+        carton_count: cartons != null && !isNaN(cartons) ? cartons : null,   // 箱数(该色行)
         image_url: st?.image_url?.trim() || null, remark: c?.remark?.trim() || null,
         fabric_name: st?.fabric_name?.trim() || null,
         fabric_width: st?.fabric_width?.trim() || null,
@@ -129,7 +134,13 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
   const { error: delErr } = await (supabase.from('order_line_items') as any).delete().eq('order_id', orderId);
   if (delErr) return { error: '清旧明细失败:' + delErr.message };
   if (rows.length > 0) {
-    const { error: insErr } = await (supabase.from('order_line_items') as any).insert(rows);
+    let { error: insErr } = await (supabase.from('order_line_items') as any).insert(rows);
+    if (insErr && /product_name_en|carton_count|column .* does not exist/i.test(insErr.message || '')) {
+      // 双语/箱数迁移未执行 → 降级去掉新列重插(不 brick 保存),提醒执行迁移
+      console.warn('[saveOrderLineItems] 双语/箱数列缺失,降级保存。请执行 20260703_line_items_bilingual_cartons.sql');
+      const plain = rows.map(({ product_name_en, carton_count, ...rest }) => rest);
+      ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(plain));
+    }
     if (insErr) return { error: '写明细失败:' + insErr.message };
   }
 

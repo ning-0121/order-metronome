@@ -11,9 +11,10 @@ import { getOrderLineItems, saveOrderLineItems } from '@/app/actions/order-line-
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys } from '@/lib/utils/size-sort';
 
-type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string };
+type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string; carton_count?: number | string };
 type Style = {
   style_no: string; product_name: string; image_url: string; colors: Color[];
+  product_name_en?: string;   // 款式英文描述(生产任务单/PI 双语)
   // S1.2 每款布料(自动同步成该款 BOM 第一行 + 生产任务单用料)
   fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
 };
@@ -162,7 +163,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
         <div key={si} className="bg-white rounded-xl border border-gray-200 p-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <input value={st.style_no} onChange={(e) => setStyleField(si, 'style_no', e.target.value)} placeholder="款号 *" disabled={!canEdit} className={`${inp} w-28`} />
-            <input value={st.product_name} onChange={(e) => setStyleField(si, 'product_name', e.target.value)} placeholder="品名" disabled={!canEdit} className={`${inp} w-40`} />
+            <input value={st.product_name} onChange={(e) => setStyleField(si, 'product_name', e.target.value)} placeholder="品名/款式描述(中)" disabled={!canEdit} className={`${inp} w-40`} />
+            <input value={st.product_name_en || ''} onChange={(e) => setStyleField(si, 'product_name_en', e.target.value)} placeholder="款式描述(英) Style Desc" disabled={!canEdit} className={`${inp} w-44`} />
             <input value={st.image_url} onChange={(e) => setStyleField(si, 'image_url', e.target.value)} placeholder="产品图 URL 或点上传" disabled={!canEdit} className={`${inp} flex-1 min-w-[140px]`} />
             {canEdit && (
               <label className="text-xs px-2 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 cursor-pointer hover:bg-indigo-100 whitespace-nowrap">
@@ -198,6 +200,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
                   <th className="px-1 py-1 font-medium">颜色(英)</th>
                   {sizeLabels.map((s) => <th key={s} className="px-1 py-1 font-medium text-center w-14">{s}</th>)}
                   <th className="px-1 py-1 font-medium text-center">小计</th>
+                  <th className="px-1 py-1 font-medium text-center">箱数</th>
                   {canEdit && <th></th>}
                 </tr>
               </thead>
@@ -212,6 +215,9 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
                       </td>
                     ))}
                     <td className="px-1 py-1 text-center font-mono font-semibold text-gray-900">{sumSizes(c.sizes)}</td>
+                    <td className="px-1 py-1 text-center">
+                      <input type="number" min="0" value={c.carton_count ?? ''} onChange={(e) => setColorField(si, ci, 'carton_count', e.target.value)} placeholder="箱" disabled={!canEdit} className={`${inp} w-14 text-center`} />
+                    </td>
                     {canEdit && <td className="px-1 py-1"><button onClick={() => removeColor(si, ci)} className="text-red-500">×</button></td>}
                   </tr>
                 ))}
