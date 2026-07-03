@@ -81,6 +81,28 @@ export function ProcurementQueueClient({
 
   const btn = 'text-xs px-2 py-1 rounded font-medium disabled:opacity-50';
 
+  // 2026-07-03 用户拍板:状态推进全部二次确认;点错可「↩回退」上一状态(留痕)
+  function confirmRun(l: QueueLine, key: string, to: string, text: string) {
+    if (!window.confirm(text)) return;
+    run(`${l.id}:${key}`, () => transitionProcurementLine(l.id, to as any));
+  }
+  const BACK_ONE: Record<string, string> = {
+    confirmed: 'ordered', in_production: 'confirmed',
+    ready_to_ship: 'in_production', shipped: 'ready_to_ship', arrived: 'shipped',
+  };
+  function BackButton({ l }: { l: QueueLine }) {
+    const backTo = BACK_ONE[l.line_status];
+    if (!backTo) return null;
+    return (
+      <button className={`${btn} border border-gray-200 text-gray-400 hover:text-red-500`}
+        title="点错了?退回上一状态(操作留痕)" disabled={busy === `${l.id}:back`}
+        onClick={() => {
+          if (!window.confirm(`把「${l.material_name}」从「${STATUS_LABEL[l.line_status] || l.line_status}」退回「${STATUS_LABEL[backTo] || backTo}」?\n(误点纠正,操作会留痕)`)) return;
+          run(`${l.id}:back`, () => transitionProcurementLine(l.id, backTo as any, { note: '误点回退' }));
+        }}>↩ 回退</button>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {err && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{err}</div>}
@@ -142,12 +164,13 @@ export function ProcurementQueueClient({
               onClick={async () => { const note = prompt('催货备注（可选）：') ?? undefined; run(`${l.id}:chase`, () => chaseProcurementLine(l.id, note)); }}>催货</button>
             {l.line_status === 'ordered' && (
               <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:conf`}
-                onClick={() => run(`${l.id}:conf`, () => transitionProcurementLine(l.id, 'confirmed'))}>确认</button>
+                onClick={() => confirmRun(l, 'conf', 'confirmed', `确认「${l.material_name}」供应商已接单/确认交期?`)}>确认</button>
             )}
             <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:rts`}
-              onClick={() => run(`${l.id}:rts`, () => transitionProcurementLine(l.id, 'ready_to_ship'))}>✅ 工厂已完成</button>
+              onClick={() => confirmRun(l, 'rts', 'ready_to_ship', `确定「${l.material_name}」工厂已完成、进入待送货?\n(点错可用「↩回退」退回)`)}>✅ 工厂已完成</button>
             <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:ship`}
-              onClick={() => run(`${l.id}:ship`, () => transitionProcurementLine(l.id, 'shipped'))}>直接发货</button>
+              onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」已直接发货(跳过待送货)?`)}>直接发货</button>
+            <BackButton l={l} />
           </RowShell>
         ))}
       </section>
@@ -167,12 +190,13 @@ export function ProcurementQueueClient({
               </span>
               {l.line_status === 'ready_to_ship' && (
                 <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:ship`}
-                  onClick={() => run(`${l.id}:ship`, () => transitionProcurementLine(l.id, 'shipped'))}>🚚 已发货</button>
+                  onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」供应商已发货?`)}>🚚 已发货</button>
               )}
               {l.line_status === 'shipped' && (
                 <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${l.id}:arr`}
-                  onClick={() => run(`${l.id}:arr`, () => transitionProcurementLine(l.id, 'arrived'))}>📦 已送达</button>
+                  onClick={() => confirmRun(l, 'arr', 'arrived', `确定「${l.material_name}」货已送达工厂/仓库?\n送达后进入待验收。`)}>📦 已送达</button>
               )}
+              <BackButton l={l} />
             </RowShell>
           );
         })}
@@ -194,6 +218,7 @@ export function ProcurementQueueClient({
                 onClick={() => setOpenForm(openForm === `${l.id}:reg` ? null : `${l.id}:reg`)}>📥 收货登记</button>
               <button className={`${btn} bg-white text-gray-600 border border-gray-300 hover:bg-gray-50`}
                 onClick={() => setOpenForm(openForm === `${l.id}:recv` ? null : `${l.id}:recv`)}>验收判定</button>
+              <BackButton l={l} />
             </RowShell>
             {openForm === `${l.id}:reg` && (
               <ReceiptRegisterForm line={l} onDone={() => { setOpenForm(null); router.refresh(); }} />

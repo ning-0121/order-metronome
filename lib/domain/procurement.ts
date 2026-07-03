@@ -35,16 +35,19 @@ export const LINE_STATUS_LABELS: Record<ProcurementLineStatus, string> = {
   cancelled: '已取消',
 };
 
-/** 合法状态转换表。ordered→shipped 允许跳过 confirmed（小供应商不走确认）。 */
+/**
+ * 合法状态转换表。ordered→shipped 允许跳过 confirmed（小供应商不走确认）。
+ * 2026-07-03 用户拍板:手滑点错要能退 —— 各状态允许回退上一步(验收结果不可退,让步/拒收是质检结论)。
+ */
 export const VALID_LINE_TRANSITIONS: Record<ProcurementLineStatus, ProcurementLineStatus[]> = {
   draft: ['pending_order', 'cancelled'],
   pending_order: ['ordered', 'cancelled'],
   ordered: ['confirmed', 'ready_to_ship', 'shipped', 'cancelled'],
-  confirmed: ['in_production', 'ready_to_ship', 'shipped', 'cancelled'],
-  in_production: ['ready_to_ship', 'shipped', 'cancelled'],
-  ready_to_ship: ['shipped', 'cancelled'],
-  shipped: ['arrived', 'cancelled'],
-  arrived: ['accepted', 'concession', 'rejected'],
+  confirmed: ['in_production', 'ready_to_ship', 'shipped', 'ordered', 'cancelled'],
+  in_production: ['ready_to_ship', 'shipped', 'confirmed', 'cancelled'],
+  ready_to_ship: ['shipped', 'in_production', 'cancelled'],
+  shipped: ['arrived', 'ready_to_ship', 'cancelled'],
+  arrived: ['accepted', 'concession', 'rejected', 'shipped'],
   accepted: ['closed'],
   concession: ['closed'],
   rejected: ['closed'], // 退货补料 = 开新行，原行关闭
