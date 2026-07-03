@@ -204,10 +204,10 @@ export async function parsePO(
       response = await client.messages.create({
         model: 'claude-sonnet-5',            // 2026-07-03:老 sonnet-4-6 慢 → 最新最快的 Sonnet,提取更准
         max_tokens: 4096,
-        thinking: { type: 'disabled' },      // sonnet-5 省略 thinking 会默认开 adaptive(变慢);结构化提取不需要思考,关掉保速度
         system: SYSTEM_PROMPT,
         messages,
       }, { signal: controller.signal });     // 关键修复:此前 signal 没传给 SDK → 55秒超时形同虚设,请求会一直挂到 SDK 默认 10 分钟
+      // 注:不设 thinking,与小绮/原辅料识别等已验证能跑的 sonnet-5 调用对齐(避免个别参数触发 API 报错→静默失败)
     } catch (e: any) {
       if (e.name === 'AbortError' || e.message?.includes('abort')) {
         return { ok: false, error: 'AI 解析超时,请尝试上传更小的文件或使用图片格式。' };

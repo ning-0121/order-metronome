@@ -295,6 +295,9 @@ function NewOrderWizard() {
 
       if (successes.length === 0) {
         console.error('[PO auto-parse] 全部解析失败', failures);
+        // 2026-07-03:此前静默 return,用户只看到「快但啥也没填」。改成可见错误,暴露真实原因。
+        const reasons = failures.map(f => `${f.fileName}: ${f.error}`).join('；');
+        showError(`PO 识别失败,未能预填:${reasons || '未知原因'}。可手工填写,或换更清晰的 PO(PDF/图片)重试。`);
         return;
       }
 
@@ -489,15 +492,17 @@ function NewOrderWizard() {
       setPoAutoFilled(true);
 
       // 简单告知用户（不弹复杂 modal）
-      if (conflicts.length > 0 || failures.length > 0) {
-        const msg: string[] = [];
-        if (successes.length > 0) msg.push(`✅ AI 识别 ${successes.length} 个 PO 完成`);
-        if (failures.length > 0) msg.push(`❌ ${failures.length} 个文件解析失败`);
-        if (conflicts.length > 0) msg.push(`⚠ ${conflicts.length} 个字段与你已填的内容不一致 — 已保留你的填写，AI 结果记入备注`);
-        alert(msg.join('\n'));
-      }
+      // 2026-07-03:总是给成功反馈(此前只在有冲突/失败时才弹,干净成功时静默 → 用户不知道有没有识别到)
+      const styleCnt = successes.flatMap(s => s.data.styles || []).length;
+      const msg: string[] = [`✅ AI 识别 ${successes.length} 个 PO:客户「${merged.customer_name || '未识别'}」· 总量 ${merged.total_qty || 0} 件 · ${styleCnt} 款 · 交期 ${merged.earliest_delivery || '未识别'}`];
+      if (styleCnt === 0) msg.push('⚠ 没有识别到款色码明细,请手工在「逐款明细」录入');
+      if (failures.length > 0) msg.push(`❌ ${failures.length} 个文件解析失败`);
+      if (conflicts.length > 0) msg.push(`⚠ ${conflicts.length} 个字段与你已填的不一致 — 已保留你的填写,AI 结果记入备注`);
+      alert(msg.join('\n'));
     } catch (err: any) {
       console.error('[PO auto-parse]', err?.message);
+      // 预填代码本身抛异常(非解析失败)此前也被静默吞 → 改成可见
+      showError('PO 预填出错:' + (err?.message || '未知错误') + '。可手工填写。');
     } finally {
       setPoParsing(false);
     }
