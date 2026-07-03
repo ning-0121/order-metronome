@@ -15,6 +15,7 @@ type WebhookEventType =
   | 'order.activated'
   | 'order.completed'
   | 'order.cancelled'
+  | 'order.deleted'
   | 'order.resync'
   | 'milestone.updated'
   | 'price_approval.requested'
@@ -129,6 +130,16 @@ export async function notifyOrderCompleted(order: Record<string, unknown>) {
 /** 订单取消时通知财务系统 */
 export async function notifyOrderCancelled(order: Record<string, unknown>) {
   return sendToFinanceSystem('order.cancelled', order)
+}
+
+/**
+ * 订单删除时通知财务系统作废(应收/应付/预算/已同步PO应付 全部冲销)。
+ * 带完整标识(order_no/internal_order_no)+ 关联采购单号,供财务侧精确核销。
+ */
+export async function notifyOrderDeleted(payload: {
+  id: string; order_no?: string | null; internal_order_no?: string | null; customer_name?: string | null; po_nos?: string[];
+}) {
+  return sendToFinanceSystem('order.deleted', payload as any)
 }
 
 /** 推送价格审批请求到财务系统 */
