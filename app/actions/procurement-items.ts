@@ -42,6 +42,44 @@ export async function listProcurementItems(orderId: string) {
       }
     }
   } catch { /* 姓名解析失败不影响列表 */ }
+
+  // 供应商记忆(2026-07-03 确认归并加强 ①):同一物料上次从谁家买的、什么价 → 建议
+  // 身份口径:有主数据码按码配,没有按 名称+规格(不含颜色——供应商供的是料,不分色)
+  try {
+    const masterIds = [...new Set((data || []).map((r: any) => r.material_master_id).filter(Boolean))];
+    const names = [...new Set((data || []).map((r: any) => r.material_name).filter(Boolean))];
+    if (masterIds.length > 0 || names.length > 0) {
+      let hq = (supabase.from('procurement_items') as any)
+        .select('material_master_id, material_name, specification, confirmed_supplier_name, unit_price, currency, confirmed_at, orders(order_no)')
+        .neq('order_id', orderId)
+        .not('confirmed_supplier_name', 'is', null)
+        .order('confirmed_at', { ascending: false })
+        .limit(120);
+      const ors: string[] = [];
+      if (masterIds.length) ors.push(`material_master_id.in.(${masterIds.join(',')})`);
+      if (names.length) ors.push(`material_name.in.(${names.map(n => `"${String(n).replace(/"/g, '')}"`).join(',')})`);
+      hq = hq.or(ors.join(','));
+      const { data: hist } = await hq;
+      const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+      const byMaster = new Map<string, any>();
+      const byNameSpec = new Map<string, any>();
+      for (const h of (hist || [])) {                       // 已按时间倒序,首个=最近
+        const rec = {
+          supplier: h.confirmed_supplier_name, unit_price: h.unit_price, currency: h.currency,
+          confirmed_at: h.confirmed_at, order_no: h.orders?.order_no || null,
+        };
+        if (h.material_master_id && !byMaster.has(h.material_master_id)) byMaster.set(h.material_master_id, rec);
+        const k = `${norm(h.material_name)}|${norm(h.specification)}`;
+        if (!byNameSpec.has(k)) byNameSpec.set(k, rec);
+      }
+      for (const r of (data || [])) {
+        (r as any).last_purchase =
+          (r.material_master_id && byMaster.get(r.material_master_id)) ||
+          byNameSpec.get(`${norm(r.material_name)}|${norm(r.specification)}`) || null;
+      }
+    }
+  } catch { /* 历史建议失败不影响列表 */ }
+
   return { data: data || [] };
 }
 
@@ -69,7 +107,7 @@ export async function consolidateOrderProcurementItems(orderId: string) {
 
   // 1) 需求
   const { data: reqs, error: rErr } = await (supabase.from('material_requirements') as any)
-    .select('id, snapshot_line_id, material_name, material_code, category, unit, net_purchase_qty, version')
+    .select('id, snapshot_line_id, material_name, material_code, category, unit, net_purchase_qty, version, required_date, order_by_date')
     .eq('order_id', orderId);
   if (rErr) return { error: friendlyError(rErr) };
   if (!reqs || reqs.length === 0) return { error: '该订单暂无物料需求(请先在「原辅料和包装」提交采购,跑出 MRP)' };
@@ -112,12 +150,15 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     const dev = sl?.qty_per_piece != null ? Number(sl.qty_per_piece) : null;
     const loss = sl?.loss_rate != null ? Number(sl.loss_rate) : null;
     let g = groups.get(key);
-    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, imgs: [] as string[] }; groups.set(key, g); }
+    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, imgs: [] as string[], reqDate: null, orderBy: null }; groups.set(key, g); }
     g.total += net; g.count += 1;
     if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; }   // 主导来源的开发单耗/损耗作代表值
     // 汇集来源图(去重,封顶 8 张)
     const imgs = sl?.bom_id ? (bomImages.get(sl.bom_id) || []) : [];
     for (const u of imgs) if (g.imgs.length < 8 && !g.imgs.includes(u)) g.imgs.push(u);
+    // 到货倒推:取各来源最早的 需到日/最晚下单日(宁早勿晚)
+    if (r.required_date && (!g.reqDate || r.required_date < g.reqDate)) g.reqDate = r.required_date;
+    if (r.order_by_date && (!g.orderBy || r.order_by_date < g.orderBy)) g.orderBy = r.order_by_date;
   }
 
   // 5) 现有采购项(select * :image_urls 等新列迁移未执行时也不报缺列)
@@ -152,6 +193,8 @@ export async function consolidateOrderProcurementItems(orderId: string) {
         for (const u of g.imgs) if (merged.length < 8 && !merged.includes(u)) merged.push(u);
         if (merged.length !== cur.length) upd.image_urls = merged;
       }
+      // 到货倒推日期刷新(列存在才写,迁移未跑不报错)
+      if ('order_by_date' in (ex as any)) { upd.required_date = g.reqDate; upd.order_by_date = g.orderBy; }
       if (Number(ex.total_required_qty) !== g.total && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
       await (supabase.from('procurement_items') as any).update(upd).eq('id', ex.id);
       updated++;
@@ -171,6 +214,8 @@ export async function consolidateOrderProcurementItems(orderId: string) {
         suggested_purchase_qty: suggested, status: 'draft', created_by: user.id,
       };
       if (g.imgs.length > 0) row.image_urls = g.imgs;   // 业务传的色卡/辅料图随归并流转
+      if (g.reqDate) row.required_date = g.reqDate;     // 需到日/最晚下单日(到货倒推亮灯)
+      if (g.orderBy) row.order_by_date = g.orderBy;
       // 品类补:采购下单后才冒出来的新项 = 漏采补录 → 标补采购,待财务审批
       if (afterProcurementPlaced) {
         row.is_supplement = true;
@@ -180,10 +225,10 @@ export async function consolidateOrderProcurementItems(orderId: string) {
         row.finance_approval_status = 'pending';
       }
       let { error: iErr } = await (supabase.from('procurement_items') as any).insert(row);
-      if (iErr && /column .* does not exist|is_supplement|finance_approval|image_urls/i.test(iErr.message || '')) {
-        // 补采购/图片迁移未执行 → 降级为普通项插入(不 brick 核料),提醒执行迁移
-        console.warn('[consolidate] 新列缺失,降级插入。请执行 20260703 系列迁移(supplement/images)');
-        const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, image_urls, ...plain } = row;
+      if (iErr && /column .* does not exist|is_supplement|finance_approval|image_urls|order_by_date|required_date/i.test(iErr.message || '')) {
+        // 补采购/图片/日期迁移未执行 → 降级为普通项插入(不 brick 核料),提醒执行迁移
+        console.warn('[consolidate] 新列缺失,降级插入。请执行 20260703 系列迁移(supplement/images/dates)');
+        const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, image_urls, required_date, order_by_date, ...plain } = row;
         ({ error: iErr } = await (supabase.from('procurement_items') as any).insert(plain));
       }
       if (iErr) return { error: friendlyError(iErr) };

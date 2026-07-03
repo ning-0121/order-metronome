@@ -47,6 +47,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [fulfillment, setFulfillment] = useState<any[]>([]);
+  const [checked, setChecked] = useState<Set<string>>(new Set());   // ② 批量确认勾选
   // 供应商主数据(确认供应商下拉用;不再手敲名字)
   const [supplierOptions, setSupplierOptions] = useState<any[]>([]);
   useEffect(() => {
@@ -218,6 +219,43 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
 
   const sel = items.find(i => i.id === selId);
+
+  // ── 确认归并加强(2026-07-03 用户拍板 1-4)──
+  const DONE_STATUSES = ['confirmed', 'ordered', 'partially_received', 'completed', 'closed'];
+  const pendingItems = items.filter(i => ['draft', 'reviewing'].includes(i.status));
+  const doneCount = items.length - pendingItems.length;
+  // ② 批量确认资格:供应商+数量齐、无风险/替代标记、非待批补采购(这些强制逐项人核)
+  const canBulkConfirm = (i: any) =>
+    ['draft', 'reviewing'].includes(i.status)
+    && String(i.confirmed_supplier_name || '').trim()
+    && (i.final_purchase_qty ?? i.suggested_purchase_qty) != null
+    && !i.risk_flag && !i.is_substitute && !i.needs_reconfirm
+    && !(i.is_supplement && i.finance_approval_status !== 'approved');
+  const bulkEligible = items.filter(canBulkConfirm);
+  const checkedEligible = bulkEligible.filter(i => checked.has(i.id));
+  // ④ 下单倒计时:超最晚下单日=🔥,3天内=⏰
+  const deadlineBadge = (i: any) => {
+    if (!i.order_by_date || DONE_STATUSES.includes(i.status)) return null;
+    const days = Math.floor((new Date(i.order_by_date + 'T23:59:59+08:00').getTime() - Date.now()) / 86400000);
+    if (days < 0) return { cls: 'bg-red-100 text-red-700', text: `🔥 超最晚下单日${-days}天`, tip: `需到 ${i.required_date || '?'} · 最晚下单 ${i.order_by_date},今天不下单赶不上生产` };
+    if (days <= 3) return { cls: 'bg-amber-100 text-amber-700', text: `⏰ ${days === 0 ? '今天' : days + '天内'}须下单`, tip: `需到 ${i.required_date || '?'} · 最晚下单 ${i.order_by_date}` };
+    return null;
+  };
+
+  async function bulkConfirm() {
+    const ids = checkedEligible.map(i => i.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`批量确认 ${ids.length} 项采购?(有风险/替代/待批补采购的项不在其列,需逐项处理)`)) return;
+    setBusy(true); setMsg('');
+    let ok = 0; const fails: string[] = [];
+    for (const id of ids) {
+      const r = await updateProcurementItemStatus(id, orderId, 'confirmed');
+      if ((r as any).error) fails.push((r as any).error); else ok++;
+    }
+    setBusy(false); setChecked(new Set());
+    setMsg(`✅ 批量确认 ${ok}/${ids.length} 项${fails.length ? `;首个失败原因:${fails[0]}` : ''}`);
+    await reload();
+  }
   // 实时建议采购(2026-07-03 用户拍板:改任何数立即看到结果)——
   // 与服务端保存时用的是同一个内核纯函数,单一算法口径(ADR-005),不会出现两套数
   const liveSuggested = sel ? computeSuggestedPurchaseQty({
@@ -296,6 +334,41 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       </div>
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
 
+      {/* ③ 核料完成度 + ② 批量确认 工具条 */}
+      {items.length > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-semibold text-gray-800">核料进度 {doneCount}/{items.length}</span>
+            <div className="flex-1 min-w-[140px] h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${items.length ? Math.round(doneCount / items.length * 100) : 0}%` }} />
+            </div>
+            {bulkEligible.length > 0 && (
+              <>
+                <button onClick={() => setChecked(checked.size === bulkEligible.length ? new Set() : new Set(bulkEligible.map(i => i.id)))}
+                  className="text-xs text-indigo-600 hover:underline">
+                  {checked.size === bulkEligible.length ? '取消全选' : `全选可批量确认(${bulkEligible.length})`}
+                </button>
+                <button onClick={bulkConfirm} disabled={busy || checkedEligible.length === 0}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">
+                  ✅ 批量确认({checkedEligible.length})
+                </button>
+              </>
+            )}
+          </div>
+          {pendingItems.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap text-xs">
+              <span className="text-gray-400">待核:</span>
+              {pendingItems.map(i => (
+                <button key={i.id} onClick={() => select(i)}
+                  className={`px-2 py-0.5 rounded-full border ${selId === i.id ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  {i.material_name || i.item_no}{i.color ? ` · ${i.color}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {items.length === 0 ? (
         <div className="text-center py-10 text-gray-400">
           <p className="mb-2">暂无采购核料项</p>
@@ -306,16 +379,24 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 text-left text-gray-500">
-              {['编号', '物料', '类别', '颜色', '单位', '总需求', '库存可用', '来源', '建议采购', '最终', '供应商', '状态', ''].map(h => (
+              {['☑', '编号', '物料', '类别', '颜色', '单位', '总需求', '库存可用', '来源', '建议采购', '最终', '供应商', '状态', ''].map(h => (
                 <th key={h} className="py-2 px-2 font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {items.map(it => (
                 <tr key={it.id} className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${selId === it.id ? 'bg-indigo-50/40' : ''}`} onClick={() => select(it)}>
+                  <td className="py-2 px-2" onClick={e => e.stopPropagation()}>
+                    {canBulkConfirm(it) ? (
+                      <input type="checkbox" checked={checked.has(it.id)}
+                        onChange={e => setChecked(prev => { const n = new Set(prev); e.target.checked ? n.add(it.id) : n.delete(it.id); return n; })}
+                        className="w-3.5 h-3.5 accent-emerald-600" title="可批量确认" />
+                    ) : <span className="text-gray-200">·</span>}
+                  </td>
                   <td className="py-2 px-2 font-mono text-xs text-indigo-600 whitespace-nowrap">
                     {it.needs_reconfirm && <span title="需重新确认" className="text-amber-600">⚠ </span>}
                     {it.is_supplement && <span title={`补采购:${it.supplement_reason || ''}`} className={`mr-1 px-1.5 py-px rounded text-[10px] font-medium ${SUPP_STATUS[it.finance_approval_status]?.cls || 'bg-amber-100 text-amber-700'}`}>🟠补</span>}
+                    {(() => { const b = deadlineBadge(it); return b ? <span title={b.tip} className={`mr-1 px-1.5 py-px rounded text-[10px] font-medium ${b.cls}`}>{b.text}</span> : null; })()}
                     {it.item_no || '—'}</td>
                   <td className="py-2 px-2 font-medium text-gray-900">
                     <span className="inline-flex items-center gap-1.5">
@@ -548,6 +629,20 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                 {supplierOptions.map(s => <option key={s.id} value={s.name}>{s.name}{s.main_category ? `(${s.main_category})` : ''}</option>)}
               </select>
               <a href="/suppliers" target="_blank" className="text-[10px] text-indigo-500 hover:underline">没有?去建供应商 →</a>
+              {/* ① 供应商记忆:同物料上次从谁家买的、什么价 */}
+              {sel.last_purchase && (
+                <span className="block text-[10px] text-emerald-700 mt-0.5">
+                  上次:{sel.last_purchase.supplier}
+                  {sel.last_purchase.unit_price != null ? ` ¥${sel.last_purchase.unit_price}` : ''}
+                  {sel.last_purchase.order_no ? `(${sel.last_purchase.order_no}` : '('}
+                  {sel.last_purchase.confirmed_at ? ` ${fmtD(sel.last_purchase.confirmed_at)})` : ')'}
+                  <button onClick={() => {
+                    set('confirmed_supplier_name', sel.last_purchase.supplier);
+                    if (sel.last_purchase.unit_price != null && !form.unit_price) set('unit_price', String(sel.last_purchase.unit_price));
+                    if (sel.last_purchase.currency && !form.currency) set('currency', sel.last_purchase.currency);
+                  }} className="ml-1 px-1.5 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">采纳</button>
+                </span>
+              )}
             </label>
             <Field label="联系人" k="supplier_contact" form={form} set={set} />
             <Field label="Lead(天)" k="lead_days" form={form} set={set} type="number" />
