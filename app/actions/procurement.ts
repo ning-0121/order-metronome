@@ -152,6 +152,9 @@ export async function addProcurementItem(
 ): Promise<{ error?: string; data?: ProcurementLineItem }> {
   const auth = await checkAccess();
   if (!auth.ok || !auth.userId) return { error: auth.error };
+  // 泄价红线③同源:执行层增行/手填底价仅限采购角色(业务执行走「补数量申请」)
+  if (!hasRoleInGroup(auth.roles || [], 'CAN_EDIT_PROCUREMENT_EXEC'))
+    return { error: '仅采购/采购经理/管理员可编辑采购执行层(业务执行请走「补数量申请」)' };
 
   const supabase = await createClient();
 
@@ -251,6 +254,9 @@ export async function batchAddProcurementItems(
 ): Promise<{ error?: string; count?: number }> {
   const auth = await checkAccess();
   if (!auth.ok || !auth.userId) return { error: auth.error };
+  // 泄价红线③同源:批量增执行层含价行仅限采购角色
+  if (!hasRoleInGroup(auth.roles || [], 'CAN_EDIT_PROCUREMENT_EXEC'))
+    return { error: '仅采购/采购经理/管理员可编辑采购执行层' };
 
   const supabase = await createClient();
   const rows = items.map(item => ({
@@ -283,6 +289,9 @@ export async function syncFromProcurementTracking(
 ): Promise<{ added: number; skipped: number; error?: string }> {
   const auth = await checkAccess();
   if (!auth.ok || !auth.userId) return { added: 0, skipped: 0, error: auth.error };
+  // 泄价红线③同源:同步进执行层含价行仅限采购角色
+  if (!hasRoleInGroup(auth.roles || [], 'CAN_EDIT_PROCUREMENT_EXEC'))
+    return { added: 0, skipped: 0, error: '仅采购/采购经理/管理员可编辑采购执行层' };
 
   const supabase = await createClient();
 
@@ -444,6 +453,9 @@ export async function deleteProcurementItem(
 ): Promise<{ error?: string }> {
   const auth = await checkAccess();
   if (!auth.ok) return { error: auth.error };
+  // 泄价红线③同源:执行层删行仅限采购角色
+  if (!hasRoleInGroup(auth.roles || [], 'CAN_EDIT_PROCUREMENT_EXEC'))
+    return { error: '仅采购/采购经理/管理员可编辑采购执行层' };
 
   const supabase = await createClient();
   const { error } = await (supabase.from('procurement_line_items') as any)
@@ -465,6 +477,9 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
 }> {
   const auth = await checkAccess();
   if (!auth.ok) return { error: auth.error };
+  // 对账单含底价/金额,仅可见底价角色可导出(业务/生产不得导出含价对账单)
+  if (!hasRoleInGroup(auth.roles || [], 'CAN_SEE_PROCUREMENT_FLOOR'))
+    return { error: '仅采购/财务/管理员可导出含价对账单' };
 
   const supabase = await createClient();
 

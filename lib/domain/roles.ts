@@ -222,6 +222,9 @@ export const ROLE_GROUPS = {
 
   /** 可录领料/退料(发料出库):生产/物流/采购/admin —— 谁管发料谁录 */
   CAN_ISSUE_MATERIAL: ['admin', 'production', 'production_manager', 'logistics', 'procurement', 'procurement_manager'] as const,
+
+  /** 可写采购执行层(增删对账行/手填底价):采购/采购经理/admin —— 业务执行请走「补数量申请」，不能直接改执行层含价数据 */
+  CAN_EDIT_PROCUREMENT_EXEC: ['admin', 'procurement', 'procurement_manager'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;
