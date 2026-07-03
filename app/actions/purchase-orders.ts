@@ -126,6 +126,43 @@ export async function listPurchaseOrders(): Promise<{ data?: any[]; error?: stri
   return { data: data || [] };
 }
 
+/**
+ * 某订单关联的采购单档案(2026-07-03:下单后核料页转入追踪模式,这里是"下文"的家)。
+ * 每单:PO号/供应商/状态/订购合计/已收/未到,链到采购单详情(批次历史在详情里)。
+ */
+export async function getOrderPurchaseOrders(orderId: string): Promise<{ data?: any[]; error?: string }> {
+  const { supabase, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  const { data: lines } = await (supabase.from('procurement_line_items') as any)
+    .select('purchase_order_id, ordered_qty, received_qty')
+    .eq('order_id', orderId).not('purchase_order_id', 'is', null);
+  const poIds = [...new Set((lines || []).map((l: any) => l.purchase_order_id))];
+  if (poIds.length === 0) return { data: [] };
+  const { data: pos } = await (supabase.from('purchase_orders') as any)
+    .select('id, po_no, status, delivery_date, created_at, suppliers(name)').in('id', poIds);
+  const agg = new Map<string, { ordered: number; received: number; count: number }>();
+  for (const l of (lines || [])) {
+    const a = agg.get(l.purchase_order_id) || { ordered: 0, received: 0, count: 0 };
+    a.ordered += Number(l.ordered_qty) || 0;
+    a.received += Number(l.received_qty) || 0;
+    a.count += 1;
+    agg.set(l.purchase_order_id, a);
+  }
+  const out = (pos || []).map((p: any) => {
+    const a = agg.get(p.id) || { ordered: 0, received: 0, count: 0 };
+    return {
+      id: p.id, po_no: p.po_no, status: p.status,
+      supplier_name: p.suppliers?.name || null,
+      delivery_date: p.delivery_date, created_at: p.created_at,
+      line_count: a.count,
+      ordered_sum: Math.round(a.ordered * 1000) / 1000,
+      received_sum: Math.round(a.received * 1000) / 1000,
+      outstanding_sum: Math.max(0, Math.round((a.ordered - a.received) * 1000) / 1000),
+    };
+  }).sort((x: any, y: any) => String(y.created_at || '').localeCompare(String(x.created_at || '')));
+  return { data: out };
+}
+
 /** 采购单详情：头 + 供应商 + 行 + 关联订单双号。**底价按角色屏蔽**。 */
 export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?: string }> {
   const { supabase, roles, userId } = await authRoles();
@@ -136,8 +173,22 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
   if (!po) return { error: '采购单不存在' };
 
   const { data: lines } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, unit_price, price_baseline, ordered_amount, received_qty, status')
+    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, unit_price, price_baseline, ordered_amount, received_qty, status, line_status, chase_count, last_chased_at')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
+
+  // 进度档案(2026-07-03 用户拍板:分批收货后要能追整单全貌)——每行的收货批次历史
+  const lineIds = (lines || []).map((l: any) => l.id);
+  const receiptsByLine = new Map<string, any[]>();
+  if (lineIds.length > 0) {
+    const { data: receipts } = await (supabase.from('goods_receipts') as any)
+      .select('line_item_id, received_qty, received_unit, received_at, inspection_result, defect_notes')
+      .in('line_item_id', lineIds).order('received_at', { ascending: true });
+    for (const r of (receipts || [])) {
+      const arr = receiptsByLine.get(r.line_item_id) || [];
+      arr.push(r); receiptsByLine.set(r.line_item_id, arr);
+    }
+  }
+  for (const l of (lines || [])) (l as any).receipts = receiptsByLine.get((l as any).id) || [];
 
   // 双号：关联订单的 internal_order_no + order_no
   const orderIds: string[] = ((po as any).order_ids || []) as string[];

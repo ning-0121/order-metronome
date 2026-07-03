@@ -144,25 +144,73 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
           <table className="w-full text-xs">
             <thead><tr className="bg-gray-50 text-left text-gray-500">
               <th className="px-3 py-2">物料</th><th className="px-3 py-2">规格</th>
-              <th className="px-3 py-2 text-center">数量</th><th className="px-3 py-2 text-right">建议价</th>
+              <th className="px-3 py-2 text-center">订购</th>
+              <th className="px-3 py-2 text-center">已收</th>
+              <th className="px-3 py-2 text-center">未到</th>
+              <th className="px-3 py-2 text-center">状态</th>
+              <th className="px-3 py-2 text-right">建议价</th>
               {canSeeFloor && <th className="px-3 py-2 text-right">底价</th>}
               {canSeeFloor && <th className="px-3 py-2 text-right">金额</th>}
             </tr></thead>
             <tbody className="divide-y divide-gray-100">
-              {lines.map((l: any) => (
-                <tr key={l.id}>
-                  <td className="px-3 py-2">{l.material_name}</td>
-                  <td className="px-3 py-2 text-gray-500">{l.specification || '—'}</td>
-                  <td className="px-3 py-2 text-center">{l.ordered_qty} {l.ordered_unit}</td>
-                  <td className="px-3 py-2 text-right">{l.price_baseline ?? '—'}</td>
-                  {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.unit_price ?? '—'}</td>}
-                  {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.ordered_amount ?? '—'}</td>}
-                </tr>
-              ))}
+              {lines.map((l: any) => {
+                const ordered = Number(l.ordered_qty) || 0;
+                const received = Number(l.received_qty) || 0;
+                const out = Math.max(0, Math.round((ordered - received) * 1000) / 1000);
+                const receipts: any[] = Array.isArray(l.receipts) ? l.receipts : [];
+                return (
+                  <>
+                    <tr key={l.id}>
+                      <td className="px-3 py-2">{l.material_name}</td>
+                      <td className="px-3 py-2 text-gray-500">{l.specification || '—'}</td>
+                      <td className="px-3 py-2 text-center">{l.ordered_qty} {l.ordered_unit}</td>
+                      <td className="px-3 py-2 text-center text-emerald-700 font-medium">{received || '—'}</td>
+                      <td className={`px-3 py-2 text-center font-semibold ${out > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{ordered ? out : '—'}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{LINE_STATUS_LABEL[l.line_status] || l.line_status || '—'}</span>
+                        {(l.chase_count ?? 0) > 0 && <span className="block text-[10px] text-amber-600 mt-0.5">催{l.chase_count}次{l.last_chased_at ? ` ${String(l.last_chased_at).slice(5, 10)}` : ''}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right">{l.price_baseline ?? '—'}</td>
+                      {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.unit_price ?? '—'}</td>}
+                      {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.ordered_amount ?? '—'}</td>}
+                    </tr>
+                    {receipts.length > 0 && (
+                      <tr key={`${l.id}-receipts`}>
+                        <td colSpan={canSeeFloor ? 9 : 7} className="px-3 pb-2 pt-0">
+                          <div className="ml-4 rounded-lg bg-emerald-50/60 border border-emerald-100 px-3 py-1.5 text-[11px] text-emerald-800">
+                            📥 收货批次:
+                            {receipts.map((r: any, i: number) => (
+                              <span key={i} className="ml-2">
+                                第{i + 1}批 {String(r.received_at || '').slice(0, 10)} · {r.received_qty}{r.received_unit || l.ordered_unit || ''}
+                                {r.inspection_result && r.inspection_result !== 'pending' ? `(${r.inspection_result === 'pass' ? '合格' : r.inspection_result === 'concession' ? '让步' : r.inspection_result === 'reject' ? '拒收' : r.inspection_result})` : ''}
+                                {i < receipts.length - 1 ? ' ;' : ''}
+                              </span>
+                            ))}
+                            {out > 0 && <b className="ml-2 text-amber-700">· 还差 {out}{l.ordered_unit || ''} 未到</b>}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
             </tbody>
+            <tfoot><tr className="bg-gray-50 font-medium text-gray-700">
+              <td className="px-3 py-2" colSpan={2}>合计</td>
+              <td className="px-3 py-2 text-center">{lines.reduce((a: number, l: any) => a + (Number(l.ordered_qty) || 0), 0)}</td>
+              <td className="px-3 py-2 text-center text-emerald-700">{lines.reduce((a: number, l: any) => a + (Number(l.received_qty) || 0), 0)}</td>
+              <td className="px-3 py-2 text-center text-amber-700">{Math.max(0, Math.round(lines.reduce((a: number, l: any) => a + ((Number(l.ordered_qty) || 0) - (Number(l.received_qty) || 0)), 0) * 1000) / 1000)}</td>
+              <td colSpan={canSeeFloor ? 4 : 2} />
+            </tr></tfoot>
           </table>
         </div>
       </div>
     </div>
   );
 }
+
+const LINE_STATUS_LABEL: Record<string, string> = {
+  draft: '草稿', pending_order: '待下单', ordered: '已下单', confirmed: '已确认',
+  in_production: '生产中', ready_to_ship: '待送货', shipped: '在途', arrived: '已送达',
+  accepted: '验收合格', concession: '让步接收', rejected: '拒收', completed: '完成', closed: '关闭', cancelled: '已取消',
+};

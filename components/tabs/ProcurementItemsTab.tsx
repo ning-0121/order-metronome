@@ -9,6 +9,7 @@ import {
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
+import { getOrderPurchaseOrders } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
 import { computeSuggestedPurchaseQty } from '@/lib/services/procurement-consolidation';
@@ -84,12 +85,15 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [stForm, setStForm] = useState<Record<string, { counted: string; location: string }>>({});
   const [stBusy, setStBusy] = useState(false);
 
+  const [orderPos, setOrderPos] = useState<any[]>([]);   // 该订单的采购单档案(下单后的"下文")
   const reload = async () => {
     const res = await listProcurementItems(orderId);
     const list = (res as any).error ? [] : ((res as any).data || []);
     if ((res as any).error) setMsg((res as any).error); else setItems(list);
     const ff = await getOrderProcurementFulfillment(orderId);
     if ((ff as any).data) setFulfillment((ff as any).data);
+    const pos = await getOrderPurchaseOrders(orderId);
+    if ((pos as any).data) setOrderPos((pos as any).data);
     // 各采购项的库存可用量(按 consolidation_key)
     const keys = list.map((i: any) => i.consolidation_key).filter(Boolean);
     if (keys.length) {
@@ -282,6 +286,10 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   const sel = items.find(i => i.id === selId);
 
+  // ── 阶段判定(2026-07-03 用户拍板:下完单核料转入追踪模式,不再摆工作台) ──
+  const ORDERED_PLUS = ['ordered', 'partially_received', 'completed', 'closed'];
+  const trackingPhase = items.length > 0 && items.every(i => ORDERED_PLUS.includes(i.status));
+
   // ── 确认归并加强(2026-07-03 用户拍板 1-4)──
   const DONE_STATUSES = ['confirmed', 'ordered', 'partially_received', 'completed', 'closed'];
   const pendingItems = items.filter(i => ['draft', 'reviewing'].includes(i.status));
@@ -449,31 +457,61 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-gray-500">{items.length} 个采购核料项 · 同订单按 物料+颜色+单位 自动归并</div>
         <div className="flex items-center gap-2">
-          {confirmedCount > 0 && (
-            <button onClick={genLines} disabled={busy}
-              className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50"
-              title="把已确认采购项生成采购执行行(下单/收货用)">
-              {busy ? '生成中…' : `➡️ 生成执行行（${confirmedCount} 已确认）`}</button>
-          )}
-          <button onClick={consolidate} disabled={busy}
-            className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
-            {busy ? '核料中…' : '🔄 核料归并 / 刷新'}</button>
+          {trackingPhase ? (
+            <span className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500" title="全部采购项已下单;核定/归并已锁定,改量走「补数量申请」">
+              🔒 已全部下单 — 进入跟单追踪(下方采购单档案)
+            </span>
+          ) : (<>
+            {confirmedCount > 0 && (
+              <button onClick={genLines} disabled={busy}
+                className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50"
+                title="把已确认采购项生成采购执行行(下单/收货用)">
+                {busy ? '生成中…' : `➡️ 生成执行行（${confirmedCount} 已确认）`}</button>
+            )}
+            <button onClick={consolidate} disabled={busy}
+              className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+              {busy ? '核料中…' : '🔄 核料归并 / 刷新'}</button>
+          </>)}
         </div>
       </div>
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
+
+      {/* 采购单档案(下单后的追踪主体:PO为单位,批次历史在PO详情) */}
+      {orderPos.length > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-100 text-sm font-semibold text-gray-700">🧾 本单采购单档案({orderPos.length})<span className="font-normal text-xs text-gray-400"> · 每批收货/催货记录点进采购单看</span></div>
+          {orderPos.map(p => (
+            <Link key={p.id} href={`/procurement/po/${p.id}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-50 hover:bg-gray-50 text-xs">
+              <span className="font-mono font-semibold text-indigo-700">{p.po_no}</span>
+              <span className="text-gray-600">{p.supplier_name || '—'}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{({ draft: '草稿', placed: '已下单', confirmed: '已确认', receiving: '收货中', received: '已收齐', closed: '关闭', cancelled: '取消' } as Record<string, string>)[p.status] || p.status}</span>
+              <span className="text-gray-400">{p.line_count} 行 · 订购 {p.ordered_sum}</span>
+              <span className="text-emerald-700">已收 {p.received_sum}</span>
+              {p.outstanding_sum > 0
+                ? <span className="font-semibold text-amber-600">未到 {p.outstanding_sum}</span>
+                : <span className="text-emerald-600">✓ 收齐</span>}
+              <span className="ml-auto text-indigo-500">查看档案 →</span>
+            </Link>
+          ))}
+        </div>
+      )}
 
       {/* ⓪ 按款核定大货单耗(布料必核;不核定完不能归并——归并=Σ 每款件数×该款大货单耗) */}
       {consLines.length > 0 && (
         <div className={`rounded-xl border-2 p-3 space-y-2 ${consMissing.length > 0 ? 'border-amber-300 bg-amber-50/60' : 'border-gray-200 bg-white'}`}>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-gray-800">📐 按款核定大货单耗</span>
-            {consMissing.length > 0
-              ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">🔒 还差 {consMissing.length} 条布料未核定 — 核定完才能归并</span>
-              : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 布料已全部核定,可归并</span>}
-            <button onClick={saveCons} disabled={consSaving}
-              className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
-              {consSaving ? '保存中…' : '💾 保存核定'}
-            </button>
+            {trackingPhase
+              ? <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">🔒 已下单,核定锁定(存档;改量走「补数量申请」)</span>
+              : consMissing.length > 0
+                ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">🔒 还差 {consMissing.length} 条布料未核定 — 核定完才能归并</span>
+                : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 布料已全部核定,可归并</span>}
+            {!trackingPhase && (
+              <button onClick={saveCons} disabled={consSaving}
+                className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+                {consSaving ? '保存中…' : '💾 保存核定'}
+              </button>
+            )}
           </div>
           <p className="text-[11px] text-gray-500">每款排料不同,大货单耗必须逐款填;总需求 = Σ(每款件数 × 该款大货单耗),不做平均/折算。辅料默认按开发单耗,可选核。</p>
           <div className="overflow-x-auto">
@@ -492,10 +530,10 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     <td className="py-1.5 px-2">{l.required ? <span className="text-amber-700 font-medium">布料·必核</span> : <span className="text-gray-400">辅料·可选</span>}</td>
                     <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
                     <td className="py-1.5 px-2">
-                      <input type="number" step="0.001" min="0" value={consEdit[l.id] ?? ''}
+                      <input type="number" step="0.001" min="0" value={consEdit[l.id] ?? ''} disabled={trackingPhase}
                         placeholder={l.required ? '必填' : `默认 ${l.development_consumption ?? '—'}`}
                         onChange={e => setConsEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
-                        className={`w-24 rounded border px-2 py-1 ${l.required && !(Number(consEdit[l.id]) > 0) ? 'border-amber-400 bg-white' : 'border-gray-300'}`} />
+                        className={`w-24 rounded border px-2 py-1 disabled:bg-gray-50 disabled:text-gray-500 ${l.required && !(Number(consEdit[l.id]) > 0) ? 'border-amber-400 bg-white' : 'border-gray-300'}`} />
                     </td>
                     <td className="py-1.5 px-2 text-gray-400">{l.unit || '—'}</td>
                   </tr>
@@ -506,8 +544,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
         </div>
       )}
 
-      {/* 确认后的下文(2026-07-03 用户拍板:确认→采购单→给供应商→财务→追踪 一条路走亮) */}
-      {(linesReady || confirmedCount > 0) && (
+      {/* 确认后的下文(2026-07-03 用户拍板:确认→采购单→给供应商→财务→追踪 一条路走亮;下单后由采购单档案接棒) */}
+      {(linesReady || confirmedCount > 0) && !trackingPhase && (
         <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3 flex items-center gap-3 flex-wrap">
           <span className="text-sm font-semibold text-emerald-900">
             {linesReady ? '执行行已就绪,下一步:归成采购单发供应商' : '已确认的项:先点上方「➡️ 生成执行行」,再归采购单'}
