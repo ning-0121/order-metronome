@@ -46,11 +46,11 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
           <LampDot lamp={line.lamp} />
           <span className="font-medium text-gray-900 truncate">{line.material_name}</span>
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[line.category || 'other'] || line.category}</span>
-          <Link href={`/orders/${line.order_id}`} className="text-xs text-indigo-600 hover:underline shrink-0">
+          {/* 采购不进订单详情(2026-07-03 权限隔离)→ 专属核料页(只读摘要+核料+任务单下载) */}
+          <Link href={`/procurement/verify/${line.order_id}`} className="text-xs text-indigo-600 hover:underline shrink-0">
             {line.internal_order_no ? `${line.internal_order_no} | ` : ''}{line.order_no}·{line.customer_name}
           </Link>
-          {/* 数据链:采购随手打开该订单的生产任务单核对(2026-07-03 用户要求) */}
-          <Link href={`/orders/${line.order_id}?tab=manufacturing_order`} className="text-xs text-gray-400 hover:text-indigo-600 shrink-0" title="打开该订单的生产任务单核对">
+          <Link href={`/procurement/verify/${line.order_id}`} className="text-xs text-gray-400 hover:text-indigo-600 shrink-0" title="打开核料页,右上可下载生产任务单">
             📋任务单
           </Link>
         </div>
@@ -91,7 +91,7 @@ export function ProcurementQueueClient({
           📨 待采购订单（{pendingRequests.length}）<span className="font-normal text-emerald-700">— 业务执行已提交采购申请</span>
         </div>
         {pendingRequests.length === 0 ? <Empty /> : pendingRequests.map(o => (
-          <Link key={o.order_id} href={`/orders/${o.order_id}?tab=procurement_items`}
+          <Link key={o.order_id} href={`/procurement/verify/${o.order_id}`}
             className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 hover:bg-emerald-50/50">
             {o.late_count > 0
               ? <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title={`${o.late_count} 项已过最晚下单日`} />

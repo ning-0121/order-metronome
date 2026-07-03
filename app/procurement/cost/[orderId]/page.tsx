@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getProcurementCostSummary } from '@/app/actions/procurement-cost';
@@ -6,6 +7,7 @@ import { getOrderLeftover } from '@/app/actions/inventory';
 import { ProcurementCostClient } from './ProcurementCostClient';
 
 export default async function ProcurementCostDetailPage({ params }: { params: Promise<{ orderId: string }> }) {
+  await requireProcurementPage(['finance']);   // 成本页财务也可看;业务/生产等回工作台(2026-07-03)
   const { orderId } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

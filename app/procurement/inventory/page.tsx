@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { hasRoleInGroup } from '@/lib/domain/roles';
@@ -7,6 +8,7 @@ import { InventoryClient } from './InventoryClient';
 
 // 库存余额 + 领料/退料（W1）。收货自动入库;领料/退料由仓库/生产录。
 export default async function InventoryPage() {
+  await requireProcurementPage();   // 采购系统页面级门禁:非采购角色回工作台(2026-07-03)
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');

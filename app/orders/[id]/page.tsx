@@ -13,6 +13,7 @@ import { LiveScorePreview } from '@/components/LiveScorePreview';
 import { DocumentCenterTab } from '@/components/tabs/DocumentCenterTab';
 import { isActiveStatus, isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import { notFound, redirect } from 'next/navigation';
+import { isProcurementOnly } from '@/lib/utils/procurement-page-guard';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { hasRoleInGroup } from '@/lib/domain/roles';
@@ -97,6 +98,11 @@ export default async function OrderDetailPage({
     if ((profile as any)?.roles?.length > 0) {
       currentRoles = (profile as any).roles;
     }
+  }
+  // 纯采购角色不进订单详情(2026-07-03 用户拍板:采购看到/误改订单一切太危险)
+  // → 改道采购专属核料页(只读摘要+核料+任务单下载)。兼任其他角色/管理员不受限。
+  if (!isAdmin && isProcurementOnly(currentRoles)) {
+    redirect(`/procurement/verify/${id}`);
   }
   // 价格/利润可见性（红线：production/merchandiser/admin_assistant/procurement/logistics 不可见）
   const canSeeFinancials = isAdmin || hasRoleInGroup(currentRoles, 'CAN_SEE_FINANCIALS');

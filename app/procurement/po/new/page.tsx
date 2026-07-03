@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { listSuppliers } from '@/app/actions/suppliers';
@@ -6,6 +7,7 @@ import { listUnassignedProcurementLines } from '@/app/actions/purchase-orders';
 import { NewPurchaseOrderClient } from './NewPurchaseOrderClient';
 
 export default async function NewPOPage() {
+  await requireProcurementPage();   // 采购系统页面级门禁:非采购角色回工作台(2026-07-03)
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');

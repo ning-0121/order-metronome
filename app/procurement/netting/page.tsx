@@ -1,10 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { NettingClient } from './NettingClient';
 
 // 跨订单合并采购（P3 A）：未归单待下单行按物料跨订单聚合 → 一张跨订单采购单。
 export default async function NettingPage() {
+  await requireProcurementPage();   // 采购系统页面级门禁:非采购角色回工作台(2026-07-03)
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');

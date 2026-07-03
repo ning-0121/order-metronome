@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getProcurementQueues, getProcurementMatters, type RiskMatter } from '@/app/actions/procurement';
@@ -20,6 +21,7 @@ const MATTER_GROUPS: { type: RiskMatter['matter_type']; label: string; tone: str
 ];
 
 export default async function ProcurementCenterPage() {
+  await requireProcurementPage();   // 采购系统页面级门禁:非采购角色回工作台(2026-07-03)
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
@@ -137,7 +139,7 @@ function RiskCenter({ matters }: { matters: RiskMatter[] }) {
                     <div className="text-sm text-gray-900">{m.title}</div>
                     <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
                       {m.order_id && m.order_no && (
-                        <Link href={`/orders/${m.order_id}`} className="text-indigo-600 hover:underline">
+                        <Link href={`/procurement/verify/${m.order_id}`} className="text-indigo-600 hover:underline">
                           {m.order_no}
                         </Link>
                       )}

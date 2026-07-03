@@ -1,10 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getPurchaseOrder } from '@/app/actions/purchase-orders';
 import { PurchaseOrderDetailClient } from './PurchaseOrderDetailClient';
 
 export default async function PODetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireProcurementPage();   // 采购系统页面级门禁:非采购角色回工作台(2026-07-03)
   const { id } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

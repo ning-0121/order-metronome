@@ -1,10 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { listOrdersWithProcurement } from '@/app/actions/procurement-cost';
 
 // 采购成本核算入口：有采购行的订单列表 → 选一个看核算。
 export default async function ProcurementCostIndexPage() {
+  await requireProcurementPage(['finance']);   // 成本页财务也可看;业务/生产等回工作台(2026-07-03)
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
