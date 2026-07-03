@@ -130,6 +130,9 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         <LineItemMatrixEditor orderId={orderId} />
       </div>
 
+      {/* AI 原始识别冻结底档(建单时 PO 解析原文,纠错追溯用) */}
+      <PoParseSnapshotPanel orderId={orderId} />
+
       {/* 生命周期条 */}
       {mo && (
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -409,6 +412,82 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** AI 原始识别冻结底档面板:折叠展示建单时 PO 解析原文,可「用当前明细覆盖冻结」(再冻结)。 */
+function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [snap, setSnap] = useState<any>(null);
+  const [at, setAt] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  async function load() {
+    const { getPoParseSnapshot } = await import('@/app/actions/order-line-items');
+    const res = await getPoParseSnapshot(orderId);
+    setSnap((res as any).snapshot || null);
+    setAt((res as any).at || null);
+    setLoaded(true);
+  }
+  async function toggle() {
+    const next = !open; setOpen(next);
+    if (next && !loaded) await load();
+  }
+  async function refreeze() {
+    if (!confirm('用当前「逐款明细」覆盖冻结底档?覆盖后底档 = 现在的明细。')) return;
+    setBusy(true); setMsg('');
+    const { refreezePoParseSnapshot } = await import('@/app/actions/order-line-items');
+    const res = await refreezePoParseSnapshot(orderId);
+    setBusy(false);
+    if ((res as any).error) { setMsg('❌ ' + (res as any).error); return; }
+    setMsg('✅ 已重新冻结'); await load();
+  }
+
+  const styles = snap?.styles || [];
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-3">
+      <button onClick={toggle} className="w-full flex items-center justify-between text-sm font-semibold text-gray-800">
+        <span>📋 AI 原始识别（冻结底档）{at && <span className="ml-2 text-[11px] font-normal text-gray-400">冻结于 {String(at).slice(0, 16).replace('T', ' ')}</span>}</span>
+        <span className="text-gray-400">{open ? '收起 ▲' : '展开 ▼'}</span>
+      </button>
+      {open && (
+        <div className="mt-3">
+          {!loaded ? <p className="text-xs text-gray-400">加载中…</p>
+            : !snap ? <p className="text-xs text-gray-400">此单无 PO 解析底档(手工录入或从 PO 创建的单没有 AI 原文)。</p>
+            : (
+            <>
+              <p className="text-[11px] text-gray-500 mb-2">这是建单时 AI 从 PO 读出的原文(只读)。和上方「逐款明细」对比可看当初读错在哪;纠正在上方明细里改,改完点下面「再冻结」把底档更新成现在的明细。</p>
+              <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-gray-50 text-gray-500 text-left">
+                    {['款号', '品名', '颜色', '尺码×件数'].map(h => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {styles.flatMap((st: any, si: number) => (st.colors || []).map((c: any, ci: number) => (
+                      <tr key={`${si}-${ci}`} className="border-t border-gray-50">
+                        <td className="px-2 py-1">{ci === 0 ? (st.style_no || '—') : ''}</td>
+                        <td className="px-2 py-1 text-gray-500">{ci === 0 ? (st.product_name || '—') : ''}</td>
+                        <td className="px-2 py-1">{[c.color_cn, c.color_en].filter(Boolean).join('/') || '—'}</td>
+                        <td className="px-2 py-1 text-gray-600">{Object.entries(c.sizes || {}).map(([k, v]) => `${k}:${v}`).join('  ') || '—'}</td>
+                      </tr>
+                    )))}
+                    {styles.length === 0 && <tr><td colSpan={4} className="px-2 py-2 text-gray-400">（底档无款色码）</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center gap-3 mt-2">
+                <button onClick={refreeze} disabled={busy}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-50">
+                  {busy ? '处理中…' : '🔒 用当前明细再冻结'}</button>
+                {msg && <span className="text-xs text-gray-600">{msg}</span>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

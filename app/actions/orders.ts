@@ -349,6 +349,13 @@ export async function createOrder(
     delivery_required_at:    delivery_type === 'domestic' ? (delivery_required_at || null)            : null,
     order_purpose,
     notes: (formData.get('notes') as string) || null,
+    // AI 原始识别冻结底档(有 PO 解析才有):只读原文,纠错追溯用;工作版在 order_line_items
+    ...(() => {
+      const raw = formData.get('po_parse_snapshot') as string | null;
+      if (!raw) return {};
+      try { return { po_parse_snapshot: JSON.parse(raw), po_parse_snapshot_at: new Date().toISOString() }; }
+      catch { return {}; }
+    })(),
     special_tags: [
       formData.get('has_plus_size') === 'true' ? '大码款' : '',
       formData.get('high_stretch') === 'true' ? '高弹面料' : '',

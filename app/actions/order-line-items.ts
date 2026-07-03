@@ -11,6 +11,42 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { syncStyleFabricsToBom } from '@/lib/services/style-fabric-sync';
 
+/** 读 AI 原始识别冻结底档(建单时 PO 解析原文)。 */
+export async function getPoParseSnapshot(orderId: string): Promise<{ snapshot?: any; at?: string | null; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data, error } = await (supabase.from('orders') as any)
+    .select('po_parse_snapshot, po_parse_snapshot_at').eq('id', orderId).maybeSingle();
+  if (error) return { error: error.message };
+  return { snapshot: (data as any)?.po_parse_snapshot ?? null, at: (data as any)?.po_parse_snapshot_at ?? null };
+}
+
+/** 再冻结:用当前逐款明细覆盖冻结底档(业务纠正后固化)。权限同 saveOrderLineItems。 */
+export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: order } = await (supabase.from('orders') as any).select('created_by, owner_user_id').eq('id', orderId).maybeSingle();
+  if (!order) return { error: '订单不存在' };
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const canEdit = roles.includes('admin')
+    || (order as any).created_by === user.id || (order as any).owner_user_id === user.id
+    || roles.some((r) => ['merchandiser', 'order_manager', 'sales_manager', 'admin_assistant'].includes(r));
+  if (!canEdit) return { error: '无权操作(仅创建者/负责人/理单/管理员)' };
+
+  const res = await getOrderLineItems(orderId);
+  if ((res as any).error) return { error: (res as any).error };
+  const styles = (res as any).data || [];
+  const snapshot = { styles, _refrozen: true };
+  const { error } = await (supabase.from('orders') as any)
+    .update({ po_parse_snapshot: snapshot, po_parse_snapshot_at: new Date().toISOString() }).eq('id', orderId);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
 /** 读订单明细 → 按款分组返回。 */
 export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]; error?: string }> {
   const supabase = await createClient();

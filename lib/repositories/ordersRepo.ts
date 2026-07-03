@@ -70,6 +70,9 @@ const INSERT_WHITELIST = [
   'delivery_required_at',
   // AQL 验货标准（列 2026-05-18 已加，但白名单遗漏导致建单时被静默丢弃，2026-06-01 补回）
   'aql_standard',
+  // AI 原始识别冻结底档（2026-07-03）
+  'po_parse_snapshot',
+  'po_parse_snapshot_at',
 ] as const;
 
 const UPDATE_WHITELIST = [
@@ -125,6 +128,9 @@ const UPDATE_WHITELIST = [
   'delivery_required_at',
   // AQL 验货标准（同 INSERT，避免编辑订单时被静默丢弃，2026-06-01 补回）
   'aql_standard',
+  // AI 原始识别冻结底档（2026-07-03，供「再冻结」更新）
+  'po_parse_snapshot',
+  'po_parse_snapshot_at',
 ] as const;
 
 // ⚠️ 系统级约束：order_no 一旦生成，永不修改

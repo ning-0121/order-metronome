@@ -561,6 +561,10 @@ function NewOrderWizard() {
     if (submitStyles.length) {
       rawFormData.set('line_items', JSON.stringify(submitStyles));
     }
+    // AI 原始识别冻结底档(有 PO 解析时才带):建单落到 orders.po_parse_snapshot,供后续纠错追溯
+    if (poParseResult) {
+      rawFormData.set('po_parse_snapshot', JSON.stringify(poParseResult));
+    }
 
     try {
       await handleStep1SubmitCore(rawFormData);
