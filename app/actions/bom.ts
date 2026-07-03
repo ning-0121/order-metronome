@@ -590,16 +590,22 @@ export async function submitBomToProcurement(
   const { data: liRows } = await (supabase.from('order_line_items') as any)
     .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
   const styleQty = new Map<string, number>();
-  const styleColorQty = new Map<string, number>();      // key: style¦norm(color),中英文色名都登记
+  const styleColorQty = new Map<string, number>();      // key: style¦规范色 → 该款该色件数
+  const colorAlias = new Map<string, string>();          // style¦任一色名(中/英) → 规范色 key
   const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
   for (const r of (liRows || []) as any[]) {
     if (!r.style_no) continue;
     const q = Number(r.qty_pcs) || 0;
     styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
-    for (const col of [r.color_cn, r.color_en]) {
-      if (!String(col ?? '').trim()) continue;
-      const k = `${r.style_no}¦${normColor(col)}`;
-      styleColorQty.set(k, (styleColorQty.get(k) || 0) + q);
+    // 2026-07-04 审计修:件数每行只加一次(原来 color_cn/color_en 各加一次,同名色翻倍→多算料)。
+    // 规范色=中文优先,英文兜底;中英文两个色名都做别名指向同一桶,BOM 用任一色名可命中。
+    const canon = normColor(r.color_cn) || normColor(r.color_en);
+    if (!canon) continue;
+    const canonKey = `${r.style_no}¦${canon}`;
+    styleColorQty.set(canonKey, (styleColorQty.get(canonKey) || 0) + q);
+    for (const c of [r.color_cn, r.color_en]) {
+      const nc = normColor(c);
+      if (nc) colorAlias.set(`${r.style_no}¦${nc}`, canonKey);
     }
   }
   const bomStyle = new Map<string, string | null>((bomRows as any[]).map(r => [r.id, r.style_no || null]));
@@ -755,7 +761,9 @@ export async function submitBomToProcurement(
     const lineStyle = line.bom_id ? bomStyle.get(line.bom_id) : null;
     let poQty = (lineStyle && styleQty.get(lineStyle)) ? styleQty.get(lineStyle)! : order.quantity;
     if (lineStyle && String(line.color ?? '').trim()) {
-      const cq = styleColorQty.get(`${lineStyle}¦${normColor(line.color)}`);
+      // 别名解析:BOM 色名(中或英)→ 规范色桶,再取件数(不再因中英文写法漏命中/翻倍)
+      const bk = `${lineStyle}¦${normColor(line.color)}`;
+      const cq = styleColorQty.get(colorAlias.get(bk) || bk);
       if (cq && cq > 0) poQty = cq;
       // 色名对不上明细 → 保持款级总量(宁多勿缺),核料里人工调
     }

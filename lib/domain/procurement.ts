@@ -63,6 +63,23 @@ export function isValidLineTransition(
   return (VALID_LINE_TRANSITIONS[f] || []).includes(to);
 }
 
+/**
+ * 收货超量闸(2026-07-04 审计统一):累计收货 > 采购量×(1+tol) 判超,需财务放行。
+ * 三个收货入口(recordReceiptBatch/recordReceipt/recordGoodsReceipt)统一调用,口径唯一。
+ * ordered<=0(无采购量基准)不判超。返回 over=true 时应拦截并通知财务。
+ */
+export function overReceiptCheck(
+  orderedQty: number | null | undefined,
+  prevReceived: number | null | undefined,
+  thisQty: number | null | undefined,
+  tolerance = 0.1,
+): { ordered: number; projected: number; cap: number; over: boolean } {
+  const ordered = Number(orderedQty) || 0;
+  const projected = Math.round(((Number(prevReceived) || 0) + (Number(thisQty) || 0)) * 1000) / 1000;
+  const cap = Math.round(ordered * (1 + tolerance) * 1000) / 1000;
+  return { ordered, projected, cap, over: ordered > 0 && projected > cap };
+}
+
 /** 在途状态（进入催货/交期监控范围） */
 export const ACTIVE_LINE_STATUSES: ProcurementLineStatus[] = [
   'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped',

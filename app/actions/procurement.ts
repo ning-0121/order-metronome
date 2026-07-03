@@ -17,8 +17,24 @@ import {
   LINE_STATUS_LABELS,
   CHASE_ESCALATION_THRESHOLD,
   ACTIVE_LINE_STATUSES,
+  overReceiptCheck,
   type ProcurementLineStatus,
 } from '@/lib/domain/procurement';
+
+/** 超量收货 → 通知全体财务(三个收货入口共用)。fire-and-forget,失败不影响拦截。 */
+async function notifyFinanceOverReceipt(supabase: any, line: any, gate: { ordered: number; projected: number; cap: number }) {
+  try {
+    const { data: order } = await (supabase.from('orders') as any).select('order_no, internal_order_no').eq('id', line.order_id).maybeSingle();
+    const { data: profs } = await (supabase.from('profiles') as any).select('user_id, role, roles');
+    const fin = (profs || []).filter((p: any) => { const rs = p.roles?.length ? p.roles : [p.role]; return rs.includes('finance'); });
+    if (fin.length) await (supabase.from('notifications') as any).insert(fin.map((f: any) => ({
+      user_id: f.user_id, type: 'over_receipt',
+      title: `⚠ 超量收货待处理:${order?.internal_order_no || order?.order_no || ''}`,
+      message: `「${line.material_name || ''}」累计收货 ${gate.projected}${line.ordered_unit || ''} 将超采购量 ${gate.ordered} 的 10%(上限 ${gate.cap})。请裁决:审批放行 / 退回布行 / 布行补足 / 超出搁置。`,
+      related_order_id: line.order_id,
+    })));
+  } catch { /* 通知失败不影响拦截 */ }
+}
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
 
@@ -331,7 +347,8 @@ export async function recordReceipt(
   orderId: string,
   receivedQty: number,
   notes?: string,
-): Promise<{ error?: string }> {
+  allowOver = false,
+): Promise<{ error?: string; needsApproval?: boolean }> {
   // O4(2026-07-02 审计):收货是库存动作,收紧到操作角色(采购/管理员),
   // 与 recordGoodsReceipt 同一门槛;此前用 checkAccess 让 sales/finance 也能记收货。
   const auth = await checkOperator();
@@ -345,6 +362,19 @@ export async function recordReceipt(
     .eq('id', itemId)
     .single();
   if (!item) return { error: '明细不存在' };
+
+  // 收货 ±10% 硬闸(此入口为覆盖写=总量,故 prev=0、thisQty=总量;超量拦截通知财务)
+  if (receivedQty > 0) {
+    const gate = overReceiptCheck((item as any).ordered_qty, 0, receivedQty);
+    if (gate.over) {
+      const isFinance = auth.roles?.some(r => ['finance', 'admin'].includes(r));
+      if (!allowOver) {
+        await notifyFinanceOverReceipt(supabase, { order_id: orderId, material_name: null, ordered_unit: (item as any).ordered_unit }, gate);
+        return { error: `⚠ 收货 ${gate.projected}${(item as any).ordered_unit || ''} 超采购量 ${gate.ordered} 的 10%(上限 ${gate.cap})。已拦截并通知财务:审批放行 / 退回布行 / 布行补足 / 超出搁置。超量请走「收货登记」批次录入由财务放行。`, needsApproval: true };
+      }
+      if (!isFinance) return { error: '超采购量 10% 需财务放行' };
+    }
+  }
 
   // 判断状态（旧 status 列 + 同步新 line_status，否则采购中心队列会永远显示在途/待催）
   let status = 'complete';
@@ -759,14 +789,15 @@ export async function recordGoodsReceipt(
     aql_level?: string;
     defect_notes?: string;
     return_required?: boolean;
+    allow_over?: boolean;
   },
-): Promise<{ error?: string }> {
+): Promise<{ error?: string; needsApproval?: boolean; cap?: number }> {
   const access = await checkOperator();
   if (!access.ok) return { error: access.error };
   const supabase = await createClient();
 
   const { data: line, error: getErr } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, line_status, ordered_unit')
+    .select('id, order_id, line_status, ordered_unit, ordered_qty, material_name')
     .eq('id', lineItemId).single();
   if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
 
@@ -779,6 +810,22 @@ export async function recordGoodsReceipt(
     return { error: '让步接收需采购经理或管理员审批' };
   }
   if (!(payload.received_qty >= 0)) return { error: '实收数量无效' };
+
+  // 收货 ±10% 硬闸(与批次收货同口径;拒收 result=reject 不计超收——本就是不入账退货)
+  if (payload.result !== 'reject') {
+    const { data: prev } = await (supabase.from('goods_receipts') as any)
+      .select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
+    const prevTotal = ((prev || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
+    const gate = overReceiptCheck(line.ordered_qty, prevTotal, payload.received_qty);
+    if (gate.over) {
+      const isFinance = access.roles?.some(r => ['finance', 'admin'].includes(r));
+      if (!payload.allow_over) {
+        await notifyFinanceOverReceipt(supabase, line, gate);
+        return { error: `⚠ 验收累计 ${gate.projected}${line.ordered_unit || ''} 将超采购量 ${gate.ordered} 的 10%(上限 ${gate.cap})。已拦截并通知财务:审批放行 / 退回布行 / 布行补足 / 超出搁置。`, needsApproval: true, cap: gate.cap };
+      }
+      if (!isFinance) return { error: '超采购量 10% 需财务放行' };
+    }
+  }
 
   const now = new Date().toISOString();
   const { error: grErr } = await (supabase.from('goods_receipts') as any).insert({
@@ -847,34 +894,20 @@ export async function recordReceiptBatch(
 
   const now = new Date().toISOString();
 
-  // ── 收货 ±10% 硬闸(2026-07-03 用户拍板):累计收货超采购量 10% → 拦截,需财务审批放行 ──
-  const orderedQ = Number(line.ordered_qty) || 0;
-  if (orderedQ > 0) {
+  // ── 收货 ±10% 硬闸(统一纯函数 overReceiptCheck)──
+  {
     const { data: prev } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId);
     const prevTotal = ((prev || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
-    const projected = Math.round((prevTotal + payload.received_qty) * 1000) / 1000;
-    const cap = Math.round(orderedQ * 1.1 * 1000) / 1000;
-    if (projected > cap) {
+    const gate = overReceiptCheck(line.ordered_qty, prevTotal, payload.received_qty);
+    if (gate.over) {
       const isFinance = access.roles?.some(r => ['finance', 'admin'].includes(r));
       if (!payload.allow_over) {
-        // 通知全体财务(超收待处理)
-        try {
-          const { data: order } = await (supabase.from('orders') as any).select('order_no, internal_order_no').eq('id', line.order_id).maybeSingle();
-          const { data: profs } = await (supabase.from('profiles') as any).select('user_id, role, roles');
-          const fin = (profs || []).filter((p: any) => { const rs = p.roles?.length ? p.roles : [p.role]; return rs.includes('finance'); });
-          if (fin.length) await (supabase.from('notifications') as any).insert(fin.map((f: any) => ({
-            user_id: f.user_id, type: 'over_receipt',
-            title: `⚠ 超量收货待处理:${(order as any)?.internal_order_no || (order as any)?.order_no || ''}`,
-            message: `「${line.material_name || ''}」累计收货 ${projected}${line.ordered_unit || ''} 将超采购量 ${orderedQ} 的 10%(上限 ${cap})。请裁决:审批放行 / 退回布行 / 布行补足 / 超出搁置。`,
-            related_order_id: line.order_id,
-          })));
-        } catch { /* 通知失败不影响拦截 */ }
+        await notifyFinanceOverReceipt(supabase, line, gate);
         return {
-          error: `⚠ 累计收货 ${projected}${line.ordered_unit || ''} 将超采购量 ${orderedQ} 的 10%(上限 ${cap})。已拦截并通知财务。处理方向:①财务审批放行 ②退回布行 ③让布行补足到量 ④超出部分搁置等待。`,
-          needsApproval: true, cap,
+          error: `⚠ 累计收货 ${gate.projected}${line.ordered_unit || ''} 将超采购量 ${gate.ordered} 的 10%(上限 ${gate.cap})。已拦截并通知财务。处理方向:①财务审批放行 ②退回布行 ③让布行补足到量 ④超出部分搁置等待。`,
+          needsApproval: true, cap: gate.cap,
         };
       }
-      // allow_over 放行:仅财务/管理员可用
       if (!isFinance) return { error: '超采购量 10% 需财务放行,你的角色不可勾「超收放行」;请联系财务审批' };
     }
   }

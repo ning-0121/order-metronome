@@ -7,6 +7,8 @@
 
 import { MILESTONE_TEMPLATE_V1, MILESTONE_TEMPLATE_V2, SAMPLE_MILESTONE_TEMPLATE, TRADE_MILESTONE_TEMPLATE, getApplicableMilestones } from '../lib/milestoneTemplate';
 import { MILESTONE_CONFIRMATION_PARTIES } from '../lib/domain/confirmationParties';
+import { overReceiptCheck } from '../lib/domain/procurement';
+import { computeSuggestedPurchaseQty } from '../lib/services/procurement-consolidation';
 import { calcDueDates } from '../lib/schedule';
 import { CIRCUIT_BREAKER, ACTION_CONFIG } from '../lib/agent/types';
 
@@ -74,6 +76,24 @@ console.log('\n🤝 多方确认');
   for (const step of Object.keys(MILESTONE_CONFIRMATION_PARTIES)) {
     assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `确认配置的 ${step} 存在于 V2 模板`);
   }
+}
+
+// ════ 采购算账口径(2026-07-04 审计补测试盲区)════
+console.log('\n🧮 采购算账');
+{
+  // 收货 ±10% 闸:1000 → 1100 恰好不超,1101 超,批次累计,ordered=0 不判
+  assert(!overReceiptCheck(1000, 0, 1000).over, '收货 1000/1000 不超');
+  assert(!overReceiptCheck(1000, 0, 1100).over, '收货 1100/1000 =110% 恰好不超');
+  assert(overReceiptCheck(1000, 0, 1101).over, '收货 1101/1000 超10%');
+  assert(overReceiptCheck(1000, 900, 250).over, '批次累计 900+250=1150 超');
+  assert(!overReceiptCheck(1000, 900, 150).over, '批次累计 900+150=1050 不超');
+  assert(!overReceiptCheck(0, 0, 9999).over, 'ordered=0 不判超收');
+  // 建议采购量:损耗只乘一次 + 安全库存 + MOQ 取整(废除大货/开发比例)
+  assert(computeSuggestedPurchaseQty({ total_required_qty: 1000, procurement_loss_pct: 3 }) === 1030, '建议=1000×1.03=1030(损耗一次)');
+  assert(computeSuggestedPurchaseQty({ total_required_qty: 1000, procurement_loss_pct: 0, safety_stock_qty: 50 }) === 1050, '建议=1000+安全50=1050');
+  assert(computeSuggestedPurchaseQty({ total_required_qty: 1000, procurement_loss_pct: 0, moq: 500 }) === 1000, 'MOQ 500 对齐 1000');
+  assert(computeSuggestedPurchaseQty({ total_required_qty: 1001, procurement_loss_pct: 0, moq: 500 }) === 1500, 'MOQ 500:1001→1500');
+  assert(computeSuggestedPurchaseQty({ total_required_qty: null as any }) === null, '无需求量→null');
 }
 
 // 打样模板必须包含关键节点
