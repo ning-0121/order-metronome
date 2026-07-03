@@ -364,6 +364,22 @@ function NewOrderWizard() {
           }
           return { qty: '', unit: 'kg' };
         };
+        // 配比兜底(2026-07-03 用户实测漏识别):PO 尺码行常是"配比"(如 1:2:2:1)而非件数。
+        // AI 若原样返回配比 → Σsizes 远小于该色数量 → 按比例分摊成件数(最大余数法,合计严格=qty)。
+        const normalizeSizes = (sizes: Record<string, any>, qty: number): Record<string, number> => {
+          const entries = Object.entries(sizes || {}).map(([k, v]) => [k, Number(v) || 0] as [string, number]).filter(([, v]) => v > 0);
+          if (entries.length === 0 || !qty || qty <= 0) return sizes || {};
+          const sum = entries.reduce((a, [, v]) => a + v, 0);
+          if (sum === qty) return Object.fromEntries(entries);           // 已是件数
+          const looksRatio = sum <= 24 && qty >= sum * 5;                // 1:2:2:1 这类
+          if (!looksRatio) return Object.fromEntries(entries);           // 说不清 → 原样保留人来核
+          const raw = entries.map(([k, v]) => ({ k, exact: (qty * v) / sum }));
+          const floored = raw.map(r => ({ k: r.k, n: Math.floor(r.exact), frac: r.exact - Math.floor(r.exact) }));
+          let remain = qty - floored.reduce((a, r) => a + r.n, 0);
+          floored.sort((a, b) => b.frac - a.frac);                       // 余数从大到小补齐
+          for (let i = 0; remain > 0; i = (i + 1) % floored.length, remain--) floored[i].n += 1;
+          return Object.fromEntries(entries.map(([k]) => [k, floored.find(f => f.k === k)!.n]));
+        };
         const parsedStyles = successes.flatMap(s => (s.data.styles || [])).map((st: any) => {
           const cons = parseConsumption(st.unit_consumption || '');
           return {
@@ -377,7 +393,7 @@ function NewOrderWizard() {
           colors: (st.colors || []).map((c: any) => ({
             color_cn: c.color_cn || '',
             color_en: c.color_en || '',
-            sizes: (c.sizes && typeof c.sizes === 'object') ? c.sizes : {},
+            sizes: (c.sizes && typeof c.sizes === 'object') ? normalizeSizes(c.sizes, Number(c.qty) || 0) : {},
             remark: c.packaging || '',
           })),
           };
@@ -1119,6 +1135,14 @@ function NewOrderWizard() {
           </div>
 
           <form onSubmit={handleStep1Submit} className="space-y-8"
+            onKeyDown={(e) => {
+              // 2026-07-03 事故:输入框里按回车 = 浏览器隐式提交整表(业务没填完就"自动提交",
+              // 看起来像被 AI 接管)。拦死:回车只用于换行/确认输入,提交必须手点「提交订单」按钮。
+              if (e.key === 'Enter') {
+                const t = e.target as HTMLElement;
+                if (t.tagName === 'INPUT' || t.tagName === 'SELECT') e.preventDefault();
+              }
+            }}
             onChange={(e) => {
               const form = e.currentTarget;
               const cn = (form.querySelector('input[name="customer_name"]') as HTMLInputElement)?.value || '';
