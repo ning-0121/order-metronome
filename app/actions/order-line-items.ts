@@ -131,8 +131,16 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
     }
   }
 
-  const { error: delErr } = await (supabase.from('order_line_items') as any).delete().eq('order_id', orderId);
+  // ── 保险丝(2026-07-03 事故:表缺 DELETE 策略 → 删除静默 0 行 → 每次保存明细翻倍)──
+  // 先数旧行,再带 .select 删,删不掉就中止 —— 宁可报错,绝不叠加。
+  const { count: beforeCount } = await (supabase.from('order_line_items') as any)
+    .select('id', { count: 'exact', head: true }).eq('order_id', orderId);
+  const { data: deletedRows, error: delErr } = await (supabase.from('order_line_items') as any)
+    .delete().eq('order_id', orderId).select('id');
   if (delErr) return { error: '清旧明细失败:' + delErr.message };
+  if ((beforeCount || 0) > 0 && (deletedRows || []).length === 0) {
+    return { error: '保存中止:旧明细删不掉(数据库缺 DELETE 权限,会导致数量翻倍)。请先在 Supabase 执行 20260703_delete_policies_fix.sql' };
+  }
   if (rows.length > 0) {
     let { error: insErr } = await (supabase.from('order_line_items') as any).insert(rows);
     if (insErr && /product_name_en|carton_count|column .* does not exist/i.test(insErr.message || '')) {

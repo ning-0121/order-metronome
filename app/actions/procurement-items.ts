@@ -182,8 +182,13 @@ export async function consolidateOrderProcurementItems(orderId: string) {
       flagIds.push(...draftIds.filter((id: string) => refSet.has(id)));
     }
     if (deletable.length > 0) {
-      await (supabase.from('procurement_items') as any).delete().in('id', deletable);
-      removed += deletable.length;
+      // 保险丝(2026-07-03):带 .select 验证真删了;缺 DELETE 策略时静默 0 行 → 孤儿清理空转
+      const { data: reallyDeleted } = await (supabase.from('procurement_items') as any)
+        .delete().in('id', deletable).select('id');
+      removed += (reallyDeleted || []).length;
+      if ((reallyDeleted || []).length < deletable.length) {
+        console.warn(`[consolidate] 草稿孤儿清理不完整(${(reallyDeleted || []).length}/${deletable.length}),疑缺 DELETE 策略,请执行 20260703_delete_policies_fix.sql`);
+      }
     }
     if (flagIds.length > 0) {
       await (supabase.from('procurement_items') as any).update({ needs_reconfirm: true, updated_at: now }).in('id', flagIds);

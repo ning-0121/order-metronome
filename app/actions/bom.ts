@@ -704,7 +704,16 @@ export async function submitBomToProcurement(
   }
 
   // ── d. 重算 material_requirements(B1:该 plan 下需求均无采购引用,安全删重建)──
-  await (supabase.from('material_requirements') as any).delete().eq('material_plan_id', planId);
+  // 保险丝(2026-07-03):表缺 DELETE 策略时删除会静默 0 行 → 重新提交采购需求翻倍。
+  // 先数旧行,删不掉就中止 —— 宁可报错,绝不叠加。
+  const { count: oldReqCount } = await (supabase.from('material_requirements') as any)
+    .select('id', { count: 'exact', head: true }).eq('material_plan_id', planId);
+  const { data: delReqs, error: delReqErr } = await (supabase.from('material_requirements') as any)
+    .delete().eq('material_plan_id', planId).select('id');
+  if (delReqErr) return { error: `旧需求清理失败,已中止(避免需求叠加):${delReqErr.message}` };
+  if ((oldReqCount || 0) > 0 && (delReqs || []).length === 0) {
+    return { error: '提交中止:旧物料需求删不掉(数据库缺 DELETE 权限,会导致需求翻倍)。请先在 Supabase 执行 20260703_delete_policies_fix.sql' };
+  }
   // P0:快照行查询失败必须抛,不静默零需求(CLAUDE.md 血泪教训)。
   const { data: snapLines, error: snapErr } = await (supabase.from('material_package_snapshot_lines') as any)
     .select('*').eq('snapshot_id', snapshotId!);
