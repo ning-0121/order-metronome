@@ -13,7 +13,8 @@ import { buildQuoteLineRow, buildQuoteSnapshot, evaluateApprovalGate } from '@/l
 import type { QuoteInput, QuoteOutput } from '@/lib/quoter/types';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 
-const QUOTER_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement'];
+// 试用前审计🔴:报价含成本/毛利,跟单(merchandiser)不该看 → 移出(2026-07-03)
+const QUOTER_ROLES = ['admin', 'sales', 'finance', 'procurement'];
 
 async function checkQuoterAccess(): Promise<{ ok: boolean; userId?: string; roles?: string[]; error?: string }> {
   const supabase = await createClient();

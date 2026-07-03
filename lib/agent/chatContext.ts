@@ -6,6 +6,7 @@
 
 import { isActiveStatus, isBlockedStatus, isDoneStatus } from '@/lib/domain/types';
 import { buildIndustryPrompt } from '@/lib/agent/industryKnowledge';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 export interface AgentChatMessage {
   role: 'user' | 'agent';
@@ -28,6 +29,9 @@ export async function buildAgentChatPayload(
   const userName = profile?.name || user.email?.split('@')[0];
   const userRoles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
   const primaryRole = userRoles[0] || 'sales';
+  // 试用前审计🔴:财务数据(毛利/定金/尾款)只给有财务可见权限的角色——
+  // 此前任何登录角色问订单号都会被塞财务上下文,生产/QC/物流可套出毛利
+  const canSeeFinancials = hasRoleInGroup(userRoles, 'CAN_SEE_FINANCIALS');
 
   const context: string[] = [];
 
@@ -72,7 +76,7 @@ export async function buildAgentChatPayload(
         context.push(`  特殊标签：${order.special_tags.join('、')}`);
       }
 
-      if (finRes.data) {
+      if (finRes.data && canSeeFinancials) {
         const f = finRes.data;
         const finParts = [];
         if (f.margin_pct !== null) finParts.push(`毛利率 ${f.margin_pct}%${f.margin_pct < 8 ? '（⚠低于8%底线）' : ''}`);
@@ -226,8 +230,8 @@ export async function buildAgentChatPayload(
     }
   }
 
-  // ═══ 7. 财务类查询 ═══
-  if (question.includes('收款') || question.includes('付款') || question.includes('尾款') || question.includes('定金') || question.includes('逾期')) {
+  // ═══ 7. 财务类查询(仅财务可见角色) ═══
+  if (canSeeFinancials && (question.includes('收款') || question.includes('付款') || question.includes('尾款') || question.includes('定金') || question.includes('逾期'))) {
     const { data: overduePayments } = await (supabase.from('order_financials') as any)
       .select('balance_status, balance_amount, balance_due_date, orders!inner(order_no, customer_name)')
       .eq('balance_status', 'overdue')

@@ -57,6 +57,11 @@ export interface POParsedData {
 const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务是从客户PO（采购订单）中提取信息，返回标准化的JSON格式。
 
 要求：
+0. PO 可能是中文或英文,不同客户版式差异很大(表格式/清单式/邮件正文式都有)。常见英文字段名对照:
+   Style#/Style No/Item → 款号;Description/Item Name → 品名;Color/Colour/Colorway → 颜色;
+   Qty/Quantity/Units → 数量;Size Breakdown/Size Ratio/尺码横排表头 → 尺码配比;
+   Delivery Date/Ship Date/Cancel Date → 交期;PO#/Order No → PO号;Fabric/Material/Composition → 面料。
+   识别不到的字段留空并写进 confidence_notes,不要猜。
 1. 仔细识别每个款式/SKU的颜色、尺码配比、数量
 2. 尺码标签可能是 S/M/L/XL 或 2/4/6/8 或其他，请如实提取
 3. 如果PO是英文，颜色名请同时提供中文翻译和英文原文
