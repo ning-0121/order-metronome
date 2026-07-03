@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   listMaterialMaster, createMaterialMaster, updateMaterialMaster, archiveMaterialMaster,
+  deleteMaterialMaster, bulkImportMaterials,
   listPendingPromotion, promoteTemporaryMaterial, canManageMaster, findSimilarMaterials, type MasterInput,
 } from '@/app/actions/material-master';
+import { parseExcelFile, downloadExcelTemplate, pickCell, importResultText } from '@/lib/utils/excel-import';
 import { MaterialDetailPanel } from './MaterialDetailPanel';
 
 const CATEGORIES: { value: string; label: string }[] = [
@@ -77,12 +79,22 @@ export default function MaterialMasterPage() {
     return () => clearTimeout(t);
   }, [form.material_name, form.category, form.specification, showForm, editId]);
 
-  async function save() {
+  async function save(force = false) {
     setSaving(true); setMsg('');
+    // 2026-07-03 防重复:不再无条件 force。完全同名同类别服务端直接拒绝;
+    // 模糊相似 → 返回 similar 面板,用户点「继续创建」才 force。
     const res = editId
       ? await updateMaterialMaster(editId, form)
-      : await createMaterialMaster(form, { force: true });  // 实时相似已提示,这里直接建(V1 不阻止)
+      : await createMaterialMaster(form, { force });
     setSaving(false);
+    if ((res as any).duplicate) {
+      const d = (res as any).duplicate;
+      setMsg('');
+      alert(`⚠️ 物料已存在,不能重复创建:\n${d.material_code || '无编码'} ${d.material_name}${d.specification ? ' · ' + d.specification : ''}\n\n请在列表里直接使用/编辑它。`);
+      setShowForm(false); setSearch(d.material_name); loadLib();
+      return;
+    }
+    if ((res as any).similar) { setSimilar((res as any).similar); return; }  // 展示相似面板,等用户决定
     if (res.error) { setMsg('保存失败：' + res.error); return; }
     setShowForm(false); setSimilar(null);
     setMsg(editId ? '✅ 已更新' : `✅ 已新建（编号 ${(res as any).data?.material_code || ''}）`);
@@ -94,6 +106,47 @@ export default function MaterialMasterPage() {
     const res = await archiveMaterialMaster(r.id);
     if (res.error) { alert(res.error); return; }
     loadLib();
+  }
+
+  async function remove(r: any) {
+    if (!confirm(`删除物料「${r.material_name}」(${r.material_code || '无编码'})？\n未被订单BOM/采购引用才能删;已被引用请用「归档」。`)) return;
+    const res = await deleteMaterialMaster(r.id);
+    if (res.error) { alert(res.error); return; }
+    setMsg(`✅ 已删除「${r.material_name}」`);
+    loadLib();
+  }
+
+  // Excel 批量导入
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ summary: string; details: Array<{ row: number; name: string; reason: string }> } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImporting(true); setImportResult(null); setMsg('');
+    try {
+      const parsed = await parseExcelFile(file);
+      const labelToValue = (label: string) => CATEGORIES.find(c => c.label === label.trim())?.value || label.trim();
+      const inputs = parsed.map(r => ({
+        material_name: pickCell(r, ['物料名称', '名称']),
+        category: labelToValue(pickCell(r, ['类别', '分类'])),
+        default_unit: pickCell(r, ['单位']),
+        specification: pickCell(r, ['规格', '成分']),
+        reference_price: pickCell(r, ['参考价']) as any,
+        default_loss_rate: pickCell(r, ['默认损耗率', '损耗率', '损耗']) as any,
+        default_lead_days: pickCell(r, ['默认交期', '交期']) as any,
+      })).filter(x => Object.values(x).some(v => String(v || '').trim()));
+      if (inputs.length === 0) { alert('文件里没有读到数据行 — 请用「下载模板」的格式填写'); return; }
+      const res = await bulkImportMaterials(inputs as any);
+      if (res.error) { alert(res.error); return; }
+      setImportResult({ summary: importResultText(res), details: [...(res.skipped || []), ...(res.failed || [])] });
+      loadLib();
+    } catch (err: any) {
+      alert('文件解析失败:' + (err?.message || '请确认是 .xlsx/.xls/.csv 文件'));
+    } finally {
+      setImporting(false);
+    }
   }
 
   const [promoting, setPromoting] = useState<string | null>(null);
@@ -137,7 +190,28 @@ export default function MaterialMasterPage() {
             </select>
             <button onClick={loadLib} className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">搜索</button>
             <button onClick={openNew} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">+ 新建物料</button>
+            {canManage && <>
+              <button onClick={() => downloadExcelTemplate('物料导入模板.xlsx',
+                ['物料名称*', '类别*', '单位', '规格(成分/克重)', '参考价(不含税)', '默认损耗率%', '默认交期(天)'],
+                [['例:280g仿锦棉', '面料', '米', '96%锦纶4%氨纶 280g', '23.5', '3', '15']])}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">📄 模板</button>
+              <button onClick={() => fileRef.current?.click()} disabled={importing}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+                {importing ? '导入中…' : '📥 Excel 导入'}
+              </button>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
+            </>}
           </div>
+
+          {importResult && (
+            <div className="mb-4 text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1">
+              <p className="font-medium text-gray-800">{importResult.summary}</p>
+              {importResult.details.slice(0, 20).map((d, i) => (
+                <p key={i} className="text-gray-500">第{d.row}行「{d.name}」：{d.reason}</p>
+              ))}
+              {importResult.details.length > 20 && <p className="text-gray-400">…还有 {importResult.details.length - 20} 条</p>}
+            </div>
+          )}
 
           {loading ? <div className="text-center py-10 text-gray-400">加载中...</div> : rows.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">
@@ -167,7 +241,8 @@ export default function MaterialMasterPage() {
                           <button onClick={() => setDetailMat(r)} className="text-xs text-emerald-600 hover:underline">供应链</button>
                           {canManage && <>
                             <button onClick={() => openEdit(r)} className="text-xs text-indigo-600 hover:underline">编辑</button>
-                            <button onClick={() => archive(r)} className="text-xs text-gray-400 hover:text-red-500 hover:underline">归档</button>
+                            <button onClick={() => archive(r)} className="text-xs text-gray-400 hover:text-amber-600 hover:underline">归档</button>
+                            <button onClick={() => remove(r)} className="text-xs text-gray-400 hover:text-red-500 hover:underline">删除</button>
                           </>}
                         </div>
                       </td>
@@ -204,7 +279,7 @@ export default function MaterialMasterPage() {
                       </button>
                     )}
                   </div>
-                  {promoteSimilar?.id === r.id && (
+                  {promoteSimilar && promoteSimilar.id === r.id && (
                     <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded-lg p-2">
                       <p className="text-amber-700 font-medium">⚠️ 可能已有类似物料:</p>
                       <ul className="text-amber-700 mt-1 space-y-0.5">
@@ -270,8 +345,8 @@ export default function MaterialMasterPage() {
               <label className="text-xs text-gray-600">默认交期(工作日)
                 <input type="number" value={form.default_lead_days ?? ''} onChange={e => setForm(f => ({ ...f, default_lead_days: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
-              <label className="col-span-2 text-xs text-gray-600">规格(成分/克重/纱支)
-                <input value={form.specification ?? ''} onChange={e => setForm(f => ({ ...f, specification: e.target.value }))}
+              <label className="col-span-2 text-xs text-gray-600">规格(克重/门幅/成分)— 同名布料靠规格区分变体,如「仿锦直贡呢拉毛」260g / 270g / 275g 各一条
+                <input value={form.specification ?? ''} placeholder="如 260g 门幅150cm" onChange={e => setForm(f => ({ ...f, specification: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
             </div>
 
@@ -288,7 +363,7 @@ export default function MaterialMasterPage() {
                   ))}
                 </ul>
                 <div className="flex gap-2 mt-2.5">
-                  <button onClick={() => save()} disabled={saving} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">继续创建</button>
+                  <button onClick={() => save(true)} disabled={saving} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">确认不同,继续创建</button>
                   <button onClick={() => { setShowForm(false); setSearch(similar[0].material_name); }} className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100">使用已有</button>
                 </div>
               </div>

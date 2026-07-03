@@ -28,7 +28,12 @@ export interface EnsureMaterialInput {
   supplier?: string | null;
 }
 
-/** 找同名同类正式主数据复用码;没有 → 自动建正式主数据赋码(seed_source='bom_auto')。 */
+/**
+ * 找 同名+同类+同规格 正式主数据复用码;没有 → 自动建正式主数据赋码(seed_source='bom_auto')。
+ * 2026-07-03 变体模式:同名布料可有多行(规格=克重/门幅 区分)。匹配规则:
+ *  - 录入带规格 → 按规格精确配;配不上 → 建新变体行;
+ *  - 录入无规格 → 同名只有一行才复用;有多行变体 = 歧义,不瞎猜(返回 null,BOM 行留空码,人来定)。
+ */
 export async function ensureMaterialMaster(
   supabase: any, userId: string, input: EnsureMaterialInput,
 ): Promise<{ id: string; code: string } | null> {
@@ -36,13 +41,27 @@ export async function ensureMaterialMaster(
     const name = input.name?.trim();
     if (!name) return null;
     const cat = BOM_TO_MASTER_CAT[input.category] || (CODE_PREFIX[input.category] ? input.category : 'other');
+    const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+    const inSpec = norm(input.spec);
 
-    // 1. 同名同类正式料 → 复用(ilike 无通配 = 忽略大小写的等值)
-    const { data: hit } = await supabase.from('material_master')
-      .select('id, material_code')
-      .eq('is_temporary', false).eq('status', 'active').eq('category', cat)
-      .ilike('material_name', name)
-      .limit(1).maybeSingle();
+    // 同名同类候选(ilike 无通配 = 忽略大小写的等值),再按规格挑
+    const pickMatch = async (): Promise<any | 'ambiguous' | null> => {
+      const { data: rows } = await supabase.from('material_master')
+        .select('id, material_code, specification')
+        .eq('is_temporary', false).eq('status', 'active').eq('category', cat)
+        .ilike('material_name', name)
+        .limit(20);
+      const list = rows || [];
+      if (list.length === 0) return null;
+      const specHit = list.find((r: any) => norm(r.specification) === inSpec);
+      if (specHit) return specHit;                       // 规格精确命中(含 双方都空)
+      if (inSpec) return null;                           // 带规格但没这个变体 → 建新行
+      return list.length === 1 ? list[0] : 'ambiguous';  // 无规格:唯一才复用,多变体不瞎猜
+    };
+
+    // 1. 复用已有行(缺码则补码)
+    const hit = await pickMatch();
+    if (hit === 'ambiguous') return null;
     if (hit?.material_code) return { id: hit.id, code: hit.material_code };
     if (hit) {
       const code = await genMaterialCode(supabase, cat);
@@ -62,6 +81,10 @@ export async function ensureMaterialMaster(
       }).select('id, material_code').single();
       if (!error) return { id: data.id, code: data.material_code };
       if (!/duplicate|unique/i.test(error.message || '')) return null;
+      // 撞唯一可能是 名称+类别+规格 索引(并发下别人刚建了同变体)→ 重查直接复用,别再空转赋码
+      const again = await pickMatch();
+      if (again && again !== 'ambiguous') return { id: again.id, code: again.material_code || '' };
+      if (again === 'ambiguous') return null;
     }
     return null;
   } catch { return null; }
