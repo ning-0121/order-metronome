@@ -49,6 +49,49 @@ export const MILESTONE_TEMPLATE_V1: Array<{
 ];
 
 /**
+ * 节点体系 V2(2026-07-03,9 节点,设计见 docs/Designs/Milestone-V2-Departments-Redesign.md)
+ * 对齐五部门(业务执行/采购/生产[含QC]/财务)重构 + 用户拍板的 9 节点顺序。
+ * 【模板版本化·决策③】只对新订单生效;在途订单已物化的里程碑行不动,仍走 V1。
+ *
+ * 与 V1 的结构差异:
+ *  - finance_approval 并入 po_confirmed(PO确认=业务+财务双确认,同日) → 不再单列节点
+ *  - 新增 mo_released(生产任务单下发,T+0,MO状态→executing 时自动完成)
+ *  - 新增 pre_prod_meeting(产前会,T+2,业务+生产+采购三方)
+ *  - 砍掉 factory_completion / inspection_release / booking_done(折进 shipment_execute「发货出运」)
+ *
+ * owner_role = 该节点的主责/牵头确认方(单人可完成)。多方(双/三方)确认机制为 P1b,
+ * 届时挂到节点上;P1a 先把骨架、排期、自动完成钩子落地。
+ * ⚠ owner_role 必须是 user_role 枚举合法值(无 'qc',QC 属生产部 → 用 'production')。
+ */
+export const MILESTONE_TEMPLATE_V2: Array<{
+  step_key: string;
+  name: string;
+  owner_role: OwnerRole;
+  is_critical: boolean;
+  evidence_required: boolean;
+  evidence_note?: string;
+}> = [
+  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "业务确认 + 财务确认(双确认);上传客户 PO 与财务审核意见" },
+  { step_key: "mo_released", name: "生产任务单下发", owner_role: "sales", is_critical: false, evidence_required: false,
+    evidence_note: "生产任务单状态推进到「已下发生产」时系统自动完成本节点" },
+  { step_key: "pre_prod_meeting", name: "产前会", owner_role: "sales", is_critical: false, evidence_required: true,
+    evidence_note: "业务执行 + 生产 + 采购 三方确认;上传产前会纪要" },
+  { step_key: "procurement_order_placed", name: "采购下单", owner_role: "procurement", is_critical: true, evidence_required: true,
+    evidence_note: "完成后开启采购进度共享(无价单 + 采购进度 tab)" },
+  { step_key: "pre_production_sample_approved", name: "产前样确认", owner_role: "procurement", is_critical: true, evidence_required: true,
+    evidence_note: "采购(原辅料大货品质) + 业务执行(客户/自确认) 双确认" },
+  { step_key: "production_kickoff", name: "生产启动", owner_role: "production", is_critical: true, evidence_required: false,
+    evidence_note: "生产 + QC;完成后开启 QC 日常跟单打卡" },
+  { step_key: "final_qc_check", name: "尾查验货", owner_role: "production", is_critical: true, evidence_required: true,
+    evidence_note: "业务执行 + QC 双确认;汇总打卡记录作为验货依据" },
+  { step_key: "shipment_execute", name: "发货出运", owner_role: "logistics", is_critical: true, evidence_required: true,
+    evidence_note: "业务执行 + 采购(尾料清点归库) + 财务 三方确认;含订舱/报关/出运" },
+  { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false,
+    evidence_note: "按账期(发货日 + 账期天数);财务系统回传可自动完成" },
+];
+
+/**
  * 国内送仓订单需要跳过的出运节点
  * 这些节点只有出口订单（DDP）才需要
  * FOB / 人民币含税 / 人民币不含税 → 都走送仓流程
@@ -229,7 +272,8 @@ export function getApplicableMilestones(
   const phase: SamplePhase = samplePhase
     || (skipPreProductionSample ? 'skip_all' : 'confirmed');
 
-  let template = [...MILESTONE_TEMPLATE_V1];
+  // 节点体系 V2(9节点)对新订单生效;V1 保留服务在途订单与回滚。
+  let template = [...MILESTONE_TEMPLATE_V2];
 
   // ── 样品阶段处理 ──
   if (phase === 'skip_all') {

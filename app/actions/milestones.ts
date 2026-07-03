@@ -447,6 +447,29 @@ export async function markMilestoneDone(
     }
   }
 
+  // ── V2 多方确认门禁(P1b 2026-07-03)──
+  // V2 多方节点(PO确认/产前会/产前样/尾查/发货出运):所有要求方确认完毕才能完成。
+  // 配置在 lib/domain/confirmationParties.ts;V1 节点不在配置里,零影响。
+  // admin 豁免(应急);确认表还没建(迁移未跑)时放行不阻塞,confirm 侧会提示建表。
+  {
+    const { requiredPartiesFor, pendingParties } = await import('@/lib/domain/confirmationParties');
+    const requiredParties = requiredPartiesFor(milestone.step_key);
+    if (requiredParties.length > 0 && !isAdmin) {
+      const { data: confs, error: confErr } = await (supabase.from('milestone_confirmations') as any)
+        .select('party_key, status').eq('milestone_id', milestoneId);
+      if (!confErr) {
+        const confirmedKeys = new Set<string>(
+          (confs || []).filter((c: any) => c.status === 'confirmed').map((c: any) => c.party_key));
+        const pending = pendingParties(milestone.step_key, confirmedKeys);
+        if (pending.length > 0) {
+          return { error: `此节点需多方确认,还差:${pending.map(p => p.label).join('、')}。请相关方在节点卡片「多方确认」区点确认后再完成` };
+        }
+      } else {
+        console.warn('[multi-confirm] 确认表查询失败,门禁跳过:', confErr.message);
+      }
+    }
+  }
+
   // 逾期允许直接处理（CEO 拍板 2026-04-08）：
   // 不再强制先提交延期申请。逾期天数会被记录到 milestone_logs 用于后续评分扣分，
   // 同时 UI 会标注「逾期 X 天完成」让 CEO/督导/下游负责人都能看到。

@@ -5,7 +5,8 @@
  * 用法：npx tsx scripts/pre-deploy-check.ts
  */
 
-import { MILESTONE_TEMPLATE_V1, SAMPLE_MILESTONE_TEMPLATE, TRADE_MILESTONE_TEMPLATE, getApplicableMilestones } from '../lib/milestoneTemplate';
+import { MILESTONE_TEMPLATE_V1, MILESTONE_TEMPLATE_V2, SAMPLE_MILESTONE_TEMPLATE, TRADE_MILESTONE_TEMPLATE, getApplicableMilestones } from '../lib/milestoneTemplate';
+import { MILESTONE_CONFIRMATION_PARTIES } from '../lib/domain/confirmationParties';
 import { calcDueDates } from '../lib/schedule';
 import { CIRCUIT_BREAKER, ACTION_CONFIG } from '../lib/agent/types';
 
@@ -26,18 +27,53 @@ console.log('\n🔍 部署前回归检查\n');
 
 // ════ 1. 里程碑模板完整性 ════
 console.log('📋 里程碑模板');
-// 2026-06-19 极简骨架:生产模板 28→11(只留重点节点)
-assert(MILESTONE_TEMPLATE_V1.length >= 11, `生产模板有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥11)`);
+// 2026-07-03 节点体系 V2:生产模板 9 节点(设计 docs/Designs/Milestone-V2-Departments-Redesign.md)。
+//   V2 只对新订单生效;V1(11节点)保留服务在途订单与回滚,故仍校验其存在。
+assert(MILESTONE_TEMPLATE_V2.length === 9, `V2 生产模板有 ${MILESTONE_TEMPLATE_V2.length} 个节点 (=9)`);
+assert(MILESTONE_TEMPLATE_V1.length >= 11, `V1 生产模板(在途兜底)有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥11)`);
 assert(SAMPLE_MILESTONE_TEMPLATE.length === 8, `打样模板有 ${SAMPLE_MILESTONE_TEMPLATE.length} 个节点 (=8)`);
 
-// 生产模板必须包含的重点节点(极简后:订单评审会/中查/预评估等已删)
+// V2 生产模板必须包含的 9 个节点(顺序=排期递增)
 const requiredSteps = [
-  'po_confirmed', 'finance_approval', 'procurement_order_placed', 'production_kickoff',
-  'final_qc_check', 'factory_completion',
-  'inspection_release', 'payment_received',
+  'po_confirmed', 'mo_released', 'pre_prod_meeting', 'procurement_order_placed',
+  'pre_production_sample_approved', 'production_kickoff', 'final_qc_check',
+  'shipment_execute', 'payment_received',
 ];
 for (const step of requiredSteps) {
-  assert(MILESTONE_TEMPLATE_V1.some(m => m.step_key === step), `生产模板包含 ${step}`);
+  assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `V2 生产模板包含 ${step}`);
+}
+// V2 已折叠/移除的旧节点不应再出现在新模板
+for (const gone of ['finance_approval', 'factory_completion', 'inspection_release', 'booking_done']) {
+  assert(!MILESTONE_TEMPLATE_V2.some(m => m.step_key === gone), `V2 生产模板已移除 ${gone}`);
+}
+// V2 新增节点必须在 calcDueDates 有排期(否则建单缺日期)
+{
+  const due = calcDueDates({ orderDate: '2026-07-03', incoterm: 'FOB', etd: '2026-09-30' });
+  for (const step of ['mo_released', 'pre_prod_meeting']) {
+    assert(due[step] instanceof Date && !isNaN(due[step].getTime()), `calcDueDates 含 V2 节点 ${step}`);
+  }
+}
+
+// ════ 1b. V2 多方确认配置(P1b)════
+console.log('\n🤝 多方确认');
+{
+  const expected: Record<string, number> = {
+    po_confirmed: 2,                     // 业务执行 + 财务
+    pre_prod_meeting: 3,                 // 业务执行 + 生产 + 采购
+    pre_production_sample_approved: 2,   // 采购 + 业务执行
+    final_qc_check: 2,                   // QC + 业务执行
+    shipment_execute: 3,                 // 业务执行 + 采购 + 财务
+  };
+  for (const [step, n] of Object.entries(expected)) {
+    const parties = MILESTONE_CONFIRMATION_PARTIES[step] || [];
+    assert(parties.length === n, `${step} 要求 ${n} 方确认(实际 ${parties.length})`);
+    assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `多方确认节点 ${step} 在 V2 模板里`);
+    assert(parties.every(p => p.roles.length > 0 && p.key && p.label), `${step} 各确认方 key/label/roles 完整`);
+  }
+  // 配置里不能出现 V2 模板没有的节点(防拼写漂移)
+  for (const step of Object.keys(MILESTONE_CONFIRMATION_PARTIES)) {
+    assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `确认配置的 ${step} 存在于 V2 模板`);
+  }
 }
 
 // 打样模板必须包含关键节点
@@ -49,12 +85,13 @@ for (const step of sampleSteps) {
 // ════ 2. getApplicableMilestones 路由正确 ════
 console.log('\n🔀 模板路由');
 const prodMilestones = getApplicableMilestones('bulk', false, 'export');
-assert(prodMilestones.length >= 11, `export订单返回 ${prodMilestones.length} 个节点 (≥11)`);
+assert(prodMilestones.length === 9, `export订单返回 ${prodMilestones.length} 个节点 (=9, V2)`);
+assert(prodMilestones.some(m => m.step_key === 'shipment_execute'), 'export包含 shipment_execute');
 
 const domesticMilestones = getApplicableMilestones('bulk', false, 'domestic');
-assert(domesticMilestones.length < prodMilestones.length, `domestic订单节点数(${domesticMilestones.length}) < export(${prodMilestones.length})`);
+// V2:domestic 用 domestic_delivery 替换 shipment_execute(节点数与 export 相同)
 assert(domesticMilestones.some(m => m.step_key === 'domestic_delivery'), 'domestic包含 domestic_delivery');
-assert(!domesticMilestones.some(m => m.step_key === 'booking_done'), 'domestic不包含 booking_done');
+assert(!domesticMilestones.some(m => m.step_key === 'shipment_execute'), 'domestic不含出运 shipment_execute');
 
 const sampleMilestones = getApplicableMilestones('sample', false, 'domestic', 'sample');
 assert(sampleMilestones.length === 8, `sample订单返回 ${sampleMilestones.length} 个节点 (=8)`);
@@ -136,16 +173,16 @@ const devIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'dev_sam
 const devPreIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'pre_production_sample_approved');
 assert(devIdx >= 0 && devIdx < devPreIdx, `头样确认(${devIdx}) 在产前样客户确认(${devPreIdx})之前`);
 
-// ════ 2b. 极简生产模板(11 节点骨架)节点顺序正确性 ════
+// ════ 2b. V2 生产模板(9 节点骨架)节点顺序正确性 ════
 console.log('\n📐 节点顺序');
 function stepIdx(template: typeof prodMilestones, key: string) {
   return template.findIndex((m: any) => m.step_key === key);
 }
-// 骨架顺序:PO→财务→采购→产前样确认→开裁→尾查→工厂完成→验货→订舱→出运→收款
+// V2 骨架顺序(=排期递增):PO确认→生产任务单下发→产前会→采购下单→产前样确认→生产启动→尾查验货→发货出运→收款
 const spine = [
-  'po_confirmed', 'finance_approval', 'procurement_order_placed', 'pre_production_sample_approved',
-  'production_kickoff', 'final_qc_check', 'factory_completion', 'inspection_release',
-  'booking_done', 'shipment_execute', 'payment_received',
+  'po_confirmed', 'mo_released', 'pre_prod_meeting', 'procurement_order_placed',
+  'pre_production_sample_approved', 'production_kickoff', 'final_qc_check',
+  'shipment_execute', 'payment_received',
 ];
 let prevIdx = -1;
 for (const key of spine) {

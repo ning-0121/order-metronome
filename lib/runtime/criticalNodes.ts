@@ -11,19 +11,22 @@
 
 /** 关键路径节点 step_key 集合 */
 export const CRITICAL_STEP_KEYS = new Set<string>([
-  'finance_approval',
+  'po_confirmed',         // V2:PO确认(并入财务审核,订单+资金起跑门)
+  'finance_approval',     // V1 在途订单仍有此节点
   'procurement_order_placed',
   'pre_production_sample_approved',
   'production_kickoff',
   'final_qc_check',
   'factory_completion',
-  'booking_done',         // 出口订单的最后阻塞点
+  'booking_done',         // V1 出口订单的最后阻塞点
+  'shipment_execute',     // V2 出口订单的最后阻塞点(订舱/报关/出运折进此节点)
   'domestic_delivery',    // 国内送仓订单的最后阻塞点
 ]);
 
 /** 节点权重（影响 confidence 扣分时使用） */
 export const STEP_WEIGHT: Record<string, 'critical' | 'high' | 'medium' | 'low'> = {
   // 关键路径
+  po_confirmed:                    'critical',   // V2:PO确认门(并入财务审核)
   finance_approval:                'critical',
   procurement_order_placed:        'high',
   pre_production_sample_approved:  'high',
@@ -31,6 +34,7 @@ export const STEP_WEIGHT: Record<string, 'critical' | 'high' | 'medium' | 'low'>
   final_qc_check:                  'high',
   factory_completion:              'critical',
   booking_done:                    'critical',
+  shipment_execute:                'critical',   // V2:出口最后阻塞点
   domestic_delivery:               'critical',
 
   // 次要但有影响

@@ -53,9 +53,46 @@
 
 ## 五、实施分期
 
-- **P1**(先行):V2 模板 9 节点 + T+0/T+2 排期 + MO 自动完成钩子 + 多方确认机制接入 + 部门文案。
+- **P1a**(已完成 2026-07-03):V2 模板 9 节点骨架 + T+0/T+2 排期 + MO 自动完成钩子 + 部门文案(决策①)。**零 migration**(新 step_key 为 text,owner_role 复用现有枚举)。
+- **P1b**(已完成 2026-07-03):多方(双/三方)确认机制,详见下方「P1b 落地清单」。决策②最终口径:**业务开发部在客户开发系统(araos)工作到「下 PO」,不进节拍器;节拍器的业务角色(sales/sales_manager)= 业务执行部**,UI 文案已改「业务执行」。不新增 bd 角色。
 - **P2**:QC 打卡(表单+提醒+断更监控+共享)。
 - **P3**:采购进度定期推送 + 收款按账期自动化(财务 webhook 回传)。
+
+### P1a 落地清单(改动面,均已过 `npm run check`=151✅ + `npm run build`✅)
+
+| 文件 | 改动 |
+|---|---|
+| `lib/milestoneTemplate.ts` | 新增 `MILESTONE_TEMPLATE_V2`(9节点);`getApplicableMilestones` 生产分支切 V2;V1 保留服务在途+回滚 |
+| `lib/schedule.ts` | TIMELINE + calcDueDates 加 `mo_released`(T+0)/`pre_prod_meeting`(T+2) |
+| `lib/runtime/criticalNodes.ts` | 关键集加 `po_confirmed`(并入财务门)/`shipment_execute`(V2出口末阻塞);旧键保留兼容 V1 |
+| `app/actions/manufacturing-order.ts` | MO 状态→`executing` 自动完成里程碑 `mo_released`(fire-and-forget,不阻塞主链路,非V2订单命中0行静默) |
+| `lib/utils/i18n.ts` | 决策①:跟单/QC 家族显示统一为「生产部QC」;`production_manager`→「生产部主管」 |
+| `scripts/pre-deploy-check.ts` | 断言改指 V2(9节点/顺序/新键排期/已移除旧节点) |
+
+**owner_role 说明**:`user_role` 枚举无 `qc` 值,QC 属生产部 → QC 牵头节点(尾查验货)owner_role 用 `production`。
+**已知边界**:历史导入路径(`orders.ts` import_current_step)仍按 V1 索引 —— 仅用于把旧订单导入到某中间节点,新 V2 订单是全新建单不走此路,低风险。
+
+### P1b 落地清单(多方确认,2026-07-03)
+
+「节点完成 = 所有要求方确认完毕」:
+
+| 节点 | 要求确认方 |
+|---|---|
+| PO确认 | 业务执行 + 财务(双) |
+| 产前会 | 业务执行 + 生产部 + 采购部(三) |
+| 产前样确认 | 采购部 + 业务执行(双) |
+| 尾查验货 | 生产部QC + 业务执行(双) |
+| 发货出运 | 业务执行 + 采购部(尾料清点归库) + 财务(三) |
+
+| 文件 | 职责 |
+|---|---|
+| `lib/domain/confirmationParties.ts` | 节点→确认方配置(部门→角色组映射,纯函数,进 check 断言) |
+| `supabase/migrations/20260703_milestone_confirmations.sql` | 确认表(一节点一方一行,UNIQUE 幂等,RLS) |
+| `app/actions/milestone-confirmations.ts` | 行懒建 + 角色把关确认 + 日志 + 全齐自动完成(免证据节点)/提示传证据 |
+| `app/actions/milestones.ts` markMilestoneDone | 完成门禁:缺确认 → 报还差哪些方;admin 豁免;表未建时放行(不 brick) |
+| `components/MilestoneConfirmations.tsx` | 节点卡片「多方确认」chips(✅谁/何时 · ⬜确认按钮按角色显隐) |
+
+机制:确认行为逐条落 `milestone_logs`(admin 代确认标注);全部确认后免证据节点直接自动完成并触发交付置信度重算,要证据的节点由负责人照常上传凭证→点完成(门禁此时已放行)。V1 在途订单节点不在配置里 → 完全不受影响。
 
 ## 决策(2026-07-03 用户拍板)
 

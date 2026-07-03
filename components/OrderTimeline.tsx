@@ -2,6 +2,7 @@
 import { formatDate, formatDateTime, formatRelative, isOverdue } from '@/lib/utils/date';
 import { isDoneStatus, isActiveStatus, isPendingStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import { MilestoneActions } from './MilestoneActions';
+import { MilestoneConfirmations } from './MilestoneConfirmations';
 import { DelayRequestForm } from './DelayRequestForm';
 import { OwnerAssignment } from './OwnerAssignment';
 import { SOPButton } from './SOPModal';
@@ -602,6 +603,13 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                             </div>
                           );
                         })()}
+
+                        {/* V2 多方确认(P1b):仅多方节点渲染;全部确认后节点才能完成 */}
+                        <MilestoneConfirmations
+                          milestoneId={m.id}
+                          stepKey={m.step_key}
+                          milestoneStatus={m.status as any}
+                        />
 
                         {/* 核心操作区：MilestoneActions（去处理 + 申请延期）— 仅对应角色可见 */}
                         <MilestoneActions

@@ -122,6 +122,8 @@ const TIMELINE = {
   // ── 阶段 1：订单评审（0-3 天）──
   po_confirmed:                  0,
   finance_approval:              1,
+  mo_released:                   0,   // V2:生产任务单下发(与PO同日,MO→executing 自动完成)
+  pre_prod_meeting:              2,   // V2:产前会(业务+生产+采购三方,PO后 2 天)
   order_kickoff_meeting:         2,   // 业务+CEO 双签会议
   production_order_upload:       3,   // 业务上传生产单 + 原辅料单
 
@@ -337,6 +339,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
   const result: Record<string, Date> = {
     po_confirmed:                  cap(calc(TIMELINE.po_confirmed)),
     finance_approval:              cap(calc(TIMELINE.finance_approval)),
+    mo_released:                   cap(calc(TIMELINE.mo_released)),        // V2:生产任务单下发(T+0)
+    pre_prod_meeting:              cap(calc(TIMELINE.pre_prod_meeting)),   // V2:产前会(T+2)
     order_kickoff_meeting:         cap(calc(TIMELINE.order_kickoff_meeting)),
     production_order_upload:       cap(calc(TIMELINE.production_order_upload)),
     order_docs_bom_complete:       cap(calc(TIMELINE.order_docs_bom_complete)),
