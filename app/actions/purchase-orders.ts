@@ -90,10 +90,23 @@ export async function createPurchaseOrder(input: {
   if (poErr) return { error: '创建采购单失败：' + poErr.message };
 
   const poId = (po as any).id;
+  // 供应商名同步写到行上(队列显示直读 supplier_name,不再依赖 join)
+  const { data: sup } = await (supabase.from('suppliers') as any)
+    .select('name').eq('id', input.supplierId).maybeSingle();
+  const supplierName = (sup as any)?.name || null;
+
   // 归行到单（仅未占用的）
-  const { error: updErr } = await (supabase.from('procurement_line_items') as any)
-    .update({ purchase_order_id: poId, supplier_id: input.supplierId })
+  let { error: updErr } = await (supabase.from('procurement_line_items') as any)
+    .update({ purchase_order_id: poId, supplier_id: input.supplierId, supplier_name: supplierName })
     .in('id', input.lineItemIds).is('purchase_order_id', null);
+  if (updErr && /supplier_id_fkey|foreign key/i.test(updErr.message || '')) {
+    // 旧外键仍指 factories(迁移 20260703_supplier_fkey_repoint 未执行)→ 降级:
+    // 行上只挂单号+供应商名(供应商真相在采购单头 purchase_orders.supplier_id),先不断业务
+    console.warn('[createPurchaseOrder] supplier_id 外键仍指 factories,降级归行。请执行 20260703_supplier_fkey_repoint.sql');
+    ({ error: updErr } = await (supabase.from('procurement_line_items') as any)
+      .update({ purchase_order_id: poId, supplier_name: supplierName })
+      .in('id', input.lineItemIds).is('purchase_order_id', null));
+  }
   if (updErr) {
     await (supabase.from('purchase_orders') as any).delete().eq('id', poId); // 回滚头
     return { error: '归行失败：' + updErr.message };
