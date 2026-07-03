@@ -85,12 +85,41 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     await reload();
   }
 
+  // ── 两步归并(2026-07-03 用户拍板:不许一键直写,先看变更计划再勾选执行)──
+  const [mergePlan, setMergePlan] = useState<any | null>(null);
+  const [applyOpts, setApplyOpts] = useState({ create: true, refresh: true, cleanup: true });
+
   async function consolidate() {
     setBusy(true); setMsg('');
-    const res = await consolidateOrderProcurementItems(orderId);
+    const res = await consolidateOrderProcurementItems(orderId, { dryRun: true });
     setBusy(false);
     if ((res as any).error) { setMsg((res as any).error); return; }
-    setMsg(`✅ 核料完成:新增 ${(res as any).created} / 刷新 ${(res as any).updated}${(res as any).flagged ? ` / 标记需重确认 ${(res as any).flagged}` : ''}${(res as any).removed ? ` / 清理孤儿 ${(res as any).removed}` : ''}`);
+    const p = (res as any).plan;
+    const hasChanges = p && (p.creates.length > 0 || p.qtyUpdates.length > 0 || p.orphanDelete.length > 0 || p.orphanFlag.length > 0);
+    if (!hasChanges) {
+      // 只有参数/图片/日期同步(不改数量不删项)= 安全,直接执行
+      if (p?.paramRefresh > 0) {
+        setBusy(true);
+        const r2 = await consolidateOrderProcurementItems(orderId, { apply: { create: false, refresh: true, cleanup: false } });
+        setBusy(false);
+        if ((r2 as any).error) { setMsg((r2 as any).error); return; }
+        setMsg(`✅ 与需求一致,已同步参数/图片/日期 ${(r2 as any).updated} 项(数量无变化)`);
+        await reload();
+      } else {
+        setMsg('✅ 与需求一致,无需变更');
+      }
+      return;
+    }
+    setApplyOpts({ create: true, refresh: true, cleanup: true });
+    setMergePlan(p);                                   // 弹出变更计划,人勾选后执行
+  }
+
+  async function executeMerge() {
+    setBusy(true); setMsg('');
+    const res = await consolidateOrderProcurementItems(orderId, { apply: applyOpts });
+    setBusy(false); setMergePlan(null);
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    setMsg(`✅ 归并完成:新增 ${(res as any).created} / 刷新 ${(res as any).updated}${(res as any).flagged ? ` / 标记需重确认 ${(res as any).flagged}` : ''}${(res as any).removed ? ` / 清理孤儿 ${(res as any).removed}` : ''}`);
     await reload();
   }
 
@@ -269,6 +298,72 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* 归并变更计划弹窗(先看后勾选,人确认才执行) */}
+      {mergePlan && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={() => setMergePlan(null)}>
+          <div className="bg-white rounded-xl max-w-2xl w-full my-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-800">🔄 归并变更计划 — 勾选要执行的,确认才落库</span>
+              <button onClick={() => setMergePlan(null)} className="text-xs text-gray-400 hover:text-gray-600">取消</button>
+            </div>
+            <div className="p-4 space-y-3 text-xs max-h-[60vh] overflow-y-auto">
+              {mergePlan.creates.length > 0 && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                  <label className="flex items-center gap-2 font-semibold text-emerald-800 cursor-pointer">
+                    <input type="checkbox" checked={applyOpts.create} onChange={e => setApplyOpts(o => ({ ...o, create: e.target.checked }))} className="accent-emerald-600" />
+                    ➕ 新增 {mergePlan.creates.length} 项
+                  </label>
+                  <ul className="mt-1.5 space-y-0.5 text-emerald-700">
+                    {mergePlan.creates.map((c: any, i: number) => (
+                      <li key={i}>· {c.material_name}{c.color ? ` · ${c.color}` : ''} — {c.qty}{c.unit || ''}{c.is_supplement ? ' 🟠(采购下单后新增=补采购,需财务审批)' : ''}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {mergePlan.qtyUpdates.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                  <label className="flex items-center gap-2 font-semibold text-amber-800 cursor-pointer">
+                    <input type="checkbox" checked={applyOpts.refresh} onChange={e => setApplyOpts(o => ({ ...o, refresh: e.target.checked }))} className="accent-amber-600" />
+                    ✏️ 总需求变化 {mergePlan.qtyUpdates.length} 项(旧→新)
+                  </label>
+                  <ul className="mt-1.5 space-y-0.5 text-amber-700">
+                    {mergePlan.qtyUpdates.map((u: any, i: number) => (
+                      <li key={i}>· {u.item_no} {u.material_name}{u.color ? ` · ${u.color}` : ''}:{u.oldQty} → <b>{u.newQty}</b>{u.unit || ''}{u.willFlag ? '(已确认项,将标⚠需重确认)' : ''}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {(mergePlan.orphanDelete.length > 0 || mergePlan.orphanFlag.length > 0) && (
+                <div className="rounded-lg border border-red-200 bg-red-50/50 p-3">
+                  <label className="flex items-center gap-2 font-semibold text-red-800 cursor-pointer">
+                    <input type="checkbox" checked={applyOpts.cleanup} onChange={e => setApplyOpts(o => ({ ...o, cleanup: e.target.checked }))} className="accent-red-600" />
+                    🗑 来源已消失的孤儿项 {mergePlan.orphanDelete.length + mergePlan.orphanFlag.length} 项
+                  </label>
+                  <ul className="mt-1.5 space-y-0.5 text-red-700">
+                    {mergePlan.orphanDelete.map((o: any, i: number) => (
+                      <li key={`d${i}`}>· {o.item_no} {o.material_name}{o.color ? ` · ${o.color}` : ''} — 草稿,将<b>删除</b></li>
+                    ))}
+                    {mergePlan.orphanFlag.map((o: any, i: number) => (
+                      <li key={`f${i}`}>· {o.item_no} {o.material_name}{o.color ? ` · ${o.color}` : ''} — {statusLabel(o.status)},保留并标⚠(已进采购流程,人来决策)</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {mergePlan.paramRefresh > 0 && (
+                <p className="text-gray-400">另有 {mergePlan.paramRefresh} 项数量无变化,仅同步参数/图片/日期(随「刷新」勾选一并执行)</p>
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex gap-2 justify-end">
+              <button onClick={() => setMergePlan(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">取消(什么都不动)</button>
+              <button onClick={executeMerge} disabled={busy || (!applyOpts.create && !applyOpts.refresh && !applyOpts.cleanup)}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                {busy ? '执行中…' : '✅ 执行勾选的变更'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 尾料清点归库弹窗 */}
       {stocktakeOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={() => setStocktakeOpen(false)}>

@@ -87,7 +87,15 @@ export async function listProcurementItems(orderId: string) {
  * 核料归并:读 material_requirements ⋈ snapshot_lines ⋈ materials_bom → 按 key 分组 → upsert 采购项。
  * 分步查询 + JS join(避开深层 PostgREST 嵌套 join 脆弱)。保留采购已填决策,仅刷新系统字段。
  */
-export async function consolidateOrderProcurementItems(orderId: string) {
+/**
+ * 核料归并 —— 两步制(2026-07-03 用户拍板:不许一键直写):
+ *  dryRun:true → 只算不写,返回变更计划(新增/改数/参数同步/孤儿清理,逐项旧→新);
+ *  执行 → 按 apply 勾选项落库(create=建新项 refresh=刷新数量参数 cleanup=清孤儿)。
+ */
+export async function consolidateOrderProcurementItems(
+  orderId: string,
+  opts: { dryRun?: boolean; apply?: { create?: boolean; refresh?: boolean; cleanup?: boolean } } = {},
+) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -166,12 +174,46 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     .select('*').eq('order_id', orderId);
   const exMap = new Map<string, any>((existing || []).map((e: any) => [e.consolidation_key, e]));
 
+  // ── 变更计划(2026-07-03 用户拍板:归并不许一键直写,先让人看到会发生什么)──
+  // 孤儿判定(草稿无执行行引用→可删;其余→只标记),计划阶段就算好
+  const liveKeys = new Set(groups.keys());
+  const orphans = (existing || []).filter((e: any) => !liveKeys.has(e.consolidation_key));
+  const orphanDraftIds = orphans.filter((e: any) => e.status === 'draft').map((e: any) => e.id);
+  let orphanDeletableIds = new Set<string>(orphanDraftIds);
+  if (orphanDraftIds.length > 0) {
+    const { data: refd } = await (supabase.from('procurement_line_items') as any)
+      .select('procurement_item_id').in('procurement_item_id', orphanDraftIds);
+    for (const r of (refd || [])) orphanDeletableIds.delete(r.procurement_item_id);
+  }
+  const brief = (x: any) => ({ item_no: x.item_no || null, material_name: x.material_name || null, color: x.color || null, unit: x.unit || null, status: x.status || null });
+  const plan = {
+    creates: [] as any[],        // 新增项(含是否补采购)
+    qtyUpdates: [] as any[],     // 总需求变化(旧→新;非草稿会标 needs_reconfirm)
+    paramRefresh: 0,             // 数量不变,仅同步参数/图片/日期(安全)
+    orphanDelete: orphans.filter((e: any) => orphanDeletableIds.has(e.id)).map(brief),
+    orphanFlag: orphans.filter((e: any) => !orphanDeletableIds.has(e.id)).map(brief),
+  };
+  for (const g of groups.values()) {
+    const ex = exMap.get(g.key);
+    if (!ex) {
+      plan.creates.push({ material_name: g.material_name, color: g.color, unit: g.unit, qty: g.total, is_supplement: afterProcurementPlaced });
+    } else if (Number(ex.total_required_qty) !== g.total) {
+      plan.qtyUpdates.push({ ...brief(ex), oldQty: ex.total_required_qty, newQty: g.total, willFlag: ex.status !== 'draft' });
+    } else {
+      plan.paramRefresh++;
+    }
+  }
+  if (opts.dryRun) return { ok: true, plan };
+
+  const apply = { create: true, refresh: true, cleanup: true, ...(opts.apply || {}) };
   let created = 0, updated = 0, flagged = 0, removed = 0;
   let seq = (existing || []).length;
   const now = new Date().toISOString();
 
   for (const g of groups.values()) {
     const ex = exMap.get(g.key);
+    if (ex && !apply.refresh) continue;
+    if (!ex && !apply.create) continue;
     if (ex) {
       const devRep = ex.development_consumption ?? g.devTop;
       // 采购没填过损耗 → 预填来源损耗参考(原基线3%),从此损耗只在这一处明算
@@ -240,23 +282,12 @@ export async function consolidateOrderProcurementItems(orderId: string) {
     }
   }
 
-  // 6) 旧项不再有来源(物料被删/改) —— 二次提交后清孤儿(审计🟠:此前草稿孤儿被无视,滞留成过期垃圾项)
-  //    - 草稿孤儿 且 无执行行引用 → 直接删(未下游,无痕移除)
+  // 6) 孤儿处理(集合在计划阶段已算好;受 cleanup 勾选控制)
+  //    - 草稿孤儿 且 无执行行引用 → 删(未下游,无痕移除)
   //    - 已确认/在采购中的孤儿(或草稿却已挂执行行)→ 保留 + 标 needs_reconfirm(已下游动过,人来决策)
-  const liveKeys = new Set(groups.keys());
-  const orphans = (existing || []).filter((e: any) => !liveKeys.has(e.consolidation_key));
-  if (orphans.length > 0) {
-    const draftIds = orphans.filter((e: any) => e.status === 'draft').map((e: any) => e.id);
-    const flagIds = orphans.filter((e: any) => e.status !== 'draft').map((e: any) => e.id);
-    let deletable = draftIds;
-    if (draftIds.length > 0) {
-      // 双保险:草稿本不该有执行行,但若有(曾确认→生成→退回)则不删,降级为标记
-      const { data: refd } = await (supabase.from('procurement_line_items') as any)
-        .select('procurement_item_id').in('procurement_item_id', draftIds);
-      const refSet = new Set((refd || []).map((r: any) => r.procurement_item_id));
-      deletable = draftIds.filter((id: string) => !refSet.has(id));
-      flagIds.push(...draftIds.filter((id: string) => refSet.has(id)));
-    }
+  if (apply.cleanup && orphans.length > 0) {
+    const deletable = orphans.filter((e: any) => orphanDeletableIds.has(e.id)).map((e: any) => e.id);
+    const flagIds = orphans.filter((e: any) => !orphanDeletableIds.has(e.id)).map((e: any) => e.id);
     if (deletable.length > 0) {
       // 保险丝(2026-07-03):带 .select 验证真删了;缺 DELETE 策略时静默 0 行 → 孤儿清理空转
       const { data: reallyDeleted } = await (supabase.from('procurement_items') as any)
