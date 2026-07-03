@@ -663,7 +663,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             <Field label="大货单耗" k="production_consumption" form={form} set={set} type="number" />
             <Field label="采购损耗%" k="procurement_loss_pct" form={form} set={set} type="number" />
             <Field label="安全库存" k="safety_stock_qty" form={form} set={set} type="number" />
-            <Field label="MOQ" k="moq" form={form} set={set} type="number" />
+            {/* MOQ 字段撤掉(2026-07-03 用户拍板不需要);列保留,已录过的旧值仍参与建议量取整 */}
             <div>
               <span className="text-gray-500">建议采购(实时算)</span>
               <div className="mt-1 w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 font-semibold text-emerald-800"
