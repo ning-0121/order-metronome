@@ -21,7 +21,8 @@ const MATTER_GROUPS: { type: RiskMatter['matter_type']; label: string; tone: str
 ];
 
 export default async function ProcurementCenterPage() {
-  await requireProcurementPage();   // 采购系统页面级门禁:非采购角色回工作台(2026-07-03)
+  const { roles: pageRoles } = await requireProcurementPage();   // 采购系统页面级门禁:非采购角色回工作台(2026-07-03)
+  const canFinanceOver = pageRoles.some(r => ['finance', 'admin'].includes(r));   // 超收放行仅财务/管理员
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
@@ -86,7 +87,7 @@ export default async function ProcurementCenterPage() {
         <Stat label="⚠️ 风险事项" value={matterCounts.total} tone="border-rose-200 bg-rose-50 text-rose-800" />
       </div>
 
-      <ProcurementQueueClient pendingRequests={pendingRequests} pendingOrder={pendingOrder} chase={chase} readyShip={readyShip} receive={receive} />
+      <ProcurementQueueClient pendingRequests={pendingRequests} pendingOrder={pendingOrder} chase={chase} readyShip={readyShip} receive={receive} canFinanceOver={canFinanceOver} />
 
       {/* ── 风险中心（只读，物化投影）── */}
       <div className="mt-8">

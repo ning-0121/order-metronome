@@ -15,6 +15,7 @@ export interface ProcItem {
   material_name?: string | null;
   specification?: string | null;
   category?: string | null;
+  color?: string | null;
   unit?: string | null;
   purchase_unit?: string | null;
   total_required_qty?: number | null;
@@ -82,6 +83,7 @@ export interface FulfillmentRow {
   procurement_item_id: string;
   consolidation_key: string;
   material_name: string | null;
+  color: string | null;
   unit: string | null;
   status: string | null;
   required: number;   // 系统需求(total_required_qty)
@@ -120,6 +122,7 @@ export function deriveFulfillment(
       procurement_item_id: it.id,
       consolidation_key: it.consolidation_key,
       material_name: it.material_name ?? null,
+      color: it.color ?? null,
       unit: it.unit ?? null,
       status: it.status ?? null,
       required: round3(Number(it.total_required_qty) || 0),

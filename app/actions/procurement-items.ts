@@ -88,6 +88,67 @@ export async function listProcurementItems(orderId: string) {
  * 分步查询 + JS join(避开深层 PostgREST 嵌套 join 脆弱)。保留采购已填决策,仅刷新系统字段。
  */
 /**
+ * 库存抵扣(2026-07-03 用户拍板:减尾料 + 进采购单标库存 + 不采购)。
+ * 用现有尾料库存抵扣某采购项:预留锁定该量(别的单不能再用)→ 记 stock_deduct_qty →
+ * 最终采购量减去它(只向供应商买剩余;全抵扣则采购量=0,不生成执行行)。发货时领用核销。
+ */
+export async function deductFromStock(itemId: string, orderId: string): Promise<{
+  deducted?: number; remaining?: number; total_deduct?: number; error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
+
+  const { data: it, error: gErr } = await (supabase.from('procurement_items') as any)
+    .select('id, order_id, consolidation_key, material_master_id, material_name, unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, stock_deduct_qty, procurement_notes')
+    .eq('id', itemId).single();
+  if (gErr || !it) return { error: gErr?.message || '采购项不存在' };
+  if ((it as any).order_id !== orderId) return { error: '采购项与订单不匹配' };
+
+  // 当前还要采购的量(最终采购量;未设则建议;再未设则总需求)
+  const base = Number((it as any).final_purchase_qty ?? (it as any).suggested_purchase_qty ?? (it as any).total_required_qty) || 0;
+  if (base <= 0) return { error: '当前采购量为 0,无需抵扣' };
+
+  const { getAvailableStockByKeys, reserveStock } = await import('@/app/actions/inventory');
+  const av = await getAvailableStockByKeys([(it as any).consolidation_key]);
+  const available = (av as any).data?.[(it as any).consolidation_key]?.available || 0;
+  if (available <= 0) return { error: '该物料当前无可用库存尾料,无需抵扣(可先做「尾料清点归库」)' };
+
+  const deduct = Math.round(Math.min(available, base) * 1000) / 1000;
+
+  // 预留锁定(逻辑锁,别的单不能再抵这批;发货时 consumeReservation/领料核销)
+  const rv = await reserveStock({
+    materialKey: (it as any).consolidation_key,
+    materialMasterId: (it as any).material_master_id || null,
+    orderId, procurementItemId: itemId, qty: deduct,
+    source: 'procurement', note: `库存抵扣:${(it as any).material_name || ''} ${deduct}${(it as any).unit || ''}(不采购,发货领用核销)`,
+  });
+  if ((rv as any).error) return { error: '预留库存失败:' + (rv as any).error };
+
+  const totalDeduct = Math.round(((Number((it as any).stock_deduct_qty) || 0) + deduct) * 1000) / 1000;
+  const remaining = Math.max(0, Math.round((base - deduct) * 1000) / 1000);
+  const stamp = `[库存抵扣 ${deduct}${(it as any).unit || ''}:用尾料库存,已预留锁定,不采购,发货领用核销]`;
+  const upd: any = {
+    stock_deduct_qty: totalDeduct,
+    final_purchase_qty: remaining,
+    procurement_notes: (it as any).procurement_notes ? `${(it as any).procurement_notes} ${stamp}` : stamp,
+    updated_at: new Date().toISOString(),
+  };
+  let { error: uErr } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
+  if (uErr && /stock_deduct_qty|column .* does not exist/i.test(uErr.message || '')) {
+    // 迁移未执行 → 降级(不记 stock_deduct_qty,只减采购量+备注),提示
+    const { stock_deduct_qty, ...plain } = upd;
+    ({ error: uErr } = await (supabase.from('procurement_items') as any).update(plain).eq('id', itemId));
+  }
+  if (uErr) return { error: friendlyError(uErr) };
+
+  revalidatePath(`/orders/${orderId}`);
+  return { deducted: deduct, remaining, total_deduct: totalDeduct };
+}
+
+/**
  * 采购下单节点自动完成(2026-07-03:下了采购单,「待采购订单」卡就该消失)。
  * 条件:该订单有采购项 且 全部已下单(ordered 及之后)→ 自动完成
  * procurement_order_placed 节点(系统内采购单即证据;留痕+触发置信度重算)。
@@ -653,9 +714,10 @@ export async function generateExecutionLines(orderId: string) {
 
   const now = new Date().toISOString();
   const rows = (items as any[])
-    .filter((it) => !done.has(it.id) && canGenerateExecution(it))
+    // 采购量>0 才生成执行行:最终采购量=0(全用库存抵扣)的项不采购、不发供应商
+    .filter((it) => !done.has(it.id) && canGenerateExecution(it) && (Number(it.final_purchase_qty ?? it.suggested_purchase_qty ?? 0) > 0))
     .map((it) => ({ ...buildExecutionLineRow(it, user.id), ordered_at: now }));
-  if (rows.length === 0) return { ok: true, created: 0, message: '已确认项均已生成执行行' };
+  if (rows.length === 0) return { ok: true, created: 0, message: '已确认项无需采购(全用库存抵扣)或均已生成执行行' };
 
   const { error: insErr } = await (supabase.from('procurement_line_items') as any).insert(rows);
   if (insErr) return { error: friendlyError(insErr) };
@@ -670,7 +732,7 @@ export async function getOrderProcurementFulfillment(orderId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: items } = await (supabase.from('procurement_items') as any)
-    .select('id, consolidation_key, material_name, unit, total_required_qty, status').eq('order_id', orderId);
+    .select('id, consolidation_key, material_name, color, unit, total_required_qty, status').eq('order_id', orderId);
   if (!items || items.length === 0) return { data: [] };
 
   const itemIds = (items as any[]).map((i) => i.id);

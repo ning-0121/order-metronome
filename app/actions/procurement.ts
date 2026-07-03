@@ -829,18 +829,50 @@ export async function recordGoodsReceipt(
  */
 export async function recordReceiptBatch(
   lineItemId: string,
-  payload: { received_qty: number; received_date?: string; slip_paths?: string[]; note?: string; mark_complete?: boolean },
-): Promise<{ error?: string; ok?: boolean; total_received?: number; ordered?: number; complete?: boolean }> {
+  payload: { received_qty: number; received_date?: string; slip_paths?: string[]; note?: string; mark_complete?: boolean; allow_over?: boolean },
+): Promise<{ error?: string; ok?: boolean; total_received?: number; ordered?: number; complete?: boolean; needsApproval?: boolean; cap?: number }> {
   const access = await checkOperator();
   if (!access.ok || !access.userId) return { error: access.error };
   if (!(payload.received_qty > 0)) return { error: '本批实收数量必须大于 0' };
   const supabase = await createClient();
 
   const { data: line } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, line_status, ordered_qty, ordered_unit, received_qty').eq('id', lineItemId).single();
+    .select('id, order_id, line_status, ordered_qty, ordered_unit, received_qty, material_name').eq('id', lineItemId).single();
   if (!line) return { error: '采购行不存在' };
 
   const now = new Date().toISOString();
+
+  // ── 收货 ±10% 硬闸(2026-07-03 用户拍板):累计收货超采购量 10% → 拦截,需财务审批放行 ──
+  const orderedQ = Number(line.ordered_qty) || 0;
+  if (orderedQ > 0) {
+    const { data: prev } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId);
+    const prevTotal = ((prev || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
+    const projected = Math.round((prevTotal + payload.received_qty) * 1000) / 1000;
+    const cap = Math.round(orderedQ * 1.1 * 1000) / 1000;
+    if (projected > cap) {
+      const isFinance = access.roles?.some(r => ['finance', 'admin'].includes(r));
+      if (!payload.allow_over) {
+        // 通知全体财务(超收待处理)
+        try {
+          const { data: order } = await (supabase.from('orders') as any).select('order_no, internal_order_no').eq('id', line.order_id).maybeSingle();
+          const { data: profs } = await (supabase.from('profiles') as any).select('user_id, role, roles');
+          const fin = (profs || []).filter((p: any) => { const rs = p.roles?.length ? p.roles : [p.role]; return rs.includes('finance'); });
+          if (fin.length) await (supabase.from('notifications') as any).insert(fin.map((f: any) => ({
+            user_id: f.user_id, type: 'over_receipt',
+            title: `⚠ 超量收货待处理:${(order as any)?.internal_order_no || (order as any)?.order_no || ''}`,
+            message: `「${line.material_name || ''}」累计收货 ${projected}${line.ordered_unit || ''} 将超采购量 ${orderedQ} 的 10%(上限 ${cap})。请裁决:审批放行 / 退回布行 / 布行补足 / 超出搁置。`,
+            related_order_id: line.order_id,
+          })));
+        } catch { /* 通知失败不影响拦截 */ }
+        return {
+          error: `⚠ 累计收货 ${projected}${line.ordered_unit || ''} 将超采购量 ${orderedQ} 的 10%(上限 ${cap})。已拦截并通知财务。处理方向:①财务审批放行 ②退回布行 ③让布行补足到量 ④超出部分搁置等待。`,
+          needsApproval: true, cap,
+        };
+      }
+      // allow_over 放行:仅财务/管理员可用
+      if (!isFinance) return { error: '超采购量 10% 需财务放行,你的角色不可勾「超收放行」;请联系财务审批' };
+    }
+  }
   const receivedAt = payload.received_date ? new Date(payload.received_date + 'T00:00:00+08:00').toISOString() : now;
 
   // 1. 追加一批
@@ -872,8 +904,8 @@ export async function recordReceiptBatch(
   catch (e: any) { console.warn('[recordReceiptBatch] 采购项联动失败(不阻断):', e?.message); }
 
   await logProcurement(supabase, lineItemId, line.order_id, 'receive', line.line_status, nextStatus,
-    `收货登记:本批 ${payload.received_qty}${line.ordered_unit || ''},累计 ${total}/${ordered}${complete ? '(已收齐)' : ''}`,
-    { batch: payload.received_qty, total });
+    `收货登记:本批 ${payload.received_qty}${line.ordered_unit || ''},累计 ${total}/${ordered}${complete ? '(已收齐)' : ''}${payload.allow_over ? ' [财务超收放行]' : ''}`,
+    { batch: payload.received_qty, total, allow_over: !!payload.allow_over });
   revalidatePath(`/orders/${line.order_id}`);
   revalidatePath('/procurement');
   return { ok: true, total_received: total, ordered, complete };

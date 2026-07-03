@@ -5,7 +5,7 @@ import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
-  listBomConsumptionLines, saveBomProductionConsumption,
+  listBomConsumptionLines, saveBomProductionConsumption, deductFromStock,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
@@ -181,13 +181,15 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setStocktakeOpen(false); await reload();
   }
 
-  // 用库存抵扣:把某采购项的最终采购量减去可用库存
-  function deductStock(item: any) {
-    const a = avail[item.consolidation_key];
-    if (!a || a.available <= 0) return;
-    const base = Number(form.final_purchase_qty) || Number(item.final_purchase_qty) || Number(item.suggested_purchase_qty) || 0;
-    const next = Math.max(0, Math.round((base - a.available) * 1000) / 1000);
-    setForm(f => ({ ...f, final_purchase_qty: String(next) }));
+  // 用库存抵扣(2026-07-03 做透):预留锁定尾料 + 记库存抵扣量 + 减采购量 + 备注(不采购,发货领用核销)
+  async function deductStock(item: any) {
+    setSaving(true); setMsg('');
+    const res = await deductFromStock(item.id, orderId);
+    setSaving(false);
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    const d = res as any;
+    setMsg(`✅ 库存抵扣 ${d.deducted}${item.unit || ''}(已预留锁定给本单,不采购,发货领用核销)→ 剩余采购 ${d.remaining}${item.unit || ''}${d.remaining === 0 ? '(全用库存,不下单)' : ''}`);
+    await reload();
   }
 
   async function select(item: any) {
@@ -669,7 +671,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-500 border-b border-gray-100">
-                {['物料', '状态', '需求', '下单', '收货', '消耗(领料)', '尾货', '单位'].map(h => (
+                {['物料', '颜色', '状态', '需求', '下单', '收货', '消耗(领料)', '尾货', '单位'].map(h => (
                   <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr></thead>
@@ -677,6 +679,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                 {fulfillment.filter(f => f.ordered > 0 || f.received > 0 || f.consumed > 0).map(f => (
                   <tr key={f.procurement_item_id} className="border-b border-gray-50">
                     <td className="py-1.5 px-2 text-gray-800">{f.material_name || '—'}</td>
+                    <td className="py-1.5 px-2 text-gray-600">{f.color || '—'}</td>
                     <td className="py-1.5 px-2"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{statusLabel(f.status)}</span></td>
                     <td className="py-1.5 px-2 text-gray-500 font-mono">{f.required}</td>
                     <td className="py-1.5 px-2 text-gray-700 font-mono">{f.ordered}</td>
@@ -822,16 +825,24 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             </label>
           </div>
 
+          {/* 已用库存抵扣的记录(进采购单·标库存·不采购) */}
+          {Number(sel.stock_deduct_qty) > 0 && (
+            <div className="rounded-lg bg-sky-50 border border-sky-200 p-2.5 text-xs text-sky-800">
+              📦 已用库存抵扣 <b>{sel.stock_deduct_qty}</b> {sel.unit || ''}(已预留锁定给本单,<b>不采购</b>,发货时领料核销)
+              · 采购量 = 需求 {sel.total_required_qty} − 库存 {sel.stock_deduct_qty} = <b>{sel.final_purchase_qty ?? '—'}</b>
+            </div>
+          )}
+
           {/* 库存抵扣:该物料有可用尾料 → 一键从最终采购量扣减 */}
           {avail[sel.consolidation_key]?.available > 0 && (
             <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-xs flex items-center justify-between gap-2">
               <span className="text-emerald-800">
                 📦 库存有 <b>{avail[sel.consolidation_key].available}</b> {sel.unit || ''} 可用
                 {avail[sel.consolidation_key].location && <>(库位 {avail[sel.consolidation_key].location})</>}
-                ,可抵扣本次采购
+                ,可抵扣本次采购(减尾料·标库存·不采购)
               </span>
-              <button onClick={() => deductStock(sel)}
-                className="shrink-0 px-3 py-1 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">用库存抵扣</button>
+              <button onClick={() => deductStock(sel)} disabled={saving}
+                className="shrink-0 px-3 py-1 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">{saving ? '处理中…' : '用库存抵扣'}</button>
             </div>
           )}
 

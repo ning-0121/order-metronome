@@ -61,10 +61,11 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
 }
 
 export function ProcurementQueueClient({
-  pendingRequests = [], pendingOrder, chase, readyShip, receive,
+  pendingRequests = [], pendingOrder, chase, readyShip, receive, canFinanceOver = false,
 }: {
   pendingRequests?: Array<{ order_id: string; order_no: string | null; internal_order_no?: string | null; customer_name: string | null; submitted_at: string | null; req_count: number; late_count: number }>;
   pendingOrder: QueueLine[]; chase: QueueLine[]; readyShip: QueueLine[]; receive: QueueLine[];
+  canFinanceOver?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -221,7 +222,7 @@ export function ProcurementQueueClient({
               <BackButton l={l} />
             </RowShell>
             {openForm === `${l.id}:reg` && (
-              <ReceiptRegisterForm line={l} onDone={() => { setOpenForm(null); router.refresh(); }} />
+              <ReceiptRegisterForm line={l} canFinanceOver={canFinanceOver} onDone={() => { setOpenForm(null); router.refresh(); }} />
             )}
             {openForm === `${l.id}:recv` && (
               <ReceiveForm line={l} busy={!!busy && busy.startsWith(`${l.id}:recv`)}
@@ -287,7 +288,7 @@ function ReceiveForm({ line, busy, onSubmit }: {
 }
 
 /** 收货登记(分批次 + 码单上传 + 累计汇总)。仓库把实收数据交采购,采购在此逐批录入。 */
-function ReceiptRegisterForm({ line, onDone }: { line: QueueLine; onDone: () => void }) {
+function ReceiptRegisterForm({ line, onDone, canFinanceOver = false }: { line: QueueLine; onDone: () => void; canFinanceOver?: boolean }) {
   const today = new Date().toISOString().slice(0, 10);
   const [batches, setBatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -295,6 +296,7 @@ function ReceiptRegisterForm({ line, onDone }: { line: QueueLine; onDone: () => 
   const [date, setDate] = useState(today);
   const [note, setNote] = useState('');
   const [complete, setComplete] = useState(false);
+  const [allowOver, setAllowOver] = useState(false);   // 财务超收放行
   const [slipPaths, setSlipPaths] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -329,6 +331,7 @@ function ReceiptRegisterForm({ line, onDone }: { line: QueueLine; onDone: () => 
     const res = await recordReceiptBatch(line.id, {
       received_qty: q, received_date: date, note: note || undefined,
       slip_paths: slipPaths.length ? slipPaths : undefined, mark_complete: complete,
+      allow_over: allowOver,
     });
     setSaving(false);
     if ((res as any).error) { setErr((res as any).error); return; }
@@ -371,6 +374,22 @@ function ReceiptRegisterForm({ line, onDone }: { line: QueueLine; onDone: () => 
         <label className="text-xs flex items-center gap-1 text-gray-600"><input type="checkbox" checked={complete} onChange={e => setComplete(e.target.checked)} />收齐</label>
         <button disabled={saving || uploading} className="text-xs px-3 py-1 rounded bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50" onClick={submit}>{saving ? '登记中…' : '登记本批'}</button>
       </div>
+      {/* 超收 ±10% 预警(本批会超时提示) */}
+      {(() => {
+        const q = parseFloat(qty) || 0;
+        if (!(ordered > 0) || q <= 0) return null;
+        const projected = Math.round((received + q) * 1000) / 1000;
+        const cap = Math.round(ordered * 1.1 * 1000) / 1000;
+        if (projected <= cap) return null;
+        return (
+          <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-800 space-y-1">
+            <p>⚠ 本批后累计 <b>{projected}</b> 将超采购量 {ordered} 的 10%(上限 {cap})。系统会拦截并通知财务。处理:①退回布行 ②让布行补足 ③超出搁置 ④财务审批放行。</p>
+            {canFinanceOver
+              ? <label className="flex items-center gap-1.5 text-amber-900 font-medium"><input type="checkbox" checked={allowOver} onChange={e => setAllowOver(e.target.checked)} />财务放行本次超收入账(留痕)</label>
+              : <span className="text-amber-600">需财务勾选放行才能入账。</span>}
+          </div>
+        );
+      })()}
       {err && <div className="text-xs text-red-600">{err}</div>}
     </div>
   );
