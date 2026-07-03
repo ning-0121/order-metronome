@@ -10,6 +10,7 @@ export type ProcurementLineStatus =
   | 'ordered'
   | 'confirmed'
   | 'in_production'
+  | 'ready_to_ship'   // 2026-07-03:工厂已完成、待送货(用户要求队列细分)
   | 'shipped'
   | 'arrived'
   | 'accepted'
@@ -24,8 +25,9 @@ export const LINE_STATUS_LABELS: Record<ProcurementLineStatus, string> = {
   ordered: '已下单',
   confirmed: '已确认',
   in_production: '生产中',
-  shipped: '已发货',
-  arrived: '已到厂',
+  ready_to_ship: '已完成待送货',
+  shipped: '已发货在途',
+  arrived: '已送达待验收',
   accepted: '验收通过',
   concession: '让步接收',
   rejected: '拒收',
@@ -37,9 +39,10 @@ export const LINE_STATUS_LABELS: Record<ProcurementLineStatus, string> = {
 export const VALID_LINE_TRANSITIONS: Record<ProcurementLineStatus, ProcurementLineStatus[]> = {
   draft: ['pending_order', 'cancelled'],
   pending_order: ['ordered', 'cancelled'],
-  ordered: ['confirmed', 'shipped', 'cancelled'],
-  confirmed: ['in_production', 'shipped', 'cancelled'],
-  in_production: ['shipped', 'cancelled'],
+  ordered: ['confirmed', 'ready_to_ship', 'shipped', 'cancelled'],
+  confirmed: ['in_production', 'ready_to_ship', 'shipped', 'cancelled'],
+  in_production: ['ready_to_ship', 'shipped', 'cancelled'],
+  ready_to_ship: ['shipped', 'cancelled'],
   shipped: ['arrived', 'cancelled'],
   arrived: ['accepted', 'concession', 'rejected'],
   accepted: ['closed'],
@@ -59,7 +62,7 @@ export function isValidLineTransition(
 
 /** 在途状态（进入催货/交期监控范围） */
 export const ACTIVE_LINE_STATUSES: ProcurementLineStatus[] = [
-  'ordered', 'confirmed', 'in_production', 'shipped',
+  'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped',
 ];
 
 // ── 拍板参数（2026-06-13，决策4 + 排期缓冲）──

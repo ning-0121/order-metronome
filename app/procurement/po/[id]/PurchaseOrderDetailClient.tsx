@@ -57,6 +57,17 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{po.po_no}</h1>
           <p className="text-sm text-gray-500 mt-1">{dualNo}</p>
+          {/* 数据链:直达关联订单的生产任务单,采购核对用料/数量(2026-07-03 用户要求) */}
+          {(orderRefs || []).length > 0 && (
+            <p className="text-xs mt-1 flex flex-wrap gap-2">
+              {(orderRefs || []).map((o: any) => (
+                <a key={o.id} href={`/orders/${o.id}?tab=manufacturing_order`}
+                  className="text-indigo-600 hover:underline">
+                  📋 {o.internal_order_no || o.order_no} 生产任务单
+                </a>
+              ))}
+            </p>
+          )}
         </div>
         <div className="flex gap-2 shrink-0">
           {canSeeFloor && (

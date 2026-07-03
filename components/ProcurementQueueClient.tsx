@@ -21,10 +21,17 @@ const CAT: Record<string, string> = {
 };
 const STATUS_LABEL: Record<string, string> = {
   pending_order: '待下单', ordered: '已下单', confirmed: '已确认',
-  in_production: '生产中', shipped: '已发货', arrived: '已到厂',
+  in_production: '生产中', ready_to_ship: '已完成待送货', shipped: '已发货在途', arrived: '已送达',
 };
 
 function fmt(d: string | null) { return d ? d.slice(0, 10) : '—'; }
+
+/** 未到货数量 = 订购 − 已收(负数钳 0);无订购量返回 null 不显示 */
+function outstanding(l: QueueLine): number | null {
+  const o = Number(l.ordered_qty);
+  if (!o) return null;
+  return Math.max(0, Math.round((o - (Number(l.received_qty) || 0)) * 1000) / 1000);
+}
 
 function LampDot({ lamp }: { lamp: string | null }) {
   if (!lamp) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-200" title="无截止/不监控" />;
@@ -42,6 +49,10 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
           <Link href={`/orders/${line.order_id}`} className="text-xs text-indigo-600 hover:underline shrink-0">
             {line.order_no}·{line.customer_name}
           </Link>
+          {/* 数据链:采购随手打开该订单的生产任务单核对(2026-07-03 用户要求) */}
+          <Link href={`/orders/${line.order_id}?tab=manufacturing_order`} className="text-xs text-gray-400 hover:text-indigo-600 shrink-0" title="打开该订单的生产任务单核对">
+            📋任务单
+          </Link>
         </div>
         <div className="flex items-center gap-2 shrink-0">{children}</div>
       </div>
@@ -50,8 +61,8 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
 }
 
 export function ProcurementQueueClient({
-  pendingOrder, chase, receive,
-}: { pendingOrder: QueueLine[]; chase: QueueLine[]; receive: QueueLine[] }) {
+  pendingOrder, chase, readyShip, receive,
+}: { pendingOrder: QueueLine[]; chase: QueueLine[]; readyShip: QueueLine[]; receive: QueueLine[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<string | null>(null); // `${rowId}:${kind}`
@@ -93,10 +104,10 @@ export function ProcurementQueueClient({
         ))}
       </section>
 
-      {/* ── 待催货 ── */}
+      {/* ── 待催货(生产中) ── */}
       <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-100 font-bold text-amber-900 text-sm">
-          🔔 待催货 / 在途（{chase.length}）
+          🔔 待催货 / 生产中（{chase.length}）
         </div>
         {chase.length === 0 ? <Empty /> : chase.map(l => (
           <RowShell key={l.id} line={l}>
@@ -110,27 +121,52 @@ export function ProcurementQueueClient({
               <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:conf`}
                 onClick={() => run(`${l.id}:conf`, () => transitionProcurementLine(l.id, 'confirmed'))}>确认</button>
             )}
-            {['ordered', 'confirmed', 'in_production'].includes(l.line_status) && (
-              <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:ship`}
-                onClick={() => run(`${l.id}:ship`, () => transitionProcurementLine(l.id, 'shipped'))}>发货</button>
-            )}
-            {l.line_status === 'shipped' && (
-              <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${l.id}:arr`}
-                onClick={() => run(`${l.id}:arr`, () => transitionProcurementLine(l.id, 'arrived'))}>到厂</button>
-            )}
+            <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:rts`}
+              onClick={() => run(`${l.id}:rts`, () => transitionProcurementLine(l.id, 'ready_to_ship'))}>✅ 工厂已完成</button>
+            <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:ship`}
+              onClick={() => run(`${l.id}:ship`, () => transitionProcurementLine(l.id, 'shipped'))}>直接发货</button>
           </RowShell>
         ))}
       </section>
 
-      {/* ── 待验收 ── */}
+      {/* ── 已完成待送货 / 在途 ── */}
+      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-sky-50 px-4 py-2.5 border-b border-sky-100 font-bold text-sky-900 text-sm">
+          🚚 已完成待送货 / 在途（{readyShip.length}）
+        </div>
+        {readyShip.length === 0 ? <Empty /> : readyShip.map(l => {
+          const out = outstanding(l);
+          return (
+            <RowShell key={l.id} line={l}>
+              <span className="text-xs text-gray-400">
+                {STATUS_LABEL[l.line_status]} · 预计 {fmt(l.expected_arrival || l.promised_date)}
+                {out != null && <> · <b className={out > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {out}</b> {l.ordered_unit}</>}
+              </span>
+              {l.line_status === 'ready_to_ship' && (
+                <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:ship`}
+                  onClick={() => run(`${l.id}:ship`, () => transitionProcurementLine(l.id, 'shipped'))}>🚚 已发货</button>
+              )}
+              {l.line_status === 'shipped' && (
+                <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${l.id}:arr`}
+                  onClick={() => run(`${l.id}:arr`, () => transitionProcurementLine(l.id, 'arrived'))}>📦 已送达</button>
+              )}
+            </RowShell>
+          );
+        })}
+      </section>
+
+      {/* ── 已送达待验收 ── */}
       <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-emerald-50 px-4 py-2.5 border-b border-emerald-100 font-bold text-emerald-900 text-sm">
-          ✅ 待验收（{receive.length}）
+          ✅ 已送达待验收（{receive.length}）
         </div>
         {receive.length === 0 ? <Empty /> : receive.map(l => (
           <div key={l.id}>
             <RowShell line={l}>
-              <span className="text-xs text-gray-400">订购 {l.ordered_qty ?? '—'} {l.ordered_unit}{l.received_qty ? ` · 已收 ${l.received_qty}` : ''}</span>
+              <span className="text-xs text-gray-400">
+                订购 {l.ordered_qty ?? '—'} {l.ordered_unit}{l.received_qty ? ` · 已收 ${l.received_qty}` : ''}
+                {outstanding(l) != null && <> · <b className={outstanding(l)! > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {outstanding(l)}</b></>}
+              </span>
               <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`}
                 onClick={() => setOpenForm(openForm === `${l.id}:reg` ? null : `${l.id}:reg`)}>📥 收货登记</button>
               <button className={`${btn} bg-white text-gray-600 border border-gray-300 hover:bg-gray-50`}

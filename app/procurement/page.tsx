@@ -35,7 +35,7 @@ export default async function ProcurementCenterPage() {
     );
   }
 
-  const { pendingOrder, chase, receive, counts } = result.data!;
+  const { pendingOrder, chase, readyShip, receive, counts } = result.data!;
   const mattersResult = await getProcurementMatters();
   const matters = mattersResult.data?.matters ?? [];
   const matterCounts = mattersResult.data?.counts ?? { total: 0, high: 0, medium: 0 };
@@ -71,15 +71,16 @@ export default async function ProcurementCenterPage() {
       </div>
 
       {/* Dashboard 壳：计数 */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
         <Stat label="待下单" value={counts.pendingOrder} tone="border-indigo-200 bg-indigo-50 text-indigo-800" />
-        <Stat label="待催货 / 在途" value={counts.chase} tone="border-amber-200 bg-amber-50 text-amber-800" />
-        <Stat label="待验收" value={counts.receive} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
+        <Stat label="待催货 / 生产中" value={counts.chase} tone="border-amber-200 bg-amber-50 text-amber-800" />
+        <Stat label="已完成待送货" value={counts.readyShip} tone="border-sky-200 bg-sky-50 text-sky-800" />
+        <Stat label="已送达待验收" value={counts.receive} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
         <Stat label="🔴 红灯行" value={counts.red} tone="border-red-200 bg-red-50 text-red-800" />
         <Stat label="⚠️ 风险事项" value={matterCounts.total} tone="border-rose-200 bg-rose-50 text-rose-800" />
       </div>
 
-      <ProcurementQueueClient pendingOrder={pendingOrder} chase={chase} receive={receive} />
+      <ProcurementQueueClient pendingOrder={pendingOrder} chase={chase} readyShip={readyShip} receive={receive} />
 
       {/* ── 风险中心（只读，物化投影）── */}
       <div className="mt-8">

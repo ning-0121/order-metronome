@@ -918,6 +918,7 @@ export interface QueueLine {
   price_variance_pct: number | null;
   ordered_qty: number | null;
   ordered_unit: string | null;
+  received_qty: number | null;   // 已收(累计);未到货 = ordered_qty − received_qty
   chase_count: number | null;
   last_chased_at: string | null;
   lamp: 'red' | 'yellow' | 'green' | null;
@@ -927,8 +928,9 @@ export async function getProcurementQueues(): Promise<{
   data?: {
     pendingOrder: QueueLine[];
     chase: QueueLine[];
+    readyShip: QueueLine[];
     receive: QueueLine[];
-    counts: { pendingOrder: number; chase: number; receive: number; red: number };
+    counts: { pendingOrder: number; chase: number; readyShip: number; receive: number; red: number };
   };
   error?: string;
 }> {
@@ -936,11 +938,11 @@ export async function getProcurementQueues(): Promise<{
   if (!auth.ok) return { error: auth.error };
   const supabase = await createClient();
 
-  const { computeLineLamp, ACTIVE_LINE_STATUSES: ACTIVE } = await import('@/lib/domain/procurement');
+  const { computeLineLamp } = await import('@/lib/domain/procurement');
 
   const { data, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, unit_price, price_variance_pct, ordered_qty, ordered_unit, chase_count, last_chased_at, orders(order_no, customer_name, lifecycle_status)')
-    .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'shipped', 'arrived']);
+    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, unit_price, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, customer_name, lifecycle_status)')
+    .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
   if (error) return { error: error.message };
 
   const now = new Date();
@@ -957,6 +959,7 @@ export async function getProcurementQueues(): Promise<{
       promised_date: r.promised_date, expected_arrival: r.expected_arrival,
       po_no: r.po_no, unit_price: r.unit_price, price_variance_pct: r.price_variance_pct,
       ordered_qty: r.ordered_qty, ordered_unit: r.ordered_unit,
+      received_qty: r.received_qty ?? null,
       chase_count: r.chase_count, last_chased_at: r.last_chased_at,
       lamp: computeLineLamp(r, { now }),
     }));
@@ -964,15 +967,18 @@ export async function getProcurementQueues(): Promise<{
   const lampRank = (l: string | null) => (l === 'red' ? 0 : l === 'yellow' ? 1 : l === 'green' ? 2 : 3);
   const byLamp = (a: QueueLine, b: QueueLine) => lampRank(a.lamp) - lampRank(b.lamp);
 
+  // 2026-07-03 用户拍板四段:待下单 / 待催货(生产中) / 已完成待送货+在途 / 已送达待验收
   const pendingOrder = rows.filter(r => r.line_status === 'pending_order').sort(byLamp);
-  const chase = rows.filter(r => (ACTIVE as string[]).includes(r.line_status)).sort(byLamp);
+  const chase = rows.filter(r => ['ordered', 'confirmed', 'in_production'].includes(r.line_status)).sort(byLamp);
+  const readyShip = rows.filter(r => ['ready_to_ship', 'shipped'].includes(r.line_status)).sort(byLamp);
   const receive = rows.filter(r => r.line_status === 'arrived');
 
   return {
     data: {
-      pendingOrder, chase, receive,
+      pendingOrder, chase, readyShip, receive,
       counts: {
-        pendingOrder: pendingOrder.length, chase: chase.length, receive: receive.length,
+        pendingOrder: pendingOrder.length, chase: chase.length,
+        readyShip: readyShip.length, receive: receive.length,
         red: rows.filter(r => r.lamp === 'red').length,
       },
     },
