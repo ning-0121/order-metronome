@@ -30,9 +30,10 @@ export function resolveCapabilities(roles: string[]): ProcurementCapabilities {
   const supplierGrouping = isAdmin || isProcExec;
   const executionDetail = isAdmin || isProcExec;
 
-  // 采购成本（物料单价/金额）：仅 admin / procurement / production_manager
+  // 采购成本（物料单价/金额=大货底价）：仅 admin / procurement
+  //   2026-07-04 用户拍板:production_manager 不看大货底价(移出;对齐 CAN_SEE_PROCUREMENT_FLOOR 不含生产侧)
   //   merchandiser 可看分组与执行量，但不看采购成本；finance/sales/production 不看
-  const procurementCost = isAdmin || has(roles, 'procurement', 'production_manager');
+  const procurementCost = isAdmin || has(roles, 'procurement');
 
   // 订单金额：复用真实 CAN_SEE_FINANCIALS（admin/finance/sales 在内）
   const orderFinancials = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
