@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { PWARegister } from "@/components/PWARegister";
+import { WorkbenchAnchor } from "@/components/WorkbenchAnchor";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRoleFromEmail } from "@/lib/utils/user-role";
 import { PRODUCT_NAME, PRODUCT_DESC, PRODUCT_TAGLINE_EN } from "@/lib/branding/constants";
@@ -53,6 +54,8 @@ export default async function RootLayout({
       >
         <Navbar isAdmin={isAdmin} isProcurement={isProcurement} />
         <PWARegister />
+        {/* 打开系统/闲置2小时后再打开 → 回角色工作台;工作中刷新不打扰;单据深链不劫持 */}
+        <WorkbenchAnchor />
         {/* 左侧控制中心宽 60(15rem),桌面端正文留出左边距 */}
         <div className="md:pl-60 flex flex-col min-h-screen">
           <main className="container mx-auto bg-white px-4 py-8 flex-1">
