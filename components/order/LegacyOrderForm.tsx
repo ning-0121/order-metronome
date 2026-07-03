@@ -129,6 +129,8 @@ function NewOrderWizard() {
   const [deliveryType, setDeliveryType] = useState<string>('');
   const [shippingSampleRequired, setShippingSampleRequired] = useState(false);
   const [preGeneratedOrderNo, setPreGeneratedOrderNo] = useState<string | null>(null);
+  // 手工录入子模式:有PO(上传预录) / 无PO(直接手工填)。null=未选,先让业务选
+  const [poMode, setPoMode] = useState<'has_po' | 'no_po' | null>(null);
   const [orderNoLoading, setOrderNoLoading] = useState(true);
   const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
   const [poVerifyResult, setPoVerifyResult] = useState<POVerifyResult | null>(null);
@@ -1115,8 +1117,34 @@ function NewOrderWizard() {
             }}
           >
 
-            {/* ── 基本信息 ── */}
+            {/* ── 录入方式:有PO / 没PO ── */}
             <div>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3 pb-2 border-b border-gray-100">
+                录入方式
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+                <button type="button" onClick={() => setPoMode('has_po')}
+                  className={`text-left rounded-xl border-2 p-4 transition ${poMode === 'has_po' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200'}`}>
+                  <div className="text-sm font-semibold text-gray-900">📄 有客户 PO</div>
+                  <div className="text-xs text-gray-500 mt-1">上传 PO → 系统自动预录款色码/表头 → 业务核对修改。识别结果会冻结保存,以后可纠错。</div>
+                </button>
+                <button type="button" onClick={() => setPoMode('no_po')}
+                  className={`text-left rounded-xl border-2 p-4 transition ${poMode === 'no_po' ? 'border-amber-500 bg-amber-50' : 'border-gray-200 hover:border-amber-200'}`}>
+                  <div className="text-sm font-semibold text-gray-900">✍️ 没有 PO,手工填</div>
+                  <div className="text-xs text-gray-500 mt-1">客户没给正式 PO → 不用传文件,直接在下方基本信息 + 「逐款明细」手工录入。</div>
+                </button>
+              </div>
+              {poMode === null && <p className="text-xs text-amber-600">👆 请先选择录入方式</p>}
+            </div>
+
+            {poMode === 'has_po' && (
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 text-xs text-indigo-800">
+                📄 到下方「文件上传」选客户 PO,系统会自动识别并填入表单和逐款明细;识别结果冻结保存,读错了直接在下方改即可。
+              </div>
+            )}
+
+            {/* ── 基本信息 ── */}
+            <div className={poMode === null ? 'opacity-40 pointer-events-none' : ''}>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4 pb-2 border-b border-gray-100">
                 基本信息
               </h3>
@@ -1517,20 +1545,23 @@ function NewOrderWizard() {
             </div>
 
             {/* ── 文件上传 ── */}
-            <div>
+            <div className={poMode === null ? 'opacity-40 pointer-events-none' : ''}>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2 pb-2 border-b border-gray-100">
                 文件上传
               </h3>
               <p className="text-xs text-gray-500 mb-4">
-                有客户 PO → 上传自动预录款色码,业务再改;<b>没有 PO 的客户</b> → 可不传,直接在下方「逐款明细」手工录入。PO / 报价单至少给一样,或手工录明细即可建单。
+                {poMode === 'no_po'
+                  ? <>没有 PO → PO/报价单不用传,「逐款明细」手工录款色码即可;尺码表可选。</>
+                  : <>有客户 PO → 上传自动预录款色码,业务再改;识别结果会冻结保存,读错在下方改。PO/报价单至少给一样,或手工录明细即可建单。</>}
               </p>
               <div className="space-y-3">
-                {([
-                  // 2026-07-03 放开必传:PO/报价单改为可选(无PO客户可纯手工建单),提交时校验「至少一份文件或手工明细」
+                {(([
+                  // 2026-07-03 放开必传:PO/报价单可选;子模式=no_po 时隐藏 PO/报价单(只留尺码表)
                   { name: 'customer_po_file',        label: '客户 PO（可多个,可选）',  required: false, multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
                   { name: 'customer_quote_file',     label: '客户报价单（可多个,可选）',  required: false, multiple: true, stepKey: '_customer_quote' },
                   { name: 'size_chart_file',         label: '尺码表（可多个）',  required: false, multiple: true, stepKey: '_size_chart', hint: '客户/技术部的尺寸表,生产任务单 tab 可直接查看' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
+                  .filter(({ name }) => poMode === 'no_po' ? name === 'size_chart_file' : true))
                   .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (
                   <div key={name} className="rounded-lg border border-gray-200 p-3">
                     <div className="flex items-center gap-4">
