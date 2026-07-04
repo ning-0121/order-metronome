@@ -998,6 +998,7 @@ export async function listReceiptBatches(lineItemId: string): Promise<{ data?: a
 export interface PendingApprovalPO {
   id: string;
   po_no: string | null;
+  approval_status: string | null;   // pending=待审批 · not_required/approved=可下单(未 place)
   total_amount: number | null;
   supplier_name: string | null;
   reasons: string[];
@@ -1186,9 +1187,12 @@ export async function getProcurementQueues(): Promise<{
   // 待审批采购单:已建、撞风险闸卡在 pending 的采购单(下单没走完的真相在这)。
   const pendingApprovalPOs: PendingApprovalPO[] = [];
   try {
+    // 审计修(2026-07-04):放宽到所有草稿采购单(不只待审批)——归单后未 place 的草稿单
+    // (approval_status=not_required/approved)本来会从所有队列消失(已挂 PO→不在待下单;未 place→不在待催货),
+    // 形成盲区。全部露在横幅,按 approval_status 区分"待审批 / 可下单"。
     const { data: pos } = await (supabase.from('purchase_orders') as any)
       .select('id, po_no, total_amount, approval_status, approval_reasons, approval_required_by, order_ids, suppliers(name)')
-      .eq('status', 'draft').eq('approval_status', 'pending');
+      .eq('status', 'draft');
     const poOrderIds = [...new Set((pos || []).flatMap((p: any) => p.order_ids || []))];
     const poOrderMap = new Map<string, any>();
     if (poOrderIds.length > 0) {
@@ -1198,7 +1202,8 @@ export async function getProcurementQueues(): Promise<{
     }
     for (const p of (pos || [])) {
       pendingApprovalPOs.push({
-        id: p.id, po_no: p.po_no, total_amount: canSeeFloor ? (p.total_amount ?? null) : null,
+        id: p.id, po_no: p.po_no, approval_status: p.approval_status ?? null,
+        total_amount: canSeeFloor ? (p.total_amount ?? null) : null,
         supplier_name: p.suppliers?.name ?? null,
         reasons: p.approval_reasons || [], required_by: p.approval_required_by || [],
         orders: (p.order_ids || []).map((oid: string) => {
@@ -1254,6 +1259,7 @@ export async function getProcurementMatters(): Promise<{
 }> {
   const auth = await checkAccess();
   if (!auth.ok) return { error: auth.error };
+  const canSeeFloor = hasRoleInGroup(auth.roles || [], 'CAN_SEE_PROCUREMENT_FLOOR');
   const supabase = await createClient();
 
   const { data, error } = await (supabase.from('procurement_matters') as any)
@@ -1262,7 +1268,22 @@ export async function getProcurementMatters(): Promise<{
     .order('detected_at', { ascending: true });
   if (error) return { error: error.message };
 
-  const matters: RiskMatter[] = (data || []) as RiskMatter[];
+  let matters: RiskMatter[] = (data || []) as RiskMatter[];
+  // 审计 P0(2026-07-04):price_anomaly 事项的 title/evidence 内含底价(unit_price/price_baseline)。
+  // 非 floor 角色(sales/merchandiser/production_manager 虽在 ALLOWED_ROLES 但不在 CAN_SEE_PROCUREMENT_FLOOR)
+  // 直连调此 server action 会拿到底价 → 剥离绝对金额,只留百分比。
+  if (!canSeeFloor) {
+    matters = matters.map((m) => {
+      if (m.matter_type !== 'price_anomaly') return m;
+      const ev = { ...(m.evidence || {}) } as Record<string, any>;
+      delete ev.unit_price; delete ev.price_baseline; delete ev.ordered_amount;
+      const pct = (m.evidence as any)?.price_variance_pct;
+      return {
+        ...m, evidence: ev,
+        title: `价格异常${pct != null ? `:高于历史中位约 ${pct}%` : ''}(金额对本角色隐藏)`,
+      };
+    });
+  }
   return {
     data: {
       matters,

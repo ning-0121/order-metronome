@@ -98,31 +98,40 @@ export default async function ProcurementCenterPage() {
       {pendingApprovalPOs.length > 0 && (
         <div className="mb-6 rounded-xl border-2 border-orange-300 bg-orange-50 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-sm font-bold text-orange-800">⏳ 待审批采购单（{pendingApprovalPOs.length}）</span>
-            <span className="text-xs text-orange-600">这些单已建但撞了风险闸,需审批后才能真正下单;不批,订单会一直显示"待下单/待采购"。</span>
+            <span className="text-sm font-bold text-orange-800">🧾 草稿采购单（{pendingApprovalPOs.length}）待下单/待审批</span>
+            <span className="text-xs text-orange-600">这些单已建但还没真正下单;待审批的需先审批,可下单的进 PO 页传凭证后下单。不处理,订单会一直显示"待采购"。</span>
           </div>
           <div className="space-y-2">
-            {pendingApprovalPOs.map((p) => (
+            {pendingApprovalPOs.map((p) => {
+              const isPending = p.approval_status === 'pending';
+              return (
               <div key={p.id} className="flex items-center gap-3 flex-wrap bg-white rounded-lg border border-orange-200 px-3 py-2">
                 <Link href={`/procurement/po/${p.id}`} className="text-sm font-semibold text-indigo-600 hover:underline">{p.po_no}</Link>
+                <span className={`text-[11px] px-1.5 py-0.5 rounded ${isPending ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'}`}>
+                  {isPending ? '待审批' : '可下单(未下单)'}
+                </span>
                 <span className="text-xs text-gray-500">{p.supplier_name || '—'}</span>
                 {p.total_amount != null && <span className="text-xs text-gray-700">¥{p.total_amount}</span>}
                 <span className="text-xs text-gray-400">
                   {(p.orders || []).map(o => o.internal_order_no || o.order_no).filter(Boolean).join(' / ')}
                 </span>
-                <div className="flex items-center gap-1 flex-wrap">
-                  {(p.reasons || []).map(r => (
-                    <span key={r} className="text-[11px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">{REASON_CN[r] || r}</span>
-                  ))}
-                </div>
-                <span className="text-[11px] text-gray-500">
-                  需{(p.required_by || []).map(s => s === 'finance' ? '财务' : '采购经理').join('+')}审批
-                </span>
+                {isPending && (
+                  <>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {(p.reasons || []).map(r => (
+                        <span key={r} className="text-[11px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">{REASON_CN[r] || r}</span>
+                      ))}
+                    </div>
+                    <span className="text-[11px] text-gray-500">
+                      需{(p.required_by || []).map(s => s === 'finance' ? '财务' : '采购经理').join('+')}审批
+                    </span>
+                  </>
+                )}
                 <Link href={`/procurement/po/${p.id}`} className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-orange-600 text-white font-medium hover:bg-orange-700">
-                  去审批 →
+                  {isPending ? '去审批 →' : '去下单 →'}
                 </Link>
               </div>
-            ))}
+            );})}
           </div>
         </div>
       )}

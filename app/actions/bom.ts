@@ -637,14 +637,15 @@ export async function submitBomToProcurement(
   // R1(2026-07-02 审计):款级 BOM 行(style_no 非空)按该款件数算需求,不能用整单数量
   // 2026-07-03:带颜色的行再往下钻一层 —— 按 款×色 件数算(布料按色下单,一色一数)
   const { data: liRows } = await (supabase.from('order_line_items') as any)
-    .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
+    .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
   const styleQty = new Map<string, number>();
   const styleColorQty = new Map<string, number>();      // key: style¦规范色 → 该款该色件数
   const colorAlias = new Map<string, string>();          // style¦任一色名(中/英) → 规范色 key
   const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
   for (const r of (liRows || []) as any[]) {
     if (!r.style_no) continue;
-    const q = Number(r.qty_pcs) || 0;
+    // 套装:真实件数 = 件数 × 每套件数(set_multiplier;1=非套装),与 getBomItems 同口径,否则少采购
+    const q = (Number(r.qty_pcs) || 0) * (Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1);
     styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
     // 2026-07-04 审计修:件数每行只加一次(原来 color_cn/color_en 各加一次,同名色翻倍→多算料)。
     // 规范色=中文优先,英文兜底;中英文两个色名都做别名指向同一桶,BOM 用任一色名可命中。

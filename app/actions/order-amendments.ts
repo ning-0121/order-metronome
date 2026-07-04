@@ -156,6 +156,14 @@ export async function approveOrderAmendment(
     }
 
     if (Object.keys(updates).length > 0) {
+      // 审计修(2026-07-04):改了 quantity/unit_price 要重算 total_amount,否则财务报表金额错。
+      if ('quantity' in updates || 'unit_price' in updates) {
+        const { data: curr } = await (supabase.from('orders') as any)
+          .select('quantity, unit_price').eq('id', amendment.order_id).maybeSingle();
+        const q = Number(updates.quantity ?? (curr as any)?.quantity);
+        const up = Number(updates.unit_price ?? (curr as any)?.unit_price);
+        if (Number.isFinite(q) && Number.isFinite(up)) updates.total_amount = Math.round(q * up * 100) / 100;
+      }
       await (supabase.from('orders') as any)
         .update(updates)
         .eq('id', amendment.order_id);
@@ -163,6 +171,18 @@ export async function approveOrderAmendment(
 
     // ── 副作用执行 ──
     await executeSideEffects(supabase, amendment.order_id, sideEffects, user!.id, reminders);
+
+    // 审计修(2026-07-04):改单动了金额/数量/条款 → 重发 order.updated 给财务,否则财务应收停在改前值。
+    try {
+      const financeFields = ['quantity', 'unit_price', 'total_amount', 'currency', 'payment_terms'];
+      if (Object.keys(updates).some((k) => financeFields.includes(k))) {
+        const { data: fresh } = await (supabase.from('orders') as any).select('*').eq('id', amendment.order_id).maybeSingle();
+        if (fresh) {
+          const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+          await syncOrderToFinance(fresh as Record<string, unknown>, 'order.updated');
+        }
+      }
+    } catch (e: any) { console.warn('[approveOrderAmendment] 改单财务同步失败(不阻断):', e?.message); }
   }
 
   // 把 reminders 持久化到 amendment 行（前端可读）

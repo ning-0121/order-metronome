@@ -217,11 +217,16 @@ export function buildPurchaseOrderSyncPayload(
   orderRefs?: unknown[],
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
 ): Record<string, unknown> {
+  // 无底价采购单(无价版)total_amount 汇总为 0 → 发 null + amount_pending,
+  // 避免财务建一笔 ¥0 应付污染台账(审计 2026-07-04);真实金额待补价后由 resync 补。
+  const rawAmount = Number(po.total_amount);
+  const amountKnown = Number.isFinite(rawAmount) && rawAmount > 0;
   return {
     po_no: po.po_no,
     purchase_order_id: po.id,
     supplier_id: po.supplier_id,
-    total_amount: po.total_amount ?? null,
+    total_amount: amountKnown ? rawAmount : null,
+    amount_pending: !amountKnown,
     currency: po.currency ?? null,
     payment_terms: po.payment_terms ?? null,
     delivery_date: po.delivery_date ?? null,

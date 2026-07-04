@@ -1285,13 +1285,30 @@ export async function decideCancelAction(
     return { error: result.error };
   }
   
-  // 推送到财务系统
+  // 推送到财务系统(冲销应收+应付)
   if (decision === 'approved') {
     try {
       const { notifyOrderCancelled } = await import('@/lib/integration/finance-sync');
       const cancelReq = result.data && typeof result.data === 'object' && 'cancelRequest' in result.data ? (result.data as any).cancelRequest : null;
-      if (cancelReq) await notifyOrderCancelled({ id: cancelReq.order_id, lifecycle_status: '已取消' } as Record<string, unknown>);
-    } catch (e: any) { console.warn(`[orders] 订单次要操作 1146:`, e?.message); }
+      if (cancelReq) {
+        const oid = cancelReq.order_id;
+        // 审计修(2026-07-04):比照删除路径,带上订单双号 + 关联采购单号,财务才能精确冲销应付/付款计划
+        // (原来只发 {id, lifecycle_status},财务拿不到 po_no 冲不了已登记的应付 → AP 黑洞)。
+        const { data: ord } = await (supabase.from('orders') as any)
+          .select('order_no, internal_order_no, customer_name').eq('id', oid).maybeSingle();
+        const poNos: string[] = [];
+        try {
+          const { data: pos } = await (supabase.from('purchase_orders') as any)
+            .select('po_no, order_ids').contains('order_ids', [oid]);
+          for (const p of (pos || [])) if ((p as any).po_no) poNos.push((p as any).po_no);
+        } catch { /* 采购单表缺失/查询失败不阻断取消通知 */ }
+        await notifyOrderCancelled({
+          id: oid, lifecycle_status: '已取消',
+          order_no: (ord as any)?.order_no ?? null, internal_order_no: (ord as any)?.internal_order_no ?? null,
+          customer_name: (ord as any)?.customer_name ?? null, po_nos: poNos,
+        } as Record<string, unknown>);
+      }
+    } catch (e: any) { console.warn(`[orders] 取消冲销通知失败(不阻断):`, e?.message); }
   }
 
   // 获取订单ID以便revalidate（从result中获取）

@@ -269,13 +269,16 @@ export async function placePurchaseOrder(poId: string): Promise<{
   if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '无采购权限' };
 
   const { data: po } = await (supabase.from('purchase_orders') as any)
-    .select('status, approval_status, total_amount, supplier_id, order_proof_paths, suppliers(net_days)').eq('id', poId).maybeSingle();
+    .select('status, approval_status, total_amount, supplier_id, suppliers(net_days)').eq('id', poId).maybeSingle();
   if (!po) return { error: '采购单不存在' };
   if ((po as any).status !== 'draft') return { error: '仅草稿可下单' };
 
-  // 下单强制凭证(2026-07-04 用户拍板):没上传下单凭证不允许下单。列缺失时不卡(迁移前兼容)。
-  if ('order_proof_paths' in (po as any)) {
-    const proofs = (po as any).order_proof_paths;
+  // 下单强制凭证(2026-07-04 用户拍板):没上传下单凭证不允许下单。
+  // 凭证列单独容错查(不塞进上面主 select,否则迁移未执行时整条 select 报错→误报"采购单不存在"、下单全阻断)。
+  const { data: proofRow, error: proofErr } = await (supabase.from('purchase_orders') as any)
+    .select('order_proof_paths').eq('id', poId).maybeSingle();
+  if (!proofErr) {   // 列存在(已执行迁移)才强制;列缺失(迁移前)→ 放行,不 brick 下单
+    const proofs = (proofRow as any)?.order_proof_paths;
     if (!Array.isArray(proofs) || proofs.length === 0) {
       return { error: '下单前必须上传下单凭证(给供应商的下单截图/付款凭证/回单等)。请在采购单页「下单凭证」处上传后再下单。' };
     }
