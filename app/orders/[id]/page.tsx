@@ -876,7 +876,7 @@ export default async function OrderDetailPage({
               orderId={id}
               orderNo={orderData.order_no}
               isAdmin={isAdmin}
-              canReport={isAdmin || currentRoles.some(r => ['sales', 'merchandiser'].includes(r))}
+              canReport={isAdmin || currentRoles.some(r => ['sales', 'merchandiser', 'production', 'production_manager', 'qc', 'quality'].includes(r))}
             />
           </div>
         )}
