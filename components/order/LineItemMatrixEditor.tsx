@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { getOrderLineItems, saveOrderLineItems } from '@/app/actions/order-line-items';
+import { getOrderLineItems, saveOrderLineItems, parseOrderFile } from '@/app/actions/order-line-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys } from '@/lib/utils/size-sort';
 
@@ -36,6 +36,45 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
   const [msg, setMsg] = useState('');
   const [newSize, setNewSize] = useState('');
   const [uploading, setUploading] = useState<number | null>(null);
+  const [parsing, setParsing] = useState(false);
+
+  // 步骤2b:上传客户订单 Excel → 零 token 解析 → 归组追加进富录入表(预览可改,再保存)
+  async function handleParseOrderFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';   // 允许重复选同一文件
+    if (!file) return;
+    setParsing(true); setMsg('');
+    try {
+      const buf = await file.arrayBuffer();
+      let bin = '';
+      const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      const base64 = btoa(bin);
+      const res = await parseOrderFile(base64);
+      if ((res as any).error) { setMsg('❌ ' + (res as any).error); setParsing(false); return; }
+      const parsed = ((res as any).styles || []) as Style[];
+      if (parsed.length === 0) { setMsg('❌ 没解析到任何款'); setParsing(false); return; }
+      // 追加合并:同款号(非空)并入其颜色行,否则新增款
+      const merged: Style[] = styles.map((s) => ({ ...s, colors: [...s.colors] }));
+      for (const ps of parsed) {
+        const key = (ps.style_no || '').trim();
+        const hit = key ? merged.find((m) => (m.style_no || '').trim() === key) : null;
+        if (hit) hit.colors.push(...ps.colors);
+        else merged.push(ps);
+      }
+      setStyles(merged);
+      // 尺码列并集
+      const labelSet = new Set(sizeLabels);
+      for (const s of ((res as any).sizeNames || [])) labelSet.add(s);
+      for (const ps of parsed) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) labelSet.add(k);
+      setSizeLabels(sortSizeKeys([...labelSet]));
+      const nColors = parsed.reduce((a, s) => a + s.colors.length, 0);
+      setMsg(`✅ 已解析 ${parsed.length} 款 / ${nColors} 颜色行,请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}`);
+    } catch (err: any) {
+      setMsg('❌ 读取失败:' + (err?.message || String(err)));
+    }
+    setParsing(false);
+  }
 
   const load = useCallback(async () => {
     if (controlled || !orderId) { setLoading(false); return; }
@@ -151,6 +190,12 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-600">总量 <b className="text-gray-900">{orderTotal}</b> 件 · <b>{styles.length}</b> 款 · <b>{colorRows}</b> 颜色行</span>
+          {canEdit && (
+            <label className={`px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 text-xs font-medium hover:bg-indigo-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="上传含尺码数量的客户订单/生产单 Excel,零 token 解析成明细,预览可改">
+              {parsing ? '解析中…' : '📄 上传客户订单'}
+              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleParseOrderFile} disabled={parsing} />
+            </label>
+          )}
           {canEdit && !controlled && <button onClick={save} disabled={saving} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">{saving ? '保存中…' : '💾 保存明细'}</button>}
         </div>
       </div>

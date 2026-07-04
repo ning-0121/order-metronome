@@ -87,6 +87,57 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
   return { data: [...map.values()] };
 }
 
+/**
+ * 步骤2b:客户订单 Excel(合同/生产单式)→ 零 token 解析 → 归组成富录入表 Style[] 形状。
+ * 只返回款/色/尺码/数量(不带价),天然无泄价;不写库 —— 业务在富录入表预览、核对、改后再保存。
+ * 权限:业务/理单/跟单/管理员(生产/QC 不解析客户订单)。
+ */
+export async function parseOrderFile(base64: string): Promise<{
+  styles?: any[]; sizeNames?: string[]; headerRow?: number; error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const allowed = ['admin', 'sales', 'order_manager', 'sales_manager', 'admin_assistant', 'merchandiser'];
+  if (!roles.some((r) => allowed.includes(r))) return { error: '无权解析客户订单文件(仅业务/理单/跟单/管理员)' };
+
+  try {
+    const buf = Buffer.from(base64.replace(/^data:.*base64,/, ''), 'base64');
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.default.Workbook();
+    await wb.xlsx.load(buf as any);
+    const ws = wb.worksheets[0];
+    if (!ws) return { error: '空文件' };
+    const rows: unknown[][] = [];
+    for (let r = 1; r <= ws.rowCount; r++) {
+      const arr: unknown[] = [];
+      for (let c = 1; c <= ws.columnCount; c++) arr.push(ws.getCell(r, c).value);   // 原值:parseOrderSheet 的 cellText 兼容富文本/公式
+      rows.push(arr);
+    }
+    const { parseOrderSheet } = await import('@/lib/services/order-sheet-parser');
+    const res = parseOrderSheet(rows);
+    if (res.headerRow === -1) return { error: '没识别到尺码表头(需含 S/M/L 或 XS-XXL 等尺码列)。请确认上传的是含尺码数量的客户订单/生产单。' };
+    if (res.lines.length === 0) return { error: '识别到表头但没读到订单行,请检查文件或手工录入兜底。' };
+
+    // 归组:每款一个 Style,同款多色汇入 colors[]。解析出的 color 落 color_cn;不带价。
+    const map = new Map<string, any>();
+    for (const l of res.lines) {
+      const key = l.style_no || '（未识别款号）';
+      let st = map.get(key);
+      if (!st) {
+        st = { style_no: l.style_no || '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', colors: [] };
+        map.set(key, st);
+      }
+      st.colors.push({ color_cn: l.color || '', color_en: l.color_ref || '', sizes: l.sizes || {}, qty: l.qty_total || 0, remark: '' });
+    }
+    return { styles: [...map.values()], sizeNames: res.sizeNames, headerRow: res.headerRow };
+  } catch (e) {
+    return { error: '解析失败:' + (e instanceof Error ? e.message : String(e)) + '。可手工录入兜底。' };
+  }
+}
+
 /** 整单替换订单明细(删旧插新)。权限:管理员/理单类角色/该单创建者·负责人。 */
 export async function saveOrderLineItems(orderId: string, styles: any[]): Promise<{ ok?: boolean; styles?: number; lines?: number; total?: number; error?: string }> {
   const supabase = await createClient();
