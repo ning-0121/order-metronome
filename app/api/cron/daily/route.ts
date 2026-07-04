@@ -16,7 +16,7 @@ import { materializeProcurementMatters } from '@/lib/services/procurement-matter
 export async function GET(req: NextRequest) {
   // Vercel Cron 鉴权（生产环境必须）
   const authHeader = req.headers.get('authorization')
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
