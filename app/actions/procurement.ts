@@ -1090,11 +1090,16 @@ export async function getProcurementQueues(): Promise<{
       for (const p of alive) {
         if (doneOrders.has(p.order_id)) continue;
         const sts = itemsByOrder.get(p.order_id) || [];
+        // 采购项全部已下单/已收/完成 → 无条件出"待采购"队列。
+        // 显示口径以「真实采购状态」为准,不再被里程碑标记的成败绑架
+        // (原 bug:里程碑不存在/已 done 时 autoComplete 返回 false → 掉下去 push 回队列 → 收货了还挂待采购)。
+        // 同时 fire-and-forget 把「采购下单」里程碑自动回填到节拍器(用户要求:不用手工回去点)。
         if (sts.length > 0 && sts.every(s => ORDERED.includes(s))) {
           try {
             const { autoCompleteProcurementPlacedForOrder } = await import('@/app/actions/procurement-items');
-            if (await autoCompleteProcurementPlacedForOrder(supabase, p.order_id)) { doneOrders.add(p.order_id); continue; }
-          } catch { /* 自愈失败不影响队列 */ }
+            void autoCompleteProcurementPlacedForOrder(supabase, p.order_id).catch(() => {});
+          } catch { /* 自愈失败不影响队列出队 */ }
+          continue;   // ← 无条件出队(修 ②③:收货后不再显示待采购/去核料)
         }
         pendingRequests.push({
           order_id: p.order_id,

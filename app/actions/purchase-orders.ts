@@ -177,8 +177,16 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
   // 基础读走用户会话(RLS 管订单范围),不含已封锁的价列(unit_price/ordered_amount);
   // price_baseline(建议价)对业务可见,保留。floor 角色的底价在下方经 service-role 补。
   const { data: lines } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, price_baseline, received_qty, status, line_status, chase_count, last_chased_at')
+    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, price_baseline, received_qty, status, line_status, chase_count, last_chased_at, procurement_item_id')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
+
+  // 颜色:执行行无 color 列,经 procurement_item_id 回查主数据(采购单按颜色分行,显示必须带色)
+  const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];
+  if (piIds.length > 0) {
+    const { data: pis } = await (supabase.from('procurement_items') as any).select('id, color').in('id', piIds);
+    const colorMap = new Map((pis || []).map((p: any) => [p.id, p.color]));
+    for (const l of (lines || [])) (l as any).color = l.procurement_item_id ? (colorMap.get(l.procurement_item_id) ?? null) : null;
+  }
 
   // 进度档案(2026-07-03 用户拍板:分批收货后要能追整单全貌)——每行的收货批次历史
   const lineIds = (lines || []).map((l: any) => l.id);

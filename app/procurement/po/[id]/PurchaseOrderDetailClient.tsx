@@ -147,6 +147,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
           <table className="w-full text-xs">
             <thead><tr className="bg-gray-50 text-left text-gray-500">
               <th className="px-3 py-2">物料</th><th className="px-3 py-2">规格</th>
+              <th className="px-3 py-2">颜色</th>
               <th className="px-3 py-2 text-center">订购</th>
               <th className="px-3 py-2 text-center">已收</th>
               <th className="px-3 py-2 text-center">未到</th>
@@ -166,6 +167,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                     <tr key={l.id}>
                       <td className="px-3 py-2">{l.material_name}</td>
                       <td className="px-3 py-2 text-gray-500">{l.specification || '—'}</td>
+                      <td className="px-3 py-2">{l.color ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">{l.color}</span> : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-center">{l.ordered_qty} {l.ordered_unit}</td>
                       <td className="px-3 py-2 text-center text-emerald-700 font-medium">{received || '—'}</td>
                       <td className={`px-3 py-2 text-center font-semibold ${out > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{ordered ? out : '—'}</td>
@@ -179,7 +181,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                     </tr>
                     {receipts.length > 0 && (
                       <tr key={`${l.id}-receipts`}>
-                        <td colSpan={canSeeFloor ? 9 : 7} className="px-3 pb-2 pt-0">
+                        <td colSpan={canSeeFloor ? 10 : 8} className="px-3 pb-2 pt-0">
                           <div className="ml-4 rounded-lg bg-emerald-50/60 border border-emerald-100 px-3 py-1.5 text-[11px] text-emerald-800">
                             📥 收货批次:
                             {receipts.map((r: any, i: number) => (
@@ -199,7 +201,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
               })}
             </tbody>
             <tfoot><tr className="bg-gray-50 font-medium text-gray-700">
-              <td className="px-3 py-2" colSpan={2}>合计</td>
+              <td className="px-3 py-2" colSpan={3}>合计</td>
               <td className="px-3 py-2 text-center">{lines.reduce((a: number, l: any) => a + (Number(l.ordered_qty) || 0), 0)}</td>
               <td className="px-3 py-2 text-center text-emerald-700">{lines.reduce((a: number, l: any) => a + (Number(l.received_qty) || 0), 0)}</td>
               <td className="px-3 py-2 text-center text-amber-700">{Math.max(0, Math.round(lines.reduce((a: number, l: any) => a + ((Number(l.ordered_qty) || 0) - (Number(l.received_qty) || 0)), 0) * 1000) / 1000)}</td>
