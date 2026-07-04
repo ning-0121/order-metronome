@@ -12,6 +12,7 @@ import {
   type QueueLine,
 } from '@/app/actions/procurement';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 const LAMP: Record<string, string> = {
   red: 'bg-red-500', yellow: 'bg-yellow-400', green: 'bg-emerald-500',
@@ -68,6 +69,7 @@ export function ProcurementQueueClient({
   canFinanceOver?: boolean;
 }) {
   const router = useRouter();
+  const { confirm, prompt, dialog } = useDialogs();
   const [busy, setBusy] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<string | null>(null); // `${rowId}:${kind}`
   const [err, setErr] = useState('');
@@ -83,8 +85,8 @@ export function ProcurementQueueClient({
   const btn = 'text-xs px-2 py-1 rounded font-medium disabled:opacity-50';
 
   // 2026-07-03 用户拍板:状态推进全部二次确认;点错可「↩回退」上一状态(留痕)
-  function confirmRun(l: QueueLine, key: string, to: string, text: string) {
-    if (!window.confirm(text)) return;
+  async function confirmRun(l: QueueLine, key: string, to: string, text: string) {
+    if (!(await confirm({ title: '确认操作?', message: text, confirmText: '确认' }))) return;
     run(`${l.id}:${key}`, () => transitionProcurementLine(l.id, to as any));
   }
   const BACK_ONE: Record<string, string> = {
@@ -97,8 +99,8 @@ export function ProcurementQueueClient({
     return (
       <button className={`${btn} border border-gray-200 text-gray-400 hover:text-red-500`}
         title="点错了?退回上一状态(操作留痕)" disabled={busy === `${l.id}:back`}
-        onClick={() => {
-          if (!window.confirm(`把「${l.material_name}」从「${STATUS_LABEL[l.line_status] || l.line_status}」退回「${STATUS_LABEL[backTo] || backTo}」?\n(误点纠正,操作会留痕)`)) return;
+        onClick={async () => {
+          if (!(await confirm({ title: '退回上一状态?', message: `把「${l.material_name}」从「${STATUS_LABEL[l.line_status] || l.line_status}」退回「${STATUS_LABEL[backTo] || backTo}」\n(误点纠正,操作会留痕)`, danger: true, confirmText: '回退' }))) return;
           run(`${l.id}:back`, () => transitionProcurementLine(l.id, backTo as any, { note: '误点回退' }));
         }}>↩ 回退</button>
     );
@@ -140,7 +142,7 @@ export function ProcurementQueueClient({
               <button className={`${btn} bg-indigo-600 text-white hover:bg-indigo-700`}
                 onClick={() => setOpenForm(openForm === `${l.id}:order` ? null : `${l.id}:order`)}>下单</button>
               <button className={`${btn} border border-gray-200 text-gray-500`} disabled={busy === `${l.id}:cancel`}
-                onClick={async () => { const reason = prompt('取消理由（必填）：'); if (reason) run(`${l.id}:cancel`, () => transitionProcurementLine(l.id, 'cancelled', { note: reason })); }}>取消</button>
+                onClick={async () => { const v = await prompt({ title: '取消该采购行', fields: [{ name: 'reason', label: '取消理由', type: 'textarea', required: true }], confirmText: '确认取消', }); if (v) run(`${l.id}:cancel`, () => transitionProcurementLine(l.id, 'cancelled', { note: v.reason })); }}>取消</button>
             </RowShell>
             {openForm === `${l.id}:order` && (
               <OrderForm line={l} busy={busy === `${l.id}:order`}
@@ -162,7 +164,7 @@ export function ProcurementQueueClient({
               {(l.chase_count ?? 0) > 0 && <span className="text-amber-600 ml-1">催{l.chase_count}次</span>}
             </span>
             <button className={`${btn} bg-amber-500 text-white hover:bg-amber-600`} disabled={busy === `${l.id}:chase`}
-              onClick={async () => { const note = prompt('催货备注（可选）：') ?? undefined; run(`${l.id}:chase`, () => chaseProcurementLine(l.id, note)); }}>催货</button>
+              onClick={async () => { const v = await prompt({ title: `催货「${l.material_name}」`, message: `已催 ${l.chase_count ?? 0} 次`, fields: [{ name: 'note', label: '催货备注(可选)', type: 'textarea' }], confirmText: '记一次催货', }); if (v) run(`${l.id}:chase`, () => chaseProcurementLine(l.id, v.note || undefined)); }}>催货</button>
             {l.line_status === 'ordered' && (
               <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:conf`}
                 onClick={() => confirmRun(l, 'conf', 'confirmed', `确认「${l.material_name}」供应商已接单/确认交期?`)}>确认</button>
@@ -391,6 +393,7 @@ function ReceiptRegisterForm({ line, onDone, canFinanceOver = false }: { line: Q
         );
       })()}
       {err && <div className="text-xs text-red-600">{err}</div>}
+      {dialog}
     </div>
   );
 }
