@@ -8,6 +8,7 @@ import { NudgeButton } from '@/components/NudgeButton';
 import { DashboardAIAdvice } from '@/components/DashboardAIAdvice';
 import { ExpandableList } from '@/components/ExpandableList';
 import { MyProcurementTrackingCard } from '@/components/MyProcurementTrackingCard';
+import { ExportOrderSummaryButton } from '@/components/ExportOrderSummaryButton';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -291,8 +292,9 @@ export default async function DashboardPage() {
               {userRoles.map(r => ROLE_LABELS[r] || r).join('、')}
             </p>
           </div>
-          <div className="text-right flex-shrink-0 ml-6">
+          <div className="text-right flex-shrink-0 ml-6 space-y-2">
             <p className="text-sm font-medium text-gray-500">{formatToday()}</p>
+            <ExportOrderSummaryButton />
           </div>
         </div>
         </div>
