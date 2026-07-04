@@ -32,3 +32,21 @@ export function maskFloorForLines<T extends Record<string, unknown>>(rows: T[], 
     return rest as T; // 连派生金额(含 unit_price)一并剥离，防反推底价
   });
 }
+
+/**
+ * 屏蔽供应商财务字段（付款方式/账期/银行/税号）—— 非 CAN_EDIT_SUPPLIER_FINANCE
+ * 角色(如业务/生产/物流)拿到的供应商对象里根本没有这些字段(server 端剥离)。
+ * 接受单个对象或数组;null/undefined 原样返回。
+ */
+export function maskSupplierFinance<T extends Record<string, unknown> | null | undefined>(
+  input: T,
+  canSeeFinance: boolean,
+): T {
+  if (canSeeFinance || input == null) return input;
+  const strip = (r: any) => {
+    if (r == null || typeof r !== 'object') return r;
+    const { payment_method, net_days, bank_info, tax_id, ...rest } = r;
+    return rest;
+  };
+  return (Array.isArray(input) ? (input as any[]).map(strip) : strip(input)) as T;
+}

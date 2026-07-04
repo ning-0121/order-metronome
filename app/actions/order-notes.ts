@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
+import { getUserRoles } from '@/lib/utils/user-role';
+import { isAdminRole } from '@/lib/domain/roles';
 
 export interface OrderNote {
   id: string;
@@ -87,6 +89,14 @@ export async function deleteOrderNote(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+
+  // 鉴权(审计 P0:此前零校验,任意人可删任意订单备注→篡改审计):仅作者本人或 admin
+  const { data: note } = await (supabase.from('order_notes_log') as any)
+    .select('author_user_id').eq('id', noteId).maybeSingle();
+  if (!note) return { error: '备注不存在' };
+  const roles = await getUserRoles(supabase, user.id);
+  if ((note as any).author_user_id !== user.id && !isAdminRole(roles))
+    return { error: '仅备注作者或管理员可删除' };
 
   const { error } = await (supabase.from('order_notes_log') as any)
     .delete()

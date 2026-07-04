@@ -10,12 +10,14 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { syncStyleFabricsToBom } from '@/lib/services/style-fabric-sync';
+import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 
 /** 读 AI 原始识别冻结底档(建单时 PO 解析原文)。 */
 export async function getPoParseSnapshot(orderId: string): Promise<{ snapshot?: any; at?: string | null; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
   const { data, error } = await (supabase.from('orders') as any)
     .select('po_parse_snapshot, po_parse_snapshot_at').eq('id', orderId).maybeSingle();
   if (error) return { error: error.message };
@@ -33,8 +35,10 @@ export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: b
   const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const canEdit = roles.includes('admin')
     || (order as any).created_by === user.id || (order as any).owner_user_id === user.id
-    || roles.some((r) => ['merchandiser', 'order_manager', 'sales_manager', 'admin_assistant'].includes(r));
-  if (!canEdit) return { error: '无权操作(仅创建者/负责人/理单/管理员)' };
+    || roles.some((r) => ['order_manager', 'sales_manager', 'admin_assistant'].includes(r))
+    // 审计 P0:跟单不再全局放行,须与该订单相关(创建者/负责人/被指派人)
+    || (roles.includes('merchandiser') && await canUserAccessOrder(supabase, user.id, orderId));
+  if (!canEdit) return { error: '无权操作(仅创建者/负责人/被指派跟单/理单/管理员)' };
 
   const res = await getOrderLineItems(orderId);
   if ((res as any).error) return { error: (res as any).error };
@@ -52,6 +56,7 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
   // select * :双语/箱数列(20260703 迁移)未执行时也不报缺列
   const { data, error } = await (supabase.from('order_line_items') as any)
     .select('*').eq('order_id', orderId).order('line_no', { ascending: true });
@@ -95,8 +100,10 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
   const canEdit = roles.includes('admin')
     || (order as any).created_by === user.id
     || (order as any).owner_user_id === user.id
-    || roles.some((r) => ['merchandiser', 'order_manager', 'sales_manager', 'admin_assistant'].includes(r));
-  if (!canEdit) return { error: '无权编辑该订单明细(仅创建者/负责人/理单/管理员)' };
+    || roles.some((r) => ['order_manager', 'sales_manager', 'admin_assistant'].includes(r))
+    // 审计 P0:跟单不再全局放行,须与该订单相关(创建者/负责人/被指派人)
+    || (roles.includes('merchandiser') && await canUserAccessOrder(supabase, user.id, orderId));
+  if (!canEdit) return { error: '无权编辑该订单明细(仅创建者/负责人/被指派跟单/理单/管理员)' };
 
   // 组装行:每款每色一行,qty = Σsizes;布料字段款级同值写每行
   const rows: any[] = [];

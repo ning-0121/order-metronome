@@ -12,7 +12,7 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
-import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
+import { maskFloorForLines, maskSupplierFinance } from '@/lib/procurement/purchaseOrder';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 import { evaluateProcurementApproval, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
@@ -217,6 +217,9 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
   const canProcure = roles.some((r) => CAN_PROCURE.includes(r));
   const canApproveProcurement = hasRoleInGroup(roles, 'CAN_APPROVE_PROCUREMENT');
   const canApproveFinance = hasRoleInGroup(roles, 'CAN_APPROVE_PROC_FINANCE');
+
+  // 供应商财务字段(银行/税号/账期)按角色剥离(审计 P0:join 出的 suppliers(*) 此前对全员可读)
+  (po as any).suppliers = maskSupplierFinance((po as any).suppliers, hasRoleInGroup(roles, 'CAN_EDIT_SUPPLIER_FINANCE'));
 
   return { data: { po, lines: maskedLines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance } };
 }

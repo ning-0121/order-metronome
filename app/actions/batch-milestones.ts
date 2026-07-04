@@ -25,6 +25,7 @@ import {
   BATCH_STEP_META,
   type BatchAwareStepKey,
 } from '@/lib/domain/batchAwareSteps';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 export interface MarkBatchStepResult {
   ok: boolean;
@@ -78,11 +79,16 @@ export async function markBatchMilestoneStep(
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
   const isAdmin = roles.includes('admin');
   const isOrderActor = order.created_by === user.id || order.owner_user_id === user.id;
-  // 任何登录用户都可标记批次进度（与现有 /api/nudge 同样宽松）
-  // 主流程的角色权限在主 milestone 推进时由原 checkOrderModifiable / 角色匹配把关
-  if (!isAdmin && !isOrderActor) {
-    // 不强制阻塞，但记录在审计中
-    // （如果未来收紧权限，把下面这行改成 return error 即可）
+  // 鉴权(审计 P0:此前是空 no-op,任意登录用户可驱动批次节点含出运放货)。
+  // 放行:admin / 订单负责人 / 可操作里程碑的角色(跟单/生产/QC/物流等)。
+  const canOperate = isAdmin || isOrderActor
+    || hasRoleInGroup(roles, 'CAN_OPERATE_MILESTONES') || roles.includes('logistics');
+  if (!canOperate) return { ok: false, error: '无权操作该批次节点' };
+  // 出运放货(shipment_execute:写 BL/船名/置 shipped)额外闸:仅物流/生产管理/订单负责人/admin
+  if (BATCH_STEP_META[stepKey as BatchAwareStepKey]?.source === 'status_shipped' && action === 'complete') {
+    const canShip = isAdmin || isOrderActor
+      || roles.includes('logistics') || roles.includes('production_manager');
+    if (!canShip) return { ok: false, error: '仅物流/生产管理/订单负责人可标记出运' };
   }
 
   // ── 1. 更新批次本身 ──

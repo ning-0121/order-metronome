@@ -11,7 +11,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
-import { pickEditableSupplierFields } from '@/lib/procurement/purchaseOrder';
+import { pickEditableSupplierFields, maskSupplierFinance } from '@/lib/procurement/purchaseOrder';
 import { syncSupplierToFinance } from '@/lib/integration/finance-sync';
 
 /** 供应商 upsert 后同步财务（P2b，未配置即跳过，绝不阻塞主链）。 */
@@ -39,23 +39,26 @@ export interface SupplierInput {
 }
 
 export async function listSuppliers(): Promise<{ data?: any[]; error?: string }> {
+  const auth = await authRoles();
+  if (!auth.userId) return { error: auth.error };
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
   const { data, error } = await (supabase.from('suppliers') as any)
     .select('*').neq('status', 'archived').order('name', { ascending: true });
   if (error) return { error: error.message };
-  return { data: data || [] };
+  // 财务字段(银行/税号/账期)按角色剥离(审计 P0:此前对全员可读)
+  const canFin = hasRoleInGroup(auth.roles, 'CAN_EDIT_SUPPLIER_FINANCE');
+  return { data: maskSupplierFinance(data || [], canFin) };
 }
 
 export async function getSupplier(id: string): Promise<{ data?: any; error?: string }> {
+  const auth = await authRoles();
+  if (!auth.userId) return { error: auth.error };
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
   const { data, error } = await (supabase.from('suppliers') as any).select('*').eq('id', id).maybeSingle();
   if (error) return { error: error.message };
   if (!data) return { error: '供应商不存在' };
-  return { data };
+  const canFin = hasRoleInGroup(auth.roles, 'CAN_EDIT_SUPPLIER_FINANCE');
+  return { data: maskSupplierFinance(data, canFin) };
 }
 
 /** 同名(忽略大小写/首尾空格)未归档供应商 → 返回该行;无重复 → null。 */
