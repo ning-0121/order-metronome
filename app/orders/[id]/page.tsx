@@ -21,6 +21,7 @@ import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
+import { QuoteBaselineTab } from '@/components/tabs/QuoteBaselineTab';
 import { ProductVariantPicker } from '@/components/ProductVariantPicker';
 import { OrderActions } from '@/components/OrderActions';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
@@ -77,7 +78,7 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'quote_baseline', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -416,6 +417,7 @@ export default async function OrderDetailPage({
             {[
               // 精简为常用 8 个标签(用户 2026-07 拍板);其余隐藏、功能未删,仍可经 ?tab= URL 访问
               { key: 'basic', label: '基本信息' },
+              { key: 'quote_baseline', label: '📋 报价基线' },
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'manufacturing_order', label: '🏭 生产任务单' },
               { key: 'bom', label: '原辅料和包装' },
@@ -729,6 +731,13 @@ export default async function OrderDetailPage({
             </div>
           )}
           </>
+        )}
+
+        {/* Tab: 报价基线(成本单一真相 → BOM/核料超单耗超价对照 · 财务预算) */}
+        {activeTab === 'quote_baseline' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <QuoteBaselineTab orderId={id} />
+          </div>
         )}
 
         {/* Tab: 执行进度 */}
