@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof } from '@/app/actions/purchase-orders';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
+import { createClient as createBrowserClient } from '@/lib/supabase/client';
 
 const REASON_LABELS: Record<string, string> = {
   large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
@@ -18,6 +19,38 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
   const sup = po.suppliers || {};
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState('');
+  const [proofPaths, setProofPaths] = useState<string[]>(Array.isArray(po.order_proof_paths) ? po.order_proof_paths : []);
+  const [proofUploading, setProofUploading] = useState(false);
+
+  async function handleProofUpload(files: FileList) {
+    setProofUploading(true);
+    try {
+      const supabase = createBrowserClient();
+      const added: string[] = [];
+      for (const f of Array.from(files)) {
+        const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
+        const path = `po-proof/${po.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error } = await supabase.storage.from('order-docs').upload(path, f, { contentType: f.type, upsert: false });
+        if (error) { await confirm({ title: '上传失败:' + error.message, confirmText: '知道了' }); continue; }
+        added.push(path);
+      }
+      if (added.length === 0) { setProofUploading(false); return; }
+      const next = [...proofPaths, ...added];
+      const res = await savePurchaseOrderProof(po.id, next);
+      if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); setProofUploading(false); return; }
+      setProofPaths(next);
+    } catch (e: any) {
+      await confirm({ title: '上传异常:' + (e?.message || String(e)), confirmText: '知道了' });
+    }
+    setProofUploading(false);
+  }
+
+  async function removeProof(path: string) {
+    const next = proofPaths.filter((p) => p !== path);
+    const res = await savePurchaseOrderProof(po.id, next);
+    if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
+    setProofPaths(next);
+  }
 
   async function handlePlace() {
     setBusy('place');
@@ -87,6 +120,34 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
         </div>
       </div>
 
+      {/* 下单凭证(2026-07-04 用户拍板:下单强制传凭证)—— 草稿态、采购可传 */}
+      {po.status === 'draft' && canProcure && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-sm font-semibold text-gray-800">📎 下单凭证</h3>
+            {proofPaths.length > 0
+              ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">已上传 {proofPaths.length} 个</span>
+              : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">未上传 — 下单前必传</span>}
+            <label className={`ml-auto text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 font-medium hover:bg-indigo-50 cursor-pointer ${proofUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+              {proofUploading ? '上传中…' : '+ 上传凭证'}
+              <input type="file" accept="image/*,.pdf" multiple className="hidden" disabled={proofUploading}
+                onChange={(e) => { if (e.target.files?.length) handleProofUpload(e.target.files); e.currentTarget.value = ''; }} />
+            </label>
+          </div>
+          <p className="text-[11px] text-gray-500 mt-1">给供应商的下单截图 / 付款凭证 / 回单等。下单(placed)前必须至少 1 个。</p>
+          {proofPaths.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {proofPaths.map((p, i) => (
+                <li key={p} className="flex items-center gap-2 text-xs text-gray-600">
+                  <span className="truncate flex-1">📄 凭证 {i + 1} · {p.split('/').pop()}</span>
+                  <button onClick={() => removeProof(p)} className="text-red-500 hover:underline">删除</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {/* 审批 / 下单（P2a）—— 卡风险不走流程 */}
       {po.status === 'draft' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between gap-3">
@@ -111,9 +172,10 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
               </button>
             )}
             {canProcure && po.approval_status !== 'pending' && (
-              <button onClick={handlePlace} disabled={busy !== ''}
+              <button onClick={handlePlace} disabled={busy !== '' || proofPaths.length === 0}
+                title={proofPaths.length === 0 ? '请先上传下单凭证' : ''}
                 className="text-xs px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium disabled:opacity-50">
-                {busy === 'place' ? '处理中…' : '📦 下单'}
+                {busy === 'place' ? '处理中…' : proofPaths.length === 0 ? '📦 下单(先传凭证)' : '📦 下单'}
               </button>
             )}
           </div>

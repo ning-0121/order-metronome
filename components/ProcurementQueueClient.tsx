@@ -130,26 +130,29 @@ export function ProcurementQueueClient({
         ))}
       </section>
 
-      {/* ── 待下单 ── */}
+      {/* ── 待下单(2026-07-04 用户拍板:下单只走采购单——归采购单→审批闸→强制凭证。
+             这里不再逐行快速下单,改引导去待采购工作台归单;仅保留「取消」用于剔除不该采的行)── */}
       <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="bg-indigo-50 px-4 py-2.5 border-b border-indigo-100 font-bold text-indigo-900 text-sm">
+        <div className="bg-indigo-50 px-4 py-2.5 border-b border-indigo-100 font-bold text-indigo-900 text-sm flex items-center gap-2">
           📝 待下单（{pendingOrder.length}）
+          {pendingOrder.length > 0 && (
+            <Link href="/procurement/netting" className="ml-auto text-xs px-3 py-1 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+              🧩 去归采购单下单 →
+            </Link>
+          )}
         </div>
-        {pendingOrder.length === 0 ? <Empty /> : pendingOrder.map(l => (
-          <div key={l.id}>
-            <RowShell line={l}>
-              <span className="text-xs text-gray-400">需到 {fmt(l.required_by)}</span>
-              <button className={`${btn} bg-indigo-600 text-white hover:bg-indigo-700`}
-                onClick={() => setOpenForm(openForm === `${l.id}:order` ? null : `${l.id}:order`)}>下单</button>
-              <button className={`${btn} border border-gray-200 text-gray-500`} disabled={busy === `${l.id}:cancel`}
-                onClick={async () => { const v = await prompt({ title: '取消该采购行', fields: [{ name: 'reason', label: '取消理由', type: 'textarea', required: true }], confirmText: '确认取消', }); if (v) run(`${l.id}:cancel`, () => transitionProcurementLine(l.id, 'cancelled', { note: v.reason })); }}>取消</button>
-            </RowShell>
-            {openForm === `${l.id}:order` && (
-              <OrderForm line={l} busy={busy === `${l.id}:order`}
-                onSubmit={(p) => run(`${l.id}:order`, () => transitionProcurementLine(l.id, 'ordered', p))} />
-            )}
-          </div>
-        ))}
+        {pendingOrder.length === 0 ? <Empty /> : (
+          <>
+            <p className="px-4 pt-2 text-[11px] text-gray-500">这些料还没归到采购单。下单请到「待采购工作台」归成采购单 → 审批 → 强制传凭证下单(不再逐行下单)。</p>
+            {pendingOrder.map(l => (
+              <RowShell key={l.id} line={l}>
+                <span className="text-xs text-gray-400">需到 {fmt(l.required_by)}</span>
+                <button className={`${btn} border border-gray-200 text-gray-500`} disabled={busy === `${l.id}:cancel`}
+                  onClick={async () => { const v = await prompt({ title: '取消该采购行', fields: [{ name: 'reason', label: '取消理由', type: 'textarea', required: true }], confirmText: '确认取消', }); if (v) run(`${l.id}:cancel`, () => transitionProcurementLine(l.id, 'cancelled', { note: v.reason })); }}>取消</button>
+              </RowShell>
+            ))}
+          </>
+        )}
       </section>
 
       {/* ── 待催货(生产中) ── */}
@@ -239,33 +242,7 @@ export function ProcurementQueueClient({
 
 function Empty() { return <div className="px-4 py-6 text-center text-sm text-gray-400">暂无</div>; }
 
-function OrderForm({ line, busy, onSubmit }: {
-  line: QueueLine; busy: boolean;
-  onSubmit: (p: { po_no?: string; unit_price?: number; supplier_name?: string; promised_date?: string }) => void;
-}) {
-  const [po, setPo] = useState('');
-  const [price, setPrice] = useState('');
-  const [supplier, setSupplier] = useState(line.supplier_name || '');
-  const [promised, setPromised] = useState('');
-  return (
-    <div className="bg-indigo-50/50 px-3 py-3 grid grid-cols-2 md:grid-cols-4 gap-2 border-b border-gray-100">
-      <input className="rounded border border-gray-300 px-2 py-1 text-xs" placeholder="采购单号 PO" value={po} onChange={e => setPo(e.target.value)} />
-      <input className="rounded border border-gray-300 px-2 py-1 text-xs" placeholder="单价" type="number" step="0.01" value={price} onChange={e => setPrice(e.target.value)} />
-      <input className="rounded border border-gray-300 px-2 py-1 text-xs" placeholder="供应商" value={supplier} onChange={e => setSupplier(e.target.value)} />
-      <input className="rounded border border-gray-300 px-2 py-1 text-xs" type="date" title="承诺交期" value={promised} onChange={e => setPromised(e.target.value)} />
-      <button disabled={busy}
-        className="col-span-2 md:col-span-4 text-xs px-3 py-1.5 rounded bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50"
-        onClick={() => onSubmit({
-          po_no: po || undefined,
-          unit_price: price ? parseFloat(price) : undefined,
-          supplier_name: supplier || undefined,
-          promised_date: promised || undefined,
-        })}>
-        {busy ? '提交中…' : '确认下单'}
-      </button>
-    </div>
-  );
-}
+// OrderForm(逐行快速下单)已废除(2026-07-04):下单只走采购单(归并→审批→强制凭证)。
 
 function ReceiveForm({ line, busy, onSubmit }: {
   line: QueueLine; busy: boolean;

@@ -269,9 +269,17 @@ export async function placePurchaseOrder(poId: string): Promise<{
   if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '无采购权限' };
 
   const { data: po } = await (supabase.from('purchase_orders') as any)
-    .select('status, approval_status, total_amount, supplier_id, suppliers(net_days)').eq('id', poId).maybeSingle();
+    .select('status, approval_status, total_amount, supplier_id, order_proof_paths, suppliers(net_days)').eq('id', poId).maybeSingle();
   if (!po) return { error: '采购单不存在' };
   if ((po as any).status !== 'draft') return { error: '仅草稿可下单' };
+
+  // 下单强制凭证(2026-07-04 用户拍板):没上传下单凭证不允许下单。列缺失时不卡(迁移前兼容)。
+  if ('order_proof_paths' in (po as any)) {
+    const proofs = (po as any).order_proof_paths;
+    if (!Array.isArray(proofs) || proofs.length === 0) {
+      return { error: '下单前必须上传下单凭证(给供应商的下单截图/付款凭证/回单等)。请在采购单页「下单凭证」处上传后再下单。' };
+    }
+  }
 
   const place = async () => {
     const { error } = await (supabase.from('purchase_orders') as any)
@@ -365,6 +373,22 @@ export async function placePurchaseOrder(poId: string): Promise<{
   await (supabase.from('purchase_orders') as any)
     .update({ approval_status: 'not_required', updated_at: new Date().toISOString() }).eq('id', poId);
   return place();
+}
+
+/** 保存下单凭证路径(order-docs 私有桶,客户端已上传)。下单前必须 ≥1 张。 */
+export async function savePurchaseOrderProof(poId: string, paths: string[]): Promise<{ ok?: boolean; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '无采购权限' };
+  const clean = (paths || []).filter((p) => typeof p === 'string' && p.trim());
+  const { error } = await (supabase.from('purchase_orders') as any)
+    .update({ order_proof_paths: clean, updated_at: new Date().toISOString() }).eq('id', poId);
+  if (error) {
+    if (/order_proof_paths|does not exist|column/i.test(error.message)) return { error: '凭证列尚未创建,请先在 Supabase 执行 20260704_po_order_proof.sql' };
+    return { error: error.message };
+  }
+  revalidatePath(`/procurement/po/${poId}`);
+  return { ok: true };
 }
 
 /** 导出采购单 Excel（发供应商；采购专用，含底价）。 */
