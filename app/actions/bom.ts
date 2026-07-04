@@ -16,6 +16,54 @@ export async function getBomItems(orderId: string) {
   const { data, error } = await (supabase.from('materials_bom') as any)
     .select('*').eq('order_id', orderId).order('material_type');
   if (error) return { data: null, error: error.message };
+
+  // 派生「总需用量」:单件用量 × 件数(件数来自 order_line_items,按 款×色 匹配,
+  // 与 submitBomToProcurement 同口径 → 展示即将来真实采购基数,不做第二套算法)。
+  // 只读派生,不写库;total_qty 若人工填了则以人工为准(computed 仅兜底/对照)。
+  try {
+    const rows = (data || []) as any[];
+    const { data: order } = await (supabase.from('orders') as any)
+      .select('quantity').eq('id', orderId).maybeSingle();
+    const orderQty = Number((order as any)?.quantity) || 0;
+    const { data: liRows } = await (supabase.from('order_line_items') as any)
+      .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
+    const styleQty = new Map<string, number>();
+    const styleColorQty = new Map<string, number>();
+    const colorAlias = new Map<string, string>();
+    const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
+    for (const r of (liRows || []) as any[]) {
+      if (!r.style_no) continue;
+      const q = Number(r.qty_pcs) || 0;
+      styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
+      const canon = normColor(r.color_cn) || normColor(r.color_en);
+      if (!canon) continue;
+      const canonKey = `${r.style_no}¦${canon}`;
+      styleColorQty.set(canonKey, (styleColorQty.get(canonKey) || 0) + q);
+      for (const c of [r.color_cn, r.color_en]) {
+        const nc = normColor(c);
+        if (nc) colorAlias.set(`${r.style_no}¦${nc}`, canonKey);
+      }
+    }
+    for (const b of rows) {
+      // 件数基数:款×色 命中 → 该色件数;款命中 → 该款件数;否则整单数量(与提交同"宁多勿缺")
+      let pieces = 0;
+      const st = b.style_no || null;
+      if (st && String(b.color ?? '').trim()) {
+        const bk = `${st}¦${normColor(b.color)}`;
+        pieces = styleColorQty.get(colorAlias.get(bk) || bk) || (st && styleQty.get(st)) || orderQty;
+      } else if (st && styleQty.get(st)) {
+        pieces = styleQty.get(st)!;
+      } else {
+        pieces = orderQty;
+      }
+      const qpp = b.qty_per_piece != null ? Number(b.qty_per_piece) : null;
+      b.computed_pieces = pieces > 0 ? pieces : null;
+      b.computed_total_qty = (qpp != null && qpp > 0 && pieces > 0)
+        ? Math.round(qpp * pieces * 100) / 100
+        : null;
+    }
+  } catch (e: any) { console.warn('[getBomItems] 总需派生失败(不阻断):', e?.message); }
+
   return { data, error: null };
 }
 

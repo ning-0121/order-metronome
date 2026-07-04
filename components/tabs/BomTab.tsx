@@ -825,7 +825,19 @@ export function BomTab({ orderId }: { orderId: string }) {
                         className="ml-1 inline-block px-1 py-px rounded text-[10px] font-medium bg-rose-100 text-rose-700 align-middle">⚠超报价+{o.consumption_over_pct}%</span>
                     ) : null; })()}
                   </td>
-                  <td className="py-2 px-3 font-medium text-gray-900">{item.total_qty ?? '—'}</td>
+                  <td className="py-2 px-3 font-medium text-gray-900">
+                    {item.total_qty != null && item.total_qty !== ''
+                      ? item.total_qty
+                      : item.computed_total_qty != null
+                        ? (
+                          <span title={`自动算:单件用量 ${item.qty_per_piece} × 件数 ${item.computed_pieces}${item.unit ? `（${item.unit}）` : ''}。件数来自订单明细,人工填「总需」可覆盖。`}
+                            className="text-emerald-700">
+                            {item.computed_total_qty}
+                            <span className="ml-1 text-[10px] text-emerald-500 font-normal">自动</span>
+                          </span>
+                        )
+                        : '—'}
+                  </td>
                   <td className="py-2 px-3 text-gray-600">{item.unit}</td>
                   <td className="py-2 px-3 text-gray-500">{item.supplier || '—'}</td>
                   <td className="py-2 px-3 text-gray-500">{item.spec || '—'}</td>
