@@ -3,7 +3,18 @@
 // 安全：HMAC-SHA256 签名 + API Key + 时间戳防重放
 // ============================================================
 
-import { createHmac } from 'crypto'
+import { createHmac, createHash } from 'crypto'
+
+/**
+ * 幂等键(审计 P1):原用 `om-${Date.now()}-${random}` → 每次随机,财务侧按 request_id
+ * 去重永不命中,resync/重试会重复入账。改为 event + data 内容哈希的确定性键:
+ * 相同内容重发(resync 无变化)→ 同键 → 财务去重;订单真改了 → 内容变 → 新键 → 照常处理。
+ * timestamp 不参与哈希(在 payload 外层),故纯重试稳定同键。
+ */
+function deterministicRequestId(event: string, data: Record<string, unknown>): string {
+  const h = createHash('sha256').update(`${event}|${JSON.stringify(data)}`).digest('hex').slice(0, 24)
+  return `om-${event}-${h}`
+}
 
 const FINANCE_SYSTEM_URL = process.env.FINANCE_SYSTEM_URL || ''
 const INTEGRATION_API_KEY = process.env.INTEGRATION_API_KEY || ''
@@ -52,7 +63,7 @@ async function sendToFinanceSystem(
     event,
     timestamp: new Date().toISOString(),
     source: 'order-metronome',
-    request_id: `om-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    request_id: deterministicRequestId(event, data),
     data,
     signature: '',
   }
