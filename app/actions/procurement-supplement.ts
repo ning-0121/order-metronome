@@ -118,6 +118,36 @@ export async function requestSupplementQty(
   return { ok: true, itemNo };
 }
 
+/** 超报价基线财务审批(P2b):批准后该采购项方可确认/下单。仅财务/管理员。 */
+export async function approveBaselineOver(
+  itemId: string, approve: boolean, rejectReason?: string,
+): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const auth = await userRoles(supabase);
+  if (!auth.userId) return { error: auth.error };
+  if (!auth.roles.some((r) => FINANCE_ROLES.includes(r))) return { error: '仅财务/管理员可审批超报价基线' };
+  if (!approve && !rejectReason?.trim()) return { error: '驳回请填写原因' };
+
+  const { data: item, error: gErr } = await (supabase.from('procurement_items') as any)
+    .select('id, order_id, baseline_over_status').eq('id', itemId).single();
+  if (gErr || !item) return { error: gErr?.message || '找不到该采购项' };
+  if (!(item as any).baseline_over_status) return { error: '该项未触发超基线审批' };
+  if ((item as any).baseline_over_status === 'approved' && approve) return { ok: true };
+
+  const now = new Date().toISOString();
+  const { error } = await (supabase.from('procurement_items') as any).update({
+    baseline_over_status: approve ? 'approved' : 'rejected',
+    baseline_over_approved_by: auth.userId,
+    baseline_over_approved_at: now,
+    baseline_over_reject_reason: approve ? null : rejectReason!.trim(),
+    updated_at: now,
+  }).eq('id', itemId);
+  if (error) return { error: friendlyError(error) };
+
+  revalidatePath(`/orders/${(item as any).order_id}`);
+  return { ok: true };
+}
+
 /** 财务审批补采购:批准 → 采购可正常确认/执行;驳回 → 项保留但永久不可执行(留痕)。 */
 export async function approveSupplement(
   itemId: string, approve: boolean, rejectReason?: string,

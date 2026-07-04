@@ -8,7 +8,7 @@ import {
   listBomConsumptionLines, saveBomProductionConsumption, deductFromStock,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
-import { requestSupplementQty, approveSupplement } from '@/app/actions/procurement-supplement';
+import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
 import { getOrderPurchaseOrders } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
@@ -274,6 +274,25 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   }
 
   // 财务审批补采购(服务端仅财务/管理员可批)
+  async function approveBaseline(item: any, ok: boolean) {
+    let rejectReason: string | undefined;
+    if (!ok) {
+      const r = await prompt({ title: '驳回超报价基线', fields: [{ name: 'reason', label: '驳回原因', type: 'textarea', required: true }], confirmText: '确认驳回' });
+      if (!r) return;
+      rejectReason = r.reason;
+    } else if (!(await confirm({
+      title: `批准超报价基线「${item.material_name}」?`,
+      message: `${item.baseline_over_note || ''} · 批准后采购方可确认/下单`,
+      confirmText: '批准',
+    }))) {
+      return;
+    }
+    const res = await approveBaselineOver(item.id, ok, rejectReason);
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    setMsg(ok ? '✅ 已批准超基线,采购可确认' : '已驳回超基线');
+    await reload();
+  }
+
   async function approveSupp(item: any, ok: boolean) {
     let rejectReason: string | undefined;
     if (!ok) {
@@ -311,7 +330,9 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     && String(i.confirmed_supplier_name || '').trim()
     && (i.final_purchase_qty ?? i.suggested_purchase_qty) != null
     && !i.risk_flag && !i.is_substitute && !i.needs_reconfirm
-    && !(i.is_supplement && i.finance_approval_status !== 'approved');
+    && !(i.is_supplement && i.finance_approval_status !== 'approved')
+    // 超报价基线未获财务批准 → 不可批量确认(与逐项确认闸一致)
+    && !(i.baseline && (i.baseline.over_consumption || i.baseline.over_price) && i.baseline_over_status !== 'approved');
   const bulkEligible = items.filter(canBulkConfirm);
   const checkedEligible = bulkEligible.filter(i => checked.has(i.id));
   // ④ 下单倒计时:超最晚下单日=🔥,3天内=⏰
@@ -757,6 +778,37 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               )}
               {sel.finance_approval_status === 'pending' && (
                 <p className="text-amber-600">批准后采购部才能「确认→生成执行行→归采购单」;此项会同步进财务系统预警。</p>
+              )}
+            </div>
+          )}
+
+          {/* 超报价基线 + 财务审批(P2b:超单耗/超价 → 未批不能确认)*/}
+          {((sel.baseline && (sel.baseline.over_consumption || sel.baseline.over_price)) || sel.baseline_over_status) && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-rose-800">🔴 超报价基线</span>
+                {sel.baseline_over_status && (
+                  <span className={`px-2 py-0.5 rounded-full font-medium ${SUPP_STATUS[sel.baseline_over_status]?.cls || 'bg-amber-100 text-amber-700'}`}>
+                    {SUPP_STATUS[sel.baseline_over_status]?.label || sel.baseline_over_status}
+                  </span>
+                )}
+                {sel.baseline_over_status === 'pending' && <>
+                  <button onClick={() => approveBaseline(sel, true)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">✅ 批准(财务)</button>
+                  <button onClick={() => approveBaseline(sel, false)}
+                    className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700">✖ 驳回(财务)</button>
+                </>}
+              </div>
+              <p className="text-rose-700">
+                {sel.baseline_over_note
+                  || [sel.baseline?.over_consumption ? `大货单耗超报价 +${sel.baseline.consumption_over_pct}%(报价 ${sel.baseline.quote_consumption})` : '',
+                      sel.baseline?.over_price ? `采购单价超报价 +${sel.baseline.price_over_pct}%` : ''].filter(Boolean).join(' · ')}
+              </p>
+              {sel.baseline_over_status === 'rejected' && sel.baseline_over_reject_reason && (
+                <p className="text-red-600">驳回原因:{sel.baseline_over_reject_reason}</p>
+              )}
+              {(!sel.baseline_over_status || sel.baseline_over_status === 'pending') && (
+                <p className="text-rose-600">超报价基线需财务审批;确认采购时会自动提交并通知财务,批准后才能确认→下单。</p>
               )}
             </div>
           )}
