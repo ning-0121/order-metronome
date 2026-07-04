@@ -56,6 +56,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid source' }, { status: 403 })
   }
 
+  // 财务进度事件（结算/收款/付款完成）——append-only 记进 order_finance_events，
+  // 让节拍器看到资金进度(此前财务进度对节拍器全黑盒)。按 qimo_order_id=orders.id 精确关联。
+  const FINANCE_PROGRESS = new Set(['settlement.closed', 'collection.received', 'payment.completed'])
+  if (FINANCE_PROGRESS.has((payload as unknown as { event?: string }).event || '')) {
+    const d = payload.data as unknown as { qimo_order_id?: string; order_no?: string; amount?: number; currency?: string; note?: string; at?: string }
+    try {
+      const supabase = await createClient()
+      // Database 生成类型未含此新表(与本文件其它 from() 同款)，用 any 旁路,运行期表存在即可
+      const { error } = await (supabase.from('order_finance_events') as unknown as { insert: (v: unknown) => Promise<{ error: { message: string } | null }> }).insert({
+        order_id: d.qimo_order_id || null,
+        order_no: d.order_no || null,
+        event_type: (payload as unknown as { event: string }).event,
+        amount: d.amount ?? null,
+        currency: d.currency || null,
+        note: d.note || null,
+        occurred_at: d.at || new Date().toISOString(),
+      })
+      if (error) throw new Error(error.message)
+      return NextResponse.json({ status: 'ok', recorded: (payload as unknown as { event: string }).event })
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'record failed' }, { status: 500 })
+    }
+  }
+
   const { approval_id, approval_type, decision, decider_name, decision_note } = payload.data
 
   try {
