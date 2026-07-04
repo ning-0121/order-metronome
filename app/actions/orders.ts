@@ -187,6 +187,16 @@ export async function createOrder(
   const colorCount = formData.get('color_count') as string | null;
 
   if (!internal_order_no?.trim()) return { ok: false, error: '请填写内部订单号（订单册编号），财务需要此编号进行核算' };
+  // 防内部单号撞车(2026-07-04 审计):同一内部单号只能有一张活跃订单,否则财务按内部号对账会串单。
+  {
+    const { data: dupIno } = await (supabase.from('orders') as any)
+      .select('order_no, lifecycle_status')
+      .eq('internal_order_no', internal_order_no.trim())
+      .not('lifecycle_status', 'in', '("cancelled","已取消","archived","已归档")')
+      .limit(1)
+      .maybeSingle();
+    if (dupIno) return { ok: false, error: `内部单号「${internal_order_no.trim()}」已被订单 ${(dupIno as any).order_no} 占用。请勿重复导入;如需新单请换内部单号。` };
+  }
   if (!etd && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETD（离港日）' };
   if (!warehouse_due_date && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETA（到港/到仓日）' };
   if (!factory_date) return { ok: false, error: '请填写出厂日期' };
@@ -1153,6 +1163,16 @@ export async function updateOrderField(
       if (!canModify) {
         return { ok: false, error: '内部单号已填写，修改需要财务审批。请联系财务或管理员。' };
       }
+    }
+    // 防撞车(2026-07-04 审计):改成的内部单号不能已被别的活跃订单占用
+    if (value?.trim()) {
+      const { data: dupIno } = await (supabase.from('orders') as any)
+        .select('order_no')
+        .eq('internal_order_no', value.trim())
+        .neq('id', orderId)
+        .not('lifecycle_status', 'in', '("cancelled","已取消","archived","已归档")')
+        .limit(1).maybeSingle();
+      if (dupIno) return { ok: false, error: `内部单号「${value.trim()}」已被订单 ${(dupIno as any).order_no} 占用,不能重复。` };
     }
   }
 
