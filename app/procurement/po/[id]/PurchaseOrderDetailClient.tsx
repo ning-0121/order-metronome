@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder } from '@/app/actions/purchase-orders';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
 
 const REASON_LABELS: Record<string, string> = {
   large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
@@ -133,6 +134,9 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
           {canSeeFloor && <div className="flex justify-between"><span className="text-gray-500">合计</span><span className="font-semibold">{po.currency} {po.total_amount ?? '—'}</span></div>}
         </div>
       </div>
+
+      {/* 自定义追踪提醒(采购设节点+日期,到点提醒采购/业务/跟单) */}
+      <PoRemindersPanel poId={po.id} />
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700 flex items-center gap-2">

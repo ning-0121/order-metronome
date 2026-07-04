@@ -22,6 +22,8 @@ export async function GET(request: Request) {
     let supervisorAlerts = 0;
     // ── 自动升级链：逾期 1/2/3/5 天分级上报 ──
     let autoEscalated = 0;
+    // ── 采购单自定义提醒节点：到点通知采购/业务/跟单 ──
+    let poReminders = 0;
     try {
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -30,6 +32,7 @@ export async function GET(request: Request) {
         escalated = await checkUnassignedMerchandiser(supabase);
         supervisorAlerts = await notifyAdminAssistantOverdue(supabase);
         autoEscalated = await runEscalationChain(supabase);
+        poReminders = await checkPoReminders(supabase);
       }
     } catch (e: any) {
       console.error('[reminders] extra checks error:', e?.message);
@@ -43,11 +46,79 @@ export async function GET(request: Request) {
       merchandiser_escalated: escalated,
       supervisor_alerts: supervisorAlerts,
       auto_escalated: autoEscalated,
+      po_reminders: poReminders,
     });
   } catch (error: any) {
     console.error('Cron job error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+}
+
+/**
+ * 采购单自定义提醒节点:到点(remind_at ≤ 今天)的 pending 节点 → 通知
+ * 采购(创建者)+ 该单每个订单的业务执行(owner_user_id)/创建者 + 跟单(milestone owner_role=merchandiser)。
+ * 通知后置 status='notified'(只提醒一次,符合"自定义节点+日期"语义;需再提醒则改期,updatePoReminder 会重置回 pending)。
+ * 表未建时静默返回 0,不炸整条 cron。
+ */
+async function checkPoReminders(supabase: any): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: due, error } = await supabase
+    .from('po_reminders')
+    .select('id, purchase_order_id, label, note, remind_at, created_by')
+    .eq('status', 'pending')
+    .lte('remind_at', today);
+  if (error) { if (!/does not exist/i.test(error.message)) console.error('[po_reminders] query:', error.message); return 0; }
+  if (!due || due.length === 0) return 0;
+
+  const poIds = [...new Set(due.map((r: any) => r.purchase_order_id))];
+  const { data: pos } = await supabase.from('purchase_orders').select('id, po_no, order_ids').in('id', poIds);
+  const poMap = new Map((pos || []).map((p: any) => [p.id, p]));
+  const allOrderIds = [...new Set((pos || []).flatMap((p: any) => p.order_ids || []))];
+
+  const orderMap = new Map<string, any>();
+  const merchByOrder = new Map<string, string>();
+  if (allOrderIds.length > 0) {
+    const { data: orders } = await supabase.from('orders')
+      .select('id, order_no, customer_name, owner_user_id, created_by').in('id', allOrderIds);
+    for (const o of (orders || [])) orderMap.set(o.id, o);
+    const { data: mRows } = await supabase.from('milestones')
+      .select('order_id, owner_user_id, owner_role').in('order_id', allOrderIds).eq('owner_role', 'merchandiser');
+    for (const m of (mRows || [])) if (m.owner_user_id) merchByOrder.set(m.order_id, m.owner_user_id);
+  }
+
+  const notifs: any[] = [];
+  const markIds: string[] = [];
+  let fired = 0;
+  for (const r of due) {
+    const po: any = poMap.get(r.purchase_order_id);
+    markIds.push(r.id);   // PO 消失也标记,避免每 15 分钟反复扫
+    if (!po) continue;
+    const oids: string[] = po.order_ids || [];
+    const mk = (uid: string, oid: string | null, o: any) => ({
+      user_id: uid, type: 'po_reminder',
+      title: `⏰ 采购提醒:${po.po_no || ''} — ${r.label}`,
+      message: `采购单 ${po.po_no || po.id}${o ? `（订单 ${o.order_no || oid}${o.customer_name ? ` · ${o.customer_name}` : ''}）` : ''}追踪节点「${r.label}」到期(${r.remind_at})${r.note ? `;备注:${r.note}` : ''}。`,
+      related_order_id: oid, status: 'unread', email_sent: false,
+    });
+    if (oids.length === 0) {
+      if (r.created_by) notifs.push(mk(r.created_by, null, null));
+    } else {
+      for (const oid of oids) {
+        const o = orderMap.get(oid);
+        const set = new Set<string>([r.created_by, o?.owner_user_id, o?.created_by, merchByOrder.get(oid)].filter(Boolean) as string[]);
+        for (const uid of set) notifs.push(mk(uid, oid, o));
+      }
+    }
+    fired++;
+  }
+  if (notifs.length > 0) {
+    const { error: insErr } = await supabase.from('notifications').insert(notifs);
+    if (insErr) { console.error('[po_reminders] notify insert:', insErr.message); return 0; }  // 未标记 → 下轮重试
+  }
+  if (markIds.length > 0) {
+    await supabase.from('po_reminders').update({ status: 'notified', notified_at: new Date().toISOString() }).in('id', markIds);
+  }
+  return fired;
 }
 
 /**

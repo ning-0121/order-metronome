@@ -7,6 +7,7 @@ import { UnblockButton } from '@/components/UnblockButton';
 import { NudgeButton } from '@/components/NudgeButton';
 import { DashboardAIAdvice } from '@/components/DashboardAIAdvice';
 import { ExpandableList } from '@/components/ExpandableList';
+import { MyProcurementTrackingCard } from '@/components/MyProcurementTrackingCard';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -296,6 +297,9 @@ export default async function DashboardPage() {
         </div>
         </div>
       </div>
+
+      {/* 🛒 我的采购追踪 — 我负责订单的采购进度 + 到期提醒(无采购活动时自动隐藏) */}
+      <div className="mb-6"><MyProcurementTrackingCard /></div>
 
       {/* ⚡ 今日行动 — 最优先的 3 件事 */}
       {myOverdue.length + (filteredTodayDue?.length || 0) > 0 && (
