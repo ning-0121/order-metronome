@@ -13,6 +13,7 @@ import { getOrderPurchaseOrders } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
 import { computeSuggestedPurchaseQty } from '@/lib/services/procurement-consolidation';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 /** 补采购财务审批状态 → 显示 */
 const SUPP_STATUS: Record<string, { label: string; cls: string }> = {
@@ -41,6 +42,7 @@ const FORM_KEYS = [
 ];
 
 export function ProcurementItemsTab({ orderId }: { orderId: string }) {
+  const { confirm, prompt, dialog } = useDialogs();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -247,7 +249,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     } finally { setImgBusy(false); }
   }
   async function removeItemImage(url: string) {
-    if (!sel || !window.confirm('移除这张图?(不删除原文件,只从此项摘掉)')) return;
+    if (!sel || !(await confirm({ title: '移除这张图?', message: '不删除原文件,只从此项摘掉', danger: true, confirmText: '移除' }))) return;
     const next = (Array.isArray(sel.image_urls) ? sel.image_urls : []).filter((u: string) => u !== url);
     const res = await updateProcurementItemImages(sel.id, orderId, next);
     if ((res as any).error) { setMsg((res as any).error); return; }
@@ -256,13 +258,16 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   // 数量补:对已有项申请补量(业务执行提交;服务端角色把关)
   async function requestSupp(item: any) {
-    const qtyStr = window.prompt(`补采购「${item.material_name || ''}」\n\n补多少(单位:${item.unit || '同原项'})?只填数字:`, '');
-    if (qtyStr === null) return;
-    const qty = Number(qtyStr);
-    if (!qty || qty <= 0 || isNaN(qty)) { setMsg('补量必须是大于 0 的数字'); return; }
-    const reason = window.prompt('补采购原因(财务审批要看,必填):\n如「生产损耗超标」「裁剪数量不够」', '');
-    if (reason === null) return;
-    const res = await requestSupplementQty(orderId, item.id, qty, reason || '');
+    const v = await prompt({
+      title: `补采购「${item.material_name || ''}」`,
+      fields: [
+        { name: 'qty', label: '补多少', type: 'number', required: true, suffix: item.unit || '同原项', placeholder: '只填数字' },
+        { name: 'reason', label: '补采购原因(财务审批要看)', type: 'textarea', required: true, placeholder: '如「生产损耗超标」「裁剪数量不够」' },
+      ],
+      confirmText: '提交申请',
+    });
+    if (!v) return;
+    const res = await requestSupplementQty(orderId, item.id, Number(v.qty), v.reason);
     if ((res as any).error) { setMsg((res as any).error); return; }
     setMsg(`✅ 补料申请已提交(${(res as any).itemNo}),已通知财务审批`);
     await reload();
@@ -272,10 +277,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   async function approveSupp(item: any, ok: boolean) {
     let rejectReason: string | undefined;
     if (!ok) {
-      const r = window.prompt('驳回原因(必填):', '');
-      if (r === null) return;
-      rejectReason = r;
-    } else if (!window.confirm(`批准补采购「${item.material_name}」${item.total_required_qty}${item.unit || ''}?\n批准后采购部即可确认并执行。`)) {
+      const r = await prompt({ title: '驳回补采购', fields: [{ name: 'reason', label: '驳回原因', type: 'textarea', required: true }], confirmText: '确认驳回' });
+      if (!r) return;
+      rejectReason = r.reason;
+    } else if (!(await confirm({
+      title: `批准补采购「${item.material_name}」?`,
+      message: `${item.total_required_qty}${item.unit || ''} · 批准后采购部即可确认并执行`,
+      confirmText: '批准',
+    }))) {
       return;
     }
     const res = await approveSupplement(item.id, ok, rejectReason);
@@ -317,7 +326,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   async function bulkConfirm() {
     const ids = checkedEligible.map(i => i.id);
     if (ids.length === 0) return;
-    if (!window.confirm(`批量确认 ${ids.length} 项采购?(有风险/替代/待批补采购的项不在其列,需逐项处理)`)) return;
+    if (!(await confirm({ title: `批量确认 ${ids.length} 项采购?`, message: '有风险/替代/待批补采购的项不在其列,需逐项处理', confirmText: '确认' }))) return;
     setBusy(true); setMsg('');
     let ok = 0; const fails: string[] = [];
     for (const id of ids) {
@@ -932,6 +941,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 }
