@@ -4,7 +4,11 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function POST(request: Request) {
   try {
-    const { password, access_token, user_id } = await request.json();
+    // 安全(2026-07-04 审计 P0):只允许改「已认证用户自己」的密码——
+    // Method 1 = cookie session,Method 2 = access_token(Supabase 恢复令牌,自证身份)。
+    // 原 Method 3 从请求体取 user_id + service-role 改任意人密码 = 账号接管后门,已删除。
+    // 忘记密码重置走 /api/auth/reset-password(HMAC 签名令牌派生 userId),不走本路由。
+    const { password, access_token } = await request.json();
 
     if (!password || password.length < 8) {
       return NextResponse.json({ error: '密码至少需要 8 位' }, { status: 400 });
@@ -41,24 +45,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Method 3: Use service_role admin API (MOST RELIABLE — bypasses all session issues)
-    if (user_id) {
-      try {
-        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (url && serviceKey) {
-          const adminClient = createSupabaseClient(url, serviceKey);
-          const { error } = await adminClient.auth.admin.updateUserById(user_id, { password });
-          if (!error) return NextResponse.json({ success: true });
-          console.log('[update-password] Method 3 (admin) error:', error.message);
-          return NextResponse.json({ error: error.message }, { status: 400 });
-        } else {
-          console.log('[update-password] Method 3 skipped: missing SUPABASE_SERVICE_ROLE_KEY');
-        }
-      } catch (e: any) {
-        console.log('[update-password] Method 3 (admin) exception:', e.message);
-      }
-    }
+    // (Method 3 已删除:服务端凭 body.user_id 改任意人密码是账号接管后门)
 
     return NextResponse.json({ error: '无法更新密码 — 请重新发送重置邮件并点击新链接' }, { status: 400 });
   } catch (err: any) {

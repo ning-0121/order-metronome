@@ -685,9 +685,11 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF NEW.role IS DISTINCT FROM OLD.role THEN
+  -- 2026-07-04 审计 P0:标量 role 与数组 roles[] 任一变化都需 admin(堵 roles[] 自助提权)
+  IF (NEW.role IS DISTINCT FROM OLD.role)
+     OR (NEW.roles IS DISTINCT FROM OLD.roles) THEN
     IF NOT public.is_admin_user(auth.uid()) THEN
-      RAISE EXCEPTION 'only admin can update role';
+      RAISE EXCEPTION 'only admin can update role/roles';
     END IF;
   END IF;
   RETURN NEW;
