@@ -12,6 +12,7 @@ export interface NettingLine {
   order_id: string;
   order_no?: string | null;
   internal_order_no?: string | null;
+  material_master_id?: string | null;  // 审计 P0:归并键须与库存/采购项同口径(master 优先)
   material_name: string;
   specification?: string | null;
   category?: string | null;
@@ -47,6 +48,7 @@ export function aggregateLinesByKey(lines: NettingLine[]): NettingGroup[] {
 
   for (const l of lines) {
     const key = consolidationKey({
+      material_master_id: l.material_master_id,   // master 优先,与库存/采购项同口径
       material_name: l.material_name,
       specification: l.specification,
       category: l.category,

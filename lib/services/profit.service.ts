@@ -49,7 +49,7 @@ export function checkDataCompleteness(financials: any, baseline: any, order: any
   // 成本数据
   check(!!baseline?.budget_fabric_amount || !!financials?.cost_material, '面料成本')
   check(!!baseline?.cmt_factory_quote || !!financials?.cost_cmt, '加工费')
-  check(!!financials?.cost_shipping !== undefined, '运费')
+  check(financials?.cost_shipping != null, '运费')  // 审计 P1:原 !!x!==undefined 恒真,运费永远算"已填"
 
   // 订单基础数据
   check(!!order?.quantity, '订单数量')
@@ -92,13 +92,17 @@ function aggregateProfitNumbers(financials: any, baseline: any, order: any, over
   if (overrides?.revenueUsd) revenueUsd = overrides.revenueUsd
 
   // 成本（优先用 overrides，其次 order_financials，最后 cost_baseline）
+  // 审计 P1:原用 `||` → 合法 0 值(cost_material=0)被当缺失回退到预算面料额。
+  // 改显式 null 判断:financials 填了(含 0)就用它,没填才回退基线。
   const materialCost = overrides?.materialCost
-    ?? (Number(financials?.cost_material ?? 0)
-    || Number(baseline?.budget_fabric_amount ?? 0))
+    ?? (financials?.cost_material != null
+      ? Number(financials.cost_material)
+      : Number(baseline?.budget_fabric_amount ?? 0))
 
   const processingCost = overrides?.processingCost
-    ?? (Number(financials?.cost_cmt ?? 0)
-    || (Number(baseline?.cmt_factory_quote ?? 0) * quantity))
+    ?? (financials?.cost_cmt != null
+      ? Number(financials.cost_cmt)
+      : Number(baseline?.cmt_factory_quote ?? 0) * quantity)
 
   const logisticsCost = overrides?.logisticsCost ?? Number(financials?.cost_shipping ?? 0)
   const otherCost = overrides?.otherCost ?? Number(financials?.cost_other ?? 0)

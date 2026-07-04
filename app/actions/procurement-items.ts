@@ -490,8 +490,13 @@ export async function consolidateOrderProcurementItems(
       }
       let { error: iErr } = await (supabase.from('procurement_items') as any).insert(row);
       if (iErr && /column .* does not exist|is_supplement|finance_approval|image_urls|order_by_date|required_date/i.test(iErr.message || '')) {
-        // 补采购/图片/日期迁移未执行 → 降级为普通项插入(不 brick 核料),提醒执行迁移
-        console.warn('[consolidate] 新列缺失,降级插入。请执行 20260703 系列迁移(supplement/images/dates)');
+        // 审计 P0:补采购行若无法写入闸门列(is_supplement/finance_approval_status),
+        // 绝不降级为无闸普通项(会绕过财务审批直接确认→下单花钱),直接中止让用户先跑迁移。
+        if (row.is_supplement) {
+          return { error: '补采购所需数据库列缺失,请先执行 20260703 补采购迁移(supplement/finance_approval)后再核料——绝不降级为无财务审批闸的普通采购项' };
+        }
+        // 非补采购行:仅图片/日期等装饰列缺失 → 降级插入(不 brick 核料),提醒执行迁移
+        console.warn('[consolidate] 非闸门新列缺失,降级插入。请执行 20260703 系列迁移(images/dates)');
         const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, image_urls, required_date, order_by_date, ...plain } = row;
         ({ error: iErr } = await (supabase.from('procurement_items') as any).insert(plain));
       }

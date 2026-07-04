@@ -15,7 +15,7 @@ export async function getCrossOrderNetting(): Promise<{ data?: NettingGroup[]; e
   if (!user) return { error: '请先登录' };
 
   const { data: lines, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit')
+    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, procurement_item_id')
     .is('purchase_order_id', null)
     .order('material_name', { ascending: true });
   if (error) return { error: error.message };
@@ -32,17 +32,32 @@ export async function getCrossOrderNetting(): Promise<{ data?: NettingGroup[]; e
     for (const o of (ords || []) as any[]) orderMap.set(o.id, o);
   }
 
-  const enriched: NettingLine[] = rows.map((l) => ({
-    id: l.id,
-    order_id: l.order_id,
-    order_no: orderMap.get(l.order_id)?.order_no ?? null,
-    internal_order_no: orderMap.get(l.order_id)?.internal_order_no ?? null,
-    material_name: l.material_name,
-    specification: l.specification,
-    category: l.category,
-    ordered_qty: l.ordered_qty,
-    ordered_unit: l.ordered_unit,
-  }));
+  // 审计 P0:执行行无 master_id/color 列,经 procurement_item_id 回查主数据,
+  // 让 netting 归并键与库存/采购项同口径(master 优先 + 含颜色)。
+  const piIds = [...new Set(rows.map((l) => l.procurement_item_id).filter(Boolean))];
+  const piMap = new Map<string, any>();
+  if (piIds.length) {
+    const { data: pis } = await (supabase.from('procurement_items') as any)
+      .select('id, material_master_id, color').in('id', piIds);
+    for (const p of (pis || []) as any[]) piMap.set(p.id, p);
+  }
+
+  const enriched: NettingLine[] = rows.map((l) => {
+    const pi = l.procurement_item_id ? piMap.get(l.procurement_item_id) : null;
+    return {
+      id: l.id,
+      order_id: l.order_id,
+      order_no: orderMap.get(l.order_id)?.order_no ?? null,
+      internal_order_no: orderMap.get(l.order_id)?.internal_order_no ?? null,
+      material_master_id: pi?.material_master_id ?? null,
+      material_name: l.material_name,
+      specification: l.specification,
+      category: l.category,
+      color: pi?.color ?? null,
+      ordered_qty: l.ordered_qty,
+      ordered_unit: l.ordered_unit,
+    };
+  });
 
   return { data: aggregateLinesByKey(enriched) };
 }
