@@ -108,6 +108,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   const confirmedCount = items.filter(i => i.status === 'confirmed').length;
   const [linesReady, setLinesReady] = useState(false);   // 生成执行行后亮"去归采购单"通路
+  // 大货单耗核定表折叠:核定完(或已下单锁定)默认收起,留一行;还有缺的默认展开催填。null=跟随默认,布尔=手动。
+  const [consOpen, setConsOpen] = useState<boolean | null>(null);
   async function genLines() {
     setBusy(true); setMsg('');
     const res = await generateExecutionLines(orderId);
@@ -319,6 +321,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   // ── 阶段判定(2026-07-03 用户拍板:下完单核料转入追踪模式,不再摆工作台) ──
   const ORDERED_PLUS = ['ordered', 'partially_received', 'completed', 'closed'];
   const trackingPhase = items.length > 0 && items.every(i => ORDERED_PLUS.includes(i.status));
+  // 核定表默认开合:还有布料没核 → 展开催填;全核定/已下单锁定 → 收起省版面(可手动展开复核)
+  const consEffectiveOpen = consOpen ?? (consMissing.length > 0 && !trackingPhase);
 
   // ── 确认归并加强(2026-07-03 用户拍板 1-4)──
   const DONE_STATUSES = ['confirmed', 'ordered', 'partially_received', 'completed', 'closed'];
@@ -538,13 +542,20 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               : consMissing.length > 0
                 ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">🔒 还差 {consMissing.length} 条布料未核定 — 核定完才能归并</span>
                 : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 布料已全部核定,可归并</span>}
-            {!trackingPhase && (
+            {consMissing.length === 0 && (
+              <button onClick={() => setConsOpen(!consEffectiveOpen)}
+                className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">
+                {consEffectiveOpen ? '收起 ▲' : `展开复核 / 修改（${consLines.length}）▼`}
+              </button>
+            )}
+            {!trackingPhase && consEffectiveOpen && (
               <button onClick={saveCons} disabled={consSaving}
                 className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
                 {consSaving ? '保存中…' : '💾 保存核定'}
               </button>
             )}
           </div>
+          {consEffectiveOpen && <>
           <p className="text-[11px] text-gray-500">每款排料不同,大货单耗必须逐款填;总需求 = Σ(每款件数 × 该款大货单耗),不做平均/折算。辅料默认按开发单耗,可选核。</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -573,6 +584,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               </tbody>
             </table>
           </div>
+          </>}
         </div>
       )}
 
