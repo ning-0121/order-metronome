@@ -27,7 +27,8 @@ export default async function ProcurementCenterPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const result = await getProcurementQueues();
+  // 两个独立调用并行(原串行 → 少一整轮跨区往返;性能优化 2026-07-04)
+  const [result, mattersResult] = await Promise.all([getProcurementQueues(), getProcurementMatters()]);
   if (result.error) {
     // 无权限或查询失败：降级提示，不 crash
     return (
@@ -43,7 +44,6 @@ export default async function ProcurementCenterPage() {
     large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
     over_budget: '超预算', non_standard_terms: '非标账期',
   };
-  const mattersResult = await getProcurementMatters();
   const matters = mattersResult.data?.matters ?? [];
   const matterCounts = mattersResult.data?.counts ?? { total: 0, high: 0, medium: 0 };
 
