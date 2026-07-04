@@ -445,7 +445,7 @@ export async function consolidateOrderProcurementItems(
   if (opts.dryRun) return { ok: true, plan };
 
   const apply = { create: true, refresh: true, cleanup: true, ...(opts.apply || {}) };
-  let created = 0, updated = 0, flagged = 0, removed = 0;
+  let created = 0, updated = 0, flagged = 0, removed = 0, syncedLines = 0;
   let seq = (existing || []).length;
   const now = new Date().toISOString();
 
@@ -476,9 +476,29 @@ export async function consolidateOrderProcurementItems(
       }
       // 到货倒推日期刷新(列存在才写,迁移未跑不报错)
       if ('order_by_date' in (ex as any)) { upd.required_date = g.reqDate; upd.order_by_date = g.orderBy; }
-      if (Number(ex.total_required_qty) !== g.total && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
+      const totalChanged = Number(ex.total_required_qty) !== g.total;
+      if (totalChanged && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
       await (supabase.from('procurement_items') as any).update(upd).eq('id', ex.id);
       updated++;
+      // 审计修(2026-07-04):重归并抬高/降低需求 → 同步【未下单】执行行的 ordered_qty,
+      // 否则执行行停在旧量、静默少采购 + 多表打架。已下单(placed 及以后)的行不动,
+      // 靠 needs_reconfirm 提示采购走「补数量申请」——已下单量不能被静默改。
+      if (totalChanged) {
+        const newOrderable = orderableQty({
+          final_purchase_qty: (ex as any).final_purchase_qty,
+          suggested_purchase_qty: suggested,
+          stock_deduct_qty: (ex as any).stock_deduct_qty,
+        });
+        try {
+          const { data: syncedRows } = await (supabase.from('procurement_line_items') as any)
+            .update({ ordered_qty: newOrderable, updated_at: now })
+            .eq('procurement_item_id', ex.id)
+            .in('line_status', ['draft', 'pending_order'])
+            .is('purchase_order_id', null)   // 已归到采购单的行不动(改量会弄乱 PO 合计)→ 走 needs_reconfirm
+            .select('id');
+          syncedLines += ((syncedRows || []) as any[]).length;
+        } catch (e: any) { console.warn('[consolidate] 执行行数量同步失败(不阻断):', e?.message); }
+      }
     } else {
       seq++;
       const suggested = computeSuggestedPurchaseQty({
@@ -548,7 +568,7 @@ export async function consolidateOrderProcurementItems(
   }
 
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true, created, updated, flagged, removed, total_items: groups.size };
+  return { ok: true, created, updated, flagged, removed, syncedLines, total_items: groups.size };
 }
 
 /** 来源明细(live):该采购项归并键命中的 requirements ⋈ snapshot_lines。粒度=物料行(产品维度缺口见 P1.md §5.1)。 */
