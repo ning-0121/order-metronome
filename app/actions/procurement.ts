@@ -379,6 +379,15 @@ export async function recordReceipt(
     .single();
   if (!item) return { error: '明细不存在' };
 
+  // 审计修(2026-07-04):止血双真相。此入口是"覆盖写 received_qty 且不写 goods_receipts",
+  // 一旦该行已有 goods_receipts 批次(经「收货登记」录过),覆盖写会抹掉批次汇总、甚至写负库存。
+  // → 已有批次的行禁止走本覆盖入口,统一去「收货登记」(goods_receipts 单一真相 + 质检闸)。
+  const { count: grCount } = await (supabase.from('goods_receipts') as any)
+    .select('id', { count: 'exact', head: true }).eq('line_item_id', itemId);
+  if ((grCount || 0) > 0) {
+    return { error: '该行已有收货批次记录,请用采购中心「收货登记」继续录入/验收(单一真相),不要在对账页覆盖写。' };
+  }
+
   // 收货 ±10% 硬闸(此入口为覆盖写=总量,故 prev=0、thisQty=总量;超量拦截通知财务)
   if (receivedQty > 0) {
     const gate = overReceiptCheck((item as any).ordered_qty, 0, receivedQty);
