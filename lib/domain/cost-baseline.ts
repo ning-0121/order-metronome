@@ -5,6 +5,7 @@
  */
 
 export interface BaselineLine {
+  style_no?: string | null;             // 款号(报价单每款一行,单耗按款不同)
   material_name: string;
   color?: string | null;
   category?: string | null;
@@ -27,14 +28,24 @@ const norm = (s?: string | null): string => (s || '').trim().toLowerCase();
  *   3) 同物料任一行(兜底)
  * 匹配不到 → matched=false(无基线,不参与超出判定)。
  */
-export function matchBaseline(lines: BaselineLine[], material: string, color?: string | null): BaselineMatch {
+export function matchBaseline(lines: BaselineLine[], material: string, color?: string | null, style?: string | null): BaselineMatch {
+  const miss: BaselineMatch = { matched: false, quote_consumption: null, quote_unit_price: null };
   const m = norm(material);
-  if (!m || !Array.isArray(lines) || lines.length === 0) return { matched: false, quote_consumption: null, quote_unit_price: null };
-  const sameMat = lines.filter((l) => norm(l.material_name) === m);
-  if (sameMat.length === 0) return { matched: false, quote_consumption: null, quote_unit_price: null };
+  if (!m || !Array.isArray(lines) || lines.length === 0) return miss;
+  let sameMat = lines.filter((l) => norm(l.material_name) === m);
+  if (sameMat.length === 0) return miss;
+
+  // 款优先:基线有款号时,先在同款里匹配;同款无命中再退回不分款(向后兼容旧基线)。
+  const s = norm(style);
+  const hasStyleInBaseline = sameMat.some((l) => norm(l.style_no));
+  if (s && hasStyleInBaseline) {
+    const sameStyle = sameMat.filter((l) => norm(l.style_no) === s);
+    if (sameStyle.length > 0) sameMat = sameStyle;   // 命中同款 → 只在同款里挑颜色
+  }
+
   const c = norm(color);
   const line =
-    (c ? sameMat.find((l) => norm(l.color) === c) : undefined)         // 同料同色
+    (c ? sameMat.find((l) => norm(l.color) === c) : undefined)         // 同料(同款)同色
     ?? sameMat.find((l) => !norm(l.color))                            // 同料·基线通用色
     ?? sameMat[0];                                                    // 兜底
   return {

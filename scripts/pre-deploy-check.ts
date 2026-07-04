@@ -115,6 +115,14 @@ console.log('\n▶ 报价基线对照(P2:超单耗/超价,容差 0)');
   assert(checkTrimTotalOverBudget(1001, 1000).over, '辅料总价 1001>1000 超');
   assert(!checkTrimTotalOverBudget(1000, 1000).over, '辅料总价 1000=1000 不超');
   assert(!checkTrimTotalOverBudget(9999, null).over, '预算空→不判超');
+  // 款(STYLE)维度:同款优先;旧基线无款向后兼容
+  const styled = [
+    { style_no: 'A', material_name: '布', color: '黑', quote_consumption: 0.3 },
+    { style_no: 'B', material_name: '布', color: '黑', quote_consumption: 0.4 },
+  ];
+  assert(matchBaseline(styled, '布', '黑', 'A').quote_consumption === 0.3, '款A命中0.3');
+  assert(matchBaseline(styled, '布', '黑', 'B').quote_consumption === 0.4, '款B命中0.4(不混款)');
+  assert(matchBaseline([{ material_name: '布', quote_consumption: 0.5 }], '布', null, 'A').quote_consumption === 0.5, '旧基线无款→向后兼容匹配');
 }
 
 // 打样模板必须包含关键节点

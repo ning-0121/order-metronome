@@ -9,7 +9,7 @@ const CATS: Array<{ v: string; l: string }> = [
 ];
 
 type Row = QuoteBaselineLine & { _k: number };
-const emptyRow = (k: number): Row => ({ _k: k, material_name: '', category: 'fabric', color: '', quote_consumption: null, quote_unit_price: null, quote_unit: 'kg', notes: '' });
+const emptyRow = (k: number): Row => ({ _k: k, style_no: '', material_name: '', category: 'fabric', color: '', quote_consumption: null, quote_unit_price: null, quote_unit: 'kg', notes: '' });
 
 /**
  * 报价基线录入(源头·单一真相):业务逐料填 单耗 + 单价 + 加工费 → 冻结成基线。
@@ -18,6 +18,7 @@ const emptyRow = (k: number): Row => ({ _k: k, material_name: '', category: 'fab
 export function QuoteBaselineTab({ orderId }: { orderId: string }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [cmt, setCmt] = useState<string>('');
+  const [styleBudgets, setStyleBudgets] = useState<any[]>([]);   // 款预算(解析器填,手动表原样保留不冲掉)
   const [canEdit, setCanEdit] = useState(false);
   const [canPrice, setCanPrice] = useState(false);
   const [frozenAt, setFrozenAt] = useState<string | null>(null);
@@ -33,6 +34,7 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
     const d = res.data!;
     setRows((d.lines.length ? d.lines : []).map((l) => ({ ...l, _k: kc++ })));
     setCmt(d.cmt_quote != null ? String(d.cmt_quote) : '');
+    setStyleBudgets((d as any).styleBudgets || []);
     setCanEdit(d.can_edit); setCanPrice(d.can_see_price); setFrozenAt(d.frozen_at);
     setLoading(false);
   }
@@ -47,6 +49,7 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
     const res = await saveQuoteBaseline(orderId, {
       cmt_quote: cmt.trim() === '' ? null : Number(cmt),
       lines: rows.map(({ _k, ...l }) => l),
+      styleBudgets,   // 原样带回,手动保存不冲掉解析器填的款预算
     });
     setSaving(false);
     if ((res as any).error) { setMsg({ ok: false, text: (res as any).error }); return; }
@@ -79,15 +82,16 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
       <div className="overflow-x-auto bg-white rounded-xl border border-gray-200">
         <table className="w-full text-sm">
           <thead><tr className="bg-gray-50 text-left text-gray-500 text-xs">
-            <th className="px-3 py-2">物料 *</th><th className="px-3 py-2">类别</th><th className="px-3 py-2">颜色</th>
+            <th className="px-3 py-2">款号</th><th className="px-3 py-2">物料 *</th><th className="px-3 py-2">类别</th><th className="px-3 py-2">颜色</th>
             <th className="px-3 py-2 text-right">报价单耗</th><th className="px-3 py-2">单位</th>
             {canPrice && <th className="px-3 py-2 text-right">报价单价</th>}
             <th className="px-3 py-2">备注</th>{canEdit && <th className="px-3 py-2"></th>}
           </tr></thead>
           <tbody className="divide-y divide-gray-100">
-            {rows.length === 0 && <tr><td colSpan={canPrice ? 8 : 7} className="px-3 py-6 text-center text-gray-400 text-sm">还没有报价基线,点下方「加一行」逐料录入</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={canPrice ? 9 : 8} className="px-3 py-6 text-center text-gray-400 text-sm">还没有报价基线,点下方「加一行」逐料录入(或建单时上传报价单自动填)</td></tr>}
             {rows.map((r) => (
               <tr key={r._k}>
+                <td className="px-2 py-1"><input disabled={!canEdit} value={r.style_no || ''} onChange={(e) => patch(r._k, { style_no: e.target.value })} placeholder="款号" className="w-20 rounded border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-50" /></td>
                 <td className="px-2 py-1"><input disabled={!canEdit} value={r.material_name} onChange={(e) => patch(r._k, { material_name: e.target.value })} placeholder="如 280克直贡呢" className="w-full rounded border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-50" /></td>
                 <td className="px-2 py-1">
                   <select disabled={!canEdit} value={r.category || 'fabric'} onChange={(e) => patch(r._k, { category: e.target.value })} className="rounded border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-50">

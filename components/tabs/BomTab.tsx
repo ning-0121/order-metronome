@@ -108,7 +108,7 @@ export function BomTab({ orderId }: { orderId: string }) {
   useEffect(() => { getQuoteBaseline(orderId).then((r) => setBaseLines(((r as any).data?.lines || []) as BaselineLine[])).catch(() => {}); }, [orderId]);
   const overBaseline = (it: any) => {
     if (!baseLines.length) return null;
-    const base = matchBaseline(baseLines, it.material_name, it.color);
+    const base = matchBaseline(baseLines, it.material_name, it.color, it.style_no);
     if (!base.matched) return null;
     const chk = checkOverBaseline(base, it.qty_per_piece != null ? Number(it.qty_per_piece) : null, null);
     return chk.over_consumption ? chk : null;
