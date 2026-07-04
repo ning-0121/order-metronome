@@ -1012,6 +1012,7 @@ export interface QueueLine {
   internal_order_no: string | null;   // 内部单号(财务核算口径,随行显示)
   customer_name: string | null;
   material_name: string;
+  color: string | null;             // 经 procurement_item_id 回查(执行行无颜色列),区分同料不同色
   category: string | null;
   supplier_name: string | null;
   line_status: string;
@@ -1132,9 +1133,17 @@ export async function getProcurementQueues(): Promise<{
   // 基础读走用户会话(RLS 管范围),不含已封锁的 unit_price(price_variance_pct 是百分比、非绝对价,保留);
   // 底价对 floor 角色在下方经 service-role 补(此前此处直接返回 unit_price 未剥离,是泄价点)。
   const { data, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
+    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, procurement_item_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
     .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
   if (error) return { error: error.message };
+
+  // 颜色回查:执行行无颜色列,经 procurement_item_id → procurement_items.color(同料不同色才分得清)
+  const piIds = [...new Set((data || []).map((r: any) => r.procurement_item_id).filter(Boolean))];
+  const colorByPi = new Map<string, string | null>();
+  if (piIds.length > 0) {
+    const { data: pis } = await (supabase.from('procurement_items') as any).select('id, color').in('id', piIds);
+    for (const p of (pis || [])) colorByPi.set(p.id, p.color ?? null);
+  }
 
   const now = new Date();
   const rows: QueueLine[] = (data || [])
@@ -1146,7 +1155,8 @@ export async function getProcurementQueues(): Promise<{
       id: r.id, order_id: r.order_id,
       order_no: r.orders?.order_no ?? null, internal_order_no: r.orders?.internal_order_no ?? null,
       customer_name: r.orders?.customer_name ?? null,
-      material_name: r.material_name, category: r.category, supplier_name: r.supplier_name,
+      material_name: r.material_name, color: r.procurement_item_id ? (colorByPi.get(r.procurement_item_id) ?? null) : null,
+      category: r.category, supplier_name: r.supplier_name,
       line_status: r.line_status, required_by: r.required_by,
       promised_date: r.promised_date, expected_arrival: r.expected_arrival,
       po_no: r.po_no, purchase_order_id: r.purchase_order_id, unit_price: r.unit_price, price_variance_pct: r.price_variance_pct,

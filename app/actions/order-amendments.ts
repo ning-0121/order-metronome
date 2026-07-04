@@ -45,7 +45,7 @@ export async function submitOrderAmendment(
 
   // 权限：仅订单创建者 / 跟单负责人 / 管理员可提交变更申请
   const { data: order } = await (supabase.from('orders') as any)
-    .select('created_by, owner_user_id')
+    .select('created_by, owner_user_id, order_no, internal_order_no, customer_name')
     .eq('id', orderId)
     .single();
   if (!order) return { error: '订单不存在' };
@@ -86,6 +86,18 @@ export async function submitOrderAmendment(
     }
     return { error: '提交失败：' + error.message };
   }
+
+  // 通知管理员:有订单变更申请待审批(审批权在 admin;否则申请石沉大海)(2026-07-04 用户反馈)
+  try {
+    const changed = Object.keys(fields).map((k) => AMENDMENT_RULES.find((r) => r.field === k)?.label || k).join('、');
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(supabase, ['admin'], {
+      type: 'amendment_approval',
+      title: `🟣 订单修改待审批：${(order as any).internal_order_no || (order as any).order_no || ''}`,
+      message: `订单 ${(order as any).internal_order_no || (order as any).order_no || orderId}（${(order as any).customer_name || ''}）申请修改「${changed}」；原因：${reason.trim()}。请到该订单页审批。`,
+      relatedOrderId: orderId,
+    });
+  } catch (e: any) { console.warn('[submitOrderAmendment] 变更待审批通知失败(不阻断):', e?.message); }
 
   revalidatePath(`/orders/${orderId}`);
   return { success: true };

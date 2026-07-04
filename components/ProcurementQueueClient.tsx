@@ -46,6 +46,7 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
         <div className="flex items-center gap-2 min-w-0">
           <LampDot lamp={line.lamp} />
           <span className="font-medium text-gray-900 truncate">{line.material_name}</span>
+          {line.color && <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 shrink-0">{line.color}</span>}
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[line.category || 'other'] || line.category}</span>
           {/* 采购不进订单详情(2026-07-03 权限隔离)→ 专属核料页(只读摘要+核料+任务单下载) */}
           <Link href={`/procurement/verify/${line.order_id}`} className="text-xs text-indigo-600 hover:underline shrink-0">
