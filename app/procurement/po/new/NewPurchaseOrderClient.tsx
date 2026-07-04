@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createPurchaseOrder } from '@/app/actions/purchase-orders';
 import { consolidationKey } from '@/lib/services/procurement-consolidation';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[]; lines: any[] }) {
   const router = useRouter();
+  const { confirm, dialog } = useDialogs();
   const [supplierId, setSupplierId] = useState('');
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [paymentTerms, setPaymentTerms] = useState('');
@@ -40,23 +42,25 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
   }
 
   async function submit() {
-    if (!supplierId) { alert('请选择供应商'); return; }
-    if (checked.size === 0) { alert('请勾选采购行'); return; }
+    if (!supplierId) { await confirm({ title: '请选择供应商', confirmText: '知道了' }); return; }
+    if (checked.size === 0) { await confirm({ title: '请勾选采购行', confirmText: '知道了' }); return; }
 
     let mergeSameMaterials = false;
     const dups = duplicateGroups();
     if (dups.length > 0) {
       const list = dups.map((g) => `· ${g.label}:${g.count} 行,共 ${Math.round(g.qty * 1000) / 1000} ${g.unit}`).join('\n');
-      mergeSameMaterials = window.confirm(
-        `检测到 ${dups.length} 组同料同规格(同单位)采购行:\n\n${list}\n\n` +
-        `是否合并?\n【确定】导出给供应商时并为一行(系统内仍分订单核销,不影响对账)\n【取消】保持分行`
-      );
+      mergeSameMaterials = await confirm({
+        title: `检测到 ${dups.length} 组同料同规格(同单位)采购行,是否合并?`,
+        message: `${list}\n\n【合并】导出给供应商时并为一行(系统内仍分订单核销,不影响对账)\n【保持分行】不合并`,
+        confirmText: '合并',
+        cancelText: '保持分行',
+      });
     }
 
     setSaving(true);
     const res = await createPurchaseOrder({ supplierId, lineItemIds: [...checked], paymentTerms, deliveryDate: deliveryDate || undefined, mergeSameMaterials });
     setSaving(false);
-    if (res.error) { alert(res.error); return; }
+    if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
     router.push(`/procurement/po/${res.id}`);
   }
 
@@ -112,6 +116,7 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
         className="w-full py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50">
         {saving ? '创建中…' : `创建采购单（已选 ${checked.size} 行）`}
       </button>
+      {dialog}
     </div>
   );
 }

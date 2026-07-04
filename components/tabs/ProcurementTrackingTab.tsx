@@ -22,6 +22,7 @@ import {
   type ProcurementItem,
 } from '@/app/actions/procurement-tracking';
 import { createClient } from '@/lib/supabase/client';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 interface Props {
   orderId: string;
@@ -45,6 +46,7 @@ const CATEGORY_MAP: Record<string, { label: string; icon: string }> = {
 };
 
 export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) {
+  const { confirm, prompt, dialog } = useDialogs();
   const [items, setItems] = useState<ProcurementItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [sourceFile, setSourceFile] = useState<{ name: string; url: string } | null>(null);
@@ -114,8 +116,8 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
 
   // 提交补充采购申请
   async function handleSubmitSupplement() {
-    if (!newName.trim()) { alert('请填写物料名称'); return; }
-    if (!newReason.trim()) { alert('请填写补充原因（财务审计必填）'); return; }
+    if (!newName.trim()) { await confirm({ title: '请填写物料名称', confirmText: '知道了' }); return; }
+    if (!newReason.trim()) { await confirm({ title: '请填写补充原因（财务审计必填）', confirmText: '知道了' }); return; }
     setSaving(true);
     const res = await submitSupplementRequest(orderId, {
       category: newCategory,
@@ -125,7 +127,7 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
       notes: newNotes || undefined,
       supplement_reason: newReason.trim(),
     });
-    if (res.error) { alert('提交失败: ' + res.error); }
+    if (res.error) { await confirm({ title: '提交失败', message: res.error, confirmText: '知道了' }); }
     else {
       setFormMode(null);
       setNewName(''); setNewCategory('other'); setNewSupplier('');
@@ -139,23 +141,23 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
   async function handleApprove(itemId: string) {
     setApprovingId(itemId);
     const res = await approveSupplementRequest(itemId);
-    if (res.error) alert('确认失败: ' + res.error);
+    if (res.error) await confirm({ title: '确认失败', message: res.error, confirmText: '知道了' });
     else await loadData();
     setApprovingId(null);
   }
 
   async function handleUpdate(id: string, field: string, value: string | null) {
     const res = await updateProcurementItem(id, { [field]: value || null });
-    if (res.error) { alert('保存失败: ' + res.error); return; }
+    if (res.error) { await confirm({ title: '保存失败', message: res.error, confirmText: '知道了' }); return; }
     setItems(prev => prev.map(item =>
       item.id === id ? { ...item, [field]: value, updated_at: new Date().toISOString() } : item
     ));
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('确定删除此采购项？')) return;
+    if (!(await confirm({ title: '确定删除此采购项？', danger: true, confirmText: '删除' }))) return;
     const res = await deleteProcurementItem(id);
-    if (res.error) { alert('删除失败: ' + res.error); return; }
+    if (res.error) { await confirm({ title: '删除失败', message: res.error, confirmText: '知道了' }); return; }
     setItems(prev => prev.filter(item => item.id !== id));
   }
 
@@ -349,8 +351,9 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
                                   className="flex-1 px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-sm font-medium focus:border-indigo-400 focus:outline-none" />
                                 <button title="拆分批次"
                                   onClick={async () => {
-                                    const batch = prompt('输入批次名（如颜色：黑色、白色）：');
-                                    if (!batch?.trim()) return;
+                                    const v = await prompt({ title: '拆分批次', fields: [{ name: 'batch', label: '批次名（如颜色：黑色、白色）', type: 'text', required: true }], confirmText: '拆分' });
+                                    if (!v) return;
+                                    const batch = v.batch;
                                     await addProcurementItem(orderId, { category: item.category, item_name: `${item.item_name}-${batch.trim()}`, supplier: item.supplier || undefined });
                                     await loadData();
                                   }}
@@ -465,6 +468,7 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
         💡 所有人可查看。采购/业务/跟单直接编辑进度，实时保存。
         原始采购单以外的新增物料请点「+ 补充采购申请」→ 填写原因 → 等业务确认后执行。
       </p>
+      {dialog}
     </div>
   );
 }

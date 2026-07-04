@@ -10,6 +10,7 @@ import {
   syncFromProcurementTracking,
   type ProcurementLineItem,
 } from '@/app/actions/procurement';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 interface Props {
   orderId: string;
@@ -33,6 +34,7 @@ const CATEGORY_OPTIONS = [
 const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(CATEGORY_OPTIONS.map(o => [o.value, o.label]));
 
 export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: Props) {
+  const { confirm, dialog } = useDialogs();
   const [items, setItems] = useState<ProcurementLineItem[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -79,10 +81,10 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
       qty_per_piece: formQtyPerPiece ? Number(formQtyPerPiece) : undefined,
     });
     if (res.error) {
-      alert(res.error);
+      await confirm({ title: res.error, confirmText: '知道了' });
     } else {
       if (res.warning) {
-        alert('⚠ 预算预警：' + res.warning);
+        await confirm({ title: '⚠ 预算预警', message: res.warning, confirmText: '知道了' });
       }
       setFormName(''); setFormSpec(''); setFormQty(''); setFormPrice(''); setFormQtyPerPiece('');
       setShowAddForm(false);
@@ -94,7 +96,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
   async function handleRecordReceipt(itemId: string) {
     if (!receiptQty) return;
     const res = await recordReceipt(itemId, orderId, Number(receiptQty), receiptNotes || undefined);
-    if (res.error) alert(res.error);
+    if (res.error) await confirm({ title: res.error, confirmText: '知道了' });
     else {
       setEditingReceiptId(null);
       setReceiptQty('');
@@ -104,19 +106,19 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
   }
 
   async function handleDelete(itemId: string) {
-    if (!confirm('删除这条采购明细？')) return;
+    if (!(await confirm({ title: '删除这条采购明细？', danger: true, confirmText: '删除' }))) return;
     await deleteProcurementItem(itemId, orderId);
     load();
   }
 
   async function handleSync() {
-    if (!confirm('从采购进度同步数据到对账明细？已存在的物料会跳过，不会重复添加。')) return;
+    if (!(await confirm({ title: '从采购进度同步数据到对账明细？', message: '已存在的物料会跳过，不会重复添加。', confirmText: '同步' }))) return;
     setSyncing(true);
     const res = await syncFromProcurementTracking(orderId);
     if (res.error && res.added === 0) {
-      alert(res.error);
+      await confirm({ title: res.error, confirmText: '知道了' });
     } else {
-      alert(`同步完成 ✅\n新增 ${res.added} 条，跳过 ${res.skipped} 条（已存在）`);
+      await confirm({ title: '同步完成 ✅', message: `新增 ${res.added} 条，跳过 ${res.skipped} 条（已存在）`, confirmText: '知道了' });
       load();
     }
     setSyncing(false);
@@ -125,7 +127,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
   async function handleExport() {
     setExporting(true);
     const res = await exportReconciliationSheet(orderId);
-    if (res.error) { alert(res.error); setExporting(false); return; }
+    if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); setExporting(false); return; }
     if (res.base64 && res.fileName) {
       const byteChars = atob(res.base64);
       const byteNums = new Array(byteChars.length);
@@ -350,6 +352,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 }

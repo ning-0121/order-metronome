@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder } from '@/app/actions/purchase-orders';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 const REASON_LABELS: Record<string, string> = {
   large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
@@ -11,6 +12,7 @@ const REASON_LABELS: Record<string, string> = {
 
 export function PurchaseOrderDetailClient({ view }: { view: any }) {
   const router = useRouter();
+  const { confirm, prompt, dialog } = useDialogs();
   const { po, lines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance } = view;
   const sup = po.suppliers || {};
   const [exporting, setExporting] = useState(false);
@@ -20,18 +22,19 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     setBusy('place');
     const res = await placePurchaseOrder(po.id);
     setBusy('');
-    if (res.error) { alert(res.error); return; }
-    if (res.pendingApproval) { alert('已转审批 · 触发:' + (res.reasons || []).map((r: string) => REASON_LABELS[r] || r).join('、')); router.refresh(); return; }
-    alert('✅ 已下单'); router.refresh();
+    if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
+    if (res.pendingApproval) { await confirm({ title: '已转审批', message: '触发:' + (res.reasons || []).map((r: string) => REASON_LABELS[r] || r).join('、'), confirmText: '知道了' }); router.refresh(); return; }
+    await confirm({ title: '✅ 已下单', confirmText: '知道了' }); router.refresh();
   }
   async function handleApprove() {
-    const note = window.prompt('审批意见（可选）:');
-    if (note === null) return;
+    const v = await prompt({ title: '审批通过', fields: [{ name: 'note', label: '审批意见（可选）', type: 'textarea' }], confirmText: '审批通过' });
+    if (!v) return;
+    const note = v.note;
     setBusy('approve');
     const res = await approvePurchaseOrder(po.id, note || undefined);
     setBusy('');
-    if (res.error) { alert(res.error); return; }
-    alert('✅ 审批通过'); router.refresh();
+    if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
+    await confirm({ title: '✅ 审批通过', confirmText: '知道了' }); router.refresh();
   }
 
   const dualNo = `${po.po_no} · 订单 ${(orderRefs || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
@@ -40,7 +43,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     setExporting(true);
     const res = await exportPurchaseOrder(po.id, { withPrice });
     setExporting(false);
-    if (res.error) { alert(res.error); return; }
+    if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
     if (res.base64 && res.fileName) {
       const bin = atob(res.base64);
       const arr = new Uint8Array(bin.length);
@@ -205,6 +208,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
           </table>
         </div>
       </div>
+      {dialog}
     </div>
   );
 }
