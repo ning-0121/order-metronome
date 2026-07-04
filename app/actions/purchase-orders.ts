@@ -424,7 +424,6 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const multiMaterial = materials.length > 1;
 
   const sup = (po as any).suppliers || {};
-  const custName = (ords || []).map((o: any) => o.customer_name).filter(Boolean)[0] || '';
   const orderNos = (ords || []).map((o: any) => o.internal_order_no || o.order_no).filter(Boolean).join(' / ') || (po as any).po_no || '';
 
   const ExcelJS = await import('exceljs');
@@ -453,7 +452,8 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   ws.getRow(1).height = 24;
   // 抬头信息块
   ws.addRow([]);
-  ws.addRow(['订单号', orderNos, '客户', custName, '原辅料名', multiMaterial ? materials.join('、') : (materials[0] || '')]);
+  // 采购单发供应商,不暴露客户名(2026-07-04 用户拍板)
+  ws.addRow(['订单号', orderNos, '原辅料名', multiMaterial ? materials.join('、') : (materials[0] || '')]);
   ws.addRow(['供应商', sup.name || '—', '联系人/电话', `${sup.contact_name || ''} ${sup.phone || ''}`.trim() || '—', '预计到货', (po as any).delivery_date || '—']);
   if (withPrice) ws.addRow(['付款方式/账期', `${sup.payment_method || '—'} / ${sup.net_days != null ? sup.net_days + '天' : '—'}`]);
   ws.addRow([]);

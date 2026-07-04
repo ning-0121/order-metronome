@@ -995,6 +995,16 @@ export async function listReceiptBatches(lineItemId: string): Promise<{ data?: a
 }
 
 // ── 采购中心工作队列（跨订单，供 /procurement 页只读渲染）──
+export interface PendingApprovalPO {
+  id: string;
+  po_no: string | null;
+  total_amount: number | null;
+  supplier_name: string | null;
+  reasons: string[];
+  required_by: string[];
+  orders: { order_no: string | null; internal_order_no: string | null; customer_name: string | null }[];
+}
+
 export interface QueueLine {
   id: string;
   order_id: string;
@@ -1009,6 +1019,7 @@ export interface QueueLine {
   promised_date: string | null;
   expected_arrival: string | null;
   po_no: string | null;
+  purchase_order_id: string | null;   // 已挂到某采购单(即使未 placed)→ 不再算"待下单"
   unit_price: number | null;
   price_variance_pct: number | null;
   ordered_qty: number | null;
@@ -1038,7 +1049,8 @@ export async function getProcurementQueues(): Promise<{
     chase: QueueLine[];
     readyShip: QueueLine[];
     receive: QueueLine[];
-    counts: { pendingRequests: number; pendingOrder: number; chase: number; readyShip: number; receive: number; red: number; overdueOrders: number; atRiskOrders: number };
+    pendingApprovalPOs: PendingApprovalPO[];
+    counts: { pendingRequests: number; pendingOrder: number; chase: number; readyShip: number; receive: number; pendingApproval: number; red: number; overdueOrders: number; atRiskOrders: number };
   };
   error?: string;
 }> {
@@ -1120,7 +1132,7 @@ export async function getProcurementQueues(): Promise<{
   // 基础读走用户会话(RLS 管范围),不含已封锁的 unit_price(price_variance_pct 是百分比、非绝对价,保留);
   // 底价对 floor 角色在下方经 service-role 补(此前此处直接返回 unit_price 未剥离,是泄价点)。
   const { data, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
+    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
     .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
   if (error) return { error: error.message };
 
@@ -1137,7 +1149,7 @@ export async function getProcurementQueues(): Promise<{
       material_name: r.material_name, category: r.category, supplier_name: r.supplier_name,
       line_status: r.line_status, required_by: r.required_by,
       promised_date: r.promised_date, expected_arrival: r.expected_arrival,
-      po_no: r.po_no, unit_price: r.unit_price, price_variance_pct: r.price_variance_pct,
+      po_no: r.po_no, purchase_order_id: r.purchase_order_id, unit_price: r.unit_price, price_variance_pct: r.price_variance_pct,
       ordered_qty: r.ordered_qty, ordered_unit: r.ordered_unit,
       received_qty: r.received_qty ?? null,
       chase_count: r.chase_count, last_chased_at: r.last_chased_at,
@@ -1154,18 +1166,47 @@ export async function getProcurementQueues(): Promise<{
   const byLamp = (a: QueueLine, b: QueueLine) => lampRank(a.lamp) - lampRank(b.lamp);
 
   // 2026-07-03 用户拍板四段:待下单 / 待催货(生产中) / 已完成待送货+在途 / 已送达待验收
-  const pendingOrder = rows.filter(r => r.line_status === 'pending_order').sort(byLamp);
+  // 2026-07-04 修:已挂到采购单的行(即使 PO 还没 placed/待审批)不再算"待下单",否则
+  // 建了单还显示"可下单",且撞审批闸后一直挂着,业务困惑。这些行改到「待审批采购单」露出。
+  const pendingOrder = rows.filter(r => r.line_status === 'pending_order' && !r.purchase_order_id).sort(byLamp);
   const chase = rows.filter(r => ['ordered', 'confirmed', 'in_production'].includes(r.line_status)).sort(byLamp);
   const readyShip = rows.filter(r => ['ready_to_ship', 'shipped'].includes(r.line_status)).sort(byLamp);
   const receive = rows.filter(r => r.line_status === 'arrived');
 
+  // 待审批采购单:已建、撞风险闸卡在 pending 的采购单(下单没走完的真相在这)。
+  const pendingApprovalPOs: PendingApprovalPO[] = [];
+  try {
+    const { data: pos } = await (supabase.from('purchase_orders') as any)
+      .select('id, po_no, total_amount, approval_status, approval_reasons, approval_required_by, order_ids, suppliers(name)')
+      .eq('status', 'draft').eq('approval_status', 'pending');
+    const poOrderIds = [...new Set((pos || []).flatMap((p: any) => p.order_ids || []))];
+    const poOrderMap = new Map<string, any>();
+    if (poOrderIds.length > 0) {
+      const { data: pords } = await (supabase.from('orders') as any)
+        .select('id, order_no, internal_order_no, customer_name').in('id', poOrderIds);
+      for (const o of (pords || [])) poOrderMap.set(o.id, o);
+    }
+    for (const p of (pos || [])) {
+      pendingApprovalPOs.push({
+        id: p.id, po_no: p.po_no, total_amount: canSeeFloor ? (p.total_amount ?? null) : null,
+        supplier_name: p.suppliers?.name ?? null,
+        reasons: p.approval_reasons || [], required_by: p.approval_required_by || [],
+        orders: (p.order_ids || []).map((oid: string) => {
+          const o = poOrderMap.get(oid);
+          return { order_no: o?.order_no ?? null, internal_order_no: o?.internal_order_no ?? null, customer_name: o?.customer_name ?? null };
+        }),
+      });
+    }
+  } catch (e: any) { console.warn('[getProcurementQueues] 待审批采购单查询失败:', e?.message); }
+
   return {
     data: {
-      pendingRequests, pendingOrder, chase, readyShip, receive,
+      pendingRequests, pendingOrder, chase, readyShip, receive, pendingApprovalPOs,
       counts: {
         pendingRequests: pendingRequests.length,
         pendingOrder: pendingOrder.length, chase: chase.length,
         readyShip: readyShip.length, receive: receive.length,
+        pendingApproval: pendingApprovalPOs.length,
         red: rows.filter(r => r.lamp === 'red').length,
         // 到货逾期订单:有 ≥1 行预计到货晚于要求日(red 灯)的不同订单数
         overdueOrders: new Set(rows.filter(r => r.lamp === 'red').map(r => r.order_id)).size,
