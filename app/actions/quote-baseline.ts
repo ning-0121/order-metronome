@@ -80,6 +80,57 @@ export async function getQuoteBaseline(orderId: string): Promise<{
   };
 }
 
+/** exceljs 单元格取文本(富文本/公式)。 */
+function xlsxCell(v: unknown): unknown {
+  if (v && typeof v === 'object') {
+    const o = v as any;
+    if (Array.isArray(o.richText)) return o.richText.map((t: any) => t?.text ?? '').join('');
+    if (o.result !== undefined) return o.result;
+    if (o.text !== undefined) return o.text;
+  }
+  return v;
+}
+
+/**
+ * 解析上传的内部成本核算单(报价单)→ 返回报价基线行 + 款预算(不落库,给前端预览确认)。
+ * 纯代码(exceljs + parseCostSheet),零 AI/零 token。仅业务/订单管理/admin。
+ */
+export async function parseQuoteFile(base64: string): Promise<{
+  lines?: QuoteBaselineLine[]; styleBudgets?: QuoteStyleBudget[]; error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roles = await getUserRoles(supabase, user.id);
+  if (!canEditBaseline(roles)) return { error: '仅业务/订单管理/管理员可上传报价单' };
+  try {
+    const buf = Buffer.from(base64.replace(/^data:.*base64,/, ''), 'base64');
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.default.Workbook();
+    await wb.xlsx.load(buf as any);
+    const ws = wb.worksheets[0];
+    if (!ws) return { error: '空文件' };
+    const rows: unknown[][] = [];
+    for (let r = 1; r <= ws.rowCount; r++) {
+      const arr: unknown[] = [];
+      for (let c = 1; c <= ws.columnCount; c++) arr.push(xlsxCell(ws.getCell(r, c).value));
+      rows.push(arr);
+    }
+    const { parseCostSheet } = await import('@/lib/services/quote-sheet-parser');
+    const res = parseCostSheet(rows);
+    if (res.headerRow === -1) return { error: '没识别到表头(需含 "STYLE" 列)。请确认上传的是内部成本核算单。' };
+    if (res.lines.length === 0) return { error: '识别到表头但没读到面料行,请检查文件或手工录入。' };
+    const lines: QuoteBaselineLine[] = res.lines.map((l) => ({
+      style_no: l.style_no, material_name: l.material_name, category: 'fabric', color: null,
+      quote_consumption: l.quote_consumption, quote_unit_price: l.quote_unit_price,
+      quote_unit: l.quote_unit, supplier: l.supplier, notes: l.composition || null,
+    }));
+    return { lines, styleBudgets: res.styleBudgets as QuoteStyleBudget[] };
+  } catch (e) {
+    return { error: '解析失败:' + (e instanceof Error ? e.message : String(e)) + '。可手工录入兜底。' };
+  }
+}
+
 export async function saveQuoteBaseline(
   orderId: string,
   input: { cmt_quote?: number | null; lines: QuoteBaselineLine[]; styleBudgets?: QuoteStyleBudget[] },

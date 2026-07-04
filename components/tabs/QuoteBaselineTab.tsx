@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getQuoteBaseline, saveQuoteBaseline, type QuoteBaselineLine } from '@/app/actions/quote-baseline';
+import { getQuoteBaseline, saveQuoteBaseline, parseQuoteFile, type QuoteBaselineLine } from '@/app/actions/quote-baseline';
 
 const CATS: Array<{ v: string; l: string }> = [
   { v: 'fabric', l: '面料' }, { v: 'trim', l: '辅料' }, { v: 'packing', l: '包装' },
@@ -44,6 +44,22 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
   function addRow() { setRows((rs) => [...rs, emptyRow(Date.now() + rs.length)]); }
   function delRow(k: number) { setRows((rs) => rs.filter((r) => r._k !== k)); }
 
+  const [parsing, setParsing] = useState(false);
+  async function onUpload(file: File) {
+    setParsing(true); setMsg(null);
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(file);
+      });
+      const res = await parseQuoteFile(b64);
+      if ((res as any).error) { setMsg({ ok: false, text: (res as any).error }); return; }
+      let k = Date.now();
+      setRows((res.lines || []).map((l) => ({ ...l, _k: k++ })));
+      setStyleBudgets((res as any).styleBudgets || []);
+      setMsg({ ok: true, text: `✅ 已解析 ${(res.lines || []).length} 料 / ${((res as any).styleBudgets || []).length} 款 —— 请核对/修改后点「冻结报价基线」` });
+    } finally { setParsing(false); }
+  }
+
   async function save() {
     setSaving(true); setMsg(null);
     const res = await saveQuoteBaseline(orderId, {
@@ -70,10 +86,17 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
           </p>
         </div>
         {canEdit && (
-          <button onClick={save} disabled={saving}
-            className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium disabled:opacity-50">
-            {saving ? '冻结中…' : (frozenAt ? '重新冻结' : '冻结报价基线')}
-          </button>
+          <div className="flex items-center gap-2">
+            <label className={`text-sm px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-50 font-medium cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="上传内部成本核算单 Excel,自动填(代码解析,零 token)">
+              {parsing ? '解析中…' : '📄 上传报价单'}
+              <input type="file" accept=".xlsx,.xls" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.currentTarget.value = ''; }} />
+            </label>
+            <button onClick={save} disabled={saving}
+              className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium disabled:opacity-50">
+              {saving ? '冻结中…' : (frozenAt ? '重新冻结' : '冻结报价基线')}
+            </button>
+          </div>
         )}
       </div>
 
