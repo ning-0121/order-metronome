@@ -688,7 +688,18 @@ export async function requestCancel(
     `申请取消订单：${reasonDetail}`,
     { reason_type: reasonType, reason_detail: reasonDetail }
   );
-  
+
+  // 通知财务(+管理员):有取消申请待审批 —— 否则审批人永远不知道有东西要审(2026-07-04 用户反馈)
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(supabase, ['finance', 'admin'], {
+      type: 'cancel_approval',
+      title: `🔴 取消订单待审批：${(order as any)?.order_no || ''}`,
+      message: `订单 ${(order as any)?.order_no || orderId}（${(order as any)?.customer_name || ''}）申请取消；原因：${reasonDetail}。请到该订单页审批取消申请。`,
+      relatedOrderId: orderId,
+    });
+  } catch (e: any) { console.warn('[requestCancel] 取消待审批通知失败(不阻断):', e?.message); }
+
   return { data: cancelRequest };
 }
 

@@ -345,6 +345,19 @@ export async function placePurchaseOrder(poId: string): Promise<{
       approval_status: 'pending', approval_required_by: decision.requiredBy,
       approval_reasons: decision.reasons, updated_at: new Date().toISOString(),
     }).eq('id', poId);
+    // 通知审批人:采购单卡在待审批 —— 否则采购/财务不知道要审,单子石沉大海(2026-07-04 用户反馈)
+    try {
+      const notifyRoles = new Set<string>(['admin']);
+      if (decision.requiredBy.includes('finance')) notifyRoles.add('finance');
+      if (decision.requiredBy.includes('procurement')) notifyRoles.add('procurement_manager');
+      const scopeCn = decision.requiredBy.includes('finance') ? '财务' : '采购经理';
+      const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+      await notifyUsersByRole(supabase, [...notifyRoles], {
+        type: 'po_approval',
+        title: `🟠 采购单待审批：${(po as any).po_no || ''}`,
+        message: `采购单 ${(po as any).po_no || poId} 触发风险闸（${decision.reasons.join('、')}），需${scopeCn}审批后方可下单。请到采购单页审批。`,
+      });
+    } catch (e: any) { console.warn('[placePurchaseOrder] 待审批通知失败(不阻断):', e?.message); }
     revalidatePath(`/procurement/po/${poId}`);
     return { pendingApproval: true, reasons: decision.reasons };
   }

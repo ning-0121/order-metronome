@@ -114,6 +114,41 @@ export async function createInAppNotification(
 }
 
 /**
+ * 扇出站内通知给「拥有指定角色之一」的所有用户 —— 审批类请求专用
+ * (取消申请、采购单待审批等:创建后审批人必须被主动通知,否则石沉大海)。
+ * 传入 supabase(可 service-role)。失败不抛(通知非主链路)。返回送达人数。
+ */
+export async function notifyUsersByRole(
+  supabase: any,
+  roles: string[],
+  n: { type: string; title: string; message: string; relatedOrderId?: string | null },
+): Promise<number> {
+  try {
+    const { data: users } = await (supabase.from('profiles') as any).select('user_id, role, roles');
+    const seen = new Set<string>();
+    const targets = (users || []).filter((p: any) => {
+      const rs: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
+      if (!rs.some((r: string) => roles.includes(r))) return false;
+      if (seen.has(p.user_id)) return false;
+      seen.add(p.user_id);
+      return true;
+    });
+    if (targets.length === 0) return 0;
+    const { error } = await (supabase.from('notifications') as any).insert(
+      targets.map((t: any) => ({
+        user_id: t.user_id, type: n.type, title: n.title, message: n.message,
+        related_order_id: n.relatedOrderId || null, status: 'unread', email_sent: false,
+      })),
+    );
+    if (error) { console.error('[notifyUsersByRole] insert 失败:', error.message); return 0; }
+    return targets.length;
+  } catch (e: any) {
+    console.error('[notifyUsersByRole] 异常:', e?.message);
+    return 0;
+  }
+}
+
+/**
  * Send notification (email + in-app)
  *
  * 通知频率策略：
