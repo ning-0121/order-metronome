@@ -17,6 +17,7 @@ type Style = {
   product_name_en?: string;   // 款式英文描述(生产任务单/PI 双语)
   // S1.2 每款布料(自动同步成该款 BOM 第一行 + 生产任务单用料)
   fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
+  set_multiplier?: number | string;   // 套装每套件数(1/空=非套装);算料按 件数×每套件数
 };
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
@@ -112,7 +113,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
   };
 
   // ── 款 ──
-  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
+  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', set_multiplier: 1, colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
   const removeStyle = (i: number) => setStyles(styles.filter((_, x) => x !== i));
   // 复制款:深拷贝(颜色/尺码件数/图片全带上),插在原款正下方,款号加「-副本」提示改;再改数量/图片即可
   const copyStyle = (i: number) => {
@@ -123,6 +124,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
       image_url: src.image_url,
       fabric_name: src.fabric_name || '', fabric_width: src.fabric_width || '',
       fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg',
+      set_multiplier: src.set_multiplier ?? 1,
       colors: src.colors.map((c) => ({ ...c, sizes: { ...c.sizes } })),
     };
     setStyles([...styles.slice(0, i + 1), dup, ...styles.slice(i + 1)]);
@@ -210,6 +212,12 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
             <input value={st.style_no} onChange={(e) => setStyleField(si, 'style_no', e.target.value)} placeholder="款号 *" disabled={!canEdit} className={`${inp} w-28`} />
             <input value={st.product_name} onChange={(e) => setStyleField(si, 'product_name', e.target.value)} placeholder="品名/款式描述(中)" disabled={!canEdit} className={`${inp} w-40`} />
             <input value={st.product_name_en || ''} onChange={(e) => setStyleField(si, 'product_name_en', e.target.value)} placeholder="款式描述(英) Style Desc" disabled={!canEdit} className={`${inp} w-44`} />
+            <label className="inline-flex items-center gap-1 text-xs text-gray-500" title="套装每套几件(如两件套填2)。算料按 件数×每套件数;非套装留 1。">
+              套装
+              <input type="number" min="1" step="1" value={st.set_multiplier ?? ''} onChange={(e) => setStyleField(si, 'set_multiplier', e.target.value)}
+                placeholder="1" disabled={!canEdit} className={`${inp} w-14`} />
+              件/套
+            </label>
             <input value={st.image_url} onChange={(e) => setStyleField(si, 'image_url', e.target.value)} placeholder="产品图 URL 或点上传" disabled={!canEdit} className={`${inp} flex-1 min-w-[140px]`} />
             {canEdit && (
               <label className="text-xs px-2 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 cursor-pointer hover:bg-indigo-100 whitespace-nowrap">

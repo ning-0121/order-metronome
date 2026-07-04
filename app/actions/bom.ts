@@ -26,14 +26,15 @@ export async function getBomItems(orderId: string) {
       .select('quantity').eq('id', orderId).maybeSingle();
     const orderQty = Number((order as any)?.quantity) || 0;
     const { data: liRows } = await (supabase.from('order_line_items') as any)
-      .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
+      .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
     const styleQty = new Map<string, number>();
     const styleColorQty = new Map<string, number>();
     const colorAlias = new Map<string, string>();
     const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
     for (const r of (liRows || []) as any[]) {
       if (!r.style_no) continue;
-      const q = Number(r.qty_pcs) || 0;
+      // 套装:总件数 = 件数 × 每套件数(set_multiplier;1=非套装)。算料按真实件数,不按套数。
+      const q = (Number(r.qty_pcs) || 0) * (Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1);
       styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
       const canon = normColor(r.color_cn) || normColor(r.color_en);
       if (!canon) continue;

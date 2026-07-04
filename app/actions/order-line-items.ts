@@ -72,6 +72,7 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
         product_name_en: r.product_name_en || '', image_url: r.image_url || '',
         fabric_name: r.fabric_name || '', fabric_width: r.fabric_width || '',
         fabric_consumption: r.fabric_consumption ?? '', fabric_unit: r.fabric_unit || 'kg',
+        set_multiplier: Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1,  // 套装每套件数(1=非套装)
         colors: [],
       };
       map.set(key, st);
@@ -176,7 +177,7 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
         style_no: st?.style_no?.trim() || null, product_name: st?.product_name?.trim() || null,
         product_name_en: st?.product_name_en?.trim() || null,     // 款式英文描述(双语)
         color_cn: c?.color_cn?.trim() || null, color_en: c?.color_en?.trim() || null,
-        sizes, unit: 'pcs', set_multiplier: 1,
+        sizes, unit: 'pcs', set_multiplier: Number(st?.set_multiplier) > 0 ? Number(st.set_multiplier) : 1,
         qty_pcs: qty || null, qty_raw: qty || null,
         carton_count: cartons != null && !isNaN(cartons) ? cartons : null,   // 箱数(该色行)
         image_url: st?.image_url?.trim() || null, remark: c?.remark?.trim() || null,
