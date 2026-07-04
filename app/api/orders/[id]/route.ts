@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getCurrentUserRole } from '@/lib/utils/user-role';
 
 /**
  * DELETE /api/orders/[id]
@@ -45,24 +44,15 @@ export async function DELETE(
     }, { status: 409 });
   }
 
-  const { isAdmin } = await getCurrentUserRole(supabase);
-
-  // 权限分级：
-  // - 管理员：任意状态都能删（强制清理）
-  // - 非管理员：只能删自己创建的 draft 订单
-  if (!isAdmin) {
-    if (order.lifecycle_status && order.lifecycle_status !== 'draft') {
-      return NextResponse.json(
-        { error: '只有草稿状态的订单可以删除，已启动的订单请走取消流程或联系管理员' },
-        { status: 400 }
-      );
-    }
-    if (order.created_by !== user.id) {
-      return NextResponse.json(
-        { error: '无权删除：只有订单创建者或管理员可以删除' },
-        { status: 403 }
-      );
-    }
+  // 权限(2026-07-04 用户拍板):删除订单仅 admin/财务(业务连自己草稿也不能删;
+  // 业务要移除订单请走「申请取消」→ 财务审批)。
+  const { data: delProf } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const delRoles: string[] = (delProf as any)?.roles?.length ? (delProf as any).roles : [(delProf as any)?.role].filter(Boolean);
+  if (!delRoles.some((r) => ['admin', 'finance'].includes(r))) {
+    return NextResponse.json(
+      { error: '无权删除订单:仅管理员/财务可删除。业务如需移除订单,请用「申请取消」提交财务审批。' },
+      { status: 403 }
+    );
   }
 
   // ── 级联清理 ──
@@ -115,5 +105,5 @@ export async function DELETE(
     });
   } catch (e: any) { console.warn('[deleteOrder] 财务作废通知失败(未配置即跳过):', e?.message); }
 
-  return NextResponse.json({ success: true, order_no: order.order_no, forced: isAdmin && order.lifecycle_status !== 'draft' });
+  return NextResponse.json({ success: true, order_no: order.order_no, forced: order.lifecycle_status !== 'draft' });
 }

@@ -20,7 +20,8 @@ export async function getCrossOrderNetting(): Promise<{ data?: NettingGroup[]; e
     .order('material_name', { ascending: true });
   if (error) return { error: error.message };
 
-  const rows = (lines || []) as any[];
+  // 过滤 0 量行(纯抵扣/尾料已满足 → 无需采购,不该在工作台占位)
+  const rows = ((lines || []) as any[]).filter((l) => Number(l.ordered_qty) > 0);
   if (rows.length === 0) return { data: [] };
 
   // 订单双号

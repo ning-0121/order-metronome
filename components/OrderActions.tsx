@@ -21,15 +21,15 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   const [cancelType, setCancelType] = useState('customer');
 
   const isDraft = lifecycleStatus === 'draft';
+  const isTerminal = ['cancelled', '已取消', 'completed', '已完成'].includes(lifecycleStatus);
   const canActivate = false; // 自动激活：阶段1全部完成后系统自动确认，不再手动操作
-  // 删除规则：
-  // - draft 订单 → 创建者或管理员都可以删
-  // - 非 draft 订单 → 只有管理员能强制删除（用于清理脏数据）
-  const canDelete = isAdmin || (isDraft && isOrderOwner);
-  const isForceDelete = isAdmin && !isDraft;
-  // 取消逻辑：业务员申请取消→管理员审批，管理员直接取消
-  const canRequestCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && isOrderOwner && !isAdmin;
-  const canDirectCancel = !isDraft && lifecycleStatus !== 'cancelled' && lifecycleStatus !== 'completed' && isAdmin;
+  // 删除规则(2026-07-04 用户拍板):删除订单仅 admin/财务(业务连自己草稿也不能删)。
+  const canDelete = isAdmin || isFinance;
+  const isForceDelete = (isAdmin || isFinance) && !isDraft;
+  // 取消逻辑:业务(非 admin/财务)申请取消 → 财务审批;admin/财务可直接取消。
+  // 含草稿:草稿+有库存记录删不掉,必须能走取消(修死路)。
+  const canRequestCancel = !isTerminal && isOrderOwner && !isAdmin && !isFinance;
+  const canDirectCancel = !isTerminal && (isAdmin || isFinance);
 
   async function handleActivate() {
     if (!confirm(`确认启动订单 ${orderNo}？启动后将进入执行状态。`)) return;
@@ -91,7 +91,7 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
         setShowCancelForm(false);
         setCancelReason('');
         router.refresh();
-        alert('取消申请已提交，等待管理员审批');
+        alert('取消申请已提交，等待财务审批');
       }
     } catch {
       alert('提交失败');

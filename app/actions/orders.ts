@@ -1272,10 +1272,11 @@ export async function decideCancelAction(
     return { error: '请先登录' };
   }
 
-  // 权限检查：只有 admin 可以审批取消申请
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) {
-    return { error: '无权审批：只有管理员可以审批取消申请' };
+  // 权限检查(2026-07-04 用户拍板:业务申请取消 → 财务审批;admin 也可)
+  const { data: _cprof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const _croles: string[] = (_cprof as any)?.roles?.length ? (_cprof as any).roles : [(_cprof as any)?.role].filter(Boolean);
+  if (!_croles.some((r) => ['admin', 'finance'].includes(r))) {
+    return { error: '无权审批:仅财务/管理员可审批取消申请' };
   }
 
   const result = await decideCancel(cancelRequestId, decision, decisionNote);
