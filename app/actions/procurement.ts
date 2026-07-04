@@ -1038,7 +1038,7 @@ export async function getProcurementQueues(): Promise<{
     chase: QueueLine[];
     readyShip: QueueLine[];
     receive: QueueLine[];
-    counts: { pendingRequests: number; pendingOrder: number; chase: number; readyShip: number; receive: number; red: number };
+    counts: { pendingRequests: number; pendingOrder: number; chase: number; readyShip: number; receive: number; red: number; overdueOrders: number; atRiskOrders: number };
   };
   error?: string;
 }> {
@@ -1167,6 +1167,10 @@ export async function getProcurementQueues(): Promise<{
         pendingOrder: pendingOrder.length, chase: chase.length,
         readyShip: readyShip.length, receive: receive.length,
         red: rows.filter(r => r.lamp === 'red').length,
+        // 到货逾期订单:有 ≥1 行预计到货晚于要求日(red 灯)的不同订单数
+        overdueOrders: new Set(rows.filter(r => r.lamp === 'red').map(r => r.order_id)).size,
+        // 需抓紧追(有可能逾期):有 ≥1 行临近要求日(yellow 灯)、尚未逾期的不同订单数
+        atRiskOrders: new Set(rows.filter(r => r.lamp === 'yellow').map(r => r.order_id)).size,
       },
     },
   };
