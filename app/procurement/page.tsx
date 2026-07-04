@@ -70,8 +70,11 @@ export default async function ProcurementCenterPage() {
           <Link href="/procurement/inventory" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50">
             📦 库存
           </Link>
-          <Link href="/procurement/po/new" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
-            ＋ 新建采购单
+          <Link href="/procurement/po/new" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-500 border border-gray-200 text-sm hover:bg-gray-50" title="不走归并,手动勾行建单">
+            手动建单
+          </Link>
+          <Link href="/procurement/netting" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+            🧩 待采购工作台
           </Link>
         </div>
       </div>

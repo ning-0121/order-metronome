@@ -33,6 +33,7 @@ export interface NettingGroup {
   material_name: string;
   specification: string | null;
   category: string | null;
+  color: string | null;
   unit: string | null;
   total_qty: number;
   order_count: number;
@@ -59,7 +60,7 @@ export function aggregateLinesByKey(lines: NettingLine[]): NettingGroup[] {
     if (!g) {
       g = {
         key, material_name: l.material_name, specification: l.specification ?? null,
-        category: l.category ?? null, unit: l.ordered_unit ?? null,
+        category: l.category ?? null, color: l.color ?? null, unit: l.ordered_unit ?? null,
         total_qty: 0, order_count: 0, line_ids: [], contributors: [],
       };
       groups.set(key, g);

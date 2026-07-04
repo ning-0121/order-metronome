@@ -16,8 +16,8 @@ export default async function NettingPage() {
       <div className="mb-2">
         <Link href="/procurement" className="text-sm text-gray-500 hover:text-indigo-600">← 采购中心</Link>
       </div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">跨订单合并采购</h1>
-      <p className="text-sm text-gray-500 mb-6">未归单待下单行按物料跨订单聚合 → 选一组建一张跨订单采购单(order_ids 自动多订单)。</p>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">待采购工作台</h1>
+      <p className="text-sm text-gray-500 mb-6">未归单待下单行按物料自动分组(同料同色同规格,跨订单)。勾选后:<b className="text-indigo-700">合并需求行</b>(同料并一行)或 <b className="text-emerald-700">归到一张采购单</b>(跨料同供应商一张单)。</p>
       <NettingClient />
     </div>
   );
