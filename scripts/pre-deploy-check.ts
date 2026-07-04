@@ -9,6 +9,7 @@ import { MILESTONE_TEMPLATE_V1, MILESTONE_TEMPLATE_V2, SAMPLE_MILESTONE_TEMPLATE
 import { MILESTONE_CONFIRMATION_PARTIES } from '../lib/domain/confirmationParties';
 import { overReceiptCheck } from '../lib/domain/procurement';
 import { computeSuggestedPurchaseQty } from '../lib/services/procurement-consolidation';
+import { matchBaseline, checkOverBaseline, checkTrimTotalOverBudget } from '../lib/domain/cost-baseline';
 import { calcDueDates } from '../lib/schedule';
 import { CIRCUIT_BREAKER, ACTION_CONFIG } from '../lib/agent/types';
 
@@ -94,6 +95,26 @@ console.log('\n🧮 采购算账');
   assert(computeSuggestedPurchaseQty({ total_required_qty: 1000, procurement_loss_pct: 0, moq: 500 }) === 1000, 'MOQ 500 对齐 1000');
   assert(computeSuggestedPurchaseQty({ total_required_qty: 1001, procurement_loss_pct: 0, moq: 500 }) === 1500, 'MOQ 500:1001→1500');
   assert(computeSuggestedPurchaseQty({ total_required_qty: null as any }) === null, '无需求量→null');
+}
+
+console.log('\n▶ 报价基线对照(P2:超单耗/超价,容差 0)');
+{
+  const lines = [
+    { material_name: '280克直贡呢', color: '黑色', quote_consumption: 0.382, quote_unit_price: 20 },
+    { material_name: '拉链', color: null, quote_consumption: 1, quote_unit_price: 0.8 },
+  ];
+  assert(matchBaseline(lines, '280克直贡呢', '黑色').matched, '同料同色匹配');
+  assert(matchBaseline(lines, '拉链', '任意色').matched, '基线通用色(color空)匹配任意色');
+  assert(!matchBaseline(lines, '不存在的料', null).matched, '无此料不匹配');
+  const b = matchBaseline(lines, '280克直贡呢', '黑色');
+  assert(checkOverBaseline(b, 0.383, 20).over_consumption, '大货单耗 0.383>0.382 超');
+  assert(!checkOverBaseline(b, 0.382, 20).over_consumption, '大货单耗 0.382=0.382 不超(容差0=严格大于)');
+  assert(checkOverBaseline(b, 0.382, 21).over_price, '采购价 21>20 超');
+  assert(!checkOverBaseline(b, 0.382, 20).over_price, '采购价 20=20 不超');
+  assert(!checkOverBaseline({ matched: true, quote_consumption: null, quote_unit_price: null }, 0.5, 99).over_consumption, '基线值空→不判超');
+  assert(checkTrimTotalOverBudget(1001, 1000).over, '辅料总价 1001>1000 超');
+  assert(!checkTrimTotalOverBudget(1000, 1000).over, '辅料总价 1000=1000 不超');
+  assert(!checkTrimTotalOverBudget(9999, null).over, '预算空→不判超');
 }
 
 // 打样模板必须包含关键节点

@@ -642,6 +642,13 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                       )}
                       {it.material_name || '—'}
                     </span>
+                    {it.baseline && (it.baseline.over_consumption || it.baseline.over_price) && (
+                      <span
+                        title={`${it.baseline.over_consumption ? `大货单耗 超报价基线 +${it.baseline.consumption_over_pct}%（报价 ${it.baseline.quote_consumption}）` : ''}${it.baseline.over_price ? ` 采购单价 超报价基线 +${it.baseline.price_over_pct}%` : ''} · 超基线需财务审批`}
+                        className="ml-1 inline-block px-1.5 py-px rounded text-[10px] font-medium bg-rose-100 text-rose-700 align-middle">
+                        ⚠超基线{it.baseline.over_consumption ? `·耗+${it.baseline.consumption_over_pct}%` : ''}{it.baseline.over_price ? `·价+${it.baseline.price_over_pct}%` : ''}
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 px-2"><span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{CAT_LABEL[it.category] || it.category || '—'}</span></td>
                   <td className="py-2 px-2 text-gray-600">{it.color || '—'}</td>

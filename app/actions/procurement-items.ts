@@ -85,6 +85,21 @@ export async function listProcurementItems(orderId: string) {
     }
   } catch { /* 历史建议失败不影响列表 */ }
 
+  // 报价基线对照(P2):按物料+颜色匹配冻结的报价基线,判超单耗/超价(容差 0,超即报警;超需财务审批)。
+  // 在剥价前算(用 unit_price 比对),剥价时同步剥基线价字段。
+  try {
+    const { data: cb } = await (supabase.from('order_cost_baseline') as any)
+      .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
+    const baseLines = (((cb as any)?.quote_baseline_lines) || []) as any[];
+    if (baseLines.length > 0) {
+      const { matchBaseline, checkOverBaseline } = await import('@/lib/domain/cost-baseline');
+      for (const r of (data || [])) {
+        const base = matchBaseline(baseLines, (r as any).material_name, (r as any).color);
+        (r as any).baseline = base.matched ? checkOverBaseline(base, (r as any).production_consumption ?? null, (r as any).unit_price ?? null) : null;
+      }
+    }
+  } catch { /* 基线对照失败不影响列表 */ }
+
   // 底价剥离(红线③):非可见底价角色 → 删 unit_price/金额/历史成交价,server 端剥离
   if (!canSeeFloor) {
     for (const r of (data || [])) {
@@ -92,6 +107,8 @@ export async function listProcurementItems(orderId: string) {
       delete (r as any).ordered_amount;
       delete (r as any).difference_amount;
       if ((r as any).last_purchase) delete (r as any).last_purchase.unit_price;
+      // 报价基线的价维也剥离(报价单价=成本),只留单耗对照
+      if ((r as any).baseline) { delete (r as any).baseline.quote_unit_price; delete (r as any).baseline.price_over_pct; delete (r as any).baseline.over_price; }
     }
   }
 
