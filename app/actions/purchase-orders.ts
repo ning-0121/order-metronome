@@ -16,7 +16,6 @@ import { maskFloorForLines, maskSupplierFinance } from '@/lib/procurement/purcha
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 import { evaluateProcurementApproval, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
-import { consolidationKey } from '@/lib/services/procurement-consolidation';
 
 const CAN_PROCURE = ['admin', 'procurement', 'procurement_manager'];
 
@@ -369,65 +368,123 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   // 含价版(仅采购)经 service-role 读底价;无价版走用户会话(RLS 管范围),不取价列
   const { data: lines } = await ((withPrice ? createServiceRoleClient() : supabase).from('procurement_line_items') as any)
     .select(withPrice
-      ? 'material_name, specification, category, ordered_qty, ordered_unit, unit_price, ordered_amount'
-      : 'material_name, specification, category, ordered_qty, ordered_unit')
+      ? 'material_name, specification, category, ordered_qty, ordered_unit, unit_price, ordered_amount, notes, procurement_item_id'
+      : 'material_name, specification, category, ordered_qty, ordered_unit, notes, procurement_item_id')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
-  const { data: ords } = await (supabase.from('orders') as any)
-    .select('order_no, internal_order_no').in('id', ((po as any).order_ids || []) as string[]);
 
-  // C 合并同料:同 consolidation_key 并为一行(数量/金额求和;单价不一致时按 金额/数量 回算)。只影响导出,DB 行不动。
-  let exportLines = (lines || []) as any[];
-  if ((po as any).merge_same_materials) {
-    const groups = new Map<string, any>();
-    for (const l of exportLines) {
-      const key = consolidationKey({
-        material_name: l.material_name, specification: l.specification,
-        category: l.category, unit: l.ordered_unit,
-      });
-      const g = groups.get(key);
-      if (!g) { groups.set(key, { ...l, _prices: new Set([l.unit_price ?? null]) }); continue; }
-      g.ordered_qty = (Number(g.ordered_qty) || 0) + (Number(l.ordered_qty) || 0);
-      g.ordered_amount = (Number(g.ordered_amount) || 0) + (Number(l.ordered_amount) || 0);
-      g._prices.add(l.unit_price ?? null);
-    }
-    exportLines = [...groups.values()].map((g) => {
-      if (g._prices.size > 1) {
-        const qty = Number(g.ordered_qty) || 0;
-        g.unit_price = qty > 0 && g.ordered_amount != null ? Math.round((g.ordered_amount / qty) * 10000) / 10000 : null;
-      }
-      delete g._prices;
-      return g;
-    });
+  // 颜色 + 大货单耗:执行行无这些列 → 经 procurement_item_id 回查主数据(采购单按颜色分行,模板需要)
+  const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];
+  const piMap = new Map<string, any>();
+  if (piIds.length > 0) {
+    const { data: pis } = await (createServiceRoleClient().from('procurement_items') as any)
+      .select('id, color, production_consumption, development_consumption').in('id', piIds);
+    for (const p of (pis || [])) piMap.set(p.id, p);
   }
+  for (const l of (lines || [])) {
+    const pi = l.procurement_item_id ? piMap.get(l.procurement_item_id) : null;
+    (l as any).color = pi?.color ?? null;
+    (l as any).consumption = pi?.production_consumption ?? pi?.development_consumption ?? null;
+  }
+
+  const { data: ords } = await (supabase.from('orders') as any)
+    .select('order_no, internal_order_no, customer_name').in('id', ((po as any).order_ids || []) as string[]);
+
+  // 采购单模板按「物料 + 颜色 + 规格 + 单位」聚合成行(颜色分行,同色跨订单求和);DB 行不动。
+  const rowMap = new Map<string, any>();
+  for (const l of (lines || []) as any[]) {
+    const key = `${l.material_name || ''}|${l.color || ''}|${l.specification || ''}|${l.ordered_unit || ''}`;
+    const g = rowMap.get(key) || {
+      material_name: l.material_name || '', color: l.color || '', specification: l.specification || '',
+      unit: l.ordered_unit || '', consumption: l.consumption ?? null, notes: l.notes || '',
+      qty: 0, amount: 0, prices: new Set<number>(),
+    };
+    g.qty += Number(l.ordered_qty) || 0;
+    g.amount += Number(l.ordered_amount) || 0;
+    if (l.unit_price != null) g.prices.add(Number(l.unit_price));
+    rowMap.set(key, g);
+  }
+  const rows = [...rowMap.values()].map((g) => ({
+    ...g,
+    unit_price: g.prices.size === 1 ? [...g.prices][0] : (g.qty > 0 && g.amount ? Math.round((g.amount / g.qty) * 10000) / 10000 : null),
+  }));
+  const materials = [...new Set(rows.map((r) => r.material_name).filter(Boolean))];
+  const multiMaterial = materials.length > 1;
+
+  const sup = (po as any).suppliers || {};
+  const custName = (ords || []).map((o: any) => o.customer_name).filter(Boolean)[0] || '';
+  const orderNos = (ords || []).map((o: any) => o.internal_order_no || o.order_no).filter(Boolean).join(' / ') || (po as any).po_no || '';
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
+  wb.creator = 'QIMO OS · 义乌市绮陌服饰有限公司';
   const ws = wb.addWorksheet('采购单');
-  const sup = (po as any).suppliers || {};
-  const dualNo = `${(po as any).po_no}  ·  订单 ${(ords || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
-  ws.addRow([withPrice ? '采购单 PURCHASE ORDER' : '采购单(内部流转 · 无价)']);
-  ws.addRow(['单号', dualNo]);
-  ws.addRow(['供应商', sup.name || '—']);
-  ws.addRow(['联系人/电话', `${sup.contact_name || ''} ${sup.phone || ''}`]);
-  if (withPrice) ws.addRow(['付款方式/账期', `${sup.payment_method || '—'} / ${sup.net_days != null ? sup.net_days + '天' : '—'}`]);
-  ws.addRow(['交期', (po as any).delivery_date || '—']);
+
+  // 列定义(按你上传的模板);无价版去掉 单价/金额
+  const COLS: Array<{ h: string; w: number; price?: boolean }> = [
+    ...(multiMaterial ? [{ h: '原辅料名', w: 20 }] : []),
+    { h: '颜色代码', w: 16 }, { h: 'PATTON色号', w: 12 }, { h: '工厂色号', w: 12 },
+    { h: '单件平方用量', w: 12 }, { h: '单件用量(kg)', w: 12 }, { h: '订单数量', w: 10 },
+    { h: '总用量', w: 12 }, { h: '单位', w: 8 },
+    ...(withPrice ? [{ h: '单价', w: 10, price: true }, { h: '金额', w: 14, price: true }] : []),
+    { h: '备注', w: 20 },
+  ];
+  const NC = COLS.length;
+  const colLetter = (i: number) => String.fromCharCode(65 + i);
+  const lastCol = colLetter(NC - 1);
+
+  // 抬头:公司名 + 采购单
+  ws.mergeCells(`A1:${lastCol}1`);
+  ws.getCell('A1').value = '义乌市绮陌服饰有限公司  ·  采购单 PURCHASE ORDER' + (withPrice ? '' : '(内部流转·无价)');
+  ws.getCell('A1').font = { bold: true, size: 14 };
+  ws.getCell('A1').alignment = { horizontal: 'center' };
+  ws.getRow(1).height = 24;
+  // 抬头信息块
   ws.addRow([]);
-  if (withPrice) {
-    ws.addRow(['物料', '规格', '数量', '单位', '单价', '金额']);
-    for (const l of exportLines) {
-      ws.addRow([l.material_name, l.specification || '', l.ordered_qty, l.ordered_unit, l.unit_price ?? '', l.ordered_amount ?? '']);
-    }
-    ws.addRow([]);
-    ws.addRow(['', '', '', '', '合计', (po as any).total_amount ?? '']);
-    [22, 22, 12, 8, 12, 14].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-  } else {
-    // 无价版:去掉单价/金额/合计/账期,加收货栏(仓库到货核对手填)
-    ws.addRow(['物料', '规格', '数量', '单位', '实收数量', '备注']);
-    for (const l of exportLines) {
-      ws.addRow([l.material_name, l.specification || '', l.ordered_qty, l.ordered_unit, '', '']);
-    }
-    [22, 22, 12, 8, 12, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  ws.addRow(['订单号', orderNos, '客户', custName, '原辅料名', multiMaterial ? materials.join('、') : (materials[0] || '')]);
+  ws.addRow(['供应商', sup.name || '—', '联系人/电话', `${sup.contact_name || ''} ${sup.phone || ''}`.trim() || '—', '预计到货', (po as any).delivery_date || '—']);
+  if (withPrice) ws.addRow(['付款方式/账期', `${sup.payment_method || '—'} / ${sup.net_days != null ? sup.net_days + '天' : '—'}`]);
+  ws.addRow([]);
+
+  // 表头
+  const headerRow = ws.addRow(COLS.map((c) => c.h));
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+  });
+
+  // 明细行(每颜色一行;PATTON色号/工厂色号/单件平方用量/订单数量 无数据留空给采购员手填)
+  let totalAmount = 0;
+  for (const r of rows) {
+    const cells: any[] = [
+      ...(multiMaterial ? [r.material_name] : []),
+      r.color || '', '', '', '',                       // 颜色 · PATTON · 工厂色号 · 单件平方用量(空)
+      r.consumption ?? '', '',                          // 单件用量kg · 订单数量(空)
+      Math.round(r.qty * 1000) / 1000, r.unit || '',    // 总用量 · 单位
+      ...(withPrice ? [r.unit_price ?? '', r.amount ? Math.round(r.amount * 100) / 100 : ''] : []),
+      r.notes || '',
+    ];
+    if (withPrice && r.amount) totalAmount += r.amount;
+    const row = ws.addRow(cells);
+    row.eachCell((cell) => { cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
   }
+
+  // 合计(含价版)
+  if (withPrice) {
+    const totalRow = ws.addRow([]);
+    const amtColIdx = COLS.findIndex((c) => c.h === '金额');
+    ws.getCell(`${colLetter(amtColIdx - 1)}${totalRow.number}`).value = '合计';
+    ws.getCell(`${colLetter(amtColIdx - 1)}${totalRow.number}`).font = { bold: true };
+    ws.getCell(`${colLetter(amtColIdx)}${totalRow.number}`).value = Math.round(totalAmount * 100) / 100;
+    ws.getCell(`${colLetter(amtColIdx)}${totalRow.number}`).font = { bold: true };
+  }
+
+  // 页脚
+  ws.addRow([]);
+  ws.addRow(['业务员：', '', '采购员：', '', '下单日期：', new Date().toLocaleDateString('zh-CN')]);
+
+  COLS.forEach((c, i) => { ws.getColumn(i + 1).width = c.w; });
 
   const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
   return { base64, fileName: `采购单${withPrice ? '' : '_无价版'}_${(po as any).po_no}_${sup.name || ''}.xlsx` };
