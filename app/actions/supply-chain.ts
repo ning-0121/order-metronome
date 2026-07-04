@@ -18,10 +18,13 @@ async function canSeeFinancials(supabase: any, userId: string): Promise<boolean>
   return hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
 }
 
+// 审计修(2026-07-04):补齐全部 line_status,避免 ready_to_ship/rejected/cancelled 的行
+// 落不进任何桶、从概览凭空消失(四桶之和 < lines.length,与采购工作台两张皮)。
 const PENDING = new Set(['draft', 'pending_order']);
-const TRANSIT = new Set(['ordered', 'confirmed', 'in_production', 'shipped']);
+const TRANSIT = new Set(['ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped']);
 const ARRIVED = new Set(['arrived']);
-const DONE = new Set(['accepted', 'closed', 'concession']);
+const DONE = new Set(['accepted', 'closed', 'concession', 'cancelled']);
+// rejected(质检拒收)→ 归"需关注",不算完成
 
 export interface SupplyChainLine {
   id: string;
@@ -81,10 +84,12 @@ export async function getOrderSupplyChainOverview(
     else if (TRANSIT.has(st)) inTransit++;
     else if (ARRIVED.has(st)) arrived++;
     else if (DONE.has(st)) done++;
+    else attention++;   // rejected 及任何未归类状态 → 需关注(不再凭空消失)
     const cat = l.category || 'other';
     byCategory[cat] = (byCategory[cat] || 0) + 1;
-    // 需关注:需到日已过,且还没到厂/验收(只读判断,不拦截)
-    const overdue = !!l.required_by && l.required_by < today && !ARRIVED.has(st) && !DONE.has(st);
+    // 需关注:需到日已过,且还没到厂/验收(只读判断,不拦截)。已在 else 计过的不重复加。
+    const overdue = !!l.required_by && l.required_by < today && !ARRIVED.has(st) && !DONE.has(st)
+      && (PENDING.has(st) || TRANSIT.has(st));
     if (overdue) attention++;
     return { ...l, overdue };
   });

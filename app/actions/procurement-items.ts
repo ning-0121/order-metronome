@@ -172,6 +172,23 @@ export async function deductFromStock(itemId: string, orderId: string): Promise<
   const { error: uErr } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
   if (uErr) return { error: friendlyError(uErr) };
 
+  // 审计修(2026-07-04):抵扣后同步【未下单且未归采购单】执行行的 ordered_qty = 抵扣后出单量,
+  // 否则执行行仍是抵扣前全量 → 归单/导出/下单发给供应商的量把已抵扣的库存重复采购。
+  // 已归采购单的行(purchase_order_id 非空)不静默改,标 needs_reconfirm 让采购走补/退。
+  try {
+    await (supabase.from('procurement_line_items') as any)
+      .update({ ordered_qty: remaining, updated_at: new Date().toISOString() })
+      .eq('procurement_item_id', itemId)
+      .in('line_status', ['draft', 'pending_order'])
+      .is('purchase_order_id', null);
+    const { count: placedCount } = await (supabase.from('procurement_line_items') as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('procurement_item_id', itemId).not('purchase_order_id', 'is', null);
+    if ((placedCount || 0) > 0) {
+      await (supabase.from('procurement_items') as any).update({ needs_reconfirm: true }).eq('id', itemId);
+    }
+  } catch (e: any) { console.warn('[deductFromStock] 执行行数量同步失败(不阻断):', e?.message); }
+
   revalidatePath(`/orders/${orderId}`);
   return { deducted: deduct, remaining, total_deduct: totalDeduct };
 }

@@ -12,6 +12,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 export interface OrderFinancials {
   id: string;
@@ -63,6 +64,22 @@ export async function getOrderFinancials(orderId: string): Promise<{ data?: Orde
     const { data: newData } = await (supabase.from('order_financials') as any)
       .select('*').eq('order_id', orderId).maybeSingle();
     data = newData;
+  }
+  if (!data) return { data: undefined };
+
+  // 审计修(2026-07-04):action 层加 CAN_SEE_FINANCIALS 门禁(原来只靠 RLS,而 RLS 的
+  // owner 子句会把成本/毛利超授给被指派为 owner 的 production/qc/跟单)。非授权角色剥离
+  // 金额/成本/利润,只保留控制开关+状态(生产/物流要用 allow_production/allow_shipment)。
+  const { data: prof } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')) {
+    const SENSITIVE = ['sale_price_per_piece', 'sale_total', 'cost_material', 'cost_cmt',
+      'cost_shipping', 'cost_other', 'cost_total', 'gross_profit_rmb', 'margin_pct',
+      'deposit_rate', 'deposit_amount', 'deposit_received', 'balance_amount', 'balance_received'];
+    const masked = { ...(data as any) };
+    for (const k of SENSITIVE) masked[k] = null;
+    return { data: masked as OrderFinancials };
   }
 
   return { data: data as OrderFinancials };
