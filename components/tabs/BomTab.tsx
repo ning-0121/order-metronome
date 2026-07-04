@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react';
 import { getBomItems, addBomItem, addBomItemsBatch, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
 import { listMaterialMaster } from '@/app/actions/material-master';
+import { getQuoteBaseline } from '@/app/actions/quote-baseline';
+import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
 const CAT_LABEL: Record<string, string> = {
@@ -100,6 +102,17 @@ export function BomTab({ orderId }: { orderId: string }) {
 
   const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
+
+  // 报价基线(P2:BOM 单耗超报价单耗 → 提示)
+  const [baseLines, setBaseLines] = useState<BaselineLine[]>([]);
+  useEffect(() => { getQuoteBaseline(orderId).then((r) => setBaseLines(((r as any).data?.lines || []) as BaselineLine[])).catch(() => {}); }, [orderId]);
+  const overBaseline = (it: any) => {
+    if (!baseLines.length) return null;
+    const base = matchBaseline(baseLines, it.material_name, it.color);
+    if (!base.matched) return null;
+    const chk = checkOverBaseline(base, it.qty_per_piece != null ? Number(it.qty_per_piece) : null, null);
+    return chk.over_consumption ? chk : null;
+  };
 
   // ── 原辅料单批量识别 ──
   async function handleParseFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -805,7 +818,13 @@ export function BomTab({ orderId }: { orderId: string }) {
                       </label>
                     </div>
                   </td>
-                  <td className="py-2 px-3 text-gray-700">{item.qty_per_piece ?? '—'}</td>
+                  <td className="py-2 px-3 text-gray-700">
+                    {item.qty_per_piece ?? '—'}
+                    {(() => { const o = overBaseline(item); return o ? (
+                      <span title={`BOM 单耗 ${item.qty_per_piece} 超报价单耗 ${o.quote_consumption}（+${o.consumption_over_pct}%）· 核料确认时需财务审批`}
+                        className="ml-1 inline-block px-1 py-px rounded text-[10px] font-medium bg-rose-100 text-rose-700 align-middle">⚠超报价+{o.consumption_over_pct}%</span>
+                    ) : null; })()}
+                  </td>
                   <td className="py-2 px-3 font-medium text-gray-900">{item.total_qty ?? '—'}</td>
                   <td className="py-2 px-3 text-gray-600">{item.unit}</td>
                   <td className="py-2 px-3 text-gray-500">{item.supplier || '—'}</td>
