@@ -387,16 +387,26 @@ async function requireManage(): Promise<{ supabase: any; userId?: string; error?
 }
 
 // ── 多供应商图 ──
+// 🔒 底价红线(2026-07-05 审计 P0):unit_price=大货底价,只有采购/财务/管理员可见。
+// 此前本函数对全登录角色返回底价 + /material-master 挂在非 admin 导航 → 业务/生产/QC 都能看底价。
+// 修:非 CAN_SEE_PROCUREMENT_FLOOR 角色一律剥 unit_price(其余供应商信息可看)。
 export async function listMaterialSuppliers(materialMasterId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  const roles = await rolesOf(supabase, user.id);
+  const { hasRoleInGroup } = await import('@/lib/domain/roles');
+  const canFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   const { data, error } = await (supabase.from('material_supplier') as any)
     .select('id, supplier_id, unit_price, currency, lead_days, moq, purchase_unit, is_preferred, last_quoted_at, note, suppliers(name)')
     .eq('material_master_id', materialMasterId)
     .order('is_preferred', { ascending: false });
   if (error) return { error: friendlyError(error) };
-  return { data: (data || []).map((r: any) => ({ ...r, supplier_name: r.suppliers?.name || null })) };
+  return { data: (data || []).map((r: any) => ({
+    ...r,
+    unit_price: canFloor ? r.unit_price : null,   // 非采购/财务:屏蔽大货底价
+    supplier_name: r.suppliers?.name || null,
+  })) };
 }
 
 export async function upsertMaterialSupplier(input: {

@@ -55,6 +55,16 @@ export async function calculateOrderScore(
 ): Promise<{ data?: any; error?: string }> {
   const supabase = await createClient();
 
+  // 🔒 鉴权(2026-07-05 审计 P0):此前本 action 完全无 auth,却被客户端 LiveScorePreview 直调
+  // 且 upsert order_commissions(写各角色评分/提成率)→ 任何人拿 orderId 即可篡改绩效、偷看他人评分。
+  // 修:必须登录 + 对该订单有访问权(内部完成/管理员触发链本就在 auth 后调用,天然通过)。
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) {
+    return { error: '无权查看此订单评分' };
+  }
+
   // 获取订单信息
   const { data: order } = await (supabase.from('orders') as any)
     .select('id, order_no, etd, warehouse_due_date, incoterm, owner_user_id, created_by')

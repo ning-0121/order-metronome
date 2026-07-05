@@ -1338,6 +1338,48 @@ export async function decideCancelAction(
     } catch (e: any) { console.warn(`[orders] 取消冲销通知失败(不阻断):`, e?.message); }
   }
 
+  // ── 本地采购/风险清理(2026-07-05 审计 P0)──
+  // 此前取消只标 cancelled + 冻结里程碑,不作废本地采购单/执行行、不清风险投影
+  // → 采购继续为死单下单/催货/收货、库存为死单进货、风险卡显示幽灵健康度。
+  if (decision === 'approved') {
+    const oid = (result.data as any)?.cancelRequest?.order_id;
+    if (oid) {
+      try {
+        const { createServiceRoleClient } = await import('@/lib/supabase/server');
+        const svc = createServiceRoleClient();
+        // ① 关联采购单:从 order_ids 移除本单;数组空了(整单只为本单)且未收货完成 → 作废(比照删除路径)
+        const { data: pos } = await (svc.from('purchase_orders') as any)
+          .select('id, order_ids, status').contains('order_ids', [oid]);
+        for (const po of (pos || [])) {
+          const remain = ((po as any).order_ids || []).filter((x: string) => x !== oid);
+          const settled = ['received', 'closed'].includes((po as any).status);
+          if (remain.length === 0 && !settled) {
+            await (svc.from('purchase_orders') as any).update({ status: 'cancelled', order_ids: [], updated_at: new Date().toISOString() }).eq('id', (po as any).id);
+          } else {
+            await (svc.from('purchase_orders') as any).update({ order_ids: remain, updated_at: new Date().toISOString() }).eq('id', (po as any).id);
+          }
+        }
+        // ② 本单未收货的执行行 → cancelled,退出采购队列(已收货/让步/关闭的保留台账)
+        await (svc.from('procurement_line_items') as any)
+          .update({ line_status: 'cancelled' })
+          .eq('order_id', oid)
+          .not('line_status', 'in', '("received","accepted","closed","concession","cancelled")');
+        // ③ 清掉交付置信度投影(取消单无交付风险,免显示幽灵健康度;投影可重建无害)
+        await (svc.from('runtime_orders') as any).delete().eq('order_id', oid);
+      } catch (e: any) { console.warn('[decideCancelAction] 采购/风险清理失败(不阻断取消):', e?.message); }
+      // ④ 通知采购/生产:此单已取消,停止下单/催货/排产(原来他们连铃铛都收不到)
+      try {
+        const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+        await notifyUsersByRole(supabase, ['procurement', 'procurement_manager', 'production', 'production_manager'], {
+          type: 'order_cancelled',
+          title: '🛑 订单已取消,停止采购/生产',
+          message: '关联订单已取消,系统已作废其未收货的采购单/执行行。请勿再为此单下单、催货或排产。',
+          relatedOrderId: oid,
+        });
+      } catch (e: any) { console.warn('[decideCancelAction] 取消通知采购/生产失败(不阻断):', e?.message); }
+    }
+  }
+
   // 获取订单ID以便revalidate（从result中获取）
   if (result.data && typeof result.data === 'object' && 'cancelRequest' in result.data) {
     const cancelRequest = (result.data as any).cancelRequest;
