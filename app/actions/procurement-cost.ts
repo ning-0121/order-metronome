@@ -71,6 +71,92 @@ export async function getProcurementCostSummary(orderId: string): Promise<{ data
   };
 }
 
+/**
+ * 预算 vs 实际 四列对照(2026-07-05 用户拍板):逐物料 预算/实际下单/实际送货/尾料剩余,
+ * 每列 数量·单价·总额;实际下单哪项超预算标红。预算来自报价基线(单件用量×订单件数)。
+ */
+export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; error?: string }> {
+  const { userId, canFloor } = await authFloor();
+  if (!userId) return { error: '请先登录' };
+  if (!canFloor) return { error: '无权查看采购成本' };
+  const svc = createServiceRoleClient();
+
+  const { data: order } = await (svc.from('orders') as any)
+    .select('id, order_no, internal_order_no, customer_name, quantity').eq('id', orderId).maybeSingle();
+  if (!order) return { error: '订单不存在' };
+  const orderQty = Number((order as any).quantity) || 0;
+
+  const { data: base } = await (svc.from('order_cost_baseline') as any)
+    .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
+  const baseLines: any[] = (base as any)?.quote_baseline_lines || [];
+
+  const { data: lines } = await (svc.from('procurement_line_items') as any)
+    .select('material_name, ordered_qty, received_qty, unit_price, ordered_amount, ordered_unit').eq('order_id', orderId);
+
+  const { getOrderLeftover } = await import('@/app/actions/inventory');
+  const leftoverRows: any[] = ((await getOrderLeftover(orderId)) as any).data || [];
+
+  const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  // 预算:逐料(单件用量取该料最大值;报价单价)
+  const budgetMap = new Map<string, { name: string; unit: string | null; consumption: number; price: number }>();
+  for (const b of baseLines) {
+    const k = norm(b.material_name); if (!k) continue;
+    const ex = budgetMap.get(k);
+    const cons = Number(b.quote_consumption) || 0;
+    const price = Number(b.quote_unit_price) || 0;
+    if (ex) { ex.consumption = Math.max(ex.consumption, cons); if (price) ex.price = price; }
+    else budgetMap.set(k, { name: b.material_name, unit: b.quote_unit || null, consumption: cons, price });
+  }
+  // 实际(下单/送货)按料聚合
+  const actualMap = new Map<string, { name: string; unit: string | null; oQty: number; oAmt: number; rQty: number; pSum: number; pN: number }>();
+  for (const l of (lines || [])) {
+    const k = norm(l.material_name); if (!k) continue;
+    const a = actualMap.get(k) || { name: l.material_name, unit: l.ordered_unit || null, oQty: 0, oAmt: 0, rQty: 0, pSum: 0, pN: 0 };
+    a.oQty += Number(l.ordered_qty) || 0; a.oAmt += Number(l.ordered_amount) || 0; a.rQty += Number(l.received_qty) || 0;
+    if (l.unit_price != null) { a.pSum += Number(l.unit_price); a.pN++; }
+    actualMap.set(k, a);
+  }
+  const leftoverMap = new Map<string, number>();
+  for (const r of leftoverRows) { const k = norm(r.material_name); if (k) leftoverMap.set(k, (leftoverMap.get(k) || 0) + (Number(r.leftover) || 0)); }
+
+  const keys = new Set<string>([...budgetMap.keys(), ...actualMap.keys()]);
+  const rows = [...keys].map((k) => {
+    const b = budgetMap.get(k); const a = actualMap.get(k);
+    const budQty = b ? r3(b.consumption * orderQty) : null;
+    const budPrice = b ? b.price || null : null;
+    const budTotal = (budQty != null && budPrice != null) ? r2(budQty * budPrice) : null;
+    const oQty = a ? r3(a.oQty) : 0;
+    const oPrice = a && a.pN ? Math.round(a.pSum / a.pN * 10000) / 10000 : null;
+    const oTotal = a ? r2(a.oAmt) : 0;
+    const rQty = a ? r3(a.rQty) : 0;
+    const rTotal = oPrice != null ? r2(rQty * oPrice) : null;
+    const lQty = r3(leftoverMap.get(k) || 0);
+    const lTotal = oPrice != null ? r2(lQty * oPrice) : null;
+    return {
+      material_name: b?.name || a?.name || k, unit: b?.unit || a?.unit || null,
+      budget: { qty: budQty, price: budPrice, total: budTotal },
+      ordered: {
+        qty: oQty, price: oPrice, total: oTotal,
+        over_qty: budQty != null && oQty > budQty,
+        over_price: budPrice != null && oPrice != null && oPrice > budPrice,
+        over_total: budTotal != null && oTotal > budTotal,
+      },
+      received: { qty: rQty, total: rTotal },
+      leftover: { qty: lQty, total: lTotal },
+    };
+  }).sort((x, y) => (y.ordered.total || 0) - (x.ordered.total || 0));
+
+  const totals = rows.reduce((t, r) => ({
+    budget: r2(t.budget + (r.budget.total || 0)), ordered: r2(t.ordered + (r.ordered.total || 0)),
+    received: r2(t.received + (r.received.total || 0)), leftover: r2(t.leftover + (r.leftover.total || 0)),
+  }), { budget: 0, ordered: 0, received: 0, leftover: 0 });
+
+  return { data: { order, rows, totals, orderQty, has_budget: baseLines.length > 0 } };
+}
+
 /** 显式回填：以采购实际成本写 order_financials.actual_material_cost + 重算利润（人工触发）。 */
 export async function backfillActualMaterialCost(orderId: string): Promise<{ error?: string; ok?: boolean; actual?: number }> {
   const { supabase, userId, canFloor } = await authFloor();
