@@ -58,6 +58,13 @@ export async function generateMyBriefingAction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '未登录' };
 
+  // 复审:默认走当日缓存(0 token);forceRefresh 绕过缓存强制调 Claude(~¥0.3-0.5/次),此路径限速防连点刷。
+  if (forceRefresh) {
+    const { guardAICall } = await import('@/lib/ai/rate-limit');
+    const guard = await guardAICall('smart_insights', null);
+    if (!guard.ok) return { error: guard.error };
+  }
+
   const { data: profile } = await (supabase.from('profiles') as any)
     .select('display_name, name')
     .eq('user_id', user.id)

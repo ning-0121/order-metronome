@@ -356,6 +356,11 @@ export async function extractTextFromAttachment(attachmentId: string): Promise<{
     .single();
   if (!row) return { error: '附件不存在' };
 
+  // 复审:车间单 Claude Vision OCR 是付费 LLM 端点,此前无限速 → 可被刷 token。补 guardAICall(production_photo)。
+  const { guardAICall } = await import('@/lib/ai/rate-limit');
+  const guard = await guardAICall('production_photo', (row as any).order_id);
+  if (!guard.ok) return { error: guard.error };
+
   const mime = (row as any).mime_type || '';
   if (!mime.startsWith('image/')) {
     return { error: '目前只支持图片识别（PDF/文档请人工录入）' };
