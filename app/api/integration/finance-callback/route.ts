@@ -137,12 +137,19 @@ export async function POST(request: Request) {
     }
 
     if (approval_type === 'cancel') {
-      const { data: rows, error } = await supabase
-        .from('cancel_requests')
-        .update({ status: decision, decided_at: new Date().toISOString() })
-        .eq('id', approval_id).eq('status', 'pending').select('id')
-      if (error) throw new Error(`Cancel approval update failed: ${error.message}`)
-      if (!rows || rows.length === 0) skipLog('cancel')
+      // H3:财务批准/驳回 → 真执行取消(service-role;decideCancel 内部 isApprovalPending 幂等,非 pending 返 error 即跳过)。
+      // 批准:decideCancel 落 cancelled + 冻结里程碑 → finalizeCancelledOrder 作废 PO/执行行 + 清风险 + 通知财务/采购/生产。
+      const { createServiceRoleClient } = await import('@/lib/supabase/server')
+      const svc = createServiceRoleClient()
+      const { decideCancel, finalizeCancelledOrder } = await import('@/lib/repositories/ordersRepo')
+      const noteTag = decision_note ? `[财务系统-${decider_name}] ${decision_note}` : `[财务系统-${decider_name}] ${decision === 'approved' ? '已批准取消' : '驳回取消'}`
+      const res = await decideCancel(approval_id, decision, noteTag, { supabase: svc, actorId: null })
+      if (res.error) {
+        console.log(`[FinanceCallback] cancel ${approval_id}: ${res.error}(幂等跳过)`)
+      } else if (decision === 'approved') {
+        const oid = (res.data as any)?.cancelRequest?.order_id
+        if (oid) await finalizeCancelledOrder(svc, oid)
+      }
     }
 
     // 里程碑审批（财务确认加工费/核准出运/收款等）。状态闸:已完成的不再被回调改动(防重放覆盖人工修正)。

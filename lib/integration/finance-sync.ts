@@ -35,6 +35,8 @@ type WebhookEventType =
   | 'supplier.upserted'
   | 'purchase_order.placed'
   | 'purchase_order.approval_requested'
+  | 'cancel.requested'
+  | 'milestone.requested'
   | 'goods_receipt.recorded'
 
 interface WebhookPayload {
@@ -317,6 +319,23 @@ export async function requestPurchaseOrderApproval(
   const data = buildPurchaseOrderSyncPayload(po, orderRefs, supplements)
   if (internalRiskFlags) (data as Record<string, unknown>).internal_risk_flags = internalRiskFlags
   return sendToFinanceSystem('purchase_order.approval_requested', data)
+}
+
+/** H3:取消/里程碑审批发起端 —— 推给财务系统审批队列。字段对齐财务 handleGenericApprovalRequest。 */
+export interface ApprovalRequestPayload {
+  id: string                    // 必:审批实体 id(cancel_request.id / milestone.id),财务批准回传 approval_id 用它
+  order_no?: string | null
+  customer_name?: string | null
+  requester_name?: string | null
+  summary?: string | null
+  detail?: string | null
+  created_at?: string | null
+}
+export async function syncCancelRequestToFinance(p: ApprovalRequestPayload) {
+  return sendToFinanceSystem('cancel.requested', p as unknown as Record<string, unknown>)
+}
+export async function syncMilestoneRequestToFinance(p: ApprovalRequestPayload) {
+  return sendToFinanceSystem('milestone.requested', p as unknown as Record<string, unknown>)
 }
 
 /**

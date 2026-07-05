@@ -12,9 +12,11 @@ import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
  * 传入对应的 supabase client(用户会话 或 service-role)。
  */
 export async function placePurchaseOrderCore(supabase: any, poId: string): Promise<{ ok?: boolean; error?: string }> {
-  const { error } = await (supabase.from('purchase_orders') as any)
-    .update({ status: 'placed', updated_at: new Date().toISOString() }).eq('id', poId);
+  // H2 复审:内部状态闸 —— 仅 draft → placed 命中才继续。命中 0 行(已下单/重放)→ 幂等 no-op,防二次下单。
+  const { data: placedRows, error } = await (supabase.from('purchase_orders') as any)
+    .update({ status: 'placed', updated_at: new Date().toISOString() }).eq('id', poId).eq('status', 'draft').select('id');
   if (error) { try { revalidatePath(`/procurement/po/${poId}`); } catch { /* route 外调用无 revalidate 上下文 */ } return { error: error.message }; }
+  if (!placedRows || placedRows.length === 0) { console.log(`[placeCore] PO ${poId} 非 draft(已下单/重放),跳过`); return { ok: true }; }
 
   // 该单的行 draft/pending_order → ordered,进「待催货」队列(失败不阻断)
   try {

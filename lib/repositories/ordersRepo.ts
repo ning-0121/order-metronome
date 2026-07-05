@@ -700,6 +700,21 @@ export async function requestCancel(
     });
   } catch (e: any) { console.warn('[requestCancel] 取消待审批通知失败(不阻断):', e?.message); }
 
+  // H3:发起端 —— 推给财务系统审批队列(财务接 cancel.requested → 队列 → 批/驳回传 approval_type:'cancel')
+  try {
+    const { data: reqProf } = await (supabase.from('profiles') as any).select('name').eq('user_id', user.id).maybeSingle();
+    const { syncCancelRequestToFinance } = await import('@/lib/integration/finance-sync');
+    await syncCancelRequestToFinance({
+      id: (cancelRequest as any).id,
+      order_no: (order as any)?.order_no ?? null,
+      customer_name: (order as any)?.customer_name ?? null,
+      requester_name: (reqProf as any)?.name ?? null,
+      summary: `订单取消申请:${reasonType}`,
+      detail: reasonDetail,
+      created_at: (cancelRequest as any).created_at,
+    });
+  } catch (e: any) { console.warn('[requestCancel] 发财务取消审批请求失败(已落 outbox/不阻断):', e?.message); }
+
   return { data: cancelRequest };
 }
 
@@ -709,15 +724,17 @@ export async function requestCancel(
 export async function decideCancel(
   cancelRequestId: string,
   decision: 'approved' | 'rejected',
-  decisionNote: string | null = null
+  decisionNote: string | null = null,
+  override?: { supabase?: any; actorId?: string | null }, // H3:财务回调用 service-role 调,无用户会话
 ): Promise<{ data?: any; error?: string }> {
-  const supabase = await createClient();
-  
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: 'User not authenticated' };
+  const supabase = override?.supabase || await createClient();
+  let actorId: string | null = override?.actorId ?? null;
+  if (!override?.supabase) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: 'User not authenticated' };
+    actorId = user.id;
   }
-  
+
   // 获取取消申请
   const { data: cancelRequest, error: getError } = await (supabase
     .from('cancel_requests') as any)
@@ -742,7 +759,7 @@ export async function decideCancel(
     .from('cancel_requests') as any)
     .update({
       status: decision,
-      decided_by: user.id,
+      decided_by: actorId,
       decided_at: new Date().toISOString(),
       decision_note: decisionNote,
     })
@@ -773,7 +790,7 @@ export async function decideCancel(
         lifecycle_status: 'cancelled', // 关键修复：之前只写 termination_*，没改 lifecycle → 半状态
         termination_type: '取消',
         termination_reason: cancelRequest.reason_detail,
-        termination_approved_by: user.id,
+        termination_approved_by: actorId,
       })
       .eq('id', orderId)
       .select()
@@ -816,7 +833,7 @@ export async function decideCancel(
     await (supabase.from('cancel_requests') as any)
       .update({
         status: 'rejected',
-        decided_by: user.id,
+        decided_by: actorId,
         decided_at: new Date().toISOString(),
         decision_note: '订单已因其它取消申请而取消，本申请自动关闭',
       })
@@ -828,6 +845,44 @@ export async function decideCancel(
   }
 
   return { data: { cancelRequest: updatedRequest } };
+}
+
+/**
+ * 取消订单的下游清理(PO 作废 / 未收货执行行 cancelled / 清风险投影 / 通知财务+采购+生产)。
+ * 内部审批(decideCancelAction)与财务回调(finance-callback H3)共用同一套清理,传入对应 client。
+ */
+export async function finalizeCancelledOrder(client: any, orderId: string): Promise<void> {
+  const poNos: string[] = [];
+  try {
+    const { data: pos } = await (client.from('purchase_orders') as any)
+      .select('id, po_no, order_ids, status').contains('order_ids', [orderId]);
+    for (const po of (pos || [])) {
+      if ((po as any).po_no) poNos.push((po as any).po_no);
+      const remain = ((po as any).order_ids || []).filter((x: string) => x !== orderId);
+      const settled = ['received', 'closed'].includes((po as any).status);
+      if (remain.length === 0 && !settled) {
+        await (client.from('purchase_orders') as any).update({ status: 'cancelled', order_ids: [], updated_at: new Date().toISOString() }).eq('id', (po as any).id);
+      } else {
+        await (client.from('purchase_orders') as any).update({ order_ids: remain, updated_at: new Date().toISOString() }).eq('id', (po as any).id);
+      }
+    }
+    await (client.from('procurement_line_items') as any)
+      .update({ line_status: 'cancelled' }).eq('order_id', orderId)
+      .not('line_status', 'in', '("received","accepted","closed","concession","cancelled")');
+    await (client.from('runtime_orders') as any).delete().eq('order_id', orderId);
+  } catch (e: any) { console.warn('[finalizeCancelledOrder] 采购/风险清理失败(不阻断):', e?.message); }
+  try {
+    const { data: ord } = await (client.from('orders') as any).select('order_no, internal_order_no, customer_name').eq('id', orderId).maybeSingle();
+    const { notifyOrderCancelled } = await import('@/lib/integration/finance-sync');
+    await notifyOrderCancelled({ id: orderId, lifecycle_status: '已取消', order_no: (ord as any)?.order_no ?? null, internal_order_no: (ord as any)?.internal_order_no ?? null, customer_name: (ord as any)?.customer_name ?? null, po_nos: poNos } as Record<string, unknown>);
+  } catch (e: any) { console.warn('[finalizeCancelledOrder] 财务冲销通知失败(不阻断):', e?.message); }
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(client, ['procurement', 'procurement_manager', 'production', 'production_manager'], {
+      type: 'order_cancelled', title: '🛑 订单已取消,停止采购/生产',
+      message: '关联订单已取消,系统已作废其未收货的采购单/执行行。请勿再为此单下单、催货或排产。', relatedOrderId: orderId,
+    });
+  } catch (e: any) { console.warn('[finalizeCancelledOrder] 取消通知采购/生产失败(不阻断):', e?.message); }
 }
 
 /**

@@ -1312,71 +1312,16 @@ export async function decideCancelAction(
     return { error: result.error };
   }
   
-  // 推送到财务系统(冲销应收+应付)
-  if (decision === 'approved') {
-    try {
-      const { notifyOrderCancelled } = await import('@/lib/integration/finance-sync');
-      const cancelReq = result.data && typeof result.data === 'object' && 'cancelRequest' in result.data ? (result.data as any).cancelRequest : null;
-      if (cancelReq) {
-        const oid = cancelReq.order_id;
-        // 审计修(2026-07-04):比照删除路径,带上订单双号 + 关联采购单号,财务才能精确冲销应付/付款计划
-        // (原来只发 {id, lifecycle_status},财务拿不到 po_no 冲不了已登记的应付 → AP 黑洞)。
-        const { data: ord } = await (supabase.from('orders') as any)
-          .select('order_no, internal_order_no, customer_name').eq('id', oid).maybeSingle();
-        const poNos: string[] = [];
-        try {
-          const { data: pos } = await (supabase.from('purchase_orders') as any)
-            .select('po_no, order_ids').contains('order_ids', [oid]);
-          for (const p of (pos || [])) if ((p as any).po_no) poNos.push((p as any).po_no);
-        } catch { /* 采购单表缺失/查询失败不阻断取消通知 */ }
-        await notifyOrderCancelled({
-          id: oid, lifecycle_status: '已取消',
-          order_no: (ord as any)?.order_no ?? null, internal_order_no: (ord as any)?.internal_order_no ?? null,
-          customer_name: (ord as any)?.customer_name ?? null, po_nos: poNos,
-        } as Record<string, unknown>);
-      }
-    } catch (e: any) { console.warn(`[orders] 取消冲销通知失败(不阻断):`, e?.message); }
-  }
-
-  // ── 本地采购/风险清理(2026-07-05 审计 P0)──
-  // 此前取消只标 cancelled + 冻结里程碑,不作废本地采购单/执行行、不清风险投影
-  // → 采购继续为死单下单/催货/收货、库存为死单进货、风险卡显示幽灵健康度。
+  // 批准 → 下游清理(财务冲销 + PO 作废 + 执行行 cancelled + 清风险 + 通知采购/生产)。
+  // 复审:抽成 finalizeCancelledOrder 与财务回调(H3)共用同一套;用 service-role 保证 PO/runtime 写不受 RLS 影响。
   if (decision === 'approved') {
     const oid = (result.data as any)?.cancelRequest?.order_id;
     if (oid) {
       try {
         const { createServiceRoleClient } = await import('@/lib/supabase/server');
-        const svc = createServiceRoleClient();
-        // ① 关联采购单:从 order_ids 移除本单;数组空了(整单只为本单)且未收货完成 → 作废(比照删除路径)
-        const { data: pos } = await (svc.from('purchase_orders') as any)
-          .select('id, order_ids, status').contains('order_ids', [oid]);
-        for (const po of (pos || [])) {
-          const remain = ((po as any).order_ids || []).filter((x: string) => x !== oid);
-          const settled = ['received', 'closed'].includes((po as any).status);
-          if (remain.length === 0 && !settled) {
-            await (svc.from('purchase_orders') as any).update({ status: 'cancelled', order_ids: [], updated_at: new Date().toISOString() }).eq('id', (po as any).id);
-          } else {
-            await (svc.from('purchase_orders') as any).update({ order_ids: remain, updated_at: new Date().toISOString() }).eq('id', (po as any).id);
-          }
-        }
-        // ② 本单未收货的执行行 → cancelled,退出采购队列(已收货/让步/关闭的保留台账)
-        await (svc.from('procurement_line_items') as any)
-          .update({ line_status: 'cancelled' })
-          .eq('order_id', oid)
-          .not('line_status', 'in', '("received","accepted","closed","concession","cancelled")');
-        // ③ 清掉交付置信度投影(取消单无交付风险,免显示幽灵健康度;投影可重建无害)
-        await (svc.from('runtime_orders') as any).delete().eq('order_id', oid);
-      } catch (e: any) { console.warn('[decideCancelAction] 采购/风险清理失败(不阻断取消):', e?.message); }
-      // ④ 通知采购/生产:此单已取消,停止下单/催货/排产(原来他们连铃铛都收不到)
-      try {
-        const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-        await notifyUsersByRole(supabase, ['procurement', 'procurement_manager', 'production', 'production_manager'], {
-          type: 'order_cancelled',
-          title: '🛑 订单已取消,停止采购/生产',
-          message: '关联订单已取消,系统已作废其未收货的采购单/执行行。请勿再为此单下单、催货或排产。',
-          relatedOrderId: oid,
-        });
-      } catch (e: any) { console.warn('[decideCancelAction] 取消通知采购/生产失败(不阻断):', e?.message); }
+        const { finalizeCancelledOrder } = await import('@/lib/repositories/ordersRepo');
+        await finalizeCancelledOrder(createServiceRoleClient(), oid);
+      } catch (e: any) { console.warn('[decideCancelAction] 取消清理失败(不阻断):', e?.message); }
     }
   }
 
