@@ -1314,6 +1314,7 @@ export async function bulkApproveAllPendingDelays(
   ok: boolean;
   approved: number;
   failed: number;
+  skipped: number;
   total: number;
   errors?: Array<{ id: string; reason: string }>;
   message: string;
@@ -1321,7 +1322,7 @@ export async function bulkApproveAllPendingDelays(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { ok: false, approved: 0, failed: 0, total: 0, message: '未登录' };
+    return { ok: false, approved: 0, failed: 0, skipped: 0, total: 0, message: '未登录' };
   }
 
   // 权限：与单个 approveDelayRequestCore 一致 — 仅管理员
@@ -1335,7 +1336,7 @@ export async function bulkApproveAllPendingDelays(
       ? (profile as any).roles
       : [(profile as any)?.role].filter(Boolean);
   if (!hasRoleInGroup(userRoles, 'CAN_APPROVE_DELAY')) {
-    return { ok: false, approved: 0, failed: 0, total: 0, message: '仅管理员或业务部经理可批准延期申请' };
+    return { ok: false, approved: 0, failed: 0, skipped: 0, total: 0, message: '仅管理员或业务部经理可批准延期申请' };
   }
 
   // 拉所有 pending 延期申请 — 用 service-role 绕过 RLS（admin 已校验过）
@@ -1345,37 +1346,49 @@ export async function bulkApproveAllPendingDelays(
   } catch (e: any) {
     console.warn('[bulkApprove] service-role 不可用，降级 user session:', e?.message);
   }
-  const { data: pendingRows, error: queryError } = await (queryClient
-    .from('delay_requests') as any)
-    .select('id')
-    .eq('status', 'pending')
-    .order('created_at', { ascending: true })
-    .limit(200); // 保险：单次最多处理 200 条，避免 Vercel 超时
-
+  // 拉 pending + 审批链状态(P0 复审修:批量不能绕过多级链)
+  let pendingRows: any[] | null = null;
+  let queryError: any = null;
+  ({ data: pendingRows, error: queryError } = await (queryClient.from('delay_requests') as any)
+    .select('id, approval_chain, current_step')
+    .eq('status', 'pending').order('created_at', { ascending: true }).limit(200));
+  if (queryError && /approval_chain|current_step|does not exist/i.test(queryError.message || '')) {
+    // 迁移未执行时降级:只拉 id,全部按无链处理(旧行为)
+    ({ data: pendingRows, error: queryError } = await (queryClient.from('delay_requests') as any)
+      .select('id').eq('status', 'pending').order('created_at', { ascending: true }).limit(200));
+  }
   if (queryError) {
-    return { ok: false, approved: 0, failed: 0, total: 0, message: `查询失败: ${queryError.message}` };
+    return { ok: false, approved: 0, failed: 0, skipped: 0, total: 0, message: `查询失败: ${queryError.message}` };
   }
 
-  const ids = (pendingRows || []).map((r: any) => r.id);
-  if (ids.length === 0) {
-    return { ok: true, approved: 0, failed: 0, total: 0, message: '没有待批准的延期申请' };
+  const rows = (pendingRows || []) as any[];
+  if (rows.length === 0) {
+    return { ok: true, approved: 0, failed: 0, skipped: 0, total: 0, message: '没有待批准的延期申请' };
   }
 
   const note = decisionNote || '批量批准（系统清理积压）';
   const errors: Array<{ id: string; reason: string }> = [];
   let approved = 0;
+  let skipped = 0;
 
   // 串行处理（每条都有 DB 操作 + 副作用，并行容易出竞态）
-  for (const id of ids) {
+  for (const row of rows) {
+    // P0 复审修:有未走满的多级审批链 → 跳过批量,必须逐级确认(否则会绕过链、留下 status=approved 但 current_step=0 的矛盾态)
+    const chain = row.approval_chain;
+    const step = Number(row.current_step) || 0;
+    if (Array.isArray(chain) && chain.length > 0 && step < chain.length) {
+      skipped++; // 不计入 errors(非失败),仍留在 pending 列表待逐级确认
+      continue;
+    }
     try {
-      const result = await approveDelayRequestCore(id, note);
+      const result = await approveDelayRequestCore(row.id, note);
       if (result.ok) {
         approved++;
       } else {
-        errors.push({ id, reason: result.error || '未知错误' });
+        errors.push({ id: row.id, reason: result.error || '未知错误' });
       }
     } catch (e: any) {
-      errors.push({ id, reason: e?.message || String(e) });
+      errors.push({ id: row.id, reason: e?.message || String(e) });
     }
   }
 
@@ -1391,8 +1404,9 @@ export async function bulkApproveAllPendingDelays(
     ok: true,
     approved,
     failed,
-    total: ids.length,
+    skipped,
+    total: rows.length,
     errors: failed > 0 ? errors.slice(0, 10) : undefined, // 只返回前 10 条避免 payload 太大
-    message: `共 ${ids.length} 条，成功 ${approved} 条${failed > 0 ? `，失败 ${failed} 条` : ''}${ids.length === 200 ? '（达到单次上限 200，请再次点击处理剩余）' : ''}`,
+    message: `共 ${rows.length} 条，成功 ${approved} 条${failed > 0 ? `，失败 ${failed} 条` : ''}${skipped > 0 ? `，跳过 ${skipped} 条(有未完成的多级审批链,需逐级确认)` : ''}${rows.length === 200 ? '（达到单次上限 200，请再次点击处理剩余）' : ''}`,
   };
 }

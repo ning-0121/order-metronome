@@ -68,7 +68,8 @@ export interface ProcurementLineItem {
 // TODO(Sprint-1): 此清单与 lib/domain/roles.ts 任一现成 group 都不完全等价（缺 sales 的 group 没有，
 //                 含 production_manager 的 EXECUTION 没有 finance/sales）。
 //                 保留本地常量，待评估后整合到 ROLE_GROUPS（建议命名 CAN_VIEW_PROCUREMENT）。
-const ALLOWED_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement', 'production_manager'];
+// 复审 P1 修:补 procurement_manager(此前漏,给谁分配"采购经理"单角色谁就进不去采购中心/不能催货收货)。
+const ALLOWED_ROLES = ['admin', 'sales', 'merchandiser', 'finance', 'procurement', 'procurement_manager', 'production_manager'];
 
 async function checkAccess(): Promise<{ ok: boolean; userId?: string; roles?: string[]; error?: string }> {
   const supabase = await createClient();
@@ -626,7 +627,7 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
 // ════════════════════════════════════════════════════════════
 
 /** 可操作采购行流转的角色（查看权限沿用上方 ALLOWED_ROLES，更宽） */
-const OPERATOR_ROLES = ['procurement', 'admin', 'admin_assistant'];
+const OPERATOR_ROLES = ['procurement', 'procurement_manager', 'admin', 'admin_assistant'];
 
 async function checkOperator(): Promise<{ ok: boolean; userId?: string; roles?: string[]; error?: string }> {
   const supabase = await createClient();

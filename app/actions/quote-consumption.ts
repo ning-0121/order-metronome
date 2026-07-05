@@ -29,6 +29,12 @@ export async function getApprovedQuoteForCompare(quoteId: string): Promise<Compa
   // 认证（RLS 亦强制；此处提前干净失败）
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return blockedBasis(quoteId, 'unauthenticated');
+  // 复审 P1:快照含客户报价/售价,只给建单角色(防生产/QC/物流直调此 action 读到报价)
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!roles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'].includes(r))) {
+    return blockedBasis(quoteId, 'unauthorized_role');
+  }
 
   // Step 1 — 只取审批信封（❌ 不取 line / cost / price breakdown）
   const { data: quote } = await (supabase.from('quoter_quotes') as any)

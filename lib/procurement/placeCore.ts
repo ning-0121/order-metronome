@@ -41,15 +41,15 @@ export async function placePurchaseOrderCore(supabase: any, poId: string): Promi
     }
   } catch { /* 财务同步失败不影响下单 */ }
 
-  // placed → 关联采购项 confirmed→ordered
+  // placed → 关联采购项 confirmed→ordered(P0 复审修:传入本函数的 client,webhook 上下文无 cookie 会话会静默 no-op)
   try {
     const { syncProcurementItemsOrderedForPO } = await import('@/app/actions/procurement-items');
-    await syncProcurementItemsOrderedForPO(poId);
+    await syncProcurementItemsOrderedForPO(poId, supabase);
   } catch (e: any) { console.warn('[placeCore] 采购项状态联动失败(不阻断):', e?.message); }
   // 全部采购项已下单 → 自动完成「采购下单」节点
   try {
     const { autoCompleteProcurementPlacedForPO } = await import('@/app/actions/procurement-items');
-    await autoCompleteProcurementPlacedForPO(poId);
+    await autoCompleteProcurementPlacedForPO(poId, supabase);
   } catch (e: any) { console.warn('[placeCore] 采购下单节点自动完成失败(不阻断):', e?.message); }
 
   try { revalidatePath(`/procurement/po/${poId}`); } catch { /* route 外调用无 revalidate 上下文 */ }

@@ -237,11 +237,14 @@ export async function autoCompleteProcurementPlacedForOrder(supabase: any, order
   return true;
 }
 
-/** 下单钩子:该采购单涉及的订单逐一尝试自动完成「采购下单」节点(fire-and-forget)。 */
-export async function autoCompleteProcurementPlacedForPO(poId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+/** 下单钩子:该采购单涉及的订单逐一尝试自动完成「采购下单」节点(fire-and-forget)。
+ *  P0 复审修:可传入 client(placeCore 在财务回调 webhook 上下文里无 cookie 会话,须用传入的 service-role)。 */
+export async function autoCompleteProcurementPlacedForPO(poId: string, client?: any) {
+  const supabase = client || await createClient();
+  if (!client) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+  }
   const { data: po } = await (supabase.from('purchase_orders') as any)
     .select('po_no').eq('id', poId).maybeSingle();
   const { data: lines } = await (supabase.from('procurement_line_items') as any)
@@ -926,11 +929,14 @@ export async function syncProcurementItemReceivingStatus(orderId: string) {
   return { ok: true, changed };
 }
 
-/** 状态联动:采购单 placed → 该单执行行关联采购项 confirmed→ordered。下单钩子 fire-and-forget 调用。 */
-export async function syncProcurementItemsOrderedForPO(purchaseOrderId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
+/** 状态联动:采购单 placed → 该单执行行关联采购项 confirmed→ordered。下单钩子 fire-and-forget 调用。
+ *  P0 复审修:可传入 client(财务回调 webhook 无 cookie 会话,须用传入的 service-role,否则静默 no-op 致订单永卡待采购)。 */
+export async function syncProcurementItemsOrderedForPO(purchaseOrderId: string, client?: any) {
+  const supabase = client || await createClient();
+  if (!client) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: '请先登录' };
+  }
 
   const { data: lines } = await (supabase.from('procurement_line_items') as any)
     .select('procurement_item_id').eq('purchase_order_id', purchaseOrderId).not('procurement_item_id', 'is', null);

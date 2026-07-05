@@ -19,7 +19,7 @@ function has(roles: string[], ...allow: string[]): boolean {
 
 export function resolveCapabilities(roles: string[]): ProcurementCapabilities {
   const isAdmin = has(roles, 'admin');
-  const isProcExec = has(roles, 'procurement', 'merchandiser', 'production_manager');
+  const isProcExec = has(roles, 'procurement', 'procurement_manager', 'merchandiser', 'production_manager');
   const isProduction = has(roles, 'production');
   const isSales = has(roles, 'sales');
   const isFinance = has(roles, 'finance');
