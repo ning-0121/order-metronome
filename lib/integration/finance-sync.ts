@@ -34,6 +34,7 @@ type WebhookEventType =
   | 'quotation.frozen'
   | 'supplier.upserted'
   | 'purchase_order.placed'
+  | 'purchase_order.approval_requested'
   | 'goods_receipt.recorded'
 
 interface WebhookPayload {
@@ -299,6 +300,18 @@ export async function syncPurchaseOrderToFinance(
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
 ) {
   return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs, supplements))
+}
+
+/**
+ * 采购单 ≥ ¥5000 → 请求外部财务系统审批(审计 B)。载荷同 purchase_order.placed(单头+lines+order_refs)。
+ * 财务系统审批后回调 finance-callback(approval_type='purchase', approval_id=采购单 id)→ 批准自动下单。
+ */
+export async function requestPurchaseOrderApproval(
+  po: Record<string, unknown>,
+  orderRefs?: unknown[],
+  supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
+) {
+  return sendToFinanceSystem('purchase_order.approval_requested', buildPurchaseOrderSyncPayload(po, orderRefs, supplements))
 }
 
 /**

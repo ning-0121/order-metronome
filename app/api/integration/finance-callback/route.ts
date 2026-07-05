@@ -20,7 +20,7 @@ interface ApprovalCallback {
     approval_id: string
     // P0-4 修复：补 'milestone'。L106 实际处理这种类型（财务确认加工费/核准出运/收款等里程碑）
     // 但 union 之前漏写，导致 TS 判类型不重叠、IDE 提示死代码
-    approval_type: 'price' | 'delay' | 'cancel' | 'milestone'
+    approval_type: 'price' | 'delay' | 'cancel' | 'milestone' | 'purchase'
     decision: 'approved' | 'rejected'
     decided_by: string
     decider_name: string
@@ -153,6 +153,43 @@ export async function POST(request: Request) {
         .eq('id', approval_id)
 
       if (error) throw new Error(`Milestone update failed: ${error.message}`)
+    }
+
+    // 采购单审批(审计 B):approval_id=采购单 id。批准 → 自动下单(place core,emit purchase_order.placed);
+    // 驳回 → 拦下并把原因给采购。用 service-role(无用户会话)。
+    if (approval_type === 'purchase') {
+      const { createServiceRoleClient } = await import('@/lib/supabase/server')
+      const svc = createServiceRoleClient()
+      const poNo = (payload.data as unknown as { po_no?: string }).po_no || approval_id
+      const noteTag = decision_note ? `[财务系统-${decider_name}] ${decision_note}` : `[财务系统-${decider_name}] ${decision === 'approved' ? '已批准' : '已驳回'}`
+      if (decision === 'approved') {
+        const { error: upErr } = await (svc.from('purchase_orders') as any)
+          .update({ approval_status: 'approved', approved_at: new Date().toISOString(), approval_note: noteTag, updated_at: new Date().toISOString() })
+          .eq('id', approval_id)
+        if (upErr) throw new Error(`PO approve update failed: ${upErr.message}`)
+        const { placePurchaseOrderCore } = await import('@/lib/procurement/placeCore')
+        const pr = await placePurchaseOrderCore(svc, approval_id)
+        if (pr.error) throw new Error(`PO place after approval failed: ${pr.error}`)
+        try {
+          const { notifyUsersByRole } = await import('@/lib/utils/notifications')
+          await notifyUsersByRole(svc, ['procurement', 'procurement_manager'], {
+            type: 'po_finance_approval', title: `✅ 采购单财务已批准,已自动下单：${poNo}`,
+            message: `采购单 ${poNo} 已获财务批准并自动下单。`,
+          })
+        } catch { /* 通知失败不阻断 */ }
+      } else {
+        const { error: upErr } = await (svc.from('purchase_orders') as any)
+          .update({ approval_status: 'rejected', approval_note: noteTag, updated_at: new Date().toISOString() })
+          .eq('id', approval_id)
+        if (upErr) throw new Error(`PO reject update failed: ${upErr.message}`)
+        try {
+          const { notifyUsersByRole } = await import('@/lib/utils/notifications')
+          await notifyUsersByRole(svc, ['procurement', 'procurement_manager'], {
+            type: 'po_finance_approval', title: `🔴 采购单被财务驳回：${poNo}`,
+            message: `采购单 ${poNo} 被财务驳回:${decision_note || '无原因'}。请调整后重新提交。`,
+          })
+        } catch { /* 通知失败不阻断 */ }
+      }
     }
 
     console.log(`[FinanceCallback] ${approval_type} ${approval_id}: ${decision} by ${decider_name}`)

@@ -16,6 +16,7 @@ import { maskFloorForLines, maskSupplierFinance } from '@/lib/procurement/purcha
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 import { evaluateProcurementApproval, evaluateBudgetGate, reasonsCn, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
+import { placePurchaseOrderCore } from '@/lib/procurement/placeCore';
 
 const CAN_PROCURE = ['admin', 'procurement', 'procurement_manager'];
 
@@ -350,56 +351,54 @@ export async function placePurchaseOrder(poId: string): Promise<{
     }
   }
 
-  const place = async () => {
-    const { error } = await (supabase.from('purchase_orders') as any)
-      .update({ status: 'placed', updated_at: new Date().toISOString() }).eq('id', poId);
-    if (error) { revalidatePath(`/procurement/po/${poId}`); return { error: error.message }; }
-    // R3:该单的行 draft/pending_order → ordered,进「待催货」队列(失败不阻断下单)
-    try {
-      await (supabase.from('procurement_line_items') as any)
-        .update({ line_status: 'ordered' })
-        .eq('purchase_order_id', poId)
-        .in('line_status', ['draft', 'pending_order']);
-    } catch (e: any) { console.warn('[placePurchaseOrder] 行状态推进失败(不阻断):', e?.message); }
-    // P2b: placed → 财务同步（应付/付款计划）。未配置即跳过，绝不阻塞下单。
-    // 2026-07-03:附带补采购预警——此单执行行若挂了补采购项,财务侧收到 has_supplement + 明细
+  const place = () => placePurchaseOrderCore(supabase, poId);
+
+  // 已审批通过 → 直接下单
+  if ((po as any).approval_status === 'approved') return place();
+
+  // 采购单 ≥ ¥5000 → 走外部财务系统审批(审计 B):置待审批 + emit approval_requested,不真下单。
+  // 财务系统审批后回调 finance-callback(approval_type='purchase')→ 批准自动下单/驳回拦下。
+  const FINANCE_EXT_APPROVAL_THRESHOLD = 5000;
+  if ((Number((po as any).total_amount) || 0) >= FINANCE_EXT_APPROVAL_THRESHOLD) {
+    await (supabase.from('purchase_orders') as any).update({
+      approval_status: 'pending', approval_required_by: ['finance'], approval_reasons: ['finance_ext_5000'],
+      updated_at: new Date().toISOString(),
+    }).eq('id', poId);
     try {
       const { data: full } = await (supabase.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
       if (full) {
         let supplements: Array<{ item_no?: string; material_name?: string; qty?: number; reason?: string }> = [];
         try {
-          const { data: lines } = await (supabase.from('procurement_line_items') as any)
+          const { data: sl } = await (supabase.from('procurement_line_items') as any)
             .select('procurement_item_id').eq('purchase_order_id', poId).not('procurement_item_id', 'is', null);
-          const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id))];
+          const piIds = [...new Set((sl || []).map((l: any) => l.procurement_item_id))];
           if (piIds.length > 0) {
-            const { data: suppItems } = await (supabase.from('procurement_items') as any)
-              .select('item_no, material_name, total_required_qty, supplement_reason')
-              .in('id', piIds).eq('is_supplement', true);
-            supplements = (suppItems || []).map((s: any) => ({
-              item_no: s.item_no, material_name: s.material_name,
-              qty: s.total_required_qty, reason: s.supplement_reason,
-            }));
+            const { data: si } = await (supabase.from('procurement_items') as any)
+              .select('item_no, material_name, total_required_qty, supplement_reason').in('id', piIds).eq('is_supplement', true);
+            supplements = (si || []).map((s: any) => ({ item_no: s.item_no, material_name: s.material_name, qty: s.total_required_qty, reason: s.supplement_reason }));
           }
-        } catch { /* 补采购列未建时静默(迁移前) */ }
-        await syncPurchaseOrderToFinance(full, undefined, supplements);
+        } catch { /* 补采购列未建 */ }
+        const { requestPurchaseOrderApproval } = await import('@/lib/integration/finance-sync');
+        await requestPurchaseOrderApproval(full, undefined, supplements);
       }
-    } catch { /* 财务同步失败不影响下单 */ }
-    // B3a: placed → 关联采购项 confirmed→ordered(fire-and-forget)。
+    } catch (e: any) { console.warn('[placePurchaseOrder] 财务审批请求发送失败(已置待审批,失败已落 outbox):', e?.message); }
+    // ≥5000 直走外部财务审批,内部预算/付重闸被跳过 → 仍跑一遍并把警示带进通知,别丢了付重信号
+    let budgetWarn = '';
     try {
-      const { syncProcurementItemsOrderedForPO } = await import('@/app/actions/procurement-items');
-      await syncProcurementItemsOrderedForPO(poId);
-    } catch (e: any) { console.warn('[placePurchaseOrder] 采购项状态联动失败(不阻断下单):', e?.message); }
-    // 全部采购项已下单 → 自动完成「采购下单」节点,「待采购订单」卡随之消失(2026-07-03)
+      const bg = await computeBudgetGate(createServiceRoleClient(), poId, ((po as any).order_ids || []) as string[]);
+      if (bg?.over) budgetWarn = ` ⚠ 系统另检测到超预算${bg.overMaterials.length ? `(疑重复下单料:${bg.overMaterials.slice(0, 4).join('、')})` : ''},请财务重点核。`;
+    } catch { /* 预算闸异常不阻断 */ }
     try {
-      const { autoCompleteProcurementPlacedForPO } = await import('@/app/actions/procurement-items');
-      await autoCompleteProcurementPlacedForPO(poId);
-    } catch (e: any) { console.warn('[placePurchaseOrder] 采购下单节点自动完成失败(不阻断):', e?.message); }
+      const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+      await notifyUsersByRole(supabase, ['procurement', 'procurement_manager'], {
+        type: 'po_finance_approval',
+        title: `🟠 采购单已提交财务审批：${(po as any).po_no || ''}`,
+        message: `采购单金额 ¥${(Number((po as any).total_amount) || 0).toLocaleString()} ≥ ¥5000,已提交财务系统审批,批准后自动下单。${budgetWarn}`,
+      });
+    } catch { /* 通知失败不阻断 */ }
     revalidatePath(`/procurement/po/${poId}`);
-    return { ok: true };
-  };
-
-  // 已审批通过 → 直接下单
-  if ((po as any).approval_status === 'approved') return place();
+    return { pendingApproval: true, reasons: budgetWarn ? ['finance_ext_5000', 'over_budget_material'] : ['finance_ext_5000'] };
+  }
 
   // 否则跑风险闸（无法绕过）——读底价评估,经 service-role(已 CAN_PROCURE 门禁)
   const { data: lines } = await (createServiceRoleClient().from('procurement_line_items') as any)
