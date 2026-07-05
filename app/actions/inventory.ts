@@ -51,7 +51,7 @@ export async function recordInventoryReceipt(lineId: string): Promise<{ ok?: boo
     if ((pitem as any)?.consolidation_key) materialKey = (pitem as any).consolidation_key;
   }
 
-  const { error } = await (supabase.from('inventory_transactions') as any).insert({
+  const row: Record<string, any> = {
     material_key: materialKey,
     material_name: (line as any).material_name,
     unit: (line as any).ordered_unit,
@@ -61,7 +61,16 @@ export async function recordInventoryReceipt(lineId: string): Promise<{ ok?: boo
     source_ref: lineId,
     created_by: user.id,
     note: '采购收货自动入库',
-  });
+    receipt_cumulative_qty: received, // 幂等目标:该行累计收货到 received
+  };
+  // 复审:幂等 upsert —— 并发双击算出同 cumulative → 唯一冲突 DO NOTHING,不重复入库
+  let { error } = await (supabase.from('inventory_transactions') as any)
+    .upsert(row, { onConflict: 'source_ref,txn_type,receipt_cumulative_qty', ignoreDuplicates: true });
+  if (error && /receipt_cumulative_qty|does not exist|column|on conflict|constraint/i.test(error.message || '')) {
+    // 迁移(20260705_inventory_receipt_idempotency)未执行 → 降级普通 insert(老行为,无并发幂等)
+    const { receipt_cumulative_qty, ...plain } = row;
+    ({ error } = await (supabase.from('inventory_transactions') as any).insert(plain));
+  }
   if (error) return { error: error.message };
   return { ok: true, delta };
 }

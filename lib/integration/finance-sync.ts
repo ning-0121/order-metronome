@@ -312,8 +312,11 @@ export async function requestPurchaseOrderApproval(
   po: Record<string, unknown>,
   orderRefs?: unknown[],
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
+  internalRiskFlags?: Record<string, unknown>, // 复审:内部风险信号(超预算/付重/偏离基线/新供应商)结构化带给财务审批
 ) {
-  return sendToFinanceSystem('purchase_order.approval_requested', buildPurchaseOrderSyncPayload(po, orderRefs, supplements))
+  const data = buildPurchaseOrderSyncPayload(po, orderRefs, supplements)
+  if (internalRiskFlags) (data as Record<string, unknown>).internal_risk_flags = internalRiskFlags
+  return sendToFinanceSystem('purchase_order.approval_requested', data)
 }
 
 /**

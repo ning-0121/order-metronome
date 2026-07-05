@@ -107,64 +107,68 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
-    // 4. 根据审批类型更新对应表
+    // 4. 根据审批类型更新对应表。H2 复审:各分支加状态闸(仅"仍待审批"命中才落地),
+    //    防不同 request_id 的重复回调覆盖已处理/已被人工修正的记录(request_id 幂等只挡同键重放)。
+    const skipLog = (t: string) => console.log(`[FinanceCallback] ${t} ${approval_id}: 非待审批(重放/已处理/已人工改动),跳过`)
     if (approval_type === 'price') {
-      const { error } = await supabase
+      const { data: rows, error } = await supabase
         .from('pre_order_price_approvals')
         .update({
           status: decision,
-          review_note: decision_note
-            ? `[财务系统-${decider_name}] ${decision_note}`
-            : `[财务系统-${decider_name}] ${decision === 'approved' ? '审批通过' : '审批驳回'}`,
+          review_note: decision_note ? `[财务系统-${decider_name}] ${decision_note}` : `[财务系统-${decider_name}] ${decision === 'approved' ? '审批通过' : '审批驳回'}`,
           reviewed_at: new Date().toISOString(),
         })
-        .eq('id', approval_id)
-
+        .eq('id', approval_id).eq('status', 'pending').select('id')
       if (error) throw new Error(`Price approval update failed: ${error.message}`)
+      if (!rows || rows.length === 0) skipLog('price')
     }
 
     if (approval_type === 'delay') {
-      const { error } = await supabase
+      const { data: rows, error } = await supabase
         .from('delay_requests')
         .update({
           status: decision,
-          decision_note: decision_note
-            ? `[财务系统-${decider_name}] ${decision_note}`
-            : `[财务系统-${decider_name}] ${decision === 'approved' ? '审批通过' : '审批驳回'}`,
+          decision_note: decision_note ? `[财务系统-${decider_name}] ${decision_note}` : `[财务系统-${decider_name}] ${decision === 'approved' ? '审批通过' : '审批驳回'}`,
           approved_at: new Date().toISOString(),
         })
-        .eq('id', approval_id)
-
+        .eq('id', approval_id).eq('status', 'pending').select('id')
       if (error) throw new Error(`Delay approval update failed: ${error.message}`)
+      if (!rows || rows.length === 0) skipLog('delay')
     }
 
     if (approval_type === 'cancel') {
-      const { error } = await supabase
+      const { data: rows, error } = await supabase
         .from('cancel_requests')
-        .update({
-          status: decision,
-          decided_at: new Date().toISOString(),
-        })
-        .eq('id', approval_id)
-
+        .update({ status: decision, decided_at: new Date().toISOString() })
+        .eq('id', approval_id).eq('status', 'pending').select('id')
       if (error) throw new Error(`Cancel approval update failed: ${error.message}`)
+      if (!rows || rows.length === 0) skipLog('cancel')
     }
 
-    // 里程碑审批（财务确认加工费/核准出运/收款等）
+    // 里程碑审批（财务确认加工费/核准出运/收款等）。状态闸:已完成的不再被回调改动(防重放覆盖人工修正)。
     if (approval_type === 'milestone') {
       const newStatus = decision === 'approved' ? '已完成' : '阻塞'
-      const { error } = await supabase
+      const { data: rows, error } = await supabase
         .from('milestones')
         .update({
           status: newStatus,
           actual_at: decision === 'approved' ? new Date().toISOString() : null,
-          notes: decision_note
-            ? `[财务系统-${decider_name}] ${decision_note}`
-            : `[财务系统-${decider_name}] ${decision === 'approved' ? '财务已确认' : '财务驳回'}`,
+          notes: decision_note ? `[财务系统-${decider_name}] ${decision_note}` : `[财务系统-${decider_name}] ${decision === 'approved' ? '财务已确认' : '财务驳回'}`,
         })
-        .eq('id', approval_id)
-
+        .eq('id', approval_id).not('status', 'in', '("已完成","done","completed")').select('id')
       if (error) throw new Error(`Milestone update failed: ${error.message}`)
+      if (!rows || rows.length === 0) skipLog('milestone')
+      else {
+        // 复审:此前财务确认里程碑直接写库、绕过 recompute 钩子 → 交付置信度滞后。补触发一次(fire-and-forget)。
+        try {
+          const { data: m } = await supabase.from('milestones').select('order_id').eq('id', approval_id).maybeSingle()
+          const oid = (m as any)?.order_id
+          if (oid) {
+            const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence')
+            await recomputeDeliveryConfidence(oid, { type: 'milestone_status_changed', source: 'finance-callback:milestone', severity: 'info', payload: { milestone_id: approval_id, decision } })
+          }
+        } catch (e) { console.warn('[finance-callback] milestone recompute 失败(不阻断):', e instanceof Error ? e.message : e) }
+      }
     }
 
     // 采购单审批(审计 B):approval_id=采购单 id。批准 → 自动下单(place core,emit purchase_order.placed);

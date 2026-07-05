@@ -360,8 +360,35 @@ export async function placePurchaseOrder(poId: string): Promise<{
   // 财务系统审批后回调 finance-callback(approval_type='purchase')→ 批准自动下单/驳回拦下。
   const FINANCE_EXT_APPROVAL_THRESHOLD = 5000;
   if ((Number((po as any).total_amount) || 0) >= FINANCE_EXT_APPROVAL_THRESHOLD) {
+    // 复审:≥5000 走外部财务审批时,内部风险闸此前被跳过、结果没送到财务。
+    // 修:先跑内部风险(预算/付重 + 偏离基线/新供应商),结构化写 approval_reasons + 带进财务 payload,
+    //    让财务审批时看到风险信号(财务是钱的权威,看到后自行决定;不在回调处二次硬拦以免推翻财务决定)。
+    const svc = createServiceRoleClient();
+    const orderIds = ((po as any).order_ids || []) as string[];
+    let bg: any = null;
+    try { bg = await computeBudgetGate(svc, poId, orderIds); } catch { /* 预算闸异常不阻断 */ }
+    let priceVariance = false, newSupplier = false;
+    try {
+      const { data: lns } = await (svc.from('procurement_line_items') as any).select('unit_price, price_baseline').eq('purchase_order_id', poId);
+      const { count } = await (supabase.from('purchase_orders') as any).select('id', { count: 'exact', head: true })
+        .eq('supplier_id', (po as any).supplier_id).neq('id', poId).in('status', ['placed', 'confirmed', 'receiving', 'received', 'closed']);
+      const dec = evaluateProcurementApproval({ totalAmount: Number((po as any).total_amount) || 0, lines: (lns || []) as any[], supplierNetDays: (po as any).suppliers?.net_days ?? null, isNewSupplier: (count || 0) === 0, orderBudget: null });
+      priceVariance = dec.reasons.includes('price_variance');
+      newSupplier = dec.reasons.includes('new_supplier');
+    } catch { /* 风险评估异常不阻断 */ }
+    const flags = {
+      over_budget_total: !!bg?.overTotal,
+      over_budget_materials: (bg?.overMaterials || []) as string[],
+      price_variance: priceVariance,
+      new_supplier: newSupplier,
+    };
+    const reasonCodes = ['finance_ext_5000',
+      ...(flags.over_budget_total ? ['over_budget_total'] : []),
+      ...(flags.over_budget_materials.length ? ['over_budget_material'] : []),
+      ...(priceVariance ? ['price_variance'] : []),
+      ...(newSupplier ? ['new_supplier'] : [])];
     await (supabase.from('purchase_orders') as any).update({
-      approval_status: 'pending', approval_required_by: ['finance'], approval_reasons: ['finance_ext_5000'],
+      approval_status: 'pending', approval_required_by: ['finance'], approval_reasons: reasonCodes,
       updated_at: new Date().toISOString(),
     }).eq('id', poId);
     try {
@@ -379,25 +406,20 @@ export async function placePurchaseOrder(poId: string): Promise<{
           }
         } catch { /* 补采购列未建 */ }
         const { requestPurchaseOrderApproval } = await import('@/lib/integration/finance-sync');
-        await requestPurchaseOrderApproval(full, undefined, supplements);
+        await requestPurchaseOrderApproval(full, undefined, supplements, flags); // 带内部风险信号给财务
       }
     } catch (e: any) { console.warn('[placePurchaseOrder] 财务审批请求发送失败(已置待审批,失败已落 outbox):', e?.message); }
-    // ≥5000 直走外部财务审批,内部预算/付重闸被跳过 → 仍跑一遍并把警示带进通知,别丢了付重信号
-    let budgetWarn = '';
-    try {
-      const bg = await computeBudgetGate(createServiceRoleClient(), poId, ((po as any).order_ids || []) as string[]);
-      if (bg?.over) budgetWarn = ` ⚠ 系统另检测到超预算${bg.overMaterials.length ? `(疑重复下单料:${bg.overMaterials.slice(0, 4).join('、')})` : ''},请财务重点核。`;
-    } catch { /* 预算闸异常不阻断 */ }
+    const budgetWarn = flags.over_budget_materials.length ? ` ⚠ 系统检测到疑重复下单料:${flags.over_budget_materials.slice(0, 4).join('、')}` : (flags.over_budget_total ? ' ⚠ 系统检测到整单超预算' : '');
     try {
       const { notifyUsersByRole } = await import('@/lib/utils/notifications');
       await notifyUsersByRole(supabase, ['procurement', 'procurement_manager'], {
         type: 'po_finance_approval',
         title: `🟠 采购单已提交财务审批：${(po as any).po_no || ''}`,
-        message: `采购单金额 ¥${(Number((po as any).total_amount) || 0).toLocaleString()} ≥ ¥5000,已提交财务系统审批,批准后自动下单。${budgetWarn}`,
+        message: `采购单金额 ¥${(Number((po as any).total_amount) || 0).toLocaleString()} ≥ ¥5000,已提交财务系统审批(风险信号已随单送财务),批准后自动下单。${budgetWarn}`,
       });
     } catch { /* 通知失败不阻断 */ }
     revalidatePath(`/procurement/po/${poId}`);
-    return { pendingApproval: true, reasons: budgetWarn ? ['finance_ext_5000', 'over_budget_material'] : ['finance_ext_5000'] };
+    return { pendingApproval: true, reasons: reasonCodes };
   }
 
   // 否则跑风险闸（无法绕过）——读底价评估,经 service-role(已 CAN_PROCURE 门禁)

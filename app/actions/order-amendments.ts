@@ -125,6 +125,24 @@ export async function approveOrderAmendment(
   if (fetchErr || !amendment) return { error: '申请不存在' };
   if (!isApprovalPending(amendment.status)) return { error: '此申请已处理' };
 
+  // 复审 P1(TOCTOU):窗口期只在提交时校验;审批常隔数天,此时订单可能已推进关键节点(如已开裁)。
+  // 批准前用「当前」完成节点重校验每个待改字段,窗口已关则自动驳回,防已裁片后仍改小数量致静默错配。
+  if (approved && amendment.fields_to_change) {
+    const doneNow = await loadDoneStepKeys(supabase, amendment.order_id);
+    const closed: string[] = [];
+    for (const field of Object.keys(amendment.fields_to_change as Record<string, any>)) {
+      if (!checkAmendmentAllowed(field, doneNow).allowed) closed.push(field);
+    }
+    if (closed.length > 0) {
+      await (supabase.from('order_amendments') as any).update({
+        status: 'rejected', reviewed_by: user!.id, reviewed_at: new Date().toISOString(),
+        admin_note: (adminNote ? adminNote + '\n' : '') + `⛔ 提交后订单已推进关键节点,以下变更窗口已关闭,不能批准:${closed.join('、')}。请走专门流程(追加子订单/延期申请)。`,
+      }).eq('id', amendmentId);
+      revalidatePath(`/orders/${amendment.order_id}`);
+      return { error: `变更窗口已关闭(${closed.join('、')})—— 提交后订单已推进关键节点,已自动驳回,请走专门流程。` };
+    }
+  }
+
   // 更新申请状态
   await (supabase.from('order_amendments') as any)
     .update({
@@ -237,6 +255,15 @@ async function executeSideEffects(
       })
       .eq('order_id', orderId)
       .eq('step_key', 'packing_method_confirmed');
+    // 复审:此重置未走 recalc_schedule 分支时不会触发 recompute → 投影滞后。补一次(fire-and-forget)。
+    if (!effects.has('recalc_schedule')) {
+      void (async () => {
+        try {
+          const { recomputeDeliveryConfidence } = await import('./runtime-confidence');
+          await recomputeDeliveryConfidence(orderId, { type: 'milestone_status_changed', source: 'amendment:reset_packing', severity: 'info', payload: { step_key: 'packing_method_confirmed' }, triggeredBy: actorUserId });
+        } catch (e: any) { console.warn('[amendment] 包装重置 recompute 失败(不阻断):', e?.message); }
+      })();
+    }
   }
 
   // 2.5 采购需求联动(审计#2):改数量/款/色等采购相关变更 → 把采购项+未收货执行行标「需重新确认」。
