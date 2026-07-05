@@ -531,7 +531,7 @@ export async function updateMilestone(
   // 获取当前里程碑（用于状态转换校验和订单状态检查）
   const { data: currentMilestone, error: getMilestoneError } = await (supabase
     .from('milestones') as any)
-    .select('status, order_id, owner_role')
+    .select('status, order_id, owner_role, step_key, name')
     .eq('id', id)
     .single();
   
@@ -658,6 +658,26 @@ export async function updateMilestone(
         old_status: currentMilestone.status,
       },
     });
+  }
+
+  // ── H3:财务确认节点(owner_role='finance',如财务审核/核准出运/收款)推进到 in_progress(待财务确认)
+  //    → 发 milestone.requested 给财务系统审批队列(财务批准回传 approval_type='milestone')。fire-and-forget。
+  const becameInProgress = sanitized.status === 'in_progress' && currentMilestone?.status !== 'in_progress';
+  if (currentMilestone?.order_id && becameInProgress && currentMilestone?.owner_role === 'finance') {
+    void (async () => {
+      try {
+        const { createServiceRoleClient } = await import('@/lib/supabase/server');
+        const svc = createServiceRoleClient();
+        const { data: ord } = await (svc.from('orders') as any).select('order_no, customer_name').eq('id', currentMilestone.order_id).maybeSingle();
+        const { syncMilestoneRequestToFinance } = await import('@/lib/integration/finance-sync');
+        const label = currentMilestone.name || currentMilestone.step_key || '里程碑';
+        await syncMilestoneRequestToFinance({
+          id, order_no: (ord as any)?.order_no ?? null, customer_name: (ord as any)?.customer_name ?? null,
+          requester_name: null, summary: `里程碑待财务确认:${label}`, detail: label,
+          created_at: new Date().toISOString(),
+        });
+      } catch (e: any) { console.warn('[milestone-hook] milestone.requested 发送失败(不阻断):', e?.message); }
+    })();
   }
 
   return { data };
