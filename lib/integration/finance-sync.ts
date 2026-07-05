@@ -172,7 +172,9 @@ export async function syncOrderToFinance(order: Record<string, unknown>, event: 
     quantity: order.quantity || null,
     quantity_unit: order.quantity_unit || null,
     factory_name: order.factory_name || null,
+    factory_date: order.factory_date || null,   // 审计#2:重排改的是工厂日,财务需看到新交期
     etd: order.etd || null,
+    warehouse_due_date: order.warehouse_due_date || null,
     payment_terms: order.payment_terms || null,
     style_no: order.style_no || null,
     notes: order.notes || null,

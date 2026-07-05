@@ -245,6 +245,24 @@ export async function applyReschedule(
     }
   })();
 
+  // ── 审计#2:重排此前对财务/采购/生产全静默。补:同步财务(新交期)+ 通知采购/生产/跟单 ──
+  try {
+    const { data: full } = await (supabase.from('orders') as any).select('*').eq('id', orderId).maybeSingle();
+    if (full) {
+      const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+      await syncOrderToFinance(full, 'order.updated'); // 载荷已含 factory_date/etd/warehouse_due_date
+    }
+  } catch (e: any) { console.warn('[reschedule] 财务同步失败(已落 outbox / 不阻断):', e?.message); }
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(supabase, ['procurement', 'procurement_manager', 'production', 'production_manager', 'merchandiser'], {
+      type: 'order_rescheduled',
+      title: `📅 订单已重排交期：${order.order_no || ''}`,
+      message: `订单 ${order.order_no || orderId} 工厂日已改为 ${newFactoryDate}(新上线 ${newProductionStartDate}),${updatedCount} 个节点顺延。请据新交期调整采购到货/生产排产。`,
+      relatedOrderId: orderId,
+    });
+  } catch (e: any) { console.warn('[reschedule] 通知采购/生产失败(不阻断):', e?.message); }
+
   revalidatePath(`/orders/${orderId}`);
   return { data: { updatedCount, newFactoryDate } };
 }

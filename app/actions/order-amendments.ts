@@ -239,9 +239,25 @@ async function executeSideEffects(
       .eq('step_key', 'packing_method_confirmed');
   }
 
-  // 3. 通知相关角色
+  // 2.5 采购需求联动(审计#2):改数量/款/色等采购相关变更 → 把采购项+未收货执行行标「需重新确认」。
+  //     不自动重算 BOM 单耗(避免误改),而是让采购/跟单据变更重新核料;标记后采购 UI 会提示 needs_reconfirm。
+  if (effects.has('notify_procurement')) {
+    try {
+      await (supabase.from('procurement_items') as any)
+        .update({ needs_reconfirm: true }).eq('order_id', orderId)
+        .not('status', 'in', '("closed","completed")');
+    } catch (e: any) { console.warn('[amendment] 采购项标需重确认失败(列缺/不阻断):', e?.message); }
+    try {
+      await (supabase.from('procurement_line_items') as any)
+        .update({ needs_reconfirm: true }).eq('order_id', orderId)
+        .not('line_status', 'in', '("received","accepted","closed","concession","cancelled")');
+    } catch (e: any) { console.warn('[amendment] 执行行标需重确认失败(列缺/不阻断):', e?.message); }
+  }
+
+  // 3. 通知相关角色(采购变更时一并通知生产,别只发采购铃铛)
   const notifyRoles: Array<{ effect: AmendmentSideEffect; role: string; label: string }> = [
     { effect: 'notify_procurement', role: 'procurement', label: '采购' },
+    { effect: 'notify_procurement', role: 'production', label: '生产' },
     { effect: 'notify_finance', role: 'finance', label: '财务' },
     { effect: 'notify_merchandiser', role: 'merchandiser', label: '跟单' },
     { effect: 'notify_production_manager', role: 'production_manager', label: '生产主管' },
