@@ -163,6 +163,10 @@ export async function createDelayRequest(
     }
   }
 
+  // 改期审批链快照(2026-07-05 P1):按该节点 owner_role 从路由表冻结审批链,逐级确认
+  const { deferralChainFor } = await import('@/lib/domain/deferral-routing');
+  const approvalChain = deferralChainFor(milestoneData.owner_role);
+
   // Create delay request
   const insertPayload: any = {
     order_id: orderData.id,
@@ -177,12 +181,19 @@ export async function createDelayRequest(
     delay_days: delayDays,
     impacts_final_delivery: categoryInfo.impactsFinalDeliveryDate,
     status: 'pending',
+    approval_chain: approvalChain,
+    current_step: 0,
   };
-  const { data: delayRequest, error } = await (supabase
+  let { data: delayRequest, error } = await (supabase
     .from('delay_requests') as any)
     .insert(insertPayload)
     .select()
     .single();
+  // 迁移未执行(缺 approval_chain 等列)→ 降级去掉链列重插,不 brick 申请
+  if (error && /approval_chain|current_step|column .* does not exist/i.test(error.message || '')) {
+    const { approval_chain, current_step, ...plain } = insertPayload;
+    ({ data: delayRequest, error } = await (supabase.from('delay_requests') as any).insert(plain).select().single());
+  }
 
   if (error) {
     return { error: error.message };
@@ -197,6 +208,20 @@ export async function createDelayRequest(
     reasonDetail,
     { delay_request_id: (delayRequest as any).id }
   );
+
+  // P1(2026-07-05):通知审批链首个角色"有改期待你确认"(逐级链首)
+  try {
+    if (approvalChain.length > 0) {
+      const { roleCn } = await import('@/lib/domain/deferral-routing');
+      const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+      await notifyUsersByRole(supabase, [approvalChain[0]], {
+        type: 'deferral_approval',
+        title: `🕒 改期待审批:${(milestoneData.name || '')}（${orderData.internal_order_no || orderData.order_no || ''}）`,
+        message: `${milestoneData.name || '节点'}申请改期到 ${proposedNewDueAt || proposedNewAnchorDate || '新日期'}；原因：${reasonDetail}。请到该订单确认(你是本步「${roleCn(approvalChain[0])}」审批)。`,
+        relatedOrderId: orderData.id,
+      });
+    }
+  } catch (e: any) { console.warn('[createDelayRequest] 链首通知失败(不阻断):', e?.message); }
 
   // Customer Memory V1: auto-create on delay request
   const customerName = (orderData.customer_name as string) || '';
@@ -364,6 +389,55 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
   return toLegacyResult(await approveDelayRequestCore(delayRequestId, decisionNote));
 }
 
+/**
+ * P1 多级链审批(2026-07-05):当前轮到的角色确认一步。链满 → 复用 approveDelayRequestCore 落地。
+ * 权限:调用者须持链上 current_step 那级的角色(admin 可代任一步)。
+ */
+export async function approveDeferralStep(delayRequestId: string, note?: string): Promise<{ ok?: boolean; done?: boolean; nextRole?: string; error?: string }> {
+  const userClient = await createClient();
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (userClient.from('profiles') as any).select('role, roles, name').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+
+  const { roleCn } = await import('@/lib/domain/deferral-routing');
+  let svc: any; try { svc = createServiceRoleClient(); } catch { svc = userClient; }
+  const { data: dr } = await (svc.from('delay_requests') as any)
+    .select('id, order_id, status, approval_chain, approvals, current_step').eq('id', delayRequestId).maybeSingle();
+  if (!dr) return { error: '改期申请不存在' };
+  if ((dr as any).status !== 'pending') return { error: '该申请已处理' };
+  const chain: string[] = Array.isArray((dr as any).approval_chain) ? (dr as any).approval_chain : [];
+  if (chain.length === 0) return { error: '该申请无审批链(旧单请走原审批入口)' };
+  const step = Number((dr as any).current_step) || 0;
+  const needRole = chain[step];
+  if (!roles.includes('admin') && !roles.includes(needRole)) {
+    return { error: `本步需「${roleCn(needRole)}」确认,你的角色不匹配` };
+  }
+
+  const approvals = Array.isArray((dr as any).approvals) ? (dr as any).approvals : [];
+  approvals.push({ role: needRole, user_id: user.id, name: (prof as any)?.name || null, at: new Date().toISOString(), note: note || null });
+  const nextStep = step + 1;
+  const complete = nextStep >= chain.length;
+  await (svc.from('delay_requests') as any)
+    .update({ approvals, current_step: nextStep, updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+
+  if (complete) {
+    const res = toLegacyResult(await approveDelayRequestCore(delayRequestId, note));   // 链满 → 落地(core 对链已满放行)
+    if ((res as any).error) return { error: (res as any).error };
+    return { ok: true, done: true };
+  }
+  // 通知下一级
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(svc, [chain[nextStep]], {
+      type: 'deferral_approval', title: '🕒 改期待你确认(接续)',
+      message: `上一级已确认,请你(${roleCn(chain[nextStep])})接续确认此改期申请。`,
+      relatedOrderId: (dr as any).order_id,
+    });
+  } catch { /* 通知失败不阻断 */ }
+  return { ok: true, done: false, nextRole: chain[nextStep] };
+}
+
 async function approveDelayRequestCore(
   delayRequestId: string,
   decisionNote?: string,
@@ -383,8 +457,20 @@ async function approveDelayRequestCore(
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   // 2026-06 起：CEO/admin 与业务部经理可审批延期（业务经理对客户交期负责）
+  // 2026-07-05 P1：若该申请的多级审批链已走满(approveDeferralStep 逐级确认完成),
+  // 则由链授权放行(链末位角色可能不在 CAN_APPROVE_DELAY,如 merchandiser),不再卡单人闸。
   if (!hasRoleInGroup(userRoles, 'CAN_APPROVE_DELAY')) {
-    return failure('延期审批权限不足，仅 CEO/管理员或业务部经理可批准。', 'PERMISSION_DENIED');
+    let chainComplete = false;
+    try {
+      const svc0 = createServiceRoleClient();
+      const { data: cr } = await (svc0.from('delay_requests') as any)
+        .select('approval_chain, current_step').eq('id', delayRequestId).maybeSingle();
+      const ch = Array.isArray((cr as any)?.approval_chain) ? (cr as any).approval_chain : [];
+      chainComplete = ch.length > 0 && Number((cr as any)?.current_step || 0) >= ch.length;
+    } catch { /* 读不到就按无链处理 */ }
+    if (!chainComplete) {
+      return failure('延期审批权限不足，仅 CEO/管理员或业务部经理可批准。', 'PERMISSION_DENIED');
+    }
   }
 
   // 鉴权通过后，所有数据操作用 service-role 客户端 — 绕过 delay_requests RLS 的

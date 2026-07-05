@@ -73,8 +73,18 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
 
   async function handleApprove() {
     setLoading(true);
-    const result = await approveDelayRequest(delayRequest.id, decisionNote || undefined);
+    // P1(2026-07-05):优先走多级审批链(只有当前步角色能确认,逐级推进);
+    // 无链的旧单 → 回退到原单人审批。
+    const { approveDeferralStep } = await import('@/app/actions/delays');
+    const step = await approveDeferralStep(delayRequest.id, decisionNote || undefined);
+    let result: any = step;
+    if ((step as any).error && /无审批链/.test((step as any).error)) {
+      result = await approveDelayRequest(delayRequest.id, decisionNote || undefined);
+    }
     if (!result.error) {
+      if ((step as any).done === false && (step as any).nextRole) {
+        alert(`✅ 你这一步已确认,已转下一级审批(等待确认)。`);
+      }
       router.refresh();
       setShowActions(false);
       setDecisionNote('');
