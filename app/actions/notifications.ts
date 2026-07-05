@@ -14,11 +14,16 @@ export async function checkAndSendReminders() {
   const supabase = await createClient();
   const now = new Date();
 
-  // Get all in_progress milestones (兼容中文状态)
+  // 复审 P0 性能:只取「48h 内到期或已逾期」的进行中节点(提醒窗口最宽 48h)。
+  // 原来拉全部 in_progress(随系统运行只增不减,每 15 分钟全表扫)→ 收窄到临期集,基数稳定。
+  const cutoff = new Date(now.getTime() + 48 * 3600 * 1000).toISOString();
   const { data: milestones, error } = await supabase
     .from('milestones')
     .select('*')
-    .in('status', ['in_progress']);
+    .in('status', ['in_progress'])
+    .not('due_at', 'is', null)
+    .lte('due_at', cutoff)
+    .limit(500);
 
   if (error || !milestones) {
     console.error('Error fetching milestones:', error);
@@ -41,6 +46,8 @@ export async function checkAndSendReminders() {
     if (!order) continue;
 
     const orderData = order as any;
+    // 复审:已终结订单(取消/完成/归档/复盘)的残留节点不再发提醒
+    if (['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档', '已复盘'].includes(orderData.lifecycle_status)) continue;
     const dueAt = new Date(milestoneData.due_at);
     const hoursRemaining = differenceInHours(dueAt, now);
 

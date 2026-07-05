@@ -89,18 +89,11 @@ export default async function OrderDetailPage({
   const customerShipHold = isCustomerShipHoldFromOrder(orderData);
   const customerHoldStale = isCustomerHoldStale(orderData);
   const supabase = await createClient();
-  const { role: currentRole, isAdmin } = await getCurrentUserRole(supabase);
-  const { data: { user } } = await supabase.auth.getUser();
-  const isOrderOwner = user ? orderData.created_by === user.id : false;
-
-  // 获取用户多角色
-  let currentRoles: string[] = currentRole ? [currentRole] : [];
-  if (user) {
-    const { data: profile } = await supabase.from('profiles').select('roles, role').eq('user_id', user.id).single();
-    if ((profile as any)?.roles?.length > 0) {
-      currentRoles = (profile as any).roles;
-    }
-  }
+  // 复审性能:getCurrentUserRole 已做 auth+profiles,直接复用它返回的 userId/roles,
+  // 省掉此前额外的 auth.getUser() + profiles 查询(每开一张订单省 1 次鉴权往返 + 1 次角色查询)。
+  const { role: currentRole, isAdmin, userId, roles: profileRoles } = await getCurrentUserRole(supabase);
+  const isOrderOwner = userId ? orderData.created_by === userId : false;
+  const currentRoles: string[] = (profileRoles && profileRoles.length > 0) ? profileRoles : (currentRole ? [currentRole] : []);
   // 纯采购角色不进订单详情(2026-07-03 用户拍板:采购看到/误改订单一切太危险)
   // → 改道采购专属核料页(只读摘要+核料+任务单下载)。兼任其他角色/管理员不受限。
   if (!isAdmin && isProcurementOnly(currentRoles)) {

@@ -163,7 +163,10 @@ export default async function DashboardPage() {
       .select(`*, orders!inner (id, order_no, customer_name, internal_order_no, lifecycle_status)`)
       .lt('due_at', `${today}T00:00:00`)
       .not('status', 'in', '("done","已完成","completed")')
-      .order('due_at', { ascending: true }),
+      // 复审性能:排除已终结订单的残留逾期节点(取消/完成的死单仍留旧逾期节点 → 结果集随历史无限增长)
+      .not('orders.lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","已复盘")')
+      .order('due_at', { ascending: true })
+      .limit(500),
     // 当前用户涉及的订单
     (supabase.from('orders') as any)
       .select('id').eq('owner_user_id', user.id),
@@ -175,7 +178,9 @@ export default async function DashboardPage() {
     (supabase.from('milestones') as any)
       .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
       .in('status', ['blocked', '卡单', '卡住'])
-      .order('created_at', { ascending: false }),
+      .not('orders.lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","已复盘")')
+      .order('created_at', { ascending: false })
+      .limit(500),
   ]);
   const myOrderIds = new Set([
     ...(createdOrders || []).map((o: any) => o.id),

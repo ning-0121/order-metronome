@@ -57,11 +57,11 @@ export function isAdmin(email: string | null | undefined): boolean {
  * 之前一律被错判为 isAdmin=false / role='sales'，在订单详情页、仓库页
  * 等处功能受限或被错误重定向（如延期审批按钮不显示）。
  */
-export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRole; isAdmin: boolean }> {
+export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRole; isAdmin: boolean; userId?: string | null; roles?: string[] }> {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user || !user.email) {
-    return { role: 'sales', isAdmin: false };
+    return { role: 'sales', isAdmin: false, userId: null, roles: [] };
   }
 
   // 邮箱白名单：保底 admin（profiles 缺失也不失权）
@@ -97,7 +97,8 @@ export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRol
     role = emailRole;
   }
 
-  return { role, isAdmin };
+  // 复审性能:一并返回 userId + roles(本函数已查过 auth+profiles),调用方无需再各查一次
+  return { role, isAdmin, userId: user.id, roles: profileRoles };
 }
 
 /**
