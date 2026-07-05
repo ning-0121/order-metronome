@@ -56,6 +56,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid source' }, { status: 403 })
   }
 
+  // 3.5 时间戳窗口(审计修 2026-07-05):原来只验 key+签名、无时间戳 → 抓到一次合法回调即可
+  // 无限重放(尤其 finance-events 是 append-only,重放会插重复资金事件)。加 5 分钟窗口兜住。
+  const tsMs = Date.parse(payload.timestamp || '')
+  if (!payload.timestamp || Number.isNaN(tsMs) || Math.abs(Date.now() - tsMs) > 5 * 60 * 1000) {
+    return NextResponse.json({ error: 'Request expired (replay prevention)' }, { status: 401 })
+  }
+
   // 财务进度事件（结算/收款/付款完成）——append-only 记进 order_finance_events，
   // 让节拍器看到资金进度(此前财务进度对节拍器全黑盒)。按 qimo_order_id=orders.id 精确关联。
   const FINANCE_PROGRESS = new Set(['settlement.closed', 'collection.received', 'payment.completed'])
