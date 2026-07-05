@@ -108,10 +108,11 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
   const salePrice = order.unit_price || (order.incoterm === 'DDP' ? baseline?.ddp_price : baseline?.fob_price) || 0;
   const exchangeRate = baseline?.exchange_rate || 7.2;
   const saleTotal = salePrice * qty * (order.currency === 'CNY' ? 1 : exchangeRate);
-  const costPerPiece = baseline?.total_cost_per_piece || 0;
   const costMaterial = baseline?.budget_fabric_amount || 0;
   const costCmt = (baseline?.cmt_factory_quote || 0) * qty;
-  const costTotal = costPerPiece * qty;
+  // 成本口径统一为 profit.service 的组件求和(料+加工+运+杂),并首次即持久化 cost_total。
+  // 审计 P1:此前 cost_total 从不写入 → updateOrderFinancials 读到 0 → 毛利=全额、毛利率虚高、亏损单漏报。
+  const costTotal = costMaterial + costCmt; // 首次运/杂费未录,为 0;后续 update 会并入
   const grossProfit = saleTotal - costTotal;
   const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
 
@@ -124,6 +125,7 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
     exchange_rate: exchangeRate,
     cost_material: costMaterial,
     cost_cmt: costCmt,
+    cost_total: costTotal || null,
     gross_profit_rmb: grossProfit || null,
     margin_pct: marginPct || null,
     min_margin_alert: marginPct < 8,
@@ -176,8 +178,9 @@ export async function updateOrderFinancials(
     return { error: '仅财务和管理员可修改经营数据' };
   }
 
-  // 自动计算利润
-  if (updates.sale_price_per_piece !== undefined || updates.sale_total !== undefined || updates.exchange_rate !== undefined) {
+  // 自动计算利润:销售 或 运费/杂费 任一变动都要重算(此前只在销售变动时算 → 改运杂费不进 cost_total)
+  if (updates.sale_price_per_piece !== undefined || updates.sale_total !== undefined || updates.exchange_rate !== undefined
+      || updates.cost_shipping !== undefined || updates.cost_other !== undefined) {
     const { data: current } = await (supabase.from('order_financials') as any)
       .select('*').eq('order_id', orderId).single();
     const { data: order } = await (supabase.from('orders') as any)
@@ -188,11 +191,16 @@ export async function updateOrderFinancials(
     const rate = updates.exchange_rate ?? current?.exchange_rate ?? 7.2;
     const currency = updates.sale_currency ?? current?.sale_currency ?? 'USD';
     const saleTotal = updates.sale_total ?? (price * qty * (currency === 'CNY' ? 1 : rate));
-    const costTotal = current?.cost_total || 0;
+    // 审计 P1:成本改由组件现算(料+加工+运+杂,与 profit.service 同口径),不再读从不写入的 cost_total 列。
+    const costTotal =
+      Number(current?.cost_material || 0) + Number(current?.cost_cmt || 0) +
+      Number(updates.cost_shipping ?? current?.cost_shipping ?? 0) +
+      Number(updates.cost_other ?? current?.cost_other ?? 0);
     const grossProfit = saleTotal - costTotal;
     const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
 
     (updates as any).sale_total = saleTotal;
+    (updates as any).cost_total = costTotal;
     (updates as any).gross_profit_rmb = grossProfit;
     (updates as any).margin_pct = marginPct;
     (updates as any).min_margin_alert = marginPct < 8;
