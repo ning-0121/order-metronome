@@ -24,6 +24,8 @@ export async function GET(request: Request) {
     let autoEscalated = 0;
     // ── 采购单自定义提醒节点：到点通知采购/业务/跟单 ──
     let poReminders = 0;
+    // ── 采购风险中心近实时物化(审计修 2026-07-04:原只每晚物化,滞后近24h→改每15分钟)──
+    let mattersMaterialized: number | string = 0;
     try {
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -33,6 +35,11 @@ export async function GET(request: Request) {
         supervisorAlerts = await notifyAdminAssistantOverdue(supabase);
         autoEscalated = await runEscalationChain(supabase);
         poReminders = await checkPoReminders(supabase);
+        try {
+          const { materializeProcurementMatters } = await import('@/lib/services/procurement-matters.service');
+          const r = await materializeProcurementMatters(supabase as any, { mode: 'execute' });
+          mattersMaterialized = (r as any)?.count ?? 'ok';
+        } catch (e: any) { console.error('[reminders] matters materialize error:', e?.message); mattersMaterialized = 'error'; }
       }
     } catch (e: any) {
       console.error('[reminders] extra checks error:', e?.message);
@@ -47,6 +54,7 @@ export async function GET(request: Request) {
       supervisor_alerts: supervisorAlerts,
       auto_escalated: autoEscalated,
       po_reminders: poReminders,
+      matters_materialized: mattersMaterialized,
     });
   } catch (error: any) {
     console.error('Cron job error:', error);

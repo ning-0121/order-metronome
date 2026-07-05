@@ -888,6 +888,38 @@ export async function syncProcurementItemReceivingStatus(orderId: string) {
       changed++;
     }
   }
+
+  // 审计修(2026-07-04):整单料齐 → 自动完成「原料到厂检验」里程碑 + 重算交付置信度,
+  // 与「采购下单」节点自动完成对齐,否则收齐后风险卡仍显示原料未到直到手工勾节点。
+  try {
+    const allReceived = (items as any[]).length > 0 && (items as any[]).every((it: any) => {
+      const a = agg.get(it.id); return a && a.ordered > 0 && a.received >= a.ordered;
+    });
+    if (allReceived) {
+      const { data: ms } = await (supabase.from('milestones') as any)
+        .select('id, status').eq('order_id', orderId).eq('step_key', 'materials_received_inspected').maybeSingle();
+      const st = String((ms as any)?.status || '').toLowerCase();
+      if (ms && st !== 'done' && st !== '已完成') {
+        await (supabase.from('milestones') as any)
+          .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now }).eq('id', (ms as any).id);
+        await (supabase.from('milestone_logs') as any).insert({
+          milestone_id: (ms as any).id, order_id: orderId, action: 'status_transition',
+          note: '全部原料已收齐验收 → 系统自动完成「原料到厂检验」节点(收货记录即证据)',
+          payload: { auto: true, source: 'materials_received' },
+        }).then(() => {}, () => {});
+        void (async () => {
+          try {
+            const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');
+            await recomputeDeliveryConfidence(orderId, {
+              type: 'milestone_status_changed', source: `milestone:${(ms as any).id}`, severity: 'info',
+              payload: { milestone_id: (ms as any).id, new_status: 'done', auto: 'materials_received' },
+            });
+          } catch { /* 忽略 */ }
+        })();
+      }
+    }
+  } catch (e: any) { console.warn('[syncProcurementItemReceivingStatus] 料齐里程碑联动失败(不阻断):', e?.message); }
+
   return { ok: true, changed };
 }
 

@@ -144,8 +144,8 @@ export default async function ProcurementCenterPage() {
           <h2 className="text-lg font-bold text-gray-900">⚠️ 采购风险中心</h2>
           <span className="text-xs text-gray-400">
             {matterCounts.total > 0
-              ? `高 ${matterCounts.high} · 中 ${matterCounts.medium}（每日自动物化）`
-              : '每日自动物化'}
+              ? `高 ${matterCounts.high} · 中 ${matterCounts.medium}（每15分钟自动物化）`
+              : '每15分钟自动物化'}
           </span>
         </div>
         <RiskCenter matters={matters} />
