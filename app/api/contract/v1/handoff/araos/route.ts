@@ -20,15 +20,70 @@ function fail(code: string, status: number, message?: string) {
   return NextResponse.json({ schema_version: 'v1', error: { code, message: message ?? code } }, { status });
 }
 
-interface HandoffCustomer {
-  name?: string; company_name?: string; contact_name?: string; email?: string; phone?: string; country?: string;
+/**
+ * araos 出站真实 body(见 araos lib/metronome/client.ts):
+ *   { source, entity_type:'order'|'sample', entity_id, company_id, idempotency_key, data:{...}, sent_at }
+ * data = buildOrderPayload/buildSamplePayload:{ type, araos_order_id/araos_sample_id, company_name,
+ *        contact_name, contact_email, contact_phone, order_ref/quantity/required_delivery/product_lines/... }
+ * 本端点向后兼容一个扁平 { araos_order_id, customer:{...}, deal:{...} } 形态。
+ */
+type AnyObj = Record<string, any>;
+
+const str = (v: any): string | null => {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+};
+const num = (v: any): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** product_lines(数组/对象/字符串)→ 简短款式摘要,用于通知文案。 */
+function stylesSummary(pl: any): string | null {
+  if (!pl) return null;
+  if (typeof pl === 'string') return str(pl);
+  if (Array.isArray(pl)) {
+    const parts = pl.map((x) => (typeof x === 'string' ? x : x?.style || x?.name || x?.style_no)).filter(Boolean);
+    return parts.length ? parts.slice(0, 4).join('、') + (parts.length > 4 ? ` 等${parts.length}款` : '') : null;
+  }
+  return null;
 }
-interface HandoffBody {
-  event_type?: string;
-  araos_order_id?: string;
-  araos_company_id?: string;
-  customer?: HandoffCustomer;
-  deal?: { po_number?: string; style?: string; quantity?: number; target_delivery?: string; currency?: string; note?: string };
+
+interface Normalized {
+  araosOrderId: string | null;
+  araosCompanyId: string | null;
+  entityType: string;              // order | sample
+  eventType: string;               // deal_won | sample_request
+  customerName: string | null;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  country: string | null;
+  deal: { po_number: string | null; style: string | null; quantity: number | null; target_delivery: string | null; currency: string | null; note: string | null };
+}
+
+/** 归一化 araos 包裹体 / 扁平体 → 统一字段。 */
+function normalize(body: AnyObj): Normalized {
+  const d: AnyObj = body && typeof body.data === 'object' && body.data ? body.data : body;
+  const c: AnyObj = body?.customer && typeof body.customer === 'object' ? body.customer : {};
+  const entityType = str(body?.entity_type) || (d?.type === 'sample_request' ? 'sample' : 'order') || 'order';
+  return {
+    araosOrderId: str(body?.idempotency_key) || str(body?.entity_id) || str(d?.araos_order_id) || str(d?.araos_sample_id),
+    araosCompanyId: str(body?.company_id) || str(d?.araos_company_id),
+    entityType,
+    eventType: str(body?.event_type) || (entityType === 'sample' ? 'sample_request' : 'deal_won'),
+    customerName: str(d?.company_name) || str(c?.name) || str(c?.company_name),
+    contactName: str(d?.contact_name) || str(c?.contact_name),
+    email: str(d?.contact_email) || str(c?.email),
+    phone: str(d?.contact_phone) || str(d?.shipping?.phone) || str(c?.phone),
+    country: str(d?.shipping?.country) || str(d?.country) || str(c?.country),
+    deal: {
+      po_number: str(d?.order_ref) || str(body?.deal?.po_number),
+      style: stylesSummary(d?.product_lines) || str(d?.styles_requested) || str(body?.deal?.style),
+      quantity: num(d?.quantity) ?? num(body?.deal?.quantity),
+      target_delivery: str(d?.required_delivery) || str(d?.target_delivery) || str(body?.deal?.target_delivery),
+      currency: str(d?.currency) || str(body?.deal?.currency),
+      note: str(d?.spec_notes) || str(d?.brand_requirements) || str(body?.deal?.note),
+    },
+  };
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -50,15 +105,16 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!auth.ok) return fail(auth.code, auth.status);
   if (auth.keyId !== 'araos') return fail('insufficient_scope', 403, 'handoff 仅限 araos 消费者');
 
-  // 2) 解析 + 校验必填
-  let body: HandoffBody;
+  // 2) 解析 + 归一化(araos 包裹体/扁平体)+ 校验必填
+  let body: AnyObj;
   try { body = JSON.parse(rawBody || '{}'); } catch { return fail('invalid_body', 400, 'body 非合法 JSON'); }
-  const araosOrderId = (body.araos_order_id || '').trim();
-  const customerName = (body.customer?.name || '').trim();
-  if (!araosOrderId) return fail('invalid_body', 400, '缺 araos_order_id(幂等键)');
-  if (!customerName) return fail('invalid_body', 400, '缺 customer.name');
+  const n = normalize(body);
+  const araosOrderId = n.araosOrderId || '';
+  const customerName = n.customerName || '';
+  if (!araosOrderId) return fail('invalid_body', 400, '缺 araos entity id(幂等键)');
+  if (!customerName) return fail('invalid_body', 400, '缺客户名(company_name)');
 
-  const araosCompanyId = (body.araos_company_id || '').trim();
+  const araosCompanyId = n.araosCompanyId || '';
   const sourceUuid = UUID_RE.test(araosCompanyId) ? araosCompanyId : null; // source_araos_company_id 为 uuid 列
   const svc = createServiceRoleClient();
 
@@ -97,11 +153,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!customerId) {
       const insert: Record<string, unknown> = {
         customer_name: customerName,
-        company_name: body.customer?.company_name || null,
-        contact_name: body.customer?.contact_name || null,
-        email: body.customer?.email || null,
-        phone: body.customer?.phone || null,
-        country: body.customer?.country || null,
+        company_name: customerName,
+        contact_name: n.contactName,
+        email: n.email,
+        phone: n.phone,
+        country: n.country,
         source_araos_company_id: sourceUuid,
       };
       const { data: created, error: cErr } = await (svc.from('customers') as any)
@@ -110,18 +166,19 @@ export async function POST(request: Request): Promise<NextResponse> {
       customerId = created.id; matchPath = 'created';
     }
 
-    // 5) 通知业务:赢单来建单(不自动建单)
-    const d = body.deal || {};
+    // 5) 通知业务:赢单/寄样来建单(不自动建单)
+    const d = n.deal;
+    const isSample = n.entityType === 'sample';
     const dealBits = [
-      d.po_number ? `PO ${d.po_number}` : null,
+      d.po_number ? `单号 ${d.po_number}` : null,
       d.style ? `款 ${d.style}` : null,
       d.quantity ? `${d.quantity} 件` : null,
       d.target_delivery ? `交期 ${String(d.target_delivery).slice(0, 10)}` : null,
     ].filter(Boolean).join(' · ');
     await notifyUsersByRole(svc, ['sales', 'sales_manager', 'order_manager', 'admin'], {
-      type: 'araos_deal_won',
-      title: `🎉 araos 赢单:${customerName}`,
-      message: `${dealBits || '新赢单'} —— 客户已${matchPath === 'created' ? '新建' : '匹配'}到系统,请在报价/建单流程录 PO 建单(生产链不自动建单)。${d.note ? ' 备注:' + d.note : ''}`,
+      type: isSample ? 'araos_sample_request' : 'araos_deal_won',
+      title: `${isSample ? '🧵 araos 打样/寄样' : '🎉 araos 赢单'}:${customerName}`,
+      message: `${dealBits || (isSample ? '新样单' : '新赢单')} —— 客户已${matchPath === 'created' ? '新建' : '匹配'}到系统,请在报价/建单流程录${isSample ? '样单' : ' PO 建单'}(生产链不自动建单)。${d.note ? ' 备注:' + d.note : ''}`,
       relatedOrderId: null,
     });
 
@@ -129,7 +186,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     await (svc.from('araos_handoffs_inbox') as any).upsert({
       araos_order_id: araosOrderId,
       araos_company_id: araosCompanyId || null,
-      event_type: body.event_type || 'deal_won',
+      event_type: n.eventType,
       payload: body,
       status: 'processed',
       qimo_customer_id: customerId,
@@ -147,7 +204,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     try {
       await (svc.from('araos_handoffs_inbox') as any).upsert({
         araos_order_id: araosOrderId, araos_company_id: araosCompanyId || null,
-        event_type: body.event_type || 'deal_won', payload: body, status: 'error',
+        event_type: n.eventType, payload: body, status: 'error',
         error: String(e?.message || e).slice(0, 500),
       }, { onConflict: 'araos_order_id' });
     } catch {}
