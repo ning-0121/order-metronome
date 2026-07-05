@@ -390,10 +390,12 @@ export async function approveDelayRequest(delayRequestId: string, decisionNote?:
 }
 
 /**
- * P1 多级链审批(2026-07-05):当前轮到的角色确认一步。链满 → 复用 approveDelayRequestCore 落地。
+ * P1/P3 多级链审批(2026-07-05):当前轮到的角色确认一步。链满 → 复用 approveDelayRequestCore 落地。
+ * P3:若此改期影响整体交期,链末位需选 mode —— push_delivery(退交期,推整体交期)/
+ *     urgent(转紧急,不退交期、链追加采购+生产确认下游压缩、订单标「交期紧急」)。
  * 权限:调用者须持链上 current_step 那级的角色(admin 可代任一步)。
  */
-export async function approveDeferralStep(delayRequestId: string, note?: string): Promise<{ ok?: boolean; done?: boolean; nextRole?: string; error?: string }> {
+export async function approveDeferralStep(delayRequestId: string, note?: string, mode?: 'push_delivery' | 'urgent'): Promise<{ ok?: boolean; done?: boolean; nextRole?: string; needsMode?: boolean; urgent?: boolean; error?: string }> {
   const userClient = await createClient();
   const { data: { user } } = await userClient.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -403,7 +405,7 @@ export async function approveDeferralStep(delayRequestId: string, note?: string)
   const { roleCn } = await import('@/lib/domain/deferral-routing');
   let svc: any; try { svc = createServiceRoleClient(); } catch { svc = userClient; }
   const { data: dr } = await (svc.from('delay_requests') as any)
-    .select('id, order_id, status, approval_chain, approvals, current_step').eq('id', delayRequestId).maybeSingle();
+    .select('id, order_id, status, approval_chain, approvals, current_step, reschedule_mode, impacts_final_delivery').eq('id', delayRequestId).maybeSingle();
   if (!dr) return { error: '改期申请不存在' };
   if ((dr as any).status !== 'pending') return { error: '该申请已处理' };
   const chain: string[] = Array.isArray((dr as any).approval_chain) ? (dr as any).approval_chain : [];
@@ -417,24 +419,51 @@ export async function approveDeferralStep(delayRequestId: string, note?: string)
   const approvals = Array.isArray((dr as any).approvals) ? (dr as any).approvals : [];
   approvals.push({ role: needRole, user_id: user.id, name: (prof as any)?.name || null, at: new Date().toISOString(), note: note || null });
   const nextStep = step + 1;
-  const complete = nextStep >= chain.length;
-  await (svc.from('delay_requests') as any)
-    .update({ approvals, current_step: nextStep, updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+  const baseComplete = nextStep >= chain.length;
+  const alreadyDecided = !!(dr as any).reschedule_mode;   // 已定过 mode = 链已为 urgent 追加过采购/生产
+  const impactsDelivery = !!(dr as any).impacts_final_delivery;
 
-  if (complete) {
-    const res = toLegacyResult(await approveDelayRequestCore(delayRequestId, note));   // 链满 → 落地(core 对链已满放行)
+  const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+  const notify = async (role: string, msg: string) => {
+    try { await notifyUsersByRole(svc, [role], { type: 'deferral_approval', title: '🕒 改期待你确认', message: msg, relatedOrderId: (dr as any).order_id }); } catch { /* 不阻断 */ }
+  };
+
+  if (baseComplete) {
+    // P3:到链末位,且影响交期,且还没定 mode → 需要"退交期 / 转紧急"决策
+    if (impactsDelivery && !alreadyDecided && !mode) {
+      // 先不推进,让前端弹二选一(不写库,保持本步未确认)
+      approvals.pop();
+      return { needsMode: true, error: '此改期影响整体交期,请选择「退交期」或「转紧急」' };
+    }
+    if (impactsDelivery && !alreadyDecided && mode === 'urgent') {
+      // 转紧急:链追加 采购+生产 确认下游压缩,标 reschedule_mode,暂不落地
+      const ext = [...chain];
+      for (const r of ['procurement', 'production']) if (!ext.includes(r)) ext.push(r);
+      await (svc.from('delay_requests') as any)
+        .update({ approvals, current_step: nextStep, approval_chain: ext, reschedule_mode: 'urgent', updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+      await notify(ext[nextStep], `已选「转紧急·不退交期」,请你(${roleCn(ext[nextStep])})确认下游能压缩到原交期。`);
+      return { ok: true, done: false, urgent: true, nextRole: ext[nextStep] };
+    }
+    // 真正落地:push_delivery(退交期) 或 urgent 追加链已确认完 或 不影响交期
+    await (svc.from('delay_requests') as any).update({ approvals, current_step: nextStep, updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+    if ((dr as any).reschedule_mode === 'urgent') {
+      // 转紧急落地:不推整体交期(impacts_final_delivery=false)+ 订单标「交期紧急」
+      await (svc.from('delay_requests') as any).update({ impacts_final_delivery: false }).eq('id', delayRequestId);
+      try {
+        const { data: ord } = await (svc.from('orders') as any).select('special_tags').eq('id', (dr as any).order_id).maybeSingle();
+        const tags: string[] = Array.isArray((ord as any)?.special_tags) ? (ord as any).special_tags : [];
+        if (!tags.includes('交期紧急')) await (svc.from('orders') as any).update({ special_tags: [...tags, '交期紧急'] }).eq('id', (dr as any).order_id);
+      } catch { /* 标签失败不阻断 */ }
+    } else if (mode === 'push_delivery') {
+      await (svc.from('delay_requests') as any).update({ reschedule_mode: 'push_delivery' }).eq('id', delayRequestId);
+    }
+    const res = toLegacyResult(await approveDelayRequestCore(delayRequestId, note));   // 落地(core 对链已满放行)
     if ((res as any).error) return { error: (res as any).error };
     return { ok: true, done: true };
   }
-  // 通知下一级
-  try {
-    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-    await notifyUsersByRole(svc, [chain[nextStep]], {
-      type: 'deferral_approval', title: '🕒 改期待你确认(接续)',
-      message: `上一级已确认,请你(${roleCn(chain[nextStep])})接续确认此改期申请。`,
-      relatedOrderId: (dr as any).order_id,
-    });
-  } catch { /* 通知失败不阻断 */ }
+  // 未到末位 → 推进 + 通知下一级
+  await (svc.from('delay_requests') as any).update({ approvals, current_step: nextStep, updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+  await notify(chain[nextStep], `上一级已确认,请你(${roleCn(chain[nextStep])})接续确认此改期申请。`);
   return { ok: true, done: false, nextRole: chain[nextStep] };
 }
 

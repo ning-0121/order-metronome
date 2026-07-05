@@ -59,6 +59,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
   const [loadingImpacted, setLoadingImpacted] = useState(false);
   const [decisionNote, setDecisionNote] = useState('');
   const [showActions, setShowActions] = useState(false);
+  const [needMode, setNeedMode] = useState(false);   // P3:链末位需选 退交期/转紧急
 
   useEffect(() => {
     const chainLen = Array.isArray(delayRequest.approval_chain) ? delayRequest.approval_chain.length : 0;
@@ -76,20 +77,21 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
     setLoadingImpacted(false);
   }
 
-  async function handleApprove() {
+  async function handleApprove(mode?: 'push_delivery' | 'urgent') {
     setLoading(true);
-    // P1(2026-07-05):优先走多级审批链(只有当前步角色能确认,逐级推进);
-    // 无链的旧单 → 回退到原单人审批。
+    // P1/P3:优先走多级审批链(逐级推进);无链的旧单 → 回退原单人审批。
     const { approveDeferralStep } = await import('@/app/actions/delays');
-    const step = await approveDeferralStep(delayRequest.id, decisionNote || undefined);
+    const step = await approveDeferralStep(delayRequest.id, decisionNote || undefined, mode);
     let result: any = step;
     if ((step as any).error && /无审批链/.test((step as any).error)) {
       result = await approveDelayRequest(delayRequest.id, decisionNote || undefined);
     }
+    // P3:链末位影响交期 → 需选 退交期/转紧急
+    if ((step as any).needsMode) { setNeedMode(true); setLoading(false); return; }
     if (!result.error) {
-      if ((step as any).done === false && (step as any).nextRole) {
-        alert(`✅ 你这一步已确认,已转下一级审批(等待确认)。`);
-      }
+      if ((step as any).urgent) alert('✅ 已选「转紧急·不退交期」,已转采购+生产确认下游压缩。');
+      else if ((step as any).done === false && (step as any).nextRole) alert('✅ 你这一步已确认,已转下一级审批(等待确认)。');
+      setNeedMode(false);
       router.refresh();
       setShowActions(false);
       setDecisionNote('');
@@ -297,10 +299,25 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
                 placeholder="请输入审批意见（拒绝时必须填写）..."
               />
             </div>
+            {needMode && (
+              <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                <p className="text-sm font-medium text-amber-900 mb-2">此改期影响整体交期,请选择处置方式:</p>
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => handleApprove('push_delivery')} disabled={loading}
+                    className="rounded-md bg-indigo-600 px-3 py-2 text-white text-sm hover:bg-indigo-700 disabled:opacity-50">
+                    📆 退交期(推整体交期,客户承诺变更)
+                  </button>
+                  <button onClick={() => handleApprove('urgent')} disabled={loading}
+                    className="rounded-md bg-orange-600 px-3 py-2 text-white text-sm hover:bg-orange-700 disabled:opacity-50">
+                    🚨 转紧急(不退交期,采购+生产确认压缩)
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
-                onClick={handleApprove}
-                disabled={loading}
+                onClick={() => handleApprove()}
+                disabled={loading || needMode}
                 className="flex-1 rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:opacity-50 font-medium"
               >
                 {loading ? '处理中...' : '✓ 批准延期'}
