@@ -141,14 +141,15 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
   const saleTotal = salePrice * qty * (order.currency === 'CNY' ? 1 : exchangeRate);
   const costMaterial = baseline?.budget_fabric_amount || 0;
   const costCmt = (baseline?.cmt_factory_quote || 0) * qty;
-  // 成本口径统一为 profit.service 的组件求和(料+加工+运+杂),并首次即持久化 cost_total。
-  // 审计 P1:此前 cost_total 从不写入 → updateOrderFinancials 读到 0 → 毛利=全额、毛利率虚高、亏损单漏报。
-  const costTotal = costMaterial + costCmt; // 首次运/杂费未录,为 0;后续 update 会并入
+  // 成本口径 = profit.service 组件求和(料+加工+运+杂);cost_total 是生成列,DB 自动算,app 不写。
+  const costTotal = costMaterial + costCmt; // 首次运/杂费未录,为 0
+  // H1(复审):成本组件全为 0(多半是没 order_cost_baseline)→ 毛利待定,不写虚高的 100%/安全。
+  const costBasisMissing = costTotal === 0;
   const grossProfit = saleTotal - costTotal;
   const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
 
-  // 插入 order_financials
-  const { error: finError } = await (supabase.from('order_financials') as any).upsert({
+  // 插入 order_financials(cost_total 是生成列,不写→428C9;只写普通列)
+  const finPayload: Record<string, unknown> = {
     order_id: orderId,
     sale_price_per_piece: salePrice || null,
     sale_currency: order.currency || 'USD',
@@ -156,12 +157,19 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
     exchange_rate: exchangeRate,
     cost_material: costMaterial,
     cost_cmt: costCmt,
-    // ⚠️ cost_total 是数据库生成列(GENERATED),不能写入(会 428C9)。只写普通列 gross_profit_rmb/margin_pct。
-    gross_profit_rmb: grossProfit || null,
-    margin_pct: marginPct || null,
-    min_margin_alert: marginPct < 8,
+    cost_basis_missing: costBasisMissing,
+    gross_profit_rmb: costBasisMissing ? null : (grossProfit || null),
+    margin_pct: costBasisMissing ? null : (marginPct || null),
+    min_margin_alert: costBasisMissing ? null : (marginPct < 8), // 缺基线写 null=待定,别写 false=安全
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'order_id' });
+  };
+  let { error: finError } = await (supabase.from('order_financials') as any).upsert(finPayload, { onConflict: 'order_id' });
+  // H1 迁移(20260705_cost_basis_missing)未执行时降级:去掉新列 + min_margin_alert 回退 false(不 brick 财务录入)
+  if (finError && /cost_basis_missing|min_margin_alert|does not exist|null value|not-null/i.test(finError.message || '')) {
+    const { cost_basis_missing, ...rest } = finPayload;
+    rest.min_margin_alert = costBasisMissing ? false : (marginPct < 8);
+    ({ error: finError } = await (supabase.from('order_financials') as any).upsert(rest, { onConflict: 'order_id' }));
+  }
   // 财务记录写失败不再静默：返回 error 让调用方可感知（建单主链路仍由调用方决定是否阻断）
   if (finError) {
     console.error('[initOrderFinancials] 财务记录初始化失败:', finError.message);
@@ -227,14 +235,16 @@ export async function updateOrderFinancials(
       Number(current?.cost_material || 0) + Number(current?.cost_cmt || 0) +
       Number(updates.cost_shipping ?? current?.cost_shipping ?? 0) +
       Number(updates.cost_other ?? current?.cost_other ?? 0);
+    const costBasisMissing = costTotal === 0; // H1:成本组件全为 0 → 毛利待定
     const grossProfit = saleTotal - costTotal;
     const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
 
     (updates as any).sale_total = saleTotal;
     // ⚠️ cost_total 是生成列,不写(会 428C9);毛利用本地组件和 costTotal 现算写普通列。
-    (updates as any).gross_profit_rmb = grossProfit;
-    (updates as any).margin_pct = marginPct;
-    (updates as any).min_margin_alert = marginPct < 8;
+    (updates as any).cost_basis_missing = costBasisMissing;
+    (updates as any).gross_profit_rmb = costBasisMissing ? null : grossProfit;
+    (updates as any).margin_pct = costBasisMissing ? null : marginPct;
+    (updates as any).min_margin_alert = costBasisMissing ? null : (marginPct < 8);
   }
 
   // ── 金额守恒校验（2026-05-18, P1）──
@@ -260,9 +270,14 @@ export async function updateOrderFinancials(
     if (!r.ok) return { error: r.message };
   }
 
-  const { error } = await (supabase.from('order_financials') as any)
-    .update({ ...updates, updated_by: user.id, updated_at: new Date().toISOString() })
-    .eq('order_id', orderId);
+  const upd: Record<string, any> = { ...updates, updated_by: user.id, updated_at: new Date().toISOString() };
+  let { error } = await (supabase.from('order_financials') as any).update(upd).eq('order_id', orderId);
+  // H1 迁移未执行时降级:去掉 cost_basis_missing + min_margin_alert 回退 false(不 brick 财务更新)
+  if (error && /cost_basis_missing|min_margin_alert|does not exist|null value|not-null/i.test(error.message || '')) {
+    const { cost_basis_missing, ...rest } = upd;
+    if (rest.min_margin_alert === null) rest.min_margin_alert = false;
+    ({ error } = await (supabase.from('order_financials') as any).update(rest).eq('order_id', orderId));
+  }
 
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);

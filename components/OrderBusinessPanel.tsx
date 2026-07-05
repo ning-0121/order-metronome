@@ -189,7 +189,7 @@ function ProfitCard({
           )}
         </>
       ) : (
-        <div className="text-sm text-gray-400 mt-2">待录入销售额</div>
+        <div className="text-sm text-gray-400 mt-2">毛利待定</div>
       )}
       <p className={`text-[11px] mt-2 leading-relaxed ${s.text}`}>{state.order_profit_status.explain}</p>
       {canUpload && (

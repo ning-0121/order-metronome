@@ -85,6 +85,7 @@ export interface EngineInput {
     cost_other: number;
     gross_profit_rmb: number | null;
     margin_pct: number | null;
+    cost_basis_missing?: boolean | null;
     deposit_amount: number | null;
     deposit_received: number;
     deposit_status: string;
@@ -191,6 +192,10 @@ export function calculateProfitStatus(input: EngineInput): StatusResult<'healthy
   const f = input.financials;
   if (!f || f.sale_total === null || f.sale_total === 0) {
     return { value: 'unknown', level: 'gray', explain: '未录入销售额，无法计算利润' };
+  }
+  // H1(复审):缺成本基线 → 毛利待定,别把 margin=null 当 0 → 误显示"低毛利/健康"
+  if (f.cost_basis_missing || f.margin_pct == null) {
+    return { value: 'unknown', level: 'gray', explain: '缺成本基线,毛利待定 — 上传成本核算单后自动计算' };
   }
 
   const margin = f.margin_pct ?? 0;
