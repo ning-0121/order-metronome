@@ -107,9 +107,30 @@ export function ProcurementQueueClient({
     );
   }
 
+  // 今日先处理(2026-07-05 简化:按优先级列出有活的队列,新人一眼知道从哪下手)
+  const todo = [
+    { label: '待采购订单(去核料下单)', n: pendingRequests.length, href: '#q-pendingRequests' },
+    { label: '待验收', n: receive.length, href: '#q-receive' },
+    { label: '待催货', n: chase.length, href: '#q-chase' },
+    { label: '已完成待送货', n: readyShip.length, href: '#q-readyShip' },
+    { label: '待下单(去归采购单)', n: pendingOrder.length, href: '#q-pendingOrder' },
+  ].filter(t => t.n > 0);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       {err && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{err}</div>}
+
+      {/* 今日先处理:一眼知道从哪下手 */}
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+        <span className="text-sm font-semibold text-emerald-800">👉 今天先处理</span>
+        {todo.length === 0
+          ? <span className="text-xs text-gray-500">采购队列都清空了 · 只看下方风险中心即可</span>
+          : todo.map(t => (
+            <a key={t.href} href={t.href} className="text-xs px-2.5 py-1 rounded-full bg-white border border-emerald-200 text-emerald-700 font-medium hover:bg-emerald-100">
+              {t.label} <b>{t.n}</b>
+            </a>
+          ))}
+      </div>
 
       {/* ── 待采购订单(业务执行提交采购申请 → 采购从这里接活;完成「采购下单」节点后自动消失)── */}
       <section id="q-pendingRequests" className="scroll-mt-4 bg-white rounded-xl border-2 border-emerald-200 overflow-hidden">
@@ -241,7 +262,8 @@ export function ProcurementQueueClient({
   );
 }
 
-function Empty() { return <div className="px-4 py-6 text-center text-sm text-gray-400">暂无</div>; }
+// 空队列压扁(2026-07-05 简化:不再占大块"暂无",一条细线,让有活的队列突出)
+function Empty() { return <div className="px-4 py-1.5 text-xs text-gray-300">— 暂无</div>; }
 
 // OrderForm(逐行快速下单)已废除(2026-07-04):下单只走采购单(归并→审批→强制凭证)。
 
