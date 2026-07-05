@@ -125,7 +125,7 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
     exchange_rate: exchangeRate,
     cost_material: costMaterial,
     cost_cmt: costCmt,
-    cost_total: costTotal || null,
+    // ⚠️ cost_total 是数据库生成列(GENERATED),不能写入(会 428C9)。只写普通列 gross_profit_rmb/margin_pct。
     gross_profit_rmb: grossProfit || null,
     margin_pct: marginPct || null,
     min_margin_alert: marginPct < 8,
@@ -200,7 +200,7 @@ export async function updateOrderFinancials(
     const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
 
     (updates as any).sale_total = saleTotal;
-    (updates as any).cost_total = costTotal;
+    // ⚠️ cost_total 是生成列,不写(会 428C9);毛利用本地组件和 costTotal 现算写普通列。
     (updates as any).gross_profit_rmb = grossProfit;
     (updates as any).margin_pct = marginPct;
     (updates as any).min_margin_alert = marginPct < 8;
