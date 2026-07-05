@@ -5,7 +5,7 @@
 // GET 无 body，故 timestamp 走 header；规范串含 method/path/timestamp/apiKey。
 // ============================================================
 
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, createHash, timingSafeEqual } from 'crypto';
 import type { ContractScope } from './scopes';
 import { SCOPES } from './scopes';
 
@@ -49,9 +49,19 @@ function safeEqual(a: string, b: string): boolean {
   }
 }
 
-/** 规范签名串（GET 无 body）。消费方与本函数必须一致拼装。 */
-export function buildSignString(method: string, path: string, timestamp: string, apiKey: string): string {
-  return [method.toUpperCase(), path, timestamp, apiKey].join('\n');
+/**
+ * 规范签名串。GET 无 body → 4 段(method/path/timestamp/apiKey),兼容现有只读路由。
+ * POST 写 → 传 bodyHash(sha256(rawBody) hex)追加为第 5 段,防篡改 body。消费方须同口径。
+ */
+export function buildSignString(method: string, path: string, timestamp: string, apiKey: string, bodyHash?: string): string {
+  const base = [method.toUpperCase(), path, timestamp, apiKey];
+  if (bodyHash) base.push(bodyHash);
+  return base.join('\n');
+}
+
+/** sha256 hex(用于 POST body hash;与消费方口径一致)。 */
+export function sha256Hex(payload: string): string {
+  return createHash('sha256').update(payload).digest('hex');
 }
 
 /** HMAC-SHA256 hex。 */
@@ -67,8 +77,9 @@ export function verifyContractRequest(opts: {
   timestamp: string | null;
   signature: string | null;
   now: number;
+  bodyHash?: string; // POST 写:sha256(rawBody);GET 省略保持 4 段签名(向后兼容)
 }): AuthResult {
-  const { method, path, apiKey, timestamp, signature, now } = opts;
+  const { method, path, apiKey, timestamp, signature, now, bodyHash } = opts;
 
   if (!apiKey) return { ok: false, code: 'missing_api_key', status: 401 };
 
@@ -82,7 +93,7 @@ export function verifyContractRequest(opts: {
   }
 
   if (!signature) return { ok: false, code: 'invalid_signature', status: 401 };
-  const expected = hmacHex(consumer.secret, buildSignString(method, path, timestamp, apiKey));
+  const expected = hmacHex(consumer.secret, buildSignString(method, path, timestamp, apiKey, bodyHash));
   if (!safeEqual(signature, expected)) return { ok: false, code: 'invalid_signature', status: 401 };
 
   return { ok: true, keyId: consumer.keyId, scope: consumer.scope };
