@@ -72,7 +72,7 @@ export async function getFactoryScores(): Promise<{
     // 查 factory_completion + QC 节点
     const { data: milestones, error: msErr } = await (supabase.from('milestones') as any)
       .select('order_id, step_key, due_at, actual_at, status')
-      .in('order_id', orderIds.slice(0, 30))
+      .in('order_id', orderIds)   // 审计#3:原 slice(0,30) 只取前 30 单算准时率、却用全量 totalOrders → 大工厂评分失真截断
       .in('step_key', ['factory_completion', 'mid_qc_check', 'final_qc_check'])
       .in('status', ['done', '已完成']);
     if (msErr) return { error: `加载里程碑失败: ${msErr.message}` };
