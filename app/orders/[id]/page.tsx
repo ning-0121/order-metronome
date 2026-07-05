@@ -44,6 +44,7 @@ import { RootCausesPanel } from '@/components/RootCausesPanel';
 import { rootCauseEngineEnabled } from '@/lib/engine/featureFlags';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
 import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
+import { FinanceEventsTimeline } from '@/components/FinanceEventsTimeline';
 import { CostControlTab } from '@/components/tabs/CostControlTab';
 import { SupplyChainTab } from '@/components/tabs/SupplyChainTab';
 import { BackButton } from '@/components/BackButton';
@@ -454,6 +455,7 @@ export default async function OrderDetailPage({
             <AISkillSidebar orderId={id} />
           </div>
           <OrderBusinessPanel orderId={id} isAdmin={isAdmin} userRoles={currentRoles} />
+          {canSeeFinancials && <FinanceEventsTimeline orderId={id} />}
           <div className="grid gap-6 md:grid-cols-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">基础信息</h2>

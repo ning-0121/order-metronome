@@ -85,6 +85,37 @@ export async function getOrderFinancials(orderId: string): Promise<{ data?: Orde
   return { data: data as OrderFinancials };
 }
 
+export interface OrderFinanceEvent {
+  id: string;
+  event_type: 'settlement.closed' | 'collection.received' | 'payment.completed' | string;
+  amount: number | null;
+  currency: string | null;
+  note: string | null;
+  occurred_at: string | null;
+  created_at: string | null;
+}
+
+/**
+ * 财务资金进度时间线(审计:order_finance_events 只写不读 → 补读)。
+ * 财务系统回传的 结算/收款/付款 事件,按发生时间倒序。含金额 → 只给 CAN_SEE_FINANCIALS 看。
+ */
+export async function getOrderFinanceEvents(orderId: string): Promise<{ data?: OrderFinanceEvent[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '未登录' };
+  const { data: prof } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')) return { error: '无权查看资金进度' };
+  const { data, error } = await (supabase.from('order_finance_events') as any)
+    .select('id, event_type, amount, currency, note, occurred_at, created_at')
+    .eq('order_id', orderId)
+    .order('occurred_at', { ascending: false, nullsFirst: false })
+    .limit(100);
+  if (error) return { error: error.message };
+  return { data: (data || []) as OrderFinanceEvent[] };
+}
+
 /**
  * 初始化订单经营数据 + 4 个确认模块
  */
