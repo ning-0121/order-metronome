@@ -14,7 +14,7 @@ import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines, maskSupplierFinance } from '@/lib/procurement/purchaseOrder';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
-import { evaluateProcurementApproval, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
+import { evaluateProcurementApproval, evaluateBudgetGate, reasonsCn, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
 
 const CAN_PROCURE = ['admin', 'procurement', 'procurement_manager'];
@@ -258,6 +258,72 @@ export async function approvePurchaseOrder(poId: string, note?: string): Promise
 }
 
 /**
+ * 预算闸数据装配(2026-07-05):结合报价基线预算单,算「整单总额 + 单料」累计是否超预算。
+ * 预算来源 order_cost_baseline(单件用量×订单件数×报价单价,口径同 getBudgetVsActual)。
+ * 累计 = 已 placed 及之后的采购单 ordered_amount(不含本单)+ 本单。无冻结预算 → 返 null(不拦)。
+ * 只被 service-role 调(含已封锁的 ordered_amount);已在 placePurchaseOrder 的 CAN_PROCURE 门内。
+ */
+async function computeBudgetGate(svc: any, poId: string, orderIds: string[]) {
+  if (!orderIds.length) return null;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+
+  const [{ data: bases }, { data: orders }] = await Promise.all([
+    (svc.from('order_cost_baseline') as any).select('order_id, quote_baseline_lines').in('order_id', orderIds),
+    (svc.from('orders') as any).select('id, quantity').in('id', orderIds),
+  ]);
+  if (!bases?.length) return null; // 无冻结预算单 → 不判(优雅降级)
+  const qtyOf = new Map<string, number>((orders || []).map((o: any) => [o.id, Number(o.quantity) || 0]));
+
+  // 预算:逐单逐料(单件用量取该料最大值×件数×报价单价)→ 整单总额 + 单料预算
+  const budgetByMat = new Map<string, { name: string; budget: number }>();
+  let totalBudget = 0;
+  for (const b of bases as any[]) {
+    const q = qtyOf.get(b.order_id) || 0;
+    const perMat = new Map<string, { name: string; cons: number; price: number }>();
+    for (const ln of (b.quote_baseline_lines || []) as any[]) {
+      const k = norm(ln.material_name); if (!k) continue;
+      const cons = Number(ln.quote_consumption) || 0; const price = Number(ln.quote_unit_price) || 0;
+      const ex = perMat.get(k);
+      if (ex) { ex.cons = Math.max(ex.cons, cons); if (price) ex.price = price; }
+      else perMat.set(k, { name: ln.material_name, cons, price });
+    }
+    for (const [k, v] of perMat) {
+      const bud = r2(v.cons * q * v.price);
+      totalBudget += bud;
+      const agg = budgetByMat.get(k) || { name: v.name, budget: 0 };
+      agg.budget += bud; budgetByMat.set(k, agg);
+    }
+  }
+
+  // 已下单累计(placed 及之后,不含本单)+ 本单,按料聚合
+  const { data: allLines } = await (svc.from('procurement_line_items') as any)
+    .select('material_name, ordered_amount, purchase_order_id').in('order_id', orderIds).not('purchase_order_id', 'is', null);
+  const poIds = [...new Set(((allLines || []) as any[]).map((l) => l.purchase_order_id))];
+  const { data: pos } = poIds.length
+    ? await (svc.from('purchase_orders') as any).select('id, status').in('id', poIds)
+    : { data: [] };
+  const committedPo = new Set(((pos || []) as any[])
+    .filter((p) => ['placed', 'confirmed', 'receiving', 'received', 'closed'].includes(p.status)).map((p) => p.id));
+
+  const committedByMat = new Map<string, number>(); let committedTotal = 0;
+  const thisByMat = new Map<string, number>(); let thisTotal = 0;
+  for (const l of (allLines || []) as any[]) {
+    const amt = Number(l.ordered_amount) || 0; const k = norm(l.material_name);
+    if (l.purchase_order_id === poId) { thisTotal += amt; thisByMat.set(k, (thisByMat.get(k) || 0) + amt); }
+    else if (committedPo.has(l.purchase_order_id)) { committedTotal += amt; committedByMat.set(k, (committedByMat.get(k) || 0) + amt); }
+  }
+
+  const byMaterial = [...new Set([...budgetByMat.keys(), ...thisByMat.keys(), ...committedByMat.keys()])].map((k) => ({
+    name: budgetByMat.get(k)?.name || k,
+    budget: budgetByMat.get(k)?.budget ?? null,
+    committed: committedByMat.get(k) || 0,
+    thisPo: thisByMat.get(k) || 0,
+  }));
+  return evaluateBudgetGate({ totalBudget, committedTotal, thisPoTotal: thisTotal, byMaterial });
+}
+
+/**
  * 下单（P2a）：draft → placed。**始终跑风险闸**（无法绕过审批）。
  * 已 approved → 直接下单;否则评估:有风险 → 转 pending 并阻断;无风险 → 直接下单。
  */
@@ -269,7 +335,7 @@ export async function placePurchaseOrder(poId: string): Promise<{
   if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '无采购权限' };
 
   const { data: po } = await (supabase.from('purchase_orders') as any)
-    .select('status, approval_status, total_amount, supplier_id, suppliers(net_days)').eq('id', poId).maybeSingle();
+    .select('po_no, status, approval_status, total_amount, supplier_id, order_ids, suppliers(net_days)').eq('id', poId).maybeSingle();
   if (!po) return { error: '采购单不存在' };
   if ((po as any).status !== 'draft') return { error: '仅草稿可下单' };
 
@@ -348,8 +414,24 @@ export async function placePurchaseOrder(poId: string): Promise<{
     lines: (lines || []) as any[],
     supplierNetDays: (po as any).suppliers?.net_days ?? null,
     isNewSupplier: (count || 0) === 0,
-    orderBudget: null,
+    orderBudget: null, // 预算判定改由下方累计+单料预算闸负责(单 PO 标量口径会漏付重)
   });
+
+  // 预算闸(2026-07-05):结合报价预算单,整单/单料累计超预算 → 拦下,并入财务审批(付重也在此被截)
+  let overMaterialDetail = '';
+  try {
+    const orderIds = ((po as any).order_ids || []) as string[];
+    const bg = await computeBudgetGate(createServiceRoleClient(), poId, orderIds);
+    if (bg?.over) {
+      decision.needsApproval = true;
+      for (const r of bg.reasons) if (!decision.reasons.includes(r)) decision.reasons.push(r);
+      if (!decision.requiredBy.includes('finance')) decision.requiredBy.push('finance');
+      if (!decision.requiredBy.includes('procurement')) decision.requiredBy.push('procurement');
+      if (bg.overMaterials.length) {
+        overMaterialDetail = `（超预算料:${bg.overMaterials.slice(0, 6).join('、')}${bg.overMaterials.length > 6 ? ' 等' : ''}）`;
+      }
+    }
+  } catch (e: any) { console.warn('[placePurchaseOrder] 预算闸异常(降级=不拦):', e?.message); }
 
   if (decision.needsApproval) {
     await (supabase.from('purchase_orders') as any).update({
@@ -366,7 +448,7 @@ export async function placePurchaseOrder(poId: string): Promise<{
       await notifyUsersByRole(supabase, [...notifyRoles], {
         type: 'po_approval',
         title: `🟠 采购单待审批：${(po as any).po_no || ''}`,
-        message: `采购单 ${(po as any).po_no || poId} 触发风险闸（${decision.reasons.join('、')}），需${scopeCn}审批后方可下单。请到采购单页审批。`,
+        message: `采购单 ${(po as any).po_no || poId} 触发风险闸（${reasonsCn(decision.reasons)}）${overMaterialDetail}，需${scopeCn}审批后方可下单。请到采购单页审批。`,
       });
     } catch (e: any) { console.warn('[placePurchaseOrder] 待审批通知失败(不阻断):', e?.message); }
     revalidatePath(`/procurement/po/${poId}`);

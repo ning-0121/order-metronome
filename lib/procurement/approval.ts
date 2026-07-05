@@ -63,3 +63,63 @@ export function topRequiredScope(requiredBy: ApprovalScope[]): ApprovalScope | n
   if (requiredBy.includes('procurement')) return 'procurement';
   return null;
 }
+
+// ============================================================
+// 预算闸（2026-07-05 用户拍板）：结合报价基线预算单，超预算 → 拦下需财务审批。
+// 口径「整单总额 + 单料双查」：
+//   ① 整单:已下单累计 + 本单 > 整单预算总额 → 超
+//   ② 单料:某料 已下单累计 + 本单 > 该料预算 → 超(能精准抓「同一个料重复下单」的付重)
+// 累计口径是关键 —— 单看本单价内的重复下单每单都合规,却把总额顶穿,正是付重漏洞所在。
+// 无冻结预算(order_cost_baseline 缺)→ 跳过,不拦(优雅降级)。
+// ============================================================
+
+/** 预算比对容差:单件用量是估算(取该料最大单耗×件数),给 0.5% 防浮点/取整误报;真超仍拦。 */
+export const BUDGET_OVER_TOLERANCE_PCT = 0.5;
+
+export interface BudgetGateInput {
+  totalBudget: number | null;   // 整单预算总额(跨该单所有 order_id 合计);null=无预算→不判
+  committedTotal: number;       // 已下单累计(placed 及之后,不含本单)
+  thisPoTotal: number;          // 本单总额
+  byMaterial: Array<{ name: string; budget: number | null; committed: number; thisPo: number }>;
+}
+
+export interface BudgetGateResult {
+  over: boolean;
+  overTotal: boolean;
+  overMaterials: string[];
+  reasons: string[];            // over_budget_total / over_budget_material
+}
+
+const overWithTol = (actual: number, budget: number) => actual > budget * (1 + BUDGET_OVER_TOLERANCE_PCT / 100);
+
+export function evaluateBudgetGate(i: BudgetGateInput): BudgetGateResult {
+  const reasons: string[] = [];
+  const overTotal =
+    i.totalBudget != null && i.totalBudget > 0 && overWithTol(i.committedTotal + i.thisPoTotal, i.totalBudget);
+  if (overTotal) reasons.push('over_budget_total');
+
+  const overMaterials: string[] = [];
+  for (const m of i.byMaterial) {
+    if (m.budget != null && m.budget > 0 && overWithTol(m.committed + m.thisPo, m.budget)) {
+      overMaterials.push(m.name);
+    }
+  }
+  if (overMaterials.length > 0) reasons.push('over_budget_material');
+
+  return { over: reasons.length > 0, overTotal, overMaterials, reasons };
+}
+
+/** 审批原因码 → 中文(通知/详情页可读;含预算闸新码)。 */
+export const APPROVAL_REASON_CN: Record<string, string> = {
+  large_amount: '大额采购',
+  price_variance: '采购价偏离基线',
+  new_supplier: '新供应商',
+  over_budget: '超预算',
+  over_budget_total: '整单超预算',
+  over_budget_material: '单料超预算(疑重复下单)',
+  non_standard_terms: '非标账期',
+};
+
+export function reasonsCn(reasons: string[]): string {
+  return (reasons || []).map((r) => APPROVAL_REASON_CN[r] || r).join('、');
+}

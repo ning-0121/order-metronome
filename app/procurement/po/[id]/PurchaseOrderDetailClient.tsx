@@ -9,7 +9,8 @@ import { createClient as createBrowserClient } from '@/lib/supabase/client';
 
 const REASON_LABELS: Record<string, string> = {
   large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
-  over_budget: '超预算', non_standard_terms: '非标账期(<60天)',
+  over_budget: '超预算', over_budget_total: '整单超预算', over_budget_material: '单料超预算(疑重复下单)',
+  non_standard_terms: '非标账期(<60天)',
 };
 
 export function PurchaseOrderDetailClient({ view }: { view: any }) {

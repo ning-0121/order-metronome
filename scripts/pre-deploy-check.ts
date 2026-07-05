@@ -10,6 +10,7 @@ import { MILESTONE_CONFIRMATION_PARTIES } from '../lib/domain/confirmationPartie
 import { overReceiptCheck } from '../lib/domain/procurement';
 import { computeSuggestedPurchaseQty } from '../lib/services/procurement-consolidation';
 import { matchBaseline, checkOverBaseline, checkTrimTotalOverBudget } from '../lib/domain/cost-baseline';
+import { evaluateBudgetGate } from '../lib/procurement/approval';
 import { calcDueDates } from '../lib/schedule';
 import { CIRCUIT_BREAKER, ACTION_CONFIG } from '../lib/agent/types';
 
@@ -123,6 +124,25 @@ console.log('\n▶ 报价基线对照(P2:超单耗/超价,容差 0)');
   assert(matchBaseline(styled, '布', '黑', 'A').quote_consumption === 0.3, '款A命中0.3');
   assert(matchBaseline(styled, '布', '黑', 'B').quote_consumption === 0.4, '款B命中0.4(不混款)');
   assert(matchBaseline([{ material_name: '布', quote_consumption: 0.5 }], '布', null, 'A').quote_consumption === 0.5, '旧基线无款→向后兼容匹配');
+}
+
+// ── 预算闸(2026-07-05:结合报价预算单,整单总额+单料累计超预算→拦下需财务审批,截付重)──
+console.log('\n💰 预算闸(整单+单料累计)');
+{
+  const M = (name: string, budget: number | null, committed: number, thisPo: number) => ({ name, budget, committed, thisPo });
+  // 预算内 → 不拦
+  assert(!evaluateBudgetGate({ totalBudget: 10000, committedTotal: 0, thisPoTotal: 8000, byMaterial: [M('布', 10000, 0, 8000)] }).over, '预算内不拦');
+  // 付重:料累计(已下单5000+本单5000)超该料预算5000 → 单料+整单超
+  const dup = evaluateBudgetGate({ totalBudget: 5000, committedTotal: 5000, thisPoTotal: 5000, byMaterial: [M('布', 5000, 5000, 5000)] });
+  assert(dup.reasons.includes('over_budget_material') && dup.overMaterials.includes('布'), '付重→单料超预算截住');
+  // 无冻结预算 → 不判(优雅降级)
+  assert(!evaluateBudgetGate({ totalBudget: null, committedTotal: 0, thisPoTotal: 99999, byMaterial: [M('布', null, 0, 99999)] }).over, '无预算→不拦');
+  // 容差内(超0.3%<0.5%)不误拦;真超(1%)要拦
+  assert(!evaluateBudgetGate({ totalBudget: 10000, committedTotal: 0, thisPoTotal: 10030, byMaterial: [] }).over, '容差内不误拦');
+  assert(evaluateBudgetGate({ totalBudget: 10000, committedTotal: 0, thisPoTotal: 10100, byMaterial: [] }).overTotal, '真超整单要拦');
+  // 单料超但整单不超(别的料没下单)→ 只报单料
+  const onlyMat = evaluateBudgetGate({ totalBudget: 20000, committedTotal: 0, thisPoTotal: 6000, byMaterial: [M('布', 5000, 0, 6000), M('扣', 15000, 0, 0)] });
+  assert(onlyMat.reasons.length === 1 && onlyMat.reasons[0] === 'over_budget_material', '单料超而整单不超→只报单料');
 }
 
 // 打样模板必须包含关键节点
