@@ -5,6 +5,7 @@ import { isApprovalPending } from '@/lib/domain/types';
 import { approveDelayRequest, rejectDelayRequest, getImpactedMilestones } from '@/app/actions/delays';
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
+import { roleCn } from '@/lib/domain/deferral-routing';
 
 interface DelayRequest {
   id: string;
@@ -17,6 +18,9 @@ interface DelayRequest {
   customer_approval_evidence_url?: string | null;
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
+  approval_chain?: string[] | null;
+  approvals?: { role: string; name?: string | null; at?: string; note?: string | null }[] | null;
+  current_step?: number | null;
   milestone?: {
     id: string;
     name: string;
@@ -57,7 +61,8 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
   const [showActions, setShowActions] = useState(false);
 
   useEffect(() => {
-    if (isApprovalPending(delayRequest.status) && isAdmin) {
+    const chainLen = Array.isArray(delayRequest.approval_chain) ? delayRequest.approval_chain.length : 0;
+    if (isApprovalPending(delayRequest.status) && (isAdmin || chainLen > 0)) {
       loadImpactedMilestones();
     }
   }, [delayRequest.id, delayRequest.status, isAdmin]);
@@ -131,19 +136,45 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
     return null; // Only show for pending requests
   }
 
+  const chain: string[] = Array.isArray(delayRequest.approval_chain) ? delayRequest.approval_chain : [];
+  const chainStep = Number(delayRequest.current_step) || 0;
+  const chainApprovals = Array.isArray(delayRequest.approvals) ? delayRequest.approvals : [];
+  const hasChain = chain.length > 0;
+
   return (
     <div className="border border-yellow-200 bg-yellow-50 rounded-lg p-6 mb-4">
       <div className="flex items-start justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900">延期申请详情</h3>
-        {isAdmin && !showActions && (
+        {(isAdmin || hasChain) && !showActions && (
           <button
             onClick={() => setShowActions(true)}
             className="text-sm text-blue-600 hover:text-blue-700 font-medium"
           >
-            审批
+            {hasChain ? '确认这一步' : '审批'}
           </button>
         )}
       </div>
+
+      {/* P1 审批链进度(2026-07-05):逐级确认,谁签了/轮到谁一目了然 */}
+      {hasChain && (
+        <div className="bg-white rounded-lg p-3 mb-4 border border-gray-100">
+          <div className="text-xs text-gray-500 mb-2">审批链 · 逐级确认(全确认才生效)</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {chain.map((role, i) => (
+              <span key={i} className={`text-[11px] px-2 py-1 rounded-full font-medium ${
+                i < chainStep ? 'bg-emerald-100 text-emerald-700'
+                : i === chainStep ? 'bg-indigo-600 text-white'
+                : 'bg-gray-100 text-gray-400'}`}>
+                {i < chainStep ? '✓ ' : i === chainStep ? '⏳ ' : ''}{roleCn(role)}
+                {chainApprovals[i]?.name ? ` · ${chainApprovals[i].name}` : ''}
+              </span>
+            ))}
+          </div>
+          {chainStep < chain.length
+            ? <p className="text-xs text-indigo-700 mt-2">👉 当前轮到「{roleCn(chain[chainStep])}」确认(非本步角色点确认会被拦)</p>
+            : <p className="text-xs text-emerald-700 mt-2">✓ 全部确认完成</p>}
+        </div>
+      )}
 
       {/* Reason Section */}
       <div className="bg-white rounded-lg p-4 mb-4">
@@ -188,7 +219,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
       </div>
 
       {/* Impacted Milestones Section */}
-      {isAdmin && (
+      {(isAdmin || hasChain) && (
         <div className="bg-white rounded-lg p-4 mb-4">
           <h4 className="font-semibold text-gray-900 mb-3">受影响的后续节点</h4>
           {loadingImpacted ? (
@@ -250,7 +281,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
       )}
 
       {/* Admin Actions */}
-      {isAdmin && showActions && (
+      {(isAdmin || hasChain) && showActions && (
         <div className="bg-white rounded-lg p-4 border-t border-yellow-300">
           <h4 className="font-semibold text-gray-900 mb-3">审批操作</h4>
           <div className="space-y-3">
