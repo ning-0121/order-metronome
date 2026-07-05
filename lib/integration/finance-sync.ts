@@ -51,27 +51,18 @@ function generateSignature(payload: string): string {
     .digest('hex')
 }
 
-// --- 通用 Webhook 发送 ---
-async function sendToFinanceSystem(
+// --- 原始投递(不落 outbox)：首发与重试共用;requestId 外部传入,保证重试同键幂等 ---
+async function deliverToFinance(
   event: WebhookEventType,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  requestId: string,
 ): Promise<{ success: boolean; error?: string }> {
-  if (!FINANCE_SYSTEM_URL || !INTEGRATION_API_KEY) {
-    console.log(`[FinanceSync] Skipping ${event}: FINANCE_SYSTEM_URL not configured`)
-    return { success: true } // 静默跳过，不影响主流程
-  }
-
+  if (!FINANCE_SYSTEM_URL || !INTEGRATION_API_KEY) return { success: true } // 未配置=静默跳过
   const payload: WebhookPayload = {
-    event,
-    timestamp: new Date().toISOString(),
-    source: 'order-metronome',
-    request_id: deterministicRequestId(event, data),
-    data,
+    event, timestamp: new Date().toISOString(), source: 'order-metronome', request_id: requestId, data,
   }
-
   // 签名只走 header:对最终 body 做一次 HMAC(审计 A1:删掉内嵌 payload.signature 死字段)
   const signedBody = JSON.stringify(payload)
-
   try {
     const response = await fetch(`${FINANCE_SYSTEM_URL}/api/integration/webhook`, {
       method: 'POST',
@@ -82,24 +73,81 @@ async function sendToFinanceSystem(
         'x-source': 'order-metronome',
       },
       body: signedBody,
-      signal: AbortSignal.timeout(10_000), // 10秒超时
+      signal: AbortSignal.timeout(10_000),
     })
-
     if (!response.ok) {
-      const text = await response.text()
-      console.error(`[FinanceSync] ${event} failed: HTTP ${response.status} - ${text}`)
-      return { success: false, error: `HTTP ${response.status}` }
+      const text = await response.text().catch(() => '')
+      return { success: false, error: `HTTP ${response.status} - ${text.slice(0, 200)}` }
     }
-
-    const result = await response.json()
-    console.log(`[FinanceSync] ${event} sent successfully:`, result.request_id)
     return { success: true }
   } catch (error) {
-    // 网络错误不应影响节拍器主流程
-    const msg = error instanceof Error ? error.message : 'unknown'
-    console.error(`[FinanceSync] ${event} network error: ${msg}`)
-    return { success: false, error: msg }
+    return { success: false, error: error instanceof Error ? error.message : 'unknown' }
   }
+}
+
+// --- outbox 退避重试参数(审计 A3)---
+const OUTBOX_MAX_ATTEMPTS = 6
+const outboxBackoffMs = (attempts: number) => Math.min(2 ** attempts, 60) * 60_000 // 2/4/8/16/32/60 分钟
+
+/** 失败落发件箱(幂等 request_id;已在队列则忽略)——绝不 fire-and-forget 丢单。 */
+async function enqueueFinanceOutbox(event: WebhookEventType, data: Record<string, unknown>, requestId: string, error?: string) {
+  try {
+    const { createServiceRoleClient } = await import('@/lib/supabase/server')
+    await (createServiceRoleClient().from('integration_outbox') as any).upsert({
+      target: 'finance', event, payload: data, request_id: requestId, status: 'failed', attempts: 1,
+      last_error: (error || '').slice(0, 500), next_retry_at: new Date(Date.now() + outboxBackoffMs(1)).toISOString(),
+    }, { onConflict: 'request_id', ignoreDuplicates: true })
+  } catch (e) {
+    console.error('[FinanceSync] outbox 入队失败:', e instanceof Error ? e.message : e)
+  }
+}
+
+// --- 通用 Webhook 发送:首发失败 → 落 outbox 待重试(不再静默丢单) ---
+async function sendToFinanceSystem(
+  event: WebhookEventType,
+  data: Record<string, unknown>
+): Promise<{ success: boolean; error?: string }> {
+  if (!FINANCE_SYSTEM_URL || !INTEGRATION_API_KEY) {
+    console.log(`[FinanceSync] Skipping ${event}: FINANCE_SYSTEM_URL not configured`)
+    return { success: true }
+  }
+  const requestId = deterministicRequestId(event, data)
+  const r = await deliverToFinance(event, data, requestId)
+  if (!r.success) {
+    console.error(`[FinanceSync] ${event} 首发失败(${r.error}) → 落 outbox 待重试`)
+    await enqueueFinanceOutbox(event, data, requestId, r.error)
+  }
+  return r
+}
+
+/** cron 调用:退避重试 outbox 里待重发的失败投递;超上限置 dead(可见,待人工)。 */
+export async function processFinanceOutbox(limit = 30): Promise<{ retried: number; sent: number; dead: number }> {
+  const { createServiceRoleClient } = await import('@/lib/supabase/server')
+  const svc = createServiceRoleClient()
+  const nowIso = new Date().toISOString()
+  const { data: due } = await (svc.from('integration_outbox') as any)
+    .select('id, event, payload, request_id, attempts')
+    .eq('status', 'failed').lt('attempts', OUTBOX_MAX_ATTEMPTS)
+    .or(`next_retry_at.is.null,next_retry_at.lte.${nowIso}`)
+    .order('created_at', { ascending: true }).limit(limit)
+  let sent = 0, dead = 0
+  for (const row of (due || [])) {
+    const rid = row.request_id || deterministicRequestId(row.event, row.payload)
+    const r = await deliverToFinance(row.event, row.payload, rid)
+    if (r.success) {
+      await (svc.from('integration_outbox') as any).update({ status: 'sent', sent_at: new Date().toISOString(), last_error: null }).eq('id', row.id)
+      sent++
+    } else {
+      const attempts = (row.attempts || 1) + 1
+      const status = attempts >= OUTBOX_MAX_ATTEMPTS ? 'dead' : 'failed'
+      if (status === 'dead') dead++
+      await (svc.from('integration_outbox') as any).update({
+        attempts, status, last_error: (r.error || '').slice(0, 500),
+        next_retry_at: new Date(Date.now() + outboxBackoffMs(attempts)).toISOString(),
+      }).eq('id', row.id)
+    }
+  }
+  return { retried: (due || []).length, sent, dead }
 }
 
 // ============================================================

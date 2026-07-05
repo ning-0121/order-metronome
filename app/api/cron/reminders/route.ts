@@ -45,6 +45,13 @@ export async function GET(request: Request) {
       console.error('[reminders] extra checks error:', e?.message);
     }
 
+    // 财务外发发件箱重试(审计 A3):退避重发失败的 sync*ToFinance,超上限置 dead 可见
+    let financeOutbox: any = 0;
+    try {
+      const { processFinanceOutbox } = await import('@/lib/integration/finance-sync');
+      financeOutbox = await processFinanceOutbox();
+    } catch (e: any) { console.error('[reminders] finance outbox retry error:', e?.message); financeOutbox = 'error'; }
+
     return NextResponse.json({
       success: true,
       reminders: reminderResult,
@@ -55,6 +62,7 @@ export async function GET(request: Request) {
       auto_escalated: autoEscalated,
       po_reminders: poReminders,
       matters_materialized: mattersMaterialized,
+      finance_outbox: financeOutbox,
     });
   } catch (error: any) {
     console.error('Cron job error:', error);
