@@ -69,9 +69,12 @@ export async function POST(request: Request) {
   if (FINANCE_PROGRESS.has((payload as unknown as { event?: string }).event || '')) {
     const d = payload.data as unknown as { qimo_order_id?: string; order_no?: string; amount?: number; currency?: string; note?: string; at?: string }
     try {
-      const supabase = await createClient()
-      // Database 生成类型未含此新表(与本文件其它 from() 同款)，用 any 旁路,运行期表存在即可
-      const { error } = await (supabase.from('order_finance_events') as unknown as { insert: (v: unknown) => Promise<{ error: { message: string } | null }> }).insert({
+      // 审计 A4:改用 service-role 写(绕过 RLS,配合去掉 anon INSERT 策略);
+      // 幂等键 request_id + onConflict DO NOTHING → 5 分钟窗口内重放同一回调不重复记账。
+      const { createServiceRoleClient } = await import('@/lib/supabase/server')
+      const svc = createServiceRoleClient()
+      const { error } = await (svc.from('order_finance_events') as unknown as { upsert: (v: unknown, o: unknown) => Promise<{ error: { message: string } | null }> }).upsert({
+        request_id: payload.request_id || null,
         order_id: d.qimo_order_id || null,
         order_no: d.order_no || null,
         event_type: (payload as unknown as { event: string }).event,
@@ -79,7 +82,7 @@ export async function POST(request: Request) {
         currency: d.currency || null,
         note: d.note || null,
         occurred_at: d.at || new Date().toISOString(),
-      })
+      }, { onConflict: 'request_id', ignoreDuplicates: true })
       if (error) throw new Error(error.message)
       return NextResponse.json({ status: 'ok', recorded: (payload as unknown as { event: string }).event })
     } catch (e) {

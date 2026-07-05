@@ -42,7 +42,7 @@ interface WebhookPayload {
   source: 'order-metronome'
   request_id: string
   data: Record<string, unknown>
-  signature: string
+  // 签名只走 header(x-webhook-signature),不再内嵌 payload.signature —— 财务侧从不读它(审计 A1)。
 }
 
 function generateSignature(payload: string): string {
@@ -67,11 +67,9 @@ async function sendToFinanceSystem(
     source: 'order-metronome',
     request_id: deterministicRequestId(event, data),
     data,
-    signature: '',
   }
 
-  const body = JSON.stringify(payload)
-  payload.signature = generateSignature(body)
+  // 签名只走 header:对最终 body 做一次 HMAC(审计 A1:删掉内嵌 payload.signature 死字段)
   const signedBody = JSON.stringify(payload)
 
   try {
