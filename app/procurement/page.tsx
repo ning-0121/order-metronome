@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getProcurementQueues, getProcurementMatters, type RiskMatter } from '@/app/actions/procurement';
 import { ProcurementQueueClient } from '@/components/ProcurementQueueClient';
+import { RiskEtaFill } from './RiskEtaFill';
 
 /**
  * 采购中心（Procurement Center）V1 — 工作队列页 + 风险中心。
@@ -199,6 +200,15 @@ function RiskCenter({ matters }: { matters: RiskMatter[] }) {
                       )}
                       <span>检出 {m.detected_at?.slice(0, 10)}</span>
                     </div>
+                    {/* 供应商延期风险 → 采购可直接填预计到货日处置(P2) */}
+                    {m.matter_type === 'supplier_delay' && m.order_id && (m.evidence as any)?.material_name && (
+                      <RiskEtaFill
+                        orderId={m.order_id}
+                        materialName={(m.evidence as any).material_name}
+                        supplierId={(m.evidence as any).supplier_id ?? null}
+                        requiredBy={(m.evidence as any).required_by ?? null}
+                      />
+                    )}
                   </div>
                 </div>
               ))}

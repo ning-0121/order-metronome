@@ -151,9 +151,11 @@ export async function materializeProcurementMatters(
                 lamp, line_status: l.line_status, required_by: l.required_by,
                 expected_arrival: l.expected_arrival, promised_date: l.promised_date,
                 chase_count: chaseCount, supplier_name: l.supplier_name,
+                material_name: l.material_name, supplier_id: l.supplier_id ?? null,   // 处置用:填预计到货日
               },
               source: 'line', source_ref: `line:${l.id}`,
-              matter_key: `supplier_delay:line:${l.id}`,
+              // 去重(2026-07-05 用户拍板:同料同供应商同需求日只报一条,不再黑/浓咖啡各一条)
+              matter_key: `supplier_delay:${l.order_id}:${l.supplier_id || 'nosup'}:${String(l.material_name || '').trim()}:${l.required_by || 'nodate'}`,
               detected_at: l.required_by || l.created_at || new Date(nowMs).toISOString(),
             })
           }
@@ -239,7 +241,11 @@ export async function materializeProcurementMatters(
     // ════════ execute：upsert(matter_key) + 清理本轮未检出的行 ════════
     const runTs = new Date().toISOString()
     if (matters.length > 0) {
-      const rows = matters.map(x => ({ ...x, materialized_at: runTs }))
+      // 按 matter_key 去重(2026-07-05):同料同供应商同需求日多行会共享 key,
+      // 若不去重,upsert 同一 key 两行会报"cannot affect row a second time"。保留第一条。
+      const seen = new Set<string>()
+      const rows = matters.filter(x => (seen.has(x.matter_key) ? false : (seen.add(x.matter_key), true)))
+        .map(x => ({ ...x, materialized_at: runTs }))
       const { error: upErr } = await (supabase.from('procurement_matters') as any)
         .upsert(rows, { onConflict: 'matter_key' })
       if (upErr) return err(`写入 procurement_matters 失败: ${upErr.message}`)

@@ -1352,3 +1352,30 @@ export async function getProcurementMatters(): Promise<{
     },
   };
 }
+
+/**
+ * 采购风险处置 · 填/改预计到货日(2026-07-05 P2)。采购把该料该供应商的在途行预计到货日填上:
+ * ≤ 需求日 → 下次物化(≤15分钟)自动消红;> 需求日 → 如实显示"预计晚到",不再是"未定"。
+ * 同料同供应商多色行一并更新。仅采购/管理员。
+ */
+export async function setRiskLineEta(input: { orderId: string; materialName: string; supplierId?: string | null; newEta: string }): Promise<{ ok?: boolean; updated?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!roles.some((r) => ['procurement', 'procurement_manager', 'admin'].includes(r))) return { error: '仅采购/管理员可填预计到货日' };
+  if (!input.orderId || !input.materialName) return { error: '缺少物料信息' };
+  if (!input.newEta || !/^\d{4}-\d{2}-\d{2}$/.test(input.newEta)) return { error: '请选择预计到货日(YYYY-MM-DD)' };
+
+  const svc = createServiceRoleClient();
+  let q = (svc.from('procurement_line_items') as any)
+    .update({ expected_arrival: input.newEta, updated_at: new Date().toISOString() })
+    .eq('order_id', input.orderId).eq('material_name', input.materialName)
+    .in('line_status', ['ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped']);
+  if (input.supplierId) q = q.eq('supplier_id', input.supplierId);
+  const { data, error } = await q.select('id');
+  if (error) return { error: error.message };
+  revalidatePath('/procurement');
+  return { ok: true, updated: (data || []).length };
+}
