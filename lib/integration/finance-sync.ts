@@ -31,8 +31,10 @@ type WebhookEventType =
   | 'milestone.updated'
   | 'price_approval.requested'
   | 'delay.requested'
+  | 'quotation.frozen'
   | 'supplier.upserted'
   | 'purchase_order.placed'
+  | 'goods_receipt.recorded'
 
 interface WebhookPayload {
   event: WebhookEventType
@@ -264,6 +266,40 @@ export async function syncGoodsReceiptToFinance(payload: {
   received_qty_total?: number | null; inspection_result?: string | null; line_status?: string | null;
 }) {
   return sendToFinanceSystem('goods_receipt.recorded', payload as unknown as Record<string, unknown>)
+}
+
+/** 内部成本核算单冻结 → 财务预算(单件单价,财务 ×订单数量 换算)。纯函数,可测。 */
+export function buildQuotationFrozenPayload(
+  order: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+): Record<string, unknown> {
+  const n = (v: unknown) => (v == null ? null : Number(v))
+  return {
+    qimo_order_id: order.id,
+    order_no: order.order_no,
+    internal_order_no: order.internal_order_no ?? order.style_no ?? null,
+    quote_id: (order.quote_id as string) ?? (baseline.id as string) ?? null,
+    quote_version: (order.quote_snapshot_version as number) ?? 1,
+    quotation_at: (baseline.parsed_at as string) ?? null,   // 报价核算日期
+    currency: 'CNY',
+    exchange_rate: 1,
+    // 单件单价：财务侧 × synced_orders.quantity 换算订单预算
+    unit_costs: {
+      fabric_net_price_per_kg: n(baseline.fabric_price_per_kg),
+      fabric_consumption_kg: n(baseline.fabric_consumption_kg),
+      fabric_supplier: (baseline.fabric_factory as string) ?? null,
+      fabric_name: (baseline.fabric_name as string) ?? null,
+      processing_per_piece: n(baseline.cmt_internal_estimate) ?? n(baseline.cmt_factory_quote),
+      accessory_per_piece: n(baseline.trim_cost_per_piece),
+      selling_price_per_piece: n(baseline.selling_price_per_piece),
+    },
+  }
+}
+
+/** 订单确认时 emit：内部成本核算单冻结 → 财务预算自动到位（有 baseline 才发）。 */
+export async function syncQuotationToFinance(order: Record<string, unknown>, baseline: Record<string, unknown> | null) {
+  if (!baseline) return { success: true }   // 无成本基线(未上传核算单)则跳过
+  return sendToFinanceSystem('quotation.frozen', buildQuotationFrozenPayload(order, baseline))
 }
 
 /** 检查财务系统连通性 */

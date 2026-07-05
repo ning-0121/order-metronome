@@ -684,8 +684,15 @@ export async function createOrder(
 
   // ── 推送到财务系统 ──
   try {
-    const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+    const { syncOrderToFinance, syncQuotationToFinance } = await import('@/lib/integration/finance-sync');
     await syncOrderToFinance(orderData, 'order.created');
+    // 内部成本核算单已冻结(上传PO时解析入 order_cost_baseline) → emit quotation.frozen,
+    // 财务用共享订单数量×单件单价自动建预算(带核算日期)。先建单后填预算,顺序正确。
+    const oid = (orderData as any)?.id;
+    if (oid) {
+      const { data: baseline } = await (supabase.from('order_cost_baseline') as any).select('*').eq('order_id', oid).maybeSingle();
+      await syncQuotationToFinance(orderData as Record<string, unknown>, baseline ?? null);
+    }
   } catch (e: any) { console.warn(`[orders] 财务推送失败不阻断订单创建:`, e?.message); }
 
   // ── STEP 7: 初始化经营数据 + 确认链 ──

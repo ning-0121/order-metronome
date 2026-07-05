@@ -94,6 +94,11 @@ export async function uploadCostSheet(
     total_cost_per_piece: matched.total_cost || null,
     fob_price: matched.fob_price || null,
     ddp_price: matched.ddp_price || null,
+    // 供财务预算(quotation.frozen)：辅料/含税价/面料名/工厂
+    trim_cost_per_piece: matched.trim_cost_per_piece || null,
+    selling_price_per_piece: matched.selling_price_per_piece || null,
+    fabric_name: matched.fabric_name || null,
+    fabric_factory: matched.fabric_factory || null,
     source_file_name: file.name,
     parsed_at: new Date().toISOString(),
     parsed_by: user.id,

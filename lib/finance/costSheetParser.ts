@@ -28,6 +28,8 @@ export interface CostSheetRow {
   ddp_price?: number;
   notes?: string;
   total_cost?: number;
+  trim_cost_per_piece?: number;     // 辅料费用合计（单件）
+  selling_price_per_piece?: number; // 人民币含税价（单件售价，供财务收入基线）
   // 加工费
   cmt_price?: number;          // 内部确认加工费
   labor_rate?: number;         // 工人工价
@@ -60,6 +62,8 @@ const HEADER_PATTERNS: Array<{
   { field: 'ddp_price', keywords: ['DDP'], type: 'number' },
   { field: 'notes', keywords: ['备注'], type: 'string' },
   { field: 'total_cost', keywords: ['成本'], type: 'number' },
+  { field: 'trim_cost_per_piece', keywords: ['辅料费用合计'], type: 'number' },
+  { field: 'selling_price_per_piece', keywords: ['含税价'], type: 'number' },
   { field: 'cmt_price', keywords: ['加工价'], type: 'number' },
   { field: 'labor_rate', keywords: ['工价'], type: 'number' },
   { field: 'factory_cmt_quote', keywords: ['加工厂报价', '增富找'], type: 'number' },
