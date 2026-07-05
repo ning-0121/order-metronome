@@ -11,6 +11,7 @@ import { PRODUCT_NAME } from '@/lib/branding/constants';
 interface NavbarProps {
   isAdmin?: boolean;
   isProcurement?: boolean;
+  isProduction?: boolean;
 }
 
 interface NavLink {
@@ -24,7 +25,7 @@ interface NavSection {
   links: NavLink[];
 }
 
-export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) {
+export function Navbar({ isAdmin = false, isProcurement = false, isProduction = false }: NavbarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingPriceCount, setPendingPriceCount] = useState(0);
@@ -57,6 +58,7 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
             { href: '/ceo', label: '我的节拍', icon: '🎯' },
             { href: '/orders', label: '订单中心', icon: '📦' },
             { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
+            { href: '/production', label: '生产中心', icon: '🏭' },
             { href: '/analytics', label: '数据分析', icon: '📊' },
           ],
         },
@@ -110,6 +112,7 @@ export function Navbar({ isAdmin = false, isProcurement = false }: NavbarProps) 
             isProcurement
               ? { href: '/procurement', label: '采购中心', icon: '🛒' }
               : { href: '/briefing', label: '今日简报', icon: '📧' },
+            ...(isProduction ? [{ href: '/production', label: '生产中心', icon: '🏭' }] : []),
           ],
         },
         {
