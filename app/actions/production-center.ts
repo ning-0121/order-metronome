@@ -166,3 +166,110 @@ export async function getProductionCenter(): Promise<{
 function emptySummary(): ProductionCenterSummary {
   return { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, risk: 0 };
 }
+
+/**
+ * 导出「滞留老单核对表」(2026-07-05)——工厂期已过、仍挂活跃的订单,系统信息 + 留空下拉列,
+ * 发给采购/生产逐单填真实的 采购状态/生产状态/建议处置,回收后据此批量更新(归档/完成/继续跟)。
+ * 只读导出,不改任何订单。管理层(管理员/生产经理/理单/采购经理)可导。
+ */
+export async function exportProductionReconciliation(): Promise<{ base64?: string; fileName?: string; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!user.email?.endsWith('@qimoclothing.com')) return { error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!roles.some((r) => ['admin', 'production_manager', 'order_manager', 'procurement_manager'].includes(r))) {
+    return { error: '仅管理员/生产经理/理单/采购经理可导出核对表' };
+  }
+
+  const svc = createServiceRoleClient();
+  const today = new Date().toISOString().slice(0, 10);
+  // 滞留候选:工厂期已过 且 仍活跃(非 完成/取消/归档/草稿/待审)
+  const { data: orders } = await (svc.from('orders') as any)
+    .select('id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, created_at')
+    .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","draft","pending_approval")')
+    .not('factory_date', 'is', null)
+    .lt('factory_date', today)
+    .order('factory_date', { ascending: true });
+  const list = (orders || []) as any[];
+  if (list.length === 0) return { error: '没有工厂期已过的滞留订单,无需核对' };
+  const orderIds = list.map((o) => o.id);
+
+  const [{ data: lines }, { data: ms }] = await Promise.all([
+    (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
+    (svc.from('milestones') as any).select('order_id, step_key, status, due_at')
+      .in('order_id', orderIds).in('step_key', ['production_kickoff', 'factory_completion']),
+  ]);
+  const matByOrder = new Map<string, ProductionOrderRow['material']>();
+  for (const l of (lines || []) as any[]) {
+    const m = matByOrder.get(l.order_id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
+    m.total++;
+    const st = String(l.line_status || '');
+    if (RECEIVED.has(st)) m.received++; else if (NOT_SECURED.has(st)) m.pending++; else if (IN_TRANSIT.has(st)) m.in_transit++;
+    matByOrder.set(l.order_id, m);
+  }
+  const msByOrder = new Map<string, Record<string, { status: string | null; due: string | null }>>();
+  for (const m of (ms || []) as any[]) {
+    const o = msByOrder.get(m.order_id) || {};
+    o[m.step_key] = { status: m.status ?? null, due: m.due_at ? String(m.due_at).slice(0, 10) : null };
+    msByOrder.set(m.order_id, o);
+  }
+  const STAGE_CN: Record<string, string> = {
+    awaiting_procurement: '新订单待采购', materials_in_transit: '物料在途',
+    ready_to_schedule: '开生产待排单', in_production: '生产中', done: '工厂已完工',
+  };
+  const nodeCn = (n: { status: string | null; due: string | null } | null) => {
+    if (!n) return '无此节点';
+    const st = String(n.status || 'pending').toLowerCase();
+    const label = ({ pending: '未开始', in_progress: '进行中', done: '已完成', completed: '已完成', blocked: '受阻' } as any)[st] || st;
+    return `${label}${n.due ? ` (${n.due})` : ''}`;
+  };
+  const daysPast = (d: string) => Math.round((new Date(today).getTime() - new Date(d).getTime()) / 86400000);
+
+  const ExcelJS = await import('exceljs');
+  const wb = new ExcelJS.default.Workbook();
+  const ws = wb.addWorksheet('滞留老单核对');
+  const headers = [
+    '订单号', '客户', '数量', '工厂', '工厂期', '逾期(天)', '系统当前阶段', '物料就绪',
+    '开裁节点', '工厂完成节点',
+    '采购状态【采购填】', '生产状态【生产填】', '建议处置【采购+生产】', '备注',
+  ];
+  ws.addRow(headers);
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  const widths = [16, 18, 10, 14, 12, 9, 16, 14, 18, 18, 20, 20, 22, 24];
+  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+  for (const o of list) {
+    const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
+    const mo = msByOrder.get(o.id) || {};
+    const kickoff = mo['production_kickoff'] || null;
+    const completion = mo['factory_completion'] || null;
+    const stage = computeStage(m, kickoff, completion);
+    const matText = m.total === 0 ? '未起料' : `到 ${m.received}/${m.total}${m.pending > 0 ? ` · 未下单${m.pending}` : ''}`;
+    ws.addRow([
+      o.internal_order_no || o.order_no || o.id, o.customer_name || '', o.quantity ?? '',
+      o.factory_name || '', o.factory_date ? String(o.factory_date).slice(0, 10) : '',
+      o.factory_date ? daysPast(String(o.factory_date).slice(0, 10)) : '',
+      STAGE_CN[stage] || stage, matText, nodeCn(kickoff), nodeCn(completion),
+      '', '', '', '',
+    ]);
+  }
+
+  // 下拉数据校验(采购/生产/处置列;第 2 行到末行)
+  const lastRow = list.length + 1;
+  const setList = (col: string, options: string) => {
+    for (let r = 2; r <= lastRow; r++) {
+      ws.getCell(`${col}${r}`).dataValidation = { type: 'list', allowBlank: true, formulae: [`"${options}"`] };
+    }
+  };
+  setList('K', '已采购完成,部分采购,未采购,无需采购');
+  setList('L', '已出货,已完成待出货,生产中,未排产');
+  setList('M', '归档(已完成/已出货),继续跟进,取消');
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const base64 = Buffer.from(buffer as ArrayBuffer).toString('base64');
+  return { base64, fileName: `滞留老单核对表_${today}_${list.length}单.xlsx` };
+}

@@ -1,6 +1,7 @@
 import { requireProductionPage } from '@/lib/utils/production-page-guard';
 import { getProductionCenter } from '@/app/actions/production-center';
 import { ProductionCenterClient } from './ProductionCenterClient';
+import { ReconcileExportButton } from './ReconcileExportButton';
 
 /**
  * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
@@ -33,9 +34,12 @@ export default async function ProductionCenterPage() {
         <h1 className="text-2xl font-bold text-gray-900">生产中心</h1>
         <span className="text-xs text-gray-400">卡风险,不走流程 · 生产视角</span>
       </div>
-      <p className="mb-5 text-sm text-gray-500">
-        客户下单即进本中心,按物料就绪与生产节点自动落到对应阶段。点卡片筛选;数量/物料/工厂可见,售价与成本不在此视图。
-      </p>
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <p className="text-sm text-gray-500">
+          客户下单即进本中心,按物料就绪与生产节点自动落到对应阶段。点卡片筛选;数量/物料/工厂可见,售价与成本不在此视图。
+        </p>
+        <ReconcileExportButton />
+      </div>
 
       <ProductionCenterClient rows={rows} summary={summary} />
 
