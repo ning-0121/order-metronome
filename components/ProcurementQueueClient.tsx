@@ -112,7 +112,7 @@ export function ProcurementQueueClient({
       {err && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{err}</div>}
 
       {/* ── 待采购订单(业务执行提交采购申请 → 采购从这里接活;完成「采购下单」节点后自动消失)── */}
-      <section className="bg-white rounded-xl border-2 border-emerald-200 overflow-hidden">
+      <section id="q-pendingRequests" className="scroll-mt-4 bg-white rounded-xl border-2 border-emerald-200 overflow-hidden">
         <div className="bg-emerald-50 px-4 py-2.5 border-b border-emerald-100 font-bold text-emerald-900 text-sm">
           📨 待采购订单（{pendingRequests.length}）<span className="font-normal text-emerald-700">— 业务执行已提交采购申请</span>
         </div>
@@ -133,7 +133,7 @@ export function ProcurementQueueClient({
 
       {/* ── 待下单(2026-07-04 用户拍板:下单只走采购单——归采购单→审批闸→强制凭证。
              这里不再逐行快速下单,改引导去待采购工作台归单;仅保留「取消」用于剔除不该采的行)── */}
-      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <section id="q-pendingOrder" className="scroll-mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-indigo-50 px-4 py-2.5 border-b border-indigo-100 font-bold text-indigo-900 text-sm flex items-center gap-2">
           📝 待下单（{pendingOrder.length}）
           {pendingOrder.length > 0 && (
@@ -157,7 +157,7 @@ export function ProcurementQueueClient({
       </section>
 
       {/* ── 待催货(生产中) ── */}
-      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <section id="q-chase" className="scroll-mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-100 font-bold text-amber-900 text-sm">
           🔔 待催货 / 生产中（{chase.length}）
         </div>
@@ -183,7 +183,7 @@ export function ProcurementQueueClient({
       </section>
 
       {/* ── 已完成待送货 / 在途 ── */}
-      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <section id="q-readyShip" className="scroll-mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-sky-50 px-4 py-2.5 border-b border-sky-100 font-bold text-sky-900 text-sm">
           🚚 已完成待送货 / 在途（{readyShip.length}）
         </div>
@@ -210,7 +210,7 @@ export function ProcurementQueueClient({
       </section>
 
       {/* ── 已送达待验收 ── */}
-      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <section id="q-receive" className="scroll-mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-emerald-50 px-4 py-2.5 border-b border-emerald-100 font-bold text-emerald-900 text-sm">
           ✅ 已送达待验收（{receive.length}）
         </div>

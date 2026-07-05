@@ -1250,10 +1250,14 @@ export async function getProcurementQueues(): Promise<{
     const poOrderMap = new Map<string, any>();
     if (poOrderIds.length > 0) {
       const { data: pords } = await (supabase.from('orders') as any)
-        .select('id, order_no, internal_order_no, customer_name').in('id', poOrderIds);
+        .select('id, order_no, internal_order_no, customer_name, lifecycle_status').in('id', poOrderIds);
       for (const o of (pords || [])) poOrderMap.set(o.id, o);
     }
+    const ORD_DEAD = ['cancelled', '已取消', 'archived', '已归档'];
     for (const p of (pos || [])) {
+      // 隐藏"为已取消订单建的采购单"(2026-07-05):该 PO 所有关联订单都已取消/归档 → 跳过,别在待审批堆里占位
+      const oids: string[] = p.order_ids || [];
+      if (oids.length > 0 && oids.every((oid: string) => ORD_DEAD.includes(poOrderMap.get(oid)?.lifecycle_status))) continue;
       pendingApprovalPOs.push({
         id: p.id, po_no: p.po_no, approval_status: p.approval_status ?? null,
         total_amount: canSeeFloor ? (p.total_amount ?? null) : null,

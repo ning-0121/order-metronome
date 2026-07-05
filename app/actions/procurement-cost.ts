@@ -34,7 +34,9 @@ export async function listOrdersWithProcurement(limit = 50): Promise<{ data?: an
   if (orderIds.length === 0) return { data: [] };
   const { data: orders } = await (supabase.from('orders') as any)
     .select('id, order_no, internal_order_no, customer_name, lifecycle_status').in('id', orderIds);
-  return { data: orders || [] };
+  // 隐藏已取消/已归档订单(2026-07-05 用户拍板:成本核算不列废单)
+  const HIDDEN = ['cancelled', '已取消', 'archived', '已归档'];
+  return { data: (orders || []).filter((o: any) => !HIDDEN.includes(o.lifecycle_status)) };
 }
 
 /** 采购成本核算 + 订收差异（派生，只读）。 */
