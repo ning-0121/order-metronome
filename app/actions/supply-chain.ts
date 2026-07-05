@@ -11,12 +11,6 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { getUserRoles } from '@/lib/utils/user-role';
 
-async function canSeeFinancials(supabase: any, userId: string): Promise<boolean> {
-  const { data: p } = await (supabase.from('profiles') as any)
-    .select('role, roles').eq('user_id', userId).single();
-  const roles: string[] = (p as any)?.roles?.length > 0 ? (p as any).roles : [(p as any)?.role].filter(Boolean);
-  return hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
-}
 
 // 审计修(2026-07-04):补齐全部 line_status,避免 ready_to_ship/rejected/cancelled 的行
 // 落不进任何桶、从概览凭空消失(四桶之和 < lines.length,与采购工作台两张皮)。
@@ -59,12 +53,10 @@ export async function getOrderSupplyChainOverview(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  const fin = await canSeeFinancials(supabase, user.id);
-
-  // 采购物料行。unit_price=大货底价 → 归属 CAN_SEE_PROCUREMENT_FLOOR(采购/财务/admin),
-  // **不是** canSeeFinancials(含 sales!之前挂在 fin 上会把底价泄给业务)。
-  // 底价列已列级封锁 → 含价时经 service-role 读(本处 canSeeFloor 门禁),否则用户会话不取价。
+  // 复审性能:一次 getUserRoles 同时派生 fin 与 canSeeFloor(此前 canSeeFinancials 另查一次同表同列)
+  // unit_price=大货底价 → 归属 CAN_SEE_PROCUREMENT_FLOOR(采购/财务/admin),**不是** canSeeFinancials(含 sales)。
   const roles = await getUserRoles(supabase, user.id);
+  const fin = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
   const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   const cols =
     'id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name' +
@@ -94,15 +86,16 @@ export async function getOrderSupplyChainOverview(
     return { ...l, overdue };
   });
 
-  // BOM 物料项数
-  const { count: bomCount } = await (supabase.from('materials_bom') as any)
-    .select('id', { count: 'exact', head: true })
-    .eq('order_id', orderId);
-
-  // 到货验收概要
-  const { data: receipts } = await (supabase.from('goods_receipts') as any)
-    .select('inspection_result')
-    .eq('order_id', orderId);
+  // 复审性能:BOM 计数 / 收货概要 / 物料预算 三个独立查询并行(此前顺序 await 三轮往返)
+  const [bomRes, receiptsRes, budgetRes] = await Promise.all([
+    (supabase.from('materials_bom') as any).select('id', { count: 'exact', head: true }).eq('order_id', orderId),
+    (supabase.from('goods_receipts') as any).select('inspection_result').eq('order_id', orderId),
+    fin
+      ? (supabase.from('order_cost_baseline') as any).select('budget_fabric_kg, budget_fabric_amount, fabric_consumption_kg').eq('order_id', orderId).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const bomCount = (bomRes as any)?.count ?? 0;
+  const receipts = (receiptsRes as any)?.data;
   const rc = { total: (receipts || []).length, pass: 0, concession: 0, reject: 0, pending: 0 };
   for (const r of (receipts || []) as any[]) {
     const k = r.inspection_result;
@@ -111,16 +104,7 @@ export async function getOrderSupplyChainOverview(
     else if (k === 'reject') rc.reject++;
     else rc.pending++;
   }
-
-  // 物料预算(仅财务)
-  let budget: SupplyChainOverview['budget'] = null;
-  if (fin) {
-    const { data: b } = await (supabase.from('order_cost_baseline') as any)
-      .select('budget_fabric_kg, budget_fabric_amount, fabric_consumption_kg')
-      .eq('order_id', orderId)
-      .maybeSingle();
-    budget = (b as any) || null;
-  }
+  const budget: SupplyChainOverview['budget'] = ((budgetRes as any)?.data as any) || null;
 
   return {
     data: {
