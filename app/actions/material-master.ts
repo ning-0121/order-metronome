@@ -7,7 +7,7 @@
  * 权限:查看人人可;新建=业务/理单/采购/管理员;编辑/归档/转正=理单/采购/管理员(受控)。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { convertUnit, type UomRow } from '@/lib/services/material-catalog';
@@ -389,7 +389,9 @@ async function requireManage(): Promise<{ supabase: any; userId?: string; error?
 // ── 多供应商图 ──
 // 🔒 底价红线(2026-07-05 审计 P0):unit_price=大货底价,只有采购/财务/管理员可见。
 // 此前本函数对全登录角色返回底价 + /material-master 挂在非 admin 导航 → 业务/生产/QC 都能看底价。
-// 修:非 CAN_SEE_PROCUREMENT_FLOOR 角色一律剥 unit_price(其余供应商信息可看)。
+// 修①(app 层):非 CAN_SEE_PROCUREMENT_FLOOR 角色一律剥 unit_price(其余供应商信息可看)。
+// 修②(DB 硬化 2026-07-05):unit_price 列级 REVOKE 后 user-session 直连该列会 permission denied,
+//   故价读改走 service-role(绕过列 REVOKE),再在 app 层按 canFloor 屏蔽 → 直连堵死、能力不变。
 export async function listMaterialSuppliers(materialMasterId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -397,7 +399,8 @@ export async function listMaterialSuppliers(materialMasterId: string) {
   const roles = await rolesOf(supabase, user.id);
   const { hasRoleInGroup } = await import('@/lib/domain/roles');
   const canFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
-  const { data, error } = await (supabase.from('material_supplier') as any)
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('material_supplier') as any)
     .select('id, supplier_id, unit_price, currency, lead_days, moq, purchase_unit, is_preferred, last_quoted_at, note, suppliers(name)')
     .eq('material_master_id', materialMasterId)
     .order('is_preferred', { ascending: false });

@@ -6,7 +6,7 @@
  * 全部计算在 lib/services/procurement-kernel.ts;本文件不算任何东西。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { aggregateInventoryBalance, computeAvailability, type ReservationRow } from '@/lib/services/inventory';
 import { shortageTruth, sourcingTruth, executionTruth, type ShortageInput, type ScoredSupplier } from '@/lib/services/procurement-kernel';
@@ -64,9 +64,13 @@ export async function getOrderProcurementKernel(orderId: string): Promise<{
   const shortage = shortageTruth(shortInput);
 
   // sourcingTruth:material_supplier 按 master 分组打分
+  // 🔒 底价红线(2026-07-05 审计 P0 DB 硬化):unit_price(大货底价)列级 REVOKE 后,
+  //   user-session 直连会 permission denied → 用 service-role 读真价打分,
+  //   最终输出经 maskFloor 按 canSeeFloor 屏蔽(见下方 sourcingByKey.set)。
+  const svc = createServiceRoleClient();
   const supByMaster = new Map<string, any[]>();
   if (masterIds.length) {
-    const { data: sup } = await (supabase.from('material_supplier') as any)
+    const { data: sup } = await (svc.from('material_supplier') as any)
       .select('material_master_id, supplier_id, unit_price, lead_days, is_preferred, suppliers(name)')
       .in('material_master_id', masterIds);
     for (const s of (sup || [])) {
