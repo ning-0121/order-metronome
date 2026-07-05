@@ -99,8 +99,8 @@ export async function addProductionReport(
   // 权限：跟单或业务可填写
   const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const canReport = userRoles.some(r => ['sales', 'merchandiser', 'admin'].includes(r));
-  if (!canReport) return { error: '仅跟单或业务可更新生产进度' };
+  const canReport = userRoles.some(r => ['sales', 'merchandiser', 'production', 'production_manager', 'qc', 'quality', 'admin'].includes(r));
+  if (!canReport) return { error: '仅业务/跟单/生产/QC 可更新生产进度' };
 
   // 计算累计产量
   const { data: existing } = await (supabase.from('production_reports') as any)
@@ -171,8 +171,8 @@ export async function uploadProductionReportFile(
 
   const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const canReport = userRoles.some(r => ['sales', 'merchandiser', 'admin'].includes(r));
-  if (!canReport) return { error: '仅跟单或业务可上传生产资料' };
+  const canReport = userRoles.some(r => ['sales', 'merchandiser', 'production', 'production_manager', 'qc', 'quality', 'admin'].includes(r));
+  if (!canReport) return { error: '仅业务/跟单/生产/QC 可上传生产资料' };
 
   const fileExt = file.name.split('.').pop() || 'bin';
   const storagePath = `${orderId}/production/${reportId}_${Date.now()}.${fileExt}`;

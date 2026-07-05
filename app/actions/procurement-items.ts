@@ -817,6 +817,9 @@ export async function generateExecutionLines(orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  // 门禁(2026-07-05 审计 P1):此前只查登录,任何登录用户可为任意订单批量生成执行行(执行层越权写)。
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
 
   const { data: items, error: iErr } = await (supabase.from('procurement_items') as any)
     .select('id, order_id, consolidation_key, material_name, specification, category, unit, purchase_unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, stock_deduct_qty, order_by_date, required_date, confirmed_supplier_name, unit_price, status')

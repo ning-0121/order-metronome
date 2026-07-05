@@ -103,7 +103,7 @@ export async function getProductionCenter(): Promise<{
   const [{ data: lines }, { data: ms }, { data: mos }] = await Promise.all([
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
     (svc.from('milestones') as any).select('order_id, step_key, status, due_at')
-      .in('order_id', orderIds).in('step_key', ['production_kickoff', 'factory_completion']),
+      .in('order_id', orderIds).in('step_key', ['production_kickoff', 'factory_completion', 'shipment_execute']),
     (svc.from('manufacturing_orders') as any).select('order_id').in('order_id', orderIds),
   ]);
 
@@ -132,7 +132,7 @@ export async function getProductionCenter(): Promise<{
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
     const kickoff = mo['production_kickoff'] || null;
-    const completion = mo['factory_completion'] || null;
+    const completion = mo['factory_completion'] || mo['shipment_execute'] || null; // V2 砍了 factory_completion,完工信号看 shipment_execute(发货出运)
     const stage = computeStage(m, kickoff, completion);
     if (stage === 'done') continue;   // 工厂已完工,出中心
     const risk = [kickoff, completion].some((n) => n && !DONE(n.status) && n.due && n.due < today);
@@ -199,7 +199,7 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
   const [{ data: lines }, { data: ms }] = await Promise.all([
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
     (svc.from('milestones') as any).select('order_id, step_key, status, due_at')
-      .in('order_id', orderIds).in('step_key', ['production_kickoff', 'factory_completion']),
+      .in('order_id', orderIds).in('step_key', ['production_kickoff', 'factory_completion', 'shipment_execute']),
   ]);
   const matByOrder = new Map<string, ProductionOrderRow['material']>();
   for (const l of (lines || []) as any[]) {
@@ -246,7 +246,7 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
     const kickoff = mo['production_kickoff'] || null;
-    const completion = mo['factory_completion'] || null;
+    const completion = mo['factory_completion'] || mo['shipment_execute'] || null; // V2 砍了 factory_completion,完工信号看 shipment_execute(发货出运)
     const stage = computeStage(m, kickoff, completion);
     const matText = m.total === 0 ? '未起料' : `到 ${m.received}/${m.total}${m.pending > 0 ? ` · 未下单${m.pending}` : ''}`;
     ws.addRow([

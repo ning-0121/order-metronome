@@ -393,7 +393,6 @@ function ReceiptRegisterForm({ line, onDone, canFinanceOver = false }: { line: Q
         );
       })()}
       {err && <div className="text-xs text-red-600">{err}</div>}
-      {dialog}
     </div>
   );
 }
