@@ -373,8 +373,36 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     moq: form.moq,
   }) : null;
 
+  // ── 采购工作流步骤条(2026-07-05:让没做过采购的人一眼知道"下一步该做什么")──
+  const totalItems = items.length;
+  const stepIdx = totalItems === 0 ? 0
+    : trackingPhase ? 3
+    : consMissing.length > 0 ? 0
+    : confirmedCount < totalItems ? 1
+    : 2;   // 全部已确认 → 生成执行行·归采购单·下单
+  const STEPS = ['① 核定大货单耗', '② 逐项确认', '③ 生成执行行·归采购单·下单', '④ 收货跟单'];
+  const nextHint = totalItems === 0 ? '暂无采购核料项(业务提交采购申请后出现)'
+    : stepIdx === 0 ? `还有 ${consMissing.length} 条布料未核定单耗 → 展开下方「按款核定大货单耗」逐款填,点「保存核定」`
+    : stepIdx === 1 ? `${confirmedCount}/${totalItems} 已确认 → 逐项点右侧「确认」(核对物料/颜色/数量/供应商)`
+    : stepIdx === 2 ? `全部已确认 → 点「➡️ 生成执行行」,再「去归采购单」勾行建单 → PO 页传凭证「下单」`
+    : `料已下单 → 到货后在采购中心「收货登记」;逾期在「待催货」催`;
+
   return (
     <div className="space-y-4">
+      {/* 步骤条 + 下一步高亮 */}
+      <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+        <div className="flex items-center gap-1.5 flex-wrap mb-2">
+          {STEPS.map((s, i) => (
+            <span key={i} className={`text-[11px] px-2 py-1 rounded-full font-medium ${
+              i < stepIdx ? 'bg-emerald-100 text-emerald-700'
+              : i === stepIdx ? 'bg-indigo-600 text-white'
+              : 'bg-white text-gray-400 border border-gray-200'}`}>
+              {i < stepIdx ? '✓ ' : ''}{s}
+            </span>
+          ))}
+        </div>
+        <p className="text-xs text-indigo-900"><b>👉 下一步:</b>{nextHint}</p>
+      </div>
       {/* 归并变更计划弹窗(先看后勾选,人确认才执行) */}
       {mergePlan && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={() => setMergePlan(null)}>
