@@ -253,6 +253,19 @@ export async function syncPurchaseOrderToFinance(
   return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs, supplements))
 }
 
+/**
+ * 收货回财务(审计修 2026-07-04):采购原来只在下单(placed)同步一次应付,收齐/短缺/超收/
+ * 让步接收全部不回 → 财务按理论量付款。收货写入成功后 fire-and-forget 发本事件,财务按
+ * line_id/po_no 冲销核销应付。财务侧需在 webhook 加 'goods_receipt.recorded' 分支。
+ */
+export async function syncGoodsReceiptToFinance(payload: {
+  po_no?: string | null; line_id: string; order_id?: string | null;
+  material_name?: string | null; ordered_qty?: number | null;
+  received_qty_total?: number | null; inspection_result?: string | null; line_status?: string | null;
+}) {
+  return sendToFinanceSystem('goods_receipt.recorded', payload as unknown as Record<string, unknown>)
+}
+
 /** 检查财务系统连通性 */
 export async function checkFinanceSystemHealth(): Promise<boolean> {
   if (!FINANCE_SYSTEM_URL) return false

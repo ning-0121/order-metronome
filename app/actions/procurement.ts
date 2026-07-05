@@ -374,7 +374,7 @@ export async function recordReceipt(
 
   // 获取原始订购数据
   const { data: item } = await (supabase.from('procurement_line_items') as any)
-    .select('ordered_qty, ordered_unit')
+    .select('ordered_qty, ordered_unit, po_no, material_name')
     .eq('id', itemId)
     .single();
   if (!item) return { error: '明细不存在' };
@@ -401,13 +401,16 @@ export async function recordReceipt(
     }
   }
 
-  // 判断状态（旧 status 列 + 同步新 line_status，否则采购中心队列会永远显示在途/待催）
+  // 判断状态（旧 status 列保留;line_status 不再直接跳 accepted）
+  // 审计修(2026-07-04):对账页收货只登记"到货"→ 一律进 arrived(待验收),
+  // 验收结论(accepted/让步/拒收)统一走 QC 验收 recordGoodsReceipt(AQL+让步审批闸),
+  // 不再从这里绕过质检直接置 accepted。
   let status = 'complete';
-  let lineStatus = 'accepted';        // 收齐/超发 → 验收通过，移出所有在途队列
+  let lineStatus = 'arrived';          // 到货待验收
   const diff = receivedQty - (item as any).ordered_qty;
   if (receivedQty === 0) { status = 'cancelled'; lineStatus = 'cancelled'; }
-  else if (diff < -((item as any).ordered_qty * 0.03)) { status = 'partial'; lineStatus = 'arrived'; } // 短缺>3% → 进待验收
-  else if (diff > (item as any).ordered_qty * 0.03) { status = 'over'; lineStatus = 'accepted'; }      // 超发>3%
+  else if (diff < -((item as any).ordered_qty * 0.03)) status = 'partial';   // 短缺>3%
+  else if (diff > (item as any).ordered_qty * 0.03) status = 'over';         // 超发>3%
 
   const { error } = await (supabase.from('procurement_line_items') as any)
     .update({
@@ -435,6 +438,14 @@ export async function recordReceipt(
     const { syncProcurementItemReceivingStatus } = await import('@/app/actions/procurement-items');
     await syncProcurementItemReceivingStatus(orderId);
   } catch (e: any) { console.warn('[recordReceipt] 采购项状态联动失败(不阻断收货):', e?.message); }
+
+  // 收货回财务(审计修 2026-07-04):按实收冲销/核销应付
+  try {
+    const { syncGoodsReceiptToFinance } = await import('@/lib/integration/finance-sync');
+    await syncGoodsReceiptToFinance({ po_no: (item as any).po_no ?? null, line_id: itemId, order_id: orderId,
+      material_name: (item as any).material_name ?? null, ordered_qty: (item as any).ordered_qty ?? null,
+      received_qty_total: receivedQty, line_status: lineStatus });
+  } catch (e: any) { console.warn('[recordReceipt] 收货回财务失败(不阻断):', e?.message); }
 
   // 到货校验：实收 vs 预算（如果有预算的话）
   const { data: fullItem } = await (supabase.from('procurement_line_items') as any)
@@ -689,7 +700,7 @@ export async function transitionProcurementLine(
   const svc = createServiceRoleClient();
 
   const { data: line, error: getErr } = await (svc.from('procurement_line_items') as any)
-    .select('id, order_id, line_status, material_name, specification, category, supplier_id, supplier_name, unit_price, ordered_unit, ordered_qty')
+    .select('id, order_id, line_status, material_name, specification, category, supplier_id, supplier_name, unit_price, ordered_unit, ordered_qty, purchase_order_id')
     .eq('id', lineItemId).single();
   if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
 
@@ -744,6 +755,24 @@ export async function transitionProcurementLine(
       qty: line.ordered_qty ?? null, quoted_at: now, source: 'order',
     });
     if (phErr) console.error('[procurement] price_history insert failed:', phErr.message);
+  }
+
+  // 审计修(2026-07-04):行单价填/改 且该行已归采购单 → 重算 PO 总额(存储值不随生成列自动更新)
+  // 并 resync 财务,否则无价版补价后财务应付永远停在"金额待定"。fire-and-forget,不阻断。
+  if (payload?.unit_price != null && (line as any).purchase_order_id) {
+    try {
+      const poId = (line as any).purchase_order_id;
+      const { data: poLines } = await (svc.from('procurement_line_items') as any)
+        .select('ordered_amount').eq('purchase_order_id', poId);
+      const total = ((poLines || []) as any[]).reduce((s, r) => s + (Number(r.ordered_amount) || 0), 0);
+      await (svc.from('purchase_orders') as any)
+        .update({ total_amount: Math.round(total * 100) / 100, updated_at: now }).eq('id', poId);
+      const { data: full } = await (svc.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
+      if (full && (full as any).status !== 'draft') {   // 已下单的才推财务(草稿未发应付)
+        const { syncPurchaseOrderToFinance } = await import('@/lib/integration/finance-sync');
+        await syncPurchaseOrderToFinance(full as Record<string, unknown>);
+      }
+    } catch (e: any) { console.warn('[procurement] 补价后 PO 总额 resync 失败(不阻断):', e?.message); }
   }
 
   await logProcurement(supabase, lineItemId, line.order_id, 'status_transition',
@@ -830,7 +859,7 @@ export async function recordGoodsReceipt(
   const supabase = await createClient();
 
   const { data: line, error: getErr } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, line_status, ordered_unit, ordered_qty, material_name')
+    .select('id, order_id, line_status, ordered_unit, ordered_qty, material_name, po_no')
     .eq('id', lineItemId).single();
   if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
 
@@ -897,6 +926,14 @@ export async function recordGoodsReceipt(
     await syncProcurementItemReceivingStatus(line.order_id);
   } catch (e: any) { console.warn('[recordGoodsReceipt] 采购项状态联动失败(不阻断验收):', e?.message); }
 
+  // 收货回财务(审计修 2026-07-04):按实收 + 验收结论 冲销核销应付
+  try {
+    const { syncGoodsReceiptToFinance } = await import('@/lib/integration/finance-sync');
+    await syncGoodsReceiptToFinance({ po_no: (line as any).po_no ?? null, line_id: lineItemId, order_id: line.order_id,
+      material_name: (line as any).material_name ?? null, ordered_qty: (line as any).ordered_qty ?? null,
+      received_qty_total: totalReceived, inspection_result: payload.result, line_status: nextStatus });
+  } catch (e: any) { console.warn('[recordGoodsReceipt] 收货回财务失败(不阻断):', e?.message); }
+
   await logProcurement(supabase, lineItemId, line.order_id, 'inspect',
     line.line_status, nextStatus,
     `验收 ${payload.result === 'pass' ? '通过' : payload.result === 'concession' ? '让步接收' : '拒收'}：实收 ${payload.received_qty}${payload.defect_notes ? '，' + payload.defect_notes : ''}`,
@@ -922,7 +959,7 @@ export async function recordReceiptBatch(
   const supabase = await createClient();
 
   const { data: line } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, line_status, ordered_qty, ordered_unit, received_qty, material_name').eq('id', lineItemId).single();
+    .select('id, order_id, line_status, ordered_qty, ordered_unit, received_qty, material_name, po_no').eq('id', lineItemId).single();
   if (!line) return { error: '采购行不存在' };
 
   const now = new Date().toISOString();
@@ -973,6 +1010,13 @@ export async function recordReceiptBatch(
   // 4. 联动采购项收货状态
   try { const { syncProcurementItemReceivingStatus } = await import('@/app/actions/procurement-items'); await syncProcurementItemReceivingStatus(line.order_id); }
   catch (e: any) { console.warn('[recordReceiptBatch] 采购项联动失败(不阻断):', e?.message); }
+  // 5. 收货回财务(审计修 2026-07-04):按累计实收冲销核销应付
+  try {
+    const { syncGoodsReceiptToFinance } = await import('@/lib/integration/finance-sync');
+    await syncGoodsReceiptToFinance({ po_no: (line as any).po_no ?? null, line_id: lineItemId, order_id: line.order_id,
+      material_name: (line as any).material_name ?? null, ordered_qty: ordered,
+      received_qty_total: total, line_status: nextStatus });
+  } catch (e: any) { console.warn('[recordReceiptBatch] 收货回财务失败(不阻断):', e?.message); }
 
   await logProcurement(supabase, lineItemId, line.order_id, 'receive', line.line_status, nextStatus,
     `收货登记:本批 ${payload.received_qty}${line.ordered_unit || ''},累计 ${total}/${ordered}${complete ? '(已收齐)' : ''}${payload.allow_over ? ' [财务超收放行]' : ''}`,
