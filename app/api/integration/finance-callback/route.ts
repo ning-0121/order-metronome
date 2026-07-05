@@ -92,6 +92,18 @@ export async function POST(request: Request) {
 
   const { approval_id, approval_type, decision, decider_name, decision_note } = payload.data
 
+  // H2(复审):审批回调幂等(防 5 分钟窗口内重放二次执行——尤其 purchase 二次下单、milestone 二次完成)。
+  // claim-after:先查已处理过的 request_id → no-op;处理成功后再记(失败不记→可重试)。配合 purchase 状态闸双保险。
+  const { createServiceRoleClient } = await import('@/lib/supabase/server')
+  const svcIdem = createServiceRoleClient()
+  if (payload.request_id) {
+    try {
+      const { data: seen } = await (svcIdem.from('integration_callback_events') as any)
+        .select('request_id').eq('request_id', payload.request_id).maybeSingle()
+      if (seen) return NextResponse.json({ status: 'ok', deduped: true })
+    } catch (e) { console.warn('[finance-callback] 幂等查表异常(降级,靠状态闸兜底):', e instanceof Error ? e.message : e) }
+  }
+
   try {
     const supabase = await createClient()
 
@@ -163,33 +175,51 @@ export async function POST(request: Request) {
       const poNo = (payload.data as unknown as { po_no?: string }).po_no || approval_id
       const noteTag = decision_note ? `[财务系统-${decider_name}] ${decision_note}` : `[财务系统-${decider_name}] ${decision === 'approved' ? '已批准' : '已驳回'}`
       if (decision === 'approved') {
-        const { error: upErr } = await (svc.from('purchase_orders') as any)
+        // H2 状态闸:仅 pending → approved 命中 1 行才下单;命中 0 行(重放/已处理/已下单)→ 跳过,防二次下单。
+        const { data: gate, error: upErr } = await (svc.from('purchase_orders') as any)
           .update({ approval_status: 'approved', approved_at: new Date().toISOString(), approval_note: noteTag, updated_at: new Date().toISOString() })
-          .eq('id', approval_id)
+          .eq('id', approval_id).eq('approval_status', 'pending')
+          .select('id')
         if (upErr) throw new Error(`PO approve update failed: ${upErr.message}`)
-        const { placePurchaseOrderCore } = await import('@/lib/procurement/placeCore')
-        const pr = await placePurchaseOrderCore(svc, approval_id)
-        if (pr.error) throw new Error(`PO place after approval failed: ${pr.error}`)
-        try {
-          const { notifyUsersByRole } = await import('@/lib/utils/notifications')
-          await notifyUsersByRole(svc, ['procurement', 'procurement_manager'], {
-            type: 'po_finance_approval', title: `✅ 采购单财务已批准,已自动下单：${poNo}`,
-            message: `采购单 ${poNo} 已获财务批准并自动下单。`,
-          })
-        } catch { /* 通知失败不阻断 */ }
+        if (!gate || gate.length === 0) {
+          console.log(`[FinanceCallback] purchase approve: PO ${approval_id} 非 pending,跳过下单(幂等)`)
+        } else {
+          const { placePurchaseOrderCore } = await import('@/lib/procurement/placeCore')
+          const pr = await placePurchaseOrderCore(svc, approval_id)
+          if (pr.error) throw new Error(`PO place after approval failed: ${pr.error}`)
+          try {
+            const { notifyUsersByRole } = await import('@/lib/utils/notifications')
+            await notifyUsersByRole(svc, ['procurement', 'procurement_manager'], {
+              type: 'po_finance_approval', title: `✅ 采购单财务已批准,已自动下单：${poNo}`,
+              message: `采购单 ${poNo} 已获财务批准并自动下单。`,
+            })
+          } catch { /* 通知失败不阻断 */ }
+        }
       } else {
-        const { error: upErr } = await (svc.from('purchase_orders') as any)
+        // H2 状态闸:仅 pending → rejected 命中才通知;重放不重复通知/不改已下单单。
+        const { data: gate, error: upErr } = await (svc.from('purchase_orders') as any)
           .update({ approval_status: 'rejected', approval_note: noteTag, updated_at: new Date().toISOString() })
-          .eq('id', approval_id)
+          .eq('id', approval_id).eq('approval_status', 'pending')
+          .select('id')
         if (upErr) throw new Error(`PO reject update failed: ${upErr.message}`)
-        try {
-          const { notifyUsersByRole } = await import('@/lib/utils/notifications')
-          await notifyUsersByRole(svc, ['procurement', 'procurement_manager'], {
-            type: 'po_finance_approval', title: `🔴 采购单被财务驳回：${poNo}`,
-            message: `采购单 ${poNo} 被财务驳回:${decision_note || '无原因'}。请调整后重新提交。`,
-          })
-        } catch { /* 通知失败不阻断 */ }
+        if (gate && gate.length > 0) {
+          try {
+            const { notifyUsersByRole } = await import('@/lib/utils/notifications')
+            await notifyUsersByRole(svc, ['procurement', 'procurement_manager'], {
+              type: 'po_finance_approval', title: `🔴 采购单被财务驳回：${poNo}`,
+              message: `采购单 ${poNo} 被财务驳回:${decision_note || '无原因'}。请调整后重新提交。`,
+            })
+          } catch { /* 通知失败不阻断 */ }
+        }
       }
+    }
+
+    // H2:处理成功后记幂等键(claim-after,失败不记→可重试)。表未建时静默(靠状态闸兜底)。
+    if (payload.request_id) {
+      try {
+        await (svcIdem.from('integration_callback_events') as any)
+          .insert({ request_id: payload.request_id, event: `approval.${approval_type}` })
+      } catch (e) { console.warn('[finance-callback] 幂等记账失败(不影响回执):', e instanceof Error ? e.message : e) }
     }
 
     console.log(`[FinanceCallback] ${approval_type} ${approval_id}: ${decision} by ${decider_name}`)
