@@ -52,9 +52,12 @@ function computeStage(
 ): ProductionStage | 'done' {
   if (completion && DONE(completion.status)) return 'done';   // 工厂已完工 → 出生产中心
   if (kickoff && DONE(kickoff.status)) return 'in_production'; // 已开裁 → 生产中
-  if (m.total === 0 || m.pending > 0) return 'awaiting_procurement'; // 有料未下单/未起料 → 待采购
-  if (m.received === m.total) return 'ready_to_schedule';           // 料齐未开裁 → 待排单
-  return 'materials_in_transit';                                     // 已下单未到齐 → 在途
+  if (m.total === 0) return 'awaiting_procurement';            // 未起料 → 待采购
+  if (m.received === m.total) return 'ready_to_schedule';      // 全到齐未开裁 → 待排单
+  // 2026-07-06 修:只要有料已下单/已到(in_transit 或 received > 0)→ 物料在途,即使还有个别料没下单。
+  // 旧逻辑"只要有一条没下单(pending>0)就算待采购",把 9/10 已下单的单误判成待采购(用户反馈物料在途被识别成待采购)。
+  if (m.in_transit > 0 || m.received > 0) return 'materials_in_transit'; // 有料在途/部分到齐 → 物料在途
+  return 'awaiting_procurement';                               // 全部还没下单(draft/pending_order)→ 待采购
 }
 
 export async function getProductionCenter(): Promise<{
