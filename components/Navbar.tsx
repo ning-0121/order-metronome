@@ -12,6 +12,7 @@ interface NavbarProps {
   isAdmin?: boolean;
   isProcurement?: boolean;
   isProduction?: boolean;
+  isFinance?: boolean;
 }
 
 interface NavLink {
@@ -19,13 +20,14 @@ interface NavLink {
   label: string;
   icon: string;
   badge?: 'price';
+  external?: boolean; // 走整页跳转(如 /api/finance-sso SSO 路由),不用 Next Link 客户端导航
 }
 interface NavSection {
   label?: string;
   links: NavLink[];
 }
 
-export function Navbar({ isAdmin = false, isProcurement = false, isProduction = false }: NavbarProps) {
+export function Navbar({ isAdmin = false, isProcurement = false, isProduction = false, isFinance = false }: NavbarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingPriceCount, setPendingPriceCount] = useState(0);
@@ -60,6 +62,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
             { href: '/production', label: '生产中心', icon: '🏭' },
             { href: '/analytics', label: '数据分析', icon: '📊' },
+            ...(isFinance ? [{ href: '/api/finance-sso', label: '进入财务系统', icon: '💳', external: true }] : []),
           ],
         },
         {
@@ -113,6 +116,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
               ? { href: '/procurement', label: '采购中心', icon: '🛒' }
               : { href: '/briefing', label: '今日简报', icon: '📧' },
             ...(isProduction ? [{ href: '/production', label: '生产中心', icon: '🏭' }] : []),
+            ...(isFinance ? [{ href: '/api/finance-sso', label: '进入财务系统', icon: '💳', external: true }] : []),
           ],
         },
         {
@@ -136,8 +140,10 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
   const renderLink = (link: NavLink, onNavigate?: () => void) => {
     const active = isActive(link.href);
     const showBadge = link.badge === 'price' && pendingPriceCount > 0;
+    // H4:SSO 等 API 路由走整页跳转(<a>),Next Link 客户端导航到 API 路由会 404
+    const LinkTag: any = link.external ? 'a' : Link;
     return (
-      <Link
+      <LinkTag
         key={link.href}
         href={link.href}
         onClick={onNavigate}
@@ -154,7 +160,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             {pendingPriceCount}
           </span>
         )}
-      </Link>
+      </LinkTag>
     );
   };
 

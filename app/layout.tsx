@@ -37,14 +37,16 @@ export default async function RootLayout({
   const role = user ? getUserRoleFromEmail(user.email) : undefined;
   const isAdmin = role === 'admin';
 
-  // 采购/生产中心导航可见性（轻量 profile 角色查询，单次索引命中，两者共用一次查询）
+  // 采购/生产/财务 导航可见性（轻量 profile 角色查询，单次索引命中，共用一次查询）
   let isProcurement = isAdmin;
   let isProduction = isAdmin;
+  let isFinance = isAdmin; // H4:财务/管理员显示「进入财务系统」SSO 入口
   if (user && !isAdmin) {
     const { data: prof } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
     const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
     isProcurement = roles.some(r => ['procurement', 'procurement_manager', 'admin'].includes(r));
     isProduction = roles.some(r => ['production', 'production_manager', 'admin'].includes(r));
+    isFinance = roles.some(r => ['finance', 'admin'].includes(r));
   }
 
   const currentYear = new Date().getFullYear();
@@ -54,7 +56,7 @@ export default async function RootLayout({
       <body
         className="bg-white text-gray-900 antialiased font-sans min-h-screen"
       >
-        <Navbar isAdmin={isAdmin} isProcurement={isProcurement} isProduction={isProduction} />
+        <Navbar isAdmin={isAdmin} isProcurement={isProcurement} isProduction={isProduction} isFinance={isFinance} />
         <PWARegister />
         {/* 打开系统/闲置2小时后再打开 → 回角色工作台;工作中刷新不打扰;单据深链不劫持 */}
         <WorkbenchAnchor />
