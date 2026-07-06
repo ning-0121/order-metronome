@@ -89,6 +89,19 @@ export async function markBatchMilestoneStep(
     const canShip = isAdmin || isOrderActor
       || roles.includes('logistics') || roles.includes('production_manager');
     if (!canShip) return { ok: false, error: '仅物流/生产管理/订单负责人可标记出运' };
+
+    // 分批明细强化(2026-07-06 用户拍板:7月起"有明细"的单,分批出运必须填款色明细)——
+    // 订单有逐款逐色明细(order_line_items)但本批未填款色明细(shipment_batch_items)→ 拦。
+    // 老订单(无明细)不受限;shipment_batch_items 表缺失时不阻断(降级放行)。
+    const { count: liCount } = await (supabase.from('order_line_items') as any)
+      .select('id', { count: 'exact', head: true }).eq('order_id', orderId);
+    if ((liCount || 0) > 0) {
+      const { count: allocCount, error: allocErr } = await (supabase.from('shipment_batch_items') as any)
+        .select('id', { count: 'exact', head: true }).eq('batch_id', batchId);
+      if (!allocErr && (allocCount || 0) === 0) {
+        return { ok: false, error: '该单有逐款逐色明细,本批出运前请先填「款色明细」(每款每色本批出多少件),再标出运。老订单(无明细)不受此限。' };
+      }
+    }
   }
 
   // ── 1. 更新批次本身 ──
