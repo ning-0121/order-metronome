@@ -38,10 +38,10 @@ const PRODUCTION_QC = ['production', 'production_manager', 'qc', 'quality', 'mer
  * (mo_released 自动完成;procurement_order_placed / production_kickoff / payment_received 单方)
  */
 export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]> = {
-  // 1. PO确认 = 业务确认 + 财务确认(双确认;finance_approval 并入本节点)
+  // 1. PO确认 = 财务确认 + 生产部确认(2026-07-06 用户拍板:业务建单即已确认,自己再确认多余;改为财务+生产双确认)
   po_confirmed: [
-    { key: 'sales_exec', label: '业务执行', roles: SALES_EXEC, hint: '订单信息/客户PO无误' },
     { key: 'finance', label: '财务', roles: FINANCE, hint: '价格/账期/额度审核通过' },
+    { key: 'production', label: '生产部', roles: PRODUCTION_QC, hint: '订单要求/工艺可执行,已知悉' },
   ],
   // 3. 产前会 = 业务执行 + 生产 + 采购 三方
   pre_prod_meeting: [

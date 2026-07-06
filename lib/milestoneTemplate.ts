@@ -71,8 +71,8 @@ export const MILESTONE_TEMPLATE_V2: Array<{
   evidence_required: boolean;
   evidence_note?: string;
 }> = [
-  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true,
-    evidence_note: "业务确认 + 财务确认(双确认);上传客户 PO 与财务审核意见" },
+  { step_key: "po_confirmed", name: "PO确认", owner_role: "finance", is_critical: true, evidence_required: true,
+    evidence_note: "财务确认 + 生产部确认(双确认;业务建单即已确认,不再自确认);财务核价格/账期,生产核订单要求/工艺" },
   { step_key: "mo_released", name: "生产任务单下发", owner_role: "sales", is_critical: false, evidence_required: false,
     evidence_note: "生产任务单状态推进到「已下发生产」时系统自动完成本节点" },
   { step_key: "pre_prod_meeting", name: "产前会", owner_role: "sales", is_critical: false, evidence_required: true,
