@@ -790,8 +790,9 @@ export async function transitionProcurementLine(
         .update({ total_amount: Math.round(total * 100) / 100, updated_at: now }).eq('id', poId);
       const { data: full } = await (svc.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
       if (full && (full as any).status !== 'draft') {   // 已下单的才推财务(草稿未发应付)
-        const { syncPurchaseOrderToFinance } = await import('@/lib/integration/finance-sync');
-        await syncPurchaseOrderToFinance(full as Record<string, unknown>);
+        const { syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw } = await import('@/lib/integration/finance-sync');
+        const poLines = await fetchPurchaseOrderLinesRaw(svc, poId);   // 补价 resync 也带上原辅料明细
+        await syncPurchaseOrderToFinance(full as Record<string, unknown>, undefined, undefined, poLines);
       }
     } catch (e: any) { console.warn('[procurement] 补价后 PO 总额 resync 失败(不阻断):', e?.message); }
   }

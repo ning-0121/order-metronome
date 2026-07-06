@@ -264,11 +264,57 @@ export function buildSupplierSyncPayload(s: Record<string, unknown>): Record<str
   }
 }
 
-/** 采购单同步 payload（纯，可测）。placed 时推金额/账期供财务建应付+付款计划。 */
+/**
+ * 采购执行行 → 财务行(纯映射)。此明细是财务【预算原辅料成本】与【收货核销】的共同源头。
+ * ⚠ line_id 严格 = procurement_line_items.id —— 必与收货 goods_receipt.recorded 的 line_id 同源,否则核销匹配不上。
+ * category: fabric/trim/packing/other —— 财务据此分预算桶(非 fabric 归辅料)。amount 优先取生成列 ordered_amount。
+ */
+export function mapPoLineForFinance(l: Record<string, any>): Record<string, unknown> {
+  const orders = l.orders as { order_no?: string; internal_order_no?: string } | undefined
+  const num = (v: unknown) => (v == null ? null : Number(v))
+  return {
+    line_id: l.id ?? null,
+    order_no: l.order_no ?? orders?.order_no ?? null,
+    internal_order_no: l.internal_order_no ?? orders?.internal_order_no ?? null,
+    material_name: l.material_name ?? null,
+    material_code: l.material_code ?? null,
+    category: l.category ?? null,
+    supplier_id: l.supplier_id ?? null,
+    supplier_name: l.supplier_name ?? null,
+    ordered_qty: num(l.ordered_qty),
+    ordered_unit: l.ordered_unit ?? null,
+    unit_price: num(l.unit_price),
+    amount: l.ordered_amount != null ? Number(l.ordered_amount)
+      : (l.amount != null ? Number(l.amount)
+        : (l.unit_price != null && l.ordered_qty != null ? Number(l.unit_price) * Number(l.ordered_qty) : null)),
+  }
+}
+
+/**
+ * 查一张采购单的执行行 + 附订单号,供 buildPurchaseOrderSyncPayload 映射。db=任意 supabase/service-role 客户端。
+ * ⚠ 不用 PostgREST 嵌套 join(orders(...)) —— 那依赖 FK schema 缓存,一旦缺失整查静默 fail(CLAUDE.md 血泪教训)。
+ * 改为两段查:行 + 按 order_id 批量取 order_no,手动附上,稳。
+ */
+export async function fetchPurchaseOrderLinesRaw(db: any, poId: string): Promise<any[]> {
+  const { data: lines } = await db.from('procurement_line_items')
+    .select('id, order_id, material_name, material_code, category, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
+    .eq('purchase_order_id', poId)
+  const rows: any[] = lines || []
+  const orderIds = [...new Set(rows.map((l) => l.order_id).filter(Boolean))]
+  if (orderIds.length) {
+    const { data: ords } = await db.from('orders').select('id, order_no, internal_order_no').in('id', orderIds)
+    const m = new Map((ords || []).map((o: any) => [o.id, o]))
+    for (const l of rows) { const o: any = m.get(l.order_id); if (o) { l.order_no = o.order_no; l.internal_order_no = o.internal_order_no } }
+  }
+  return rows
+}
+
+/** 采购单同步 payload（纯，可测）。placed 时推金额/账期供财务建应付+付款计划;lines=原辅料明细(财务预算+核销源)。 */
 export function buildPurchaseOrderSyncPayload(
   po: Record<string, unknown>,
   orderRefs?: unknown[],
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
+  lines?: unknown[],
 ): Record<string, unknown> {
   // 无底价采购单(无价版)total_amount 汇总为 0 → 发 null + amount_pending,
   // 避免财务建一笔 ¥0 应付污染台账(审计 2026-07-04);真实金额待补价后由 resync 补。
@@ -289,6 +335,9 @@ export function buildPurchaseOrderSyncPayload(
     // 补采购预警(2026-07-03):此单含补采购项 → 财务侧应作预算外预警/归因
     has_supplement: (supplements?.length || 0) > 0,
     supplements: supplements ?? [],
+    // 原辅料明细(P1-2 修 2026-07-06):此前从不发 lines → 财务 fin_po_lines 恒空、收货按 line_id 100% 匹配不上、
+    // 预算原辅料成本建不出。lines[].line_id 严格 = procurement_line_items.id(与收货同源)。
+    lines: (lines ?? []).map((l) => mapPoLineForFinance(l as Record<string, any>)),
   }
 }
 
@@ -302,8 +351,9 @@ export async function syncPurchaseOrderToFinance(
   po: Record<string, unknown>,
   orderRefs?: unknown[],
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
+  lines?: unknown[],
 ) {
-  return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs, supplements))
+  return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs, supplements, lines))
 }
 
 /**
@@ -315,8 +365,9 @@ export async function requestPurchaseOrderApproval(
   orderRefs?: unknown[],
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
   internalRiskFlags?: Record<string, unknown>, // 复审:内部风险信号(超预算/付重/偏离基线/新供应商)结构化带给财务审批
+  lines?: unknown[],
 ) {
-  const data = buildPurchaseOrderSyncPayload(po, orderRefs, supplements)
+  const data = buildPurchaseOrderSyncPayload(po, orderRefs, supplements, lines)
   if (internalRiskFlags) (data as Record<string, unknown>).internal_risk_flags = internalRiskFlags
   return sendToFinanceSystem('purchase_order.approval_requested', data)
 }

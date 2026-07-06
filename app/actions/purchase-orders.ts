@@ -417,8 +417,9 @@ export async function placePurchaseOrder(poId: string): Promise<{
             supplements = (si || []).map((s: any) => ({ item_no: s.item_no, material_name: s.material_name, qty: s.total_required_qty, reason: s.supplement_reason }));
           }
         } catch { /* 补采购列未建 */ }
-        const { requestPurchaseOrderApproval } = await import('@/lib/integration/finance-sync');
-        await requestPurchaseOrderApproval(full, undefined, supplements, flags); // 带内部风险信号给财务
+        const { requestPurchaseOrderApproval, fetchPurchaseOrderLinesRaw } = await import('@/lib/integration/finance-sync');
+        const poLines = await fetchPurchaseOrderLinesRaw(supabase, poId);   // 原辅料明细(财务预算+核销共同源)
+        await requestPurchaseOrderApproval(full, undefined, supplements, flags, poLines); // 带内部风险信号给财务
       }
     } catch (e: any) { console.warn('[placePurchaseOrder] 财务审批请求发送失败(已置待审批,失败已落 outbox):', e?.message); }
     const budgetWarn = flags.over_budget_materials.length ? ` ⚠ 系统检测到疑重复下单料:${flags.over_budget_materials.slice(0, 4).join('、')}` : (flags.over_budget_total ? ' ⚠ 系统检测到整单超预算' : '');

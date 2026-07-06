@@ -13,6 +13,7 @@ import { matchBaseline, checkOverBaseline, checkTrimTotalOverBudget } from '../l
 import { evaluateBudgetGate } from '../lib/procurement/approval';
 import { calcDueDates } from '../lib/schedule';
 import { CIRCUIT_BREAKER, ACTION_CONFIG } from '../lib/agent/types';
+import { buildPurchaseOrderSyncPayload, mapPoLineForFinance } from '../lib/integration/finance-sync';
 
 let passed = 0;
 let failed = 0;
@@ -96,6 +97,29 @@ console.log('\n🧮 采购算账');
   assert(computeSuggestedPurchaseQty({ total_required_qty: 1000, procurement_loss_pct: 0, moq: 500 }) === 1000, 'MOQ 500 对齐 1000');
   assert(computeSuggestedPurchaseQty({ total_required_qty: 1001, procurement_loss_pct: 0, moq: 500 }) === 1500, 'MOQ 500:1001→1500');
   assert(computeSuggestedPurchaseQty({ total_required_qty: null as any }) === null, '无需求量→null');
+}
+
+// ════ 采购单→财务 lines(P1-2 修 2026-07-06:预算原辅料 + 收货核销共同源)════
+console.log('\n🧾 采购单→财务明细行');
+{
+  const line = mapPoLineForFinance({ id: 'L1', order_id: 'O1', order_no: 'QM-1', internal_order_no: '1022',
+    material_name: '面料A', material_code: 'M1', category: 'fabric', supplier_id: 'S1', supplier_name: '供A',
+    ordered_qty: 100, ordered_unit: 'KG', unit_price: 20, ordered_amount: 2000 });
+  assert(line.line_id === 'L1', 'line_id = procurement_line_items.id(必与收货同源)');
+  assert(line.order_no === 'QM-1' && line.internal_order_no === '1022', '订单号带上(财务反查订单)');
+  assert(line.category === 'fabric', 'category 透传(财务分原/辅料预算桶)');
+  assert(line.supplier_id === 'S1' && line.supplier_name === '供A', 'supplier 带上(财务按供应商分组)');
+  assert(line.amount === 2000, 'amount 取生成列 ordered_amount');
+  assert(mapPoLineForFinance({ id: 'L2', ordered_qty: 10, unit_price: 5 }).amount === 50, '无 ordered_amount → 回退 qty×price');
+  const trim = mapPoLineForFinance({ id: 'L3', category: 'trim', unit_price: null, ordered_qty: 8 });
+  assert(trim.amount === null, '无价 → amount null(无价版不污染台账)');
+  assert(trim.category === 'trim', '辅料 category=trim 透传');
+  const payload = buildPurchaseOrderSyncPayload({ id: 'PO1', po_no: 'PO-1', total_amount: 2000 }, undefined, undefined,
+    [{ id: 'L1', ordered_qty: 100, unit_price: 20, ordered_amount: 2000, category: 'fabric' }]);
+  assert(Array.isArray(payload.lines) && (payload.lines as any[]).length === 1, 'payload 含 lines 数组');
+  assert((payload.lines as any[])[0].line_id === 'L1', 'payload.lines[0].line_id 同源');
+  const empty = buildPurchaseOrderSyncPayload({ id: 'PO2', po_no: 'PO-2' });
+  assert(Array.isArray(empty.lines) && (empty.lines as any[]).length === 0, '无 lines 参数 → 空数组(不 crash)');
 }
 
 console.log('\n▶ 报价基线对照(P2:超单耗/超价,容差 0)');

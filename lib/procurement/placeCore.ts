@@ -1,5 +1,5 @@
 import { revalidatePath } from 'next/cache';
-import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
+import { syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw } from '@/lib/integration/finance-sync';
 
 /**
  * 采购单下单核心(draft → placed):状态推进 + 行→ordered + 财务应付同步(purchase_order.placed)
@@ -39,7 +39,9 @@ export async function placePurchaseOrderCore(supabase: any, poId: string): Promi
           supplements = (suppItems || []).map((s: any) => ({ item_no: s.item_no, material_name: s.material_name, qty: s.total_required_qty, reason: s.supplement_reason }));
         }
       } catch { /* 补采购列未建时静默 */ }
-      await syncPurchaseOrderToFinance(full, undefined, supplements);
+      // 带上原辅料明细(财务预算+收货核销共同源;line_id=procurement_line_items.id 与收货同源)
+      const poLines = await fetchPurchaseOrderLinesRaw(supabase, poId);
+      await syncPurchaseOrderToFinance(full, undefined, supplements, poLines);
     }
   } catch { /* 财务同步失败不影响下单 */ }
 
