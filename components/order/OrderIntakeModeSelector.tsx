@@ -15,7 +15,7 @@ import { LegacyOrderForm } from './LegacyOrderForm';
 
 type Mode = 'po' | 'legacy';
 
-export function OrderIntakeModeSelector() {
+export function OrderIntakeModeSelector({ showPrice = false }: { showPrice?: boolean }) {
   const searchParams = useSearchParams();
   const initialPo = searchParams.get('po'); // P1a:从 PO 页「从此 PO 建单」带过来
   const [mode, setMode] = useState<Mode>(initialPo ? 'po' : 'legacy'); // 带 ?po= 直接进 PO 模式,否则默认回退
@@ -57,7 +57,7 @@ export function OrderIntakeModeSelector() {
       </div>
 
       {/* 条件渲染：两条路径逻辑各自不变 */}
-      {mode === 'po' ? <POOrderForm initialPoId={initialPo || undefined} /> : <LegacyOrderForm />}
+      {mode === 'po' ? <POOrderForm initialPoId={initialPo || undefined} /> : <LegacyOrderForm showPrice={showPrice} />}
     </div>
   );
 }

@@ -807,6 +807,7 @@ export async function createOrder(
       for (const st of parsedStyles) {
         const colors = Array.isArray(st?.colors) ? st.colors : [];
         const fabricCons = st?.fabric_consumption === '' || st?.fabric_consumption == null ? null : Number(st.fabric_consumption);
+        const poPrice = st?.po_unit_price === '' || st?.po_unit_price == null ? null : Number(st.po_unit_price);
         for (const c of colors) {
           lineNo++;
           // qty 优先取 c.qty;富录入表不维护 qty 字段 → 从 sizes 求和兜底
@@ -830,12 +831,18 @@ export async function createOrder(
             fabric_width: st?.fabric_width?.trim?.() || null,
             fabric_consumption: fabricCons != null && !isNaN(fabricCons) ? fabricCons : null,
             fabric_unit: st?.fabric_unit?.trim?.() || null,
+            po_unit_price: poPrice != null && !isNaN(poPrice) ? poPrice : null,   // 客户 PO 成交价(款级同值写每行)
             source: 'po_parse',
           });
         }
       }
       if (rows.length > 0) {
-        const { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
+        let { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
+        if (liErr && /po_unit_price|column .* does not exist/i.test(liErr.message || '')) {
+          // po_unit_price 迁移(20260706)未执行 → 降级去掉该列重插,不阻断建单
+          const plain = rows.map(({ po_unit_price, ...rest }) => rest);
+          ({ error: liErr } = await (supabase.from('order_line_items') as any).insert(plain));
+        }
         if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);
         assessment = assessSmallBatchFromLineItems(rows);
         // S1.2:每款布料 → 同步该款 BOM 第一行(失败不阻断建单)

@@ -11,6 +11,14 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { syncStyleFabricsToBom } from '@/lib/services/style-fabric-sync';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
+import { hasRoleInGroup } from '@/lib/domain/roles';
+
+/** 取当前用户角色 + 是否可见客户成交价(CAN_SEE_FINANCIALS)。 */
+async function financialsVisibility(supabase: any, userId: string): Promise<{ roles: string[]; canSeeFin: boolean }> {
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', userId).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  return { roles, canSeeFin: hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS') };
+}
 
 /** 读 AI 原始识别冻结底档(建单时 PO 解析原文)。 */
 export async function getPoParseSnapshot(orderId: string): Promise<{ snapshot?: any; at?: string | null; error?: string }> {
@@ -57,6 +65,8 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+  // 客户成交价(po_unit_price)红线:仅 CAN_SEE_FINANCIALS 可读,server 端剥离(生产/QC/物流看生产任务单不含此列)
+  const { canSeeFin } = await financialsVisibility(supabase, user.id);
   // select * :双语/箱数列(20260703 迁移)未执行时也不报缺列
   const { data, error } = await (supabase.from('order_line_items') as any)
     .select('*').eq('order_id', orderId).order('line_no', { ascending: true });
@@ -73,6 +83,7 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
         fabric_name: r.fabric_name || '', fabric_width: r.fabric_width || '',
         fabric_consumption: r.fabric_consumption ?? '', fabric_unit: r.fabric_unit || 'kg',
         set_multiplier: Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1,  // 套装每套件数(1=非套装)
+        ...(canSeeFin ? { po_unit_price: r.po_unit_price ?? '' } : {}),   // 客户成交价(款级,仅财务口径可见)
         colors: [],
       };
       map.set(key, st);
@@ -83,6 +94,7 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
       st.fabric_name = r.fabric_name; st.fabric_width = r.fabric_width || '';
       st.fabric_consumption = r.fabric_consumption ?? ''; st.fabric_unit = r.fabric_unit || 'kg';
     }
+    if (canSeeFin && (st.po_unit_price === '' || st.po_unit_price == null) && r.po_unit_price != null) st.po_unit_price = r.po_unit_price;
     st.colors.push({ color_cn: r.color_cn || '', color_en: r.color_en || '', sizes: r.sizes || {}, qty: Number(r.qty_pcs) || 0, remark: r.remark || '', carton_count: r.carton_count ?? '' });
   }
   return { data: [...map.values()] };
@@ -122,15 +134,19 @@ export async function parseOrderFile(base64: string): Promise<{
     if (res.headerRow === -1) return { error: '没识别到尺码表头(需含 S/M/L 或 XS-XXL 等尺码列)。请确认上传的是含尺码数量的客户订单/生产单。' };
     if (res.lines.length === 0) return { error: '识别到表头但没读到订单行,请检查文件或手工录入兜底。' };
 
-    // 归组:每款一个 Style,同款多色汇入 colors[]。解析出的 color 落 color_cn;不带价。
+    // 归组:每款一个 Style,同款多色汇入 colors[]。解析出的 color 落 color_cn。
+    // 客户成交价(po_unit_price,款级)仅带给可见财务的角色;解析出即预填,人在录入表确认后保存冻结。
+    const canSeeFin = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
     const map = new Map<string, any>();
     for (const l of res.lines) {
       const key = l.style_no || '（未识别款号）';
       let st = map.get(key);
       if (!st) {
-        st = { style_no: l.style_no || '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', colors: [] };
+        st = { style_no: l.style_no || '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', ...(canSeeFin ? { po_unit_price: '' } : {}), colors: [] };
         map.set(key, st);
       }
+      // 款级单价:取该款首个非空解析价(客户 PO 常一款一价)
+      if (canSeeFin && (st.po_unit_price === '' || st.po_unit_price == null) && l.unit_price != null) st.po_unit_price = l.unit_price;
       st.colors.push({ color_cn: l.color || '', color_en: l.color_ref || '', sizes: l.sizes || {}, qty: l.qty_total || 0, remark: '' });
     }
     return { styles: [...map.values()], sizeNames: res.sizeNames, headerRow: res.headerRow };
@@ -157,11 +173,24 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
     || (roles.includes('merchandiser') && await canUserAccessOrder(supabase, user.id, orderId));
   if (!canEdit) return { error: '无权编辑该订单明细(仅创建者/负责人/被指派跟单/理单/管理员)' };
 
+  // 客户成交价(po_unit_price)红线:仅 CAN_SEE_FINANCIALS 可写;其他角色(如生产编辑生产任务单)保存时
+  // 保留库里旧值,绝不用被剥离的空值抹掉(server 端读时已剥离 → 提交里本就没有此字段)。
+  const canSeeFin = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
+  const existingPrice = new Map<string, number>();
+  if (!canSeeFin) {
+    const { data: old } = await (supabase.from('order_line_items') as any).select('style_no, po_unit_price').eq('order_id', orderId);
+    for (const o of (old || [])) { const k = (o.style_no || '').trim(); if (o.po_unit_price != null && !existingPrice.has(k)) existingPrice.set(k, Number(o.po_unit_price)); }
+  }
+
   // 组装行:每款每色一行,qty = Σsizes;布料字段款级同值写每行
   const rows: any[] = [];
   let lineNo = 0;
   for (const st of (styles || [])) {
     const fabricCons = st?.fabric_consumption === '' || st?.fabric_consumption == null ? null : Number(st.fabric_consumption);
+    const submittedPrice = st?.po_unit_price === '' || st?.po_unit_price == null ? null : Number(st.po_unit_price);
+    const poUnitPrice = canSeeFin
+      ? (submittedPrice != null && !isNaN(submittedPrice) ? submittedPrice : null)   // 财务口径角色:用提交值
+      : (existingPrice.get((st?.style_no || '').trim()) ?? null);                     // 其他角色:保留旧值
     for (const c of (st?.colors || [])) {
       lineNo++;
       const sizesIn = c?.sizes || {};
@@ -185,6 +214,7 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
         fabric_width: st?.fabric_width?.trim() || null,
         fabric_consumption: fabricCons != null && !isNaN(fabricCons) ? fabricCons : null,
         fabric_unit: st?.fabric_unit?.trim() || null,
+        po_unit_price: poUnitPrice,   // 客户成交价(款级同值写每行)
         source: 'manual',
         created_by: user.id,        // 录入留痕(整单替换式保存=最后保存人)
       });
@@ -203,10 +233,10 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
   }
   if (rows.length > 0) {
     let { error: insErr } = await (supabase.from('order_line_items') as any).insert(rows);
-    if (insErr && /product_name_en|carton_count|created_by|column .* does not exist/i.test(insErr.message || '')) {
+    if (insErr && /product_name_en|carton_count|created_by|po_unit_price|column .* does not exist/i.test(insErr.message || '')) {
       // 新列迁移未执行 → 降级去掉新列重插(不 brick 保存),提醒执行迁移
-      console.warn('[saveOrderLineItems] 双语/箱数/录入人列缺失,降级保存。请执行 20260703 系列迁移');
-      const plain = rows.map(({ product_name_en, carton_count, created_by, ...rest }) => rest);
+      console.warn('[saveOrderLineItems] 双语/箱数/录入人/PO价列缺失,降级保存。请执行 20260703/20260706 系列迁移');
+      const plain = rows.map(({ product_name_en, carton_count, created_by, po_unit_price, ...rest }) => rest);
       ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(plain));
     }
     if (insErr) return { error: '写明细失败:' + insErr.message };

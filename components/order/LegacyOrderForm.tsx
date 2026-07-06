@@ -1328,7 +1328,7 @@ function NewOrderWizard() {
               <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/30 p-3">
                 <div className="text-sm font-semibold text-gray-800 mb-1">逐款明细(款 / 颜色 / 尺码 × 件数)</div>
                 <p className="text-[11px] text-gray-500 mb-3">手工录逐款明细 → 上面的总量/款数/颜色数自动算,且喂生产任务单和客户 PI。不录也能建单(上面三个数字手填)。</p>
-                <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit />
+                <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit showPrice={showPrice} />
               </div>
             </div>
 
@@ -2166,7 +2166,7 @@ function NewOrderWizard() {
 
 // 移动自 app/orders/new/page.tsx —— 逻辑逐字不变（Order Intake dual-mode 收敛）。
 // 仅把默认导出改为命名导出 LegacyOrderForm，供模式选择器条件渲染。
-export function LegacyOrderForm() {
+export function LegacyOrderForm({ showPrice = false }: { showPrice?: boolean } = {}) {
   return (
     <Suspense fallback={<div className="mx-auto max-w-3xl p-6 text-gray-400">加载中...</div>}>
       <NewOrderWizard />

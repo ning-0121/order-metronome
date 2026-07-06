@@ -18,13 +18,15 @@ type Style = {
   // S1.2 每款布料(自动同步成该款 BOM 第一行 + 生产任务单用料)
   fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
   set_multiplier?: number | string;   // 套装每套件数(1/空=非套装);算料按 件数×每套件数
+  po_unit_price?: string | number;    // 客户 PO 成交单价(款级,给客户的价);仅 showPrice 时渲染,server 端按财务口径剥离
 };
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
 const sumSizes = (s: Record<string, number>) => Object.values(s || {}).reduce((a, v) => a + (Number(v) || 0), 0);
 
-export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange }: {
+export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false }: {
   orderId?: string; canEdit?: boolean; value?: Style[]; onChange?: (styles: Style[]) => void;
+  showPrice?: boolean;   // 是否渲染客户 PO 成交价列(仅建单/售价可见场景传 true;生产任务单等不传)
 }) {
   // 受控模式(建单页:父组件持有明细,无 orderId,不自加载/自保存);否则详情模式(自加载 orderId + 保存按钮)
   const controlled = value !== undefined && !!onChange;
@@ -113,7 +115,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
   };
 
   // ── 款 ──
-  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', set_multiplier: 1, colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
+  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', po_unit_price: '', set_multiplier: 1, colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
   const removeStyle = (i: number) => setStyles(styles.filter((_, x) => x !== i));
   // 复制款:深拷贝(颜色/尺码件数/图片全带上),插在原款正下方,款号加「-副本」提示改;再改数量/图片即可
   const copyStyle = (i: number) => {
@@ -123,7 +125,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
       product_name: src.product_name,
       image_url: src.image_url,
       fabric_name: src.fabric_name || '', fabric_width: src.fabric_width || '',
-      fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg',
+      fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg', po_unit_price: src.po_unit_price ?? '',
       set_multiplier: src.set_multiplier ?? 1,
       colors: src.colors.map((c) => ({ ...c, sizes: { ...c.sizes } })),
     };
@@ -242,6 +244,13 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange 
               {['kg', '米', '平方', '码'].map((u) => <option key={u} value={u}>{u}</option>)}
             </select>
             <span className="text-[11px] text-gray-400">录了会自动进该款 BOM 和生产任务单用料</span>
+            {showPrice && (
+              <>
+                <span className="text-xs text-gray-400 ml-2">💰 PO单价</span>
+                <input type="number" min="0" step="0.01" value={st.po_unit_price ?? ''} onChange={(e) => setStyleField(si, 'po_unit_price', e.target.value)}
+                  placeholder="给客户价/件" disabled={!canEdit} className={`${inp} w-24 text-right`} title="客户 PO 成交单价(给客户的价,非我们报价);AI 解析预填,请核对后保存冻结" />
+              </>
+            )}
           </div>
 
           {/* 颜色 × 尺码 矩阵 */}
