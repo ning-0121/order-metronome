@@ -588,7 +588,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400">
-                {['款号', '颜色', '物料', '类型', '开发单耗(业务)', '预算单耗(报价)', '大货单耗(采购核定)', '单位'].map(h => (
+                {['款号', '颜色', '物料', '类型', '开发单耗(业务)', '报价单耗', '报价单价', '大货单耗(业务填·采购核实)', '单位'].map(h => (
                   <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr></thead>
@@ -601,6 +601,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     <td className="py-1.5 px-2">{l.required ? <span className="text-amber-700 font-medium">布料·必核</span> : <span className="text-gray-400">辅料·可选</span>}</td>
                     <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
                     <td className="py-1.5 px-2 font-medium text-indigo-600" title="从内部报价单冻结的报价基线带入,只读">{l.budget_consumption ?? '—'}</td>
+                    <td className="py-1.5 px-2 text-indigo-600" title="报价基线单价,只读,供比对">{l.budget_unit_price != null ? `¥${l.budget_unit_price}` : '—'}</td>
                     <td className="py-1.5 px-2">
                       <input type="number" step="0.001" min="0" value={consEdit[l.id] ?? ''} disabled={trackingPhase}
                         placeholder={l.required ? '必填' : `默认 ${l.development_consumption ?? '—'}`}

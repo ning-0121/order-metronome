@@ -12,7 +12,7 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 
-export type ProductionStage = 'awaiting_procurement' | 'materials_in_transit' | 'ready_to_schedule' | 'in_production';
+export type ProductionStage = 'awaiting_procurement' | 'materials_in_transit' | 'ready_to_schedule' | 'in_production' | 'ready_to_ship';
 
 export interface ProductionOrderRow {
   order_id: string;
@@ -37,6 +37,7 @@ export interface ProductionCenterSummary {
   materials_in_transit: number;
   ready_to_schedule: number;
   in_production: number;
+  ready_to_ship: number;
   risk: number;
 }
 
@@ -48,11 +49,16 @@ const NOT_SECURED = new Set(['draft', 'pending_order']);
 function computeStage(
   m: ProductionOrderRow['material'],
   kickoff: ProductionOrderRow['kickoff'],
-  completion: ProductionOrderRow['completion'],
+  factoryDone: { status: string | null } | null,   // 尾查/工厂完成(完工信号)
+  shipped: { status: string | null } | null,        // 发货出运(出运信号)
   procPlaced?: { status: string | null } | null,   // 采购下单里程碑(线级采购数据缺失时的兜底信号)
 ): ProductionStage | 'done' {
-  if (completion && DONE(completion.status)) return 'done';   // 工厂已完工 → 出生产中心
-  if (kickoff && DONE(kickoff.status)) return 'in_production'; // 已开裁 → 生产中
+  if (shipped && DONE(shipped.status)) return 'done';         // 已出运 → 出生产中心
+  if (kickoff && DONE(kickoff.status)) {
+    // 已开裁:工厂已完工(尾查/工厂完成)但未出运 → 待发货;否则还在生产中(2026-07-06 用户加待发货一栏)
+    if (factoryDone && DONE(factoryDone.status)) return 'ready_to_ship';
+    return 'in_production';
+  }
   if (m.total === 0) {
     // 无采购执行行(老单/没走线级采购,只在里程碑标了采购下单)→ 退回看「采购下单」里程碑:
     // 已下单 → 物料在途;否则才是真「新订单待采购」。修用户反馈:老单物料在途被误判成待采购。
@@ -141,8 +147,10 @@ export async function getProductionCenter(): Promise<{
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
     const kickoff = mo['production_kickoff'] || null;
-    const completion = mo['factory_completion'] || mo['shipment_execute'] || null; // V2 砍了 factory_completion,完工信号看 shipment_execute(发货出运)
-    const stage = computeStage(m, kickoff, completion, mo['procurement_order_placed'] || null);
+    const factoryDone = mo['final_qc_check'] || mo['factory_completion'] || null;  // 尾查/工厂完成=完工信号
+    const shipped = mo['shipment_execute'] || null;                                // 发货出运=出运信号(出运才离开生产中心)
+    const completion = factoryDone || shipped; // 展示「工厂完成」列
+    const stage = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
     if (stage === 'done') continue;   // 工厂已完工,出中心
     const risk = [kickoff, completion].some((n) => n && !DONE(n.status) && n.due && n.due < today);
     rows.push({
@@ -154,7 +162,7 @@ export async function getProductionCenter(): Promise<{
     });
   }
 
-  const STAGE_ORDER: ProductionStage[] = ['awaiting_procurement', 'materials_in_transit', 'ready_to_schedule', 'in_production'];
+  const STAGE_ORDER: ProductionStage[] = ['awaiting_procurement', 'materials_in_transit', 'ready_to_schedule', 'in_production', 'ready_to_ship'];
   rows.sort((a, b) => {
     if (a.risk !== b.risk) return a.risk ? -1 : 1;   // 风险优先
     const s = STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage);
@@ -167,13 +175,14 @@ export async function getProductionCenter(): Promise<{
     materials_in_transit: rows.filter((r) => r.stage === 'materials_in_transit').length,
     ready_to_schedule: rows.filter((r) => r.stage === 'ready_to_schedule').length,
     in_production: rows.filter((r) => r.stage === 'in_production').length,
+    ready_to_ship: rows.filter((r) => r.stage === 'ready_to_ship').length,
     risk: rows.filter((r) => r.risk).length,
   };
   return { data: rows, summary };
 }
 
 function emptySummary(): ProductionCenterSummary {
-  return { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, risk: 0 };
+  return { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, ready_to_ship: 0, risk: 0 };
 }
 
 /**
@@ -226,7 +235,7 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
   }
   const STAGE_CN: Record<string, string> = {
     awaiting_procurement: '新订单待采购', materials_in_transit: '物料在途',
-    ready_to_schedule: '开生产待排单', in_production: '生产中', done: '工厂已完工',
+    ready_to_schedule: '开生产待排单', in_production: '生产中', ready_to_ship: '待发货', done: '工厂已完工',
   };
   const nodeCn = (n: { status: string | null; due: string | null } | null) => {
     if (!n) return '无此节点';
@@ -255,8 +264,10 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
     const kickoff = mo['production_kickoff'] || null;
-    const completion = mo['factory_completion'] || mo['shipment_execute'] || null; // V2 砍了 factory_completion,完工信号看 shipment_execute(发货出运)
-    const stage = computeStage(m, kickoff, completion, mo['procurement_order_placed'] || null);
+    const factoryDone = mo['final_qc_check'] || mo['factory_completion'] || null;  // 尾查/工厂完成=完工信号
+    const shipped = mo['shipment_execute'] || null;                                // 发货出运=出运信号(出运才离开生产中心)
+    const completion = factoryDone || shipped; // 展示「工厂完成」列
+    const stage = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
     const matText = m.total === 0 ? '未起料' : `到 ${m.received}/${m.total}${m.pending > 0 ? ` · 未下单${m.pending}` : ''}`;
     ws.addRow([
       o.internal_order_no || o.order_no || o.id, o.customer_name || '', o.quantity ?? '',

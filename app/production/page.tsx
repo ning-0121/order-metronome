@@ -26,7 +26,7 @@ export default async function ProductionCenterPage() {
   }
 
   const rows = result.data || [];
-  const summary = result.summary || { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, risk: 0 };
+  const summary = result.summary || { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, ready_to_ship: 0, risk: 0 };
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -44,7 +44,7 @@ export default async function ProductionCenterPage() {
       <ProductionCenterClient rows={rows} summary={summary} />
 
       <p className="mt-4 text-xs text-gray-400">
-        阶段口径:新订单待采购=有料未下单/未起料 · 物料在途=已下单未到齐 · 开生产待排单=料齐未开裁 · 生产中=已开裁未完工。风险单=开裁/工厂完成节点逾期且未处置(可在订单里申请改期)。
+        阶段口径:新订单待采购=有料未下单/未起料 · 物料在途=已下单未到齐 · 开生产待排单=料齐未开裁 · 生产中=已开裁未完工 · 待发货=尾查/工厂完成、未出运。出运后离开本中心。风险单=开裁/工厂完成节点逾期且未处置(可在订单里申请改期)。
       </p>
     </div>
   );

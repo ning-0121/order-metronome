@@ -15,6 +15,7 @@ const STAGE_LABEL: Record<ProductionStage, string> = {
   materials_in_transit: '物料在途',
   ready_to_schedule: '开生产待排单',
   in_production: '生产中',
+  ready_to_ship: '待发货',
 };
 
 type Filter = ProductionStage | 'risk';
@@ -24,6 +25,7 @@ const CARDS: { key: Filter; label: string; tone: string; active: string }[] = [
   { key: 'materials_in_transit', label: '物料在途', tone: 'border-sky-200 bg-sky-50', active: 'ring-2 ring-sky-400' },
   { key: 'ready_to_schedule', label: '开生产待排单', tone: 'border-emerald-200 bg-emerald-50', active: 'ring-2 ring-emerald-400' },
   { key: 'in_production', label: '生产中', tone: 'border-indigo-200 bg-indigo-50', active: 'ring-2 ring-indigo-400' },
+  { key: 'ready_to_ship', label: '📦 待发货', tone: 'border-teal-200 bg-teal-50', active: 'ring-2 ring-teal-400' },
   { key: 'risk', label: '⚠ 风险单', tone: 'border-red-200 bg-red-50', active: 'ring-2 ring-red-400' },
 ];
 
@@ -32,6 +34,7 @@ const STAGE_BADGE: Record<ProductionStage, string> = {
   materials_in_transit: 'bg-sky-100 text-sky-700 border-sky-200',
   ready_to_schedule: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   in_production: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  ready_to_ship: 'bg-teal-100 text-teal-700 border-teal-200',
 };
 
 const NODE_LABEL: Record<string, string> = { pending: '未开始', in_progress: '进行中', done: '已完成', completed: '已完成', blocked: '受阻' };
@@ -101,6 +104,7 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
     materials_in_transit: summary.materials_in_transit,
     ready_to_schedule: summary.ready_to_schedule,
     in_production: summary.in_production,
+    ready_to_ship: summary.ready_to_ship,
     risk: summary.risk,
   };
 
@@ -113,7 +117,7 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
   return (
     <div>
       {/* 卡:点开筛选(每张卡都是按钮,点击筛选对应桶的订单) */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {CARDS.map((c) => {
           const on = filter === c.key;
           return (

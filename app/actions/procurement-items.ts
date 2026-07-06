@@ -273,19 +273,20 @@ export async function listBomConsumptionLines(orderId: string) {
     .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
   const baseLines: any[] = (cb as any)?.quote_baseline_lines || [];
   const norm = (s: any) => String(s ?? '').trim().toLowerCase();
-  const byStyleMat = new Map<string, number>();
-  const byMat = new Map<string, number>();
+  const byStyleMat = new Map<string, { cons: number | null; price: number | null }>();
+  const byMat = new Map<string, { cons: number | null; price: number | null }>();
   for (const bl of baseLines) {
-    const c = Number(bl.quote_consumption) || 0;
-    if (!c) continue;
+    const c = Number(bl.quote_consumption) || null;
+    const p = Number(bl.quote_unit_price) || null;
+    if (!c && !p) continue;
     const mat = norm(bl.material_name);
-    if (bl.style_no) byStyleMat.set(`${norm(bl.style_no)}¦${mat}`, c);
-    if (!byMat.has(mat)) byMat.set(mat, c);
+    if (bl.style_no) byStyleMat.set(`${norm(bl.style_no)}¦${mat}`, { cons: c, price: p });
+    if (!byMat.has(mat)) byMat.set(mat, { cons: c, price: p });
   }
-  const quoteConsOf = (b: any): number | null => {
+  const quoteOf = (b: any): { cons: number | null; price: number | null } => {
     const mat = norm(b.material_name);
-    if (b.style_no) { const v = byStyleMat.get(`${norm(b.style_no)}¦${mat}`); if (v != null) return v; }
-    return byMat.get(mat) ?? null;
+    if (b.style_no) { const v = byStyleMat.get(`${norm(b.style_no)}¦${mat}`); if (v) return v; }
+    return byMat.get(mat) ?? { cons: null, price: null };
   };
 
   const rows = (data || []).map((b: any) => ({
@@ -297,8 +298,9 @@ export async function listBomConsumptionLines(orderId: string) {
     spec: b.spec || null,
     unit: b.unit || null,
     development_consumption: b.qty_per_piece ?? null,          // 开发单耗(业务,只读)
-    budget_consumption: quoteConsOf(b),                        // 预算单耗(报价基线,只读带入)
-    production_consumption: b.production_consumption ?? null,  // 大货单耗(采购核定)
+    budget_consumption: quoteOf(b).cons,                       // 报价单耗(报价基线,只读带入)
+    budget_unit_price: quoteOf(b).price,                       // 报价单价(报价基线,只读带入,供比对)
+    production_consumption: b.production_consumption ?? null,  // 大货单耗(业务/技术填,采购核实)
     required: b.material_type === 'fabric' || b.material_type === 'lining',  // 布料必核
   }));
   return { data: rows };
