@@ -876,13 +876,22 @@ export default async function OrderDetailPage({
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
               <h2 className="text-lg font-semibold text-gray-900">🛒 采购核料</h2>
-              {/* 2026-07-06 用户拍板:采购在采购中心核料;此处业务只读看进度 */}
+              {/* 2026-07-06 用户拍板:采购在采购中心核料;业务在此只读看进度 */}
               <Link href={`/procurement/verify/${id}`} className="text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50">
-                🛒 采购去采购中心核料 →
+                🛒 去采购中心核料 →
               </Link>
             </div>
-            <p className="text-xs text-gray-400 mb-4">采购请到「采购中心 → 该订单核料页」核定/归并/下单;此处供业务看进度。</p>
-            <ProcurementItemsTab orderId={id} />
+            {isAdmin ? (
+              <>
+                <p className="text-xs text-gray-400 mb-4">采购请到「采购中心 → 该订单核料页」核定/归并/下单;此处仅管理员可编。</p>
+                <ProcurementItemsTab orderId={id} />
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-gray-400 mb-4">核料是采购的工作,在采购中心进行。这里给业务<b>只读看采购进度</b>:</p>
+                <SupplyChainTab orderId={id} />
+              </>
+            )}
           </div>
         )}
 
