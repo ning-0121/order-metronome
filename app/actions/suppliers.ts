@@ -159,6 +159,8 @@ export async function deleteSupplier(id: string): Promise<{ deleted?: boolean; a
 export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
   created?: number;
   updated?: number;   // 同名已存在 → 非破坏性补全"库里为空"的字段(联系人/电话/账期…)
+  createdNames?: string[];   // 新建的供应商名(供前端列出/点进补充)
+  updatedNames?: string[];   // 补全的供应商名
   skipped?: Array<{ row: number; name: string; reason: string }>;
   failed?: Array<{ row: number; name: string; reason: string }>;
   error?: string;
@@ -185,6 +187,8 @@ export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
 
   let created = 0;
   let updated = 0;
+  const createdNames: string[] = [];
+  const updatedNames: string[] = [];
   const skipped: Array<{ row: number; name: string; reason: string }> = [];
   const failed: Array<{ row: number; name: string; reason: string }> = [];
   const financeSyncIds: string[] = [];
@@ -218,6 +222,7 @@ export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
         if (error) { failed.push({ row: rowNo, name, reason: error.message }); continue; }
         Object.assign(exist, patch);   // 同步内存,免同文件后续同名行重复补
         updated += 1;
+        updatedNames.push(name);
         financeSyncIds.push(exist.id);
         continue;
       }
@@ -242,6 +247,7 @@ export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
     if (error) { failed.push({ row: rowNo, name, reason: error.message }); continue; }
     seen.add(key);                                    // 文件内重复也会被拦住
     created += 1;
+    createdNames.push(name);
     financeSyncIds.push((data as any).id);
   }
 
@@ -249,5 +255,5 @@ export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
   await Promise.allSettled(financeSyncIds.map((id) => pushSupplierToFinance(supabase, id)));
 
   revalidatePath('/suppliers');
-  return { created, updated, skipped, failed };
+  return { created, updated, createdNames, updatedNames, skipped, failed };
 }

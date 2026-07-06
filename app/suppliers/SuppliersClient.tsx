@@ -18,7 +18,18 @@ export function SuppliersClient({ suppliers, canBasic, canFinance, error }: {
   const [form, setForm] = useState<any>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ summary: string; details: Array<{ row: number; name: string; reason: string }> } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    summary: string;
+    createdNames?: string[]; updatedNames?: string[];
+    skipped?: Array<{ row: number; name: string; reason: string }>;
+    failed?: Array<{ row: number; name: string; reason: string }>;
+  } | null>(null);
+  // 点供应商名 → 在列表里找到它、载入左侧编辑表单去补充(找不到=还没刷新到,提示重试)
+  function openByName(name: string) {
+    const s = (suppliers || []).find((x: any) => String(x.name).trim().toLowerCase() === name.trim().toLowerCase());
+    if (s) { loadRow(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    else alert(`「${name}」列表里暂未找到,稍等刷新后在右侧列表点它编辑`);
+  }
   const fileRef = useRef<HTMLInputElement>(null);
   // ⚡ 页面内批量录入(不用 Excel):多行表格,一键提交,复用同一套查重+报告
   const emptyBatchRow = () => ({ name: '', main_category: '', contact_name: '', phone: '', net_days: '' });
@@ -36,7 +47,7 @@ export function SuppliersClient({ suppliers, canBasic, canFinance, error }: {
     })));
     setBatchSaving(false);
     if (res.error) { alert(res.error); return; }
-    setImportResult({ summary: importResultText(res), details: [...(res.skipped || []), ...(res.failed || [])] });
+    setImportResult({ summary: importResultText(res), createdNames: (res as any).createdNames, updatedNames: (res as any).updatedNames, skipped: res.skipped, failed: res.failed });
     setBatchRows((res.created || 0) > 0 ? null : batchRows);   // 有成功→收起;全被跳过→留着改
     router.refresh();
   }
@@ -91,7 +102,7 @@ export function SuppliersClient({ suppliers, canBasic, canFinance, error }: {
       if (inputs.length === 0) { alert('文件里没有读到数据行 — 请用「下载模板」的格式填写'); return; }
       const res = await bulkImportSuppliers(inputs);
       if (res.error) { alert(res.error); return; }
-      setImportResult({ summary: importResultText(res), details: [...(res.skipped || []), ...(res.failed || [])] });
+      setImportResult({ summary: importResultText(res), createdNames: (res as any).createdNames, updatedNames: (res as any).updatedNames, skipped: res.skipped, failed: res.failed });
       router.refresh();
     } catch (err: any) {
       alert('文件解析失败:' + (err?.message || '请确认是 .xlsx/.xls/.csv 文件'));
@@ -193,12 +204,50 @@ export function SuppliersClient({ suppliers, canBasic, canFinance, error }: {
             )}
 
             {importResult && (
-              <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1">
+              <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
                 <p className="font-medium text-gray-800">{importResult.summary}</p>
-                {importResult.details.slice(0, 20).map((d, i) => (
-                  <p key={i} className="text-gray-500">第{d.row}行「{d.name}」：{d.reason}</p>
-                ))}
-                {importResult.details.length > 20 && <p className="text-gray-400">…还有 {importResult.details.length - 20} 条</p>}
+                {/* 新建 */}
+                {(importResult.createdNames?.length ?? 0) > 0 && (
+                  <div>
+                    <p className="text-emerald-700 font-medium">✅ 新建 {importResult.createdNames!.length}(点名字去补充其它资料):</p>
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {importResult.createdNames!.map((n) => (
+                        <button key={n} onClick={() => openByName(n)} className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100">{n}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* 补全 */}
+                {(importResult.updatedNames?.length ?? 0) > 0 && (
+                  <div>
+                    <p className="text-sky-700 font-medium">🔄 补全已有 {importResult.updatedNames!.length}(只补了空字段,点名字可再改):</p>
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {importResult.updatedNames!.map((n) => (
+                        <button key={n} onClick={() => openByName(n)} className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 hover:bg-sky-100">{n}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* 跳过(无新增信息) */}
+                {(importResult.skipped?.length ?? 0) > 0 && (
+                  <div>
+                    <p className="text-gray-500 font-medium">⏭ 跳过 {importResult.skipped!.length}:</p>
+                    {importResult.skipped!.slice(0, 15).map((d, i) => (
+                      <p key={i} className="text-gray-500">第{d.row}行「{d.name}」：{d.reason}</p>
+                    ))}
+                    {importResult.skipped!.length > 15 && <p className="text-gray-400">…还有 {importResult.skipped!.length - 15} 条</p>}
+                  </div>
+                )}
+                {/* 失败 */}
+                {(importResult.failed?.length ?? 0) > 0 && (
+                  <div>
+                    <p className="text-red-600 font-medium">❌ 失败 {importResult.failed!.length}(需修正后重导):</p>
+                    {importResult.failed!.slice(0, 15).map((d, i) => (
+                      <p key={i} className="text-red-600">第{d.row}行「{d.name}」：{d.reason}</p>
+                    ))}
+                    {importResult.failed!.length > 15 && <p className="text-gray-400">…还有 {importResult.failed!.length - 15} 条</p>}
+                  </div>
+                )}
               </div>
             )}
           </section>
