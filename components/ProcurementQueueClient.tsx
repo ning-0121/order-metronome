@@ -55,6 +55,12 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
           <Link href={`/procurement/verify/${line.order_id}`} className="text-xs text-gray-400 hover:text-indigo-600 shrink-0" title="打开核料页,右上可下载生产任务单">
             📋任务单
           </Link>
+          {/* 每行点开对应的采购单详情(供应商/合计/明细/状态)——该行已挂到某采购单时显示 */}
+          {line.purchase_order_id && (
+            <Link href={`/procurement/po/${line.purchase_order_id}`} className="text-xs text-emerald-600 hover:underline shrink-0" title="查看该行所在的采购单">
+              🧾{line.po_no || '采购单'}
+            </Link>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">{children}</div>
       </div>
