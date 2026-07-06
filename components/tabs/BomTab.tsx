@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { getBomItems, addBomItem, addBomItemsBatch, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
+import { BulkConsumptionEditor } from '@/components/BulkConsumptionEditor';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
 import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
@@ -682,6 +683,8 @@ export function BomTab({ orderId }: { orderId: string }) {
         )}
       </div>
       {instMsg && <p className="text-xs text-gray-600 mb-2">{instMsg}</p>}
+      {/* 大货单耗核定(业务填·技术部大货版)—— 提交采购前填好,采购侧只读核实 + 填抛量(2026-07-06) */}
+      {items.length > 0 && <BulkConsumptionEditor orderId={orderId} />}
       {/* 提交采购(采购流起点)*/}
       {items.length > 0 && (
         <div className="flex items-center justify-between gap-3 mb-4 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40">

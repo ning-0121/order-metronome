@@ -301,18 +301,22 @@ export async function listBomConsumptionLines(orderId: string) {
     budget_consumption: quoteOf(b).cons,                       // 报价单耗(报价基线,只读带入)
     budget_unit_price: quoteOf(b).price,                       // 报价单价(报价基线,只读带入,供比对)
     production_consumption: b.production_consumption ?? null,  // 大货单耗(业务/技术填,采购核实)
+    over_purchase_pct: b.over_purchase_pct ?? null,            // 抛量%(采购填)
     required: b.material_type === 'fabric' || b.material_type === 'lining',  // 布料必核
   }));
   return { data: rows };
 }
 
-/** 保存按款大货单耗(采购职权;批量 {bom_id: 值})。 */
+/** 保存按款大货单耗(2026-07-06 用户拍板:改为业务执行填,技术部大货版;业务/理单/采购/管理员均可)。批量 {bom_id: 值}。 */
 export async function saveBomProductionConsumption(orderId: string, entries: Record<string, number | null>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const roleErr = await requireProcurementRole(supabase, user.id);
-  if (roleErr) return { error: roleErr };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const uRoles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!uRoles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
+    return { error: '仅业务/理单/采购/管理员可填大货单耗' };
+  }
 
   let saved = 0;
   for (const [bomId, val] of Object.entries(entries || {})) {
@@ -322,6 +326,30 @@ export async function saveBomProductionConsumption(orderId: string, entries: Rec
     if (error) {
       if (/production_consumption|column .* does not exist/i.test(error.message || '')) {
         return { error: '大货单耗列尚未建立:请先在 Supabase 执行 20260703_per_style_production_consumption.sql' };
+      }
+      return { error: friendlyError(error) };
+    }
+    saved++;
+  }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, saved };
+}
+
+/** 保存逐料抛量%(2026-07-06 用户拍板:采购职权;批量 {bom_id: %})。采购量=件数×大货单耗×(1+抛量%)。 */
+export async function saveBomOverPurchasePct(orderId: string, entries: Record<string, number | null>) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };   // 抛量是采购职权
+  let saved = 0;
+  for (const [bomId, val] of Object.entries(entries || {})) {
+    const v = val === null || val === undefined || isNaN(Number(val)) || Number(val) < 0 ? 0 : Number(val);
+    const { error } = await (supabase.from('materials_bom') as any)
+      .update({ over_purchase_pct: v }).eq('id', bomId).eq('order_id', orderId);
+    if (error) {
+      if (/over_purchase_pct|column .* does not exist/i.test(error.message || '')) {
+        return { error: '抛量列尚未建立:请先在 Supabase 执行 20260706_bom_over_purchase_pct.sql' };
       }
       return { error: friendlyError(error) };
     }
@@ -380,7 +408,7 @@ export async function consolidateOrderProcurementItems(
   const bomIds = Array.from(new Set([...slMap.values()].map((s: any) => s.bom_id).filter(Boolean)));
   const bomMaster = new Map<string, string | null>();
   const bomImages = new Map<string, string[]>();
-  const bomExtra = new Map<string, { prod: number | null; style_no: string | null }>();
+  const bomExtra = new Map<string, { prod: number | null; style_no: string | null; overPct: number }>();
   if (bomIds.length) {
     const { data: bs } = await (supabase.from('materials_bom') as any).select('*').in('id', bomIds);
     for (const b of (bs || [])) {
@@ -389,6 +417,7 @@ export async function consolidateOrderProcurementItems(
       bomExtra.set(b.id, {
         prod: b.production_consumption != null && Number(b.production_consumption) > 0 ? Number(b.production_consumption) : null,
         style_no: b.style_no || null,
+        overPct: Number(b.over_purchase_pct) > 0 ? Number(b.over_purchase_pct) : 0,   // 抛量%(采购填)
       });
     }
   }
@@ -430,6 +459,8 @@ export async function consolidateOrderProcurementItems(
     } else {
       lineTotal = (extra?.prod != null && pieces != null) ? pieces * extra.prod : net;
     }
+    // 抛量(2026-07-06 用户拍板):采购量 = 基础用量 ×(1 + 抛量%)。抛量采购逐料填。
+    if (extra?.overPct) lineTotal = lineTotal * (1 + extra.overPct / 100);
     let g = groups.get(key);
     if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, imgs: [] as string[], reqDate: null, orderBy: null }; groups.set(key, g); }
     g.total += lineTotal; g.count += 1;

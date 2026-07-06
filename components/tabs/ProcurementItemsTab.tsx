@@ -5,7 +5,7 @@ import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
-  listBomConsumptionLines, saveBomProductionConsumption, deductFromStock,
+  listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
@@ -54,26 +54,27 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [fulfillment, setFulfillment] = useState<any[]>([]);
   const [checked, setChecked] = useState<Set<string>>(new Set());   // ② 批量确认勾选
 
-  // ── 按款核定大货单耗(2026-07-03 用户拍板:布料不逐款核定单耗,不许归并)──
+  // ── 核料对照表(2026-07-06 用户拍板:大货单耗改由业务在 BOM 页填,采购这里只读核实 + 填抛量%)──
   const [consLines, setConsLines] = useState<any[]>([]);
-  const [consEdit, setConsEdit] = useState<Record<string, string>>({});
+  const [overEdit, setOverEdit] = useState<Record<string, string>>({});   // 抛量%(采购职权,逐料)
   const [consSaving, setConsSaving] = useState(false);
   const loadCons = async () => {
     const r = await listBomConsumptionLines(orderId);
     if ((r as any).data) {
       setConsLines((r as any).data);
-      setConsEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.production_consumption ?? ''])));
+      setOverEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.over_purchase_pct != null ? String(l.over_purchase_pct) : ''])));
     }
   };
   useEffect(() => { loadCons(); /* eslint-disable-next-line */ }, [orderId]);
+  // 布料大货单耗必须由业务填好(BOM 页),否则不许归并
   const consMissing = consLines.filter(l => l.required && !(Number(l.production_consumption) > 0));
   async function saveCons() {
     setConsSaving(true); setMsg('');
-    const entries = Object.fromEntries(Object.entries(consEdit).map(([id, v]) => [id, v === '' ? null : Number(v)]));
-    const r = await saveBomProductionConsumption(orderId, entries as any);
+    const entries = Object.fromEntries(Object.entries(overEdit).map(([id, v]) => [id, v === '' ? 0 : Number(v)]));
+    const r = await saveBomOverPurchasePct(orderId, entries as any);
     setConsSaving(false);
     if ((r as any).error) { setMsg((r as any).error); return; }
-    setMsg(`✅ 大货单耗已保存(${(r as any).saved} 行)`);
+    setMsg(`✅ 抛量已保存(${(r as any).saved} 行)`);
     await loadCons();
   }
   // 供应商主数据(确认供应商下拉用;不再手敲名字)
@@ -380,9 +381,9 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     : consMissing.length > 0 ? 0
     : confirmedCount < totalItems ? 1
     : 2;   // 全部已确认 → 生成执行行·归采购单·下单
-  const STEPS = ['① 核定大货单耗', '② 逐项确认', '③ 生成执行行·归采购单·下单', '④ 收货跟单'];
+  const STEPS = ['① 核料对照+抛量', '② 逐项确认', '③ 生成执行行·归采购单·下单', '④ 收货跟单'];
   const nextHint = totalItems === 0 ? '暂无采购核料项(业务提交采购申请后出现)'
-    : stepIdx === 0 ? `还有 ${consMissing.length} 条布料未核定单耗 → 展开下方「按款核定大货单耗」逐款填,点「保存核定」`
+    : stepIdx === 0 ? `还有 ${consMissing.length} 条布料·业务未填大货单耗(去「原辅料和包装」页填);填齐后采购在下方逐料填抛量%`
     : stepIdx === 1 ? `${confirmedCount}/${totalItems} 已确认 → 逐项点右侧「确认」(核对物料/颜色/数量/供应商)`
     : stepIdx === 2 ? `全部已确认 → 点「➡️ 生成执行行」,再「去归采购单」勾行建单 → PO 页传凭证「下单」`
     : `料已下单 → 到货后在采购中心「收货登记」;逾期在「待催货」催`;
@@ -564,12 +565,12 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       {consLines.length > 0 && (
         <div className={`rounded-xl border-2 p-3 space-y-2 ${consMissing.length > 0 ? 'border-amber-300 bg-amber-50/60' : 'border-gray-200 bg-white'}`}>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-gray-800">📐 按款核定大货单耗</span>
+            <span className="text-sm font-semibold text-gray-800">📐 核料对照(大货单耗只读 · 采购填抛量)</span>
             {trackingPhase
-              ? <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">🔒 已下单,核定锁定(存档;改量走「补数量申请」)</span>
+              ? <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">🔒 已下单,锁定(存档;改量走「补数量申请」)</span>
               : consMissing.length > 0
-                ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">🔒 还差 {consMissing.length} 条布料未核定 — 核定完才能归并</span>
-                : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 布料已全部核定,可归并</span>}
+                ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">🔒 还差 {consMissing.length} 条布料·业务未填大货单耗 — 业务在「原辅料和包装」页填完才能归并</span>
+                : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 大货单耗齐,可归并</span>}
             {consMissing.length === 0 && (
               <button onClick={() => setConsOpen(!consEffectiveOpen)}
                 className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">
@@ -579,16 +580,16 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             {!trackingPhase && consEffectiveOpen && (
               <button onClick={saveCons} disabled={consSaving}
                 className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
-                {consSaving ? '保存中…' : '💾 保存核定'}
+                {consSaving ? '保存中…' : '💾 保存抛量'}
               </button>
             )}
           </div>
           {consEffectiveOpen && <>
-          <p className="text-[11px] text-gray-500">每款排料不同,大货单耗必须逐款填;总需求 = Σ(每款件数 × 该款大货单耗),不做平均/折算。辅料默认按开发单耗,可选核。</p>
+          <p className="text-[11px] text-gray-500">大货单耗由业务在「原辅料和包装」页按技术部大货版逐款填(此处<b>只读核实</b>);采购逐料填<b>抛量%</b>。采购量 = Σ(每款件数 × 大货单耗) ×(1 + 抛量%)。报价单耗/单价来自报价基线,供比对识别抛量。</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400">
-                {['款号', '颜色', '物料', '类型', '开发单耗(业务)', '报价单耗', '报价单价', '大货单耗(业务填·采购核实)', '单位'].map(h => (
+                {['款号', '颜色', '物料', '类型', '开发单耗(业务)', '报价单耗', '报价单价', '大货单耗(业务填·只读)', '抛量%(采购填)', '单位'].map(h => (
                   <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr></thead>
@@ -602,17 +603,27 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
                     <td className="py-1.5 px-2 font-medium text-indigo-600" title="从内部报价单冻结的报价基线带入,只读">{l.budget_consumption ?? '—'}</td>
                     <td className="py-1.5 px-2 text-indigo-600" title="报价基线单价,只读,供比对">{l.budget_unit_price != null ? `¥${l.budget_unit_price}` : '—'}</td>
+                    {/* 大货单耗:业务在 BOM 页填,采购这里只读核实 */}
                     <td className="py-1.5 px-2">
-                      <input type="number" step="0.001" min="0" value={consEdit[l.id] ?? ''} disabled={trackingPhase}
-                        placeholder={l.required ? '必填' : `默认 ${l.development_consumption ?? '—'}`}
-                        onChange={e => setConsEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
-                        className={`w-24 rounded border px-2 py-1 disabled:bg-gray-50 disabled:text-gray-500 ${l.required && !(Number(consEdit[l.id]) > 0) ? 'border-amber-400 bg-white' : 'border-gray-300'}`} />
-                      {(() => {
-                        const cur = Number(consEdit[l.id] ?? l.production_consumption);
-                        const bud = Number(l.budget_consumption);
-                        if (bud > 0 && cur > 0 && cur > bud) return <div className="text-[10px] text-red-600 mt-0.5">⚠ 超预算单耗 +{Math.round((cur / bud - 1) * 100)}%(疑似抛量)</div>;
-                        return null;
-                      })()}
+                      {Number(l.production_consumption) > 0 ? (
+                        <>
+                          <span className="font-medium text-gray-800">{l.production_consumption}</span>
+                          {(() => {
+                            const cur = Number(l.production_consumption);
+                            const bud = Number(l.budget_consumption);
+                            if (bud > 0 && cur > bud) return <div className="text-[10px] text-red-600 mt-0.5">⚠ 超报价单耗 +{Math.round((cur / bud - 1) * 100)}%</div>;
+                            return null;
+                          })()}
+                        </>
+                      ) : l.required ? <span className="text-[11px] text-amber-600">业务未填 →</span> : <span className="text-gray-300">—</span>}
+                    </td>
+                    {/* 抛量%:采购填,采购量=件数×大货单耗×(1+抛量%) */}
+                    <td className="py-1.5 px-2">
+                      <input type="number" step="1" min="0" value={overEdit[l.id] ?? ''} disabled={trackingPhase}
+                        placeholder="0"
+                        onChange={e => setOverEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
+                        className="w-16 rounded border border-gray-300 px-2 py-1 disabled:bg-gray-50 disabled:text-gray-500" />
+                      <span className="text-[11px] text-gray-400 ml-0.5">%</span>
                     </td>
                     <td className="py-1.5 px-2 text-gray-400">{l.unit || '—'}</td>
                   </tr>
