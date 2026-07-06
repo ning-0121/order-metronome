@@ -212,25 +212,7 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
         </button>
       )}
 
-      {/* CEO 审批进行中导入 */}
-      {canApproveImport && (
-        <>
-          <button
-            onClick={handleApproveImport}
-            disabled={loading}
-            className="text-xs px-4 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 font-medium disabled:opacity-50"
-          >
-            ✅ 批准导入
-          </button>
-          <button
-            onClick={handleRejectImport}
-            disabled={loading}
-            className="text-xs px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50"
-          >
-            ❌ 拒绝
-          </button>
-        </>
-      )}
+      {/* 审批进行中导入 已移除(2026-07-06 用户拍板:去审批,创建即 active,内部单号=线下审批) */}
 
       {/* CEO：强制标记完成 */}
       {canForceComplete && (

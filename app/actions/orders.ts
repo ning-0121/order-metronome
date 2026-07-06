@@ -603,58 +603,45 @@ export async function createOrder(
   const importReason = formData.get('import_reason') as string | null;
 
   if (isImport && importCurrentStep) {
-    console.log('[createOrder] STAGE: STEP 6 isImport branch, step=', importCurrentStep);
+    console.log('[createOrder] STAGE: STEP 6 isImport branch(直接激活,去审批), step=', importCurrentStep);
     try {
-      // 6a. 标记为待审批（不直接激活）
+      // 6a. 直接激活(2026-07-06 用户拍板:去掉进行中导入审批 —— 内部单号=线下审批,创建即导入即 active)
       await (supabase.from('orders') as any)
         .update({
           imported_at: new Date().toISOString(),
           import_current_step: importCurrentStep,
-          lifecycle_status: 'pending_approval',
+          lifecycle_status: 'active',
           notes: importReason
             ? `[进行中导入] ${importReason}\n${orderData.notes || ''}`
             : orderData.notes || null,
         })
         .eq('id', orderData.id);
 
-      // 6a2. 通知所有 admin — 等审批
+      // 6b. 里程碑激活(原 approveImportOrder 逻辑内联):已过步骤 done、当前步骤 in_progress
       try {
-        const { data: admins } = await (supabase.from('profiles') as any)
-          .select('user_id')
-          .or('role.eq.admin,roles.cs.{admin}');
-        const { data: creatorProfile } = await (supabase.from('profiles') as any)
-          .select('name, email').eq('user_id', user.id).single();
-        const creatorName = (creatorProfile as any)?.name || user.email?.split('@')[0] || '?';
-        for (const admin of (admins || []) as any[]) {
-          await (supabase.from('notifications') as any).insert({
-            user_id: admin.user_id,
-            type: 'import_order_approval',
-            title: `📋 进行中订单待审批 — ${orderData.order_no}`,
-            message: `${creatorName} 创建了一个进行中导入订单：\n客户 ${customer_name || '?'} · ${quantity || '?'} 件\n当前阶段：${importCurrentStep}\n原因：${importReason || '未填'}\n\n请到订单详情页审批。`,
-            related_order_id: orderData.id,
-            status: 'unread',
-          });
+        const templates = (await import('@/lib/milestoneTemplate')).MILESTONE_TEMPLATE_V1;
+        const currentIndex = templates.findIndex(t => t.step_key === importCurrentStep);
+        if (currentIndex >= 0) {
+          const { data: milestones } = await (supabase.from('milestones') as any)
+            .select('id, sequence_number, due_at').eq('order_id', orderData.id).order('sequence_number', { ascending: true });
+          const currentSeq = currentIndex + 1;
+          for (const ms of (milestones || []) as any[]) {
+            const updates: any = {};
+            if (ms.sequence_number < currentSeq) { updates.status = 'done'; updates.actual_at = ms.due_at || new Date().toISOString(); }
+            else if (ms.sequence_number === currentSeq) { updates.status = 'in_progress'; }
+            if (Object.keys(updates).length > 0) await (supabase.from('milestones') as any).update(updates).eq('id', ms.id);
+          }
         }
-        // 微信推送 admin
-        const adminIds = ((admins || []) as any[]).map(a => a.user_id);
-        if (adminIds.length > 0) {
-          const { pushToUsers } = await import('@/lib/utils/wechat-push');
-          await pushToUsers(supabase, adminIds,
-            `📋 待审批：${orderData.order_no} 进行中导入`,
-            `${creatorName} 导入订单，客户 ${customer_name || '?'}，${quantity || '?'} 件\n原因：${importReason || '未填'}`
-          ).catch(() => {});
-        }
-      } catch (e: any) { console.warn(`[orders] 订单次要操作 627:`, e?.message); }
+      } catch (e: any) { console.warn('[createOrder] 导入里程碑激活失败(不阻断):', e?.message); }
 
-      // 6b: 不做后续的里程碑激活！等 CEO 审批通过后由 approveImportOrder 处理
-      // ↓ 直接跳过原来的 6b-6e 代码
+      // 6c. 财务同步(active)——创建即到财务
+      try {
+        const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+        await syncOrderToFinance(orderData, 'order.activated');
+      } catch (e: any) { console.warn('[createOrder] 导入财务同步失败(不阻断):', e?.message); }
+
       revalidatePath('/orders');
-      return {
-        ok: true,
-        orderId: orderData.id,
-        warning: 'pending_approval',
-        error: `订单 ${orderData.order_no} 已提交，等待 CEO 审批。`,
-      };
+      return { ok: true, orderId: orderData.id };
     } catch (importErr: any) {
       console.warn('[createOrder] 导入模式处理失败:', importErr.message);
     }
