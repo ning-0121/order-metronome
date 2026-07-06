@@ -158,9 +158,9 @@ assert(prodMilestones.length === 9, `export订单返回 ${prodMilestones.length}
 assert(prodMilestones.some(m => m.step_key === 'shipment_execute'), 'export包含 shipment_execute');
 
 const domesticMilestones = getApplicableMilestones('bulk', false, 'domestic');
-// V2:domestic 用 domestic_delivery 替换 shipment_execute(节点数与 export 相同)
-assert(domesticMilestones.some(m => m.step_key === 'domestic_delivery'), 'domestic包含 domestic_delivery');
-assert(!domesticMilestones.some(m => m.step_key === 'shipment_execute'), 'domestic不含出运 shipment_execute');
+// 2026-07-06 用户拍板:生产单固定 9 标准节点,不再按 domestic 换送仓 → domestic 与 export 相同
+assert(domesticMilestones.length === 9, `domestic生产单固定 ${domesticMilestones.length} 节点 (=9)`);
+assert(domesticMilestones.some(m => m.step_key === 'shipment_execute'), 'domestic固定含 shipment_execute(生产单不再换送仓节点)');
 
 const sampleMilestones = getApplicableMilestones('sample', false, 'domestic', 'sample');
 assert(sampleMilestones.length === 8, `sample订单返回 ${sampleMilestones.length} 个节点 (=8)`);
@@ -196,51 +196,16 @@ for (const k of tradeScheduleKeys) {
   assert(tradeDue[k] instanceof Date && !isNaN(tradeDue[k].getTime()), `trade step_key ${k} 能被 schedule 排期(calcDueDates 返回有效日期)`);
 }
 
-// 跳过产前样（skip_all）：极简模板里产前样只剩"产前样客户确认"一个 → 应被过滤掉
+// 2026-07-06 用户拍板:标准生产单执行时间线固定 9 节点 —— 免产前样/头样/二次样 都不再增删,均返回标准 9。
 const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);
-assert(
-  !skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_approved'),
-  '跳过产前样模式：不包含 pre_production_sample_approved'
-);
-assert(
-  skipSampleMilestones.length === prodMilestones.length - 1,
-  `跳过产前样模式节点数(${skipSampleMilestones.length}) = 标准export(${prodMilestones.length}) - 1`
-);
+assert(skipSampleMilestones.length === 9, `免产前样仍固定 ${skipSampleMilestones.length} 节点 (=9)`);
+assert(skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_approved'), '免产前样仍含产前样确认(固定9节点)');
 
-// 头样模式：增加 3 个头样节点
 const devSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', false, 'dev_sample');
-assert(
-  devSampleMilestones.some(m => m.step_key === 'dev_sample_making'),
-  '头样模式：包含 dev_sample_making'
-);
-assert(
-  devSampleMilestones.some(m => m.step_key === 'dev_sample_customer_confirm'),
-  '头样模式：包含 dev_sample_customer_confirm'
-);
-assert(
-  devSampleMilestones.length === prodMilestones.length + 3,
-  `头样模式节点数(${devSampleMilestones.length}) = 标准export(${prodMilestones.length}) + 3`
-);
+assert(devSampleMilestones.length === 9, `头样模式仍固定 ${devSampleMilestones.length} 节点 (=9,不再插头样节点)`);
 
-// 头样+二次样模式：增加 6 个节点
 const devRevisionMilestones = getApplicableMilestones('bulk', false, 'export', 'production', false, 'dev_sample_with_revision');
-assert(
-  devRevisionMilestones.some(m => m.step_key === 'dev_sample_revision'),
-  '二次样模式：包含 dev_sample_revision'
-);
-assert(
-  devRevisionMilestones.some(m => m.step_key === 'dev_sample_revision_confirm'),
-  '二次样模式：包含 dev_sample_revision_confirm'
-);
-assert(
-  devRevisionMilestones.length === prodMilestones.length + 6,
-  `二次样模式节点数(${devRevisionMilestones.length}) = 标准export(${prodMilestones.length}) + 6`
-);
-
-// 头样节点顺序:头样确认 在 产前样客户确认 之前(极简模板锚点改为 approved)
-const devIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'dev_sample_customer_confirm');
-const devPreIdx = devSampleMilestones.findIndex((m: any) => m.step_key === 'pre_production_sample_approved');
-assert(devIdx >= 0 && devIdx < devPreIdx, `头样确认(${devIdx}) 在产前样客户确认(${devPreIdx})之前`);
+assert(devRevisionMilestones.length === 9, `二次样模式仍固定 ${devRevisionMilestones.length} 节点 (=9)`);
 
 // ════ 2b. V2 生产模板(9 节点骨架)节点顺序正确性 ════
 console.log('\n📐 节点顺序');

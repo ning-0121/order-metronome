@@ -268,36 +268,9 @@ export function getApplicableMilestones(
     return [...TRADE_MILESTONE_TEMPLATE];
   }
 
-  // 兼容：旧的 skipPreProductionSample 映射到 samplePhase
-  const phase: SamplePhase = samplePhase
-    || (skipPreProductionSample ? 'skip_all' : 'confirmed');
-
-  // 节点体系 V2(9节点)对新订单生效;V1 保留服务在途订单与回滚。
-  let template = [...MILESTONE_TEMPLATE_V2];
-
-  // ── 样品阶段处理 ──
-  if (phase === 'skip_all') {
-    // 跳过产前样（翻单/老款/客户用设计样直接做大货）
-    template = template.filter(m => !PRE_PRODUCTION_SAMPLE_STEPS.has(m.step_key));
-  } else if (phase === 'dev_sample' || phase === 'dev_sample_with_revision') {
-    // 需要做头样：在「产前样客户确认」之前插入头样节点
-    // (极简模板已删 pre_production_sample_ready,改锚 pre_production_sample_approved)
-    let insertIdx = template.findIndex(m => m.step_key === 'pre_production_sample_approved');
-    if (insertIdx === -1) insertIdx = template.findIndex(m => m.step_key === 'pre_production_sample_ready');
-    if (insertIdx !== -1) {
-      const devNodes = phase === 'dev_sample_with_revision'
-        ? [...DEV_SAMPLE_MILESTONES, ...DEV_SAMPLE_REVISION_MILESTONES]
-        : [...DEV_SAMPLE_MILESTONES];
-      template.splice(insertIdx, 0, ...devNodes);
-    }
-  }
-  // phase === 'confirmed' → 默认流程，不改动
-
-  if (deliveryType !== 'export') {
-    // 非出口（FOB / 人民币 / 国内送仓）：过滤出运节点，追加国内送仓节点
-    const filtered = template.filter(m => !EXPORT_ONLY_STEPS.has(m.step_key));
-    return [...filtered, ...DOMESTIC_MILESTONES];
-  }
-
-  return template;
+  // 2026-07-06 用户拍板:标准生产单执行时间线【固定显示这 9 个标准节点】,
+  // 不再按 国内送仓 / 翻单 / 免产前样 动态增删(打样单/经销单仍走上方各自模板)。
+  // 保留形参签名兼容调用方;samplePhase/deliveryType/skipPreProductionSample 现不影响节点集。
+  void samplePhase; void skipPreProductionSample; void deliveryType;
+  return [...MILESTONE_TEMPLATE_V2];
 }
