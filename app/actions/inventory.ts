@@ -6,7 +6,7 @@
  * 领料/退料/盘点(issue/return/adjust) = W1。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { aggregateInventoryBalance, computeReceiptDelta, computeOrderLeftover, materialKeyForLine, availableToPromise, computeAvailability, type ReservationRow } from '@/lib/services/inventory';
@@ -84,19 +84,44 @@ export async function getInventoryBalance(): Promise<{ data?: any[]; error?: str
     .select('material_key, material_name, unit, qty');
   if (error) return { error: error.message };
   const balance = aggregateInventoryBalance((txns || []) as any[]) as any[];
-  // 补颜色:库存 material_key = 采购项 consolidation_key(含色),回查 procurement_items.color 展示,
-  // 让"同料不同色"(如 280g直贡呢 黑色 / 浓咖啡)在库存里分得清(2026-07-06 用户反馈)。
+  // 补颜色(2026-07-06 用户反馈:同料不同色如 280g直贡呢 黑色/浓咖啡 在库存显示成两行一样的)。
+  // 走 service-role + 收货流水来源(source_ref=采购执行行)→ 行的 procurement_item_id → procurement_items.color,
+  // 与采购队列取色同一可靠路径;再用 consolidation_key 兜底(无 source_ref 的老流水)。
   try {
-    const keys = [...new Set(balance.map((b) => b.material_key).filter(Boolean))];
+    const keys = [...new Set(balance.map((b) => b.material_key).filter(Boolean))] as string[];
     if (keys.length) {
-      const { data: pis } = await (supabase.from('procurement_items') as any)
+      const svc = createServiceRoleClient();
+      // material_key → 任一有来源的收货行 id(同 key 同色,取一条即可)
+      const { data: srcTxns } = await (svc.from('inventory_transactions') as any)
+        .select('material_key, source_ref').in('material_key', keys).not('source_ref', 'is', null);
+      const lineByKey = new Map<string, string>();
+      for (const t of (srcTxns || [])) { if (t.source_ref && !lineByKey.has(t.material_key)) lineByKey.set(t.material_key, t.source_ref); }
+      // 行 → procurement_item_id
+      const lineIds = [...new Set(lineByKey.values())];
+      const piByLine = new Map<string, string>();
+      if (lineIds.length) {
+        const { data: lines } = await (svc.from('procurement_line_items') as any)
+          .select('id, procurement_item_id').in('id', lineIds);
+        for (const l of (lines || [])) { if (l.procurement_item_id) piByLine.set(l.id, l.procurement_item_id); }
+      }
+      // procurement_item → color
+      const piIds = [...new Set(piByLine.values())];
+      const colorByPi = new Map<string, string | null>();
+      if (piIds.length) {
+        const { data: pis } = await (svc.from('procurement_items') as any).select('id, color').in('id', piIds);
+        for (const p of (pis || [])) colorByPi.set(p.id, p.color ?? null);
+      }
+      // 兜底:consolidation_key = material_key
+      const { data: pisByKey } = await (svc.from('procurement_items') as any)
         .select('consolidation_key, color').in('consolidation_key', keys);
       const colorByKey = new Map<string, string | null>();
-      for (const p of (pis || [])) {
-        const k = (p as any).consolidation_key;
-        if (k && !colorByKey.has(k)) colorByKey.set(k, (p as any).color ?? null);
+      for (const p of (pisByKey || [])) { const k = p.consolidation_key; if (k && !colorByKey.has(k)) colorByKey.set(k, p.color ?? null); }
+
+      for (const b of balance) {
+        const lineId = lineByKey.get(b.material_key);
+        const pi = lineId ? piByLine.get(lineId) : undefined;
+        (b as any).color = (pi ? colorByPi.get(pi) : null) ?? colorByKey.get(b.material_key) ?? null;
       }
-      for (const b of balance) (b as any).color = b.material_key ? (colorByKey.get(b.material_key) ?? null) : null;
     }
   } catch (e: any) { console.warn('[getInventoryBalance] 颜色补充失败(不影响库存展示):', e?.message); }
   return { data: balance };

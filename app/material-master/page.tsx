@@ -438,6 +438,10 @@ export default function MaterialMasterPage() {
               </div>
             )}
 
+            {/* 保存失败提示放弹窗内(此前只在页顶 setMsg,被弹窗盖住→用户以为"点更新没反应") */}
+            {msg && msg.startsWith('保存失败') && (
+              <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{msg}</div>
+            )}
             <div className="flex gap-2 mt-5">
               <button onClick={() => save()} disabled={saving || !form.material_name.trim()}
                 className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">

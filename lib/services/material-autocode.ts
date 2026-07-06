@@ -59,7 +59,7 @@ export async function ensureMaterialMaster(
       return list.length === 1 ? list[0] : 'ambiguous';  // 无规格:唯一才复用,多变体不瞎猜
     };
 
-    // 1. 复用已有行(缺码则补码)
+    // 1. 复用已有行(缺码则补码)——只复用主数据里"人已录好"的正式物料
     const hit = await pickMatch();
     if (hit === 'ambiguous') return null;
     if (hit?.material_code) return { id: hit.id, code: hit.material_code };
@@ -70,22 +70,10 @@ export async function ensureMaterialMaster(
       return error ? { id: hit.id, code: '' } : { id: hit.id, code };
     }
 
-    // 2. 自动建正式主数据赋码(count 流水可能撞唯一索引 → 加 bump 重试 3 次)
-    for (let i = 0; i < 3; i++) {
-      const code = await genMaterialCode(supabase, cat, i);
-      const { data, error } = await supabase.from('material_master').insert({
-        material_code: code, material_name: name, category: cat,
-        default_unit: input.unit || null, specification: input.spec || null,
-        default_supplier_name: input.supplier || null,
-        is_temporary: false, seed_source: 'bom_auto', created_by: userId,
-      }).select('id, material_code').single();
-      if (!error) return { id: data.id, code: data.material_code };
-      if (!/duplicate|unique/i.test(error.message || '')) return null;
-      // 撞唯一可能是 名称+类别+规格 索引(并发下别人刚建了同变体)→ 重查直接复用,别再空转赋码
-      const again = await pickMatch();
-      if (again && again !== 'ambiguous') return { id: again.id, code: again.material_code || '' };
-      if (again === 'ambiguous') return null;
-    }
+    // 2. 主数据里没有 → 不再自动建(2026-07-06 用户拍板)。
+    // 此前 AI 识别的原辅料会在此自动写入 material_master,产生"280g直贡呢 280g直贡呢"这类
+    // 重名/脏名主数据且难清理,风险高。改为:找不到就返回 null,BOM 行留空码(material_master_id=null),
+    // 由人到「物料主数据」手动新建/选用后再归。系统不再自作主张沉淀主数据。
     return null;
   } catch { return null; }
 }
