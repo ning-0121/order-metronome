@@ -6,8 +6,11 @@
  * 布料必填,否则采购不许归并。可上传技术部签名确认单。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { listBomConsumptionLines, saveBomProductionConsumption } from '@/app/actions/procurement-items';
+import { uploadTechConfirm } from '@/app/actions/tech-confirm';
+import { PackingFilesSection } from '@/components/PackingFilesSection';
+import { createClient as createBrowserClient } from '@/lib/supabase/client';
 
 export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: string; canEdit?: boolean }) {
   const [lines, setLines] = useState<any[]>([]);
@@ -15,6 +18,28 @@ export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: st
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [open, setOpen] = useState<boolean | null>(null);
+  // 技术部大货确认单(必传,不传不许提交采购)
+  const [techCount, setTechCount] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [techKey, setTechKey] = useState(0);   // 传完刷新 PackingFilesSection
+  const fileRef = useRef<HTMLInputElement>(null);
+  async function loadTechCount() {
+    const sb = createBrowserClient();
+    const { count } = await (sb.from('order_attachments') as any)
+      .select('id', { count: 'exact', head: true }).eq('order_id', orderId).eq('file_type', 'tech_bulk_confirm');
+    setTechCount(count || 0);
+  }
+  useEffect(() => { loadTechCount(); /* eslint-disable-next-line */ }, [orderId, techKey]);
+  async function onPickTech(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData(); fd.append('file', file);
+    const r = await uploadTechConfirm(orderId, fd);
+    setUploading(false);
+    if ((r as any).error) { alert((r as any).error); return; }
+    setTechKey(k => k + 1);
+  }
 
   async function load() {
     const r = await listBomConsumptionLines(orderId);
@@ -58,6 +83,27 @@ export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: st
           </button>
         )}
       </div>
+      {/* 技术部大货确认单(必传闸:不传不许提交采购)*/}
+      <div className={`rounded-lg border p-2.5 ${techCount === 0 ? 'border-red-300 bg-red-50/60' : 'border-emerald-200 bg-emerald-50/40'}`}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-800">📄 技术部大货确认单</span>
+          {techCount === 0
+            ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">必传 · 未上传不能提交采购</span>
+            : <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 已上传 {techCount} 份</span>}
+          {canEdit && (
+            <>
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+                {uploading ? '上传中…' : '⬆ 上传确认单'}
+              </button>
+              <input ref={fileRef} type="file" className="hidden" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" onChange={onPickTech} />
+            </>
+          )}
+        </div>
+        <p className="text-[11px] text-gray-500 mt-1">业务上传技术部签名的大货确认单(大货单耗的依据);不传不能提交采购。</p>
+        <div className="mt-1.5"><PackingFilesSection key={techKey} orderId={orderId} fileTypes={['tech_bulk_confirm']} emptyText="尚未上传技术确认单" canDelete={canEdit} /></div>
+      </div>
+
       {effectiveOpen && <>
         <p className="text-[11px] text-gray-500">按技术部大货版逐款填大货单耗(布料必填)。采购量 = Σ(件数 × 大货单耗) ×(1 + 采购抛量%)。旁边「报价单耗」来自报价基线,供你比对。请把技术部签名的确认单作为附件上传到订单文档区。</p>
         <div className="overflow-x-auto">

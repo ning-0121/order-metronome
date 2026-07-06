@@ -55,6 +55,7 @@ export function PackingFilesSection({ orderId, fileTypes, emptyText, canDelete =
     trims_sheet: '原辅料单',
     production_order: '生产制单',
     tech_pack: 'Tech Pack',
+    tech_bulk_confirm: '技术部大货确认单',
   };
 
   if (loading) return <div className="text-sm text-gray-400 py-2">加载中...</div>;

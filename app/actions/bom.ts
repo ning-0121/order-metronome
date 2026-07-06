@@ -700,6 +700,14 @@ export async function submitBomToProcurement(
     }
   }
 
+  // ── 必传闸(2026-07-06 用户拍板):不传技术部大货确认单,不许提交采购 ──
+  {
+    const { hasTechConfirm } = await import('@/app/actions/tech-confirm');
+    if (!(await hasTechConfirm(orderId))) {
+      return { error: '请先在「原辅料和包装」页(大货单耗表旁)上传技术部签名的大货确认单,再提交采购。' };
+    }
+  }
+
   // 阶段锚点日(复用现有里程碑日期 = One Data)
   const { data: ms } = await (supabase.from('milestones') as any)
     .select('step_key, due_at').eq('order_id', orderId);
