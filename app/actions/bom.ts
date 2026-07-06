@@ -665,10 +665,39 @@ export async function submitBomToProcurement(
     .filter(r => r.qty_per_piece == null || Number(r.qty_per_piece) <= 0)
     .map(r => r.material_name);
 
-  // 损耗率(来自成本基线,缺则默认 3)
+  // 损耗率 + 报价基线行(来自成本基线,缺损耗则默认 3)
   const { data: baseline } = await (supabase.from('order_cost_baseline') as any)
-    .select('waste_pct').eq('order_id', orderId).maybeSingle();
+    .select('waste_pct, quote_baseline_lines').eq('order_id', orderId).maybeSingle();
   const waste_pct = (baseline as any)?.waste_pct ?? 3;
+
+  // ── 内控闸:超报价基线单耗不许提交(2026-07-06 用户拍板;报价基线=从内部报价单冻结、人已确认)──
+  // 逐料把 BOM 单耗 vs 报价基线单耗比对,超 5% → 拦(疑似抛量);要提量请先在「报价基线」调整并冻结(报价变更),
+  // 或核减 BOM 单耗。只对"基线里有的料"比对(名字对不上的不误拦)。
+  const baseLinesForGate: any[] = (baseline as any)?.quote_baseline_lines || [];
+  {
+    const normN = (s: any) => String(s ?? '').trim().toLowerCase();
+    const baseCons = new Map<string, number>();
+    for (const b of baseLinesForGate) {
+      const k = normN(b.material_name); const c = Number(b.quote_consumption) || 0;
+      if (k && c > 0) baseCons.set(k, Math.max(baseCons.get(k) || 0, c));
+    }
+    const OVER = 1.05;   // 超 5% 拦
+    const over: string[] = [];
+    for (const r of bomRows as any[]) {
+      const qpp = Number(r.qty_per_piece) || 0;
+      const base = baseCons.get(normN(r.material_name));
+      if (base && qpp > base * OVER) {
+        over.push(`${r.material_name}:单耗 ${qpp} > 报价基线 ${base}(+${Math.round((qpp / base - 1) * 100)}%)`);
+      }
+    }
+    if (over.length > 0) {
+      return { error: `以下原辅料单耗超报价基线 5%(疑似抛量),不能提交采购:\n${over.join('\n')}\n\n如确需提量:请到「报价基线」页调整并重新冻结(=报价变更,需核对),或核减 BOM 单耗后再提交。` };
+    }
+    // 无报价基线 → 默认放行(不破坏存量在途单);设 env PROCUREMENT_REQUIRE_BASELINE=on 则强制"先录基线才能提交"
+    if (baseLinesForGate.length === 0 && process.env.PROCUREMENT_REQUIRE_BASELINE === 'on') {
+      return { error: '该单未录报价基线,不能提交采购。请先在「报价基线」页上传内部报价单、核对后冻结基线,再来提交。' };
+    }
+  }
 
   // 阶段锚点日(复用现有里程碑日期 = One Data)
   const { data: ms } = await (supabase.from('milestones') as any)
