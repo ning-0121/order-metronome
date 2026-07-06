@@ -134,14 +134,19 @@ export async function extractPOFromAttachment(
 4. 包装要求、生产注意事项、品质要求分类提取，原文保留，不缩减
 5. 中英文混合内容均需识别
 6. 如果某字段不存在或不确定，在 uncertain_fields 中列出
-7. 不提取价格相关信息（unit_price、total_price 等）`;
+7. 不提取价格相关信息（unit_price、total_price 等）
+8. 【重要·勿混淆】PO号(po_number) 与 款号(style_no) 是两个不同字段：
+   - PO号 = 客户采购单的单据编号，整单通常只有一个，出现在表头/单据标题处（如 NJ26-0998、YT-0711）。
+   - 款号 = 每一款服装的款式编号，逐款不同，通常在款式行里（如 BRN260809W）。
+   - 绝不要把 PO号 填进 style_no；某款若没有独立款号，style_no 填 null，也不要拿 PO号顶替。
+   - 若同一串编号既像 PO号又像款号，优先当 PO号，style_no 留 null 交人工确认。`;
 
     const extractionPrompt = `请从这份${getSourceTypeLabel(sourceType)}中提取所有 PO 信息。
 
 严格按以下 JSON 结构返回，不要 markdown 包装：
 {
   "header": {
-    "po_number": "PO号（如无则null）",
+    "po_number": "PO号=客户采购单号，整单表头一个（如NJ26-0998/YT-0711）；不是款号。如无则null",
     "issue_date": "发单日期YYYY-MM-DD（如无则null）",
     "delivery_date": "交货日期YYYY-MM-DD（如无则null）",
     "incoterm": "贸易条款如FOB/DDP（如无则null）",
@@ -152,7 +157,7 @@ export async function extractPOFromAttachment(
   "line_items": [
     {
       "line_no": 行号整数,
-      "style_no": "款号",
+      "style_no": "款号=该款服装的款式编号（如BRN260809W），逐款不同；绝不能填PO号，无独立款号则null",
       "description": "款式描述",
       "color": "颜色",
       "sizes": {"S":数量,"M":数量,"L":数量},
