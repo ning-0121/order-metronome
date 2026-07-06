@@ -49,13 +49,19 @@ function computeStage(
   m: ProductionOrderRow['material'],
   kickoff: ProductionOrderRow['kickoff'],
   completion: ProductionOrderRow['completion'],
+  procPlaced?: { status: string | null } | null,   // 采购下单里程碑(线级采购数据缺失时的兜底信号)
 ): ProductionStage | 'done' {
   if (completion && DONE(completion.status)) return 'done';   // 工厂已完工 → 出生产中心
   if (kickoff && DONE(kickoff.status)) return 'in_production'; // 已开裁 → 生产中
-  if (m.total === 0) return 'awaiting_procurement';            // 未起料 → 待采购
+  if (m.total === 0) {
+    // 无采购执行行(老单/没走线级采购,只在里程碑标了采购下单)→ 退回看「采购下单」里程碑:
+    // 已下单 → 物料在途;否则才是真「新订单待采购」。修用户反馈:老单物料在途被误判成待采购。
+    if (procPlaced && DONE(procPlaced.status)) return 'materials_in_transit';
+    return 'awaiting_procurement';                             // 未起料且采购未下单 → 待采购
+  }
   if (m.received === m.total) return 'ready_to_schedule';      // 全到齐未开裁 → 待排单
-  // 2026-07-06 修:只要有料已下单/已到(in_transit 或 received > 0)→ 物料在途,即使还有个别料没下单。
-  // 旧逻辑"只要有一条没下单(pending>0)就算待采购",把 9/10 已下单的单误判成待采购(用户反馈物料在途被识别成待采购)。
+  // 只要有料已下单/已到(in_transit 或 received > 0)→ 物料在途,即使还有个别料没下单。
+  // 旧逻辑"只要有一条没下单(pending>0)就算待采购",把 9/10 已下单的单误判成待采购。
   if (m.in_transit > 0 || m.received > 0) return 'materials_in_transit'; // 有料在途/部分到齐 → 物料在途
   return 'awaiting_procurement';                               // 全部还没下单(draft/pending_order)→ 待采购
 }
@@ -136,7 +142,7 @@ export async function getProductionCenter(): Promise<{
     const mo = msByOrder.get(o.id) || {};
     const kickoff = mo['production_kickoff'] || null;
     const completion = mo['factory_completion'] || mo['shipment_execute'] || null; // V2 砍了 factory_completion,完工信号看 shipment_execute(发货出运)
-    const stage = computeStage(m, kickoff, completion);
+    const stage = computeStage(m, kickoff, completion, mo['procurement_order_placed'] || null);
     if (stage === 'done') continue;   // 工厂已完工,出中心
     const risk = [kickoff, completion].some((n) => n && !DONE(n.status) && n.due && n.due < today);
     rows.push({
@@ -250,7 +256,7 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
     const mo = msByOrder.get(o.id) || {};
     const kickoff = mo['production_kickoff'] || null;
     const completion = mo['factory_completion'] || mo['shipment_execute'] || null; // V2 砍了 factory_completion,完工信号看 shipment_execute(发货出运)
-    const stage = computeStage(m, kickoff, completion);
+    const stage = computeStage(m, kickoff, completion, mo['procurement_order_placed'] || null);
     const matText = m.total === 0 ? '未起料' : `到 ${m.received}/${m.total}${m.pending > 0 ? ` · 未下单${m.pending}` : ''}`;
     ws.addRow([
       o.internal_order_no || o.order_no || o.id, o.customer_name || '', o.quantity ?? '',
