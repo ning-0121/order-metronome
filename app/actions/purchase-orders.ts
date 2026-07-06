@@ -238,9 +238,13 @@ export async function approvePurchaseOrder(poId: string, note?: string): Promise
   if (!userId) return { error: '请先登录' };
 
   const { data: po } = await (supabase.from('purchase_orders') as any)
-    .select('approval_status, approval_required_by').eq('id', poId).maybeSingle();
+    .select('approval_status, approval_required_by, created_by').eq('id', poId).maybeSingle();
   if (!po) return { error: '采购单不存在' };
   if ((po as any).approval_status !== 'pending') return { error: '非待审批状态' };
+  // 内控(职责分离):不能审批自己创建的采购单。
+  if ((po as any).created_by && (po as any).created_by === userId) {
+    return { error: '不能审批自己创建的采购单(职责分离)——请由另一名审批人处理。' };
+  }
 
   const scope = topRequiredScope(((po as any).approval_required_by || []) as ApprovalScope[]);
   const authorized = scope === 'finance'
@@ -355,6 +359,14 @@ export async function placePurchaseOrder(poId: string): Promise<{
 
   // 已审批通过 → 直接下单
   if ((po as any).approval_status === 'approved') return place();
+
+  // 内控(状态机强制):已提交审批的单不能"直接下单"绕过——待审批只能等审批结果,已驳回要改后重提。
+  if ((po as any).approval_status === 'pending') {
+    return { error: '该采购单待审批,请先由采购经理/财务审批通过后再下单(不能绕过审批直接下单)。' };
+  }
+  if ((po as any).approval_status === 'rejected') {
+    return { error: '该采购单已被驳回,请修改后重新提交审批,通过后才能下单。' };
+  }
 
   // 采购单 ≥ ¥5000 → 走外部财务系统审批(审计 B):置待审批 + emit approval_requested,不真下单。
   // 财务系统审批后回调 finance-callback(approval_type='purchase')→ 批准自动下单/驳回拦下。

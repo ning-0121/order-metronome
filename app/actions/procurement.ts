@@ -709,6 +709,15 @@ export async function transitionProcurementLine(
   if (!isValidLineTransition(fromStatus, nextStatus)) {
     return { error: `不允许从「${LINE_STATUS_LABELS[fromStatus] || fromStatus}」转到「${LINE_STATUS_LABELS[nextStatus] || nextStatus}」` };
   }
+  // 内控(职责分离):采购单未下单(草稿/待审批)时,不许把行推进到"已下单及以后"(催货/到厂/验收)。
+  // 防绕过审批闸直接催货收货——服务端强制,不靠前端隐藏。
+  const FORWARD_STATES = ['ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived', 'accepted', 'concession', 'partially_received', 'received', 'closed'];
+  if (FORWARD_STATES.includes(nextStatus as string) && (line as any).purchase_order_id) {
+    const { data: po } = await (svc.from('purchase_orders') as any).select('status').eq('id', (line as any).purchase_order_id).maybeSingle();
+    if ((po as any)?.status === 'draft') {
+      return { error: '该采购行所在采购单尚未下单(需先审批通过并下单),不能推进/催货/收货。请到采购单页完成审批+下单。' };
+    }
+  }
   if (nextStatus === 'cancelled' && !payload?.note?.trim()) {
     return { error: '取消采购行必须填写理由' };
   }
@@ -860,9 +869,15 @@ export async function recordGoodsReceipt(
   const supabase = await createClient();
 
   const { data: line, error: getErr } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, line_status, ordered_unit, ordered_qty, material_name, po_no')
+    .select('id, order_id, line_status, ordered_unit, ordered_qty, material_name, po_no, purchase_order_id')
     .eq('id', lineItemId).single();
   if (getErr || !line) return { error: getErr?.message || '采购行不存在' };
+
+  // 内控:未下单(草稿/待审批采购单)不得收货
+  if ((line as any).purchase_order_id) {
+    const { data: po } = await (supabase.from('purchase_orders') as any).select('status').eq('id', (line as any).purchase_order_id).maybeSingle();
+    if ((po as any)?.status === 'draft') return { error: '采购单尚未下单(需先审批通过并下单),不能收货。' };
+  }
 
   const nextStatus = payload.result === 'pass' ? 'accepted'
     : payload.result === 'concession' ? 'concession' : 'rejected';
