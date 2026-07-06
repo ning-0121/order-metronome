@@ -31,6 +31,8 @@ export async function exportProductionTrackingSheet(): Promise<{
   error?: string;
   base64?: string;
   fileName?: string;
+  headers?: string[];
+  rows?: (string | number)[][];
 }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -193,5 +195,9 @@ export async function exportProductionTrackingSheet(): Promise<{
   const base64 = Buffer.from(buffer).toString('base64');
   const fileName = `生产订单一览_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
-  return { base64, fileName };
+  const previewRows: (string | number)[][] = rows.map((r) => [
+    r.order_no, r.internal_order_no, r.customer, r.style_no,
+    r.style_count ?? '', r.color_count ?? '', r.quantity, r.delivery_date, r.sales, r.urgent ? '🔥 加急' : '',
+  ]);
+  return { base64, fileName, headers, rows: previewRows };
 }

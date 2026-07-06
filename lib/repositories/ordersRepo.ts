@@ -651,6 +651,19 @@ export async function requestCancel(
     return { error: getError?.message || 'Order not found' };
   }
 
+  // 内控(2026-07-06 用户拍板):业务执行取消订单,只能在"核料下采购申请单之前"。
+  // 采购申请一旦提交(material_plans active)→ 采购已启动,业务执行不能再取消;仅管理员可(特殊情况兜底)。
+  const { data: reqProfile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).maybeSingle();
+  const reqRoles: string[] = (reqProfile as any)?.roles?.length ? (reqProfile as any).roles : [(reqProfile as any)?.role].filter(Boolean);
+  if (!reqRoles.includes('admin')) {
+    const { data: activePlan } = await (supabase.from('material_plans') as any)
+      .select('id').eq('order_id', orderId).eq('plan_status', 'active').limit(1).maybeSingle();
+    if (activePlan) {
+      return { error: '该订单已提交采购申请(核料已下采购申请单),采购已启动,业务不能再取消订单。如确需取消,请联系管理员处理。' };
+    }
+  }
+
   // 防重：同一订单已有待审批的取消申请时，不允许重复提交（对齐延期流程的守卫）
   const { data: existingPending } = await (supabase
     .from('cancel_requests') as any)

@@ -107,7 +107,7 @@ export async function setBatchAllocation(batchId: string, items: Array<{ order_l
 }
 
 /** 业务员一键导出剩余货物(跨订单;精确到款色 + 所属订单 + 生产工厂)。返回 Excel base64。 */
-export async function exportLeftoverGoods(): Promise<{ base64?: string; fileName?: string; error?: string }> {
+export async function exportLeftoverGoods(): Promise<{ base64?: string; fileName?: string; headers?: string[]; rows?: (string | number)[][]; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -144,14 +144,13 @@ export async function exportLeftoverGoods(): Promise<{ base64?: string; fileName
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  const ws = wb.addWorksheet('剩余货物');
+  const ws = wb.addWorksheet('分批出货剩余待出');
   const headers = ['订单号', '内部单号', '客户', '生产工厂', '款号', '产品', '颜色', '订单件', '已出', '剩余'];
   ws.addRow(headers);
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: 'frozen', ySplit: 1 }];
   [16, 18, 16, 14, 14, 18, 12, 10, 10, 10].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
-  let totalLeftover = 0;
   const sorted = ((lines || []) as any[])
     .map((l) => {
       const ordered = Number(l.qty_pcs) || 0;
@@ -161,17 +160,20 @@ export async function exportLeftoverGoods(): Promise<{ base64?: string; fileName
     .filter((r) => r.leftover > 0)
     .sort((a, b) => String(orderById.get(a.l.order_id)?.order_no || '').localeCompare(String(orderById.get(b.l.order_id)?.order_no || '')));
 
+  let totalLeftover = 0;
+  const rows: (string | number)[][] = [];
   for (const r of sorted) {
     const o = orderById.get(r.l.order_id) || ({} as any);
     totalLeftover += r.leftover;
-    ws.addRow([
+    rows.push([
       o.order_no || '', o.internal_order_no || '', o.customer_name || '', o.factory_name || '未指定',
       r.l.style_no || '', r.l.product_name || '', colorOf(r.l), r.ordered, r.shipped, r.leftover,
     ]);
   }
-  if (sorted.length === 0) return { error: '当前没有剩余货物(都已出完或未录逐款出货分配)' };
+  if (rows.length === 0) return { error: '当前没有分批出货剩余待出的货物(都已出完或未录逐款出货分配)' };
+  for (const row of rows) ws.addRow(row);
 
   const buffer = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buffer as ArrayBuffer).toString('base64');
-  return { base64, fileName: `剩余货物清单_${sorted.length}项_共${totalLeftover}件.xlsx` };
+  return { base64, fileName: `分批出货剩余待出_${rows.length}项_共${totalLeftover}件.xlsx`, headers, rows };
 }
