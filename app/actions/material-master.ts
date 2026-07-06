@@ -192,8 +192,12 @@ export async function updateMaterialMaster(id: string, patch: Partial<MasterInpu
   if (patch.specification !== undefined) upd.specification = patch.specification || null;
   if (patch.default_loss_rate !== undefined) upd.default_loss_rate = num(patch.default_loss_rate);
   if (patch.reference_price !== undefined) upd.reference_price = num(patch.reference_price);
-  const { error } = await (supabase.from('material_master') as any).update(upd).eq('id', id);
+  // 写走 service-role(auth+MANAGE_ROLES 已校验):避免 material_master 缺 UPDATE RLS 策略时静默 0 行
+  // (用户反映"改了点更新没反应")。.select() 校验真改到行,0 行明确报错。
+  const { data: upRows, error } = await (createServiceRoleClient().from('material_master') as any)
+    .update(upd).eq('id', id).select('id');
   if (error) return { error: friendlyError(error) };
+  if (!upRows || upRows.length === 0) return { error: '更新未生效(物料不存在或已被删除),请刷新重试' };
   revalidatePath('/material-master');
   return { ok: true };
 }
@@ -205,9 +209,10 @@ export async function archiveMaterialMaster(id: string) {
   if (!user) return { error: '请先登录' };
   const roles = await rolesOf(supabase, user.id);
   if (!roles.some(r => MANAGE_ROLES.includes(r))) return { error: '仅理单/采购/管理员可归档' };
-  const { error } = await (supabase.from('material_master') as any)
-    .update({ status: 'archived', updated_at: new Date().toISOString() }).eq('id', id);
+  const { data: arRows, error } = await (createServiceRoleClient().from('material_master') as any)
+    .update({ status: 'archived', updated_at: new Date().toISOString() }).eq('id', id).select('id');
   if (error) return { error: friendlyError(error) };
+  if (!arRows || arRows.length === 0) return { error: '归档未生效(物料不存在或已被删除),请刷新重试' };
   revalidatePath('/material-master');
   return { ok: true };
 }
@@ -240,11 +245,12 @@ export async function deleteMaterialMaster(id: string): Promise<{ deleted?: bool
     return { referenced, error: `该物料已被引用(${referenced.join('、')}),不能删除 — 可用「归档」让它不再出现在录入/搜索中` };
   }
 
-  const { data: deleted, error } = await (supabase.from('material_master') as any)
+  // 写走 service-role(auth+MANAGE_ROLES+引用检查已做):避免缺 DELETE RLS 时静默 0 行,让无引用的脏物料能真删
+  const { data: deleted, error } = await (createServiceRoleClient().from('material_master') as any)
     .delete().eq('id', id).select('id');
   if (error) return { error: friendlyError(error) };
   if (!deleted || deleted.length === 0) {
-    return { error: '删除未生效:数据库缺少 DELETE 权限,请先在 Supabase 执行 20260703 迁移 SQL(或先用归档)' };
+    return { error: '删除未生效(物料不存在或已被删除),请刷新重试(仍不行可先用「归档」)' };
   }
   revalidatePath('/material-master');
   return { deleted: true };
