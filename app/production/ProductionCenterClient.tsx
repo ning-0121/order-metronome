@@ -164,7 +164,7 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
                 return (
                   <tr key={r.order_id} className={`hover:bg-gray-50 ${r.risk ? 'border-l-2 border-l-red-400' : ''}`}>
                     <td className="px-3 py-2.5">
-                      <Link href={`/orders/${r.order_id}`} className="font-medium text-gray-900 hover:underline">{orderNo}</Link>
+                      <Link href={`/production/order/${r.order_id}`} className="font-medium text-gray-900 hover:underline" title="进生产节点(走节点/传报告)">{orderNo}</Link>
                       {r.risk && <span className="ml-1 text-[11px] text-red-600">⚠</span>}
                       <div className="text-xs text-gray-500">{r.customer_name || '—'}</div>
                     </td>
