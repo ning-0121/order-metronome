@@ -288,7 +288,19 @@ export async function getOrderLeftover(orderId: string): Promise<{ data?: any[];
   const { data: txns, error } = await (supabase.from('inventory_transactions') as any)
     .select('material_key, material_name, unit, txn_type, qty').eq('order_id', orderId);
   if (error) return { error: error.message };
-  return { data: computeOrderLeftover((txns || []) as any[]) };
+  const rows = computeOrderLeftover((txns || []) as any[]) as any[];
+  // 颜色:material_key = 采购项 consolidation_key(含色)→ 回查 color,让真尾货分色显示(2026-07-06 用户反馈)
+  try {
+    const keys = [...new Set(rows.map((r) => r.material_key).filter(Boolean))] as string[];
+    if (keys.length) {
+      const { data: pis } = await (createServiceRoleClient().from('procurement_items') as any)
+        .select('consolidation_key, color').in('consolidation_key', keys);
+      const cbk = new Map<string, string | null>();
+      for (const p of (pis || [])) { const k = (p as any).consolidation_key; if (k && !cbk.has(k)) cbk.set(k, (p as any).color ?? null); }
+      for (const r of rows) r.color = r.material_key ? (cbk.get(r.material_key) ?? null) : null;
+    }
+  } catch (e: any) { console.warn('[getOrderLeftover] 颜色补充失败(不影响尾货):', e?.message); }
+  return { data: rows };
 }
 
 /** 领料可挂的订单列表(CAN_ISSUE_MATERIAL)。 */

@@ -3,7 +3,7 @@
 
 type Cell = { qty: number | null; price?: number | null; total: number | null;
   over_qty?: boolean; over_price?: boolean; over_total?: boolean };
-interface Row { material_name: string; unit: string | null; budget: Cell; ordered: Cell; received: Cell; leftover: Cell }
+interface Row { material_name: string; color?: string | null; unit: string | null; budget: Cell; ordered: Cell; received: Cell; leftover: Cell }
 
 const n = (v: number | null | undefined, dash = '—') => (v == null ? dash : (Math.round(v * 1000) / 1000).toLocaleString());
 const red = (on?: boolean) => (on ? 'text-red-600 font-semibold' : '');
@@ -39,7 +39,11 @@ export function BudgetVsActualTable({ data }: { data: { rows: Row[]; totals: any
               <tr><td colSpan={11} className="py-6 text-center text-gray-400">暂无采购数据</td></tr>
             ) : rows.map((r, i) => (
               <tr key={i} className="border-b border-gray-50">
-                <td className="py-2 px-3 text-gray-800">{r.material_name}{r.unit ? <span className="text-gray-400"> ({r.unit})</span> : ''}</td>
+                <td className="py-2 px-3 text-gray-800">
+                  {r.material_name}
+                  {r.color && <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 align-middle">{r.color}</span>}
+                  {r.unit ? <span className="text-gray-400"> ({r.unit})</span> : ''}
+                </td>
                 {/* 预算 */}
                 <td className="py-2 px-2 text-right text-gray-500 border-l border-gray-100">{n(r.budget.qty)}</td>
                 <td className="py-2 px-2 text-right text-gray-500">{n(r.budget.price)}</td>

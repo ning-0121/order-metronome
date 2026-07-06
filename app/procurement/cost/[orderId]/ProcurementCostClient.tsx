@@ -79,7 +79,10 @@ export function ProcurementCostClient({ data, orderId, leftover }: { data: any; 
               <tbody className="divide-y divide-gray-100">
                 {leftover.map((l: any) => (
                   <tr key={l.material_key}>
-                    <td className="px-3 py-1.5">{l.material_name || l.material_key}</td>
+                    <td className="px-3 py-1.5">
+                      {l.material_name || l.material_key}
+                      {l.color && <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 align-middle">{l.color}</span>}
+                    </td>
                     <td className="px-3 py-1.5 text-right font-mono">{l.received}</td>
                     <td className="px-3 py-1.5 text-right font-mono">{l.consumed}</td>
                     <td className={`px-3 py-1.5 text-right font-mono font-semibold ${l.leftover < 0 ? 'text-red-600' : l.leftover > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{l.leftover}</td>

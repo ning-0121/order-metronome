@@ -6,7 +6,7 @@
  * 采购(含经理)/ 管理员可维护;与该单相关的人可查看。CRUD only,不发通知(通知在 cron)。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
 const MANAGE_ROLES = ['procurement', 'procurement_manager', 'admin'];
@@ -67,7 +67,8 @@ export async function updatePoReminder(id: string, patch: { label?: string; remi
   if (patch.label !== undefined) upd.label = patch.label.trim();
   if (patch.note !== undefined) upd.note = patch.note.trim() || null;
   if (patch.remind_at !== undefined) { upd.remind_at = patch.remind_at; upd.status = 'pending'; upd.notified_at = null; }
-  const { data, error: e } = await (supabase.from('po_reminders') as any).update(upd).eq('id', id).select('purchase_order_id').maybeSingle();
+  // RLS 无 UPDATE 策略时用户会话会静默 0 行(改期/完成点了没反应)→ 写走 service-role(auth+角色已在上方校验)
+  const { data, error: e } = await (createServiceRoleClient().from('po_reminders') as any).update(upd).eq('id', id).select('purchase_order_id').maybeSingle();
   if (e) return { error: e.message };
   if ((data as any)?.purchase_order_id) revalidatePath(`/procurement/po/${(data as any).purchase_order_id}`);
   return { ok: true };
@@ -75,10 +76,10 @@ export async function updatePoReminder(id: string, patch: { label?: string; remi
 
 /** 标记完成(该追踪节点已达成,不再需要盯)。 */
 export async function markPoReminderDone(id: string): Promise<{ ok?: boolean; error?: string }> {
-  const { supabase, canManage, error } = await ctx();
+  const { canManage, error } = await ctx();
   if (error) return { error };
   if (!canManage) return { error: '仅采购/管理员可操作' };
-  const { data, error: e } = await (supabase.from('po_reminders') as any)
+  const { data, error: e } = await (createServiceRoleClient().from('po_reminders') as any)
     .update({ status: 'done', done_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq('id', id).select('purchase_order_id').maybeSingle();
   if (e) return { error: e.message };
@@ -88,12 +89,16 @@ export async function markPoReminderDone(id: string): Promise<{ ok?: boolean; er
 
 /** 删除提醒节点。 */
 export async function deletePoReminder(id: string): Promise<{ ok?: boolean; error?: string }> {
-  const { supabase, canManage, error } = await ctx();
+  const { canManage, error } = await ctx();
   if (error) return { error };
   if (!canManage) return { error: '仅采购/管理员可删除' };
-  const { data } = await (supabase.from('po_reminders') as any).select('purchase_order_id').eq('id', id).maybeSingle();
-  const { error: e } = await (supabase.from('po_reminders') as any).delete().eq('id', id);
+  // po_reminders 无 DELETE RLS 策略 → 用户会话 delete 静默 0 行(用户反映"点删除没用")。走 service-role,
+  // 并用 .select() 校验真删到行。auth+角色已在上方校验,越权删不了。
+  const svc = createServiceRoleClient();
+  const { data: row } = await (svc.from('po_reminders') as any).select('purchase_order_id').eq('id', id).maybeSingle();
+  const { data: deleted, error: e } = await (svc.from('po_reminders') as any).delete().eq('id', id).select('id');
   if (e) return { error: e.message };
-  if ((data as any)?.purchase_order_id) revalidatePath(`/procurement/po/${(data as any).purchase_order_id}`);
+  if (!deleted || deleted.length === 0) return { error: '删除未生效(提醒不存在或已被删除),请刷新重试' };
+  if ((row as any)?.purchase_order_id) revalidatePath(`/procurement/po/${(row as any).purchase_order_id}`);
   return { ok: true };
 }

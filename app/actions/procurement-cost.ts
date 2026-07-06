@@ -91,16 +91,32 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   const baseLines: any[] = (base as any)?.quote_baseline_lines || [];
 
   const { data: lines } = await (svc.from('procurement_line_items') as any)
-    .select('material_name, ordered_qty, received_qty, unit_price, ordered_amount, ordered_unit').eq('order_id', orderId);
+    .select('material_name, ordered_qty, received_qty, unit_price, ordered_amount, ordered_unit, procurement_item_id').eq('order_id', orderId);
 
   const { getOrderLeftover } = await import('@/app/actions/inventory');
   const leftoverRows: any[] = ((await getOrderLeftover(orderId)) as any).data || [];
 
+  // 颜色回查(2026-07-06 用户:成本核算看不出颜色、给的是均价)——执行行经 procurement_item_id、
+  // 尾料经 material_key(=consolidation_key)回查 procurement_items.color,按 料+色 逐行核算,不再合并均价。
+  const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];
+  const colorByPi = new Map<string, string | null>();
+  if (piIds.length) {
+    const { data: pis } = await (svc.from('procurement_items') as any).select('id, color').in('id', piIds);
+    for (const p of (pis || [])) colorByPi.set((p as any).id, (p as any).color ?? null);
+  }
+  const lkKeys = [...new Set(leftoverRows.map((r: any) => r.material_key).filter(Boolean))];
+  const colorByKey = new Map<string, string | null>();
+  if (lkKeys.length) {
+    const { data: pisk } = await (svc.from('procurement_items') as any).select('consolidation_key, color').in('consolidation_key', lkKeys);
+    for (const p of (pisk || [])) { const k = (p as any).consolidation_key; if (k && !colorByKey.has(k)) colorByKey.set(k, (p as any).color ?? null); }
+  }
+
   const norm = (s: any) => String(s ?? '').trim().toLowerCase();
   const r3 = (n: number) => Math.round(n * 1000) / 1000;
   const r2 = (n: number) => Math.round(n * 100) / 100;
+  const ckey = (name: any, color: any) => `${norm(name)}¦${norm(color)}`;
 
-  // 预算:逐料(单件用量取该料最大值;报价单价)
+  // 预算:逐料(报价基线通常按料无色;单件用量取该料最大值;报价单价)
   const budgetMap = new Map<string, { name: string; unit: string | null; consumption: number; price: number }>();
   for (const b of baseLines) {
     const k = norm(b.material_name); if (!k) continue;
@@ -110,33 +126,53 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     if (ex) { ex.consumption = Math.max(ex.consumption, cons); if (price) ex.price = price; }
     else budgetMap.set(k, { name: b.material_name, unit: b.quote_unit || null, consumption: cons, price });
   }
-  // 实际(下单/送货)按料聚合
-  const actualMap = new Map<string, { name: string; unit: string | null; oQty: number; oAmt: number; rQty: number; pSum: number; pN: number }>();
+  // 实际(下单/送货)按 料+色 聚合(同色的行才合并 → 单价是该色真实价,不是跨色均价)
+  const actualMap = new Map<string, { name: string; color: string | null; mat: string; unit: string | null; oQty: number; oAmt: number; rQty: number; pSum: number; pN: number }>();
   for (const l of (lines || [])) {
-    const k = norm(l.material_name); if (!k) continue;
-    const a = actualMap.get(k) || { name: l.material_name, unit: l.ordered_unit || null, oQty: 0, oAmt: 0, rQty: 0, pSum: 0, pN: 0 };
+    if (!norm(l.material_name)) continue;
+    const color = l.procurement_item_id ? (colorByPi.get(l.procurement_item_id) ?? null) : null;
+    const k = ckey(l.material_name, color);
+    const a = actualMap.get(k) || { name: l.material_name, color, mat: norm(l.material_name), unit: l.ordered_unit || null, oQty: 0, oAmt: 0, rQty: 0, pSum: 0, pN: 0 };
     a.oQty += Number(l.ordered_qty) || 0; a.oAmt += Number(l.ordered_amount) || 0; a.rQty += Number(l.received_qty) || 0;
     if (l.unit_price != null) { a.pSum += Number(l.unit_price); a.pN++; }
     actualMap.set(k, a);
   }
-  const leftoverMap = new Map<string, number>();
-  for (const r of leftoverRows) { const k = norm(r.material_name); if (k) leftoverMap.set(k, (leftoverMap.get(k) || 0) + (Number(r.leftover) || 0)); }
+  // 尾料 按 料+色
+  const leftoverMap = new Map<string, { qty: number; name: string; color: string | null; mat: string }>();
+  for (const r of leftoverRows) {
+    if (!norm(r.material_name)) continue;
+    const color = r.material_key ? (colorByKey.get(r.material_key) ?? null) : null;
+    const k = ckey(r.material_name, color);
+    const ex = leftoverMap.get(k) || { qty: 0, name: r.material_name, color, mat: norm(r.material_name) };
+    ex.qty += Number(r.leftover) || 0; leftoverMap.set(k, ex);
+  }
 
-  const keys = new Set<string>([...budgetMap.keys(), ...actualMap.keys()]);
-  const rows = [...keys].map((k) => {
-    const b = budgetMap.get(k); const a = actualMap.get(k);
-    const budQty = b ? r3(b.consumption * orderQty) : null;
-    const budPrice = b ? b.price || null : null;
+  // 行 = 实际∪尾料 的所有"料+色";再补上"有预算但完全没采购"的料(按料无色成行)
+  const colorKeys = new Set<string>([...actualMap.keys(), ...leftoverMap.keys()]);
+  const matsWithRows = new Set<string>([...colorKeys].map((k) => k.split('¦')[0]));
+  for (const bm of budgetMap.keys()) { if (!matsWithRows.has(bm)) colorKeys.add(`${bm}¦`); }
+
+  const budgetGiven = new Set<string>();   // 每料预算只挂到它的第一行,避免总额被色数放大
+  const rows = [...colorKeys].map((k) => {
+    const a = actualMap.get(k); const lo = leftoverMap.get(k);
+    const mat = k.split('¦')[0];
+    const b = budgetMap.get(mat);
+    const giveBudget = !!b && !budgetGiven.has(mat);
+    if (giveBudget) budgetGiven.add(mat);
+    const budQty = giveBudget ? r3(b!.consumption * orderQty) : null;
+    const budPrice = giveBudget ? (b!.price || null) : null;
     const budTotal = (budQty != null && budPrice != null) ? r2(budQty * budPrice) : null;
     const oQty = a ? r3(a.oQty) : 0;
     const oPrice = a && a.pN ? Math.round(a.pSum / a.pN * 10000) / 10000 : null;
     const oTotal = a ? r2(a.oAmt) : 0;
     const rQty = a ? r3(a.rQty) : 0;
     const rTotal = oPrice != null ? r2(rQty * oPrice) : null;
-    const lQty = r3(leftoverMap.get(k) || 0);
+    const lQty = lo ? r3(lo.qty) : 0;
     const lTotal = oPrice != null ? r2(lQty * oPrice) : null;
     return {
-      material_name: b?.name || a?.name || k, unit: b?.unit || a?.unit || null,
+      material_name: a?.name || lo?.name || b?.name || mat,
+      color: a?.color ?? lo?.color ?? null,
+      unit: a?.unit || b?.unit || null,
       budget: { qty: budQty, price: budPrice, total: budTotal },
       ordered: {
         qty: oQty, price: oPrice, total: oTotal,
