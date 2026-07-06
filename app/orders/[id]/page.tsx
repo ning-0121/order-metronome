@@ -23,6 +23,8 @@ import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
 import { QuoteBaselineTab } from '@/components/tabs/QuoteBaselineTab';
 import { ProductVariantPicker } from '@/components/ProductVariantPicker';
+import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
+import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
 import { OrderActions } from '@/components/OrderActions';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
@@ -170,6 +172,9 @@ export default async function OrderDetailPage({
   const riskLabel = { red: '风险', yellow: '注意', green: '正常' }[riskColor];
   const riskClass = { red: 'bg-red-100 text-red-700', yellow: 'bg-yellow-100 text-yellow-700', green: 'bg-green-100 text-green-700' }[riskColor];
 
+  // 超预算提交采购审批(最新一条)——顶部横幅展示 + 经理/财务就地审批
+  const budgetApproval = await getOrderBudgetApproval((orderData as any).id).catch(() => ({} as any));
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* 醒目返回按钮 — 独立浮动栏，避免被 Navbar 遮挡 */}
@@ -181,6 +186,10 @@ export default async function OrderDetailPage({
 
       {/* 重排排期横幅（出厂日已过且未出运/送仓时显示给 admin/owner） */}
       <div className="max-w-7xl mx-auto px-6 pt-4 space-y-3">
+        {/* 超预算提交采购审批横幅(超基线单耗:经理批;超5%:+财务批) */}
+        {(budgetApproval as any)?.data && (
+          <BudgetApprovalBanner approval={(budgetApproval as any).data} canMgr={!!(budgetApproval as any).canMgr} canFin={!!(budgetApproval as any).canFin} />
+        )}
         {/* 国内送仓信息缺失提示（订单创建后允许暂空，但需在「包装方式确认」前补齐） */}
         {(orderData as any).delivery_type === 'domestic' && (() => {
           const o = orderData as any;

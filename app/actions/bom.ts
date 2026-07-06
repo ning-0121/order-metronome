@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { computeMaterialRequirement } from '@/lib/services/mrp';
 import { aggregateInventoryBalance, reservedByKey } from '@/lib/services/inventory';
@@ -681,20 +681,21 @@ export async function submitBomToProcurement(
       const k = normN(b.material_name); const c = Number(b.quote_consumption) || 0;
       if (k && c > 0) baseCons.set(k, Math.max(baseCons.get(k) || 0, c));
     }
-    const OVER = 1.05;   // 超 5% 拦
-    const over: string[] = [];
+    // 口径(2026-07-06 用户拍板):单耗只要超基线(>0%)→ 拦,报业务执行经理批;超 5% → +财务批。批过才放行。
+    const overLines: { material: string; bom_cons: number; base_cons: number; over_pct: number }[] = [];
     for (const r of bomRows as any[]) {
       const qpp = Number(r.qty_per_piece) || 0;
       const base = baseCons.get(normN(r.material_name));
-      if (base && qpp > base * OVER) {
-        over.push(`${r.material_name}:单耗 ${qpp} > 报价基线 ${base}(+${Math.round((qpp / base - 1) * 100)}%)`);
+      if (base && qpp > base) {
+        overLines.push({ material: r.material_name, bom_cons: qpp, base_cons: base, over_pct: Math.round((qpp / base - 1) * 1000) / 10 });
       }
     }
-    if (over.length > 0) {
-      return { error: `以下原辅料单耗超报价基线 5%(疑似抛量),不能提交采购:\n${over.join('\n')}\n\n如确需提量:请到「报价基线」页调整并重新冻结(=报价变更,需核对),或核减 BOM 单耗后再提交。` };
-    }
-    // 无报价基线 → 默认放行(不破坏存量在途单);设 env PROCUREMENT_REQUIRE_BASELINE=on 则强制"先录基线才能提交"
-    if (baseLinesForGate.length === 0 && process.env.PROCUREMENT_REQUIRE_BASELINE === 'on') {
+    if (overLines.length > 0) {
+      const { ensureBudgetApproval } = await import('@/app/actions/budget-approvals');
+      const gate = await ensureBudgetApproval(createServiceRoleClient(), orderId, user.id, overLines);
+      if (!gate.ok) return { error: gate.message };   // 未获所需审批 → 拦下(已挂起审批单)
+    } else if (baseLinesForGate.length === 0 && process.env.PROCUREMENT_REQUIRE_BASELINE === 'on') {
+      // 无报价基线 → 默认放行(不破坏存量在途单);env 打开则强制"先录基线才能提交"
       return { error: '该单未录报价基线,不能提交采购。请先在「报价基线」页上传内部报价单、核对后冻结基线,再来提交。' };
     }
   }
