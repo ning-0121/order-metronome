@@ -342,6 +342,10 @@ export async function createOrder(
     is_new_customer: isNewCustomer,
     is_new_factory: isNewFactory,
     created_by: user.id,
+    // P0(2026-07-06 审计):去审批后正常新单曾因不显式设状态而落 DB 默认 '草稿'、永不激活,
+    //   导致 AI 巡检/晨报/日报三大风险面板对所有新生产单静默失效(卡风险命门)。
+    //   按"内部单号=线下审批,创建即 active"口径,建单即生效。import/已发货分支会各自覆盖。
+    lifecycle_status: 'active',
     quantity: quantity,
     quantity_unit: quantityUnit,
     style_count: styleCount ? parseInt(styleCount, 10) : null,

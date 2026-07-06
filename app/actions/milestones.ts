@@ -907,7 +907,10 @@ export async function markMilestoneDone(
   // 2026-06-19 修复:模板精简(28→11)删了 order_kickoff_meeting/production_order_upload,
   //   原来要这 4 个全完成才激活 → 新单永远凑不齐、卡 draft、风险徽章不显示。
   //   改为只看 po_confirmed + finance_approval(各模板都有的早期闸门),按实际存在数判定。
-  const stage1Keys = ['po_confirmed', 'finance_approval'];
+  // 2026-07-06 P0 修:V2 模板已把 finance_approval 并入 po_confirmed(只 9 节点),
+  //   原 ['po_confirmed','finance_approval'] 的 length===2 判定对 V2 单恒假 → 永不激活。
+  //   改为只认 po_confirmed(所有模板都有的首闸),完成即可激活遗留草稿单。
+  const stage1Keys = ['po_confirmed'];
   if (stage1Keys.includes(milestoneData.step_key)) {
     const { data: stage1Milestones } = await (supabase.from('milestones') as any)
       .select('step_key, status')
@@ -918,7 +921,8 @@ export async function markMilestoneDone(
     if (allStage1Done) {
       const { data: orderCheck } = await (supabase.from('orders') as any)
         .select('lifecycle_status').eq('id', milestoneData.order_id).single();
-      if (orderCheck?.lifecycle_status === 'draft') {
+      // DB 默认存中文 '草稿',而旧代码只判英文 'draft' → 遗留草稿单永不激活。两者都认。
+      if (['draft', '草稿'].includes(orderCheck?.lifecycle_status)) {
         const { activateOrder } = await import('@/lib/repositories/ordersRepo');
         await activateOrder(milestoneData.order_id);
       }
