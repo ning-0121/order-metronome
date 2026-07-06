@@ -743,6 +743,18 @@ export async function submitBomToProcurement(
     if (lineErr) return { error: `快照行创建失败:${lineErr.message}` };
   }
 
+  // ── 内控闸(2026-07-06 用户强调:业务不能反复整单重提采购)──
+  // 采购已把本单归并/下过采购单后,业务又改了原辅料(!reuseSnap=BOM 变了)→ 禁止整单"重新提交采购",
+  // 否则新需求与已下采购单错位/重复采购。BOM 未变的重提(reuseSnap)是幂等、放行。
+  // 需改料 → 通知采购在采购侧对相应行增删(增量改),不走整单重提。
+  if (!reuseSnap) {
+    const { data: placedLines } = await (supabase.from('procurement_line_items') as any)
+      .select('id, purchase_order_id').eq('order_id', orderId).not('purchase_order_id', 'is', null).limit(1);
+    if ((placedLines || []).length > 0) {
+      return { error: '采购已就本单归并/下采购单,而原辅料又有改动 → 不能整单「重新提交采购」(会与已下采购单错位或重复采购)。如需改料,请通知采购在采购侧对相应行做增删(增量修改),不要整单重提。' };
+    }
+  }
+
   // ── c. material_plan upsert(1:1 订单)──
   const { data: existingPlan } = await (supabase.from('material_plans') as any)
     .select('id').eq('order_id', orderId).maybeSingle();
