@@ -1148,26 +1148,34 @@ export async function getProcurementQueues(): Promise<{
       // 自愈(2026-07-03):已全部下单但节点没完成的订单(如钩子上线前下的单)
       // → 顺手自动完成「采购下单」节点并本次出队,不再挂着"待采购"
       const { data: allItems } = await (supabase.from('procurement_items') as any)
-        .select('order_id, status').in('order_id', orderIds);
+        .select('id, order_id, status').in('order_id', orderIds);
       const ORDERED = ['ordered', 'partially_received', 'completed', 'closed'];
-      const itemsByOrder = new Map<string, string[]>();
+      const itemsByOrder = new Map<string, Array<{ id: string; status: string }>>();
       for (const it of (allItems || [])) {
         const arr = itemsByOrder.get(it.order_id) || [];
-        arr.push(it.status); itemsByOrder.set(it.order_id, arr);
+        arr.push({ id: it.id, status: it.status }); itemsByOrder.set(it.order_id, arr);
       }
+      // 某采购项是否已进某采购单(执行行挂了 purchase_order_id)——已进 PO(即使待审批/未 placed)= 核料下单做完,
+      // 与线级队列 2026-07-04 口径对齐(挂 PO 的行不再算待下单,改横幅露出)。修:同一单收货后不再重复挂"待采购"。
+      const { data: poLines } = await (supabase.from('procurement_line_items') as any)
+        .select('procurement_item_id, purchase_order_id').in('order_id', orderIds);
+      const itemsInPO = new Set<string>();
+      for (const l of (poLines || [])) { if (l.procurement_item_id && l.purchase_order_id) itemsInPO.add(l.procurement_item_id); }
       for (const p of alive) {
         if (doneOrders.has(p.order_id)) continue;
-        const sts = itemsByOrder.get(p.order_id) || [];
-        // 采购项全部已下单/已收/完成 → 无条件出"待采购"队列。
-        // 显示口径以「真实采购状态」为准,不再被里程碑标记的成败绑架
-        // (原 bug:里程碑不存在/已 done 时 autoComplete 返回 false → 掉下去 push 回队列 → 收货了还挂待采购)。
-        // 同时 fire-and-forget 把「采购下单」里程碑自动回填到节拍器(用户要求:不用手工回去点)。
-        if (sts.length > 0 && sts.every(s => ORDERED.includes(s))) {
-          try {
-            const { autoCompleteProcurementPlacedForOrder } = await import('@/app/actions/procurement-items');
-            void autoCompleteProcurementPlacedForOrder(supabase, p.order_id).catch(() => {});
-          } catch { /* 自愈失败不影响队列出队 */ }
-          continue;   // ← 无条件出队(修 ②③:收货后不再显示待采购/去核料)
+        const items = itemsByOrder.get(p.order_id) || [];
+        // 还留在"待采购订单"的唯一条件:仍有采购项 既未下单+及以后、又没进任何采购单(= 真的还要去核料下单)。
+        // 全部已下单 或 已进 PO(待审批的也算)→ 出队;剩下的审批/催货/验收由待审批横幅+线级队列露出,不重复。
+        const stillNeedsCore = items.some(it => !ORDERED.includes(it.status) && !itemsInPO.has(it.id));
+        if (items.length > 0 && !stillNeedsCore) {
+          // 仅当真全部 ordered(PO 已 placed)才自愈「采购下单」里程碑;仅"进了待审批 PO"不算下单完成,不误标里程碑。
+          if (items.every(it => ORDERED.includes(it.status))) {
+            try {
+              const { autoCompleteProcurementPlacedForOrder } = await import('@/app/actions/procurement-items');
+              void autoCompleteProcurementPlacedForOrder(supabase, p.order_id).catch(() => {});
+            } catch { /* 自愈失败不影响队列出队 */ }
+          }
+          continue;   // ← 出队(核料下单已做完,不再重复显示待采购/去核料)
         }
         pendingRequests.push({
           order_id: p.order_id,
