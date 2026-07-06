@@ -375,10 +375,21 @@ export async function recordReceipt(
 
   // 获取原始订购数据
   const { data: item } = await (supabase.from('procurement_line_items') as any)
-    .select('ordered_qty, ordered_unit, po_no, material_name')
+    .select('ordered_qty, ordered_unit, po_no, material_name, purchase_order_id')
     .eq('id', itemId)
     .single();
   if (!item) return { error: '明细不存在' };
+
+  // 内控(2026-07-06):对账页收货此前零校验就置 arrived —— 待审批采购单的货能绕过审批闸溜进待验收。
+  // 与 recordGoodsReceipt/transitionProcurementLine 同款闸:采购单尚未下单(草稿/待审批/驳回)不得收货。
+  if ((item as any).purchase_order_id) {
+    const svcGate = createServiceRoleClient();
+    const { data: gatePo } = await (svcGate.from('purchase_orders') as any)
+      .select('status, approval_status').eq('id', (item as any).purchase_order_id).maybeSingle();
+    if (gatePo && ((gatePo as any).status === 'draft' || ['pending', 'rejected'].includes((gatePo as any).approval_status))) {
+      return { error: '该采购行所在采购单尚未下单(需先审批通过并下单),不能收货。请到采购单页完成审批+下单。' };
+    }
+  }
 
   // 审计修(2026-07-04):止血双真相。此入口是"覆盖写 received_qty 且不写 goods_receipts",
   // 一旦该行已有 goods_receipts 批次(经「收货登记」录过),覆盖写会抹掉批次汇总、甚至写负库存。
@@ -1099,6 +1110,9 @@ export interface QueueLine {
   chase_count: number | null;
   last_chased_at: string | null;
   lamp: 'red' | 'yellow' | 'green' | null;
+  // 内控:所在采购单尚未下单(草稿/待审批/驳回)。即便 line_status 已到 arrived,也是绕过审批闸的脏数据,
+  // 前端不给验收/催货按钮,引导先去审批下单(2026-07-06 用户实测发现)。
+  po_not_placed?: boolean;
 }
 
 /** 待采购订单(业务执行已提交采购申请,采购尚未完成下单)—— 订单级卡片 */
@@ -1249,6 +1263,23 @@ export async function getProcurementQueues(): Promise<{
     const costs = await fetchLineCostsByIds(rows.map((r) => r.id));
     for (const r of rows) { const c = costs.get(r.id); if (c) r.unit_price = c.unit_price; }
   }
+
+  // 内控标记(2026-07-06):挂在"尚未下单"采购单(草稿 / 待审批 / 已驳回)上的行 → po_not_placed。
+  // 这类行即便 line_status 已被绕过闸推到 arrived,也不给验收/催货按钮,引导先去审批下单。
+  // 用 service-role 查 PO 状态,避免 RLS 让某些 PO 查不到 → 误判为"已下单"仍露按钮。
+  try {
+    const linePoIds = [...new Set(rows.map((r) => r.purchase_order_id).filter(Boolean))] as string[];
+    if (linePoIds.length) {
+      const svcPo = createServiceRoleClient();
+      const { data: poStatuses } = await (svcPo.from('purchase_orders') as any)
+        .select('id, status, approval_status').in('id', linePoIds);
+      const blockedPo = new Set<string>();
+      for (const p of (poStatuses || [])) {
+        if (p.status === 'draft' || ['pending', 'rejected'].includes(p.approval_status)) blockedPo.add(p.id);
+      }
+      for (const r of rows) { if (r.purchase_order_id && blockedPo.has(r.purchase_order_id)) r.po_not_placed = true; }
+    }
+  } catch (e: any) { console.warn('[getProcurementQueues] PO 下单状态标记失败(不阻断):', e?.message); }
 
   const lampRank = (l: string | null) => (l === 'red' ? 0 : l === 'yellow' ? 1 : l === 'green' ? 2 : 3);
   const byLamp = (a: QueueLine, b: QueueLine) => lampRank(a.lamp) - lampRank(b.lamp);

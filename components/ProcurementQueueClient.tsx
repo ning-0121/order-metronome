@@ -68,6 +68,20 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
   );
 }
 
+/** 内控:该行所在采购单尚未下单(草稿/待审批/驳回)—— 不给验收/催货/推进按钮,引导先去审批下单。
+ *  服务端亦已硬闸(recordReceipt/recordGoodsReceipt/transitionProcurementLine),此处只是把 UI 对齐,不误导。 */
+function BlockedPoNote({ l }: { l: QueueLine }) {
+  return (
+    <>
+      <span className="text-xs px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200 font-medium">⚠ 采购单未下单/待审批,不能操作</span>
+      {l.purchase_order_id && (
+        <Link href={`/procurement/po/${l.purchase_order_id}`}
+          className="text-xs px-2 py-1 rounded font-medium bg-orange-500 text-white hover:bg-orange-600">去审批 →</Link>
+      )}
+    </>
+  );
+}
+
 export function ProcurementQueueClient({
   pendingRequests = [], pendingOrder, chase, readyShip, receive, canFinanceOver = false,
 }: {
@@ -194,17 +208,19 @@ export function ProcurementQueueClient({
               {STATUS_LABEL[l.line_status]} · 预计 {fmt(l.expected_arrival || l.promised_date)}
               {(l.chase_count ?? 0) > 0 && <span className="text-amber-600 ml-1">催{l.chase_count}次</span>}
             </span>
-            <button className={`${btn} bg-amber-500 text-white hover:bg-amber-600`} disabled={busy === `${l.id}:chase`}
-              onClick={async () => { const v = await prompt({ title: `催货「${l.material_name}」`, message: `已催 ${l.chase_count ?? 0} 次`, fields: [{ name: 'note', label: '催货备注(可选)', type: 'textarea' }], confirmText: '记一次催货', }); if (v) run(`${l.id}:chase`, () => chaseProcurementLine(l.id, v.note || undefined)); }}>催货</button>
-            {l.line_status === 'ordered' && (
-              <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:conf`}
-                onClick={() => confirmRun(l, 'conf', 'confirmed', `确认「${l.material_name}」供应商已接单/确认交期?`)}>确认</button>
-            )}
-            <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:rts`}
-              onClick={() => confirmRun(l, 'rts', 'ready_to_ship', `确定「${l.material_name}」工厂已完成、进入待送货?\n(点错可用「↩回退」退回)`)}>✅ 工厂已完成</button>
-            <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:ship`}
-              onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」已直接发货(跳过待送货)?`)}>直接发货</button>
-            <BackButton l={l} />
+            {l.po_not_placed ? <BlockedPoNote l={l} /> : (<>
+              <button className={`${btn} bg-amber-500 text-white hover:bg-amber-600`} disabled={busy === `${l.id}:chase`}
+                onClick={async () => { const v = await prompt({ title: `催货「${l.material_name}」`, message: `已催 ${l.chase_count ?? 0} 次`, fields: [{ name: 'note', label: '催货备注(可选)', type: 'textarea' }], confirmText: '记一次催货', }); if (v) run(`${l.id}:chase`, () => chaseProcurementLine(l.id, v.note || undefined)); }}>催货</button>
+              {l.line_status === 'ordered' && (
+                <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:conf`}
+                  onClick={() => confirmRun(l, 'conf', 'confirmed', `确认「${l.material_name}」供应商已接单/确认交期?`)}>确认</button>
+              )}
+              <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:rts`}
+                onClick={() => confirmRun(l, 'rts', 'ready_to_ship', `确定「${l.material_name}」工厂已完成、进入待送货?\n(点错可用「↩回退」退回)`)}>✅ 工厂已完成</button>
+              <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:ship`}
+                onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」已直接发货(跳过待送货)?`)}>直接发货</button>
+              <BackButton l={l} />
+            </>)}
           </RowShell>
         ))}
       </section>
@@ -222,15 +238,17 @@ export function ProcurementQueueClient({
                 {STATUS_LABEL[l.line_status]} · 预计 {fmt(l.expected_arrival || l.promised_date)}
                 {out != null && <> · <b className={out > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {out}</b> {l.ordered_unit}</>}
               </span>
-              {l.line_status === 'ready_to_ship' && (
-                <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:ship`}
-                  onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」供应商已发货?`)}>🚚 已发货</button>
-              )}
-              {l.line_status === 'shipped' && (
-                <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${l.id}:arr`}
-                  onClick={() => confirmRun(l, 'arr', 'arrived', `确定「${l.material_name}」货已送达工厂/仓库?\n送达后进入待验收。`)}>📦 已送达</button>
-              )}
-              <BackButton l={l} />
+              {l.po_not_placed ? <BlockedPoNote l={l} /> : (<>
+                {l.line_status === 'ready_to_ship' && (
+                  <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:ship`}
+                    onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」供应商已发货?`)}>🚚 已发货</button>
+                )}
+                {l.line_status === 'shipped' && (
+                  <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${l.id}:arr`}
+                    onClick={() => confirmRun(l, 'arr', 'arrived', `确定「${l.material_name}」货已送达工厂/仓库?\n送达后进入待验收。`)}>📦 已送达</button>
+                )}
+                <BackButton l={l} />
+              </>)}
             </RowShell>
           );
         })}
@@ -248,16 +266,20 @@ export function ProcurementQueueClient({
                 订购 {l.ordered_qty ?? '—'} {l.ordered_unit}{l.received_qty ? ` · 已收 ${l.received_qty}` : ''}
                 {outstanding(l) != null && <> · <b className={outstanding(l)! > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {outstanding(l)}</b></>}
               </span>
-              <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`}
-                onClick={() => setOpenForm(openForm === `${l.id}:reg` ? null : `${l.id}:reg`)}>📥 收货登记</button>
-              <button className={`${btn} bg-white text-gray-600 border border-gray-300 hover:bg-gray-50`}
-                onClick={() => setOpenForm(openForm === `${l.id}:recv` ? null : `${l.id}:recv`)}>验收判定</button>
-              <BackButton l={l} />
+              {l.po_not_placed ? <BlockedPoNote l={l} /> : (
+                <>
+                  <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`}
+                    onClick={() => setOpenForm(openForm === `${l.id}:reg` ? null : `${l.id}:reg`)}>📥 收货登记</button>
+                  <button className={`${btn} bg-white text-gray-600 border border-gray-300 hover:bg-gray-50`}
+                    onClick={() => setOpenForm(openForm === `${l.id}:recv` ? null : `${l.id}:recv`)}>验收判定</button>
+                  <BackButton l={l} />
+                </>
+              )}
             </RowShell>
-            {openForm === `${l.id}:reg` && (
+            {!l.po_not_placed && openForm === `${l.id}:reg` && (
               <ReceiptRegisterForm line={l} canFinanceOver={canFinanceOver} onDone={() => { setOpenForm(null); router.refresh(); }} />
             )}
-            {openForm === `${l.id}:recv` && (
+            {!l.po_not_placed && openForm === `${l.id}:recv` && (
               <ReceiveForm line={l} busy={!!busy && busy.startsWith(`${l.id}:recv`)}
                 onSubmit={(p) => run(`${l.id}:recv:${p.result}`, () => recordGoodsReceipt(l.id, p))} />
             )}
