@@ -46,35 +46,51 @@ export async function GET(req: NextRequest) {
     const foundNos = new Set(found.map((o) => o.order_no));
     const missing = spec.nos.filter((n) => !foundNos.has(n));
     let msSet = 0, actd = 0, compd = 0;
+    let msErr = '', actErr = '';
+
+    // 诊断:该组第一单的 lifecycle + 里程碑真实 step_key/status(揭示为何 0 行)
+    const sample = found[0];
+    let sampleDump = '';
+    if (sample) {
+      const { data: sm } = await (svc.from('milestones') as any)
+        .select('step_key, status').eq('order_id', sample.id).order('sort_order', { ascending: true });
+      const lifes = Array.from(new Set(found.map((o) => o.lifecycle_status))).join(' / ');
+      sampleDump = `<tr><td>找到单的 lifecycle 值</td><td class="m">${esc(lifes)}</td></tr>
+        <tr><td>样本 ${esc(sample.order_no)} 里程碑<br>(step_key : status)</td><td class="m">${
+          (sm || []).length ? (sm as any[]).map((x) => `${esc(x.step_key)} : ${esc(x.status)}`).join('<br>') : '❌ 该单没有任何里程碑'
+        }</td></tr>`;
+    }
 
     if (apply && found.length) {
       const ids = found.map((o) => o.id);
       // 激活(pending_approval/待审批/draft → active),已出货则 completed
       if (spec.complete) {
-        const { data: c } = await (svc.from('orders') as any).update({ lifecycle_status: 'completed' })
+        const { data: c, error: ce } = await (svc.from('orders') as any).update({ lifecycle_status: 'completed' })
           .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消")').in('id', ids).select('id');
-        compd = (c || []).length;
+        compd = (c || []).length; actErr = ce?.message || '';
       } else {
-        const { data: a } = await (svc.from('orders') as any).update({ lifecycle_status: 'active' })
+        const { data: a, error: ae } = await (svc.from('orders') as any).update({ lifecycle_status: 'active' })
           .in('lifecycle_status', ['pending_approval', '待审批', 'draft']).in('id', ids).select('id');
-        actd = (a || []).length;
+        actd = (a || []).length; actErr = ae?.message || '';
       }
       // 里程碑
       if (spec.keys === 'ALL') {
-        const { data: m } = await (svc.from('milestones') as any).update({ status: 'done', actual_at: new Date().toISOString() })
+        const { data: m, error: me } = await (svc.from('milestones') as any).update({ status: 'done', actual_at: new Date().toISOString() })
           .in('order_id', ids).not('status', 'in', '("done","已完成","completed")').select('id');
-        msSet = (m || []).length;
+        msSet = (m || []).length; msErr = me?.message || '';
       } else if (spec.keys.length) {
-        const { data: m } = await (svc.from('milestones') as any).update({ status: 'done', actual_at: new Date().toISOString() })
+        const { data: m, error: me } = await (svc.from('milestones') as any).update({ status: 'done', actual_at: new Date().toISOString() })
           .in('order_id', ids).in('step_key', spec.keys).not('status', 'in', '("done","已完成","completed")').select('id');
-        msSet = (m || []).length;
+        msSet = (m || []).length; msErr = me?.message || '';
       }
     }
 
     out += `<h3>${esc(label)} — Excel ${spec.nos.length} 单</h3><table>
       <tr><td>系统里找到</td><td>${found.length} 单</td></tr>
-      <tr><td>Excel 里有但系统没有</td><td class="${missing.length ? 'r' : 'm'}">${missing.length ? esc(missing.join(', ')) : '无'}</td></tr>`;
+      <tr><td>Excel 里有但系统没有</td><td class="${missing.length ? 'r' : 'm'}">${missing.length ? esc(missing.join(', ')) : '无'}</td></tr>
+      ${sampleDump}`;
     if (apply) out += `<tr><td>本次动作</td><td class="g">${spec.complete ? `标完成 ${compd} 单` : `激活 ${actd} 单`} · 里程碑置 done ${msSet} 条</td></tr>`;
+    if (msErr || actErr) out += `<tr><td>报错</td><td class="r">${esc(actErr)} ${esc(msErr)}</td></tr>`;
     out += `</table>`;
   }
   out += `<p class="m">说明:已出货不发财务(SQL/后端此处不补);采购中心需真实采购行(此更新不含);开生产待排单并入物料在途。跑完刷新生产中心即对。</p>`;
