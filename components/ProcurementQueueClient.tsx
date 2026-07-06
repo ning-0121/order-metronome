@@ -258,6 +258,9 @@ export function ProcurementQueueClient({
           </div>
         ))}
       </section>
+      {/* 对话框宿主:confirm/prompt(工厂已完成/确认/取消等)全靠它渲染。
+          复审误删过一次(把它当成 ReceiptRegisterForm 的越界引用),导致按钮点不了 → 已恢复。 */}
+      {dialog}
     </div>
   );
 }

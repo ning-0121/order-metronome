@@ -92,6 +92,9 @@ export default async function OrderDetailPage({
   // 复审性能:getCurrentUserRole 已做 auth+profiles,直接复用它返回的 userId/roles,
   // 省掉此前额外的 auth.getUser() + profiles 查询(每开一张订单省 1 次鉴权往返 + 1 次角色查询)。
   const { role: currentRole, isAdmin, userId, roles: profileRoles } = await getCurrentUserRole(supabase);
+  // 页面下游多处仍用 user.id / user?.id(currentUserId 等 props)→ 由 userId 合成最小 user 对象,
+  // 保留"去重复鉴权"优化(不再另调 auth.getUser)的同时,不破坏这些引用。
+  const user = userId ? { id: userId } : null;
   const isOrderOwner = userId ? orderData.created_by === userId : false;
   const currentRoles: string[] = (profileRoles && profileRoles.length > 0) ? profileRoles : (currentRole ? [currentRole] : []);
   // 纯采购角色不进订单详情(2026-07-03 用户拍板:采购看到/误改订单一切太危险)
