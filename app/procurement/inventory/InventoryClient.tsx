@@ -28,7 +28,7 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
   // 库存中心汇总 + 搜索(W-P1)
   const [search, setSearch] = useState('');
   const s = search.trim().toLowerCase();
-  const filtered = s ? balance.filter((b: any) => String(b.material_name || b.material_key).toLowerCase().includes(s)) : balance;
+  const filtered = s ? balance.filter((b: any) => `${b.material_name || ''} ${b.color || ''} ${b.material_key || ''}`.toLowerCase().includes(s)) : balance;
   const kinds = balance.length;
   const shortageN = balance.filter((b: any) => Number(b.shortage) > 0).length;
   const negN = balance.filter((b: any) => Number(b.on_hand) < 0).length;
@@ -108,7 +108,10 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
           {filtered.map((b: any) => (
             <Fragment key={b.material_key}>
               <tr className="hover:bg-gray-50">
-                <td className="px-4 py-2.5 text-gray-800">{b.material_name || b.material_key}</td>
+                <td className="px-4 py-2.5 text-gray-800">
+                  {b.material_name || b.material_key}
+                  {b.color && <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 align-middle">{b.color}</span>}
+                </td>
                 <td className={`px-4 py-2.5 text-right font-mono ${b.on_hand < 0 ? 'text-red-600' : 'text-gray-900'}`}>{b.on_hand}</td>
                 <td className="px-4 py-2.5 text-right font-mono text-amber-700">{b.reserved || 0}</td>
                 <td className={`px-4 py-2.5 text-right font-mono font-semibold ${(b.available ?? b.on_hand) < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{b.available ?? b.on_hand}</td>
@@ -128,7 +131,7 @@ export function InventoryClient({ balance, orders, canIssue }: { balance: any[];
                 <tr>
                   <td colSpan={7} className="px-4 py-3 bg-gray-50">
                     <div className="flex flex-wrap items-end gap-2">
-                      <span className="text-xs font-medium text-gray-600">{active.mode === 'issue' ? '领料' : '退料'}:{b.material_name}</span>
+                      <span className="text-xs font-medium text-gray-600">{active.mode === 'issue' ? '领料' : '退料'}:{b.material_name}{b.color ? `(${b.color})` : ''}</span>
                       <select value={orderId} onChange={(e) => setOrderId(e.target.value)} className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs bg-white">
                         <option value="">— 挂订单(可选) —</option>
                         {orders.map((o: any) => <option key={o.id} value={o.id}>{o.internal_order_no || o.order_no} · {o.customer_name || ''}</option>)}

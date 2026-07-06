@@ -48,10 +48,14 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
           <span className="font-medium text-gray-900 truncate">{line.material_name}</span>
           {line.color && <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 shrink-0">{line.color}</span>}
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[line.category || 'other'] || line.category}</span>
-          {/* 采购不进订单详情(2026-07-03 权限隔离)→ 专属核料页(只读摘要+核料+任务单下载) */}
-          <Link href={`/procurement/verify/${line.order_id}`} className="text-xs text-indigo-600 hover:underline shrink-0">
+          {/* 已归到采购单的行 → 主链接进"单张采购单"(按供应商/颜色,同供应商多色即合并单,正是用户要的"单个采购单的样子");
+              未归单的行 → 进核料页(整单核料+任务单下载)。2026-07-06 用户反馈:点了总看到总订单,要能点进单张采购单。 */}
+          <Link href={line.purchase_order_id ? `/procurement/po/${line.purchase_order_id}` : `/procurement/verify/${line.order_id}`}
+            className="text-xs text-indigo-600 hover:underline shrink-0"
+            title={line.purchase_order_id ? '打开这张采购单(按供应商/颜色)' : '打开核料页'}>
             {line.internal_order_no ? `${line.internal_order_no} | ` : ''}{line.order_no}·{line.customer_name}
           </Link>
+          {/* 核料页/整单任务单下载(始终保留入口) */}
           <Link href={`/procurement/verify/${line.order_id}`} className="text-xs text-gray-400 hover:text-indigo-600 shrink-0" title="打开核料页,右上可下载生产任务单">
             📋任务单
           </Link>

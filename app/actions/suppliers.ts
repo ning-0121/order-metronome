@@ -158,6 +158,7 @@ export async function deleteSupplier(id: string): Promise<{ deleted?: boolean; a
  */
 export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
   created?: number;
+  updated?: number;   // 同名已存在 → 非破坏性补全"库里为空"的字段(联系人/电话/账期…)
   skipped?: Array<{ row: number; name: string; reason: string }>;
   failed?: Array<{ row: number; name: string; reason: string }>;
   error?: string;
@@ -171,12 +172,19 @@ export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
   if (rows.length > 500) return { error: `一次最多导入 500 行(本次 ${rows.length} 行),请拆分文件` };
 
   const supabase = await createClient();
-  // 一次拉全部未归档名称做查重(小表,远快于逐行查库)
+  // 一次拉全部未归档供应商(含现有字段值),用于查重 + 非破坏性补全(小表,远快于逐行查库)
   const { data: existing } = await (supabase.from('suppliers') as any)
-    .select('name').neq('status', 'archived');
-  const seen = new Set<string>((existing || []).map((s: any) => String(s.name).trim().toLowerCase()));
+    .select('id, name, address, phone, contact_name, main_category, payment_method, bank_info, tax_id, net_days')
+    .neq('status', 'archived');
+  const existingByName = new Map<string, any>();
+  for (const s of (existing || []) as any[]) existingByName.set(String(s.name).trim().toLowerCase(), s);
+  const seen = new Set<string>(existingByName.keys());
+
+  const str = (v: any) => { const s = String(v ?? '').trim(); return s || null; };
+  const toNetDays = (v: any) => (v == null || String(v).trim() === '' || isNaN(Number(v)) ? null : Number(v));
 
   let created = 0;
+  let updated = 0;
   const skipped: Array<{ row: number; name: string; reason: string }> = [];
   const failed: Array<{ row: number; name: string; reason: string }> = [];
   const financeSyncIds: string[] = [];
@@ -187,10 +195,37 @@ export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
     const name = String(raw.name || '').trim();
     if (!name) { skipped.push({ row: rowNo, name: '(空)', reason: '供应商名称为空' }); continue; }
     const key = name.toLowerCase();
-    if (seen.has(key)) { skipped.push({ row: rowNo, name, reason: '已存在同名供应商,跳过' }); continue; }
+    if (seen.has(key)) {
+      // 非破坏性补全(2026-07-06):同名已存在 → 只补"库里为空、导入有值"的字段(不覆盖已有值)。
+      // 解决"当初只导了名字"的历史供应商:再导一次带联系人/电话/账期的表即可批量补全,免逐个手改。
+      const exist = existingByName.get(key);
+      const candidate: SupplierInput = {
+        address: str(raw.address) ?? undefined, phone: str(raw.phone) ?? undefined,
+        contact_name: str(raw.contact_name) ?? undefined, main_category: str(raw.main_category) ?? undefined,
+        payment_method: str(raw.payment_method) ?? undefined, bank_info: str(raw.bank_info) ?? undefined,
+        tax_id: str(raw.tax_id) ?? undefined, net_days: toNetDays(raw.net_days),
+      };
+      const editable = pickEditableSupplierFields(candidate as any, canBasic, canFinance);
+      const patch: Record<string, any> = {};
+      for (const [k, v] of Object.entries(editable)) {
+        if (v == null || v === '') continue;                            // 导入这列没值 → 不动
+        const cur = (exist as any)?.[k];
+        if (cur == null || String(cur).trim() === '') patch[k] = v;     // 仅当库里为空才补
+      }
+      if (exist && Object.keys(patch).length > 0) {
+        patch.updated_at = new Date().toISOString();
+        const { error } = await (supabase.from('suppliers') as any).update(patch).eq('id', exist.id);
+        if (error) { failed.push({ row: rowNo, name, reason: error.message }); continue; }
+        Object.assign(exist, patch);   // 同步内存,免同文件后续同名行重复补
+        updated += 1;
+        financeSyncIds.push(exist.id);
+        continue;
+      }
+      skipped.push({ row: rowNo, name, reason: '已存在且无可补全信息,跳过' });
+      continue;
+    }
 
     // Excel 单元格全是字符串:数字列转 number,文本列 trim,空转 null
-    const str = (v: any) => { const s = String(v ?? '').trim(); return s || null; };
     const input: SupplierInput = {
       name,
       address: str(raw.address) ?? undefined, phone: str(raw.phone) ?? undefined,
@@ -214,5 +249,5 @@ export async function bulkImportSuppliers(rows: SupplierInput[]): Promise<{
   await Promise.allSettled(financeSyncIds.map((id) => pushSupplierToFinance(supabase, id)));
 
   revalidatePath('/suppliers');
-  return { created, skipped, failed };
+  return { created, updated, skipped, failed };
 }

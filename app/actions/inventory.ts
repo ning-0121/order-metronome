@@ -83,7 +83,23 @@ export async function getInventoryBalance(): Promise<{ data?: any[]; error?: str
   const { data: txns, error } = await (supabase.from('inventory_transactions') as any)
     .select('material_key, material_name, unit, qty');
   if (error) return { error: error.message };
-  return { data: aggregateInventoryBalance((txns || []) as any[]) };
+  const balance = aggregateInventoryBalance((txns || []) as any[]) as any[];
+  // 补颜色:库存 material_key = 采购项 consolidation_key(含色),回查 procurement_items.color 展示,
+  // 让"同料不同色"(如 280g直贡呢 黑色 / 浓咖啡)在库存里分得清(2026-07-06 用户反馈)。
+  try {
+    const keys = [...new Set(balance.map((b) => b.material_key).filter(Boolean))];
+    if (keys.length) {
+      const { data: pis } = await (supabase.from('procurement_items') as any)
+        .select('consolidation_key, color').in('consolidation_key', keys);
+      const colorByKey = new Map<string, string | null>();
+      for (const p of (pis || [])) {
+        const k = (p as any).consolidation_key;
+        if (k && !colorByKey.has(k)) colorByKey.set(k, (p as any).color ?? null);
+      }
+      for (const b of balance) (b as any).color = b.material_key ? (colorByKey.get(b.material_key) ?? null) : null;
+    }
+  } catch (e: any) { console.warn('[getInventoryBalance] 颜色补充失败(不影响库存展示):', e?.message); }
+  return { data: balance };
 }
 
 export interface IssueInput {

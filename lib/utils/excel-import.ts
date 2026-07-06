@@ -44,8 +44,9 @@ export function pickCell(row: Record<string, string>, aliases: string[]): string
 }
 
 /** 导入结果的统一文案。 */
-export function importResultText(res: { created?: number; skipped?: Array<{ row: number; name: string; reason: string }>; failed?: Array<{ row: number; name: string; reason: string }> }): string {
+export function importResultText(res: { created?: number; updated?: number; skipped?: Array<{ row: number; name: string; reason: string }>; failed?: Array<{ row: number; name: string; reason: string }> }): string {
   const parts = [`✅ 导入成功 ${res.created || 0} 条`];
+  if (res.updated) parts.push(`🔄 补全已有 ${res.updated} 条`);
   if (res.skipped?.length) parts.push(`⏭ 跳过 ${res.skipped.length} 条(重复/缺必填)`);
   if (res.failed?.length) parts.push(`❌ 失败 ${res.failed.length} 条`);
   return parts.join(' · ');
