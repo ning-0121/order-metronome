@@ -882,7 +882,14 @@ export default async function OrderDetailPage({
         {/* Tab: 生产进度 */}
         {activeTab === 'production' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">生产进度</h2>
+            <div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="text-lg font-semibold text-gray-900">生产进度</h2>
+              {/* 2026-07-06 用户拍板:生产/QC 在生产中心走节点,订单详情对业务只读展示 */}
+              <Link href={`/production/order/${id}`} className="text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50">
+                🏭 生产/QC 去生产中心走节点 →
+              </Link>
+            </div>
+            <p className="text-xs text-gray-400 mb-4">本页对业务只读展示进度;生产/QC 请到「生产中心」点该订单走节点、传报告。</p>
             {/* 生产订单文件快捷查看 */}
             <div className="mb-6">
               <h3 className="text-sm font-medium text-gray-600 mb-2">📄 生产订单</h3>
@@ -892,7 +899,7 @@ export default async function OrderDetailPage({
               orderId={id}
               orderNo={orderData.order_no}
               isAdmin={isAdmin}
-              canReport={isAdmin || currentRoles.some(r => ['sales', 'merchandiser', 'production', 'production_manager', 'qc', 'quality'].includes(r))}
+              canReport={isAdmin}
             />
           </div>
         )}
