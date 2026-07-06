@@ -112,15 +112,19 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
 
   return (
     <div>
-      {/* 卡:点开筛选 */}
+      {/* 卡:点开筛选(每张卡都是按钮,点击筛选对应桶的订单) */}
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {CARDS.map((c) => {
           const on = filter === c.key;
           return (
-            <button key={c.key} onClick={() => setFilter(on ? null : c.key)}
-              className={`rounded-lg border px-4 py-3 text-left transition ${c.tone} ${on ? c.active : 'hover:shadow-sm'}`}>
+            <button key={c.key} type="button" onClick={() => setFilter(on ? null : c.key)}
+              aria-pressed={on} title={on ? '再点一次取消筛选' : `点击查看「${c.label.replace('⚠ ', '')}」的订单`}
+              className={`cursor-pointer rounded-lg border px-4 py-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${c.tone} ${on ? c.active : ''}`}>
               <div className="text-2xl font-bold tabular-nums">{counts[c.key]}</div>
-              <div className="text-xs text-gray-600">{c.label}</div>
+              <div className="flex items-center justify-between text-xs text-gray-600">
+                <span>{c.label}</span>
+                <span className={`text-[11px] ${on ? 'text-indigo-600' : 'text-gray-400'}`}>{on ? '筛选中 ✕' : '点开 ›'}</span>
+              </div>
             </button>
           );
         })}
