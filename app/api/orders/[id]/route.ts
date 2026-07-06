@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 
 /**
  * DELETE /api/orders/[id]
@@ -33,17 +33,6 @@ export async function DELETE(
     return NextResponse.json({ error: '订单不存在' }, { status: 404 });
   }
 
-  // ── 防"半删残废订单"硬闸(2026-07-04 审计 P0)──
-  // inventory_transactions.order_id 是 RESTRICT + append-only 触发器:有库存流水的订单
-  // 物理删会在删完 milestones 后卡在这条 FK 报错 → 残废订单。此类单禁止物理删,走取消。
-  const { count: invCount } = await (supabase.from('inventory_transactions') as any)
-    .select('id', { count: 'exact', head: true }).eq('order_id', id);
-  if ((invCount || 0) > 0) {
-    return NextResponse.json({
-      error: '此单已有库存进出记录(收货入库/领料),不能物理删除(会残留库存流水账)。请改用「取消订单」——取消会保留可审计的历史并通知财务冲销。',
-    }, { status: 409 });
-  }
-
   // 权限(2026-07-04 用户拍板):删除订单仅 admin/财务(业务连自己草稿也不能删;
   // 业务要移除订单请走「申请取消」→ 财务审批)。
   const { data: delProf } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
@@ -53,6 +42,20 @@ export async function DELETE(
       { error: '无权删除订单:仅管理员/财务可删除。业务如需移除订单,请用「申请取消」提交财务审批。' },
       { status: 403 }
     );
+  }
+  const isAdmin = delRoles.includes('admin');
+  const isCancelled = ['cancelled', '已取消'].includes(String((order as any).lifecycle_status || ''));
+
+  // ── 库存流水硬闸(2026-07-04 审计 P0)──
+  // inventory_transactions 是 append-only(触发器禁删)+ order_id RESTRICT → 有库存流水的订单正常删不掉,走取消。
+  // 例外(2026-07-06 用户拍板):管理员对"已取消"单可「彻底清除测试单」→ 走 admin_purge_order RPC 连流水一起清。
+  const { count: invCount } = await (supabase.from('inventory_transactions') as any)
+    .select('id', { count: 'exact', head: true }).eq('order_id', id);
+  const needPurge = (invCount || 0) > 0;
+  if (needPurge && !(isAdmin && isCancelled)) {
+    return NextResponse.json({
+      error: '此单已有库存进出记录(收货入库/领料),不能物理删除(会残留库存流水账)。请改用「取消订单」——取消会保留可审计的历史并通知财务冲销。（已取消的测试单可由管理员「彻底清除」）',
+    }, { status: 409 });
   }
 
   // ── 级联清理 ──
@@ -90,10 +93,22 @@ export async function DELETE(
   } catch (e: any) { console.warn('[deleteOrder] 采购单孤儿清理失败(不阻断删除):', e?.message); }
 
   // 删除订单(procurement_items/line_items/requirements/goods_receipts/reservation 走 CASCADE)
-  const { error } = await (supabase.from('orders') as any).delete().eq('id', id);
-
-  if (error) {
-    return NextResponse.json({ error: `删除失败：${error.message}` }, { status: 500 });
+  if (needPurge) {
+    // 已取消单带库存流水 → 走 SECURITY DEFINER RPC:事务内临时禁 append-only 闸删流水,再删订单(级联)
+    const { error: purgeErr } = await (createServiceRoleClient() as any).rpc('admin_purge_order', { p_order_id: id });
+    if (purgeErr) {
+      const notFound = /function .*admin_purge_order.* does not exist|could not find/i.test(purgeErr.message || '');
+      return NextResponse.json({
+        error: notFound
+          ? '彻底清除功能的数据库函数尚未创建,请先在 Supabase 执行 20260706_admin_purge_order.sql'
+          : `彻底清除失败：${purgeErr.message}`,
+      }, { status: notFound ? 409 : 500 });
+    }
+  } else {
+    const { error } = await (supabase.from('orders') as any).delete().eq('id', id);
+    if (error) {
+      return NextResponse.json({ error: `删除失败：${error.message}` }, { status: 500 });
+    }
   }
 
   // ── 财务作废(2026-07-04 审计 P0):独立财务仓库不 CASCADE,必须 webhook 冲销应收/应付/预算 ──

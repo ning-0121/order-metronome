@@ -49,9 +49,13 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
   }
 
   async function handleDelete() {
+    const isCancelledForce = isForceDelete && ['cancelled', '已取消'].includes(String(lifecycleStatus || ''));
     const warningPrefix = isForceDelete
       ? `⚠️ 管理员强制删除\n\n该订单状态为「${lifecycleStatus}」，并非草稿。\n` +
         `删除后将同时清理：里程碑、操作日志、延期申请、附件、变更申请、通知。\n` +
+        (isCancelledForce
+          ? `⚠️ 该单已有库存流水,将走「彻底清除」——连同库存进出流水一并物理删除(仅测试单用,账本记录一并消失)。\n`
+          : '') +
         `此操作不可恢复！\n\n`
       : `确定删除订单？此操作不可恢复！\n\n`;
     const input = prompt(warningPrefix + `请输入订单号 ${orderNo} 确认删除：`);
