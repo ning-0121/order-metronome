@@ -4,6 +4,7 @@ import { formatDate } from '@/lib/utils/date';
 import { computeOrderStatus } from '@/lib/utils/order-status';
 import { OrderSearchBar } from '@/components/OrderSearchBar';
 import { ExportProductionSheetButton } from '@/components/ExportProductionSheetButton';
+import { LeftoverExportButton } from '@/components/LeftoverExportButton';
 import { InlineEditField } from '@/components/InlineEditField';
 import {
   isCustomerShipHoldFromOrder,
@@ -292,6 +293,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <LeftoverExportButton />
           <ExportProductionSheetButton />
           <Link
             href={purposeFilter === 'sample' ? '/orders/new?type=sample' : '/orders/new'}

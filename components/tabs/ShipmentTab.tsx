@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
+import { BatchAllocationEditor } from '@/components/BatchAllocationEditor';
 import { getShipmentConfirmation, createShipmentConfirmation, approveShipment, executeShipment } from '@/app/actions/shipments';
 import { getShipmentBatches, enableSplitShipment, updateShipmentBatch } from '@/app/actions/shipment-batches';
 import { createClient } from '@/lib/supabase/client';
@@ -39,6 +40,7 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
   const [showSplitSetup, setShowSplitSetup] = useState(false);
   const [splitRows, setSplitRows] = useState([{ quantity: '', etd: '', notes: '' }, { quantity: '', etd: '', notes: '' }]);
   const [editingBatch, setEditingBatch] = useState<string | null>(null);
+  const [allocBatch, setAllocBatch] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
 
   // Packing List 文件
@@ -474,6 +476,15 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
                   <div><span className="text-xs text-gray-400">实际</span><p className="font-medium">{batch.actual_ship_date || '-'}</p></div>
                   <div><span className="text-xs text-gray-400">单号</span><p className="font-medium">{batch.bl_number || batch.tracking_no || '-'}</p></div>
                 </div>
+                {/* 款色分配:填这批出了哪些款色各多少 → 剩余货物精确到款色(2026-07-06) */}
+                <button onClick={() => setAllocBatch(allocBatch === batch.id ? null : batch.id)}
+                  className="mt-1 text-xs text-teal-700 hover:underline">
+                  🧩 {allocBatch === batch.id ? '收起款色分配' : '分配款色(填这批各款色出了多少)'}
+                </button>
+                {allocBatch === batch.id && (
+                  <BatchAllocationEditor orderId={orderId} batchId={batch.id}
+                    canEdit={isAdmin || currentRole === 'sales' || currentRole === 'merchandiser'} />
+                )}
                 {editingBatch === batch.id && (
                   <div className="mt-2 pt-2 border-t border-gray-100 grid grid-cols-2 gap-2">
                     <select value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))} className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
