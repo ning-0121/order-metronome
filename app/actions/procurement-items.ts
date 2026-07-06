@@ -266,6 +266,28 @@ export async function listBomConsumptionLines(orderId: string) {
   const { data, error } = await (supabase.from('materials_bom') as any)
     .select('*').eq('order_id', orderId).order('style_no').order('color');
   if (error) return { error: friendlyError(error) };
+
+  // 预算单耗:从报价基线(内部报价单冻结、人已确认)带过来,给采购核定时对照(2026-07-06 用户)。
+  // 按 款号+物料 精确匹配,配不上退回 物料名 匹配。
+  const { data: cb } = await (supabase.from('order_cost_baseline') as any)
+    .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
+  const baseLines: any[] = (cb as any)?.quote_baseline_lines || [];
+  const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+  const byStyleMat = new Map<string, number>();
+  const byMat = new Map<string, number>();
+  for (const bl of baseLines) {
+    const c = Number(bl.quote_consumption) || 0;
+    if (!c) continue;
+    const mat = norm(bl.material_name);
+    if (bl.style_no) byStyleMat.set(`${norm(bl.style_no)}¦${mat}`, c);
+    if (!byMat.has(mat)) byMat.set(mat, c);
+  }
+  const quoteConsOf = (b: any): number | null => {
+    const mat = norm(b.material_name);
+    if (b.style_no) { const v = byStyleMat.get(`${norm(b.style_no)}¦${mat}`); if (v != null) return v; }
+    return byMat.get(mat) ?? null;
+  };
+
   const rows = (data || []).map((b: any) => ({
     id: b.id,
     style_no: b.style_no || null,
@@ -275,6 +297,7 @@ export async function listBomConsumptionLines(orderId: string) {
     spec: b.spec || null,
     unit: b.unit || null,
     development_consumption: b.qty_per_piece ?? null,          // 开发单耗(业务,只读)
+    budget_consumption: quoteConsOf(b),                        // 预算单耗(报价基线,只读带入)
     production_consumption: b.production_consumption ?? null,  // 大货单耗(采购核定)
     required: b.material_type === 'fabric' || b.material_type === 'lining',  // 布料必核
   }));
