@@ -346,7 +346,7 @@ export default async function OrderDetailPage({
                   isOrderOwner={isOrderOwner}
                   isFinance={currentRoles.includes('finance')}
                 />
-                {isAdmin && <RecalcButton orderId={id} orderNo={orderData.order_no} />}
+                {/* 重算排期按钮已移除(2026-07-06 用户:不需要) */}
                 {(orderData.order_type === 'sample' || (orderData as any).order_purpose === 'sample') && (
                   <ExportSampleRequestButton orderId={id} />
                 )}

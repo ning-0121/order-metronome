@@ -243,17 +243,7 @@ export function OrderActions({ orderId, orderNo, lifecycleStatus, isAdmin, isOrd
         </button>
       )}
 
-      {/* 重新同步到财务系统（admin / finance） */}
-      {canResyncFinance && (
-        <button
-          onClick={handleResyncFinance}
-          disabled={loading}
-          className="text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
-          title="将订单主数据（金额/币种/付款条款等）重新推送给外部财务系统。不涉及收款记录。"
-        >
-          重新同步到财务系统
-        </button>
-      )}
+      {/* 重新同步到财务系统按钮已移除(2026-07-06 用户:创建即自动同步财务,失败走 outbox 自动重试,无需手动) */}
 
       {/* 管理员/CEO：直接取消 */}
       {canDirectCancel && !showCancelForm && (
