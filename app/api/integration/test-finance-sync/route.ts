@@ -61,7 +61,7 @@ export async function POST() {
   // 拼接 URL（与 finance-sync.ts 完全一致）
   const fullUrl = `${FINANCE_SYSTEM_URL}/api/integration/webhook`
 
-  // 构造 payload（完全模仿 finance-sync.ts 的双签名逻辑）
+  // 构造 payload（与 finance-sync.ts deliverToFinance 完全一致:签名只走 header,不再内嵌 payload.signature——审计A1）
   const requestId = `om-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const payload: any = {
     event: 'test.ping',
@@ -73,17 +73,14 @@ export async function POST() {
       from: 'admin diagnostic endpoint /api/integration/test-finance-sync',
       triggered_by_user_id: user.id,
     },
-    signature: '',
   }
 
   function signHmac(text: string): string {
     return createHmac('sha256', INTEGRATION_WEBHOOK_SECRET).update(text).digest('hex')
   }
 
-  const unsignedBody = JSON.stringify(payload)
-  payload.signature = signHmac(unsignedBody)
   const signedBody = JSON.stringify(payload)
-  const headerSignature = signHmac(signedBody)
+  const headerSignature = signHmac(signedBody)   // 对最终 body 做一次 HMAC,与生产投递一致
 
   // 真发送
   const startedAt = Date.now()
