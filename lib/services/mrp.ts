@@ -44,6 +44,7 @@ export interface MrpMaterialInput {
   unit?: string | null;
   qty_per_piece?: number | null;
   loss_rate?: number | null;   // %
+  pack_size?: number | null;   // 每包件数(打包辅料;N件一包→N);需求=件数×单耗÷每包件数。空/1=不打包
 }
 
 export interface MrpInput {
@@ -108,7 +109,9 @@ export function computeMaterialRequirement(input: MrpInput): MrpResult {
   if (consumption == null || !(consumption > 0)) {
     status = 'needs_input';   // 缺单耗
   } else {
-    gross_requirement = round1(po_quantity * consumption);
+    // 每包件数(打包辅料,如中包袋6件一中包→6):需求 = 件数×单耗÷每包件数(2026-07-07 用户拍板)。空/≤1 不打包。
+    const pack = material.pack_size != null && Number(material.pack_size) > 1 ? Number(material.pack_size) : 1;
+    gross_requirement = round1(po_quantity * consumption / pack);
     // 2026-07-03(用户实测「系统多算两匹布」):损耗不再暗算进净需求。
     // 净需求 = 业务口径的裸数(数量×单耗−库存−复用);损耗改为「采购损耗%」在
     // 采购核料层明示可改(建议采购=净需求×(1+损耗%),口径唯一,不再双重叠加)。

@@ -75,6 +75,7 @@ export async function addBomItem(orderId: string, item: {
   placement?: string; color?: string; spec?: string;
   notes?: string; special_requirements?: string;
   style_no?: string;   // S1.2:归属款号(空 = 整单通用)
+  pack_size?: number;  // 每包件数(打包辅料;需求÷每包件数)
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -91,7 +92,7 @@ export async function addBomItem(orderId: string, item: {
     });
   }
 
-  const { error } = await (supabase.from('materials_bom') as any).insert({
+  const insertRow: Record<string, any> = {
     order_id: orderId, created_by: user.id,
     material_name: item.material_name.trim(),
     material_type: item.material_type || 'other',
@@ -107,8 +108,14 @@ export async function addBomItem(orderId: string, item: {
     notes: item.notes || null,
     special_requirements: item.special_requirements || null,
     style_no: item.style_no?.trim() || null,
+    pack_size: item.pack_size != null && item.pack_size > 1 ? item.pack_size : null,   // 每包件数
     source: 'manual',                      // 手动新增(Phase 2A 来源标记)
-  });
+  };
+  let { error } = await (supabase.from('materials_bom') as any).insert(insertRow);
+  if (error && /pack_size|column .* does not exist/i.test(error.message || '')) {
+    delete insertRow.pack_size;   // 20260707 迁移未跑 → 降级(不 brick 加料)
+    ({ error } = await (supabase.from('materials_bom') as any).insert(insertRow));
+  }
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
   return {};
@@ -629,7 +636,7 @@ export async function submitBomToProcurement(
 
   // live BOM(完整列,用于冻结快照;style_no 用于 R1 按款算需求)
   const { data: bomRows, error: bomErr } = await (supabase.from('materials_bom') as any)
-    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier, style_no')
+    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier, style_no, pack_size')
     .eq('order_id', orderId);
   if (bomErr) return { error: bomErr.message };
   if (!bomRows || bomRows.length === 0) return { error: '原辅料单为空,请先录入物料再提交' };
@@ -775,9 +782,15 @@ export async function submitBomToProcurement(
       material_name: r.material_name, material_type: r.material_type, material_code: r.material_code,
       specification: r.spec, color: r.color, placement: r.placement,
       qty_per_piece: r.qty_per_piece, unit: r.unit, loss_rate: waste_pct,
+      pack_size: r.pack_size ?? null,   // 每包件数(打包辅料;冻结带过去,MRP 需求÷每包件数)
       suggested_supplier: r.supplier, sample_status: null, remarks: null,
     }));
-    const { error: lineErr } = await (supabase.from('material_package_snapshot_lines') as any).insert(lineRows);
+    let { error: lineErr } = await (supabase.from('material_package_snapshot_lines') as any).insert(lineRows);
+    if (lineErr && /pack_size|column .* does not exist/i.test(lineErr.message || '')) {
+      // pack_size 迁移(20260707)未执行 → 降级去列重插(不 brick 提交),提醒执行迁移
+      const plain = lineRows.map(({ pack_size, ...rest }) => rest);
+      ({ error: lineErr } = await (supabase.from('material_package_snapshot_lines') as any).insert(plain));
+    }
     if (lineErr) return { error: `快照行创建失败:${lineErr.message}` };
   }
 
@@ -872,6 +885,7 @@ export async function submitBomToProcurement(
         material_name: line.material_name, material_type: line.material_type,
         material_code: line.material_code, unit: line.unit,
         qty_per_piece: line.qty_per_piece, loss_rate: line.loss_rate,
+        pack_size: line.pack_size,   // 每包件数 → MRP 需求÷每包件数(中包袋6件一中包→6)
       },
       po_quantity: poQty, stageAnchors, inventoryQty, reuseQty: 0, today,
     });

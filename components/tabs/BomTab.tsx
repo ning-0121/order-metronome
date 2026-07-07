@@ -15,7 +15,7 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '' };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '' };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -163,6 +163,7 @@ export function BomTab({ orderId }: { orderId: string }) {
       unit: form.unit, supplier: form.supplier || undefined, spec: form.spec || undefined,
       notes: form.notes || undefined, special_requirements: form.special_requirements || undefined,
       style_no: form.style_no?.trim() || undefined,
+      pack_size: form.pack_size ? parseFloat(form.pack_size) : undefined,   // 每包件数(打包辅料;需求÷每包件数)
       // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
       ...(editId && editingTemplate ? { override_reason: form.override_reason || undefined } : {}),
     };
@@ -377,6 +378,8 @@ export function BomTab({ orderId }: { orderId: string }) {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <input placeholder="每包件数(如6件一中包填6)" type="number" step="1" min="1" value={form.pack_size} onChange={e => set('pack_size', e.target.value)}
+          title="打包辅料(中包袋/外箱等)填每包件数;需求=件数÷每包件数。空=不打包" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
       {editId && editingTemplate && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">
