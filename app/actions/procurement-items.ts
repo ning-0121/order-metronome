@@ -289,10 +289,31 @@ export async function listBomConsumptionLines(orderId: string) {
     return byMat.get(mat) ?? { cons: null, price: null };
   };
 
+  // 数量(件数,#1 用户):按 款×色 从 order_line_items 取;整单通用辅料行(无款号)→ 订单总数
+  const { data: ord } = await (supabase.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+  const orderQty = Number((ord as any)?.quantity) || 0;
+  const { data: lis } = await (supabase.from('order_line_items') as any)
+    .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
+  const byStyle = new Map<string, number>();
+  const byStyleColor = new Map<string, number>();
+  for (const li of (lis || [])) {
+    const q = Number((li as any).qty_pcs) || 0;
+    const st = norm((li as any).style_no);
+    byStyle.set(st, (byStyle.get(st) || 0) + q);
+    for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) byStyleColor.set(`${st}¦${norm(col)}`, q);
+  }
+  const pieceOf = (b: any): number | null => {
+    const st = norm(b.style_no);
+    if (b.style_no && b.color) { const v = byStyleColor.get(`${st}¦${norm(b.color)}`); if (v != null) return v; }
+    if (b.style_no) { const v = byStyle.get(st); if (v) return v; }
+    return orderQty || null;   // 整单通用(无款号)行 → 订单总数
+  };
+
   const rows = (data || []).map((b: any) => ({
     id: b.id,
     style_no: b.style_no || null,
     color: b.color || null,
+    pieces: pieceOf(b),                                        // 数量(件数,#1):供采购核料看单
     material_name: b.material_name || null,
     material_type: b.material_type || null,
     spec: b.spec || null,

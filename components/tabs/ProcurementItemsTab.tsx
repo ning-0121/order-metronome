@@ -598,7 +598,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400">
-                {['款号', '颜色', '物料', '类型', '开发单耗(业务)', '报价单耗', '报价单价', '大货单耗(业务填·只读)', '抛量%(采购填)', '单位'].map(h => (
+                {['款号', '颜色', '物料', '类型', '数量', '开发单耗(业务)', '报价单耗', '报价单价', '大货单耗(业务填·只读)', '抛量%(采购填)', '单位'].map(h => (
                   <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr></thead>
@@ -609,6 +609,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     <td className="py-1.5 px-2">{l.color || '—'}</td>
                     <td className="py-1.5 px-2 text-gray-800">{l.material_name || '—'}</td>
                     <td className="py-1.5 px-2">{l.required ? <span className="text-amber-700 font-medium">布料·必核</span> : <span className="text-gray-400">辅料·可选</span>}</td>
+                    <td className="py-1.5 px-2 font-medium text-gray-800" title="该款×色件数(整单通用辅料=订单总数)">{l.pieces ?? '—'}</td>
                     <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
                     <td className="py-1.5 px-2 font-medium text-indigo-600" title="从内部报价单冻结的报价基线带入,只读">{l.budget_consumption ?? '—'}</td>
                     <td className="py-1.5 px-2 text-indigo-600" title="报价基线单价,只读,供比对">{l.budget_unit_price != null ? `¥${l.budget_unit_price}` : '—'}</td>
