@@ -922,13 +922,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             <Read label="总需求(系统)" value={sel.total_required_qty} />
             <Read label="开发单耗(系统)" value={sel.development_consumption} />
             {/* 汇总级大货单耗已废除(2026-07-03:不同款单耗不同,平均/折算是错的)——改「按款核定大货单耗」表格,总需求=Σ每款件数×该款大货单耗 */}
-            <Field label="采购损耗%" k="procurement_loss_pct" form={form} set={set} type="number" />
+            {/* 2026-07-07:采购损耗%并入「抛量%」(唯一 buffer),此字段值=抛量%(核料对照①填,归并带过来);不再双 3% */}
+            <Field label="抛量%" k="procurement_loss_pct" form={form} set={set} type="number" />
             <Field label="安全库存" k="safety_stock_qty" form={form} set={set} type="number" />
             {/* MOQ 字段撤掉(2026-07-03 用户拍板不需要);列保留,已录过的旧值仍参与建议量取整 */}
             <div>
               <span className="text-gray-500">建议采购(实时算)</span>
               <div className="mt-1 w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 font-semibold text-emerald-800"
-                title="= 总需求 × (大货单耗÷开发单耗) × (1+采购损耗%) + 安全库存,按 MOQ 向上取整。改左边任何数,这里立即重算。">
+                title="采购量 = 总需求(裸数) × (1 + 抛量%) + 安全库存,按 MOQ 向上取整。总需求已是裸数,抛量只在这里算一次(不再双 3%)。">
                 {liveSuggested ?? '—'}
                 {liveSuggested != null && sel.suggested_purchase_qty != null && liveSuggested !== Number(sel.suggested_purchase_qty) && (
                   <span className="ml-1 text-[10px] font-normal text-emerald-600">(保存前:{sel.suggested_purchase_qty})</span>

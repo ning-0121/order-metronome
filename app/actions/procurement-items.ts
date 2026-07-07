@@ -459,12 +459,12 @@ export async function consolidateOrderProcurementItems(
     } else {
       lineTotal = (extra?.prod != null && pieces != null) ? pieces * extra.prod : net;
     }
-    // 抛量(2026-07-06 用户拍板):采购量 = 基础用量 ×(1 + 抛量%)。抛量采购逐料填。
-    if (extra?.overPct) lineTotal = lineTotal * (1 + extra.overPct / 100);
+    // 2026-07-07 用户拍板:抛量%是【唯一】buffer,只在【采购量=总需求×(1+抛量%)】处算一次。
+    //   总需求(g.total)是裸数(件数×大货单耗),不再把抛量乘进总需求 —— 否则和建议采购的损耗叠成双 3%。
     let g = groups.get(key);
-    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, imgs: [] as string[], reqDate: null, orderBy: null }; groups.set(key, g); }
+    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, overTop: 0, imgs: [] as string[], reqDate: null, orderBy: null }; groups.set(key, g); }
     g.total += lineTotal; g.count += 1;
-    if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; }   // 主导来源的开发单耗/损耗作展示参考
+    if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; g.overTop = extra?.overPct ?? 0; }   // 主导来源的开发单耗/抛量作代表
     // 汇集来源图(去重,封顶 8 张)
     const imgs = sl?.bom_id ? (bomImages.get(sl.bom_id) || []) : [];
     for (const u of imgs) if (g.imgs.length < 8 && !g.imgs.includes(u)) g.imgs.push(u);
@@ -531,16 +531,17 @@ export async function consolidateOrderProcurementItems(
     if (!ex && !apply.create) continue;
     if (ex) {
       const devRep = ex.development_consumption ?? g.devTop;
-      // 采购没填过损耗 → 预填来源损耗参考(原基线3%),从此损耗只在这一处明算
-      const lossRep = ex.procurement_loss_pct ?? g.lossTop;
+      // 2026-07-07:唯一 buffer = 抛量%(核料对照采购逐料填→over_purchase_pct)。采购量=总需求×(1+抛量%)。
+      // procurement_loss_pct 复用为该 buffer 存储位(值=抛量),不再单列采购损耗% → 不再双 3%。
+      const buffer = g.overTop;
       const suggested = computeSuggestedPurchaseQty({
         total_required_qty: g.total, development_consumption: devRep,
-        production_consumption: ex.production_consumption, procurement_loss_pct: lossRep,
+        production_consumption: ex.production_consumption, procurement_loss_pct: buffer,
         safety_stock_qty: ex.safety_stock_qty, moq: ex.moq,
       });
       const upd: any = {
         total_required_qty: g.total, source_count: g.count, development_consumption: devRep,
-        procurement_loss_pct: lossRep,
+        procurement_loss_pct: buffer,
         suggested_purchase_qty: suggested, updated_at: now,
       };
       // 图片合并:来源 BOM 新增的图并进去,采购已补拍的保留(union 去重,封顶 8)
@@ -578,7 +579,7 @@ export async function consolidateOrderProcurementItems(
     } else {
       seq++;
       const suggested = computeSuggestedPurchaseQty({
-        total_required_qty: g.total, development_consumption: g.devTop, procurement_loss_pct: g.lossTop,
+        total_required_qty: g.total, development_consumption: g.devTop, procurement_loss_pct: g.overTop,
       });
       const row: any = {
         order_id: orderId, consolidation_key: g.key,
@@ -587,7 +588,7 @@ export async function consolidateOrderProcurementItems(
         category: g.category, color: g.color, unit: g.unit,
         purchase_unit: g.unit,                // 采购计量单位默认=需求单位(物料录入时选过,买法不同采购再改)
         total_required_qty: g.total, source_count: g.count, development_consumption: g.devTop,
-        procurement_loss_pct: g.lossTop,      // 预填损耗参考(可见可改;总需求已是裸数,不再暗含)
+        procurement_loss_pct: g.overTop,      // buffer=抛量%(唯一;总需求裸数,采购量=总需求×(1+抛量%))
         suggested_purchase_qty: suggested, status: 'draft', created_by: user.id,
       };
       if (g.imgs.length > 0) row.image_urls = g.imgs;   // 业务传的色卡/辅料图随归并流转
