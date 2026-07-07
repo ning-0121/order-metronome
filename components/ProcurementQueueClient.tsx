@@ -6,6 +6,7 @@ import Link from 'next/link';
 import {
   transitionProcurementLine,
   chaseProcurementLine,
+  updateProcurementLineFields,
   recordGoodsReceipt,
   recordReceiptBatch,
   listReceiptBatches,
@@ -193,7 +194,22 @@ export function ProcurementQueueClient({
             <p className="px-4 pt-2 text-[11px] text-gray-500">这些料还没归到采购单。下单请到「待采购工作台」归成采购单 → 审批 → 强制传凭证下单(不再逐行下单)。</p>
             {pendingOrder.map(l => (
               <RowShell key={l.id} line={l}>
-                <span className="text-xs text-gray-400">需到 {fmt(l.required_by)}</span>
+                <span className="text-xs text-gray-400">需到 {fmt(l.required_by)} · {l.ordered_qty ?? '—'} {l.ordered_unit}</span>
+                <button className={`${btn} border border-indigo-200 text-indigo-600 hover:bg-indigo-50`} disabled={busy === `${l.id}:edit`}
+                  title="改尺码 / 数量 / 规格(仅未归采购单可改)"
+                  onClick={async () => {
+                    const SIZES = ['', 'XXS', 'XS', 'S', 'M', 'L', 'XL', '1XL', '2XL', '3XL', '4XL', '5XL'];
+                    const v = await prompt({
+                      title: `改采购行「${l.material_name}」`,
+                      fields: [
+                        { name: 'size', label: '尺码', type: 'select', options: SIZES.map(s => ({ value: s, label: s || '(不分码)' })), defaultValue: (l as any).size || '' },
+                        { name: 'ordered_qty', label: '数量', type: 'number', defaultValue: String(l.ordered_qty ?? '') },
+                        { name: 'specification', label: '规格(如 40*30)', type: 'text', defaultValue: (l as any).specification || '' },
+                      ],
+                      confirmText: '保存',
+                    });
+                    if (v) run(`${l.id}:edit`, () => updateProcurementLineFields(l.id, { size: v.size, ordered_qty: v.ordered_qty ? Number(v.ordered_qty) : undefined, specification: v.specification }));
+                  }}>✏️ 改</button>
                 <button className={`${btn} border border-gray-200 text-gray-500`} disabled={busy === `${l.id}:cancel`}
                   onClick={async () => { const v = await prompt({ title: '取消该采购行', fields: [{ name: 'reason', label: '取消理由', type: 'textarea', required: true }], confirmText: '确认取消', }); if (v) run(`${l.id}:cancel`, () => transitionProcurementLine(l.id, 'cancelled', { note: v.reason })); }}>取消</button>
               </RowShell>

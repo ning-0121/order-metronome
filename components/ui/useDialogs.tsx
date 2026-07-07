@@ -28,11 +28,12 @@ import { useCallback, useRef, useState, type ReactNode } from 'react';
 export interface DialogField {
   name: string;
   label: string;
-  type?: 'text' | 'number' | 'textarea';
+  type?: 'text' | 'number' | 'textarea' | 'select';
   required?: boolean;
   placeholder?: string;
   suffix?: string;          // 单位等后缀
   defaultValue?: string;
+  options?: Array<{ value: string; label: string } | string>;   // type='select' 用
 }
 
 interface ConfirmOpts {
@@ -122,7 +123,17 @@ export function useDialogs() {
                     {f.label}{f.required && <span className="text-rose-500"> *</span>}
                   </label>
                   <div className="flex items-center gap-2">
-                    {f.type === 'textarea' ? (
+                    {f.type === 'select' ? (
+                      <select
+                        value={values[f.name] ?? ''}
+                        onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-indigo-400">
+                        {(f.options || []).map((o) => {
+                          const opt = typeof o === 'string' ? { value: o, label: o } : o;
+                          return <option key={opt.value} value={opt.value}>{opt.label}</option>;
+                        })}
+                      </select>
+                    ) : f.type === 'textarea' ? (
                       <textarea
                         autoFocus={active.opts.fields[0].name === f.name}
                         rows={2} value={values[f.name] ?? ''} placeholder={f.placeholder}

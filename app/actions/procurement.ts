@@ -807,6 +807,34 @@ export async function transitionProcurementLine(
 }
 
 /**
+ * N1/N3:改采购行的 尺码 / 规格 / 数量(仅未归采购单的 draft/pending_order 行;已下单走补量/取消)。
+ * 采购手动调整自动拆的各码量、补尺码、手填规格(如包装袋 40*30)。
+ */
+export async function updateProcurementLineFields(
+  lineItemId: string,
+  patch: { size?: string | null; specification?: string | null; ordered_qty?: number | null },
+): Promise<{ ok?: boolean; error?: string }> {
+  const access = await checkOperator();
+  if (!access.ok) return { error: access.error };
+  const svc = createServiceRoleClient();
+  const { data: line } = await (svc.from('procurement_line_items') as any)
+    .select('id, order_id, line_status, purchase_order_id').eq('id', lineItemId).maybeSingle();
+  if (!line) return { error: '采购行不存在' };
+  if ((line as any).purchase_order_id || !['draft', 'pending_order'].includes((line as any).line_status)) {
+    return { error: '已归采购单/已下单的行不能直接改(改量走「补数量」,改错走「取消」)' };
+  }
+  const upd: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (patch.size !== undefined) upd.size = (patch.size || '').trim() || null;
+  if (patch.specification !== undefined) upd.specification = (patch.specification || '').trim() || null;
+  if (patch.ordered_qty != null && Number(patch.ordered_qty) > 0) upd.ordered_qty = Number(patch.ordered_qty);
+  const { error } = await (svc.from('procurement_line_items') as any).update(upd).eq('id', lineItemId);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${(line as any).order_id}`);
+  revalidatePath('/procurement');
+  return { ok: true };
+}
+
+/**
  * 催货留痕：chase_count+1 + last_chased_at + 日志；
  * 达到 CHASE_ESCALATION_THRESHOLD 的整数倍 → 通知管理员（procurement_manager 角色注册后改发 PM）。
  */
