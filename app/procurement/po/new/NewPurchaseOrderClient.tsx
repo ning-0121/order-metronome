@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createPurchaseOrder } from '@/app/actions/purchase-orders';
 import { consolidationKey } from '@/lib/services/procurement-consolidation';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { SearchableSelect } from '@/components/SearchableSelect';
 
 export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[]; lines: any[] }) {
   const router = useRouter();
@@ -69,11 +70,9 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
       <section className="bg-white rounded-xl border border-gray-200 p-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label className="block text-xs text-gray-500 mb-1">供应商 *</label>
-          <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">
-            <option value="">— 选择供应商 —</option>
-            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchableSelect options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+            value={supplierId} onChange={setSupplierId} placeholder="选择 / 搜索供应商"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white" />
           {suppliers.length === 0 && <p className="text-xs text-amber-600 mt-1">还没有供应商,<Link href="/suppliers" className="underline">先去建</Link></p>}
         </div>
         <div>

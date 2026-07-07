@@ -279,6 +279,8 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
     material_name: l.material_name ?? null,
     material_code: l.material_code ?? null,
     category: l.category ?? null,
+    // 预算桶(2026-07-07 用户拍板:辅料不分细类,面料/辅料两桶即可)。财务按 budget_bucket 汇总预算。
+    budget_bucket: l.category === 'fabric' ? 'fabric' : 'accessory',
     supplier_id: l.supplier_id ?? null,
     supplier_name: l.supplier_name ?? null,
     ordered_qty: num(l.ordered_qty),

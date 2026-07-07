@@ -6,6 +6,7 @@ import { createPurchaseOrder } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import type { NettingGroup } from '@/lib/services/netting';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { SearchableSelect } from '@/components/SearchableSelect';
 
 /**
  * 待采购工作台 —— 未归单的待下单采购行,按 consolidation_key 自动分组(跨订单同料同色同规格)。
@@ -88,11 +89,9 @@ export function NettingClient() {
       <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col sm:flex-row sm:items-end gap-3">
         <div className="flex-1">
           <label className="block text-xs text-gray-500 mb-1">下单供应商(两个动作共用)</label>
-          <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">
-            <option value="">— 选择供应商 —</option>
-            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchableSelect options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+            value={supplierId} onChange={setSupplierId} placeholder="选择 / 搜索供应商"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white" />
         </div>
         <p className="text-xs text-gray-500 sm:pb-2">
           共 <b>{groups.length}</b> 组待归单{crossOrderCount > 0 && <> · <span className="text-indigo-600">{crossOrderCount} 组可跨订单合并</span></>}

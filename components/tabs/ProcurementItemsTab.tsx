@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { SearchableSelect } from '@/components/SearchableSelect';
 import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
@@ -982,21 +983,18 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             <label className="block">
               <span className="text-gray-500">确认供应商</span>
-              <select value={form.confirmed_supplier_name ?? ''}
-                onChange={e => {
-                  const name = e.target.value;
-                  set('confirmed_supplier_name', name);
-                  const sup = supplierOptions.find(s => s.name === name);
-                  if (sup?.contact_name && !form.supplier_contact) set('supplier_contact', sup.contact_name);
-                }}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1.5 bg-white">
-                <option value="">— 选择供应商 —</option>
-                {/* 旧数据手敲的名字不在主数据里 → 保留为一个选项,不丢 */}
-                {form.confirmed_supplier_name && !supplierOptions.some(s => s.name === form.confirmed_supplier_name) && (
-                  <option value={form.confirmed_supplier_name}>{form.confirmed_supplier_name}(手工历史)</option>
-                )}
-                {supplierOptions.map(s => <option key={s.id} value={s.name}>{s.name}{s.main_category ? `(${s.main_category})` : ''}</option>)}
-              </select>
+              <div className="mt-1">
+                <SearchableSelect allowFreeText
+                  options={supplierOptions.map(s => ({ value: s.name, label: `${s.name}${s.main_category ? `(${s.main_category})` : ''}` }))}
+                  value={form.confirmed_supplier_name ?? ''}
+                  onChange={(name) => {
+                    set('confirmed_supplier_name', name);
+                    const sup = supplierOptions.find(s => s.name === name);
+                    if (sup?.contact_name && !form.supplier_contact) set('supplier_contact', sup.contact_name);
+                  }}
+                  placeholder="选择 / 搜索供应商"
+                  className="w-full rounded-lg border border-gray-300 px-2 py-1.5 bg-white" />
+              </div>
               <a href="/suppliers" target="_blank" className="text-[10px] text-indigo-500 hover:underline">没有?去建供应商 →</a>
               {/* ① 供应商记忆:同物料上次从谁家买的、什么价 */}
               {sel.last_purchase && (
