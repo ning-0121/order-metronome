@@ -92,6 +92,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       fd.append('file', file);
       const res = await parsePO(fd);
       if (!res.ok || !res.data) { setMsg('❌ ' + (res.error || 'AI 解析失败')); setParsing(false); return; }
+      const isImg = /\.(png|jpe?g)$/i.test(file.name);
+      const notes = (res.data.confidence_notes || []).filter(Boolean).join('；');
       const aiStyles: Style[] = (res.data.styles || []).map((s: any) => ({
         style_no: s.style_no || '', product_name: s.product_name || '', product_name_en: '', image_url: '',
         fabric_name: s.material || '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', po_unit_price: '', set_multiplier: 1,
@@ -99,7 +101,13 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
           color_cn: c.color_cn || '', color_en: c.color_en || '', sizes: c.sizes || {}, qty: c.qty || 0, remark: c.packaging || '',
         })),
       }));
-      if (aiStyles.length === 0) { setMsg('❌ AI 没解析到任何款'); setParsing(false); return; }
+      if (aiStyles.length === 0) {
+        // 复杂版式(合并单元格/图片/配比散在备注)Excel 转文本常读不全 → 引导截图当图片传(vision 更稳)
+        setMsg(`❌ AI 没解析到款${notes ? `（AI:${notes}）` : ''}。${isImg ? '这张图 AI 也没读到,请换更清晰/更完整的截图。' : '年年旺这类复杂版式建议:把这张表截图(含款号/颜色数量/配比 S:M:L)当图片传给「🤖 AI 解析配比」,vision 比 Excel 转文本准得多。'}`);
+        setParsing(false); return;
+      }
+      // 提示 sizes 是否空(配比没摊出来)
+      const noSizeStyles = aiStyles.filter((s) => s.colors.every((c) => !c.sizes || Object.keys(c.sizes).length === 0)).length;
       // 并入(同 code parse:同款号合并颜色行,否则新增款)
       const merged: Style[] = styles.map((s) => ({ ...s, colors: [...s.colors] }));
       for (const ps of aiStyles) {
@@ -112,7 +120,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       for (const ps of aiStyles) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) labelSet.add(k);
       setSizeLabels(sortSizeKeys([...labelSet]));
       const nColors = aiStyles.reduce((a, s) => a + s.colors.length, 0);
-      setMsg(`✅ AI 解析 ${aiStyles.length} 款 / ${nColors} 颜色行(配比已按比例摊成每码件数),请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}`);
+      const sizeWarn = noSizeStyles > 0 ? ` ⚠ 有 ${noSizeStyles} 款没摊出尺码(配比没读到),请手动补尺码或截图当图片重传` : '';
+      setMsg(`✅ AI 解析 ${aiStyles.length} 款 / ${nColors} 颜色行(配比已按比例摊成每码件数),请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}${sizeWarn}`);
     } catch (err: any) {
       setMsg('❌ AI 解析失败:' + (err?.message || String(err)));
     }
