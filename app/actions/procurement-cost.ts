@@ -87,11 +87,27 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   const orderQty = Number((order as any).quantity) || 0;
 
   const { data: base } = await (svc.from('order_cost_baseline') as any)
-    .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
+    .select('quote_baseline_lines, quote_style_budgets').eq('order_id', orderId).maybeSingle();
   const baseLines: any[] = (base as any)?.quote_baseline_lines || [];
+  const styleBudgets: any[] = (base as any)?.quote_style_budgets || [];
 
   const { data: lines } = await (svc.from('procurement_line_items') as any)
-    .select('material_name, ordered_qty, received_qty, unit_price, ordered_amount, ordered_unit, procurement_item_id').eq('order_id', orderId);
+    .select('material_name, category, ordered_qty, received_qty, unit_price, ordered_amount, ordered_unit, procurement_item_id').eq('order_id', orderId);
+
+  // 辅料预算(2026-07-07 用户拍板:辅料合并一个总额)= Σ(该款辅料费用合计 × 该款件数)。
+  // 逐款件数取 order_line_items;款预算无该款时用整单数量兜底(单款单)。
+  const { data: liQ } = await (svc.from('order_line_items') as any).select('style_no, qty_pcs').eq('order_id', orderId);
+  const qtyByStyle = new Map<string, number>();
+  for (const li of (liQ || [])) { const st = String((li as any).style_no ?? '').trim().toLowerCase(); qtyByStyle.set(st, (qtyByStyle.get(st) || 0) + (Number((li as any).qty_pcs) || 0)); }
+  let trimBudgetTotal = 0; let hasTrimBudget = false;
+  for (const sb of styleBudgets) {
+    const tb = Number((sb as any).trim_budget); if (!(tb > 0)) continue;
+    hasTrimBudget = true;
+    const st = String((sb as any).style_no ?? '').trim().toLowerCase();
+    const q = qtyByStyle.get(st) || (styleBudgets.length === 1 ? orderQty : 0);
+    trimBudgetTotal += tb * q;
+  }
+  trimBudgetTotal = Math.round(trimBudgetTotal * 100) / 100;
 
   const { getOrderLeftover } = await import('@/app/actions/inventory');
   const leftoverRows: any[] = ((await getOrderLeftover(orderId)) as any).data || [];
@@ -127,9 +143,12 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     else budgetMap.set(k, { name: b.material_name, unit: b.quote_unit || null, consumption: cons, price });
   }
   // 实际(下单/送货)按 料+色 聚合(同色的行才合并 → 单价是该色真实价,不是跨色均价)
+  // 顺带记哪些料是布料(category=fabric / 在报价基线里);辅料(其余)要合并成一行总额
+  const fabricMats = new Set<string>([...budgetMap.keys()]);
   const actualMap = new Map<string, { name: string; color: string | null; mat: string; unit: string | null; oQty: number; oAmt: number; rQty: number; pSum: number; pN: number }>();
   for (const l of (lines || [])) {
     if (!norm(l.material_name)) continue;
+    if (norm(l.category) === 'fabric') fabricMats.add(norm(l.material_name));
     const color = l.procurement_item_id ? (colorByPi.get(l.procurement_item_id) ?? null) : null;
     const k = ckey(l.material_name, color);
     const a = actualMap.get(k) || { name: l.material_name, color, mat: norm(l.material_name), unit: l.ordered_unit || null, oQty: 0, oAmt: 0, rQty: 0, pSum: 0, pN: 0 };
@@ -152,8 +171,10 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   const matsWithRows = new Set<string>([...colorKeys].map((k) => k.split('¦')[0]));
   for (const bm of budgetMap.keys()) { if (!matsWithRows.has(bm)) colorKeys.add(`${bm}¦`); }
 
+  const isFabricKey = (k: string) => fabricMats.has(k.split('¦')[0]);
   const budgetGiven = new Set<string>();   // 每料预算只挂到它的第一行,避免总额被色数放大
-  const rows = [...colorKeys].map((k) => {
+  // 布料:逐料+色成行(分类型·同色加总,报价基线对照);辅料:全部并成「辅料合计」一行(2026-07-07 用户拍板)
+  const fabricRows = [...colorKeys].filter(isFabricKey).map((k) => {
     const a = actualMap.get(k); const lo = leftoverMap.get(k);
     const mat = k.split('¦')[0];
     const b = budgetMap.get(mat);
@@ -185,12 +206,27 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     };
   }).sort((x, y) => (y.ordered.total || 0) - (x.ordered.total || 0));
 
+  // 辅料合计一行:辅料预算(trim_budget×件数)vs 下单总额(比总额,不分细类)。混单位 → 只比总额,不显数量。
+  const trimKeys = [...colorKeys].filter((k) => !isFabricKey(k));
+  let toAmt = 0;
+  for (const k of trimKeys) { const a = actualMap.get(k); if (a) toAmt += a.oAmt; }
+  toAmt = r2(toAmt);
+  const trimRows = (trimKeys.length > 0 || hasTrimBudget) ? [{
+    material_name: '辅料合计', color: null, unit: '—',
+    budget: { qty: null, price: null, total: hasTrimBudget ? trimBudgetTotal : null },
+    ordered: { qty: null, price: null, total: toAmt, over_qty: false, over_price: false,
+      over_total: hasTrimBudget && trimBudgetTotal > 0 && toAmt > trimBudgetTotal },
+    received: { qty: null, total: null }, leftover: { qty: null, total: null }, is_trim_total: true,
+  }] : [];
+
+  const rows = [...fabricRows, ...trimRows];
+
   const totals = rows.reduce((t, r) => ({
     budget: r2(t.budget + (r.budget.total || 0)), ordered: r2(t.ordered + (r.ordered.total || 0)),
     received: r2(t.received + (r.received.total || 0)), leftover: r2(t.leftover + (r.leftover.total || 0)),
   }), { budget: 0, ordered: 0, received: 0, leftover: 0 });
 
-  return { data: { order, rows, totals, orderQty, has_budget: baseLines.length > 0 } };
+  return { data: { order, rows, totals, orderQty, has_budget: baseLines.length > 0 || hasTrimBudget } };
 }
 
 /** 显式回填：以采购实际成本写 order_financials.actual_material_cost + 重算利润（人工触发）。 */
