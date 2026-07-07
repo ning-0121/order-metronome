@@ -47,7 +47,7 @@ export async function getManufacturingOrder(orderId: string) {
     .select('*').eq('order_id', orderId).order('line_no');
 
   const { data: bom } = await (supabase.from('materials_bom') as any)
-    .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, material_master_id')
+    .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, material_master_id, style_no, spec')
     .eq('order_id', orderId).order('material_type');
 
   return { data: { mo: mo || null, order, lineItems: lineItems || [], bom: bom || [] } };
@@ -257,30 +257,45 @@ export async function generateManufacturingOrderSheet(
     } catch { return null; }
   };
 
+  // 工厂内部单号(制单日期用当天;发货日期用工厂交期/ETD)
+  const madeDate = fmtDate(new Date().toISOString());
+  const shipDate = fmtDate(order.factory_date || order.etd);
+
   for (const [gi, g] of styleGroups.entries()) {
     const sheetName = (g.style_no || `款${gi + 1}`).replace(/[\\/*?:[\]]/g, '_').slice(0, 28) || `款${gi + 1}`;
     const ws = wb.addWorksheet(wb.worksheets.some(w => w.name === sheetName) ? `${sheetName}_${gi + 1}` : sheetName);
-    ws.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+    ws.pageSetup = { orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
 
-    // 该款尺码集(至少留 3 个空位手填)
+    // 该款尺码集(至少 3 列)
     const sizeSet = new Set<string>();
-    for (const li of g.items) if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) sizeSet.add(k);
+    for (const li of g.items) if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) if (Number(li.sizes[k]) > 0) sizeSet.add(k);
     const sizeKeys = sortSizes([...sizeSet]).slice(0, 8);
     const ns = Math.max(sizeKeys.length, 3);
     const styleTotal = g.items.reduce((a, li) => a + (Number(li.qty_pcs) || 0), 0) || (styleGroups.length === 1 ? order.quantity : 0);
-    const fabricLi = g.items.find((li: any) => li.fabric_name) || {};
-    const fabricName = (fabricLi as any).fabric_name || bom.find((b: any) => b.material_type === 'fabric' && (!b.style_no || b.style_no === g.style_no))?.material_name || '';
-    const fabricSpec = (fabricLi as any).fabric_width || '';
 
-    // 列布局(辉念):款号|大身颜色|款式描述|箱数|PO|数量|尺码×ns|备注|图片×3
-    const cStyle = 1, cColor = 2, cDesc = 3, cCarton = 4, cPO = 5, cQty = 6;
-    const cSize0 = 7;                        // 尺码起始列
-    const cRemark = cSize0 + ns;             // 备注
-    const cImg1 = cRemark + 1, NC = cImg1 + 2;  // 图片 3 列
-    ws.getColumn(cStyle).width = 20; ws.getColumn(cColor).width = 34; ws.getColumn(cDesc).width = 34;
-    ws.getColumn(cCarton).width = 9; ws.getColumn(cPO).width = 10; ws.getColumn(cQty).width = 11;
-    for (let c = cSize0; c < cSize0 + ns; c++) ws.getColumn(c).width = 9;
-    ws.getColumn(cRemark).width = 26;
+    // 该款面料(BOM fabric 行;无 style_no 视为整单通用)
+    const fabrics = bom.filter((b: any) => b.material_type === 'fabric' && (!b.style_no || String(b.style_no).trim() === String(g.style_no).trim()));
+    const fabricNames = fabrics.map((b: any) => b.material_name).filter(Boolean).join('  /  ')
+      || g.items.find((li: any) => li.fabric_name)?.fabric_name || '';
+    const fabricUsage = fabrics.map((b: any) => b.qty_per_piece != null ? `${b.material_name}：${b.qty_per_piece} ${b.unit || 'kg'}/件` : '').filter(Boolean).join('  /  ');
+
+    // 尺寸明细表数据(从 PO 冻结底档 measurements 拉;公差列无结构化数据 → 留白手填)
+    const snapStyles: any[] = Array.isArray((order as any).po_parse_snapshot?.styles) ? (order as any).po_parse_snapshot.styles : [];
+    const snapStyle = snapStyles.find((s: any) => String(s?.style_no || '').trim() === String(g.style_no || '').trim());
+    const meas: Array<{ label?: string; values?: Record<string, any>; tolerance?: string }> =
+      Array.isArray(snapStyle?.measurements) ? snapStyle.measurements.slice(0, 14) : [];
+    const measVal = (values: Record<string, any> | undefined, key: string) => {
+      if (!values) return '';
+      if (values[key] != null) return String(values[key]);
+      const hit = Object.keys(values).find(k => k.trim().toLowerCase() === key.trim().toLowerCase());
+      return hit ? String(values[hit]) : '';
+    };
+
+    // 列:标签(1) | 尺码(2..1+ns) | 公差(2+ns) | 产品图(3+ns..NC 3列)
+    const cLabel = 1, cSize0 = 2, cTol = 2 + ns, cImg1 = 3 + ns, NC = 3 + ns + 2;
+    ws.getColumn(cLabel).width = 16;
+    for (let c = cSize0; c < cSize0 + ns; c++) ws.getColumn(c).width = 11;
+    ws.getColumn(cTol).width = 11;
     for (let c = cImg1; c <= NC; c++) ws.getColumn(c).width = 13;
 
     const put = (r: number, c: number, v: any, font: any, opt: { align?: 'left' | 'center' | 'right'; wrap?: boolean; fill?: string; formula?: string } = {}) => {
@@ -294,217 +309,134 @@ export async function generateManufacturingOrderSheet(
       for (let rr = r1; rr <= r2; rr++) for (let cc = c1; cc <= c2; cc++) ws.getCell(rr, cc).border = thin;
     };
     const mergeR = (r: number, c1: number, c2: number) => { if (c2 > c1) ws.mergeCells(r, c1, r, c2); };
-
-    // ── 头部块 R1-R4:左 标签+值,右 面料成分/克重(模板同款)──
-    // R1 订单号 | R2 品名 | R3 交期(黄底) | R4 数量
-    const rightC1 = cRemark + 1;                 // 右块起始列(与图片列对齐)
-    const headVal = (r: number, label: string, value: any, opt: { fill?: string; font?: any } = {}) => {
-      mergeR(r, 1, 3); put(r, 1, label, SONG({ bold: true }));
-      mergeR(r, 4, cRemark); put(r, 4, value ?? '', opt.font || TIMES({ bold: true }), { fill: opt.fill });
-      boxBorder(r, 1, r, cRemark);
-      ws.getRow(r).height = 32;
+    // 一行:标签 + 合并值(整行边框)
+    const kv = (r: number, label: string, value: any, opt: { fill?: string; font?: any; c2?: number; align?: 'left' | 'center' } = {}) => {
+      const c2 = opt.c2 ?? NC;
+      put(r, 1, label, SONG({ bold: true }), { align: 'left' });
+      mergeR(r, 2, c2); put(r, 2, value ?? '', opt.font || TIMES({ bold: true }), { align: opt.align || 'left', fill: opt.fill, wrap: true });
+      boxBorder(r, 1, r, c2); ws.getRow(r).height = 30;
     };
-    headVal(1, '订单号', [
-      order.internal_order_no,                              // 内部单号(订单册编号,财务口径)在最前
-      order.order_no,
-      order.po_number ? `PO ${order.po_number}` : null,
-    ].filter(Boolean).join(' | '));
-    headVal(2, '品名', [g.product_name, (g.items[0] as any)?.product_name_en].filter(Boolean).join('  '));
-    headVal(3, '交期', `${fmtDate(order.factory_date || order.etd)}（客户装柜日，不得延期）`, { fill: YELLOW });
-    headVal(4, '数量', styleTotal || '');
-    // 右块:面料成分(R1-R2) + 克重/门幅(R3-R4)
-    ws.mergeCells(1, rightC1, 2, NC); put(1, rightC1, fabricName, TIMES({ bold: true }), { wrap: true });
-    ws.mergeCells(3, rightC1, 4, NC); put(3, rightC1, fabricSpec, TIMES({ bold: true }));
-    boxBorder(1, rightC1, 4, NC);
 
-    // ── 明细表头 R5(黄底;尺码列按普通码/加大码分色;备注浅绿)──
-    const hd = 5;
-    put(hd, cStyle, '款号', SONG({ bold: true }), { fill: YELLOW });
-    put(hd, cColor, '大身颜色', SONG({ bold: true }), { fill: YELLOW });
-    put(hd, cDesc, '款式描述', SONG({ bold: true }), { fill: YELLOW });
-    put(hd, cCarton, '箱数', SONG({ bold: true }), { fill: YELLOW });
-    put(hd, cPO, 'PO', TIMES({ bold: true, color: { argb: RED } }), { fill: YELLOW });
-    put(hd, cQty, '数量', SONG({ bold: true }), { fill: YELLOW });
-    sizeKeys.forEach((s, i) => put(hd, cSize0 + i, s, TIMES({ bold: true }), { fill: isPlusSize(s) ? SIZE_PLUS_BG : SIZE_NORMAL_BG }));
-    for (let i = sizeKeys.length; i < ns; i++) put(hd, cSize0 + i, '', TIMES({ bold: true }), { fill: SIZE_NORMAL_BG });
-    put(hd, cRemark, '备注', SONG({ bold: true }), { fill: REMARK_BG });
-    mergeR(hd, cImg1, NC); put(hd, cImg1, '图片', SONG({ bold: true }));
-    ws.getRow(hd).height = 32;
+    let r = 1;
+    // R1 公司名 / R2 标题
+    mergeR(r, 1, NC); put(r, 1, '义乌市绮陌服饰有限公司', SONG({ bold: true, size: 20 })); boxBorder(r, 1, r, NC); ws.getRow(r).height = 30; r++;
+    mergeR(r, 1, NC); put(r, 1, '生产任务单', SONG({ bold: true, size: 26 })); boxBorder(r, 1, r, NC); ws.getRow(r).height = 36; r++;
+    // R3 订单号/总数量/制单日期/发货日期(黄底 发货日期)
+    kv(r, '订单号：', [order.internal_order_no, order.order_no, order.po_number ? `PO ${order.po_number}` : null].filter(Boolean).join('  |  ')
+      + `        总数量：${styleTotal || ''}        制单日期：${madeDate}        发货日期：${shipDate}（不得延期）`, { fill: YELLOW }); r++;
+    // R4 款号/品名
+    kv(r, '款  号：', `${g.style_no || ''}        品  名：${[g.product_name, (g.items[0] as any)?.product_name_en].filter(Boolean).join(' ')}`); r++;
+    // R5/R6 主面料 + 用料
+    kv(r, '主 面 料：', fabricNames); r++;
+    kv(r, '主面料用料：', fabricUsage); r++;
 
-    // ── 数据行(每色一行)──
-    let row = hd + 1;
-    const firstColorRow = row;
-    for (const li of g.items) {
-      put(row, cStyle, li.style_no || g.style_no || '', ARIAL());
-      put(row, cColor, [li.color_en, li.color_cn].filter(Boolean).join(' ') || '—', ARIAL(), { wrap: true });
-      put(row, cDesc, [li.product_name || g.product_name, (li as any).product_name_en].filter(Boolean).join('\n'), SONG(), { wrap: true });
-      put(row, cCarton, (li as any).carton_count ?? '', SONG());
-      put(row, cPO, order.po_number || '', SONG({ color: { argb: RED } }));
-      put(row, cQty, Number(li.qty_pcs) || '', ARIAL());
-      sizeKeys.forEach((s, i) => {
-        const q = li.sizes && typeof li.sizes === 'object' ? Number(li.sizes[s]) || 0 : 0;
-        put(row, cSize0 + i, q || '', TIMES(), { fill: isPlusSize(s) ? SIZE_PLUS_BG : SIZE_NORMAL_BG });
-      });
-      put(row, cRemark, li.remark || '', SONG({ color: { argb: RED } }), { wrap: true });
-      ws.getRow(row).height = 32;
-      row++;
+    // ── 尺寸明细表(R7 标题行 + R8 表头 + 测量行);右侧产品图合并块 ──
+    const measStart = r;
+    put(r, 1, '分  类', SONG({ bold: true })); mergeR(r, 2, cTol); put(r, 2, '尺码明细表  单位：英寸', SONG({ bold: true }));
+    // 注:产品图列(cImg1..NC)不在此行单独合并 —— 由下方 measStart..measEnd 整块合并覆盖(避免重叠 merge 抛错)
+    boxBorder(r, 1, r, cTol); ws.getRow(r).height = 28; r++;
+    // 尺码表头
+    put(r, 1, '尺  码', SONG({ bold: true }), { fill: SIZE_NORMAL_BG });
+    sizeKeys.forEach((s, i) => put(r, cSize0 + i, s, TIMES({ bold: true }), { fill: isPlusSize(s) ? SIZE_PLUS_BG : SIZE_NORMAL_BG }));
+    for (let i = sizeKeys.length; i < ns; i++) put(r, cSize0 + i, '', TIMES({ bold: true }), { fill: SIZE_NORMAL_BG });
+    put(r, cTol, '公差', SONG({ bold: true }), { fill: SIZE_NORMAL_BG });
+    boxBorder(r, 1, r, cTol); ws.getRow(r).height = 26; r++;
+    // 测量行(有底档用底档;否则留一批空行手填)
+    const measRows = meas.length > 0 ? meas : Array.from({ length: 8 }, () => ({ label: '', values: {}, tolerance: '' }));
+    for (const m of measRows) {
+      put(r, 1, m.label || '', SONG(), { align: 'left' });
+      sizeKeys.forEach((s, i) => put(r, cSize0 + i, measVal(m.values, s), TIMES()));
+      put(r, cTol, (m as any).tolerance || '', TIMES());
+      boxBorder(r, 1, r, cTol); ws.getRow(r).height = 24; r++;
     }
-    if (g.items.length === 0) { ws.getRow(row).height = 32; row++; }
-    const lastColorRow = row - 1;
-
-    // ── 总计行(数量红字)──
-    mergeR(row, cStyle, cColor); put(row, cStyle, '总计', SONG());
-    put(row, cCarton, '', SONG(), lastColorRow >= firstColorRow ? { formula: `SUM(${COL(cCarton)}${firstColorRow}:${COL(cCarton)}${lastColorRow})` } : {});
-    put(row, cQty, '', TIMES({ color: { argb: RED } }), lastColorRow >= firstColorRow ? { formula: `SUM(${COL(cQty)}${firstColorRow}:${COL(cQty)}${lastColorRow})` } : {});
-    ws.getRow(row).height = 32;
-    boxBorder(hd, 1, row, cRemark);
-    const totalRow = row;
-    // 图片区:表头下贴合并块(模板 O5 合并样式)
-    ws.mergeCells(firstColorRow, cImg1, totalRow, NC);
-    boxBorder(firstColorRow, cImg1, totalRow, NC);
+    const measEnd = r - 1;
+    // 产品图:合并块贴在测量表右侧
+    ws.mergeCells(measStart, cImg1, measEnd, NC); boxBorder(measStart, cImg1, measEnd, NC);
     const img = await fetchImage(g.image_url);
     if (img) {
       const imgId = wb.addImage({ buffer: img.buffer as any, extension: img.extension });
-      ws.addImage(imgId, `${COL(cImg1)}${firstColorRow}:${COL(NC)}${totalRow}`);
+      ws.addImage(imgId, `${COL(cImg1)}${measStart}:${COL(NC)}${measEnd}`);
     } else {
-      put(firstColorRow, cImg1, '产品图片', SONG({ color: { argb: 'FF999999' } }));
+      put(measStart, cImg1, '产品图片', SONG({ color: { argb: 'FF999999' } }));
     }
-    row++;
 
-    // ── 整行黄色分隔(模板 R10 同款)──
-    for (let c = 1; c <= NC; c++) put(row, c, '', SONG(), { fill: YELLOW });
-    ws.getRow(row).height = 14;
-    row++;
+    // ── 颜色 × 尺码 订单数量 ──
+    put(r, 1, '颜  色', SONG({ bold: true }), { fill: YELLOW }); mergeR(r, 2, cTol); put(r, 2, '订单数量', SONG({ bold: true }), { fill: YELLOW });
+    boxBorder(r, 1, r, cTol); ws.getRow(r).height = 26; r++;
+    put(r, 1, '', SONG());
+    sizeKeys.forEach((s, i) => put(r, cSize0 + i, s, TIMES({ bold: true }), { fill: SIZE_NORMAL_BG }));
+    put(r, cTol, '小计', SONG({ bold: true }), { fill: SIZE_NORMAL_BG });
+    boxBorder(r, 1, r, cTol); ws.getRow(r).height = 24; r++;
+    const cartonPer = (() => {
+      const c = g.items.find((li: any) => Number(li.carton_count) > 0 && Number(li.qty_pcs) > 0);
+      return c ? Math.round(Number(c.qty_pcs) / Number(c.carton_count)) : null;
+    })();
+    for (const li of g.items) {
+      put(r, 1, [li.color_en, li.color_cn].filter(Boolean).join(' ') || '—', SONG(), { align: 'left' });
+      sizeKeys.forEach((s, i) => put(r, cSize0 + i, (li.sizes && Number(li.sizes[s])) || '', TIMES()));
+      put(r, cTol, Number(li.qty_pcs) || '', ARIAL());
+      boxBorder(r, 1, r, cTol); ws.getRow(r).height = 24; r++;
+    }
+    // 每箱件数 + 各色箱数
+    kv(r, '每箱件数：', cartonPer ?? '', { c2: cTol }); r++;
+    for (const li of g.items) {
+      const cartons = (li as any).carton_count ?? (cartonPer && Number(li.qty_pcs) ? Math.ceil(Number(li.qty_pcs) / cartonPer) : '');
+      kv(r, `${[li.color_en, li.color_cn].filter(Boolean).join(' ') || '颜色'}箱数：`, cartons, { c2: cTol }); r++;
+    }
 
-    // ── 交样时间块:表头 + 产前样/船样(日期蓝字,要求红字,右侧注意)──
-    const noteC1 = cRemark + 1;
-    const sampleHd = row;
-    put(row, 1, '', SONG({ bold: true }));
-    mergeR(row, 2, 4); put(row, 2, '交样时间', SONG({ bold: true }));
-    mergeR(row, cQty, cRemark); put(row, cQty, '要求', SONG({ bold: true }));
-    ws.getRow(row).height = 30;
-    row++;
-    const sampleRows: [string, string, string][] = [
-      ['产前样', sampleDue['pre_production_sample_approved'] || '', mo.special_requirements || ''],
-      ['船样', sampleDue['shipping_sample_send'] || '', ''],
+    // ── 各类要求(8 行;有 MO 字段带出,无则留白手填)──
+    const reqRows: [string, string][] = [
+      ['成衣辅料：', ''],
+      ['包装辅料：', bom.filter((b: any) => ['label', 'packing', 'trim'].includes(b.material_type)).map((b: any) => b.material_name).filter(Boolean).join('，')],
+      ['裁剪要求：', mo.factory_notes || ''],
+      ['缝制要求：', mo.print_embroidery_requirements || ''],
+      ['检验要求：', mo.qc_focus || ''],
+      ['包装要求：', mo.factory_packing_instructions || ''],
+      ['装箱要求：', ''],
+      ['注意事项：', mo.risk_notes || mo.special_requirements || ''],
     ];
-    for (const [label, date, req] of sampleRows) {
-      put(row, 1, label, SONG({ bold: true }));
-      mergeR(row, 2, 4); put(row, 2, date, TIMES({ bold: true, color: { argb: BLUE } }));
-      mergeR(row, cQty, cRemark); put(row, cQty, req, SONG({ bold: true, color: { argb: RED } }), { align: 'left', wrap: true });
-      ws.getRow(row).height = 34;
-      row++;
+    for (const [label, val] of reqRows) { kv(r, label, val); ws.getRow(r).height = Math.max(30, 26 * (String(val).split('\n').length)); r++; }
+
+    // 抄送 + 签名
+    mergeR(r, 1, NC); put(r, 1, `抄送：采购、面料仓、辅料仓${order.factory_name ? '、' + order.factory_name : ''}、QC、包装`, SONG({ bold: true }), { align: 'left' });
+    boxBorder(r, 1, r, NC); ws.getRow(r).height = 28; r++;
+    const third = Math.max(2, Math.floor(NC / 3));
+    put(r, 1, `制单：${nameOf(mo.created_by)}`, SONG({ bold: true }), { align: 'left' });
+    put(r, third, `跟单：${nameOf(order.owner_user_id)}`, SONG({ bold: true }), { align: 'left' });
+    put(r, third * 2, '批准：', SONG({ bold: true }), { align: 'left' });
+    boxBorder(r, 1, r, NC); ws.getRow(r).height = 30;
+  }
+
+  // ══ 辅料明细 sheet(全款合一;示例画稿/位置说明/备注 从 BOM 带出;工厂价格/采购价格留空手填,不泄底价)══
+  {
+    const ts = wb.addWorksheet('辅料明细');
+    ts.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1 };
+    const cols = [26, 20, 30, 26, 26, 14, 14];
+    cols.forEach((w, i) => (ts.getColumn(i + 1).width = w));
+    const tput = (r: number, c: number, v: any, font: any, opt: { fill?: string; align?: 'left' | 'center' } = {}) => {
+      const cell = ts.getCell(r, c); cell.value = v; cell.font = font;
+      cell.alignment = { horizontal: opt.align || 'center', vertical: 'middle', wrapText: true };
+      if (opt.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opt.fill } };
+      cell.border = thin;
+    };
+    ts.mergeCells(1, 1, 1, 7); tput(1, 1, `${order.order_no || ''} 订单辅料明细`, SONG({ bold: true, size: 18 }));
+    ts.getRow(1).height = 32;
+    const th = ['物料', '示例画稿（以实际为准）', '位置说明及示意图', '位置说明', '备注', '工厂价格', '采购价格'];
+    th.forEach((h, i) => tput(2, i + 1, h, SONG({ bold: true }), { fill: YELLOW }));
+    ts.getRow(2).height = 30;
+    const trims = bom.filter((b: any) => b.material_type !== 'fabric');
+    let tr = 3;
+    for (const b of trims) {
+      tput(tr, 1, b.material_name || '', SONG({ bold: true }), { align: 'left' });
+      tput(tr, 2, '', SONG());                                   // 示例画稿(图,手贴)
+      tput(tr, 3, b.placement || '', SONG(), { align: 'left' }); // 位置说明及示意图
+      tput(tr, 4, b.placement || '', SONG(), { align: 'left' });
+      tput(tr, 5, b.special_requirements || '', SONG(), { align: 'left' });
+      tput(tr, 6, '', SONG());                                   // 工厂价格(采购填,不带底价)
+      tput(tr, 7, '', SONG());
+      ts.getRow(tr).height = 40; tr++;
     }
-    boxBorder(sampleHd, 1, row - 1, cRemark);
-    // 右侧「注意」竖块(模板 Q11 合并)
-    ws.mergeCells(sampleHd, noteC1, row - 1, NC);
-    put(sampleHd, noteC1, mo.qc_focus ? `注意：${mo.qc_focus}` : '', SONG({ bold: true }), { wrap: true });
-    boxBorder(sampleHd, noteC1, row - 1, NC);
-
-    // ── 款式评语(合并标题行 + 内容大行)──
-    mergeR(row, 1, NC); put(row, 1, '款式评语', SONG({ bold: true }));
-    boxBorder(row, 1, row, NC); ws.getRow(row).height = 30;
-    row++;
-    const comments = ['1.' + (mo.print_embroidery_requirements || ''), mo.risk_notes ? '2.' + mo.risk_notes : '', mo.factory_notes ? '3.' + mo.factory_notes : '']
-      .filter(t => t && t !== '1.').join('\n');
-    mergeR(row, 1, NC); put(row, 1, comments ? `\n${comments}` : '', TIMES({ bold: true }), { align: 'left', wrap: true });
-    boxBorder(row, 1, row, NC); ws.getRow(row).height = Math.max(60, 26 * (comments.split('\n').length + 1));
-    row++;
-
-    // ── 包装明细行 + 签收人 ──
-    mergeR(row, 1, NC);
-    put(row, 1, mo.factory_packing_instructions ? `包装明细及要求：${mo.factory_packing_instructions}` : '包装明细及要求详见附页', SONG({ bold: true }), { align: 'left', wrap: true });
-    boxBorder(row, 1, row, NC); ws.getRow(row).height = 34;
-    row++;
-    mergeR(row, 1, 2); put(row, 1, '签收人：', SONG({ bold: true }), { align: 'left' });
-    boxBorder(row, 1, row, NC); ws.getRow(row).height = 34;
-    row += 2;
-
-    // ── (追加)用料单耗:辉念模板无此节,保留喂核料/工厂领料(样式对齐)──
-    const bomSorted = [...bom]
-      .filter((b: any) => !b.style_no || b.style_no === g.style_no)
-      .sort((a: any, b: any) => (a.material_type === 'fabric' ? 0 : 1) - (b.material_type === 'fabric' ? 0 : 1));
-    if (bomSorted.length > 0) {
-      mergeR(row, 1, NC); put(row, 1, '用料单耗', SONG({ bold: true }), { fill: YELLOW });
-      boxBorder(row, 1, row, NC); ws.getRow(row).height = 30;
-      row++;
-      const bh = row;
-      put(bh, 1, '物料', SONG({ bold: true })); put(bh, 2, '颜色', SONG({ bold: true }));
-      put(bh, 3, '规格', SONG({ bold: true })); put(bh, 4, '单耗/件', SONG({ bold: true }));
-      put(bh, 5, '单位', SONG({ bold: true }));
-      mergeR(bh, 6, NC); put(bh, 6, '备注', SONG({ bold: true }));
-      ws.getRow(bh).height = 28;
-      row++;
-      for (const b of bomSorted) {
-        put(row, 1, b.material_name || '', SONG(), { align: 'left', wrap: true });
-        put(row, 2, b.color || '', SONG());
-        put(row, 3, (b as any).spec || '', SONG());
-        put(row, 4, b.qty_per_piece ?? '', ARIAL());
-        put(row, 5, b.unit || '', SONG());
-        mergeR(row, 6, NC); put(row, 6, joinTxt(b.placement, b.special_requirements), SONG(), { align: 'left', wrap: true });
-        ws.getRow(row).height = 28;
-        row++;
-      }
-      boxBorder(bh, 1, row - 1, NC);
-      row++;
-    }
-
-    // ── 制单信息(小字)──
-    mergeR(row, 1, NC);
-    put(row, 1, `制单：${nameOf(mo.created_by)} ${fmtDate(new Date().toISOString())} · 抄送:采购、面料仓、辅料仓${order.factory_name ? '、' + order.factory_name : ''}、QC、包装组长`, SONG({ size: 12 }), { align: 'left' });
-
-    // ── 该款尺寸表 sheet(模板同款:单独一张,留白按上传尺码表填)──
-    const sizeSheetName = `${sheetName}尺寸表`.slice(0, 30);
-    if (!wb.worksheets.some(w => w.name === sizeSheetName)) {
-      const ss = wb.addWorksheet(sizeSheetName);
-      ss.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1 };
-      ss.getColumn(1).width = 38;
-      for (let c = 2; c <= 1 + ns; c++) ss.getColumn(c).width = 12;
-      const sput = (r: number, c: number, v: any, font: any, fill?: string) => {
-        const cell = ss.getCell(r, c);
-        cell.value = v; cell.font = font;
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        if (fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
-      };
-      ss.mergeCells(1, 1, 1, 1 + ns);
-      sput(1, 1, `${g.style_no || ''}尺寸工艺平量要求（inch)`, { name: '微软雅黑', size: 20, bold: true });
-      ss.getRow(1).height = 34;
-      // 普通码/加大码分组行(单列不合并,避免 exceljs 单格 merge 抛错)
-      const normalCount = sizeKeys.filter(s => !isPlusSize(s)).length;
-      const plusCount = sizeKeys.length - normalCount;
-      if (normalCount > 0 && plusCount > 0) {
-        if (normalCount > 1) ss.mergeCells(2, 2, 2, 1 + normalCount);
-        sput(2, 2, 'MISSY', { name: 'Arial', size: 12, bold: true }, SIZE_NORMAL_BG);
-        if (plusCount > 1) ss.mergeCells(2, 2 + normalCount, 2, 1 + sizeKeys.length);
-        sput(2, 2 + normalCount, 'PLUS', { name: 'Arial', size: 12, bold: true }, SIZE_PLUS_BG);
-      }
-      sput(3, 1, 'POM (inch)', { name: 'Arial', size: 12 });
-      sizeKeys.forEach((s, i) => sput(3, 2 + i, s, { name: 'Arial', size: 12, bold: true }));
-      // 尺寸数据:从 PO 冻结底档(po_parse_snapshot.styles[].measurements)拉入(2026-07-03 用户拍板)
-      const snapStyles: any[] = Array.isArray((order as any).po_parse_snapshot?.styles) ? (order as any).po_parse_snapshot.styles : [];
-      const snapStyle = snapStyles.find((s: any) => String(s?.style_no || '').trim() === String(g.style_no || '').trim());
-      const meas: Array<{ label?: string; values?: Record<string, any> }> =
-        Array.isArray(snapStyle?.measurements) ? snapStyle.measurements.slice(0, 14) : [];
-      const measVal = (values: Record<string, any> | undefined, key: string) => {
-        if (!values) return '';
-        if (values[key] != null) return String(values[key]);
-        const hit = Object.keys(values).find(k => k.trim().toLowerCase() === key.trim().toLowerCase());
-        return hit ? String(values[hit]) : '';
-      };
-      meas.forEach((m, i) => {
-        sput(4 + i, 1, m.label || '', { name: 'Arial', size: 12 });
-        ss.getCell(4 + i, 1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-        sizeKeys.forEach((s, j) => sput(4 + i, 2 + j, measVal(m.values, s), { name: 'Arial', size: 12 }));
-      });
-      const lastRow = Math.max(17, 3 + meas.length);
-      for (let i = 0; i < lastRow - 3; i++) ss.getRow(4 + i).height = 24;
-      for (let rr = 3; rr <= lastRow; rr++) for (let cc = 1; cc <= 1 + ns; cc++) ss.getCell(rr, cc).border = thin;
-      ss.mergeCells(lastRow + 1, 1, lastRow + 1, 1 + ns);
-      sput(lastRow + 1, 1,
-        meas.length > 0 ? '（尺寸来自客户 PO 识别冻结底档;以客户原始尺寸表为准,修改请重传 PO 或手工调整）'
-          : '（PO 未含尺寸数据;按建单上传的尺码表填写,上传件见订单「附件」）',
-        { name: '宋体', size: 11 });
-    }
+    if (trims.length === 0) { for (let c = 1; c <= 7; c++) tput(3, c, '', SONG()); ts.getRow(3).height = 40; }
   }
 
   const buffer = await wb.xlsx.writeBuffer();
