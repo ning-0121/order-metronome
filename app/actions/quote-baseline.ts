@@ -7,7 +7,7 @@
  * 存储:order_cost_baseline.quote_baseline_lines(jsonb) + cmt_factory_quote + baseline_frozen_*。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { getUserRoles } from '@/lib/utils/user-role';
 import { hasRoleInGroup, isAdminRole } from '@/lib/domain/roles';
@@ -103,8 +103,13 @@ export async function parseQuoteFile(base64: string): Promise<{
   if (!user) return { error: '请先登录' };
   const roles = await getUserRoles(supabase, user.id);
   if (!canEditBaseline(roles)) return { error: '仅业务/订单管理/管理员可上传报价单' };
+  const buf = Buffer.from(base64.replace(/^data:.*base64,/, ''), 'base64');
+  return parseQuoteBuffer(buf);
+}
+
+/** buffer → 报价基线 lines(布料逐料) + styleBudgets(逐款辅料/加工)。纯解析,不写库(供人确认后冻结)。 */
+async function parseQuoteBuffer(buf: Buffer): Promise<{ lines?: QuoteBaselineLine[]; styleBudgets?: QuoteStyleBudget[]; error?: string }> {
   try {
-    const buf = Buffer.from(base64.replace(/^data:.*base64,/, ''), 'base64');
     const ExcelJS = await import('exceljs');
     const wb = new ExcelJS.default.Workbook();
     await wb.xlsx.load(buf as any);
@@ -118,7 +123,7 @@ export async function parseQuoteFile(base64: string): Promise<{
     }
     const { parseCostSheet } = await import('@/lib/services/quote-sheet-parser');
     const res = parseCostSheet(rows);
-    if (res.headerRow === -1) return { error: '没识别到表头(需含 "STYLE" 列)。请确认上传的是内部成本核算单。' };
+    if (res.headerRow === -1) return { error: '没识别到表头(需含 "STYLE" 列)。请确认是内部成本核算单。' };
     if (res.lines.length === 0) return { error: '识别到表头但没读到面料行,请检查文件或手工录入。' };
     const lines: QuoteBaselineLine[] = res.lines.map((l) => ({
       style_no: l.style_no, material_name: l.material_name, category: 'fabric', color: null,
@@ -129,6 +134,34 @@ export async function parseQuoteFile(base64: string): Promise<{
   } catch (e) {
     return { error: '解析失败:' + (e instanceof Error ? e.message : String(e)) + '。可手工录入兜底。' };
   }
+}
+
+/**
+ * 一键从「建单已上传的内部成本核算单」解析报价基线(免重传)。
+ * 拉 order_attachments(file_type=internal_quote)→下载→解析→返回 lines/styleBudgets(草稿,不写库)。
+ * 业务在报价基线页核对(布料分类型·辅料总额)后点「冻结」才成真相。守 AI 治理:不自动改基线。
+ */
+export async function prefillBaselineFromOrderQuoteFile(orderId: string): Promise<{
+  lines?: QuoteBaselineLine[]; styleBudgets?: QuoteStyleBudget[]; error?: string; fileName?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roles = await getUserRoles(supabase, user.id);
+  if (!canEditBaseline(roles)) return { error: '仅业务/订单管理/管理员可操作' };
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权此订单' };
+
+  const { data: att } = await (supabase.from('order_attachments') as any)
+    .select('storage_path, file_name, file_type, created_at').eq('order_id', orderId).eq('file_type', 'internal_quote')
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (!(att as any)?.storage_path) return { error: '没找到建单上传的「内部成本核算单」附件。请用上方「上传报价单」手动传。' };
+
+  const svc = createServiceRoleClient();
+  const { data: file, error: dErr } = await svc.storage.from('order-docs').download((att as any).storage_path);
+  if (dErr || !file) return { error: '下载附件失败:' + (dErr?.message || '未知') };
+  const buf = Buffer.from(await (file as Blob).arrayBuffer());
+  const res = await parseQuoteBuffer(buf);
+  return { ...res, fileName: (att as any).file_name };
 }
 
 export async function saveQuoteBaseline(

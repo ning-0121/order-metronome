@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getQuoteBaseline, saveQuoteBaseline, parseQuoteFile, type QuoteBaselineLine } from '@/app/actions/quote-baseline';
+import { getQuoteBaseline, saveQuoteBaseline, parseQuoteFile, prefillBaselineFromOrderQuoteFile, type QuoteBaselineLine } from '@/app/actions/quote-baseline';
 
 const CATS: Array<{ v: string; l: string }> = [
   { v: 'fabric', l: '面料' }, { v: 'trim', l: '辅料' }, { v: 'packing', l: '包装' },
@@ -60,6 +60,19 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
     } finally { setParsing(false); }
   }
 
+  // 一键用建单已上传的内部报价单解析(免重传)
+  async function onPrefillFromOrder() {
+    setParsing(true); setMsg(null);
+    try {
+      const res = await prefillBaselineFromOrderQuoteFile(orderId);
+      if ((res as any).error) { setMsg({ ok: false, text: (res as any).error }); return; }
+      let k = Date.now();
+      setRows((res.lines || []).map((l) => ({ ...l, _k: k++ })));
+      setStyleBudgets((res as any).styleBudgets || []);
+      setMsg({ ok: true, text: `✅ 从建单报价单「${(res as any).fileName || ''}」解析 ${(res.lines || []).length} 料 / ${((res as any).styleBudgets || []).length} 款 —— 核对(布料分类型 · 辅料总额)后点「冻结报价基线」` });
+    } finally { setParsing(false); }
+  }
+
   async function save() {
     setSaving(true); setMsg(null);
     const res = await saveQuoteBaseline(orderId, {
@@ -92,6 +105,11 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
               <input type="file" accept=".xlsx,.xls" className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.currentTarget.value = ''; }} />
             </label>
+            <button onClick={onPrefillFromOrder} disabled={parsing}
+              title="用建单时已上传的「内部成本核算单」直接解析(免重传);解析后核对再冻结"
+              className="text-sm px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 font-medium disabled:opacity-50">
+              {parsing ? '解析中…' : '🔗 从建单报价单解析'}
+            </button>
             <button onClick={save} disabled={saving}
               className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium disabled:opacity-50">
               {saving ? '冻结中…' : (frozenAt ? '重新冻结' : '冻结报价基线')}
