@@ -14,6 +14,7 @@ import { evaluateBudgetGate } from '../lib/procurement/approval';
 import { calcDueDates } from '../lib/schedule';
 import { CIRCUIT_BREAKER, ACTION_CONFIG } from '../lib/agent/types';
 import { buildPurchaseOrderSyncPayload, mapPoLineForFinance } from '../lib/integration/finance-sync';
+import { distributeBySize } from '../lib/services/procurement-execution';
 
 let passed = 0;
 let failed = 0;
@@ -123,6 +124,25 @@ console.log('\n🧾 采购单→财务明细行');
   assert((payload.lines as any[])[0].line_id === 'L1', 'payload.lines[0].line_id 同源');
   const empty = buildPurchaseOrderSyncPayload({ id: 'PO2', po_no: 'PO-2' });
   assert(Array.isArray(empty.lines) && (empty.lines as any[]).length === 0, '无 lines 参数 → 空数组(不 crash)');
+}
+
+// ════ N1 尺码分摊(2026-07-07:采购执行行按订单各码件数拆行,保 Σ=总量)════
+console.log('\n📏 尺码分摊(N1)');
+{
+  const sum = (a: { qty: number }[]) => a.reduce((s, x) => s + x.qty, 0);
+  const r1 = distributeBySize(1500, { S: 600, M: 300, L: 600 });
+  assert(sum(r1) === 1500, '1500 按 600:300:600 分,Σ=1500');
+  assert(r1.find(x => x.size === 'M')?.qty === 300, 'M 码 = 300(2:1:2 中的 1 份)');
+  const r2 = distributeBySize(10, { S: 1, M: 1, L: 1 });
+  assert(sum(r2) === 10, '10 按 1:1:1 分,Σ=10(余数补最大码)');
+  const r3 = distributeBySize(100, {});
+  assert(r3.length === 1 && r3[0].size === null && r3[0].qty === 100, '无尺码件数→单行整量(老口径)');
+  const r4 = distributeBySize(0, { S: 5 });
+  assert(r4.length === 1 && r4[0].qty === 0, '总量 0→单行 0');
+  const r5 = distributeBySize(2364.6, { S: 1, M: 1, L: 1 });
+  assert(Math.abs(sum(r5) - 2364.6) < 0.001, 'kg 小数 2364.6 分后 Σ 保 2364.6(余数落最大码)');
+  const r6 = distributeBySize(7957, { S: 2650, M: 2650, L: 2657 });
+  assert(sum(r6) === 7957, '7957 按 2650:2650:2657 分,Σ=7957');
 }
 
 console.log('\n▶ 报价基线对照(P2:超单耗/超价,容差 0)');

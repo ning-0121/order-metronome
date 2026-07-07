@@ -13,7 +13,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
-  buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty,
+  buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize,
 } from '@/lib/services/procurement-execution';
 import { getOrderLeftover } from '@/app/actions/inventory';
 
@@ -588,12 +588,14 @@ export async function consolidateOrderProcurementItems(
           stock_deduct_qty: (ex as any).stock_deduct_qty,
         });
         try {
-          const { data: syncedRows } = await (supabase.from('procurement_line_items') as any)
+          let sync = (supabase.from('procurement_line_items') as any)
             .update({ ordered_qty: newOrderable, updated_at: now })
             .eq('procurement_item_id', ex.id)
             .in('line_status', ['draft', 'pending_order'])
-            .is('purchase_order_id', null)   // 已归到采购单的行不动(改量会弄乱 PO 合计)→ 走 needs_reconfirm
-            .select('id');
+            .is('purchase_order_id', null);   // 已归到采购单的行不动(改量会弄乱 PO 合计)→ 走 needs_reconfirm
+          // N1:只同步整量行(size 为空);已按尺码拆的多行不能被同一新量覆盖(否则各码都变总量=超采)→ 让采购重生成执行行
+          try { sync = sync.is('size', null); } catch { /* size 列未迁移:忽略,整行覆盖(老口径) */ }
+          const { data: syncedRows } = await sync.select('id');
           syncedLines += ((syncedRows || []) as any[]).length;
         } catch (e: any) { console.warn('[consolidate] 执行行数量同步失败(不阻断):', e?.message); }
       }
@@ -903,7 +905,7 @@ export async function generateExecutionLines(orderId: string) {
   if (roleErr) return { error: roleErr };
 
   const { data: items, error: iErr } = await (supabase.from('procurement_items') as any)
-    .select('id, order_id, consolidation_key, material_name, specification, category, unit, purchase_unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, stock_deduct_qty, order_by_date, required_date, confirmed_supplier_name, unit_price, status')
+    .select('id, order_id, consolidation_key, material_name, specification, category, color, unit, purchase_unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, stock_deduct_qty, order_by_date, required_date, confirmed_supplier_name, unit_price, status')
     .eq('order_id', orderId).eq('status', 'confirmed');
   if (iErr) return { error: friendlyError(iErr) };
   if (!items || items.length === 0) return { error: '无已确认的采购项(请先在采购项上「确认」)' };
@@ -913,14 +915,40 @@ export async function generateExecutionLines(orderId: string) {
     .select('procurement_item_id').eq('order_id', orderId).not('procurement_item_id', 'is', null);
   const done = new Set((existLines || []).map((l: any) => l.procurement_item_id));
 
+  // N1:订单各码件数(按颜色分 + 整单总),用于把采购量按尺码分摊到执行行
+  const { data: lis } = await (supabase.from('order_line_items') as any)
+    .select('color_cn, color_en, sizes').eq('order_id', orderId);
+  const normC = (s: any) => String(s ?? '').trim().toLowerCase();
+  const byColorSizes = new Map<string, Record<string, number>>();
+  const totalSizes: Record<string, number> = {};
+  for (const li of (lis || [])) {
+    const sz = (li as any).sizes && typeof (li as any).sizes === 'object' ? (li as any).sizes : {};
+    for (const [k, v] of Object.entries(sz)) {
+      const n = Number(v) || 0; if (n <= 0) continue;
+      totalSizes[k] = (totalSizes[k] || 0) + n;
+      for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) {
+        const key = normC(col); if (!byColorSizes.has(key)) byColorSizes.set(key, {});
+        const m = byColorSizes.get(key)!; m[k] = (m[k] || 0) + n;
+      }
+    }
+  }
+  const sizeCountsFor = (it: any): Record<string, number> => (it.color && byColorSizes.get(normC(it.color))) || totalSizes;
+
   const now = new Date().toISOString();
   const rows = (items as any[])
     // 出单量>0 才生成执行行:定案量−库存抵扣=0(全用库存)的项不采购、不发供应商
     .filter((it) => !done.has(it.id) && canGenerateExecution(it) && orderableQty(it) > 0)
-    .map((it) => ({ ...buildExecutionLineRow(it, user.id), ordered_at: now }));
+    // N1:按订单各码件数拆成逐尺码行(无尺码数据→单行整量,老口径)
+    .flatMap((it) => distributeBySize(orderableQty(it), sizeCountsFor(it))
+      .map((seg) => ({ ...buildExecutionLineRow(it, user.id, { size: seg.size, qtyOverride: seg.qty }), ordered_at: now })));
   if (rows.length === 0) return { ok: true, created: 0, message: '已确认项无需采购(全用库存抵扣)或均已生成执行行' };
 
-  const { error: insErr } = await (supabase.from('procurement_line_items') as any).insert(rows);
+  let { error: insErr } = await (supabase.from('procurement_line_items') as any).insert(rows);
+  if (insErr && /\bsize\b|column .* does not exist/i.test(insErr.message || '')) {
+    // size 迁移(20260707)未跑 → 降级去 size 列重插(退回不分码,不 brick 生成)
+    const plain = rows.map(({ size, ...rest }) => rest);
+    ({ error: insErr } = await (supabase.from('procurement_line_items') as any).insert(plain));
+  }
   if (insErr) return { error: friendlyError(insErr) };
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, created: rows.length };

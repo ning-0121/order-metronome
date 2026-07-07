@@ -36,7 +36,26 @@ export function orderableQty(item: Pick<ProcItem, 'final_purchase_qty' | 'sugges
 }
 
 /** 执行行插入行(action 再补 ordered_at / created_at 由 DB 默认)。ordered_qty NOT NULL,兜底 0。 */
-export function buildExecutionLineRow(item: ProcItem, userId: string): Record<string, any> {
+/**
+ * 按订单各码件数把总量分摊到各尺码(N1)。保 Σ=total:各码四舍五入,余数(含小数)补给件数最大的码。
+ * 无尺码件数 → 返回单行(size=null,整量),即老口径。总量为 kg 时小数余数落在最大码那行。
+ */
+export function distributeBySize(total: number, sizeCounts: Record<string, number>): Array<{ size: string | null; qty: number }> {
+  const entries = Object.entries(sizeCounts || {}).filter(([, c]) => Number(c) > 0);
+  const sum = entries.reduce((a, [, c]) => a + Number(c), 0);
+  if (!(total > 0) || entries.length === 0 || sum <= 0) return [{ size: null, qty: total }];
+  const out = entries.map(([size, c]) => ({ size, qty: Math.round((total * Number(c)) / sum) }));
+  const allocated = out.reduce((a, o) => a + o.qty, 0);
+  const diff = total - allocated;                          // 可为小数(kg)
+  if (diff !== 0) {
+    let maxI = 0;
+    for (let i = 1; i < entries.length; i++) if (Number(entries[i][1]) > Number(entries[maxI][1])) maxI = i;
+    out[maxI].qty = Math.round((out[maxI].qty + diff) * 100) / 100;
+  }
+  return out;
+}
+
+export function buildExecutionLineRow(item: ProcItem, userId: string, opts?: { size?: string | null; qtyOverride?: number }): Record<string, any> {
   return {
     order_id: item.order_id,
     procurement_item_id: item.id,
@@ -44,7 +63,8 @@ export function buildExecutionLineRow(item: ProcItem, userId: string): Record<st
     specification: item.specification ?? null,
     category: item.category ?? null,
     supplier_name: item.confirmed_supplier_name ?? null,
-    ordered_qty: orderableQty(item),                       // 定案量 − 库存抵扣(不重复采购)
+    size: opts?.size ?? null,                              // 尺码(N1;拆码行填,整行为 null)
+    ordered_qty: opts?.qtyOverride ?? orderableQty(item),  // 定案量 − 库存抵扣;拆码时用分摊量
     ordered_unit: item.purchase_unit || item.unit || null,
     unit_price: item.unit_price ?? null, // 大货底价,业务读时剥离
     // 到货倒推日 → required_by:采购中心灯/超期判定用(修 P0 审计:B3a 行原无灯)
