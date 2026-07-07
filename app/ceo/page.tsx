@@ -9,7 +9,7 @@ import { getRoleLabel } from '@/lib/utils/i18n';
 import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
 import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
 import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
-import { getPendingApprovalsCount } from '@/lib/services/pending-approvals.service';
+import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
 import { CeoInsightButton } from '@/components/CeoInsightButton';
 import { CustomerMattersPanel } from '@/components/CustomerMattersPanel';
 // 邮件晨报（briefing.service / MorningBriefingCard）已下线 — 用户反馈"太费钱用处不大"
@@ -42,10 +42,16 @@ export default async function CEOWarRoom() {
     getAnalyticsSummary(),
     getRoleEfficiency(),
     getAllPendingAgentSuggestions().catch(() => ({ data: [] })),
-    getPendingApprovalsCount(supabase, { userId: user.id, roles: ceoRoles }).catch(() => ({ ok: false as const, error: '' })),
+    getPendingApprovals(supabase, { userId: user.id, roles: ceoRoles }).catch(() => ({ ok: false as const, error: '' })),
   ]);
   const agentSuggestions = agentResult.data || [];
-  const approvals = approvalsResult.ok ? approvalsResult.data : { total: 0, byCategory: {} as any, actionableCount: 0 };
+  const approvals = approvalsResult.ok ? approvalsResult.data : { total: 0, byCategory: {} as any, actionableCount: 0, items: [] as any[] };
+
+  // 审批项按类分组(工作台待办里分类展开显示,不同审批一目了然)。类目优先级:紧急审批在前,订单确认(量大)垫后。
+  const APPROVAL_ORDER: ApprovalCategory[] = ['order_cancel', 'price', 'delay', 'ceo_import', 'payment_hold', 'agent_action', 'order_confirm'];
+  const approvalGroups = APPROVAL_ORDER
+    .map((cat) => ({ cat, meta: CATEGORY_META[cat], items: ((approvals as any).items || []).filter((it: any) => it.category === cat) }))
+    .filter((g) => g.items.length > 0);
 
   // 客户事项分级（Phase 1：只读物化表 customer_matters，手动 dry_run/execute 物化）
   // 不吞 error：表缺失/查询失败要在日志里冒出来（教训见 customer_rhythm/customer_memory）
@@ -759,59 +765,50 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
-      {/* ===== 2. 审批中心入口（点击整体进入） ===== */}
-      <Link
-        href="/admin/pending-approvals"
-        className="block bg-white rounded-xl border border-yellow-200 shadow-sm overflow-hidden hover:shadow-md hover:border-yellow-300 transition-all"
-      >
-        <div className="bg-yellow-50 px-5 py-3 border-b border-yellow-100 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-yellow-900">
-            ⏳ 审批中心（共 {approvals.total} 项）
-          </h2>
-          <span className="text-sm text-blue-600 font-medium">→</span>
-        </div>
-        {approvals.total > 0 ? (
-          <div className="px-5 py-3 flex flex-wrap gap-2 bg-gradient-to-r from-purple-50/30 to-indigo-50/30">
-            {(approvals.byCategory.order_cancel || 0) > 0 && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 font-semibold">
-                🛑 取消订单申请 {approvals.byCategory.order_cancel}
-              </span>
-            )}
-            {(approvals.byCategory.delay || 0) > 0 && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                ⏳ 延期申请 {approvals.byCategory.delay}
-              </span>
-            )}
-            {(approvals.byCategory.ceo_import || 0) > 0 && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-semibold">
-                👨‍💼 CEO 批进行中订单 {approvals.byCategory.ceo_import}
-              </span>
-            )}
-            {(approvals.byCategory.price || 0) > 0 && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">
-                💰 价格审批 {approvals.byCategory.price}
-              </span>
-            )}
-            {(approvals.byCategory.agent_action || 0) > 0 && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                🤖 Agent 建议 {approvals.byCategory.agent_action}
-              </span>
-            )}
-            {(approvals.byCategory.order_confirm || 0) > 0 && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200">
-                📋 订单确认 {approvals.byCategory.order_confirm}
-              </span>
-            )}
-            {(approvals.byCategory.payment_hold || 0) > 0 && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
-                💳 付款冻结 {approvals.byCategory.payment_hold}
-              </span>
-            )}
+      {/* ===== 2. 审批中心 — 待办审批项按类展开(不同审批分组直达处理) ===== */}
+      <div className="bg-white rounded-xl border border-yellow-200 shadow-sm overflow-hidden">
+        <Link href="/admin/pending-approvals" className="bg-yellow-50 px-5 py-3 border-b border-yellow-100 flex items-center justify-between hover:bg-yellow-100 transition-colors">
+          <h2 className="text-lg font-bold text-yellow-900">⏳ 审批中心（共 {approvals.total} 项）</h2>
+          <span className="text-sm text-blue-600 font-medium">全部 →</span>
+        </Link>
+        {approvalGroups.length > 0 ? (
+          <div className="divide-y divide-gray-100">
+            {approvalGroups.map((g) => {
+              const shown = g.items.slice(0, 5);
+              const rest = g.items.length - shown.length;
+              return (
+                <div key={g.cat} className="px-5 py-3">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${g.meta.color}`}>{g.meta.icon} {g.meta.label}</span>
+                    <span className="text-xs text-gray-400">{g.items.length} 项</span>
+                  </div>
+                  <ul className="space-y-0.5">
+                    {shown.map((it: any) => (
+                      <li key={`${g.cat}-${it.id}`}>
+                        <Link href={it.sourceUrl} className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-gray-50 group">
+                          <span className="text-sm text-gray-800 truncate">
+                            {it.title}
+                            {it.subtitle && <span className="text-gray-400 ml-1">· {it.subtitle}</span>}
+                          </span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            {it.ageDays >= 3 && <span className="text-[11px] text-red-500 font-medium">卡{it.ageDays}天</span>}
+                            <span className="text-xs text-blue-500 opacity-0 group-hover:opacity-100">去处理 →</span>
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  {rest > 0 && (
+                    <Link href="/admin/pending-approvals" className="inline-block mt-1 ml-2 text-xs text-blue-500 hover:underline">还有 {rest} 项 →</Link>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="p-4 text-center text-gray-400 text-sm">暂无待审批事项</div>
         )}
-      </Link>
+      </div>
 
       {/* 执行力快报、AI 智能助手已下线（2026-04-27）— 数据请去 /analytics/execution 查看 */}
 
