@@ -8,6 +8,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { getOrderLineItems, saveOrderLineItems, parseOrderFile } from '@/app/actions/order-line-items';
+import { parsePO } from '@/app/actions/po-parser';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys } from '@/lib/utils/size-sort';
 
@@ -75,6 +76,45 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       setMsg(`✅ 已解析 ${parsed.length} 款 / ${nColors} 颜色行,请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}`);
     } catch (err: any) {
       setMsg('❌ 读取失败:' + (err?.message || String(err)));
+    }
+    setParsing(false);
+  }
+
+  // 步骤2c:复杂版式/尺码配比(如「S:M:L=2:2:2」+每色总量,零token代码解析读不出)→ 走 AI 解析。
+  // AI 已把配比按比例摊成每码件数(sizes 是件数不是比例);解析→并入富录入表→人核对→保存冻结。
+  async function handleParseAI(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setParsing(true); setMsg('🤖 AI 正在读取配比/复杂版式…(约 10-20 秒)');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await parsePO(fd);
+      if (!res.ok || !res.data) { setMsg('❌ ' + (res.error || 'AI 解析失败')); setParsing(false); return; }
+      const aiStyles: Style[] = (res.data.styles || []).map((s: any) => ({
+        style_no: s.style_no || '', product_name: s.product_name || '', product_name_en: '', image_url: '',
+        fabric_name: s.material || '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', po_unit_price: '', set_multiplier: 1,
+        colors: (s.colors || []).map((c: any) => ({
+          color_cn: c.color_cn || '', color_en: c.color_en || '', sizes: c.sizes || {}, qty: c.qty || 0, remark: c.packaging || '',
+        })),
+      }));
+      if (aiStyles.length === 0) { setMsg('❌ AI 没解析到任何款'); setParsing(false); return; }
+      // 并入(同 code parse:同款号合并颜色行,否则新增款)
+      const merged: Style[] = styles.map((s) => ({ ...s, colors: [...s.colors] }));
+      for (const ps of aiStyles) {
+        const key = (ps.style_no || '').trim();
+        const hit = key ? merged.find((m) => (m.style_no || '').trim() === key) : null;
+        if (hit) hit.colors.push(...ps.colors); else merged.push(ps);
+      }
+      setStyles(merged);
+      const labelSet = new Set(sizeLabels);
+      for (const ps of aiStyles) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) labelSet.add(k);
+      setSizeLabels(sortSizeKeys([...labelSet]));
+      const nColors = aiStyles.reduce((a, s) => a + s.colors.length, 0);
+      setMsg(`✅ AI 解析 ${aiStyles.length} 款 / ${nColors} 颜色行(配比已按比例摊成每码件数),请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}`);
+    } catch (err: any) {
+      setMsg('❌ AI 解析失败:' + (err?.message || String(err)));
     }
     setParsing(false);
   }
@@ -195,9 +235,15 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-600">总量 <b className="text-gray-900">{orderTotal}</b> 件 · <b>{styles.length}</b> 款 · <b>{colorRows}</b> 颜色行</span>
           {canEdit && (
-            <label className={`px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 text-xs font-medium hover:bg-indigo-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="上传含尺码数量的客户订单/生产单 Excel,零 token 解析成明细,预览可改">
+            <label className={`px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 text-xs font-medium hover:bg-indigo-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="尺码数量成列的客户订单/生产单 Excel(如伊彤数量表),零 token 解析,预览可改">
               {parsing ? '解析中…' : '📄 上传客户订单'}
               <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleParseOrderFile} disabled={parsing} />
+            </label>
+          )}
+          {canEdit && (
+            <label className={`px-3 py-1.5 rounded-lg border border-purple-200 text-purple-600 text-xs font-medium hover:bg-purple-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="复杂版式/尺码配比(如年年旺:S:M:L=2:2:2 + 每色总量,或图片/PDF)用 AI 读取,自动按配比摊成每码件数">
+              {parsing ? 'AI 解析中…' : '🤖 AI 解析配比'}
+              <input type="file" accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleParseAI} disabled={parsing} />
             </label>
           )}
           {canEdit && !controlled && <button onClick={save} disabled={saving} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">{saving ? '保存中…' : '💾 保存明细'}</button>}
