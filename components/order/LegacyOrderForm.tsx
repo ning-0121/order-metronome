@@ -117,7 +117,7 @@ async function uploadFilesToStorage(
 
 type Step = 1 | 2 | 3 | 4;
 
-function NewOrderWizard() {
+function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState<Step>(1);
@@ -2169,7 +2169,7 @@ function NewOrderWizard() {
 export function LegacyOrderForm({ showPrice = false }: { showPrice?: boolean } = {}) {
   return (
     <Suspense fallback={<div className="mx-auto max-w-3xl p-6 text-gray-400">加载中...</div>}>
-      <NewOrderWizard />
+      <NewOrderWizard showPrice={showPrice} />
     </Suspense>
   );
 }
