@@ -279,6 +279,7 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
     material_name: l.material_name ?? null,
     material_code: l.material_code ?? null,
     category: l.category ?? null,
+    size: l.size ?? null,                                     // 尺码(N1;按码拆的行带上,整行为 null)
     // 预算桶(2026-07-07 用户拍板:辅料不分细类,面料/辅料两桶即可)。财务按 budget_bucket 汇总预算。
     budget_bucket: l.category === 'fabric' ? 'fabric' : 'accessory',
     supplier_id: l.supplier_id ?? null,
@@ -299,7 +300,7 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
  */
 export async function fetchPurchaseOrderLinesRaw(db: any, poId: string): Promise<any[]> {
   const { data: lines } = await db.from('procurement_line_items')
-    .select('id, order_id, material_name, material_code, category, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
+    .select('id, order_id, material_name, material_code, category, size, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
     .eq('purchase_order_id', poId)
   const rows: any[] = lines || []
   const orderIds = [...new Set(rows.map((l) => l.order_id).filter(Boolean))]

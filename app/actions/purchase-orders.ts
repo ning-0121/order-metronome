@@ -525,8 +525,8 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   // 含价版(仅采购)经 service-role 读底价;无价版走用户会话(RLS 管范围),不取价列
   const { data: lines } = await ((withPrice ? createServiceRoleClient() : supabase).from('procurement_line_items') as any)
     .select(withPrice
-      ? 'material_name, specification, category, ordered_qty, ordered_unit, unit_price, ordered_amount, notes, procurement_item_id'
-      : 'material_name, specification, category, ordered_qty, ordered_unit, notes, procurement_item_id')
+      ? 'material_name, specification, category, size, ordered_qty, ordered_unit, unit_price, ordered_amount, notes, procurement_item_id'
+      : 'material_name, specification, category, size, ordered_qty, ordered_unit, notes, procurement_item_id')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
 
   // 颜色 + 大货单耗:执行行无这些列 → 经 procurement_item_id 回查主数据(采购单按颜色分行,模板需要)
@@ -549,9 +549,9 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   // 采购单模板按「物料 + 颜色 + 规格 + 单位」聚合成行(颜色分行,同色跨订单求和);DB 行不动。
   const rowMap = new Map<string, any>();
   for (const l of (lines || []) as any[]) {
-    const key = `${l.material_name || ''}|${l.color || ''}|${l.specification || ''}|${l.ordered_unit || ''}`;
+    const key = `${l.material_name || ''}|${l.color || ''}|${l.specification || ''}|${l.size || ''}|${l.ordered_unit || ''}`;
     const g = rowMap.get(key) || {
-      material_name: l.material_name || '', color: l.color || '', specification: l.specification || '',
+      material_name: l.material_name || '', color: l.color || '', specification: l.specification || '', size: l.size || '',
       unit: l.ordered_unit || '', consumption: l.consumption ?? null, notes: l.notes || '',
       qty: 0, amount: 0, prices: new Set<number>(),
     };
@@ -578,7 +578,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   // 列定义(按你上传的模板);无价版去掉 单价/金额
   const COLS: Array<{ h: string; w: number; price?: boolean }> = [
     ...(multiMaterial ? [{ h: '原辅料名', w: 20 }] : []),
-    { h: '颜色代码', w: 16 }, { h: 'PATTON色号', w: 12 }, { h: '工厂色号', w: 12 },
+    { h: '颜色代码', w: 16 }, { h: '尺码', w: 8 }, { h: 'PATTON色号', w: 12 }, { h: '工厂色号', w: 12 },
     { h: '单件平方用量', w: 12 }, { h: '单件用量(kg)', w: 12 }, { h: '订单数量', w: 10 },
     { h: '总用量', w: 12 }, { h: '单位', w: 8 },
     ...(withPrice ? [{ h: '单价', w: 10, price: true }, { h: '金额', w: 14, price: true }] : []),
@@ -616,7 +616,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   for (const r of rows) {
     const cells: any[] = [
       ...(multiMaterial ? [r.material_name] : []),
-      r.color || '', '', '', '',                       // 颜色 · PATTON · 工厂色号 · 单件平方用量(空)
+      r.color || '', r.size || '', '', '', '',         // 颜色 · 尺码 · PATTON · 工厂色号 · 单件平方用量(空)
       r.consumption ?? '', '',                          // 单件用量kg · 订单数量(空)
       Math.round(r.qty * 1000) / 1000, r.unit || '',    // 总用量 · 单位
       ...(withPrice ? [r.unit_price ?? '', r.amount ? Math.round(r.amount * 100) / 100 : ''] : []),
