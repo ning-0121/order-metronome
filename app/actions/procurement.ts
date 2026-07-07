@@ -1226,7 +1226,7 @@ export async function getProcurementQueues(): Promise<{
   // 基础读走用户会话(RLS 管范围),不含已封锁的 unit_price(price_variance_pct 是百分比、非绝对价,保留);
   // 底价对 floor 角色在下方经 service-role 补(此前此处直接返回 unit_price 未剥离,是泄价点)。
   const { data, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, procurement_item_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
+    .select('id, order_id, material_name, category, size, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, procurement_item_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
     .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
   if (error) return { error: error.message };
 

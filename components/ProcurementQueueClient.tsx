@@ -47,6 +47,7 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
           <LampDot lamp={line.lamp} />
           <span className="font-medium text-gray-900 truncate">{line.material_name}</span>
           {line.color && <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 shrink-0">{line.color}</span>}
+          {(line as any).size && <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 shrink-0" title="尺码(N1 按码拆行)">{(line as any).size}码</span>}
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[line.category || 'other'] || line.category}</span>
           {/* 已归到采购单的行 → 主链接进"单张采购单"(按供应商/颜色,同供应商多色即合并单,正是用户要的"单个采购单的样子");
               未归单的行 → 进核料页(整单核料+任务单下载)。2026-07-06 用户反馈:点了总看到总订单,要能点进单张采购单。 */}
