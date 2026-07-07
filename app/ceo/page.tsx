@@ -772,6 +772,11 @@ export default async function CEOWarRoom() {
         </div>
         {approvals.total > 0 ? (
           <div className="px-5 py-3 flex flex-wrap gap-2 bg-gradient-to-r from-purple-50/30 to-indigo-50/30">
+            {(approvals.byCategory.order_cancel || 0) > 0 && (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 font-semibold">
+                🛑 取消订单申请 {approvals.byCategory.order_cancel}
+              </span>
+            )}
             {(approvals.byCategory.delay || 0) > 0 && (
               <span className="text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                 ⏳ 延期申请 {approvals.byCategory.delay}
