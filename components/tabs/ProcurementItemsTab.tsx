@@ -6,7 +6,7 @@ import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
-  listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock,
+  listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
@@ -107,6 +107,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [orderId]);
+
+  // 删除整条采购项(仅草稿;连带清未归单执行行)
+  async function delItem(it: any) {
+    if (!(await confirm({ title: `删除采购项 ${it.item_no || it.material_name || ''}？`, message: '仅草稿可删,连带清掉未归采购单的执行行。此操作不可撤销。', danger: true, confirmText: '删除' }))) return;
+    const r = await deleteProcurementItemRow(it.id);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setMsg('✅ 已删除采购项'); if (selId === it.id) setSelId(null); await reload();
+  }
 
   const confirmedCount = items.filter(i => i.status === 'confirmed').length;
   const [linesReady, setLinesReady] = useState(false);   // 生成执行行后亮"去归采购单"通路
@@ -745,7 +753,13 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                   <td className="py-2 px-2 font-medium text-gray-900">{it.final_purchase_qty ?? '—'}</td>
                   <td className="py-2 px-2 text-gray-600 max-w-[120px] truncate">{it.confirmed_supplier_name || '—'}</td>
                   <td className="py-2 px-2"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{statusLabel(it.status)}</span></td>
-                  <td className="py-2 px-2 text-xs text-indigo-600">{selId === it.id ? '收起' : '展开'}</td>
+                  <td className="py-2 px-2 whitespace-nowrap">
+                    <span className="text-xs text-indigo-600">{selId === it.id ? '收起' : '展开'}</span>
+                    {it.status === 'draft' && (
+                      <button onClick={e => { e.stopPropagation(); delItem(it); }}
+                        title="删除整条(仅草稿可删)" className="ml-2 text-xs text-red-500 hover:text-red-700 hover:underline">删除</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

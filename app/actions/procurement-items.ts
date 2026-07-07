@@ -7,7 +7,7 @@
  * 红线:不改 O1/O2/B1/material_requirements/procurement_line_items/现有采购中心;只读 join 引用上游;不接 AI。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
@@ -1011,4 +1011,33 @@ export async function syncProcurementItemsOrderedForPO(purchaseOrderId: string, 
     }
   }
   return { ok: true, changed };
+}
+
+/**
+ * 删除整条采购项(2026-07-07 用户拍板)。仅「草稿」且无已归采购单的执行行才可删;删前连带清未归单执行行。
+ * 已下单/进流程的采购项不能删(走取消/补量),避免与采购单/收货错位。
+ */
+export async function deleteProcurementItemRow(itemId: string): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!roles.some((r) => ['procurement', 'procurement_manager', 'admin'].includes(r))) return { error: '仅采购/管理员可删除采购项' };
+
+  const svc = createServiceRoleClient();
+  const { data: item } = await (svc.from('procurement_items') as any)
+    .select('id, order_id, status, item_no').eq('id', itemId).maybeSingle();
+  if (!item) return { error: '采购项不存在(可能已删)' };
+  if ((item as any).status !== 'draft') return { error: `仅「草稿」采购项可删除(当前:${(item as any).status})。已进采购流程的请走取消/补量` };
+
+  const { data: placed } = await (svc.from('procurement_line_items') as any)
+    .select('id').eq('procurement_item_id', itemId).not('purchase_order_id', 'is', null).limit(1);
+  if ((placed || []).length > 0) return { error: '该采购项已有执行行归入采购单,不能删除' };
+
+  await (svc.from('procurement_line_items') as any).delete().eq('procurement_item_id', itemId).is('purchase_order_id', null);
+  const { error } = await (svc.from('procurement_items') as any).delete().eq('id', itemId);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${(item as any).order_id}`);
+  return { ok: true };
 }

@@ -40,6 +40,7 @@ export async function listUnassignedProcurementLines(orderId?: string): Promise<
   let q = (createServiceRoleClient().from('procurement_line_items') as any)
     .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, unit_price, price_baseline')
     .is('purchase_order_id', null)
+    .gt('ordered_qty', 0)                    // 0 量行(如误建/占位)不进待归单,免污染下单(2026-07-07 用户)
     .order('created_at', { ascending: false });
   if (orderId) q = q.eq('order_id', orderId);
   const { data, error } = await q;
