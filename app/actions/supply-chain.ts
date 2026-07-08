@@ -41,6 +41,8 @@ export interface SupplyChainLine {
   unit_price?: number | null;
   procurement_item_id?: string | null;
   size_lines?: number;   // 该料+色被拆成几行尺码(>1 说明是合并显示)
+  size?: string | null;
+  sizes?: string[];      // 合并的各尺码(已按 S→M→L 排序),供业务视角显示"啥尺码"
 }
 
 export interface SupplyChainOverview {
@@ -66,32 +68,45 @@ export async function getOrderSupplyChainOverview(
   const roles = await getUserRoles(supabase, user.id);
   const fin = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
   const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
-  const cols =
+  const baseCols =
     'id, procurement_item_id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name' +
     (canSeeFloor ? ', unit_price' : '');
-  const { data: lines, error: linesErr } = await ((canSeeFloor ? createServiceRoleClient() : supabase).from('procurement_line_items') as any)
-    .select(cols)
-    .eq('order_id', orderId)
-    .order('category', { ascending: true });
+  const client = (canSeeFloor ? createServiceRoleClient() : supabase);
+  // size 是真列(20260707);未授权/缓存陈旧 → 降级去 size(不 brick 整页)
+  let { data: lines, error: linesErr } = await (client.from('procurement_line_items') as any)
+    .select(baseCols + ', size').eq('order_id', orderId).order('category', { ascending: true });
+  if (linesErr && /\bsize\b|schema cache|column .* does not exist|permission denied/i.test(linesErr.message || '')) {
+    ({ data: lines, error: linesErr } = await (client.from('procurement_line_items') as any)
+      .select(baseCols).eq('order_id', orderId).order('category', { ascending: true }));
+  }
   if (linesErr) return { error: friendlyError(linesErr) };
 
-  // 业务视角合并拆码执行行(2026-07-08 用户):同一采购项(procurement_item_id)被 N1 按 S/M/L 拆成多行,
-  // 业务视角看到"3 个主吊牌"像重复且是奇数。这里按采购项合并成 料+色 一行(数量求和、需到日取最早、
-  // 尺码行数留痕),与采购对账口径一致;采购中心仍保留逐码行供归单。老行(无采购项)各自成行不合并。
+  // 业务视角合并拆码执行行(2026-07-08 用户):N1 把一料按 S/M/L 拆成多行,业务看到"3 个主吊牌"像重复且奇数,
+  // 且看不出是啥尺码。这里合并成一行 + 收集尺码显示。合并键:
+  //  · 有采购项 → 按采购项(区分颜色);
+  //  · 辅料/washing 无采购项 → 按 料+供应商+类别+需到日(辅料通常无色,不会误并);
+  //  · 布料无采购项 → 各自成行(避免误并颜色),但仍显示尺码。
+  const nrm = (s: any) => String(s ?? '').trim().toLowerCase();
+  const isFabricCat = (c: any) => c === 'fabric' || c === 'lining';
   const grouped = new Map<string, any>();
   for (const l of ((lines || []) as any[])) {
-    const key = l.procurement_item_id || `__row_${l.id}`;
+    const key = l.procurement_item_id ? `pi_${l.procurement_item_id}`
+      : isFabricCat(l.category) ? `__row_${l.id}`
+      : `mat_${nrm(l.material_name)}¦${nrm(l.supplier_name)}¦${nrm(l.category)}¦${l.required_by || ''}`;
     const g = grouped.get(key);
-    if (!g) { grouped.set(key, { ...l, size_lines: 1 }); continue; }
+    if (!g) { grouped.set(key, { ...l, size_lines: 1, _sizes: l.size ? new Set([l.size]) : new Set() }); continue; }
     g.ordered_qty = (Number(g.ordered_qty) || 0) + (Number(l.ordered_qty) || 0);
     g.received_qty = (Number(g.received_qty) || 0) + (Number(l.received_qty) || 0);
     if (l.required_by && (!g.required_by || l.required_by < g.required_by)) g.required_by = l.required_by;   // 宁早勿晚
     if (l.expected_arrival && (!g.expected_arrival || l.expected_arrival < g.expected_arrival)) g.expected_arrival = l.expected_arrival;
     // 组内状态一般一致(同时生成/推进);若混态取"最不推进"的,业务视角宁可显示为未完成
     if (STATUS_RANK[l.line_status] != null && (STATUS_RANK[g.line_status] == null || STATUS_RANK[l.line_status] < STATUS_RANK[g.line_status])) g.line_status = l.line_status;
+    if (l.size) g._sizes.add(l.size);
     g.size_lines++;
   }
-  const mergedLines = [...grouped.values()];
+  const SIZE_ORDER = ['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', '2xl', 'xxxl', '3xl', '4xl', '5xl'];
+  const sizeRank = (s: any) => { const i = SIZE_ORDER.indexOf(String(s).toLowerCase()); return i < 0 ? 99 : i; };
+  const mergedLines = [...grouped.values()].map((g) => ({ ...g, sizes: [...(g._sizes || [])].sort((a, b) => sizeRank(a) - sizeRank(b)) }));
 
   const today = new Date().toISOString().slice(0, 10);
   let pending = 0, inTransit = 0, arrived = 0, done = 0, attention = 0;

@@ -106,7 +106,12 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-medium text-gray-900 truncate">{l.material_name || '—'}</span>
                   <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[l.category || 'other'] || l.category}</span>
-                  {(l.size_lines ?? 1) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-600 shrink-0" title="该料按尺码拆成多行,这里已合并为一行(数量为合计)">合 {l.size_lines} 码</span>}
+                  {/* 尺码:合并了多码就列出各码;单行就显示自己的码 */}
+                  {(l.sizes && l.sizes.length > 0)
+                    ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 font-medium shrink-0" title="该料按尺码采购,已合并显示(数量为合计)">尺码 {l.sizes.join('·')}</span>
+                    : l.size
+                      ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 font-medium shrink-0">{l.size}</span>
+                      : null}
                   {l.supplier_name && <span className="text-xs text-gray-400 truncate">· {l.supplier_name}</span>}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -143,9 +148,7 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
       <div className="flex flex-wrap gap-2 pt-1">
         <Link href={`/orders/${orderId}?tab=procurement`} className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50">📦 去采购进度</Link>
         <Link href={`/orders/${orderId}?tab=bom`} className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50">🧵 原辅料 / BOM（{data.bomCount}）</Link>
-        {canSeeFinancials && (
-          <Link href={`/orders/${orderId}?tab=cost_control`} className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50">💰 成本控制</Link>
-        )}
+        <Link href={`/orders/${orderId}?tab=procurement_items`} className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50">🛒 采购核料</Link>
       </div>
     </div>
   );
