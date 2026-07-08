@@ -813,6 +813,8 @@ export async function createOrder(
           // qty 优先取 c.qty;富录入表不维护 qty 字段 → 从 sizes 求和兜底
           const sizesSum = Object.values(c?.sizes || {}).reduce((s: number, v: any) => s + (Number(v) || 0), 0);
           const qty = Number(c?.qty ?? 0) || sizesSum;
+          // 箱数(该色行)——建单富录入表填的箱数要落库,否则生产任务单/PI 拉不到(2026-07-08 用户)
+          const cartons = c?.carton_count === '' || c?.carton_count == null ? null : Number(c.carton_count);
           rows.push({
             order_id: orderData.id,
             line_no: lineNo,
@@ -825,6 +827,7 @@ export async function createOrder(
             set_multiplier: 1,
             qty_pcs: qty || null,
             qty_raw: qty || null,
+            carton_count: cartons != null && !isNaN(cartons) ? cartons : null,
             image_url: st?.image_url || null,
             remark: c?.remark || null,
             fabric_name: st?.fabric_name?.trim?.() || null,
@@ -838,9 +841,9 @@ export async function createOrder(
       }
       if (rows.length > 0) {
         let { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
-        if (liErr && /po_unit_price|column .* does not exist/i.test(liErr.message || '')) {
-          // po_unit_price 迁移(20260706)未执行 → 降级去掉该列重插,不阻断建单
-          const plain = rows.map(({ po_unit_price, ...rest }) => rest);
+        if (liErr && /po_unit_price|carton_count|column .* does not exist/i.test(liErr.message || '')) {
+          // po_unit_price(20260706)/carton_count(20260703)迁移未执行 → 降级去掉这些列重插,不阻断建单
+          const plain = rows.map(({ po_unit_price, carton_count, ...rest }) => rest);
           ({ error: liErr } = await (supabase.from('order_line_items') as any).insert(plain));
         }
         if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);
