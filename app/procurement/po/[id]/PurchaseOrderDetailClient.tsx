@@ -215,6 +215,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
             <thead><tr className="bg-gray-50 text-left text-gray-500">
               <th className="px-3 py-2">物料</th><th className="px-3 py-2">规格</th>
               <th className="px-3 py-2">颜色</th>
+              <th className="px-3 py-2 text-center">尺码</th>
               <th className="px-3 py-2 text-center">订购</th>
               <th className="px-3 py-2 text-center">已收</th>
               <th className="px-3 py-2 text-center">未到</th>
@@ -235,6 +236,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                       <td className="px-3 py-2">{l.material_name}</td>
                       <td className="px-3 py-2 text-gray-500">{l.specification || '—'}</td>
                       <td className="px-3 py-2">{l.color ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">{l.color}</span> : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-center">{l.size ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-700">{l.size}</span> : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-center">{l.ordered_qty} {l.ordered_unit}</td>
                       <td className="px-3 py-2 text-center text-emerald-700 font-medium">{received || '—'}</td>
                       <td className={`px-3 py-2 text-center font-semibold ${out > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{ordered ? out : '—'}</td>
@@ -248,7 +250,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                     </tr>
                     {receipts.length > 0 && (
                       <tr key={`${l.id}-receipts`}>
-                        <td colSpan={canSeeFloor ? 10 : 8} className="px-3 pb-2 pt-0">
+                        <td colSpan={canSeeFloor ? 11 : 9} className="px-3 pb-2 pt-0">
                           <div className="ml-4 rounded-lg bg-emerald-50/60 border border-emerald-100 px-3 py-1.5 text-[11px] text-emerald-800">
                             📥 收货批次:
                             {receipts.map((r: any, i: number) => (

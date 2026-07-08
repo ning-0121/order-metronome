@@ -303,6 +303,9 @@ export async function listBomConsumptionLines(orderId: string) {
     for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) byStyleColor.set(`${st}¦${norm(col)}`, q);
   }
   const pieceOf = (b: any): number | null => {
+    // 辅料业务手填了总需用量 → 数量列直接显示它(中包袋按业务填的 1250,不是件数 7500)
+    const isTrim = b.material_type !== 'fabric' && b.material_type !== 'lining';
+    if (isTrim && Number(b.total_qty) > 0) return Number(b.total_qty);
     const st = norm(b.style_no);
     if (b.style_no && b.color) { const v = byStyleColor.get(`${st}¦${norm(b.color)}`); if (v != null) return v; }
     if (b.style_no) { const v = byStyle.get(st); if (v) return v; }

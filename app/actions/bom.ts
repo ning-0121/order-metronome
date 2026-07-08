@@ -892,9 +892,13 @@ export async function submitBomToProcurement(
       },
       po_quantity: poQty, stageAnchors, inventoryQty, reuseQty: 0, today,
     });
-    // 业务手填总需量 → 直接以人工为准(不自动算;中包袋/打包件等)。填了就用,没填才用 MRP 自动算。
+    // 业务手填总需量 → 直接以人工为准(不自动算;中包袋/打包件等)。填了就用。
+    // 没填时:辅料(非面料/里料)缺单耗 → 兜底=件数(不再算成 0/needs_input);面料仍需大货单耗,保持原样。
     const manualTotal = line.bom_id ? manualTotalByBom.get(line.bom_id) : undefined;
-    const netFinal = (manualTotal != null && manualTotal > 0) ? manualTotal : r.net_purchase_qty;
+    const isTrimLike = line.material_type !== 'fabric' && line.material_type !== 'lining';
+    const netFinal = (manualTotal != null && manualTotal > 0) ? manualTotal
+      : (r.net_purchase_qty != null && r.net_purchase_qty > 0) ? r.net_purchase_qty
+      : (isTrimLike ? poQty : r.net_purchase_qty);
     return {
       material_plan_id: planId, order_id: orderId, snapshot_line_id: line.id,
       material_name: r.material_name, material_type: r.material_type, category: r.category,

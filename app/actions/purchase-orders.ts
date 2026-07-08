@@ -177,9 +177,14 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
 
   // 基础读走用户会话(RLS 管订单范围),不含已封锁的价列(unit_price/ordered_amount);
   // price_baseline(建议价)对业务可见,保留。floor 角色的底价在下方经 service-role 补。
-  const { data: lines } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, price_baseline, received_qty, status, line_status, chase_count, last_chased_at, procurement_item_id')
+  const _detSel = 'id, order_id, material_name, specification, category, ordered_qty, ordered_unit, price_baseline, received_qty, status, line_status, chase_count, last_chased_at, procurement_item_id';
+  let { data: lines, error: _detErr } = await (supabase.from('procurement_line_items') as any)
+    .select(_detSel + ', size')
     .eq('purchase_order_id', id).order('created_at', { ascending: true });
+  // size 列未授权/缓存陈旧 → 降级去 size,PO 详情不变空
+  if (_detErr && /size|schema cache|column|does not exist|permission denied/i.test(_detErr.message || '')) {
+    ({ data: lines } = await (supabase.from('procurement_line_items') as any).select(_detSel).eq('purchase_order_id', id).order('created_at', { ascending: true }));
+  }
 
   // 颜色:执行行无 color 列,经 procurement_item_id 回查主数据(采购单按颜色分行,显示必须带色)
   const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];
