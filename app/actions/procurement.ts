@@ -113,7 +113,54 @@ export async function getProcurementItems(orderId: string): Promise<{
 
   if (error) return { error: error.message };
 
-  const rawItems = (data || []) as ProcurementLineItem[];
+  const rawLines = (data || []) as any[];
+
+  // 对账按物料合并(2026-07-08 用户:对账是跟供应商按物料核总量,不该被 N1 拆码拆成 21 行还看不出码)。
+  //  合并键:有采购项按采购项(分色);辅料无采购项按 料+规格+供应商;布料无采购项各自成行(避免误并色)。
+  //  数量/金额求和,收集尺码;收货以采购中心为单一真相,这里合并行只读汇总,不在对账页逐行录。
+  const nrm = (s: any) => String(s ?? '').trim().toLowerCase();
+  const isFabricCat = (c: any) => c === 'fabric' || c === 'lining';
+  const piIds = [...new Set(rawLines.map((l) => l.procurement_item_id).filter(Boolean))];
+  const colorByPi = new Map<string, string | null>();
+  if (piIds.length) {
+    const { data: pis } = await (createServiceRoleClient().from('procurement_items') as any).select('id, color').in('id', piIds);
+    for (const p of (pis || [])) colorByPi.set((p as any).id, (p as any).color ?? null);
+  }
+  const grouped = new Map<string, any>();
+  for (const l of rawLines) {
+    const color = l.procurement_item_id ? (colorByPi.get(l.procurement_item_id) ?? null) : null;
+    const key = l.procurement_item_id ? `pi_${l.procurement_item_id}`
+      : isFabricCat(l.category) ? `row_${l.id}`
+      : `mat_${nrm(l.material_name)}¦${nrm(l.specification)}¦${nrm(l.supplier_name)}`;
+    const g = grouped.get(key);
+    if (!g) {
+      grouped.set(key, { ...l, color, _line_ids: [l.id], _sizes: l.size ? new Set([l.size]) : new Set(), _n: 1 });
+      continue;
+    }
+    g.ordered_qty = (Number(g.ordered_qty) || 0) + (Number(l.ordered_qty) || 0);
+    g.ordered_amount = (Number(g.ordered_amount) || 0) + (Number(l.ordered_amount) || 0);
+    if (l.received_qty !== null && l.received_qty !== undefined) g.received_qty = (Number(g.received_qty) || 0) + Number(l.received_qty);
+    g.difference_amount = (Number(g.difference_amount) || 0) + (Number(l.difference_amount) || 0);
+    g._line_ids.push(l.id);
+    if (l.size) g._sizes.add(l.size);
+    g._n++;
+  }
+  const SIZE_ORDER = ['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', '2xl', 'xxxl', '3xl', '4xl', '5xl'];
+  const sizeRank = (s: any) => { const i = SIZE_ORDER.indexOf(String(s).toLowerCase()); return i < 0 ? 99 : i; };
+  const rawItems = [...grouped.values()].map((g) => {
+    const ordered = Number(g.ordered_qty) || 0;
+    const recv = g.received_qty ?? null;
+    const diffQty = recv !== null ? recv - ordered : null;
+    const diffPct = recv !== null && ordered > 0 ? Number(((diffQty! / ordered) * 100).toFixed(1)) : null;
+    return {
+      ...g,
+      received_qty: recv,
+      difference_qty: diffQty,
+      difference_pct: diffPct,
+      sizes: [...(g._sizes || [])].sort((a: any, b: any) => sizeRank(a) - sizeRank(b)),
+      size_count: g._n, line_ids: g._line_ids,
+    };
+  }) as ProcurementLineItem[];
 
   // 汇总(用原始底价算,但对非底价角色不返回金额)
   const totalOrdered = rawItems.reduce((s, i) => s + (i.ordered_amount || 0), 0);
@@ -538,6 +585,37 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
 
   if (!items || items.length === 0) return { error: '暂无采购明细' };
 
+  // 对账单也按物料合并(和页面一致:供应商按物料核总量,不逐尺码;尺码并进物料名括注)
+  const _piIds = [...new Set((items as any[]).map((l) => l.procurement_item_id).filter(Boolean))];
+  const _colorByPi = new Map<string, string | null>();
+  if (_piIds.length) {
+    const { data: _pis } = await (createServiceRoleClient().from('procurement_items') as any).select('id, color').in('id', _piIds);
+    for (const p of (_pis || [])) _colorByPi.set((p as any).id, (p as any).color ?? null);
+  }
+  const _nrm = (s: any) => String(s ?? '').trim().toLowerCase();
+  const _isFabric = (c: any) => c === 'fabric' || c === 'lining';
+  const _grp = new Map<string, any>();
+  for (const l of (items as any[])) {
+    const color = l.procurement_item_id ? (_colorByPi.get(l.procurement_item_id) ?? null) : null;
+    const key = l.procurement_item_id ? `pi_${l.procurement_item_id}` : _isFabric(l.category) ? `row_${l.id}` : `mat_${_nrm(l.material_name)}¦${_nrm(l.specification)}¦${_nrm(l.supplier_name)}`;
+    const g = _grp.get(key);
+    if (!g) { _grp.set(key, { ...l, color, _sizes: l.size ? new Set([l.size]) : new Set() }); continue; }
+    g.ordered_qty = (Number(g.ordered_qty) || 0) + (Number(l.ordered_qty) || 0);
+    g.ordered_amount = (Number(g.ordered_amount) || 0) + (Number(l.ordered_amount) || 0);
+    if (l.received_qty != null) g.received_qty = (Number(g.received_qty) || 0) + Number(l.received_qty);
+    g.difference_amount = (Number(g.difference_amount) || 0) + (Number(l.difference_amount) || 0);
+    if (l.size) g._sizes.add(l.size);
+  }
+  const recItems = [...(_grp.values())].map((g) => {
+    const ordered = Number(g.ordered_qty) || 0;
+    const recv = g.received_qty ?? null;
+    const diffQty = recv !== null ? recv - ordered : null;
+    const diffPct = recv !== null && ordered > 0 ? Number(((diffQty! / ordered) * 100).toFixed(1)) : null;
+    const sizes = [...(g._sizes || [])];
+    return { ...g, received_qty: recv, difference_qty: diffQty, difference_pct: diffPct,
+      material_name: sizes.length ? `${g.material_name}${g.color ? ' ' + g.color : ''}(${sizes.join('/')})` : (g.color ? `${g.material_name} ${g.color}` : g.material_name) };
+  });
+
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
   wb.creator = 'QIMO OS';
@@ -581,7 +659,7 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
   let totalOrderedAmt = 0;
   let totalReceivedAmt = 0;
 
-  (items as any[]).forEach((item, i) => {
+  recItems.forEach((item, i) => {
     const row = ws.getRow(i + 4);
     const receivedAmt = (item.received_qty || 0) * (item.unit_price || 0);
     totalOrderedAmt += item.ordered_amount || 0;

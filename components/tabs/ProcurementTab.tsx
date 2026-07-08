@@ -105,9 +105,10 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
     }
   }
 
-  async function handleDelete(itemId: string) {
-    if (!(await confirm({ title: '删除这条采购明细？', danger: true, confirmText: '删除' }))) return;
-    await deleteProcurementItem(itemId, orderId);
+  async function handleDelete(item: any) {
+    const ids: string[] = item?.line_ids?.length ? item.line_ids : [item.id];
+    if (!(await confirm({ title: ids.length > 1 ? `删除这条采购明细(含 ${ids.length} 个拆码行)？` : '删除这条采购明细？', danger: true, confirmText: '删除' }))) return;
+    for (const id of ids) await deleteProcurementItem(id, orderId);
     load();
   }
 
@@ -271,9 +272,14 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
                 {items.map(item => {
                   const hasDiscrepancy = item.received_qty !== null && Math.abs(item.difference_pct || 0) > 3;
                   const isEditingReceipt = editingReceiptId === item.id;
+                  const merged = ((item as any).size_count || 1) > 1;   // 拆码行已合并显示
                   return (
                     <tr key={item.id} className={hasDiscrepancy ? 'bg-red-50' : ''}>
-                      <td className="px-3 py-2 font-medium text-gray-900">{item.material_name}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {item.material_name}
+                        {(item as any).color && <span className="ml-1 text-[10px] text-gray-400">{(item as any).color}</span>}
+                        {(item as any).sizes?.length > 0 && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-teal-50 text-teal-700 font-medium" title="该料按尺码采购,已合并;数量为合计">尺码 {(item as any).sizes.join('·')}</span>}
+                      </td>
                       <td className="px-3 py-2 text-gray-500">{item.specification || '-'}</td>
                       <td className="px-3 py-2 text-gray-500">{item.supplier_name || '-'}</td>
                       <td className="px-3 py-2 text-center">
@@ -304,7 +310,8 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
                         ) : (
                           <span className={`font-mono ${item.received_qty !== null ? 'text-emerald-700' : 'text-gray-300'}`}>
                             {item.received_qty ?? (
-                              canRecordReceipt ? (
+                              merged ? <span className="text-gray-400 text-[11px]" title="拆码行合并显示,收货请在采购中心「收货登记」(单一真相)">采购中心收</span>
+                              : canRecordReceipt ? (
                                 <button
                                   onClick={() => { setEditingReceiptId(item.id); setReceiptQty(String(item.ordered_qty)); }}
                                   className="text-emerald-500 hover:text-emerald-700 hover:underline"
@@ -324,7 +331,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
-                          {canRecordReceipt && item.received_qty === null && !isEditingReceipt && (
+                          {canRecordReceipt && !merged && item.received_qty === null && !isEditingReceipt && (
                             <button
                               onClick={() => { setEditingReceiptId(item.id); setReceiptQty(String(item.ordered_qty)); }}
                               className="text-emerald-500 hover:text-emerald-700"
@@ -335,7 +342,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
                           )}
                           {(isAdmin || canEdit) && (
                             <button
-                              onClick={() => handleDelete(item.id)}
+                              onClick={() => handleDelete(item)}
                               className="text-gray-300 hover:text-red-500"
                               title="删除"
                             >
