@@ -151,8 +151,10 @@ export async function parseCostSheet(buffer: Buffer): Promise<CostSheetParseResu
       if (rawVal === '' || rawVal === null || rawVal === undefined) continue;
 
       if (pattern.type === 'number') {
-        const num = parseFloat(String(rawVal));
-        if (!isNaN(num)) (row as any)[pattern.field] = num;
+        // 剥掉货币/千分符等非数字字符(半角¥/全角￥/$/逗号);parseFloat 遇前缀¥直接 NaN → 价读不到
+        const cleaned = String(rawVal).replace(/[^\d.\-]/g, '');
+        const num = parseFloat(cleaned);
+        if (!isNaN(num) && cleaned !== '' && cleaned !== '-') (row as any)[pattern.field] = num;
       } else {
         (row as any)[pattern.field] = String(rawVal).trim();
       }

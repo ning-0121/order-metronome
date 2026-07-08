@@ -31,7 +31,11 @@ export interface ParsedQuoteSheet {
 const norm = (v: unknown): string => String(v ?? '').replace(/\s+/g, '').toLowerCase();
 const numOrNull = (v: unknown): number | null => {
   if (v === null || v === undefined || v === '') return null;
-  const n = Number(String(v).replace(/[,¥$]/g, '').trim());
+  // 剥掉任何非数字字符(半角¥ U+00A5 / 全角￥ U+FFE5 / $ / 逗号 / 空格 等)——
+  // 之前只剥半角¥,全角￥的报价单价全变 NaN→null(用户实测"辅料价格识别不出来")。
+  const cleaned = String(v).replace(/[^\d.\-]/g, '').trim();
+  if (cleaned === '' || cleaned === '-' || cleaned === '.') return null;
+  const n = Number(cleaned);
   return isNaN(n) ? null : n;
 };
 const strOrNull = (v: unknown): string | null => {
