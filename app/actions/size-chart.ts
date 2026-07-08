@@ -19,14 +19,18 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
   if (!file || !file.size) return { error: '请选择文件' };
   if (file.size > 20 * 1024 * 1024) return { error: '文件不能超过 20MB' };
 
-  const safeName = String(file.name || 'file').replace(/[^\w.\-一-龥]/g, '_');
-  const path = `${orderId}/size-chart/${Date.now()}-${safeName}`;
+  // ⚠ Supabase Storage 的 key 只允许 ASCII;中文文件名(如「PY70EB尺寸表.xlsx」)会报 Invalid key。
+  //   → key 用 ASCII 安全名 + 随机后缀防撞;原始文件名(含中文)存 order_attachments.file_name 供显示/下载。
+  const ext = (String(file.name || '').match(/\.[a-zA-Z0-9]{1,8}$/)?.[0] || '').toLowerCase();
+  const base = String(file.name || 'file').replace(/\.[^.]*$/, '').replace(/[^\w.\-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'file';
+  const rand = Math.random().toString(36).slice(2, 7);
+  const path = `${orderId}/size-chart/${Date.now()}-${rand}-${base}${ext}`;
   const { error: upErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
   if (upErr) return { error: `上传失败:${upErr.message}` };
 
   const { error: insErr } = await (supabase.from('order_attachments') as any).insert({
     order_id: orderId,
-    file_name: file.name || safeName,
+    file_name: file.name || `${base}${ext}`,
     file_type: SIZE_CHART_TYPE,
     storage_path: path,
     file_url: path,
