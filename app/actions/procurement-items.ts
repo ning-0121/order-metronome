@@ -834,12 +834,10 @@ export async function getProcurementItemSources(itemId: string) {
   const override = splittable && (item as any).size_qty_override && typeof (item as any).size_qty_override === 'object' ? (item as any).size_qty_override : null;
   const overrideEntries = override ? Object.entries(override).map(([size, qty]) => ({ size, qty: Number(qty) || 0 })).filter((s) => s.qty > 0) : [];
   const sizeOverrideActive = overrideEntries.length > 0;
-  const sizeBreakdown = !splittable
-    ? []
-    : sizeOverrideActive
-      ? overrideEntries
-      : distributeBySize(orderable, sizeCounts).filter((s) => s.size != null);
-  // 系统按比例拆分的默认值(供 UI「恢复按比例」参照 + 展示可拆的尺码全集)
+  // 2026-07-08 用户:默认不按尺码拆(单行整量);只有采购点「按尺码录入」填了 size_qty_override 才拆。
+  // 与 generateExecutionLines 同口径:sizeBreakdown 仅在有人工录入时才逐码,否则空(单行)。
+  const sizeBreakdown = (splittable && sizeOverrideActive) ? overrideEntries : [];
+  // 系统按比例拆的建议值(供 UI 点开「按尺码录入」时预填参照,不作默认拆分)
   const suggestedSplit = splittable ? distributeBySize(orderable, sizeCounts).filter((s) => s.size != null) : [];
   const finalQty = (item as any).final_purchase_qty ?? (item as any).suggested_purchase_qty ?? (item as any).total_required_qty ?? null;
 
@@ -1114,16 +1112,15 @@ export async function generateExecutionLines(orderId: string) {
   const rows = (items as any[])
     // 出单量>0 才生成执行行:定案量−库存抵扣=0(全用库存)的项不采购、不发供应商
     .filter((it) => !done.has(it.id) && canGenerateExecution(it) && orderableQty(it) > 0)
-    // 面料/散装物料不拆码 → 单行整量(size=null);按件计数物料:人工覆盖优先,否则 N1 按各码件数拆。
+    // 尺码拆分改为「采购主动录入」opt-in(2026-07-08 用户:辅料很多不带尺码,不再全部自动按码拆)。
+    // 默认单行整量(size=null);仅当采购在核料点「按尺码录入」填了 size_qty_override 才按码拆。面料/散装恒单行。
     .flatMap((it) => {
-      if (!shouldSplitBySize(it)) {
+      const ov = (it as any).size_qty_override && typeof (it as any).size_qty_override === 'object' ? (it as any).size_qty_override : null;
+      const overrideSegs = ov ? Object.entries(ov).map(([size, qty]) => ({ size, qty: Number(qty) || 0 })).filter((s) => s.qty > 0) : [];
+      if (overrideSegs.length === 0 || !shouldSplitBySize(it)) {
         return [{ ...buildExecutionLineRow(it, user.id, { size: null, qtyOverride: orderableQty(it) }), ordered_at: now }];
       }
-      const ov = (it as any).size_qty_override && typeof (it as any).size_qty_override === 'object' ? (it as any).size_qty_override : null;
-      const segs = ov && Object.keys(ov).length
-        ? Object.entries(ov).map(([size, qty]) => ({ size, qty: Number(qty) || 0 })).filter((s) => s.qty > 0)
-        : distributeBySize(orderableQty(it), sizeCountsFor(it));
-      return segs.map((seg) => ({ ...buildExecutionLineRow(it, user.id, { size: seg.size, qtyOverride: seg.qty }), ordered_at: now }));
+      return overrideSegs.map((seg) => ({ ...buildExecutionLineRow(it, user.id, { size: seg.size, qtyOverride: seg.qty }), ordered_at: now }));
     });
   if (rows.length === 0) return { ok: true, created: 0, message: '已确认项无需采购(全用库存抵扣)或均已生成执行行' };
 

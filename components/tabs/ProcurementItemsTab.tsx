@@ -54,6 +54,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [sizeBreakdown, setSizeBreakdown] = useState<Array<{ size: string | null; qty: number }>>([]);   // #3 尺码拆分预览
   const [sizeEdit, setSizeEdit] = useState<Record<string, string>>({});   // 尺码拆分可编辑(码→量)
   const [sizeOverrideActive, setSizeOverrideActive] = useState(false);    // 是否已存人工覆盖
+  const [suggestedSplit, setSuggestedSplit] = useState<Array<{ size: string | null; qty: number }>>([]);  // 系统按比例建议(点「按尺码录入」时预填)
   const [sizeSaving, setSizeSaving] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
@@ -230,7 +231,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   async function select(item: any) {
     if (selId === item.id) { setSelId(null); return; }
-    setSelId(item.id); setSources([]); setSizeBreakdown([]); setSizeEdit({}); setSizeOverrideActive(false);
+    setSelId(item.id); setSources([]); setSizeBreakdown([]); setSizeEdit({}); setSizeOverrideActive(false); setSuggestedSplit([]);
     const f: Record<string, any> = {};
     for (const k of FORM_KEYS) f[k] = item[k] ?? '';
     // 采购计量单位默认=该项单位(物料录入时就选过,不让采购重敲;按匹/按卷等买法不同才改)
@@ -242,6 +243,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setSizeBreakdown(bd);
     setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
     setSizeOverrideActive(!!(res as any).sizeOverrideActive);
+    setSuggestedSplit(((res as any).suggestedSplit || []) as Array<{ size: string | null; qty: number }>);
   }
   // 重新拉取当前项的尺码拆分(保存/恢复后刷新预览,不切换选中)
   async function refreshSizes(itemId: string) {
@@ -251,6 +253,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setSizeBreakdown(bd);
     setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
     setSizeOverrideActive(!!(res as any).sizeOverrideActive);
+    setSuggestedSplit(((res as any).suggestedSplit || []) as Array<{ size: string | null; qty: number }>);
   }
   // 保存尺码拆分(采购在预览直接改比例/每码数量)
   async function saveSizes() {
@@ -264,14 +267,15 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     set('final_purchase_qty', String((r as any).total));   // 同步「最终采购量(人拍板)」输入
     await Promise.all([reload(), refreshSizes(selId)]);
   }
-  // 恢复系统按比例拆分(清空人工覆盖)
+  // 取消尺码拆分(清空人工录入)→ 回到整单一个数量、不分尺码(2026-07-08 用户:默认不拆码)
   async function resetSizes() {
     if (!selId) return;
     setSizeSaving(true); setMsg('');
     const r = await saveSizeQtyOverride(selId, orderId, {});
     setSizeSaving(false);
     if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
-    setMsg('✅ 已恢复系统按比例拆分');
+    setSizeEdit({});   // 收起录入框,回到「按尺码录入」入口
+    setMsg('✅ 已改回整单一个数量(不分尺码)');
     await Promise.all([reload(), refreshSizes(selId)]);
   }
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
@@ -1006,6 +1010,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             )}
           </div>
 
+          {/* 尺码 opt-in(2026-07-08 用户:辅料很多不带尺码 → 默认整单一个数量;需要分尺码点此打开逐码录入)*/}
+          {Object.keys(sizeEdit).length === 0 && suggestedSplit.length > 0 && sel && !['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status) && (
+            <button onClick={() => setSizeEdit(Object.fromEntries(suggestedSplit.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])))}
+              className="text-xs px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 hover:bg-teal-50 font-medium">
+              ➕ 按尺码录入（默认整单一个数量·不分尺码；点此逐码填量）
+            </button>
+          )}
+
           {/* 尺码拆分:可直接改比例/每码数量(2026-07-08 用户拍板)——生成执行行按此逐码出量 */}
           {Object.keys(sizeEdit).length > 0 && (() => {
             const sizeLocked = ['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status);
@@ -1015,8 +1027,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               <div className="text-xs font-semibold text-teal-800 flex items-center gap-2 flex-wrap">
                 <span>📐 尺码拆分 · 最终采购量 <b>{sizeSum || '—'}</b> {sel.unit || ''}</span>
                 {sizeOverrideActive
-                  ? <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">✋ 人工拆分</span>
-                  : <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">系统按比例</span>}
+                  ? <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">✋ 已按尺码</span>
+                  : <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">未保存·保存后才按码拆</span>}
                 {sizeLocked && <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">🔒 已下单锁定</span>}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1035,13 +1047,11 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     className="text-xs px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-50">
                     {sizeSaving ? '保存中…' : '💾 保存尺码拆分'}
                   </button>
-                  {sizeOverrideActive && (
-                    <button onClick={resetSizes} disabled={sizeSaving}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">
-                      ↺ 恢复系统按比例
-                    </button>
-                  )}
-                  <span className="text-[11px] text-teal-600">改比例或每码数量都行;最终采购量 = 各码之和,生成采购行时按此逐码出量。</span>
+                  <button onClick={resetSizes} disabled={sizeSaving}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">
+                    ↺ 取消尺码（整单一个数量）
+                  </button>
+                  <span className="text-[11px] text-teal-600">逐码填量;最终采购量 = 各码之和,生成采购行时按此逐码出量。不需要分尺码就点「取消尺码」。</span>
                 </div>
               )}
             </div>
