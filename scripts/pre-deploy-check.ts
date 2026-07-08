@@ -118,12 +118,21 @@ console.log('\n🧾 采购单→财务明细行');
   const trim = mapPoLineForFinance({ id: 'L3', category: 'trim', unit_price: null, ordered_qty: 8 });
   assert(trim.amount === null, '无价 → amount null(无价版不污染台账)');
   assert(trim.category === 'trim', '辅料 category=trim 透传');
-  const payload = buildPurchaseOrderSyncPayload({ id: 'PO1', po_no: 'PO-1', total_amount: 2000 }, undefined, undefined,
+  const payload = buildPurchaseOrderSyncPayload({ id: 'PO1', po_no: 'PO-1', total_amount: 2000, supplier_name: '华航布行' }, undefined, undefined,
     [{ id: 'L1', ordered_qty: 100, unit_price: 20, ordered_amount: 2000, category: 'fabric' }]);
   assert(Array.isArray(payload.lines) && (payload.lines as any[]).length === 1, 'payload 含 lines 数组');
   assert((payload.lines as any[])[0].line_id === 'L1', 'payload.lines[0].line_id 同源');
+  assert(payload.supplier_name === '华航布行', '单头 supplier_name 必带(财务显示供应商)');
+  // 整单一口价(lines 空)也必带单头供应商名 —— 修复 2026-07-08 财务"未带供应商"
+  const flat = buildPurchaseOrderSyncPayload({ id: 'PO3', po_no: 'PO-3', total_amount: 67577, supplier_name: '华航布行' });
+  assert(flat.supplier_name === '华航布行', 'lines 空时单头 supplier_name 仍必带');
+  // caller 未附 supplier_name → 从明细行第一个非空兜底
+  const derived = buildPurchaseOrderSyncPayload({ id: 'PO4', po_no: 'PO-4', total_amount: 500 }, undefined, undefined,
+    [{ id: 'L9', supplier_name: '供B', ordered_qty: 5, unit_price: 100 }]);
+  assert(derived.supplier_name === '供B', 'po 无 supplier_name → 从 lines 兜底');
   const empty = buildPurchaseOrderSyncPayload({ id: 'PO2', po_no: 'PO-2' });
   assert(Array.isArray(empty.lines) && (empty.lines as any[]).length === 0, '无 lines 参数 → 空数组(不 crash)');
+  assert(empty.supplier_name === null, '无 supplier_name 无 lines → null(不 crash)');
 }
 
 // ════ N1 尺码分摊(2026-07-07:采购执行行按订单各码件数拆行,保 Σ=总量)════

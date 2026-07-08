@@ -318,6 +318,18 @@ export async function fetchPurchaseOrderLinesRaw(db: any, poId: string): Promise
   return rows
 }
 
+/**
+ * 取采购单供应商名(suppliers.name),供 caller 在推财务前附到 po.supplier_name。
+ * 单头必带 supplier_name —— 整单一口价(无逐行)时财务全靠它显示供应商。查不到返回 null(不阻断)。
+ */
+export async function fetchSupplierName(db: any, supplierId: string | null | undefined): Promise<string | null> {
+  if (!supplierId) return null
+  try {
+    const { data } = await db.from('suppliers').select('name').eq('id', supplierId).maybeSingle()
+    return (data as { name?: string } | null)?.name ?? null
+  } catch { return null }
+}
+
 /** 采购单同步 payload（纯，可测）。placed 时推金额/账期供财务建应付+付款计划;lines=原辅料明细(财务预算+核销源)。 */
 export function buildPurchaseOrderSyncPayload(
   po: Record<string, unknown>,
@@ -329,10 +341,17 @@ export function buildPurchaseOrderSyncPayload(
   // 避免财务建一笔 ¥0 应付污染台账(审计 2026-07-04);真实金额待补价后由 resync 补。
   const rawAmount = Number(po.total_amount);
   const amountKnown = Number.isFinite(rawAmount) && rawAmount > 0;
+  // 单头供应商名(2026-07-08 修):此前只在 lines[].supplier_name 带,整单一口价(lines 为空)时
+  // 财务只拿到 supplier_id、库里无 id→名映射 → 显示"未带供应商"。此处必带:优先 po.supplier_name
+  // (由 caller 从 suppliers.name 附上),缺失则从明细行取第一个非空兜底。
+  const headerSupplierName = (po.supplier_name as string | null | undefined)
+    ?? ((lines ?? []).map((l) => (l as Record<string, any>)?.supplier_name).find(Boolean) as string | undefined)
+    ?? null;
   return {
     po_no: po.po_no,
     purchase_order_id: po.id,
     supplier_id: po.supplier_id,
+    supplier_name: headerSupplierName,
     total_amount: amountKnown ? rawAmount : null,
     amount_pending: !amountKnown,
     currency: po.currency ?? null,

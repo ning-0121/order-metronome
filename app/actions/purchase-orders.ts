@@ -448,8 +448,9 @@ export async function placePurchaseOrder(poId: string): Promise<{
             supplements = (si || []).map((s: any) => ({ item_no: s.item_no, material_name: s.material_name, qty: s.total_required_qty, reason: s.supplement_reason }));
           }
         } catch { /* 补采购列未建 */ }
-        const { requestPurchaseOrderApproval, fetchPurchaseOrderLinesRaw } = await import('@/lib/integration/finance-sync');
+        const { requestPurchaseOrderApproval, fetchPurchaseOrderLinesRaw, fetchSupplierName } = await import('@/lib/integration/finance-sync');
         const poLines = await fetchPurchaseOrderLinesRaw(supabase, poId);   // 原辅料明细(财务预算+核销共同源)
+        (full as any).supplier_name = await fetchSupplierName(supabase, (full as any).supplier_id); // 单头供应商名必带(整单一口价时财务全靠它)
         await requestPurchaseOrderApproval(full, undefined, supplements, flags, poLines); // 带内部风险信号给财务
       }
     } catch (e: any) { console.warn('[placePurchaseOrder] 财务审批请求发送失败(已置待审批,失败已落 outbox):', e?.message); }
