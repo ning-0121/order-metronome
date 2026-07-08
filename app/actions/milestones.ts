@@ -1698,14 +1698,9 @@ export async function assignMerchandiser(
   const isAdmin = isAdminRole(userRoles);
   const isPM = userRoles.includes('production_manager');
 
+  // 2026-07-08 用户拍板:指定跟单仅 admin 和生产主管;业务(订单负责人)不再能指定
   if (!isAdmin && !isPM) {
-    const { data: order } = await (supabase.from('orders') as any)
-      .select('owner_user_id')
-      .eq('id', orderId)
-      .single();
-    if (!order || order.owner_user_id !== user.id) {
-      return { error: '只有管理员、生产主管或订单负责人可以指定跟单' };
-    }
+    return { error: '只有管理员或生产主管可以指定跟单' };
   }
 
   // 验证目标用户确实是跟单角色
