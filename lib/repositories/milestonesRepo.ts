@@ -513,7 +513,21 @@ export async function transitionMilestoneStatus(
     normalizedNextStatus,
     note || `状态从"${currentStatus}"转换为"${normalizedNextStatus}"`
   );
-  
+
+  // ── Runtime Hook: 状态转换（进行中/阻塞/解除阻塞等）→ 异步重算 confidence。
+  // 与 updateMilestone 内钩子同口径。此函数走独立 update 分支，之前不触发重算，
+  // 导致标进行中/解除阻塞后交付置信度风险卡不刷新。fire-and-forget，永不阻塞主链路。
+  fireRuntimeRecompute(milestone.order_id, {
+    type: 'milestone_status_changed',
+    source: `milestone:${milestoneId}`,
+    severity: isBlockedStatus(updatePayload.status) ? 'warning' : 'info',
+    payload: {
+      milestone_id: milestoneId,
+      new_status: updatePayload.status,
+      old_status: milestone.status,
+    },
+  });
+
   return { data: updated };
 }
 
@@ -687,7 +701,7 @@ export async function updateMilestone(
  * Fire-and-forget runtime confidence 重算
  * 动态导入避免 server action 循环依赖，并保证主链路绝不被阻塞或失败
  */
-function fireRuntimeRecompute(orderId: string, event: any): void {
+export function fireRuntimeRecompute(orderId: string, event: any): void {
   void (async () => {
     try {
       const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');

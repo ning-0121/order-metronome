@@ -7,6 +7,7 @@ import {
   updateMilestone,
   createMilestone,
   transitionMilestoneStatus,
+  fireRuntimeRecompute,
 } from '@/lib/repositories/milestonesRepo';
 import { isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
@@ -641,6 +642,15 @@ export async function markMilestoneDone(
   if (directErr || !directUpdate) {
     return { error: directErr?.message || '节点状态更新失败，请重试' };
   }
+
+  // ── Runtime Hook: 节点完成 → 异步重算 confidence。markMilestoneDone 走独立 update，
+  // 不经 repo updateMilestone，之前不触发重算，标完成后风险卡不刷新。显式补上。fire-and-forget。
+  fireRuntimeRecompute(milestone.order_id, {
+    type: 'milestone_status_changed',
+    source: `milestone:${milestoneId}`,
+    severity: 'info',
+    payload: { milestone_id: milestoneId, new_status: 'done', old_status: milestone.status },
+  });
 
   // 写入操作日志（包含逾期天数 + 补登信息，供后续评分使用）
   const baseNote = overdueDays > 0

@@ -131,6 +131,38 @@ export async function addProductionReport(
     return { error: error.message };
   }
 
+  // ── 生产节点即时回传：报告 → 推进里程碑「进行中」，打通到订单详情/风险卡的数据链 ──
+  // 专项报告（尾查/上线确认/中查…）→ 对应 step_key 节点；首份有产量的日常日报 → production_kickoff。
+  // 只从「待处理」点亮为「进行中」，「已完成」仍由人显式点（DP-4 系统计算·人决策：
+  // 一份尾查报告 ≠ 验货通过，可能有缺陷要返工，不该自动判完成）。
+  // fire-and-forget 语义：里程碑联动/重算失败绝不影响日报本身已成功入库。
+  try {
+    const targetStep = report.report_subtype
+      ? report.report_subtype
+      : ((report.qty_produced || 0) > 0 ? 'production_kickoff' : null);
+    if (targetStep) {
+      const { data: ms } = await (supabase.from('milestones') as any)
+        .select('id, status')
+        .eq('order_id', orderId)
+        .eq('step_key', targetStep)
+        .limit(1)
+        .maybeSingle();
+      const st = String((ms as any)?.status || '').toLowerCase();
+      const alreadyMoving = ['in_progress', '进行中', 'done', '已完成', 'completed', 'blocked', '阻塞'].includes(st);
+      if ((ms as any)?.id && !alreadyMoving) {
+        // transitionMilestoneStatus 成功后内部已 fire-and-forget 触发交付置信度重算，无需在此重复。
+        const { transitionMilestoneStatus } = await import('@/lib/repositories/milestonesRepo');
+        await transitionMilestoneStatus(
+          (ms as any).id,
+          '进行中',
+          '生产进度回传：已提交报告/首份产量日报，节点自动进入进行中',
+        );
+      }
+    }
+  } catch (e: any) {
+    console.warn('[production-report] 里程碑联动失败(不阻断日报):', e?.message);
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return { success: true, reportId: (inserted as any)?.id };
 }
