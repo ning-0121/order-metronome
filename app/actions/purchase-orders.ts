@@ -40,10 +40,13 @@ export async function listUnassignedProcurementLines(orderId?: string): Promise<
   // 只收「真正待归单」的开放行:pending_order/draft。cancelled(取消订单遗留)保持 PO=null 却已作废,
   // 若不按 line_status 过滤会一直躺在待归单里 → 用户看到的"取消订单没取消采购/重复采购单"(2026-07-08)。
   const OPEN_UNASSIGNED = ['pending_order', 'draft'];
-  const SEL = 'id, order_id, material_name, specification, category, color, size, ordered_qty, ordered_unit, unit_price, price_baseline';
-  const SEL_NO_SIZE = 'id, order_id, material_name, specification, category, color, ordered_qty, ordered_unit, unit_price, price_baseline';
+  // 注:procurement_line_items 没有 color 列(颜色在 procurement_items 上,经 procurement_item_id 回查);
+  // size 是真列(20260707)。此前误把 color 塞进 select → "column ...color does not exist" 把新建采购单整页打挂(2026-07-08)。
+  const svc = createServiceRoleClient();
+  const SEL = 'id, order_id, procurement_item_id, material_name, specification, category, size, ordered_qty, ordered_unit, unit_price, price_baseline';
+  const SEL_NO_SIZE = 'id, order_id, procurement_item_id, material_name, specification, category, ordered_qty, ordered_unit, unit_price, price_baseline';
   const run = (sel: string) => {
-    let q = (createServiceRoleClient().from('procurement_line_items') as any)
+    let q = (svc.from('procurement_line_items') as any)
       .select(sel)
       .is('purchase_order_id', null)
       .in('line_status', OPEN_UNASSIGNED)
@@ -54,11 +57,20 @@ export async function listUnassignedProcurementLines(orderId?: string): Promise<
   };
   let { data, error } = await run(SEL);
   // size 列未授权/缓存陈旧 → 降级去 size,待归单不变空(2026-07-08)
-  if (error && /size|schema cache|column|does not exist|permission denied/i.test(error.message || '')) {
+  if (error && /\bsize\b|schema cache|column .* does not exist|permission denied/i.test(error.message || '')) {
     ({ data, error } = await run(SEL_NO_SIZE));
   }
   if (error) return { error: error.message };
-  return { data: data || [] };
+  const rows = (data || []) as any[];
+  // 颜色回查:执行行经 procurement_item_id ⋈ procurement_items.color(用于待归单区分同料不同色行)
+  const piIds = [...new Set(rows.map((r) => r.procurement_item_id).filter(Boolean))];
+  if (piIds.length) {
+    const { data: pis } = await (svc.from('procurement_items') as any).select('id, color').in('id', piIds);
+    const colorByPi = new Map<string, string | null>();
+    for (const p of (pis || [])) colorByPi.set((p as any).id, (p as any).color ?? null);
+    for (const r of rows) r.color = r.procurement_item_id ? (colorByPi.get(r.procurement_item_id) ?? null) : null;
+  }
+  return { data: rows };
 }
 
 /** 建采购单：选供应商 + 勾采购行 → 头 + 行归单。 */
