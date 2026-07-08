@@ -17,6 +17,7 @@ import { isProcurementOnly } from '@/lib/utils/procurement-page-guard';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { PRODUCTION_MANAGER_FIXED_STEPS } from '@/lib/domain/default-assignees';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
@@ -132,8 +133,14 @@ export default async function OrderDetailPage({
 
   // 跟单负责人:2026-07-08 拆成两组 —— 理单跟单(owner_role='merchandiser')与生产跟单('production'),
   // 可由不同人负责。分别取各自节点的 owner 显示;之前只取「第一个」会把另一组的改动盖住(生产改了却仍显示理单人)。
+  // 2026-07-08 修「生产跟单改不了名字」:显示口径必须和 assignMerchandiser 实际改的节点对齐 —— 排除
+  // 生产主管固定节点(PRODUCTION_MANAGER_FIXED_STEPS,指派时永不覆盖)。否则重新指派后,若首个 production
+  // 节点恰是固定节点(如 pre_production_sample_ready 仍属主管),显示就一直是主管名,看着像"改不了"。
+  const pmFixedSteps = new Set(PRODUCTION_MANAGER_FIXED_STEPS);
   const followUpOwnerName = (role: string): string | null => {
-    const m = (milestones as any[] | null)?.find((x: any) => x.owner_role === role && x.owner_user_id && x.owner_user);
+    const m = (milestones as any[] | null)?.find((x: any) =>
+      x.owner_role === role && x.owner_user_id && x.owner_user &&
+      !(role === 'production' && pmFixedSteps.has(x.step_key)));
     return m ? (m.owner_user.name || m.owner_user.email || null) : null;
   };
   const merchandiserName = followUpOwnerName('merchandiser');   // 理单跟单
