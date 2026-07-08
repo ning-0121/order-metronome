@@ -47,7 +47,6 @@ import { rootCauseEngineEnabled } from '@/lib/engine/featureFlags';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
 import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
 import { FinanceEventsTimeline } from '@/components/FinanceEventsTimeline';
-import { CostControlTab } from '@/components/tabs/CostControlTab';
 import { SupplyChainTab } from '@/components/tabs/SupplyChainTab';
 import { BackButton } from '@/components/BackButton';
 import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
@@ -81,7 +80,8 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  const allowedTabs = ['basic', 'quote_baseline', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'cost_control', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  // 2026-07-08 用户拍板:弃用旧「成本控制」(单款折叠/取平均),成本单一真相全走「报价基线」。cost_control 不再是有效 tab。
+  const allowedTabs = ['basic', 'quote_baseline', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -966,23 +966,7 @@ export default async function OrderDetailPage({
           />
         )}
 
-        {/* Tab: 成本控制（红线：仅可见财务的角色） */}
-        {activeTab === 'cost_control' && canSeeFinancials && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">💰 成本控制</h2>
-            <p className="text-xs text-gray-500 mb-5">
-              上传内部成本核算单 → 自动建立成本基线 → 采购/加工费自动校验 → 标红通知财务+CEO
-            </p>
-            <CostControlTab
-              orderId={id}
-              orderNo={orderData.order_no}
-              styleNo={orderData.style_no}
-              quantity={orderData.quantity || 0}
-              isAdmin={isAdmin}
-              canEdit={isAdmin || currentRoles.some(r => ['sales', 'finance', 'merchandiser'].includes(r))}
-            />
-          </div>
-        )}
+        {/* Tab: 成本控制 —— 2026-07-08 已弃用,并入「📋 报价基线」(逐款成本单一真相)。旧 URL(?tab=cost_control)回退到报价基线。 */}
 
         {/* Tab: 采购进度（共享表 + 对账） */}
         {activeTab === 'procurement' && (

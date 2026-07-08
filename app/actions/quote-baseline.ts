@@ -198,11 +198,67 @@ export async function saveQuoteBaseline(
       fabric_cost: num(b.fabric_cost),
     }));
 
+  // ── 派生成本缓存(2026-07-08 用户拍板:弃用旧「成本控制」,报价基线成为唯一源)──
+  // 旧「成本控制」上传单会把 budget_fabric_amount/budget_fabric_kg/fabric_consumption_kg 写进
+  // order_cost_baseline,被 profit.service(成本兜底)、order-financials、procurement(面料KG预警)、
+  // supply-chain 读。弃用旧单后,这些必须由报价基线冻结时按逐款算出来喂,否则利润/预算断供。
+  const { data: ord } = await (supabase.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+  const orderQty = Number((ord as any)?.quantity) || 0;
+  const { data: liRows } = await (supabase.from('order_line_items') as any).select('style_no, qty_pcs').eq('order_id', orderId);
+  const normS = (s: any) => String(s ?? '').trim().toLowerCase();
+  const qtyByStyle = new Map<string, number>();
+  for (const li of (liRows || [])) qtyByStyle.set(normS((li as any).style_no), (qtyByStyle.get(normS((li as any).style_no)) || 0) + (Number((li as any).qty_pcs) || 0));
+  const singleStyle = styleBudgets.length <= 1;
+  const qtyFor = (styleNo: string | null): number => {
+    const q = qtyByStyle.get(normS(styleNo));
+    if (q && q > 0) return q;
+    return singleStyle ? orderQty : 0;   // 单款单/无逐款件数 → 用整单数量兜底
+  };
+
+  // 面料成本总额:优先报价单自带的逐款「面料成本(件)」×该款件数(权威,不猜损耗);
+  // 无逐款面料成本 → 退回按布料行 单耗×单价×件数 估。
+  let budgetFabricAmount = 0; let hasFabricCost = false;
+  for (const b of styleBudgets) {
+    const fc = Number((b as any).fabric_cost);
+    if (fc > 0) { hasFabricCost = true; budgetFabricAmount += fc * qtyFor((b as any).style_no); }
+  }
+  const fabricLines = lines.filter((l) => normS(l.category) === 'fabric');
+  if (!hasFabricCost) {
+    for (const l of fabricLines) {
+      const cons = Number(l.quote_consumption) || 0; const price = Number(l.quote_unit_price) || 0;
+      if (cons > 0 && price > 0) budgetFabricAmount += cons * price * (qtyFor(l.style_no) || orderQty);
+    }
+  }
+  budgetFabricAmount = Math.round(budgetFabricAmount * 100) / 100;
+
+  // 面料预算量(KG,给采购面料累计预警)与单件面料用量(供 supply-chain 显示)
+  let budgetFabricKg = 0; let consPerPiece = 0;
+  for (const l of fabricLines) {
+    const cons = Number(l.quote_consumption) || 0; if (!(cons > 0)) continue;
+    budgetFabricKg += cons * (qtyFor(l.style_no) || orderQty);
+    consPerPiece += cons;
+  }
+  budgetFabricKg = Math.round(budgetFabricKg * 100) / 100;
+  consPerPiece = Math.round(consPerPiece * 10000) / 10000;
+
+  // 加工费:优先人填的整单「加工费(报价·元/件)」;留空且逐款有 cmt → 按件数加权(整单总加工费÷总件数),
+  // 使 order-financials 的 cmt_factory_quote×qty = Σ(逐款cmt×款件数),不再是错误均值。
+  let cmtQuote = num(input.cmt_quote);
+  if (cmtQuote == null) {
+    let cmtTotal = 0; let qSum = 0; let hasCmt = false;
+    for (const b of styleBudgets) { const c = Number((b as any).cmt); const q = qtyFor((b as any).style_no); if (c > 0 && q > 0) { cmtTotal += c * q; qSum += q; hasCmt = true; } }
+    if (hasCmt && qSum > 0) cmtQuote = Math.round(cmtTotal / qSum * 10000) / 10000;
+  }
+
   const now = new Date().toISOString();
   const payload: Record<string, unknown> = {
     quote_baseline_lines: lines,
     quote_style_budgets: styleBudgets,
-    cmt_factory_quote: num(input.cmt_quote),
+    cmt_factory_quote: cmtQuote,
+    // 派生缓存(报价基线为唯一源;下游利润/预算/供应链读这些)
+    budget_fabric_amount: budgetFabricAmount > 0 ? budgetFabricAmount : null,
+    budget_fabric_kg: budgetFabricKg > 0 ? budgetFabricKg : null,
+    fabric_consumption_kg: consPerPiece > 0 ? consPerPiece : null,
     baseline_frozen_at: now,
     baseline_frozen_by: user.id,
     updated_at: now,
@@ -217,6 +273,11 @@ export async function saveQuoteBaseline(
     const { error } = await (supabase.from('order_cost_baseline') as any).insert({ order_id: orderId, ...payload });
     if (error) return { error: error.message };
   }
+  // 冻结即触发利润重算(报价基线成本兜底喂 profit.service);失败不阻断冻结
+  try {
+    const { calculateProfitSnapshot } = await import('@/lib/services/profit.service');
+    await calculateProfitSnapshot(supabase, { orderId, snapshotType: 'live' });
+  } catch (e: any) { console.warn('[saveQuoteBaseline] 利润重算失败(不阻断):', e?.message); }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, count: lines.length };
 }
