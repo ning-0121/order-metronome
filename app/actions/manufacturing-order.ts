@@ -47,7 +47,7 @@ export async function getManufacturingOrder(orderId: string) {
     .select('*').eq('order_id', orderId).order('line_no');
 
   const { data: bom } = await (supabase.from('materials_bom') as any)
-    .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, material_master_id, style_no, spec')
+    .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec')
     .eq('order_id', orderId).order('material_type');
 
   return { data: { mo: mo || null, order, lineItems: lineItems || [], bom: bom || [] } };
@@ -407,11 +407,14 @@ export async function generateManufacturingOrderSheet(
     boxBorder(r, 1, r, NC); ws.getRow(r).height = 30;
   }
 
-  // ══ 辅料明细 sheet(全款合一;示例画稿/位置说明/备注 从 BOM 带出;工厂价格/采购价格留空手填,不泄底价)══
+  // ══ 辅料明细 sheet(全款合一,1:1 复刻用户「辅料表」模板)══
+  // 列:物料 | 示例画稿(图) | 位置说明及示意图(图) | 位置说明(文) | 备注(文) | 工厂价格 | 采购价格
+  // 图从 materials_bom.image_urls 带出:[0]→示例画稿, [1]→位置示意图(业务在「原辅料」页 📷 上传的辅料/色卡图)。
+  // 工厂价格/采购价格留空手填(不泄底价);辅料 = 所有非 fabric 的 BOM 行。
   {
     const ts = wb.addWorksheet('辅料明细');
     ts.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1 };
-    const cols = [26, 20, 30, 26, 26, 14, 14];
+    const cols = [20, 38, 35, 35, 22, 14, 16];   // 对齐模板列宽
     cols.forEach((w, i) => (ts.getColumn(i + 1).width = w));
     const tput = (r: number, c: number, v: any, font: any, opt: { fill?: string; align?: 'left' | 'center' } = {}) => {
       const cell = ts.getCell(r, c); cell.value = v; cell.font = font;
@@ -424,19 +427,42 @@ export async function generateManufacturingOrderSheet(
     const th = ['物料', '示例画稿（以实际为准）', '位置说明及示意图', '位置说明', '备注', '工厂价格', '采购价格'];
     th.forEach((h, i) => tput(2, i + 1, h, SONG({ bold: true }), { fill: YELLOW }));
     ts.getRow(2).height = 30;
+
     const trims = bom.filter((b: any) => b.material_type !== 'fabric');
+    // 预取每行辅料图(image_urls[0]→示例画稿, image_urls[1]→示意图);并行,抓取失败不阻塞生成。
+    const trimImgs = await Promise.all(trims.map(async (b: any) => {
+      const urls = (Array.isArray(b.image_urls) ? b.image_urls : []).filter((u: any) => typeof u === 'string' && u);
+      const [a, c] = await Promise.all([fetchImage(urls[0] || ''), fetchImage(urls[1] || '')]);
+      return { a, c };
+    }));
+
     let tr = 3;
-    for (const b of trims) {
+    trims.forEach((b: any, idx: number) => {
+      // 备注:特殊要求 + 备注 + 规格 + 颜色(有则拼,便于工厂/采购一眼看全)
+      const remark = joinTxt(
+        b.special_requirements, b.notes,
+        b.spec ? `规格：${b.spec}` : '', b.color ? `颜色：${b.color}` : '',
+      );
       tput(tr, 1, b.material_name || '', SONG({ bold: true }), { align: 'left' });
-      tput(tr, 2, '', SONG());                                   // 示例画稿(图,手贴)
-      tput(tr, 3, b.placement || '', SONG(), { align: 'left' }); // 位置说明及示意图
-      tput(tr, 4, b.placement || '', SONG(), { align: 'left' });
-      tput(tr, 5, b.special_requirements || '', SONG(), { align: 'left' });
+      tput(tr, 2, '', SONG());                                   // 示例画稿(下方贴图)
+      tput(tr, 3, '', SONG());                                   // 位置说明及示意图(下方贴图)
+      tput(tr, 4, b.placement || '', SONG(), { align: 'left' }); // 位置说明(文字)
+      tput(tr, 5, remark, SONG(), { align: 'left' });            // 备注
       tput(tr, 6, '', SONG());                                   // 工厂价格(采购填,不带底价)
-      tput(tr, 7, '', SONG());
-      ts.getRow(tr).height = 40; tr++;
-    }
-    if (trims.length === 0) { for (let c = 1; c <= 7; c++) tput(3, c, '', SONG()); ts.getRow(3).height = 40; }
+      tput(tr, 7, '', SONG());                                   // 采购价格(采购填)
+      // 贴图(oneCell 锚点,固定尺寸,随单元格移动不缩放)。有图则加高行,无图给文字留高。
+      const { a, c } = trimImgs[idx];
+      ts.getRow(tr).height = (a || c) ? 80 : 44;
+      const place = (im: { buffer: Buffer; extension: 'jpeg' | 'png' | 'gif' } | null, col0: number) => {
+        if (!im) return;
+        const id = wb.addImage({ buffer: im.buffer as any, extension: im.extension });
+        ts.addImage(id, { tl: { col: col0 + 0.1, row: (tr - 1) + 0.1 } as any, ext: { width: 130, height: 95 }, editAs: 'oneCell' });
+      };
+      place(a, 1);   // B 列(0-indexed 1)= 示例画稿
+      place(c, 2);   // C 列(0-indexed 2)= 位置示意图
+      tr++;
+    });
+    if (trims.length === 0) { for (let c = 1; c <= 7; c++) tput(3, c, '', SONG()); ts.getRow(3).height = 44; }
   }
 
   const buffer = await wb.xlsx.writeBuffer();
