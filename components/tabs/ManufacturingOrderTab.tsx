@@ -2,10 +2,11 @@
 import { useEffect, useState } from 'react';
 import {
   getManufacturingOrder, upsertManufacturingOrder, updateManufacturingOrderStatus,
-  generateManufacturingOrderSheet,
+  generateProductionOrderSheet, generateTrimSheet,
 } from '@/app/actions/manufacturing-order';
 import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { sortSizeKeys, compareSizeKeys } from '@/lib/utils/size-sort';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', lining: '里料', label: '标签', packing: '包装',
@@ -16,6 +17,13 @@ const STATUS_FLOW = [
   { key: 'confirmed', label: '已确认' }, { key: 'executing', label: '已下发生产' }, { key: 'closed', label: '完成' },
 ];
 const statusLabel = (s: string) => STATUS_FLOW.find(x => x.key === s)?.label || s;
+// 步骤条只画真实可达的 4 步 —— 「复核中」是遗留死状态(无 UI 入口),不再画格子误导用户以为漏了一步。
+const VISIBLE_STEPS = [
+  { key: 'draft', label: '草稿' }, { key: 'confirmed', label: '已确认' },
+  { key: 'executing', label: '已下发生产' }, { key: 'closed', label: '完成' },
+];
+// 状态 → 进度序;reviewing 视同尚未确认(与「确认」按钮对 draft/reviewing 同显一致)。
+const STATUS_RANK: Record<string, number> = { draft: 0, reviewing: 0, confirmed: 1, executing: 2, closed: 3 };
 
 const emptyForm = {
   print_embroidery_requirements: '', qc_focus: '', special_requirements: '',
@@ -29,8 +37,10 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [statusBusy, setStatusBusy] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
   const [generating, setGenerating] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const { confirm, dialog } = useDialogs();
 
   const reload = async () => {
     const res = await getManufacturingOrder(orderId);
@@ -60,18 +70,47 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
     await reload();
   }
 
-  async function advance(status: string) {
-    setStatusBusy(true); setMsg('');
+  async function advance(status: string, successMsg: string) {
+    setStatusBusy(true); setStatusMsg('');
     const res = await updateManufacturingOrderStatus(orderId, status as any);
     setStatusBusy(false);
-    if ((res as any).error) { setMsg((res as any).error); return; }
+    if ((res as any).error) { setStatusMsg('❌ ' + (res as any).error); return; }
     await reload();
+    setStatusMsg(successMsg);
   }
 
-  async function generate() {
+  // 确认:内容无误 → 已确认(例行动作,一键 + 反馈,不弹确认)
+  const confirmContent = () => advance('confirmed', '✅ 已确认,可下发生产');
+
+  // 下发生产:关键动作(通知生产、自动完成下发节点)—— 弹二次确认并说明影响,防误点。
+  async function dispatch() {
+    const ok = await confirm({
+      title: '确认下发生产?',
+      message: '下发后:\n· 生产任务单进入「已下发生产」\n· 自动完成「生产任务单下发」节点\n· 通知生产开工\n\n请先确认逐款明细与工厂执行说明无误(下发后改动需重新沟通生产)。',
+      confirmText: '确认下发',
+    });
+    if (!ok) return;
+    await advance('executing', '🏭 已下发生产,已通知生产');
+  }
+
+  // 完成:关键动作(关单)—— 弹二次确认。
+  async function complete() {
+    const ok = await confirm({
+      title: '标记完成?',
+      message: '标记完成后本生产任务单关闭。请确认大货生产已实际完成。',
+      confirmText: '确认完成',
+    });
+    if (!ok) return;
+    await advance('closed', '✅ 生产任务单已完成');
+  }
+
+  // 两张单独出:'production'=生产订单(第一张,款式主表),'trim'=辅料单(第二张,辅料明细)
+  async function generate(kind: 'production' | 'trim') {
     setGenerating(true); setMsg('');
     try {
-      const res = await generateManufacturingOrderSheet(orderId);
+      const res = kind === 'production'
+        ? await generateProductionOrderSheet(orderId)
+        : await generateTrimSheet(orderId);
       if ((res as any).error) { setMsg((res as any).error); return; }
       const { base64, fileName } = res as any;
       const bytes = atob(base64);
@@ -111,16 +150,21 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
           <button onClick={() => setPreviewing(true)} disabled={!mo}
             className="text-sm px-3 py-1.5 rounded-lg bg-white text-gray-700 border border-gray-300 font-medium hover:bg-gray-50 disabled:opacity-50">
             👁 预览</button>
-          <button onClick={generate} disabled={generating || !mo}
-            className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">
-            {generating ? '生成中…' : '📄 下载生产任务单'}</button>
+          <button onClick={() => generate('production')} disabled={generating}
+            className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50"
+            title="第一张:款式主表。建单即可下载,不用等辅料确认">
+            {generating ? '生成中…' : '📄 下载生产订单'}</button>
+          <button onClick={() => generate('trim')} disabled={generating}
+            className="text-sm px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-50"
+            title="第二张:辅料明细。读最新 BOM,包装辅料确认后再下载">
+            {generating ? '生成中…' : '🧵 下载辅料单'}</button>
         </div>
       </div>
 
       {/* 预览弹窗:按范本版式渲染(数据与下载的 Excel 同源) */}
       {previewing && (
         <MoSheetPreview order={order} mo={{ ...mo, ...form }} lineItems={lineItems} bom={bom}
-          onClose={() => setPreviewing(false)} onDownload={() => { setPreviewing(false); generate(); }} />
+          onClose={() => setPreviewing(false)} onDownload={() => { setPreviewing(false); generate('production'); }} />
       )}
 
       {/* S1 富明细录入(款/色/码/件数)—— 录/改在此,下方生成任务单读它 */}
@@ -136,28 +180,33 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
       {/* 生命周期条 */}
       {mo && (
         <div className="flex items-center gap-1.5 flex-wrap">
-          {STATUS_FLOW.map((s, i) => {
-            const idx = STATUS_FLOW.findIndex(x => x.key === status);
-            const done = i <= idx;
+          {VISIBLE_STEPS.map((s, i) => {
+            const rank = STATUS_RANK[status] ?? 0;
+            const done = i <= rank;
+            const current = i === rank;
             return (
               <span key={s.key} className="flex items-center gap-1.5">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${done ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{s.label}</span>
-                {i < STATUS_FLOW.length - 1 && <span className="text-gray-300">›</span>}
+                <span className={`text-xs px-2 py-0.5 rounded-full ${done ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'} ${current ? 'ring-2 ring-indigo-300' : ''}`}>{s.label}</span>
+                {i < VISIBLE_STEPS.length - 1 && <span className="text-gray-300">›</span>}
               </span>
             );
           })}
-          <span className="ml-auto flex gap-2">
+          <span className="ml-auto flex items-center gap-3">
+            {statusMsg && <span className="text-xs text-gray-500">{statusBusy ? '处理中…' : statusMsg}</span>}
             {(status === 'draft' || status === 'reviewing') && (
-              <button onClick={() => advance('confirmed')} disabled={statusBusy}
-                className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">✅ 确认</button>
+              <button onClick={confirmContent} disabled={statusBusy}
+                className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold shadow-sm hover:bg-indigo-700 disabled:opacity-50">
+                {statusBusy ? '处理中…' : '✅ 确认'}</button>
             )}
             {status === 'confirmed' && (
-              <button onClick={() => advance('executing')} disabled={statusBusy}
-                className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">🏭 下发生产</button>
+              <button onClick={dispatch} disabled={statusBusy}
+                className="text-sm px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold shadow-sm hover:bg-amber-700 disabled:opacity-50">
+                {statusBusy ? '处理中…' : '🏭 下发生产'}</button>
             )}
             {status === 'executing' && (
-              <button onClick={() => advance('closed')} disabled={statusBusy}
-                className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-50 disabled:opacity-50">完成</button>
+              <button onClick={complete} disabled={statusBusy}
+                className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold shadow-sm hover:bg-emerald-700 disabled:opacity-50">
+                {statusBusy ? '处理中…' : '✔ 完成'}</button>
             )}
           </span>
         </div>
@@ -230,6 +279,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
           {msg && <span className="text-xs text-gray-500">{msg}</span>}
         </div>
       </div>
+      {dialog}
     </div>
   );
 }

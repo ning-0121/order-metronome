@@ -166,9 +166,30 @@ async function autoCompleteMoReleased(supabase: any, orderId: string, userId: st
 /**
  * 生成生产任务单 Excel(Constitution 09:数据全来自结构化真相 MO + orders + line_items + materials_bom)。
  * 不接 AI、不解析附件。返回 base64,前端转 Blob 下载。
+ *
+ * 两张单独出(2026-07-09 用户拍板:包装辅料常确认得晚,故拆开在两个环节生成):
+ *   ① 生产订单(第一张,款式主表)—— generateProductionOrderSheet,建单即可出,不等 BOM。
+ *   ② 辅料单(第二张,辅料明细)—— generateTrimSheet,在「原辅料和包装」页填完 BOM 后出,读最新 BOM。
+ * generateManufacturingOrderSheet 仍保留合并版(两张一起),供生产中心/采购核料页整包下载。
  */
-export async function generateManufacturingOrderSheet(
+type MoBuildOpts = { styles: boolean; trims: boolean; label: string };
+
+/** 合并版:生产订单 + 辅料明细 一份 Excel(生产中心/采购核料页整包用)。 */
+export async function generateManufacturingOrderSheet(orderId: string) {
+  return buildMoWorkbook(orderId, { styles: true, trims: true, label: '生产任务单' });
+}
+/** 第一张:只出「生产订单」(款式主表)——建单即可生成,不等 BOM/辅料确认。 */
+export async function generateProductionOrderSheet(orderId: string) {
+  return buildMoWorkbook(orderId, { styles: true, trims: false, label: '生产订单' });
+}
+/** 第二张:只出「辅料单」(辅料明细)——在「原辅料和包装」页填完 BOM 后生成,自动读最新 BOM。 */
+export async function generateTrimSheet(orderId: string) {
+  return buildMoWorkbook(orderId, { styles: false, trims: true, label: '辅料单' });
+}
+
+async function buildMoWorkbook(
   orderId: string,
+  opts: MoBuildOpts,
 ): Promise<{ ok?: boolean; base64?: string; fileName?: string; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -177,8 +198,9 @@ export async function generateManufacturingOrderSheet(
 
   const res = await getManufacturingOrder(orderId);
   if ((res as any).error) return { error: (res as any).error };
-  const { mo, order, lineItems, bom } = (res as any).data;
-  if (!mo) return { error: '请先创建并保存生产任务单' };
+  const { mo: moRaw, order, lineItems, bom } = (res as any).data;
+  // 放宽:无 MO 记录也能生成(建单即可出「生产订单」);翻译/确认字段缺省则留白手填。
+  const mo = moRaw || {};
 
   // ── 名字解析(owner/confirmed/released → profiles.name)+ 格式化 ──
   const userIds = [order.owner_user_id, mo.confirmed_by, mo.released_to_factory_by, mo.created_by].filter(Boolean);
@@ -236,7 +258,7 @@ export async function generateManufacturingOrderSheet(
     } catch { return null; }
   };
 
-  for (const [gi, g] of styleGroups.entries()) {
+  if (opts.styles) for (const [gi, g] of styleGroups.entries()) {
     const sheetName = (g.style_no || `款${gi + 1}`).replace(/[\\/*?:[\]]/g, '_').slice(0, 28) || `款${gi + 1}`;
     const ws = wb.addWorksheet(wb.worksheets.some(w => w.name === sheetName) ? `${sheetName}_${gi + 1}` : sheetName);
     ws.pageSetup = {
@@ -418,7 +440,7 @@ export async function generateManufacturingOrderSheet(
   // 列:物料 | 示例画稿(图) | 位置说明及示意图(图) | 位置说明(文) | 备注(文) | 工厂价格 | 采购价格
   // 图从 materials_bom.image_urls 带出:[0]→示例画稿, [1]→位置示意图(业务在「原辅料」页 📷 上传的辅料/色卡图)。
   // 工厂价格/采购价格留空手填(不泄底价);辅料 = 所有非 fabric 的 BOM 行。
-  {
+  if (opts.trims) {
     const ts = wb.addWorksheet('辅料明细');
     ts.pageSetup = {
       paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
@@ -476,7 +498,9 @@ export async function generateManufacturingOrderSheet(
     ts.pageSetup.printArea = `A1:G${Math.max(3, tr - 1)}`;
   }
 
+  if (wb.worksheets.length === 0) return { error: '没有可生成的内容' };
   const buffer = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buffer).toString('base64');
-  return { ok: true, base64, fileName: `生产任务单_${order.order_no || mo.mo_no}.xlsx` };
+  const orderTag = order.order_no || (mo as any).mo_no || orderId.slice(0, 8);
+  return { ok: true, base64, fileName: `${opts.label}_${orderTag}.xlsx` };
 }

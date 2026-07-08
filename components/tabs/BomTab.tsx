@@ -5,6 +5,7 @@ import { BulkConsumptionEditor } from '@/components/BulkConsumptionEditor';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
 import { uploadSizeChart, listSizeCharts, deleteSizeChart } from '@/app/actions/size-chart';
+import { generateTrimSheet } from '@/app/actions/manufacturing-order';
 import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
@@ -363,6 +364,27 @@ export function BomTab({ orderId }: { orderId: string }) {
     await reloadSizeCharts();
   }
 
+  // 生成「辅料单」(第二张:辅料明细,读最新 BOM;自动同步到「生产任务单」页)
+  const [trimBusy, setTrimBusy] = useState(false);
+  const [trimMsg, setTrimMsg] = useState('');
+  async function downloadTrimSheet() {
+    setTrimBusy(true); setTrimMsg('');
+    try {
+      const res = await generateTrimSheet(orderId);
+      if ((res as any).error) { setTrimMsg((res as any).error); return; }
+      const { base64, fileName } = res as any;
+      const bytes = atob(base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch (e: any) { setTrimMsg('生成出错：' + (e?.message || e)); }
+    finally { setTrimBusy(false); }
+  }
+
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
 
   const submitted = items.some(i => i.submit_status === 'submitted');
@@ -710,6 +732,19 @@ export function BomTab({ orderId }: { orderId: string }) {
             ))}
           </div>
         ) : <p className="text-xs text-gray-400 mt-1">暂无尺码表,点右上「上传尺码表」。</p>}
+      </div>
+      {/* 辅料单(第二张):原辅料填完后在此生成,读最新 BOM;同一按钮也在「生产任务单」页 */}
+      <div className="mb-4 p-3 rounded-xl border border-teal-200 bg-teal-50/40">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-gray-800">🧵 辅料单</span>
+          <span className="text-xs text-gray-500">原辅料/包装填完后生成第二张「辅料单」(辅料明细,自动读最新 BOM),也会同步到「生产任务单」页</span>
+          <button onClick={downloadTrimSheet} disabled={trimBusy || items.length === 0}
+            className="ml-auto text-sm px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-50"
+            title={items.length === 0 ? '先录入原辅料再生成' : '生成辅料单(辅料明细)Excel'}>
+            {trimBusy ? '生成中…' : '📋 生成辅料单'}
+          </button>
+        </div>
+        {trimMsg && <p className="text-xs text-rose-600 mt-1">{trimMsg}</p>}
       </div>
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm text-gray-500">{items.length} 条物料记录</span>
