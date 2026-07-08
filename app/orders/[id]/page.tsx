@@ -881,14 +881,10 @@ export default async function OrderDetailPage({
                 <ProcurementItemsTab orderId={id} />
               </>
             ) : (
-              <>
-                {/* 业务价格录入入口(2026-07-08 弃用报价单识别/报价基线后,预算真相改由业务在采购核料按真实物料填) */}
-                {(isOrderOwner || currentRoles.some(r => ['sales', 'merchandiser', 'sales_manager', 'order_manager'].includes(r))) && (
-                  <BomBudgetEntry orderId={id} />
-                )}
-                <p className="text-xs text-gray-400 mb-4">核料是采购的工作,在采购中心进行。这里给业务<b>只读看采购进度</b>:</p>
-                <SupplyChainTab orderId={id} />
-              </>
+              // 2026-07-08 用户:采购核料 tab 专做「核料/预算录入」——业务按采购真实物料逐料手填预算
+              //   (面料预算单价 + 逐款加工费/辅料);采购的核定/归并/下单在采购中心(右上链接)。
+              //   供应链概览/采购进度已在「采购进度」tab,这里不再重复塞。
+              <BomBudgetEntry orderId={id} />
             )}
           </div>
         )}
