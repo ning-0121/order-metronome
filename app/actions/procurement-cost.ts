@@ -90,6 +90,7 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   //   与实际下单同名对齐,不再"仿锦 vs 280g直贡呢"对不上);辅料/加工按款存 quote_style_budgets(采购核料填)。
   const { data: base } = await (svc.from('order_cost_baseline') as any)
     .select('*').eq('order_id', orderId).maybeSingle();   // * → accessory_budget_total 列未建也不报错
+  const styleBudgets: any[] = (base as any)?.quote_style_budgets || [];   // 逐款加工费 cmt(元/件)源
   const { data: bomRows } = await (svc.from('materials_bom') as any)
     .select('material_name, color, material_type, production_consumption, budget_unit_price, style_no, unit').eq('order_id', orderId);
 
@@ -114,6 +115,15 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   // 辅料预算 = 整单一口价 order_cost_baseline.accessory_budget_total(不按件数;2026-07-08 用户拍板)
   const trimBudgetTotal = Math.round((Number((base as any)?.accessory_budget_total) || 0) * 100) / 100;
   const hasTrimBudget = trimBudgetTotal > 0;
+  // 加工费预算 = Σ(该款加工费 × 该款件数)。采购不下单加工费,此为预算参考行(实际列留空;2026-07-08 用户:加工费也要跟到采购)
+  let cmtBudgetTotal = 0; let hasCmtBudget = false;
+  for (const sb of styleBudgets) {
+    const c = Number((sb as any).cmt); if (!(c > 0)) continue;
+    const st = nrm((sb as any).style_no);
+    const q = qtyByStyle.get(st) || (styleBudgets.length === 1 ? orderQty : 0);
+    if (q > 0) { cmtBudgetTotal += c * q; hasCmtBudget = true; }
+  }
+  cmtBudgetTotal = Math.round(cmtBudgetTotal * 100) / 100;
 
   const { getOrderLeftover } = await import('@/app/actions/inventory');
   const leftoverRows: any[] = ((await getOrderLeftover(orderId)) as any).data || [];
@@ -230,14 +240,22 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     received: { qty: null, total: null }, leftover: { qty: null, total: null }, is_trim_total: true,
   }] : [];
 
-  const rows = [...fabricRows, ...trimRows];
+  // 加工费一行(预算参考;采购不下单加工费 → 实际列空)。让业务填的加工费也在采购核算看得到(2026-07-08 用户)
+  const cmtRows = hasCmtBudget ? [{
+    material_name: '加工费', color: null, unit: '—',
+    budget: { qty: null, price: null, total: cmtBudgetTotal },
+    ordered: { qty: null, price: null, total: null, over_qty: false, over_price: false, over_total: false },
+    received: { qty: null, total: null }, leftover: { qty: null, total: null }, is_cmt_total: true,
+  }] : [];
+
+  const rows = [...fabricRows, ...trimRows, ...cmtRows];
 
   const totals = rows.reduce((t, r) => ({
     budget: r2(t.budget + (r.budget.total || 0)), ordered: r2(t.ordered + (r.ordered.total || 0)),
     received: r2(t.received + (r.received.total || 0)), leftover: r2(t.leftover + (r.leftover.total || 0)),
   }), { budget: 0, ordered: 0, received: 0, leftover: 0 });
 
-  return { data: { order, rows, totals, orderQty, has_budget: budgetMap.size > 0 || hasTrimBudget } };
+  return { data: { order, rows, totals, orderQty, has_budget: budgetMap.size > 0 || hasTrimBudget || hasCmtBudget } };
 }
 
 /** 显式回填：以采购实际成本写 order_financials.actual_material_cost + 重算利润（人工触发）。 */
