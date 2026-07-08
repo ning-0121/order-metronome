@@ -834,16 +834,8 @@ export default async function OrderDetailPage({
               <p className="text-xs text-gray-400 mb-3">在这里录面料/辅料/包装的单耗,是采购核料和生产任务单「用料」的数据源。</p>
               <BomTab orderId={id} />
             </div>
-            {/* 包装资料文件 */}
-            <div className="pt-4 border-t border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">📦 包装资料（文件）</h3>
-              <PackingFilesSection orderId={id} fileTypes={['packing_requirement', 'tech_pack']} emptyText="业务在「生产单上传」节点上传的包装资料将显示在这里" />
-            </div>
-            {/* 原辅料单文件 */}
-            <div className="pt-4 border-t border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">🧵 原辅料单（文件）</h3>
-              <PackingFilesSection orderId={id} fileTypes={['trims_sheet', 'production_order']} emptyText="业务在「生产单上传」节点上传的原辅料单将显示在这里" />
-            </div>
+            {/* 「包装资料/原辅料单(文件)」两块已移除(2026-07-08):空状态指向已删除的「生产单上传」节点;
+                历史文件仍可在「基本信息」tab 附件列表查看,不丢失。 */}
           </div>
         )}
         {/* Tab: 生产任务单（Manufacturing Order）*/}
@@ -900,11 +892,7 @@ export default async function OrderDetailPage({
               </Link>
             </div>
             <p className="text-xs text-gray-400 mb-4">本页对业务只读展示进度;生产/QC 请到「生产中心」点该订单走节点、传报告。</p>
-            {/* 生产订单文件快捷查看 */}
-            <div className="mb-6">
-              <h3 className="text-sm font-medium text-gray-600 mb-2">📄 生产订单</h3>
-              <PackingFilesSection orderId={id} fileTypes={['production_order']} emptyText="暂未上传生产订单，请在「执行进度→生产单上传」中补传" />
-            </div>
+            {/* 「📄 生产订单(文件)」块已移除(2026-07-08):其空状态指向已删除的「生产单上传」节点。 */}
             <ProductionProgressTab
               orderId={id}
               orderNo={orderData.order_no}
