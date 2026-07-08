@@ -77,19 +77,20 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const consMissing = consLines.filter(l => l.required && !(Number(l.production_consumption) > 0));
   async function saveCons() {
     setConsSaving(true); setMsg('');
-    // 一次保存:抛量%(采购)+ 预算单价(业务)+ 逐款加工费/辅料预算(业务)
+    // 一次保存:预算单价(业务)+ 逐款加工费/辅料预算(业务)+ 抛量%(采购,已下单则锁定不重存)
     const over = Object.fromEntries(Object.entries(overEdit).map(([id, v]) => [id, v === '' ? 0 : Number(v)]));
     const prices = Object.fromEntries(Object.entries(priceEdit).map(([id, v]) => [id, v === '' ? null : Number(v)]));
     const sbPayload = styleBudgets.map(b => ({ style_no: b.style_no, cmt: b.cmt === '' ? null : Number(b.cmt), trim_budget: b.trim_budget === '' ? null : Number(b.trim_budget) }));
-    const [r1, r2, r3] = await Promise.all([
-      saveBomOverPurchasePct(orderId, over as any),
-      saveBomBudgetUnitPrice(orderId, prices as any),
-      saveOrderStyleBudgets(orderId, sbPayload as any),
-    ]);
+    const tasks: Promise<any>[] = [
+      saveBomBudgetUnitPrice(orderId, prices as any),   // 预算单价(业务,任何阶段可填)
+      saveOrderStyleBudgets(orderId, sbPayload as any), // 逐款加工费/辅料(业务,任何阶段可填)
+    ];
+    if (!trackingPhase) tasks.push(saveBomOverPurchasePct(orderId, over as any));  // 抛量:已下单锁定,不重存
+    const results = await Promise.all(tasks);
     setConsSaving(false);
-    const err = (r1 as any).error || (r2 as any).error || (r3 as any).error;
+    const err = results.map(r => (r as any).error).find(Boolean);
     if (err) { setMsg(err); return; }
-    setMsg('✅ 已保存(抛量 + 预算单价 + 加工费/辅料预算)');
+    setMsg('✅ 已保存(预算单价 + 加工费/辅料预算' + (trackingPhase ? '' : ' + 抛量') + ')');
     await loadCons();
   }
   // 供应商主数据(确认供应商下拉用;不再手敲名字)
@@ -346,8 +347,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   // ── 阶段判定(2026-07-03 用户拍板:下完单核料转入追踪模式,不再摆工作台) ──
   const ORDERED_PLUS = ['ordered', 'partially_received', 'completed', 'closed'];
   const trackingPhase = items.length > 0 && items.every(i => ORDERED_PLUS.includes(i.status));
-  // 核定表默认开合:还有布料没核 → 展开催填;全核定/已下单锁定 → 收起省版面(可手动展开复核)
-  const consEffectiveOpen = consOpen ?? (consMissing.length > 0 && !trackingPhase);
+  // 核定表默认展开(2026-07-08:预算单价/加工费/辅料要在这填,收起会让用户"找不到输入价格的地方")
+  const consEffectiveOpen = consOpen ?? true;
 
   // ── 确认归并加强(2026-07-03 用户拍板 1-4)──
   const DONE_STATUSES = ['confirmed', 'ordered', 'partially_received', 'completed', 'closed'];
@@ -601,7 +602,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                 {consEffectiveOpen ? '收起 ▲' : `展开复核 / 修改（${consLines.length}）▼`}
               </button>
             )}
-            {!trackingPhase && consEffectiveOpen && (
+            {consEffectiveOpen && (
               <button onClick={saveCons} disabled={consSaving}
                 className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
                 {consSaving ? '保存中…' : '💾 保存核料预算'}
@@ -635,10 +636,10 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                     {/* 预算单价:业务填(面料预算=大货单耗×本列×件数);辅料留空 */}
                     <td className="py-1.5 px-2">
                       <span className="text-gray-400 mr-0.5">¥</span>
-                      <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''} disabled={trackingPhase}
+                      <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''}
                         placeholder={l.required ? '必填' : '—'}
                         onChange={e => setPriceEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
-                        className={`w-20 rounded border px-2 py-1 disabled:bg-gray-50 disabled:text-gray-500 ${l.required && !(Number(priceEdit[l.id]) > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                        className={`w-20 rounded border px-2 py-1 ${l.required && !(Number(priceEdit[l.id]) > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
                     </td>
                     {/* 抛量%:采购填,采购量=件数×大货单耗×(1+抛量%) */}
                     <td className="py-1.5 px-2">
@@ -669,13 +670,13 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                       <tr key={i} className="border-t border-indigo-100">
                         <td className="py-1 px-2 font-mono text-gray-700">{b.style_no}</td>
                         <td className="py-1 px-2"><span className="text-gray-400 mr-0.5">¥</span>
-                          <input type="number" step="any" min="0" value={b.cmt} disabled={trackingPhase}
+                          <input type="number" step="any" min="0" value={b.cmt}
                             onChange={e => setStyleBudgets(sb => sb.map((x, j) => j === i ? { ...x, cmt: e.target.value } : x))}
-                            className="w-20 rounded border border-gray-300 px-2 py-1 disabled:bg-gray-50" /></td>
+                            className="w-20 rounded border border-gray-300 px-2 py-1" /></td>
                         <td className="py-1 px-2"><span className="text-gray-400 mr-0.5">¥</span>
-                          <input type="number" step="any" min="0" value={b.trim_budget} disabled={trackingPhase}
+                          <input type="number" step="any" min="0" value={b.trim_budget}
                             onChange={e => setStyleBudgets(sb => sb.map((x, j) => j === i ? { ...x, trim_budget: e.target.value } : x))}
-                            className="w-24 rounded border border-gray-300 px-2 py-1 disabled:bg-gray-50" /></td>
+                            className="w-24 rounded border border-gray-300 px-2 py-1" /></td>
                       </tr>
                     ))}
                   </tbody>
