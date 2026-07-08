@@ -1260,8 +1260,9 @@ export async function getProcurementQueues(): Promise<{
     .in('line_status', QUEUE_STATES);
   // ⚠ size 列(N1)若 PostgREST schema 缓存未刷新/迁移未应用 → 选它整查会 error。
   //   绝不能让"新列"把采购中心整个变空 → 降级去掉 size 重查(尺码徽章暂不显示,功能不瘫)。
-  if (error && /size|schema cache|column|does not exist/i.test(error.message || '')) {
-    console.warn('[getProcurementQueues] size 列不可选(schema 缓存陈旧?),降级不带 size:', error.message);
+  if (error && /size|schema cache|column|does not exist|permission denied/i.test(error.message || '')) {
+    // size 列未授权(列级 GRANT 不含新列)/schema 缓存陈旧 → 降级不带 size,采购中心不因新列变空
+    console.warn('[getProcurementQueues] size 列不可选,降级不带 size:', error.message);
     ({ data, error } = await (supabase.from('procurement_line_items') as any).select(SEL_NO_SIZE).in('line_status', QUEUE_STATES));
   }
   if (error) return { error: error.message };

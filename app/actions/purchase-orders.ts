@@ -529,7 +529,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   let { data: lines, error: linesErr } = await (_db.from('procurement_line_items') as any)
     .select(withPrice ? _selWith : _selNo).eq('purchase_order_id', id).order('created_at', { ascending: true });
   // size 列(N1)schema 缓存未刷新 → 降级去 size,采购单照样导得出(尺码列暂空)
-  if (linesErr && /size|schema cache|column|does not exist/i.test(linesErr.message || '')) {
+  if (linesErr && /size|schema cache|column|does not exist|permission denied/i.test(linesErr.message || '')) {
     ({ data: lines } = await (_db.from('procurement_line_items') as any)
       .select((withPrice ? _selWith : _selNo).replace(', size', '')).eq('purchase_order_id', id).order('created_at', { ascending: true }));
   }
