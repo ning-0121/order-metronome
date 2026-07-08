@@ -350,12 +350,16 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [scMsg, setScMsg] = useState('');
   useEffect(() => { listSizeCharts(orderId).then(r => { if ((r as any).data) setSizeCharts((r as any).data); }); }, [orderId]);
   async function reloadSizeCharts() { const r = await listSizeCharts(orderId); if ((r as any).data) setSizeCharts((r as any).data); }
-  async function handleUploadSizeChart(file: File) {
+  async function handleUploadSizeCharts(files: FileList) {
     setScUploading(true); setScMsg('');
-    const fd = new FormData(); fd.set('file', file);
-    const r = await uploadSizeChart(orderId, fd);
+    let ok = 0; const errs: string[] = [];
+    for (const file of Array.from(files)) {
+      const fd = new FormData(); fd.set('file', file);
+      const r = await uploadSizeChart(orderId, fd);
+      if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else ok++;
+    }
     setScUploading(false);
-    if ((r as any).error) { setScMsg((r as any).error); return; }
+    setScMsg(errs.length ? `已上传 ${ok} 个,失败 ${errs.length} 个 — ${errs[0]}` : '');
     await reloadSizeCharts();
   }
   async function handleDeleteSizeChart(id: string) {
@@ -711,11 +715,11 @@ export function BomTab({ orderId }: { orderId: string }) {
       <div className="mb-4 p-3 rounded-xl border border-teal-200 bg-teal-50/40">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-semibold text-gray-800">📏 尺码表</span>
-          <span className="text-xs text-gray-500">在此上传,「生产任务单」直接读取(建单不再传)</span>
+          <span className="text-xs text-gray-500">在此上传,「生产任务单」直接读取(建单不再传)· 可一次选多个</span>
           <label className={`ml-auto text-sm px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 cursor-pointer ${scUploading ? 'opacity-50 pointer-events-none' : ''}`}>
             {scUploading ? '上传中…' : '📤 上传尺码表'}
-            <input type="file" accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" disabled={scUploading}
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadSizeChart(f); e.currentTarget.value = ''; }} />
+            <input type="file" multiple accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" disabled={scUploading}
+              onChange={e => { const fs = e.target.files; if (fs && fs.length) handleUploadSizeCharts(fs); e.currentTarget.value = ''; }} />
           </label>
         </div>
         {scMsg && <p className="text-xs text-rose-600 mt-1">{scMsg}</p>}
