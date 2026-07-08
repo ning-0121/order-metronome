@@ -38,7 +38,7 @@ const fmtD = (iso: any) => iso ? `${new Date(iso).getMonth() + 1}/${new Date(iso
 
 const FORM_KEYS = [
   'production_consumption', 'procurement_loss_pct', 'safety_stock_qty', 'moq', 'purchase_unit', 'final_purchase_qty',
-  'confirmed_supplier_name', 'backup_supplier_name', 'supplier_contact', 'lead_days',
+  'confirmed_supplier_name', 'backup_supplier_name', 'supplier_contact', 'lead_days', 'required_date',
   'unit_price', 'currency', 'tax_rate', 'price_inclusive_tax', 'quote_date',
   'is_substitute', 'substitute_reason', 'is_split', 'is_outsourced', 'risk_flag', 'risk_note', 'procurement_notes',
 ];
@@ -1109,6 +1109,23 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                 )}
               </div>
               <span className="text-[10px] text-gray-400">留空 = 下单时自动按建议采购量;要整匹/凑量就自己填,你说了算</span>
+            </label>
+            <label className="block">
+              <span className="text-gray-500">需到日(货到厂日 · 采购选)</span>
+              <input type="date" value={(form.required_date || '').slice(0, 10)}
+                onChange={e => set('required_date', e.target.value)}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-2 py-1.5" />
+              <span className="text-[10px] text-gray-400">
+                采购按供应商能到的日期直接选;缺料风险「需 X 前到」用它。{(() => {
+                  const rd = (form.required_date || '').slice(0, 10); const lead = Number(form.lead_days) || 0;
+                  if (rd && lead > 0 && /^\d{4}-\d{2}-\d{2}$/.test(rd)) {
+                    const [y, m, d] = rd.split('-').map(Number);
+                    const obd = new Date(Date.UTC(y, m - 1, d) - lead * 86400000).toISOString().slice(0, 10);
+                    return ` 最晚下单 ${obd}(=需到日−交期${lead}天)`;
+                  }
+                  return ' 留空 = 系统按出厂日−交期自动倒推';
+                })()}
+              </span>
             </label>
           </div>
 

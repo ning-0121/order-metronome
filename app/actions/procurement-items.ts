@@ -669,8 +669,8 @@ export async function consolidateOrderProcurementItems(
         for (const u of g.imgs) if (merged.length < 8 && !merged.includes(u)) merged.push(u);
         if (merged.length !== cur.length) upd.image_urls = merged;
       }
-      // 到货倒推日期刷新(列存在才写,迁移未跑不报错)
-      if ('order_by_date' in (ex as any)) { upd.required_date = g.reqDate; upd.order_by_date = g.orderBy; }
+      // 到货倒推日期刷新(列存在才写,迁移未跑不报错)。采购手锁了需到日 → 不覆盖(required_date_locked)
+      if ('order_by_date' in (ex as any) && !(ex as any).required_date_locked) { upd.required_date = g.reqDate; upd.order_by_date = g.orderBy; }
       const totalChanged = Number(ex.total_required_qty) !== g.total;
       if (totalChanged && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
       await (supabase.from('procurement_items') as any).update(upd).eq('id', ex.id);
@@ -905,7 +905,7 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
   if (roleErr) return { error: roleErr };
 
   const { data: item } = await (supabase.from('procurement_items') as any)
-    .select('total_required_qty, development_consumption').eq('id', itemId).single();
+    .select('total_required_qty, development_consumption, lead_days').eq('id', itemId).single();
   if (!item) return { error: '采购项不存在' };
 
   const numFields = ['production_consumption', 'procurement_loss_pct', 'safety_stock_qty', 'final_purchase_qty', 'lead_days', 'moq', 'unit_price', 'tax_rate'];
@@ -918,6 +918,24 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
   for (const k of textFields) if (k in fields) upd[k] = fields[k] || null;
   if ('quote_date' in fields) upd.quote_date = fields.quote_date || null;
 
+  // 需到日(采购手选,货到厂日):锁定后归并不覆盖;派生最晚下单日 = 需到日 − 供应商交期(日历日近似)
+  if ('required_date' in fields) {
+    const rd = fields.required_date ? String(fields.required_date).slice(0, 10) : null;
+    if (rd) {
+      upd.required_date = rd;
+      upd.required_date_locked = true;
+      const lead = Number(upd.lead_days ?? (item as any).lead_days) || 0;
+      if (lead > 0 && /^\d{4}-\d{2}-\d{2}$/.test(rd)) {
+        const [y, m, d] = rd.split('-').map(Number);
+        upd.order_by_date = new Date(Date.UTC(y, m - 1, d) - lead * 86400000).toISOString().slice(0, 10);
+      } else {
+        upd.order_by_date = rd;
+      }
+    } else {
+      upd.required_date_locked = false;   // 清空锁 → 恢复系统倒推(下次归并重算)
+    }
+  }
+
   // 重算 suggested(用新输入)
   upd.suggested_purchase_qty = computeSuggestedPurchaseQty({
     total_required_qty: (item as any).total_required_qty,
@@ -928,8 +946,21 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
     moq: upd.moq ?? undefined,
   });
 
-  const { error } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
+  let { error } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
+  if (error && /required_date_locked|column .* does not exist/i.test(error.message || '')) {
+    // 迁移未跑 → 去掉锁标志重试(需到日/最晚下单日仍写入,只是不"锁"、可能被下次归并覆盖)
+    const { required_date_locked, ...rest } = upd;
+    ({ error } = await (supabase.from('procurement_items') as any).update(rest).eq('id', itemId));
+  }
   if (error) return { error: friendlyError(error) };
+  // 需到日改了 → 同步未下单执行行的 required_by(缺料风险/在途灯立刻用新到货日)
+  if ('required_date' in upd) {
+    try {
+      await (supabase.from('procurement_line_items') as any)
+        .update({ required_by: upd.required_date, updated_at: new Date().toISOString() })
+        .eq('procurement_item_id', itemId).is('purchase_order_id', null);
+    } catch { /* 不阻断 */ }
+  }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }
