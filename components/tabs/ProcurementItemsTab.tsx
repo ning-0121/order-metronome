@@ -7,7 +7,7 @@ import {
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
   listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
-  saveBomBudgetUnitPrice, getOrderStyleBudgets, saveOrderStyleBudgets,
+  saveBomBudgetUnitPrice, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
@@ -52,6 +52,9 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [selId, setSelId] = useState<string | null>(null);
   const [sources, setSources] = useState<any[]>([]);
   const [sizeBreakdown, setSizeBreakdown] = useState<Array<{ size: string | null; qty: number }>>([]);   // #3 尺码拆分预览
+  const [sizeEdit, setSizeEdit] = useState<Record<string, string>>({});   // 尺码拆分可编辑(码→量)
+  const [sizeOverrideActive, setSizeOverrideActive] = useState(false);    // 是否已存人工覆盖
+  const [sizeSaving, setSizeSaving] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [fulfillment, setFulfillment] = useState<any[]>([]);
@@ -227,7 +230,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   async function select(item: any) {
     if (selId === item.id) { setSelId(null); return; }
-    setSelId(item.id); setSources([]); setSizeBreakdown([]);
+    setSelId(item.id); setSources([]); setSizeBreakdown([]); setSizeEdit({}); setSizeOverrideActive(false);
     const f: Record<string, any> = {};
     for (const k of FORM_KEYS) f[k] = item[k] ?? '';
     // 采购计量单位默认=该项单位(物料录入时就选过,不让采购重敲;按匹/按卷等买法不同才改)
@@ -235,7 +238,41 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setForm(f);
     const res = await getProcurementItemSources(item.id);
     if ((res as any).data) setSources((res as any).data);
-    setSizeBreakdown((res as any).sizeBreakdown || []);
+    const bd = ((res as any).sizeBreakdown || []) as Array<{ size: string | null; qty: number }>;
+    setSizeBreakdown(bd);
+    setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
+    setSizeOverrideActive(!!(res as any).sizeOverrideActive);
+  }
+  // 重新拉取当前项的尺码拆分(保存/恢复后刷新预览,不切换选中)
+  async function refreshSizes(itemId: string) {
+    const res = await getProcurementItemSources(itemId);
+    if ((res as any).data) setSources((res as any).data);
+    const bd = ((res as any).sizeBreakdown || []) as Array<{ size: string | null; qty: number }>;
+    setSizeBreakdown(bd);
+    setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
+    setSizeOverrideActive(!!(res as any).sizeOverrideActive);
+  }
+  // 保存尺码拆分(采购在预览直接改比例/每码数量)
+  async function saveSizes() {
+    if (!selId) return;
+    setSizeSaving(true); setMsg('');
+    const sizes = Object.fromEntries(Object.entries(sizeEdit).map(([k, v]) => [k, v === '' ? 0 : Number(v)]));
+    const r = await saveSizeQtyOverride(selId, orderId, sizes as any);
+    setSizeSaving(false);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setMsg(`✅ 尺码拆分已保存(最终采购量 ${(r as any).total})`);
+    set('final_purchase_qty', String((r as any).total));   // 同步「最终采购量(人拍板)」输入
+    await Promise.all([reload(), refreshSizes(selId)]);
+  }
+  // 恢复系统按比例拆分(清空人工覆盖)
+  async function resetSizes() {
+    if (!selId) return;
+    setSizeSaving(true); setMsg('');
+    const r = await saveSizeQtyOverride(selId, orderId, {});
+    setSizeSaving(false);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setMsg('✅ 已恢复系统按比例拆分');
+    await Promise.all([reload(), refreshSizes(selId)]);
   }
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
@@ -969,23 +1006,47 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             )}
           </div>
 
-          {/* 尺码拆分预览(#3:尺码 + 最终采购量 体现在上边)——生成执行行时会按此拆到逐尺码采购行 */}
-          {sizeBreakdown.length > 0 && (
-            <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-3">
-              <div className="text-xs font-semibold text-teal-800 mb-1.5">
-                📐 尺码拆分预览 · 最终采购量 <b>{(form.final_purchase_qty ?? liveSuggested ?? sel.final_purchase_qty ?? sel.suggested_purchase_qty) || '—'}</b> {sel.unit || ''}
-                <span className="font-normal text-teal-600 ml-1">(生成采购行时按各码件数拆分;想改单码数量在采购队列「✏️改」)</span>
+          {/* 尺码拆分:可直接改比例/每码数量(2026-07-08 用户拍板)——生成执行行按此逐码出量 */}
+          {Object.keys(sizeEdit).length > 0 && (() => {
+            const sizeLocked = ['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status);
+            const sizeSum = Object.values(sizeEdit).reduce((a, v) => a + (Number(v) || 0), 0);
+            return (
+            <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-3 space-y-2">
+              <div className="text-xs font-semibold text-teal-800 flex items-center gap-2 flex-wrap">
+                <span>📐 尺码拆分 · 最终采购量 <b>{sizeSum || '—'}</b> {sel.unit || ''}</span>
+                {sizeOverrideActive
+                  ? <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">✋ 人工拆分</span>
+                  : <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">系统按比例</span>}
+                {sizeLocked && <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">🔒 已下单锁定</span>}
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {sizeBreakdown.map((s, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 rounded-md bg-white border border-teal-200 px-2 py-0.5 text-xs">
-                    <span className="font-semibold text-teal-700">{s.size}</span>
-                    <span className="text-gray-600">{s.qty}</span>
-                  </span>
+              <div className="flex flex-wrap gap-2">
+                {Object.keys(sizeEdit).map((sz) => (
+                  <label key={sz} className="inline-flex items-center gap-1 rounded-md bg-white border border-teal-200 px-2 py-1 text-xs">
+                    <span className="font-semibold text-teal-700">{sz}</span>
+                    <input type="number" min="0" step="1" value={sizeEdit[sz]} disabled={sizeLocked}
+                      onChange={e => setSizeEdit(prev => ({ ...prev, [sz]: e.target.value }))}
+                      className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-right disabled:bg-gray-50 disabled:text-gray-500" />
+                  </label>
                 ))}
               </div>
+              {!sizeLocked && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={saveSizes} disabled={sizeSaving}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-50">
+                    {sizeSaving ? '保存中…' : '💾 保存尺码拆分'}
+                  </button>
+                  {sizeOverrideActive && (
+                    <button onClick={resetSizes} disabled={sizeSaving}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">
+                      ↺ 恢复系统按比例
+                    </button>
+                  )}
+                  <span className="text-[11px] text-teal-600">改比例或每码数量都行;最终采购量 = 各码之和,生成采购行时按此逐码出量。</span>
+                </div>
+              )}
             </div>
-          )}
+            );
+          })()}
 
           {/* 来源明细(live;粒度=物料行)*/}
           <div className="rounded-lg border border-gray-200 bg-white p-3">
