@@ -11,8 +11,11 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { hasRoleInGroup } from '@/lib/domain/roles';
-
-export type ProductionStage = 'awaiting_procurement' | 'materials_in_transit' | 'ready_to_schedule' | 'in_production' | 'ready_to_ship';
+import {
+  type ProductionStage,
+  DONE, RECEIVED, IN_TRANSIT, NOT_SECURED,
+  computeStage, effectiveStage, STAGE_ORDER,
+} from '@/lib/production/stage';
 
 export interface ProductionOrderRow {
   order_id: string;
@@ -39,37 +42,6 @@ export interface ProductionCenterSummary {
   in_production: number;
   ready_to_ship: number;
   risk: number;
-}
-
-const DONE = (s: string | null | undefined) => ['done', 'completed', '已完成'].includes(String(s || '').toLowerCase());
-const RECEIVED = new Set(['received', 'accepted', 'closed', 'concession']);
-const IN_TRANSIT = new Set(['ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
-const NOT_SECURED = new Set(['draft', 'pending_order']);
-
-function computeStage(
-  m: ProductionOrderRow['material'],
-  kickoff: ProductionOrderRow['kickoff'],
-  factoryDone: { status: string | null } | null,   // 尾查/工厂完成(完工信号)
-  shipped: { status: string | null } | null,        // 发货出运(出运信号)
-  procPlaced?: { status: string | null } | null,   // 采购下单里程碑(线级采购数据缺失时的兜底信号)
-): ProductionStage | 'done' {
-  if (shipped && DONE(shipped.status)) return 'done';         // 已出运 → 出生产中心
-  if (kickoff && DONE(kickoff.status)) {
-    // 已开裁:工厂已完工(尾查/工厂完成)但未出运 → 待发货;否则还在生产中(2026-07-06 用户加待发货一栏)
-    if (factoryDone && DONE(factoryDone.status)) return 'ready_to_ship';
-    return 'in_production';
-  }
-  if (m.total === 0) {
-    // 无采购执行行(老单/没走线级采购,只在里程碑标了采购下单)→ 退回看「采购下单」里程碑:
-    // 已下单 → 物料在途;否则才是真「新订单待采购」。修用户反馈:老单物料在途被误判成待采购。
-    if (procPlaced && DONE(procPlaced.status)) return 'materials_in_transit';
-    return 'awaiting_procurement';                             // 未起料且采购未下单 → 待采购
-  }
-  if (m.received === m.total) return 'ready_to_schedule';      // 全到齐未开裁 → 待排单
-  // 只要有料已下单/已到(in_transit 或 received > 0)→ 物料在途,即使还有个别料没下单。
-  // 旧逻辑"只要有一条没下单(pending>0)就算待采购",把 9/10 已下单的单误判成待采购。
-  if (m.in_transit > 0 || m.received > 0) return 'materials_in_transit'; // 有料在途/部分到齐 → 物料在途
-  return 'awaiting_procurement';                               // 全部还没下单(draft/pending_order)→ 待采购
 }
 
 export async function getProductionCenter(): Promise<{
@@ -105,11 +77,20 @@ export async function getProductionCenter(): Promise<{
   }
 
   // 建单即进(仅排除 已取消/已完成/归档;保留 draft/pending_approval/active)
-  let q = (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status')
-    .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")');
-  if (allowedIds) q = q.in('id', Array.from(allowedIds));
-  const { data: orders } = await q;
+  // production_stage_manual(20260708 迁移)未执行时降级不带该列(全按 auto 推算),否则整页变空(2026-07-08)
+  const OSEL = 'id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, production_stage_manual';
+  const OSEL_NO_MANUAL = 'id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status';
+  const runOrders = (sel: string) => {
+    let q = (svc.from('orders') as any)
+      .select(sel)
+      .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")');
+    if (allowedIds) q = q.in('id', Array.from(allowedIds));
+    return q;
+  };
+  let { data: orders, error: ordErr } = await runOrders(OSEL);
+  if (ordErr && /production_stage_manual|column .* does not exist|schema cache/i.test(ordErr.message || '')) {
+    ({ data: orders, error: ordErr } = await runOrders(OSEL_NO_MANUAL));
+  }
   const list = (orders || []) as any[];
   if (list.length === 0) return { data: [], summary: emptySummary() };
   const orderIds = list.map((o) => o.id);
@@ -150,8 +131,10 @@ export async function getProductionCenter(): Promise<{
     const factoryDone = mo['final_qc_check'] || mo['factory_completion'] || null;  // 尾查/工厂完成=完工信号
     const shipped = mo['shipment_execute'] || null;                                // 发货出运=出运信号(出运才离开生产中心)
     const completion = factoryDone || shipped; // 展示「工厂完成」列
-    const stage = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
-    if (stage === 'done') continue;   // 工厂已完工,出中心
+    const auto = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
+    // 生产主管一次性设的手动档做「下限」:只把订单往前推,不会倒退到比手动档更早的阶段。
+    const stage = effectiveStage(auto, (o.production_stage_manual as ProductionStage | 'done' | null) || null);
+    if (stage === 'done') continue;   // 工厂已完工/主管标已完工,出中心
     const risk = [kickoff, completion].some((n) => n && !DONE(n.status) && n.due && n.due < today);
     rows.push({
       order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, customer_name: o.customer_name,
@@ -162,7 +145,6 @@ export async function getProductionCenter(): Promise<{
     });
   }
 
-  const STAGE_ORDER: ProductionStage[] = ['awaiting_procurement', 'materials_in_transit', 'ready_to_schedule', 'in_production', 'ready_to_ship'];
   rows.sort((a, b) => {
     if (a.risk !== b.risk) return a.risk ? -1 : 1;   // 风险优先
     const s = STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage);

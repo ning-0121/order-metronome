@@ -1,5 +1,7 @@
+import Link from 'next/link';
 import { requireProductionPage } from '@/lib/utils/production-page-guard';
 import { getProductionCenter } from '@/app/actions/production-center';
+import { isStageInitOpen } from '@/app/actions/production-stage-init';
 import { ProductionCenterClient } from './ProductionCenterClient';
 import { ReconcileExportButton } from './ReconcileExportButton';
 
@@ -13,8 +15,11 @@ import { ReconcileExportButton } from './ReconcileExportButton';
 export const dynamic = 'force-dynamic';
 
 export default async function ProductionCenterPage() {
-  await requireProductionPage();
+  const { roles } = await requireProductionPage();
   const result = await getProductionCenter();
+  // 一次性进度初始化入口:仅生产主管/管理员、且入口未关闭时显示
+  const canInit = roles.includes('admin') || roles.includes('production_manager');
+  const showInit = canInit && (await isStageInitOpen());
 
   if (result.error) {
     return (
@@ -38,7 +43,15 @@ export default async function ProductionCenterPage() {
         <p className="text-sm text-gray-500">
           客户下单即进本中心,按物料就绪与生产节点自动落到对应阶段。点卡片筛选;数量/物料/工厂可见,售价与成本不在此视图。
         </p>
-        <ReconcileExportButton />
+        <div className="flex shrink-0 items-center gap-2">
+          {showInit && (
+            <Link href="/production/stage-init"
+              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+              初始化各单进度
+            </Link>
+          )}
+          <ReconcileExportButton />
+        </div>
       </div>
 
       <ProductionCenterClient rows={rows} summary={summary} />

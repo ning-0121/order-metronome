@@ -7,7 +7,8 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { type ProductionOrderRow, type ProductionStage, type ProductionCenterSummary } from '@/app/actions/production-center';
+import { type ProductionOrderRow, type ProductionCenterSummary } from '@/app/actions/production-center';
+import { type ProductionStage } from '@/lib/production/stage';
 import { generateManufacturingOrderSheet } from '@/app/actions/manufacturing-order';
 
 const STAGE_LABEL: Record<ProductionStage, string> = {
