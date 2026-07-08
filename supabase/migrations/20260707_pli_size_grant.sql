@@ -1,0 +1,21 @@
+-- ============================================================
+-- 20260707_pli_size_grant —— 给新列 size 授回 SELECT(修 permission denied)
+-- ============================================================
+-- 背景:20260704_pli_floor_column_revoke 撤了 procurement_line_items 表级 SELECT、
+--   只按当时存在的列授回(锁底价 unit_price/ordered_amount/difference_amount)。
+--   20260707 新加的 size 列不在那次授权里 → authenticated 直连/PostgREST 选 size
+--   报 "permission denied for table procurement_line_items" → 采购中心整查失败变空。
+-- 修:把非敏感的 size 列授回 authenticated(尺码是展示信息,业务/生产/跟单都可见)。
+-- ⚠️ 由人手动在 Supabase SQL Editor 执行。
+-- ============================================================
+GRANT SELECT (size) ON public.procurement_line_items TO authenticated;
+
+-- 验证(期望返回 1 行 size):
+-- SELECT column_name FROM information_schema.column_privileges
+--  WHERE table_name='procurement_line_items' AND grantee='authenticated'
+--    AND privilege_type='SELECT' AND column_name='size';
+--
+-- ⚠ 通用教训:凡后续给 procurement_line_items 加【非底价】新列,都要补一句
+--   GRANT SELECT (新列) ON public.procurement_line_items TO authenticated;
+--   否则列级 GRANT 不含新列 → 选它整查 permission denied。
+-- ============================================================
