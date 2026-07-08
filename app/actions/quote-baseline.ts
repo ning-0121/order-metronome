@@ -95,7 +95,7 @@ function xlsxCell(v: unknown): unknown {
  * 解析上传的内部成本核算单(报价单)→ 返回报价基线行 + 款预算(不落库,给前端预览确认)。
  * 纯代码(exceljs + parseCostSheet),零 AI/零 token。仅业务/订单管理/admin。
  */
-export async function parseQuoteFile(base64: string): Promise<{
+export async function parseQuoteFile(base64: string, orderId?: string): Promise<{
   lines?: QuoteBaselineLine[]; styleBudgets?: QuoteStyleBudget[]; error?: string;
 }> {
   const supabase = await createClient();
@@ -104,7 +104,10 @@ export async function parseQuoteFile(base64: string): Promise<{
   const roles = await getUserRoles(supabase, user.id);
   if (!canEditBaseline(roles)) return { error: '仅业务/订单管理/管理员可上传报价单' };
   const buf = Buffer.from(base64.replace(/^data:.*base64,/, ''), 'base64');
-  return parseQuoteBuffer(buf);
+  const res = await parseQuoteBuffer(buf);
+  // 面料单耗以富录入表逐款录入值为准(报价单单耗常两款相同像取平均)
+  if (orderId && res.lines?.length) res.lines = await overrideFabricConsumptionByStyle(supabase, orderId, res.lines);
+  return res;
 }
 
 /** buffer → 报价基线 lines(布料逐料) + styleBudgets(逐款辅料/加工)。纯解析,不写库(供人确认后冻结)。 */
@@ -137,6 +140,30 @@ async function parseQuoteBuffer(buf: Buffer): Promise<{ lines?: QuoteBaselineLin
 }
 
 /**
+ * 用富录入表(order_line_items)逐款录入的面料单耗,覆盖报价单解析出的面料单耗。
+ * 报价单常只给一个统一/较粗的单件用量(两款相同,看着像"取平均"),采购要按每款真实单耗核采购总价,
+ * 故以「每款录入时的单耗为准」(2026-07-08 用户拍板)。按款号匹配,只覆盖 fabric 行且该款有录入单耗时。
+ */
+async function overrideFabricConsumptionByStyle(client: any, orderId: string, lines: QuoteBaselineLine[]): Promise<QuoteBaselineLine[]> {
+  try {
+    const { data: li } = await (client.from('order_line_items') as any)
+      .select('style_no, fabric_consumption').eq('order_id', orderId);
+    const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+    const consByStyle = new Map<string, number>();
+    for (const r of (li || [])) {
+      const st = norm((r as any).style_no); const c = Number((r as any).fabric_consumption);
+      if (st && c > 0 && !consByStyle.has(st)) consByStyle.set(st, c);
+    }
+    if (consByStyle.size === 0) return lines;
+    return lines.map((l) => {
+      if (norm(l.category) !== 'fabric') return l;
+      const c = consByStyle.get(norm(l.style_no));
+      return c != null ? { ...l, quote_consumption: c } : l;
+    });
+  } catch { return lines; }
+}
+
+/**
  * 一键从「建单已上传的内部成本核算单」解析报价基线(免重传)。
  * 拉 order_attachments(file_type=internal_quote)→下载→解析→返回 lines/styleBudgets(草稿,不写库)。
  * 业务在报价基线页核对(布料分类型·辅料总额)后点「冻结」才成真相。守 AI 治理:不自动改基线。
@@ -161,6 +188,8 @@ export async function prefillBaselineFromOrderQuoteFile(orderId: string): Promis
   if (dErr || !file) return { error: '下载附件失败:' + (dErr?.message || '未知') };
   const buf = Buffer.from(await (file as Blob).arrayBuffer());
   const res = await parseQuoteBuffer(buf);
+  // 面料单耗以富录入表逐款录入值为准(报价单单耗常两款相同像取平均)
+  if (res.lines?.length) res.lines = await overrideFabricConsumptionByStyle(supabase, orderId, res.lines);
   return { ...res, fileName: (att as any).file_name };
 }
 

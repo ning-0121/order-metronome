@@ -51,7 +51,7 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
       const b64 = await new Promise<string>((resolve, reject) => {
         const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(file);
       });
-      const res = await parseQuoteFile(b64);
+      const res = await parseQuoteFile(b64, orderId);
       if ((res as any).error) { setMsg({ ok: false, text: (res as any).error }); return; }
       let k = Date.now();
       setRows((res.lines || []).map((l) => ({ ...l, _k: k++ })));
