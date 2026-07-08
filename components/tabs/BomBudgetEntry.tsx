@@ -75,20 +75,20 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         </button>
       </div>
       <p className="text-[11px] text-gray-500">
-        按<b>采购真实物料</b>逐料填【预算单价】:面料预算 = 大货单耗 × 预算单价 × 件数(大货单耗在「原辅料和包装」页填,此处只读)。
-        逐款再填【加工费】和【辅料单件总价】。抛量% 由采购在采购中心填,这里不涉及。
+        面料按<b>采购真实布料</b>逐料填【预算单价】:面料预算 = 大货单耗 × 预算单价 × 件数(大货单耗在「原辅料和包装」页填,此处只读)。
+        辅料<b>不逐个填价</b>,在下方逐款填【辅料总价】;逐款再填【加工费】。抛量% 由采购在采购中心填,这里不涉及。
       </p>
 
-      {/* 面料预算单价(逐料) */}
+      {/* 面料预算单价(只列布料;辅料走下方逐款「辅料总价」) */}
       <div className="overflow-x-auto rounded-lg border border-indigo-100 bg-white">
         <table className="w-full text-xs">
           <thead><tr className="text-left text-gray-400 bg-gray-50/60">
-            {['款号', '颜色', '物料', '数量', '大货单耗', '预算单价', '单位', '面料预算(自动)'].map(h => (
+            {['款号', '颜色', '布料', '数量', '大货单耗', '预算单价', '单位', '面料预算(自动)'].map(h => (
               <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
             ))}
           </tr></thead>
           <tbody>
-            {lines.map(l => {
+            {fabricLines.map(l => {
               const price = Number(priceEdit[l.id]);
               const cons = Number(l.production_consumption);
               const pcs = Number(l.pieces);
@@ -121,14 +121,14 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         </table>
       </div>
 
-      {/* 逐款:加工费 + 辅料单件总价 */}
+      {/* 逐款:加工费(元/件) + 辅料总价(该款辅料一口价,不按件数) */}
       {styleBudgets.length > 0 && (
         <div className="rounded-lg border border-indigo-100 bg-white p-3">
-          <div className="text-xs font-semibold text-gray-700 mb-1.5">🧵 逐款预算 · 加工费 + 辅料单件总价(辅料预算 = 辅料单件总价 × 该款件数)</div>
+          <div className="text-xs font-semibold text-gray-700 mb-1.5">🧵 逐款预算 · 加工费(元/件) + 辅料总价(辅料预算 = 该款辅料总价,不按件数)</div>
           <div className="overflow-x-auto">
             <table className="text-xs">
               <thead><tr className="text-left text-gray-400">
-                {['款号', '加工费(元/件)', '辅料单件总价(元/件)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
+                {['款号', '加工费(元/件)', '辅料总价(元)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
               </tr></thead>
               <tbody>
                 {styleBudgets.map((b, i) => (

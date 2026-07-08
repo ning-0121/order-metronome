@@ -361,9 +361,9 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
   for (const b of styleBudgets) { const c = Number(b.cmt); const q = qtyForStyle(b.style_no); if (c > 0 && q > 0) { cmtTotal += c * q; qSum += q; } }
   const cmtQuote = qSum > 0 ? Math.round(cmtTotal / qSum * 10000) / 10000 : null;
 
-  // 辅料预算(逐款 辅料单件总价 trim_budget × 该款件数)—— 供财务即时同步的绝对总额口径
+  // 辅料预算(逐款 辅料总价 trim_budget = 该款一口价,不按件数;2026-07-08 用户拍板)—— 供财务即时同步
   let trimTotal = 0; let trimQ = 0;
-  for (const b of styleBudgets) { const t = Number(b.trim_budget); const q = qtyForStyle(b.style_no); if (t > 0 && q > 0) { trimTotal += t * q; trimQ += q; } }
+  for (const b of styleBudgets) { const t = Number(b.trim_budget); const q = qtyForStyle(b.style_no); if (t > 0) { trimTotal += t; if (q > 0) trimQ += q; } }
   trimTotal = Math.round(trimTotal * 100) / 100;
   const cmtTotalAmt = Math.round(cmtTotal * 100) / 100;
 

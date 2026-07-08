@@ -610,7 +610,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             )}
           </div>
           {consEffectiveOpen && <>
-          <p className="text-[11px] text-gray-500">大货单耗由业务在「原辅料和包装」页按技术部大货版逐款填(此处<b>只读核实</b>);业务逐料填<b>预算单价</b>(面料预算=大货单耗×预算单价×件数,取代报价单识别);采购逐料填<b>抛量%</b>。采购量 = Σ(件数 × 大货单耗) ×(1 + 抛量%)。</p>
+          <p className="text-[11px] text-gray-500">大货单耗由业务在「原辅料和包装」页按技术部大货版逐款填(此处<b>只读核实</b>);业务给<b>布料</b>逐料填<b>预算单价</b>(面料预算=大货单耗×预算单价×件数);辅料不逐个填价,走下方逐款<b>辅料总价</b>;采购逐料填<b>抛量%</b>。采购量 = Σ(件数 × 大货单耗) ×(1 + 抛量%)。</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400">
@@ -633,13 +633,15 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                         ? <span className="font-medium text-gray-800">{l.production_consumption}</span>
                         : l.required ? <span className="text-[11px] text-amber-600">业务未填 →</span> : <span className="text-gray-300">—</span>}
                     </td>
-                    {/* 预算单价:业务填(面料预算=大货单耗×本列×件数);辅料留空 */}
+                    {/* 预算单价:仅布料填(面料预算=大货单耗×本列×件数);辅料不逐个填价,走下方「辅料总价」 */}
                     <td className="py-1.5 px-2">
-                      <span className="text-gray-400 mr-0.5">¥</span>
-                      <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''}
-                        placeholder={l.required ? '必填' : '—'}
-                        onChange={e => setPriceEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
-                        className={`w-20 rounded border px-2 py-1 ${l.required && !(Number(priceEdit[l.id]) > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                      {l.required ? (<>
+                        <span className="text-gray-400 mr-0.5">¥</span>
+                        <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''}
+                          placeholder="必填"
+                          onChange={e => setPriceEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
+                          className={`w-20 rounded border px-2 py-1 ${!(Number(priceEdit[l.id]) > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                      </>) : <span className="text-gray-300">—</span>}
                     </td>
                     {/* 抛量%:采购填,采购量=件数×大货单耗×(1+抛量%) */}
                     <td className="py-1.5 px-2">
@@ -656,14 +658,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             </table>
           </div>
 
-          {/* 逐款预算:加工费 + 辅料单件总价(业务填,取代报价基线;2026-07-08 用户拍板)*/}
+          {/* 逐款预算:加工费(元/件) + 辅料总价(该款一口价,不按件数;2026-07-08 用户拍板)*/}
           {styleBudgets.length > 0 && (
             <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 mt-2">
-              <div className="text-xs font-semibold text-indigo-800 mb-1.5">🧵 逐款预算(业务填)· 加工费 + 辅料单件总价 —— 辅料预算 = 辅料单件总价 × 该款件数</div>
+              <div className="text-xs font-semibold text-indigo-800 mb-1.5">🧵 逐款预算(业务填)· 加工费(元/件) + 辅料总价 —— 辅料预算 = 该款辅料总价(一口价,不按件数)</div>
               <div className="overflow-x-auto">
                 <table className="text-xs">
                   <thead><tr className="text-left text-gray-400">
-                    {['款号', '加工费(元/件)', '辅料单件总价(元/件)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
+                    {['款号', '加工费(元/件)', '辅料总价(元)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {styleBudgets.map((b, i) => (

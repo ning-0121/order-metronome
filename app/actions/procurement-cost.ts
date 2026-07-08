@@ -97,7 +97,7 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   const { data: lines } = await (svc.from('procurement_line_items') as any)
     .select('material_name, category, ordered_qty, received_qty, unit_price, ordered_amount, ordered_unit, procurement_item_id').eq('order_id', orderId);
 
-  // 逐款/款色件数(order_line_items):辅料预算=Σ(款辅料单件总价×款件数);面料预算件数=按款色/款/整单
+  // 逐款/款色件数(order_line_items):辅料预算=Σ(款辅料总价,一口价不按件数);面料预算件数=按款色/款/整单
   const { data: liQ } = await (svc.from('order_line_items') as any).select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
   const nrm = (s: any) => String(s ?? '').trim().toLowerCase();
   const qtyByStyle = new Map<string, number>(); const qtyByStyleColor = new Map<string, number>();
@@ -114,11 +114,9 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   };
   let trimBudgetTotal = 0; let hasTrimBudget = false;
   for (const sb of styleBudgets) {
-    const tb = Number((sb as any).trim_budget); if (!(tb > 0)) continue;
+    const tb = Number((sb as any).trim_budget); if (!(tb > 0)) continue;   // 辅料总价=该款一口价,不按件数(2026-07-08 用户拍板)
     hasTrimBudget = true;
-    const st = String((sb as any).style_no ?? '').trim().toLowerCase();
-    const q = qtyByStyle.get(st) || (styleBudgets.length === 1 ? orderQty : 0);
-    trimBudgetTotal += tb * q;
+    trimBudgetTotal += tb;
   }
   trimBudgetTotal = Math.round(trimBudgetTotal * 100) / 100;
 
@@ -224,7 +222,7 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     };
   }).sort((x, y) => (y.ordered.total || 0) - (x.ordered.total || 0));
 
-  // 辅料合计一行:辅料预算(trim_budget×件数)vs 下单总额(比总额,不分细类)。混单位 → 只比总额,不显数量。
+  // 辅料合计一行:辅料预算(Σ 款辅料总价,一口价)vs 下单总额(比总额,不分细类)。混单位 → 只比总额,不显数量。
   const trimKeys = [...colorKeys].filter((k) => !isFabricKey(k));
   let toAmt = 0;
   for (const k of trimKeys) { const a = actualMap.get(k); if (a) toAmt += a.oAmt; }
