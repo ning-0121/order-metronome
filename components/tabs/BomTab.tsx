@@ -341,6 +341,28 @@ export function BomTab({ orderId }: { orderId: string }) {
     setShowCopy(false); setCopySource(null); await reload();
   }
 
+  // 尺码表(2026-07-08:改在 BOM 页上传,喂生产任务单)。
+  // ⚠ Hooks 必须在任何早退(下面的 if (loading) return)之前声明,否则 loading→false 后
+  //   本轮多跑几个 hook,React 报「Rendered more hooks than during the previous render」→ 整页崩。
+  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null }>>([]);
+  const [scUploading, setScUploading] = useState(false);
+  const [scMsg, setScMsg] = useState('');
+  useEffect(() => { listSizeCharts(orderId).then(r => { if ((r as any).data) setSizeCharts((r as any).data); }); }, [orderId]);
+  async function reloadSizeCharts() { const r = await listSizeCharts(orderId); if ((r as any).data) setSizeCharts((r as any).data); }
+  async function handleUploadSizeChart(file: File) {
+    setScUploading(true); setScMsg('');
+    const fd = new FormData(); fd.set('file', file);
+    const r = await uploadSizeChart(orderId, fd);
+    setScUploading(false);
+    if ((r as any).error) { setScMsg((r as any).error); return; }
+    await reloadSizeCharts();
+  }
+  async function handleDeleteSizeChart(id: string) {
+    if (!confirm('删除这张尺码表？')) return;
+    await deleteSizeChart(id, orderId);
+    await reloadSizeCharts();
+  }
+
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
 
   const submitted = items.some(i => i.submit_status === 'submitted');
@@ -660,26 +682,6 @@ export function BomTab({ orderId }: { orderId: string }) {
       )}
     </div>
   );
-
-  // 尺码表(2026-07-08 用户拍板:改在 BOM 页上传,喂生产任务单;建单不再传)
-  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null }>>([]);
-  const [scUploading, setScUploading] = useState(false);
-  const [scMsg, setScMsg] = useState('');
-  useEffect(() => { listSizeCharts(orderId).then(r => { if ((r as any).data) setSizeCharts((r as any).data); }); }, [orderId]);
-  async function reloadSizeCharts() { const r = await listSizeCharts(orderId); if ((r as any).data) setSizeCharts((r as any).data); }
-  async function handleUploadSizeChart(file: File) {
-    setScUploading(true); setScMsg('');
-    const fd = new FormData(); fd.set('file', file);
-    const r = await uploadSizeChart(orderId, fd);
-    setScUploading(false);
-    if ((r as any).error) { setScMsg((r as any).error); return; }
-    await reloadSizeCharts();
-  }
-  async function handleDeleteSizeChart(id: string) {
-    if (!confirm('删除这张尺码表？')) return;
-    await deleteSizeChart(id, orderId);
-    await reloadSizeCharts();
-  }
 
   return (
     <div>
