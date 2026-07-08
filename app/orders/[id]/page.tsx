@@ -130,28 +130,14 @@ export default async function OrderDetailPage({
   const ownerProfile = (ownerProfileResult as any)?.data || null;
   const ownerName = ownerProfile?.name || ownerProfile?.email || '—';
 
-  // 跟单负责人（从 merchandiser 关卡查找已分配的用户，兼容多种角色值）
-  let merchandiserName: string | null = null;
-  let merchandiserUserId: string | null = null;
-  if (milestones) {
-    const merchRoles = ['merchandiser', 'production', 'qc'];
-    const merchMilestone = (milestones as any[]).find(
-      (m: any) => merchRoles.includes(m.owner_role) && m.owner_user_id
-    );
-    if (merchMilestone?.owner_user) {
-      merchandiserName = merchMilestone.owner_user.name || merchMilestone.owner_user.email || null;
-      merchandiserUserId = merchMilestone.owner_user_id;
-    }
-    // 如果没从 milestone 找到，尝试查订单的 merchandiser_user_id（如果存在）
-    if (!merchandiserName && orderData.merchandiser_user_id) {
-      const { data: merchProfile } = await (supabase.from('profiles') as any)
-        .select('name, email').eq('user_id', orderData.merchandiser_user_id).single();
-      if (merchProfile) {
-        merchandiserName = merchProfile.name || merchProfile.email || null;
-        merchandiserUserId = orderData.merchandiser_user_id;
-      }
-    }
-  }
+  // 跟单负责人:2026-07-08 拆成两组 —— 理单跟单(owner_role='merchandiser')与生产跟单('production'),
+  // 可由不同人负责。分别取各自节点的 owner 显示;之前只取「第一个」会把另一组的改动盖住(生产改了却仍显示理单人)。
+  const followUpOwnerName = (role: string): string | null => {
+    const m = (milestones as any[] | null)?.find((x: any) => x.owner_role === role && x.owner_user_id && x.owner_user);
+    return m ? (m.owner_user.name || m.owner_user.email || null) : null;
+  };
+  const merchandiserName = followUpOwnerName('merchandiser');   // 理单跟单
+  const productionFollowName = followUpOwnerName('production');  // 生产跟单
 
   // 执行评分
   const { data: commissions } = await getOrderCommissions(id);
@@ -494,14 +480,24 @@ export default async function OrderDetailPage({
                     </dd>
                   </div>
                 ))}
-                {/* 跟单负责人 — 仅 管理员 / 生产主管 可指定(2026-07-08 用户:业务不再能指定跟单) */}
+                {/* 跟单负责人 — 理单跟单 / 生产跟单 两组分开显示,各自可指定(2026-07-08:仅管理员/生产主管) */}
                 <div className="flex justify-between items-center">
-                  <dt className="text-sm text-gray-500">跟单负责人</dt>
+                  <dt className="text-sm text-gray-500">理单跟单</dt>
                   <dd className="text-sm font-medium">
                     {(isAdmin || currentRoles.includes('production_manager')) ? (
                       <MerchandiserAssign orderId={id} currentMerchandiserName={merchandiserName} />
                     ) : (
                       <span className="text-gray-900">{merchandiserName || '未指定'}</span>
+                    )}
+                  </dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-sm text-gray-500">生产跟单</dt>
+                  <dd className="text-sm font-medium">
+                    {(isAdmin || currentRoles.includes('production_manager')) ? (
+                      <MerchandiserAssign orderId={id} currentMerchandiserName={productionFollowName} />
+                    ) : (
+                      <span className="text-gray-900">{productionFollowName || '未指定'}</span>
                     )}
                   </dd>
                 </div>

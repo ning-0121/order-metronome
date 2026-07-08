@@ -1720,10 +1720,15 @@ export async function assignMerchandiser(
   // CEO 2026-04-09：这两个节点永远绑定生产主管，指派跟单时不能覆盖
   const { PRODUCTION_MANAGER_FIXED_STEPS } = await import('@/lib/domain/default-assignees');
 
+  // 用 service-role 读/写里程碑:milestones 若缺 UPDATE 的 RLS 策略,用户 session 改会静默 0 行、
+  // 无报错 → 前端以为成功但值没变(本项目老毛病:改了没反应)。权限已在上面用 session 校验过,这里
+  // 只做已授权的定向写,并核对受影响行数,0 行则明确报错而不是假装成功。
+  const admin = (() => { try { return createServiceRoleClient(); } catch { return supabase; } })();
+
   // 按目标角色分配对应节点:生产跟单→owner_role='production' 节点;理单跟单→'merchandiser' 节点(2026-07-08)
   const assignRoles = ['merchandiser', 'production'].filter((r) => targetRoles.includes(r));
   if (assignRoles.length === 0) assignRoles.push('merchandiser');   // admin 兜底按跟单节点
-  const { data: allMerchMs } = await (supabase.from('milestones') as any)
+  const { data: allMerchMs } = await (admin.from('milestones') as any)
     .select('id, step_key')
     .eq('order_id', orderId)
     .in('owner_role', assignRoles);
@@ -1734,21 +1739,25 @@ export async function assignMerchandiser(
     .filter(m => !pmFixedSet.has(m.step_key))
     .map(m => m.id);
 
-  let updated: any[] = [];
-  if (toUpdate.length > 0) {
-    const { data: upd, error: updateErr } = await (supabase.from('milestones') as any)
-      .update({ owner_user_id: merchandiserUserId })
-      .in('id', toUpdate)
-      .select('id');
-    if (updateErr) return { error: updateErr.message };
-    updated = upd || [];
+  if (toUpdate.length === 0) {
+    return { error: `本单没有可指派给「${assignRoles.join('/')}」的跟单节点(可能都是生产主管固定节点)。` };
   }
 
-  // 日志
-  const updatedCount = (updated || []).length;
-  for (const m of updated || []) {
+  const { data: upd, error: updateErr } = await (admin.from('milestones') as any)
+    .update({ owner_user_id: merchandiserUserId })
+    .in('id', toUpdate)
+    .select('id');
+  if (updateErr) return { error: updateErr.message };
+  const updated = upd || [];
+  if (updated.length === 0) {
+    return { error: '指派失败:0 行被更新(数据库权限/RLS 拦截或节点已变)。请刷新后重试或联系管理员。' };
+  }
+
+  // 日志(同样走 service-role,避免被 RLS 拦)
+  const updatedCount = updated.length;
+  for (const m of updated) {
     await logMilestoneAction(
-      supabase, m.id, orderId, 'update',
+      admin, m.id, orderId, 'update',
       `跟单负责人指定为：${targetProfile.name || merchandiserUserId}`
     );
   }
