@@ -558,8 +558,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
   const FILE_FIELDS = [
     { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
-    { formKey: 'internal_quote_file', fileType: 'internal_quote', label: '内部成本核算单' },
-    { formKey: 'customer_quote_file', fileType: 'customer_quote', label: '客户最终报价单' },
+    // 2026-07-08 用户拍板:建单不再传报价单(内部成本核算单/客户报价单),成本预算改由业务在「采购核料」手填
     { formKey: 'size_chart_file', fileType: 'size_chart', label: '尺码表' },
     { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
     { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
@@ -652,10 +651,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     // 校验：客户 PO / 报价单「至少给一个」(2026-07-03 放开:部分客户无正式 PO,允许纯手工建单)。
     // 有 PO → 走上传预录;无 PO → 手工填明细即可。两者都没有才拦。
     const poFile = filesToUpload.find(f => f.fileType === 'customer_po');
-    const quoteFile = filesToUpload.find(f => f.fileType === 'customer_quote');
     const hasManualLines = (lineStyles.length > 0) || (poParseResult?.styles?.length > 0);
-    if (!poFile && !quoteFile && !hasManualLines) {
-      showError('请至少上传客户 PO / 报价单其中一份,或在下方「逐款明细」手工录入款色码');
+    if (!poFile && !hasManualLines) {
+      showError('请上传客户 PO,或在下方「逐款明细」手工录入款色码');
       return;
     }
 
@@ -1593,7 +1591,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 {(([
                   // 2026-07-03 放开必传:PO/报价单可选;子模式=no_po 时隐藏 PO/报价单(只留尺码表)
                   { name: 'customer_po_file',        label: '客户 PO（可多个,可选）',  required: false, multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
-                  { name: 'customer_quote_file',     label: '客户报价单（可多个,可选）',  required: false, multiple: true, stepKey: '_customer_quote' },
+                  // 2026-07-08 用户拍板:建单不再传报价单,成本/预算改由业务在「采购核料」手填
                   { name: 'size_chart_file',         label: '尺码表（可多个）',  required: false, multiple: true, stepKey: '_size_chart', hint: '客户/技术部的尺寸表,生产任务单 tab 可直接查看' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
                   .filter(({ name }) => poMode === 'no_po' ? name === 'size_chart_file' : true))

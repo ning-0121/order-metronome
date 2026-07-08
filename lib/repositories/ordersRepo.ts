@@ -651,18 +651,19 @@ export async function requestCancel(
     return { error: getError?.message || 'Order not found' };
   }
 
-  // 内控(2026-07-06 用户拍板):业务执行取消订单,只能在"核料下采购申请单之前"。
-  // 采购申请一旦提交(material_plans active)→ 采购已启动,业务执行不能再取消;仅管理员可(特殊情况兜底)。
+  // 采购已启动(material_plans active)后,业务不能"直接执行"取消,但【可提交取消申请】给管理员审批。
+  // 2026-07-08 用户:此前这里硬拦住,业务提交即被拒、管理员根本收不到申请 → 改为放行申请并标注"采购已启动",
+  //   走同一套 cancel_requests(pending)+ 通知财务/管理员,由管理员特批(不再"联系管理员"却无入口)。
   const { data: reqProfile } = await (supabase.from('profiles') as any)
     .select('role, roles').eq('user_id', user.id).maybeSingle();
   const reqRoles: string[] = (reqProfile as any)?.roles?.length ? (reqProfile as any).roles : [(reqProfile as any)?.role].filter(Boolean);
+  let procurementStarted = false;
   if (!reqRoles.includes('admin')) {
     const { data: activePlan } = await (supabase.from('material_plans') as any)
       .select('id').eq('order_id', orderId).eq('plan_status', 'active').limit(1).maybeSingle();
-    if (activePlan) {
-      return { error: '该订单已提交采购申请(核料已下采购申请单),采购已启动,业务不能再取消订单。如确需取消,请联系管理员处理。' };
-    }
+    procurementStarted = !!activePlan;
   }
+  const finalDetail = procurementStarted ? `[采购已启动·需管理员特批] ${reasonDetail}` : reasonDetail;
 
   // 防重：同一订单已有待审批的取消申请时，不允许重复提交（对齐延期流程的守卫）
   const { data: existingPending } = await (supabase
@@ -682,7 +683,7 @@ export async function requestCancel(
       order_id: orderId,
       requested_by: user.id,
       reason_type: reasonType,
-      reason_detail: reasonDetail,
+      reason_detail: finalDetail,
       status: 'pending',
     })
     .select()
@@ -698,8 +699,8 @@ export async function requestCancel(
     'cancel_request',
     null,
     null,
-    `申请取消订单：${reasonDetail}`,
-    { reason_type: reasonType, reason_detail: reasonDetail }
+    `申请取消订单：${finalDetail}`,
+    { reason_type: reasonType, reason_detail: finalDetail }
   );
 
   // 通知财务(+管理员):有取消申请待审批 —— 否则审批人永远不知道有东西要审(2026-07-04 用户反馈)
@@ -707,8 +708,8 @@ export async function requestCancel(
     const { notifyUsersByRole } = await import('@/lib/utils/notifications');
     await notifyUsersByRole(supabase, ['finance', 'admin'], {
       type: 'cancel_approval',
-      title: `🔴 取消订单待审批：${(order as any)?.order_no || ''}`,
-      message: `订单 ${(order as any)?.order_no || orderId}（${(order as any)?.customer_name || ''}）申请取消；原因：${reasonDetail}。请到该订单页审批取消申请。`,
+      title: `🔴 取消订单待审批：${(order as any)?.order_no || ''}${procurementStarted ? '(采购已启动·需特批)' : ''}`,
+      message: `订单 ${(order as any)?.order_no || orderId}（${(order as any)?.customer_name || ''}）申请取消；原因：${finalDetail}。请到该订单页审批取消申请。`,
       relatedOrderId: orderId,
     });
   } catch (e: any) { console.warn('[requestCancel] 取消待审批通知失败(不阻断):', e?.message); }
