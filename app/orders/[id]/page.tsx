@@ -849,10 +849,10 @@ export default async function OrderDetailPage({
         {activeTab === 'manufacturing_order' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">🏭 生产任务单</h2>
-            {/* 建单时上传的尺码表(尺寸表数据源,下载任务单后按它填尺寸) */}
+            {/* 尺码表(2026-07-08:改在「原辅料和包装」页上传,这里直读展示) */}
             <div className="mb-6">
               <h3 className="text-sm font-medium text-gray-600 mb-2">📐 尺码表</h3>
-              <PackingFilesSection orderId={id} fileTypes={['size_chart']} emptyText="建单时未上传尺码表;可在新建订单页「尺码表」处补传" />
+              <PackingFilesSection orderId={id} fileTypes={['size_chart']} emptyText="暂无尺码表;请到「原辅料和包装」页上传(建单不再传尺码表)" />
             </div>
             <ManufacturingOrderTab orderId={id} />
           </div>

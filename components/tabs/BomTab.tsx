@@ -4,6 +4,7 @@ import { getBomItems, addBomItem, addBomItemsBatch, updateBomItem, deleteBomItem
 import { BulkConsumptionEditor } from '@/components/BulkConsumptionEditor';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
+import { uploadSizeChart, listSizeCharts, deleteSizeChart } from '@/app/actions/size-chart';
 import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
@@ -662,8 +663,54 @@ export function BomTab({ orderId }: { orderId: string }) {
     </div>
   );
 
+  // 尺码表(2026-07-08 用户拍板:改在 BOM 页上传,喂生产任务单;建单不再传)
+  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null }>>([]);
+  const [scUploading, setScUploading] = useState(false);
+  const [scMsg, setScMsg] = useState('');
+  useEffect(() => { listSizeCharts(orderId).then(r => { if ((r as any).data) setSizeCharts((r as any).data); }); }, [orderId]);
+  async function reloadSizeCharts() { const r = await listSizeCharts(orderId); if ((r as any).data) setSizeCharts((r as any).data); }
+  async function handleUploadSizeChart(file: File) {
+    setScUploading(true); setScMsg('');
+    const fd = new FormData(); fd.set('file', file);
+    const r = await uploadSizeChart(orderId, fd);
+    setScUploading(false);
+    if ((r as any).error) { setScMsg((r as any).error); return; }
+    await reloadSizeCharts();
+  }
+  async function handleDeleteSizeChart(id: string) {
+    if (!confirm('删除这张尺码表？')) return;
+    await deleteSizeChart(id, orderId);
+    await reloadSizeCharts();
+  }
+
   return (
     <div>
+      {/* 尺码表:在此上传,生产任务单直接读取(2026-07-08:建单不再传尺码表) */}
+      <div className="mb-4 p-3 rounded-xl border border-teal-200 bg-teal-50/40">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-gray-800">📏 尺码表</span>
+          <span className="text-xs text-gray-500">在此上传,「生产任务单」直接读取(建单不再传)</span>
+          <label className={`ml-auto text-sm px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 cursor-pointer ${scUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+            {scUploading ? '上传中…' : '📤 上传尺码表'}
+            <input type="file" accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" disabled={scUploading}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadSizeChart(f); e.currentTarget.value = ''; }} />
+          </label>
+        </div>
+        {scMsg && <p className="text-xs text-rose-600 mt-1">{scMsg}</p>}
+        {sizeCharts.length > 0 ? (
+          <div className="mt-2 space-y-1">
+            {sizeCharts.map(sc => (
+              <div key={sc.id} className="flex items-center gap-2 text-sm">
+                <span className="text-gray-400">📎</span>
+                {sc.url
+                  ? <a href={sc.url} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline truncate">{sc.file_name}</a>
+                  : <span className="text-gray-600 truncate">{sc.file_name}</span>}
+                <button onClick={() => handleDeleteSizeChart(sc.id)} className="ml-auto text-gray-300 hover:text-rose-500 text-xs" title="删除">✕</button>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-xs text-gray-400 mt-1">暂无尺码表,点右上「上传尺码表」。</p>}
+      </div>
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm text-gray-500">{items.length} 条物料记录</span>
         {!showAdd && !showImport && !showMaster && !showCopy && !parseRows && (

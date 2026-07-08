@@ -558,8 +558,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
   const FILE_FIELDS = [
     { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
-    // 2026-07-08 用户拍板:建单不再传报价单(内部成本核算单/客户报价单),成本预算改由业务在「采购核料」手填
-    { formKey: 'size_chart_file', fileType: 'size_chart', label: '尺码表' },
+    // 2026-07-08 用户拍板:建单不再传 报价单(成本走采购核料)/尺码表(改在原辅料和包装页上传,喂生产任务单)
     { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
     { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
     { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
@@ -1589,12 +1588,10 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
               </p>
               <div className="space-y-3">
                 {(([
-                  // 2026-07-03 放开必传:PO/报价单可选;子模式=no_po 时隐藏 PO/报价单(只留尺码表)
+                  // 2026-07-08 用户拍板:建单只留客户PO;报价单不传(成本走采购核料),尺码表改在「原辅料和包装」页传(喂生产任务单)
                   { name: 'customer_po_file',        label: '客户 PO（可多个,可选）',  required: false, multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
-                  // 2026-07-08 用户拍板:建单不再传报价单,成本/预算改由业务在「采购核料」手填
-                  { name: 'size_chart_file',         label: '尺码表（可多个）',  required: false, multiple: true, stepKey: '_size_chart', hint: '客户/技术部的尺寸表,生产任务单 tab 可直接查看' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
-                  .filter(({ name }) => poMode === 'no_po' ? name === 'size_chart_file' : true))
+                  .filter(() => poMode !== 'no_po'))
                   .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (
                   <div key={name} className="rounded-lg border border-gray-200 p-3">
                     <div className="flex items-center gap-4">
