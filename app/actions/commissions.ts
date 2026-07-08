@@ -373,7 +373,8 @@ export async function getMerchandiserCandidates() {
 
   const candidates = (profiles || []).filter((p: any) => {
     const roles: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
-    return roles.includes('merchandiser') || roles.includes('admin');
+    // 生产跟单(production)也是可指派的跟单人(2026-07-08 用户:生产部给生产跟单分配不了订单)
+    return roles.includes('merchandiser') || roles.includes('production') || roles.includes('admin');
   });
 
   return { data: candidates };

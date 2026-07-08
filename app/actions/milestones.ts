@@ -1716,19 +1716,22 @@ export async function assignMerchandiser(
   if (!targetProfile) return { error: '目标用户不存在' };
 
   const targetRoles: string[] = targetProfile.roles?.length > 0 ? targetProfile.roles : [targetProfile.role].filter(Boolean);
-  if (!targetRoles.includes('merchandiser') && !targetRoles.includes('admin')) {
-    return { error: '目标用户不是跟单角色' };
+  // 生产跟单(production)也可指派(2026-07-08 用户:生产部给生产跟单分配不了订单)
+  if (!targetRoles.includes('merchandiser') && !targetRoles.includes('production') && !targetRoles.includes('admin')) {
+    return { error: '目标用户不是跟单/生产跟单角色' };
   }
 
   // 批量更新 — 排除生产主管固定节点（工厂匹配确认 + 产前样准备完成）
   // CEO 2026-04-09：这两个节点永远绑定生产主管，指派跟单时不能覆盖
   const { PRODUCTION_MANAGER_FIXED_STEPS } = await import('@/lib/domain/default-assignees');
 
-  // 先查出所有该订单的 merchandiser 节点
+  // 按目标角色分配对应节点:生产跟单→owner_role='production' 节点;理单跟单→'merchandiser' 节点(2026-07-08)
+  const assignRoles = ['merchandiser', 'production'].filter((r) => targetRoles.includes(r));
+  if (assignRoles.length === 0) assignRoles.push('merchandiser');   // admin 兜底按跟单节点
   const { data: allMerchMs } = await (supabase.from('milestones') as any)
     .select('id, step_key')
     .eq('order_id', orderId)
-    .eq('owner_role', 'merchandiser');
+    .in('owner_role', assignRoles);
 
   // 过滤掉生产主管固定节点
   const pmFixedSet = new Set(PRODUCTION_MANAGER_FIXED_STEPS);
