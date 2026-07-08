@@ -70,7 +70,22 @@ export async function listUnassignedProcurementLines(orderId?: string): Promise<
     for (const p of (pis || [])) colorByPi.set((p as any).id, (p as any).color ?? null);
     for (const r of rows) r.color = r.procurement_item_id ? (colorByPi.get(r.procurement_item_id) ?? null) : null;
   }
-  return { data: rows };
+
+  // 布料/散装「不分尺码」:历史被按尺码拆的多行(同一采购项)合并回一行展示,
+  // 数量还原真实总量;merged_ids 带上所有原始行 id,供下单时折叠(保留一行、其余作废,防重复下单)。
+  const { isBulkMaterial, reconcileBulkQty } = await import('@/lib/services/procurement-execution');
+  const bulkGroups = new Map<string, any[]>();
+  const out: any[] = [];
+  for (const r of rows) {
+    if (!isBulkMaterial(r.category, r.ordered_unit) || !r.procurement_item_id) { out.push(r); continue; }
+    const arr = bulkGroups.get(r.procurement_item_id) || [];
+    arr.push(r); bulkGroups.set(r.procurement_item_id, arr);
+  }
+  for (const grp of bulkGroups.values()) {
+    if (grp.length === 1) { out.push(grp[0]); continue; }
+    out.push({ ...grp[0], size: null, ordered_qty: reconcileBulkQty(grp.map((r) => r.ordered_qty)), merged_ids: grp.map((r) => r.id) });
+  }
+  return { data: out };
 }
 
 /** 建采购单：选供应商 + 勾采购行 → 头 + 行归单。 */
@@ -89,16 +104,40 @@ export async function createPurchaseOrder(input: {
   if (!input.supplierId) return { error: '请选择供应商' };
   if (!input.lineItemIds?.length) return { error: '请勾选采购行' };
 
-  // 取选中行（校验未被占 + 汇总）——含 ordered_amount(已封锁),经 service-role 读(已 CAN_PROCURE 门禁)
-  const { data: lines, error: lErr } = await (createServiceRoleClient().from('procurement_line_items') as any)
-    .select('id, order_id, ordered_amount, purchase_order_id')
+  // 取选中行(校验未被占 + 汇总)——含 ordered_amount(已封锁),经 service-role 读(已 CAN_PROCURE 门禁)
+  const svc = createServiceRoleClient();
+  const { data: lines, error: lErr } = await (svc.from('procurement_line_items') as any)
+    .select('id, order_id, ordered_amount, ordered_qty, unit_price, category, ordered_unit, procurement_item_id, purchase_order_id')
     .in('id', input.lineItemIds);
   if (lErr) return { error: lErr.message };
   const rows = (lines || []) as any[];
   if (rows.some((r) => r.purchase_order_id)) return { error: '有采购行已在别的采购单里，请刷新重选' };
 
-  const total = rows.reduce((s, r) => s + (Number(r.ordered_amount) || 0), 0);
-  const orderIds = [...new Set(rows.map((r) => r.order_id).filter(Boolean))];
+  // 布料/散装「不分尺码」折叠:同一采购项被历史按尺码拆成多行 → 只保留一行(还原真实总量)入单,
+  // 其余作废(cancelled,离开待归单),避免布料按尺码重复下单/超采。非散装/无采购项 → 原样入单。
+  const { isBulkMaterial, reconcileBulkQty } = await import('@/lib/services/procurement-execution');
+  const bulkGroups = new Map<string, any[]>();
+  const keepIds: string[] = [];
+  const cancelIds: string[] = [];
+  const patches: { id: string; ordered_qty: number }[] = [];
+  for (const r of rows) {
+    if (!isBulkMaterial(r.category, r.ordered_unit) || !r.procurement_item_id) { keepIds.push(r.id); continue; }
+    const arr = bulkGroups.get(r.procurement_item_id) || [];
+    arr.push(r); bulkGroups.set(r.procurement_item_id, arr);
+  }
+  for (const grp of bulkGroups.values()) {
+    if (grp.length === 1) { keepIds.push(grp[0].id); continue; }
+    patches.push({ id: grp[0].id, ordered_qty: reconcileBulkQty(grp.map((r) => r.ordered_qty)) });  // ordered_amount 是 GENERATED 列,改 qty 自动重算
+    keepIds.push(grp[0].id);
+    cancelIds.push(...grp.slice(1).map((r) => r.id));
+  }
+
+  // PO 头 total_amount(折叠后入单行金额):折叠的布料行按 底价×还原量,其余按各自 ordered_amount(无底价则 0)
+  const upById = new Map<string, number | null>(rows.map((r) => [r.id, r.unit_price != null ? Number(r.unit_price) : null]));
+  const amountById = new Map<string, number>(rows.map((r) => [r.id, Number(r.ordered_amount) || 0]));
+  for (const p of patches) { const up = upById.get(p.id); amountById.set(p.id, up != null ? Math.round(up * p.ordered_qty * 100) / 100 : 0); }
+  const total = keepIds.reduce((s, id) => s + (amountById.get(id) || 0), 0);
+  const orderIds = [...new Set(rows.filter((r) => keepIds.includes(r.id)).map((r) => r.order_id).filter(Boolean))];
 
   // 生成 po_no PO-YYYYMMDD-NNN
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -123,21 +162,33 @@ export async function createPurchaseOrder(input: {
     .select('name').eq('id', input.supplierId).maybeSingle();
   const supplierName = (sup as any)?.name || null;
 
-  // 归行到单（仅未占用的）
+  // 归行到单（仅折叠后保留的行、且未占用）
   let { error: updErr } = await (supabase.from('procurement_line_items') as any)
     .update({ purchase_order_id: poId, supplier_id: input.supplierId, supplier_name: supplierName })
-    .in('id', input.lineItemIds).is('purchase_order_id', null);
+    .in('id', keepIds).is('purchase_order_id', null);
   if (updErr && /supplier_id_fkey|foreign key/i.test(updErr.message || '')) {
     // 旧外键仍指 factories(迁移 20260703_supplier_fkey_repoint 未执行)→ 降级:
     // 行上只挂单号+供应商名(供应商真相在采购单头 purchase_orders.supplier_id),先不断业务
     console.warn('[createPurchaseOrder] supplier_id 外键仍指 factories,降级归行。请执行 20260703_supplier_fkey_repoint.sql');
     ({ error: updErr } = await (supabase.from('procurement_line_items') as any)
       .update({ purchase_order_id: poId, supplier_name: supplierName })
-      .in('id', input.lineItemIds).is('purchase_order_id', null));
+      .in('id', keepIds).is('purchase_order_id', null));
   }
   if (updErr) {
     await (supabase.from('purchase_orders') as any).delete().eq('id', poId); // 回滚头
     return { error: '归行失败：' + updErr.message };
+  }
+
+  // 布料折叠尾声(best-effort,不阻断已建单):保留行还原真实总量+清尺码;重复行作废,离开待归单。
+  for (const p of patches) {
+    const { error: pErr } = await (svc.from('procurement_line_items') as any)
+      .update({ ordered_qty: p.ordered_qty, size: null }).eq('id', p.id);
+    if (pErr) console.warn('[createPurchaseOrder] 布料折叠改量失败:', pErr.message);
+  }
+  if (cancelIds.length) {
+    const { error: cErr } = await (svc.from('procurement_line_items') as any)
+      .update({ line_status: 'cancelled' }).in('id', cancelIds).is('purchase_order_id', null);
+    if (cErr) console.warn('[createPurchaseOrder] 作废重复布料行失败:', cErr.message);
   }
 
   revalidatePath('/procurement/po');

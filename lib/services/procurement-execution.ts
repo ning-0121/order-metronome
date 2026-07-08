@@ -69,9 +69,34 @@ const BULK_MATERIAL_UNITS = new Set([
 export function shouldSplitBySize(item: Pick<ProcItem, 'category' | 'unit' | 'purchase_unit'>): boolean {
   const cat = String(item.category ?? '').trim().toLowerCase();
   if (BULK_MATERIAL_CATEGORIES.has(cat)) return false;
-  const unit = String(item.purchase_unit ?? item.unit ?? '').trim().toLowerCase();
-  if (BULK_MATERIAL_UNITS.has(unit)) return false;
+  // 采购单位或基础单位任一为散装计量(kg/米…)→ 不拆码。
+  // 注:此前用 `purchase_unit ?? unit`,当 purchase_unit 为空串 '' 时(?? 不兜底 '')会取到 ''、
+  // 漏判散装 → 布料被按尺码拆成多行(每行还是整量)。改为分别判 purchase_unit 与 unit,任一散装即不拆。
+  const pu = String(item.purchase_unit || '').trim().toLowerCase();
+  const bu = String(item.unit || '').trim().toLowerCase();
+  if (BULK_MATERIAL_UNITS.has(pu) || BULK_MATERIAL_UNITS.has(bu)) return false;
   return true;
+}
+
+/** 布料/散装物料判定(按类别或单位)——用于「待归单/下单」把历史按尺码拆的布料行合并回一行。 */
+export function isBulkMaterial(category?: string | null, unit?: string | null): boolean {
+  const cat = String(category ?? '').trim().toLowerCase();
+  if (BULK_MATERIAL_CATEGORIES.has(cat)) return true;
+  const u = String(unit ?? '').trim().toLowerCase();
+  return BULK_MATERIAL_UNITS.has(u);
+}
+
+/**
+ * 布料被历史(旧 generateExecutionLines / 手工)按尺码拆成多行时,还原真实总量:
+ * - 各行数量相等 → 「整量复制」老 bug(每码都记了整量)→ 取其中一行的值;
+ * - 各行数量不等 → 按各码分摊 → 求和还原总量。
+ * 两种都能还原正确总量(布料本就不该分尺码)。
+ */
+export function reconcileBulkQty(qtys: Array<number | null | undefined>): number {
+  const arr = qtys.map((q) => Number(q) || 0);
+  if (arr.length <= 1) return arr[0] || 0;
+  const allEqual = arr.every((q) => Math.abs(q - arr[0]) < 1e-6);
+  return allEqual ? arr[0] : Math.round(arr.reduce((a, b) => a + b, 0) * 1000) / 1000;
 }
 
 export function buildExecutionLineRow(item: ProcItem, userId: string, opts?: { size?: string | null; qtyOverride?: number }): Record<string, any> {
@@ -86,8 +111,9 @@ export function buildExecutionLineRow(item: ProcItem, userId: string, opts?: { s
     ordered_qty: opts?.qtyOverride ?? orderableQty(item),  // 定案量 − 库存抵扣;拆码时用分摊量
     ordered_unit: item.purchase_unit || item.unit || null,
     unit_price: item.unit_price ?? null, // 大货底价,业务读时剥离
-    // 到货倒推日 → required_by:采购中心灯/超期判定用(修 P0 审计:B3a 行原无灯)
-    required_by: item.order_by_date ?? item.required_date ?? null,
+    // required_by = 需到日(货到厂日,采购可手选);computeLineLamp 内部再减交期算最晚下单。
+    // (原用 order_by_date=需到日−交期 → 灯里再减一次=双减,且缺料风险"需X前到"显示的是下单日而非到货日)
+    required_by: item.required_date ?? item.order_by_date ?? null,
     ordered_by: userId,
     // R3(2026-07-02 审计):DB 默认 'draft' 不在采购中心任何队列;显式置待下单
     line_status: 'pending_order',

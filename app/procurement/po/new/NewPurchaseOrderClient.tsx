@@ -58,8 +58,13 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
       });
     }
 
+    // 布料合并行(merged_ids)勾选时,展开成所有原始行 id 交给后端折叠(保留一行、其余作废)
+    const lineItemIds = lines
+      .filter((l) => checked.has(l.id))
+      .flatMap((l) => (Array.isArray(l.merged_ids) && l.merged_ids.length ? l.merged_ids : [l.id]));
+
     setSaving(true);
-    const res = await createPurchaseOrder({ supplierId, lineItemIds: [...checked], paymentTerms, deliveryDate: deliveryDate || undefined, mergeSameMaterials });
+    const res = await createPurchaseOrder({ supplierId, lineItemIds, paymentTerms, deliveryDate: deliveryDate || undefined, mergeSameMaterials });
     setSaving(false);
     if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
     router.push(`/procurement/po/${res.id}`);
