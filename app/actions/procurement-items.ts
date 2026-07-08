@@ -13,7 +13,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
-  buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize,
+  buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, shouldSplitBySize,
 } from '@/lib/services/procurement-execution';
 import { getOrderLeftover } from '@/app/actions/inventory';
 
@@ -775,7 +775,7 @@ export async function getProcurementItemSources(itemId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: item } = await (supabase.from('procurement_items') as any)
-    .select('order_id, consolidation_key, color, unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, stock_deduct_qty').eq('id', itemId).single();
+    .select('*').eq('id', itemId).single();   // * → size_qty_override 列未建也不报错
   if (!item) return { error: '采购项不存在' };
 
   const { data: reqs } = await (supabase.from('material_requirements') as any)
@@ -828,10 +828,65 @@ export async function getProcurementItemSources(itemId: string) {
   const itemColor = (item as any).color;
   const sizeCounts = (itemColor && byColorSizes.get(normC(itemColor))) || totalSizes;
   const orderable = orderableQty(item as any);
-  const sizeBreakdown = distributeBySize(orderable, sizeCounts).filter((s) => s.size != null);
+  // 面料/散装物料不按尺码拆分(整卷开裁,采购量不该按各码件数均分)→ 空拆分,预览不显示尺码块。
+  const splittable = shouldSplitBySize(item as any);
+  // 人工覆盖优先:填了 size_qty_override → 按它逐码显示(生成执行行也按它);否则系统按比例拆
+  const override = splittable && (item as any).size_qty_override && typeof (item as any).size_qty_override === 'object' ? (item as any).size_qty_override : null;
+  const overrideEntries = override ? Object.entries(override).map(([size, qty]) => ({ size, qty: Number(qty) || 0 })).filter((s) => s.qty > 0) : [];
+  const sizeOverrideActive = overrideEntries.length > 0;
+  const sizeBreakdown = !splittable
+    ? []
+    : sizeOverrideActive
+      ? overrideEntries
+      : distributeBySize(orderable, sizeCounts).filter((s) => s.size != null);
+  // 系统按比例拆分的默认值(供 UI「恢复按比例」参照 + 展示可拆的尺码全集)
+  const suggestedSplit = splittable ? distributeBySize(orderable, sizeCounts).filter((s) => s.size != null) : [];
   const finalQty = (item as any).final_purchase_qty ?? (item as any).suggested_purchase_qty ?? (item as any).total_required_qty ?? null;
 
-  return { data: sources, sizeBreakdown, finalQty, unit: (item as any).unit ?? null };
+  return { data: sources, sizeBreakdown, suggestedSplit, sizeOverrideActive, finalQty, unit: (item as any).unit ?? null };
+}
+
+/**
+ * 保存尺码拆分人工覆盖(2026-07-08 用户拍板:采购在核料预览直接改尺码比/每码数量)。
+ * sizes 传 {尺码:数量}(数量>0 才留);空对象 = 清空覆盖,恢复系统按比例拆。
+ * 覆盖非空时,同步把 final_purchase_qty 定为各码之和(最终采购量=各码总和,单一口径)。
+ * 已下单(ordered+)不许改(执行行已生成,改量走补数量/采购队列)。
+ */
+export async function saveSizeQtyOverride(itemId: string, orderId: string, sizes: Record<string, number | null | undefined>) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };   // 尺码拆分是采购职权
+
+  const { data: it } = await (supabase.from('procurement_items') as any)
+    .select('status').eq('id', itemId).eq('order_id', orderId).maybeSingle();
+  if (!it) return { error: '采购项不存在' };
+  if (['ordered', 'partially_received', 'completed', 'closed'].includes((it as any).status)) {
+    return { error: '该项已下单/在途,尺码数量改动请走「补数量申请」或采购队列' };
+  }
+
+  // 清洗:仅留数量>0 的码;四舍五入到整数(尺码件数是整数);Σ=最终采购量
+  const clean: Record<string, number> = {};
+  let total = 0;
+  for (const [k, v] of Object.entries(sizes || {})) {
+    const q = Math.round(Number(v) || 0);
+    if (String(k).trim() && q > 0) { clean[String(k).trim()] = q; total += q; }
+  }
+  const hasOverride = Object.keys(clean).length > 0;
+  const patch: Record<string, any> = {
+    size_qty_override: hasOverride ? clean : null,
+    updated_at: new Date().toISOString(),
+  };
+  if (hasOverride) patch.final_purchase_qty = total;   // 覆盖时:最终采购量 = 各码之和
+
+  let { error } = await (supabase.from('procurement_items') as any).update(patch).eq('id', itemId).eq('order_id', orderId);
+  if (error && /size_qty_override|column .* does not exist/i.test(error.message || '')) {
+    return { error: '尺码拆分列尚未建立:请先在 Supabase 执行 20260708_procurement_item_size_override.sql' };
+  }
+  if (error) return { error: friendlyError(error) };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, total, cleared: !hasOverride };
 }
 
 /** 采购确认:填大货单耗/损耗/安全库存/MOQ/供应商/价/决策,重算 suggested。 */
@@ -1026,7 +1081,7 @@ export async function generateExecutionLines(orderId: string) {
   if (roleErr) return { error: roleErr };
 
   const { data: items, error: iErr } = await (supabase.from('procurement_items') as any)
-    .select('id, order_id, consolidation_key, material_name, specification, category, color, unit, purchase_unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, stock_deduct_qty, order_by_date, required_date, confirmed_supplier_name, unit_price, status')
+    .select('*')   // * → size_qty_override 列未建也不报错(buildExecutionLineRow 只取所需字段)
     .eq('order_id', orderId).eq('status', 'confirmed');
   if (iErr) return { error: friendlyError(iErr) };
   if (!items || items.length === 0) return { error: '无已确认的采购项(请先在采购项上「确认」)' };
@@ -1059,9 +1114,17 @@ export async function generateExecutionLines(orderId: string) {
   const rows = (items as any[])
     // 出单量>0 才生成执行行:定案量−库存抵扣=0(全用库存)的项不采购、不发供应商
     .filter((it) => !done.has(it.id) && canGenerateExecution(it) && orderableQty(it) > 0)
-    // N1:按订单各码件数拆成逐尺码行(无尺码数据→单行整量,老口径)
-    .flatMap((it) => distributeBySize(orderableQty(it), sizeCountsFor(it))
-      .map((seg) => ({ ...buildExecutionLineRow(it, user.id, { size: seg.size, qtyOverride: seg.qty }), ordered_at: now })));
+    // 面料/散装物料不拆码 → 单行整量(size=null);按件计数物料:人工覆盖优先,否则 N1 按各码件数拆。
+    .flatMap((it) => {
+      if (!shouldSplitBySize(it)) {
+        return [{ ...buildExecutionLineRow(it, user.id, { size: null, qtyOverride: orderableQty(it) }), ordered_at: now }];
+      }
+      const ov = (it as any).size_qty_override && typeof (it as any).size_qty_override === 'object' ? (it as any).size_qty_override : null;
+      const segs = ov && Object.keys(ov).length
+        ? Object.entries(ov).map(([size, qty]) => ({ size, qty: Number(qty) || 0 })).filter((s) => s.qty > 0)
+        : distributeBySize(orderableQty(it), sizeCountsFor(it));
+      return segs.map((seg) => ({ ...buildExecutionLineRow(it, user.id, { size: seg.size, qtyOverride: seg.qty }), ordered_at: now }));
+    });
   if (rows.length === 0) return { ok: true, created: 0, message: '已确认项无需采购(全用库存抵扣)或均已生成执行行' };
 
   let { error: insErr } = await (supabase.from('procurement_line_items') as any).insert(rows);

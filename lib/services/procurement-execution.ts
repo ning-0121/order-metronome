@@ -55,6 +55,25 @@ export function distributeBySize(total: number, sizeCounts: Record<string, numbe
   return out;
 }
 
+// 按尺码拆分只对"按件计数"的物料成立(如尺码唛、每件一个的辅料)。
+// 面料/布料等散装按重量/长度采购的物料:整卷开裁,采购量不该按各码件数均分
+// (且大码比小码更费料,按件数比例分摊本身也失真)。→ 这类物料不拆码,单行整量。
+const BULK_MATERIAL_CATEGORIES = new Set(['面料', '布料', '主料', 'fabric', 'main_fabric']);
+const BULK_MATERIAL_UNITS = new Set([
+  'kg', '千克', '公斤', 'g', '克', 't', '吨',
+  '米', 'm', '码', 'yd', 'yard', '尺', 'cm', '厘米', 'mm', '毫米',
+  '卷', '匹',
+]);
+
+/** 该采购项是否应按尺码拆分:面料/散装(按重量·长度计)→ 否(单行整量);按件计数 → 是。 */
+export function shouldSplitBySize(item: Pick<ProcItem, 'category' | 'unit' | 'purchase_unit'>): boolean {
+  const cat = String(item.category ?? '').trim().toLowerCase();
+  if (BULK_MATERIAL_CATEGORIES.has(cat)) return false;
+  const unit = String(item.purchase_unit ?? item.unit ?? '').trim().toLowerCase();
+  if (BULK_MATERIAL_UNITS.has(unit)) return false;
+  return true;
+}
+
 export function buildExecutionLineRow(item: ProcItem, userId: string, opts?: { size?: string | null; qtyOverride?: number }): Record<string, any> {
   return {
     order_id: item.order_id,
