@@ -106,6 +106,7 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-medium text-gray-900 truncate">{l.material_name || '—'}</span>
                   <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[l.category || 'other'] || l.category}</span>
+                  {(l.size_lines ?? 1) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-600 shrink-0" title="该料按尺码拆成多行,这里已合并为一行(数量为合计)">合 {l.size_lines} 码</span>}
                   {l.supplier_name && <span className="text-xs text-gray-400 truncate">· {l.supplier_name}</span>}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">

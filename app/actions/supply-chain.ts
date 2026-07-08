@@ -18,6 +18,12 @@ const PENDING = new Set(['draft', 'pending_order']);
 const TRANSIT = new Set(['ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped']);
 const ARRIVED = new Set(['arrived']);
 const DONE = new Set(['accepted', 'closed', 'concession', 'cancelled']);
+// 合并拆码行时,组内混态取"最不推进"的作代表(数越小越早)→ 业务视角宁可显示为未完成
+const STATUS_RANK: Record<string, number> = {
+  draft: 0, pending_order: 1, ordered: 2, confirmed: 3, in_production: 4,
+  ready_to_ship: 5, shipped: 6, arrived: 7, partially_received: 8, received: 9,
+  accepted: 10, concession: 10, closed: 11, cancelled: 12,
+};
 // rejected(质检拒收)→ 归"需关注",不算完成
 
 export interface SupplyChainLine {
@@ -33,6 +39,8 @@ export interface SupplyChainLine {
   supplier_name: string | null;
   overdue: boolean;
   unit_price?: number | null;
+  procurement_item_id?: string | null;
+  size_lines?: number;   // 该料+色被拆成几行尺码(>1 说明是合并显示)
 }
 
 export interface SupplyChainOverview {
@@ -59,7 +67,7 @@ export async function getOrderSupplyChainOverview(
   const fin = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
   const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   const cols =
-    'id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name' +
+    'id, procurement_item_id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name' +
     (canSeeFloor ? ', unit_price' : '');
   const { data: lines, error: linesErr } = await ((canSeeFloor ? createServiceRoleClient() : supabase).from('procurement_line_items') as any)
     .select(cols)
@@ -67,10 +75,28 @@ export async function getOrderSupplyChainOverview(
     .order('category', { ascending: true });
   if (linesErr) return { error: friendlyError(linesErr) };
 
+  // 业务视角合并拆码执行行(2026-07-08 用户):同一采购项(procurement_item_id)被 N1 按 S/M/L 拆成多行,
+  // 业务视角看到"3 个主吊牌"像重复且是奇数。这里按采购项合并成 料+色 一行(数量求和、需到日取最早、
+  // 尺码行数留痕),与采购对账口径一致;采购中心仍保留逐码行供归单。老行(无采购项)各自成行不合并。
+  const grouped = new Map<string, any>();
+  for (const l of ((lines || []) as any[])) {
+    const key = l.procurement_item_id || `__row_${l.id}`;
+    const g = grouped.get(key);
+    if (!g) { grouped.set(key, { ...l, size_lines: 1 }); continue; }
+    g.ordered_qty = (Number(g.ordered_qty) || 0) + (Number(l.ordered_qty) || 0);
+    g.received_qty = (Number(g.received_qty) || 0) + (Number(l.received_qty) || 0);
+    if (l.required_by && (!g.required_by || l.required_by < g.required_by)) g.required_by = l.required_by;   // 宁早勿晚
+    if (l.expected_arrival && (!g.expected_arrival || l.expected_arrival < g.expected_arrival)) g.expected_arrival = l.expected_arrival;
+    // 组内状态一般一致(同时生成/推进);若混态取"最不推进"的,业务视角宁可显示为未完成
+    if (STATUS_RANK[l.line_status] != null && (STATUS_RANK[g.line_status] == null || STATUS_RANK[l.line_status] < STATUS_RANK[g.line_status])) g.line_status = l.line_status;
+    g.size_lines++;
+  }
+  const mergedLines = [...grouped.values()];
+
   const today = new Date().toISOString().slice(0, 10);
   let pending = 0, inTransit = 0, arrived = 0, done = 0, attention = 0;
   const byCategory: Record<string, number> = {};
-  const rows: SupplyChainLine[] = ((lines || []) as any[]).map((l) => {
+  const rows: SupplyChainLine[] = mergedLines.map((l) => {
     const st = String(l.line_status || '');
     if (PENDING.has(st)) pending++;
     else if (TRANSIT.has(st)) inTransit++;
