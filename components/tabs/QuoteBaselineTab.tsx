@@ -151,6 +151,35 @@ export function QuoteBaselineTab({ orderId }: { orderId: string }) {
         </table>
       </div>
 
+      {/* 逐款预算(报价单解析:面料成本/加工费/辅料费用合计)。辅料预算取「辅料费用合计」——之前解析了但没显示,像"没识别" */}
+      {canPrice && (styleBudgets.length > 0 || canEdit) && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+          <div className="text-xs font-semibold text-amber-800 mb-2">📋 逐款预算(报价单已解析)· 辅料预算 = 下方「辅料费用合计」×件数</div>
+          <div className="overflow-x-auto">
+            <table className="text-sm">
+              <thead><tr className="text-left text-gray-500 text-xs">
+                <th className="px-2 py-1">款号</th>
+                <th className="px-2 py-1 text-right">面料成本</th>
+                <th className="px-2 py-1 text-right">加工费</th>
+                <th className="px-2 py-1 text-right font-semibold text-amber-800">辅料费用合计</th>
+              </tr></thead>
+              <tbody>
+                {styleBudgets.length === 0 && <tr><td colSpan={4} className="px-2 py-2 text-gray-400 text-xs">上传报价单后这里显示逐款「辅料费用合计」;也可下面「＋加款预算」手填</td></tr>}
+                {styleBudgets.map((b, i) => (
+                  <tr key={i} className="border-t border-amber-100">
+                    <td className="px-2 py-1"><input disabled={!canEdit} value={b.style_no ?? ''} onChange={(e) => setStyleBudgets((sb) => sb.map((x, j) => j === i ? { ...x, style_no: e.target.value } : x))} placeholder="款号" className="w-24 rounded border border-amber-200 px-1 py-0.5 disabled:bg-transparent" /></td>
+                    <td className="px-2 py-1 text-right"><input disabled={!canEdit} type="number" inputMode="decimal" value={b.fabric_cost ?? ''} onChange={(e) => setStyleBudgets((sb) => sb.map((x, j) => j === i ? { ...x, fabric_cost: e.target.value === '' ? null : Number(e.target.value) } : x))} className="w-20 rounded border border-amber-200 px-1 py-0.5 text-right disabled:bg-transparent" /></td>
+                    <td className="px-2 py-1 text-right"><input disabled={!canEdit} type="number" inputMode="decimal" value={b.cmt ?? ''} onChange={(e) => setStyleBudgets((sb) => sb.map((x, j) => j === i ? { ...x, cmt: e.target.value === '' ? null : Number(e.target.value) } : x))} className="w-20 rounded border border-amber-200 px-1 py-0.5 text-right disabled:bg-transparent" /></td>
+                    <td className="px-2 py-1 text-right"><input disabled={!canEdit} type="number" inputMode="decimal" value={b.trim_budget ?? ''} onChange={(e) => setStyleBudgets((sb) => sb.map((x, j) => j === i ? { ...x, trim_budget: e.target.value === '' ? null : Number(e.target.value) } : x))} className="w-24 rounded border border-amber-300 px-1 py-0.5 text-right font-medium disabled:bg-transparent" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {canEdit && <button onClick={() => setStyleBudgets((sb) => [...sb, { style_no: '', cmt: null, trim_budget: null, fabric_cost: null }])} className="mt-2 text-xs text-amber-700 hover:underline">＋ 加款预算</button>}
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3 flex-wrap">
         {canEdit && <button onClick={addRow} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">＋ 加一行</button>}
         {canPrice && (

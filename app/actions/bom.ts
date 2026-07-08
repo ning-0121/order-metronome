@@ -636,8 +636,11 @@ export async function submitBomToProcurement(
 
   // live BOM(完整列,用于冻结快照;style_no 用于 R1 按款算需求)
   const { data: bomRows, error: bomErr } = await (supabase.from('materials_bom') as any)
-    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier, style_no, pack_size')
+    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier, style_no, pack_size, total_qty')
     .eq('order_id', orderId);
+  // 业务手填的总需量(2026-07-08 用户拍板:辅料/打包件"不要自动算,按业务填的来")→ 覆盖 MRP 自动算
+  const manualTotalByBom = new Map<string, number>();
+  for (const b of (bomRows || [])) { const t = Number((b as any).total_qty); if (t > 0) manualTotalByBom.set((b as any).id, t); }
   if (bomErr) return { error: bomErr.message };
   if (!bomRows || bomRows.length === 0) return { error: '原辅料单为空,请先录入物料再提交' };
 
@@ -889,13 +892,16 @@ export async function submitBomToProcurement(
       },
       po_quantity: poQty, stageAnchors, inventoryQty, reuseQty: 0, today,
     });
+    // 业务手填总需量 → 直接以人工为准(不自动算;中包袋/打包件等)。填了就用,没填才用 MRP 自动算。
+    const manualTotal = line.bom_id ? manualTotalByBom.get(line.bom_id) : undefined;
+    const netFinal = (manualTotal != null && manualTotal > 0) ? manualTotal : r.net_purchase_qty;
     return {
       material_plan_id: planId, order_id: orderId, snapshot_line_id: line.id,
       material_name: r.material_name, material_type: r.material_type, category: r.category,
       material_code: r.material_code, unit: r.unit,
       pieces_qty: poQty,   // 件数基数(款×色):归并层按款精确乘大货单耗用
-      gross_requirement: r.gross_requirement, loss_qty: r.loss_qty,
-      inventory_deduct: r.inventory_deduct, reuse_deduct: r.reuse_deduct, net_purchase_qty: r.net_purchase_qty,
+      gross_requirement: manualTotal != null && manualTotal > 0 ? manualTotal : r.gross_requirement, loss_qty: r.loss_qty,
+      inventory_deduct: r.inventory_deduct, reuse_deduct: r.reuse_deduct, net_purchase_qty: netFinal,
       required_stage: r.required_stage, required_date: r.required_date,
       supplier_lead_days: r.supplier_lead_days, order_by_date: r.order_by_date, timing_status: r.timing_status,
       explain_json: r.explain_json, status: r.status === 'needs_input' ? 'open' : r.status,
