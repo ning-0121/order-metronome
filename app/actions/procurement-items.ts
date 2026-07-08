@@ -417,28 +417,33 @@ export async function saveBomBudgetUnitPrice(orderId: string, entries: Record<st
   return { ok: true, saved };
 }
 
-/** 逐款预算(加工费 + 辅料单件总价):读。存 order_cost_baseline.quote_style_budgets(复用,业务在采购核料填)。 */
+/** 逐款预算(加工费,元/件)+ 整单辅料总价一口价:读。存 order_cost_baseline。业务在采购核料填。 */
 export async function getOrderStyleBudgets(orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   const { data: cb } = await (supabase.from('order_cost_baseline') as any)
-    .select('quote_style_budgets').eq('order_id', orderId).maybeSingle();
+    .select('*').eq('order_id', orderId).maybeSingle();   // select * → accessory_budget_total 列未建也不报错
   const existing: any[] = (cb as any)?.quote_style_budgets || [];
-  // 款号来自 order_line_items(逐款明细),预填每款一行;已存的值带回
+  // 款号来自 order_line_items(逐款明细),预填每款一行;已存的加工费带回
   const { data: lis } = await (supabase.from('order_line_items') as any).select('style_no').eq('order_id', orderId);
   const norm = (s: any) => String(s ?? '').trim();
   const styles = [...new Set((lis || []).map((l: any) => norm(l.style_no)).filter(Boolean))];
   const byStyle = new Map(existing.map((b: any) => [norm(b.style_no), b]));
   const rows = (styles.length ? styles : existing.map((b: any) => norm(b.style_no))).map((st: string) => {
     const b = byStyle.get(st) || {};
-    return { style_no: st, cmt: (b as any).cmt ?? null, trim_budget: (b as any).trim_budget ?? null };
+    return { style_no: st, cmt: (b as any).cmt ?? null };
   });
-  return { data: rows };
+  const accessoryTotal = (cb as any)?.accessory_budget_total ?? null;   // 整单辅料一口价
+  return { data: rows, accessoryTotal };
 }
 
-/** 逐款预算:保存(加工费 cmt + 辅料单件总价 trim_budget)。业务/采购/管理员可填。 */
-export async function saveOrderStyleBudgets(orderId: string, budgets: Array<{ style_no: string; cmt: number | null; trim_budget: number | null }>) {
+/** 逐款加工费(cmt,元/件)+ 整单辅料总价(一口价)保存。业务/采购/管理员可填。 */
+export async function saveOrderStyleBudgets(
+  orderId: string,
+  budgets: Array<{ style_no: string; cmt: number | null }>,
+  accessoryTotal?: number | null,
+) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -448,18 +453,26 @@ export async function saveOrderStyleBudgets(orderId: string, budgets: Array<{ st
     return { error: '仅业务/理单/采购/管理员可填加工费/辅料预算' };
   }
   const num = (v: any) => { const n = Number(v); return isFinite(n) && n > 0 ? n : null; };
+  // 逐款只存加工费 cmt;辅料改整单一口价(清掉历史逐款 trim_budget,避免和一口价重复计)
   const clean = (budgets || []).filter((b) => String(b.style_no || '').trim())
-    .map((b) => ({ style_no: String(b.style_no).trim(), cmt: num(b.cmt), trim_budget: num(b.trim_budget) }));
+    .map((b) => ({ style_no: String(b.style_no).trim(), cmt: num(b.cmt), trim_budget: null }));
+  const accTotal = accessoryTotal === undefined ? undefined : num(accessoryTotal);
   const { data: existing } = await (supabase.from('order_cost_baseline') as any).select('id').eq('order_id', orderId).maybeSingle();
-  const payload = { quote_style_budgets: clean, updated_at: new Date().toISOString() };
-  if (existing) {
-    const { error } = await (supabase.from('order_cost_baseline') as any).update(payload).eq('order_id', orderId);
-    if (error) return { error: friendlyError(error) };
-  } else {
-    const { error } = await (supabase.from('order_cost_baseline') as any).insert({ order_id: orderId, ...payload });
-    if (error) return { error: friendlyError(error) };
+  const basePayload: Record<string, any> = { quote_style_budgets: clean, updated_at: new Date().toISOString() };
+  const withAcc = accTotal === undefined ? basePayload : { ...basePayload, accessory_budget_total: accTotal };
+  let accColMissing = false;
+  const run = async (payload: Record<string, any>) => existing
+    ? (supabase.from('order_cost_baseline') as any).update(payload).eq('order_id', orderId)
+    : (supabase.from('order_cost_baseline') as any).insert({ order_id: orderId, ...payload });
+  let { error } = await run(withAcc);
+  if (error && /accessory_budget_total|column .* does not exist/i.test(error.message || '')) {
+    // 迁移未跑:降级只存加工费(不 brick),辅料总价待迁移后再存
+    accColMissing = true;
+    ({ error } = await run(basePayload));
   }
+  if (error) return { error: friendlyError(error) };
   try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
+  if (accColMissing) return { ok: true, warning: '辅料总价列尚未建立:请先在 Supabase 执行 20260708_order_accessory_budget_total.sql(加工费已保存)' } as any;
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }

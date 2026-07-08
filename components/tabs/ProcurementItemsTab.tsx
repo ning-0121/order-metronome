@@ -61,7 +61,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [consLines, setConsLines] = useState<any[]>([]);
   const [overEdit, setOverEdit] = useState<Record<string, string>>({});   // 抛量%(采购职权,逐料)
   const [priceEdit, setPriceEdit] = useState<Record<string, string>>({}); // 预算单价(业务填,逐料;2026-07-08 弃报价基线)
-  const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string; trim_budget: string }>>([]); // 逐款 加工费+辅料单件总价
+  const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/件)
+  const [accessoryTotal, setAccessoryTotal] = useState('');   // 整单辅料总价一口价
   const [consSaving, setConsSaving] = useState(false);
   const loadCons = async () => {
     const [r, sb] = await Promise.all([listBomConsumptionLines(orderId), getOrderStyleBudgets(orderId)]);
@@ -70,27 +71,30 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
       setOverEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.over_purchase_pct != null ? String(l.over_purchase_pct) : ''])));
       setPriceEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.budget_unit_price != null ? String(l.budget_unit_price) : ''])));
     }
-    if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '', trim_budget: b.trim_budget != null ? String(b.trim_budget) : '' })));
+    if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
+    setAccessoryTotal((sb as any)?.accessoryTotal != null ? String((sb as any).accessoryTotal) : '');
   };
   useEffect(() => { loadCons(); /* eslint-disable-next-line */ }, [orderId]);
   // 布料大货单耗必须由业务填好(BOM 页),否则不许归并
   const consMissing = consLines.filter(l => l.required && !(Number(l.production_consumption) > 0));
   async function saveCons() {
     setConsSaving(true); setMsg('');
-    // 一次保存:预算单价(业务)+ 逐款加工费/辅料预算(业务)+ 抛量%(采购,已下单则锁定不重存)
+    // 一次保存:预算单价(业务)+ 逐款加工费 + 整单辅料总价(业务)+ 抛量%(采购,已下单则锁定不重存)
     const over = Object.fromEntries(Object.entries(overEdit).map(([id, v]) => [id, v === '' ? 0 : Number(v)]));
     const prices = Object.fromEntries(Object.entries(priceEdit).map(([id, v]) => [id, v === '' ? null : Number(v)]));
-    const sbPayload = styleBudgets.map(b => ({ style_no: b.style_no, cmt: b.cmt === '' ? null : Number(b.cmt), trim_budget: b.trim_budget === '' ? null : Number(b.trim_budget) }));
+    const sbPayload = styleBudgets.map(b => ({ style_no: b.style_no, cmt: b.cmt === '' ? null : Number(b.cmt) }));
+    const accTotal = accessoryTotal === '' ? null : Number(accessoryTotal);
     const tasks: Promise<any>[] = [
-      saveBomBudgetUnitPrice(orderId, prices as any),   // 预算单价(业务,任何阶段可填)
-      saveOrderStyleBudgets(orderId, sbPayload as any), // 逐款加工费/辅料(业务,任何阶段可填)
+      saveBomBudgetUnitPrice(orderId, prices as any),          // 预算单价(业务,任何阶段可填)
+      saveOrderStyleBudgets(orderId, sbPayload as any, accTotal), // 逐款加工费 + 整单辅料总价(业务)
     ];
     if (!trackingPhase) tasks.push(saveBomOverPurchasePct(orderId, over as any));  // 抛量:已下单锁定,不重存
     const results = await Promise.all(tasks);
     setConsSaving(false);
     const err = results.map(r => (r as any).error).find(Boolean);
     if (err) { setMsg(err); return; }
-    setMsg('✅ 已保存(预算单价 + 加工费/辅料预算' + (trackingPhase ? '' : ' + 抛量') + ')');
+    const warn = results.map(r => (r as any).warning).find(Boolean);
+    setMsg(warn ? ('⚠️ ' + warn) : '✅ 已保存(预算单价 + 加工费 + 辅料总价' + (trackingPhase ? '' : ' + 抛量') + ')');
     await loadCons();
   }
   // 供应商主数据(确认供应商下拉用;不再手敲名字)
@@ -610,7 +614,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             )}
           </div>
           {consEffectiveOpen && <>
-          <p className="text-[11px] text-gray-500">大货单耗由业务在「原辅料和包装」页按技术部大货版逐款填(此处<b>只读核实</b>);业务给<b>布料</b>逐料填<b>预算单价</b>(面料预算=大货单耗×预算单价×件数);辅料不逐个填价,走下方逐款<b>辅料总价</b>;采购逐料填<b>抛量%</b>。采购量 = Σ(件数 × 大货单耗) ×(1 + 抛量%)。</p>
+          <p className="text-[11px] text-gray-500">大货单耗由业务在「原辅料和包装」页按技术部大货版逐款填(此处<b>只读核实</b>);业务给<b>布料</b>逐料填<b>预算单价</b>(面料预算=大货单耗×预算单价×件数);辅料不逐个填价,走下方<b>整单辅料总价</b>(一口价);采购逐料填<b>抛量%</b>。采购量 = Σ(件数 × 大货单耗) ×(1 + 抛量%)。</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400">
@@ -658,14 +662,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             </table>
           </div>
 
-          {/* 逐款预算:加工费(元/件) + 辅料总价(该款一口价,不按件数;2026-07-08 用户拍板)*/}
+          {/* 逐款加工费(元/件)+ 整单辅料总价一口价(2026-07-08 用户拍板)*/}
           {styleBudgets.length > 0 && (
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 mt-2">
-              <div className="text-xs font-semibold text-indigo-800 mb-1.5">🧵 逐款预算(业务填)· 加工费(元/件) + 辅料总价 —— 辅料预算 = 该款辅料总价(一口价,不按件数)</div>
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 mt-2 space-y-2">
+              <div className="text-xs font-semibold text-indigo-800">🧵 逐款加工费(元/件,业务填)· 加工费预算 = 加工费 × 该款件数</div>
               <div className="overflow-x-auto">
                 <table className="text-xs">
                   <thead><tr className="text-left text-gray-400">
-                    {['款号', '加工费(元/件)', '辅料总价(元)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
+                    {['款号', '加工费(元/件)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {styleBudgets.map((b, i) => (
@@ -675,14 +679,19 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                           <input type="number" step="any" min="0" value={b.cmt}
                             onChange={e => setStyleBudgets(sb => sb.map((x, j) => j === i ? { ...x, cmt: e.target.value } : x))}
                             className="w-20 rounded border border-gray-300 px-2 py-1" /></td>
-                        <td className="py-1 px-2"><span className="text-gray-400 mr-0.5">¥</span>
-                          <input type="number" step="any" min="0" value={b.trim_budget}
-                            onChange={e => setStyleBudgets(sb => sb.map((x, j) => j === i ? { ...x, trim_budget: e.target.value } : x))}
-                            className="w-24 rounded border border-gray-300 px-2 py-1" /></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-indigo-100">
+                <span className="text-xs font-semibold text-indigo-800">🧷 整单辅料总价</span>
+                <span className="text-gray-400 text-sm">¥</span>
+                <input type="number" step="any" min="0" value={accessoryTotal}
+                  placeholder="全单辅料合并一口价" disabled={trackingPhase}
+                  onChange={e => setAccessoryTotal(e.target.value)}
+                  className="w-40 rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
+                <span className="text-[11px] text-gray-400">整单辅料(标/袋/吊牌…)合并一个总价,辅料预算 = 本值(不按款、不按件数)</span>
               </div>
             </div>
           )}

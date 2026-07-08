@@ -89,8 +89,7 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   // 2026-07-08 弃用报价基线:面料预算改从 materials_bom(采购核料业务填 大货单耗×预算单价,真实物料名 →
   //   与实际下单同名对齐,不再"仿锦 vs 280g直贡呢"对不上);辅料/加工按款存 quote_style_budgets(采购核料填)。
   const { data: base } = await (svc.from('order_cost_baseline') as any)
-    .select('quote_style_budgets').eq('order_id', orderId).maybeSingle();
-  const styleBudgets: any[] = (base as any)?.quote_style_budgets || [];
+    .select('*').eq('order_id', orderId).maybeSingle();   // * → accessory_budget_total 列未建也不报错
   const { data: bomRows } = await (svc.from('materials_bom') as any)
     .select('material_name, color, material_type, production_consumption, budget_unit_price, style_no, unit').eq('order_id', orderId);
 
@@ -112,13 +111,9 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     if (b.style_no) { const v = qtyByStyle.get(st); if (v) return v; }
     return orderQty;
   };
-  let trimBudgetTotal = 0; let hasTrimBudget = false;
-  for (const sb of styleBudgets) {
-    const tb = Number((sb as any).trim_budget); if (!(tb > 0)) continue;   // 辅料总价=该款一口价,不按件数(2026-07-08 用户拍板)
-    hasTrimBudget = true;
-    trimBudgetTotal += tb;
-  }
-  trimBudgetTotal = Math.round(trimBudgetTotal * 100) / 100;
+  // 辅料预算 = 整单一口价 order_cost_baseline.accessory_budget_total(不按件数;2026-07-08 用户拍板)
+  const trimBudgetTotal = Math.round((Number((base as any)?.accessory_budget_total) || 0) * 100) / 100;
+  const hasTrimBudget = trimBudgetTotal > 0;
 
   const { getOrderLeftover } = await import('@/app/actions/inventory');
   const leftoverRows: any[] = ((await getOrderLeftover(orderId)) as any).data || [];

@@ -15,7 +15,8 @@ const yuan = (n: number) => `¥${n.toLocaleString(undefined, { maximumFractionDi
 export function BomBudgetEntry({ orderId }: { orderId: string }) {
   const [lines, setLines] = useState<any[]>([]);
   const [priceEdit, setPriceEdit] = useState<Record<string, string>>({});
-  const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string; trim_budget: string }>>([]);
+  const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]);
+  const [accessoryTotal, setAccessoryTotal] = useState('');   // 整单辅料总价一口价
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -31,9 +32,9 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
       setStyleBudgets(((sb as any).data as any[]).map(b => ({
         style_no: b.style_no,
         cmt: b.cmt != null ? String(b.cmt) : '',
-        trim_budget: b.trim_budget != null ? String(b.trim_budget) : '',
       })));
     }
+    setAccessoryTotal((sb as any)?.accessoryTotal != null ? String((sb as any).accessoryTotal) : '');
     setLoading(false);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -44,16 +45,16 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
     const sbPayload = styleBudgets.map(b => ({
       style_no: b.style_no,
       cmt: b.cmt === '' ? null : Number(b.cmt),
-      trim_budget: b.trim_budget === '' ? null : Number(b.trim_budget),
     }));
+    const accTotal = accessoryTotal === '' ? null : Number(accessoryTotal);
     const [r1, r2] = await Promise.all([
       saveBomBudgetUnitPrice(orderId, prices as any),
-      saveOrderStyleBudgets(orderId, sbPayload as any),
+      saveOrderStyleBudgets(orderId, sbPayload as any, accTotal),
     ]);
     setSaving(false);
     const err = (r1 as any).error || (r2 as any).error;
     if (err) { setMsg('❌ ' + err); return; }
-    setMsg('✅ 已保存预算(面料单价 + 逐款加工费/辅料)');
+    setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料总价)');
     await load();
   }
 
@@ -76,7 +77,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
       </div>
       <p className="text-[11px] text-gray-500">
         面料按<b>采购真实布料</b>逐料填【预算单价】:面料预算 = 大货单耗 × 预算单价 × 件数(大货单耗在「原辅料和包装」页填,此处只读)。
-        辅料<b>不逐个填价</b>,在下方逐款填【辅料总价】;逐款再填【加工费】。抛量% 由采购在采购中心填,这里不涉及。
+        辅料<b>不逐个填价</b>,在下方填整单一口价【辅料总价】;加工费按款填【元/件】。抛量% 由采购在采购中心填,这里不涉及。
       </p>
 
       {/* 面料预算单价(只列布料;辅料走下方逐款「辅料总价」) */}
@@ -121,14 +122,14 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         </table>
       </div>
 
-      {/* 逐款:加工费(元/件) + 辅料总价(该款辅料一口价,不按件数) */}
+      {/* 逐款加工费(元/件) */}
       {styleBudgets.length > 0 && (
         <div className="rounded-lg border border-indigo-100 bg-white p-3">
-          <div className="text-xs font-semibold text-gray-700 mb-1.5">🧵 逐款预算 · 加工费(元/件) + 辅料总价(辅料预算 = 该款辅料总价,不按件数)</div>
+          <div className="text-xs font-semibold text-gray-700 mb-1.5">🧵 逐款加工费(元/件)· 加工费预算 = 加工费 × 该款件数</div>
           <div className="overflow-x-auto">
             <table className="text-xs">
               <thead><tr className="text-left text-gray-400">
-                {['款号', '加工费(元/件)', '辅料总价(元)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
+                {['款号', '加工费(元/件)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
               </tr></thead>
               <tbody>
                 {styleBudgets.map((b, i) => (
@@ -138,10 +139,6 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
                       <input type="number" step="any" min="0" value={b.cmt}
                         onChange={e => setStyleBudgets(sb => sb.map((x, j) => j === i ? { ...x, cmt: e.target.value } : x))}
                         className="w-20 rounded border border-gray-300 px-2 py-1" /></td>
-                    <td className="py-1 px-2"><span className="text-gray-400 mr-0.5">¥</span>
-                      <input type="number" step="any" min="0" value={b.trim_budget}
-                        onChange={e => setStyleBudgets(sb => sb.map((x, j) => j === i ? { ...x, trim_budget: e.target.value } : x))}
-                        className="w-24 rounded border border-gray-300 px-2 py-1" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -149,6 +146,17 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
           </div>
         </div>
       )}
+
+      {/* 整单辅料总价(一口价:业务把琐碎辅料合并成一个总价,不逐款不逐个) */}
+      <div className="rounded-lg border border-indigo-100 bg-white p-3 flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-gray-700">🧷 整单辅料总价</span>
+        <span className="text-gray-400 text-sm">¥</span>
+        <input type="number" step="any" min="0" value={accessoryTotal}
+          placeholder="全单辅料合并一口价"
+          onChange={e => setAccessoryTotal(e.target.value)}
+          className="w-40 rounded border border-gray-300 px-2 py-1 text-sm" />
+        <span className="text-[11px] text-gray-400">整单辅料(标/袋/吊牌…)合并一个总价,辅料预算 = 本值(不按款、不按件数)</span>
+      </div>
 
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
     </div>

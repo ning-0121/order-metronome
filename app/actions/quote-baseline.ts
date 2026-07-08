@@ -355,16 +355,14 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
   consPerPiece = Math.round(consPerPiece * 10000) / 10000;
 
   // 加工费(逐款 cmt 按件数加权 → cmt_factory_quote × 总件数 = Σ 款cmt×款件数)
-  const { data: cb } = await (svc.from('order_cost_baseline') as any).select('id, quote_style_budgets').eq('order_id', orderId).maybeSingle();
+  const { data: cb } = await (svc.from('order_cost_baseline') as any).select('*').eq('order_id', orderId).maybeSingle();   // * → accessory_budget_total 列未建也不报错
   const styleBudgets: any[] = (cb as any)?.quote_style_budgets || [];
   let cmtTotal = 0; let qSum = 0;
   for (const b of styleBudgets) { const c = Number(b.cmt); const q = qtyForStyle(b.style_no); if (c > 0 && q > 0) { cmtTotal += c * q; qSum += q; } }
   const cmtQuote = qSum > 0 ? Math.round(cmtTotal / qSum * 10000) / 10000 : null;
 
-  // 辅料预算(逐款 辅料总价 trim_budget = 该款一口价,不按件数;2026-07-08 用户拍板)—— 供财务即时同步
-  let trimTotal = 0; let trimQ = 0;
-  for (const b of styleBudgets) { const t = Number(b.trim_budget); const q = qtyForStyle(b.style_no); if (t > 0) { trimTotal += t; if (q > 0) trimQ += q; } }
-  trimTotal = Math.round(trimTotal * 100) / 100;
+  // 辅料预算(整单一口价:业务在采购核料填的「辅料总价」,不按件数;2026-07-08 用户拍板)—— 供财务即时同步
+  const trimTotal = Math.round((Number((cb as any)?.accessory_budget_total) || 0) * 100) / 100;
   const cmtTotalAmt = Math.round(cmtTotal * 100) / 100;
 
   const payload: Record<string, unknown> = {
@@ -400,7 +398,7 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
       accessory_amount: trimTotal || null,
       fabric_per_piece: orderQty > 0 && budgetFabricAmount > 0 ? Math.round(budgetFabricAmount / orderQty * 10000) / 10000 : null,
       cmt_per_piece: cmtQuote,
-      accessory_per_piece: trimQ > 0 ? Math.round(trimTotal / trimQ * 10000) / 10000 : null,
+      accessory_per_piece: orderQty > 0 && trimTotal > 0 ? Math.round(trimTotal / orderQty * 10000) / 10000 : null,
     });
   } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 财务预算同步失败(不阻断):', e?.message); }
   return { ok: true };
