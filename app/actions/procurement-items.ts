@@ -85,20 +85,23 @@ export async function listProcurementItems(orderId: string) {
     }
   } catch { /* 历史建议失败不影响列表 */ }
 
-  // 报价基线对照(P2):按物料+颜色匹配冻结的报价基线,判超单耗/超价(容差 0,超即报警;超需财务审批)。
-  // 在剥价前算(用 unit_price 比对),剥价时同步剥基线价字段。
+  // 预算对照(2026-07-08 弃用报价基线):预算单价来自 materials_bom.budget_unit_price(业务在采购核料填)。
+  // 采购实际单价 > 预算单价(容差0)→ 超预算,需财务审批。单耗不再对照(大货单耗已是唯一真相,无报价单耗可比)。
+  // 在剥价前算(用 unit_price 比对),剥价时同步剥预算价字段。
   try {
-    const { data: cb } = await (supabase.from('order_cost_baseline') as any)
-      .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
-    const baseLines = (((cb as any)?.quote_baseline_lines) || []) as any[];
-    if (baseLines.length > 0) {
+    const { data: bomRows } = await (supabase.from('materials_bom') as any)
+      .select('material_name, color, style_no, budget_unit_price').eq('order_id', orderId);
+    const budgetLines = ((bomRows || []) as any[])
+      .filter((b) => Number(b.budget_unit_price) > 0)
+      .map((b) => ({ style_no: b.style_no, material_name: b.material_name, color: b.color, quote_consumption: null, quote_unit_price: Number(b.budget_unit_price) }));
+    if (budgetLines.length > 0) {
       const { matchBaseline, checkOverBaseline } = await import('@/lib/domain/cost-baseline');
       for (const r of (data || [])) {
-        const base = matchBaseline(baseLines, (r as any).material_name, (r as any).color);
-        (r as any).baseline = base.matched ? checkOverBaseline(base, (r as any).production_consumption ?? null, (r as any).unit_price ?? null) : null;
+        const base = matchBaseline(budgetLines, (r as any).material_name, (r as any).color, (r as any).style_no);
+        (r as any).baseline = base.matched ? checkOverBaseline(base, null, (r as any).unit_price ?? null) : null;
       }
     }
-  } catch { /* 基线对照失败不影响列表 */ }
+  } catch { /* 预算对照失败不影响列表 */ }
 
   // 底价剥离(红线③):非可见底价角色 → 删 unit_price/金额/历史成交价,server 端剥离
   if (!canSeeFloor) {
@@ -913,26 +916,25 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
       if (fs === 'rejected') return { error: `补采购已被财务驳回:${(it as any).finance_reject_reason || '无原因'}。如仍需采购请重新提交申请` };
     }
 
-    // 超报价基线闸(P2b):大货单耗>报价单耗 或 采购价>报价单价(容差0)→ 必须先经财务审批。
+    // 超预算闸(2026-07-08 弃用报价基线):采购单价 > 业务在采购核料填的预算单价(容差0)→ 必须先经财务审批。
     try {
       const { data: bi } = await (supabase.from('procurement_items') as any)
-        .select('material_name, color, production_consumption, unit_price, baseline_over_status').eq('id', itemId).maybeSingle();
-      const { data: cb } = await (supabase.from('order_cost_baseline') as any)
-        .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
-      const baseLines = (((cb as any)?.quote_baseline_lines) || []) as any[];
-      if (bi && baseLines.length > 0) {
+        .select('material_name, color, style_no, unit_price, baseline_over_status').eq('id', itemId).maybeSingle();
+      const { data: bomRows } = await (supabase.from('materials_bom') as any)
+        .select('material_name, color, style_no, budget_unit_price').eq('order_id', orderId);
+      const budgetLines = ((bomRows || []) as any[])
+        .filter((b) => Number(b.budget_unit_price) > 0)
+        .map((b) => ({ style_no: b.style_no, material_name: b.material_name, color: b.color, quote_consumption: null, quote_unit_price: Number(b.budget_unit_price) }));
+      if (bi && budgetLines.length > 0) {
         const { matchBaseline, checkOverBaseline } = await import('@/lib/domain/cost-baseline');
-        const base = matchBaseline(baseLines, (bi as any).material_name, (bi as any).color);
-        const chk = base.matched ? checkOverBaseline(base, (bi as any).production_consumption ?? null, (bi as any).unit_price ?? null) : null;
-        if (chk && (chk.over_consumption || chk.over_price)) {
+        const base = matchBaseline(budgetLines, (bi as any).material_name, (bi as any).color, (bi as any).style_no);
+        const chk = base.matched ? checkOverBaseline(base, null, (bi as any).unit_price ?? null) : null;
+        if (chk && chk.over_price) {
           const st = (bi as any).baseline_over_status;
-          if (st === 'rejected') return { error: '超报价基线已被财务驳回,不能确认。请调整单耗/供应商价,或让财务重新审批' };
-          if (st === 'pending') return { error: '🔴 超报价基线待财务审批,批准后才能确认(财务已收到通知)' };
+          if (st === 'rejected') return { error: '超预算已被财务驳回,不能确认。请调整供应商价,或让财务重新审批' };
+          if (st === 'pending') return { error: '🔴 超预算待财务审批,批准后才能确认(财务已收到通知)' };
           if (st !== 'approved') {
-            const note = [
-              chk.over_consumption ? `大货单耗超报价 +${chk.consumption_over_pct}%` : '',
-              chk.over_price ? `采购单价超报价 +${chk.price_over_pct}%` : '',
-            ].filter(Boolean).join(' · ');
+            const note = `采购单价超预算 +${chk.price_over_pct}%`;
             await (supabase.from('procurement_items') as any).update({
               baseline_over_status: 'pending', baseline_over_note: note,
               baseline_over_requested_by: user.id, baseline_over_requested_at: new Date().toISOString(),
@@ -944,16 +946,16 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
               const fin = (profs || []).filter((p: any) => { const rs = p.roles?.length ? p.roles : [p.role]; return rs.includes('finance') || rs.includes('admin'); });
               if (fin.length) await (supabase.from('notifications') as any).insert(fin.map((f: any) => ({
                 user_id: f.user_id, type: 'baseline_over',
-                title: `🔴 超报价基线待审批:${(order as any)?.internal_order_no || (order as any)?.order_no || ''}`,
+                title: `🔴 超预算待审批:${(order as any)?.internal_order_no || (order as any)?.order_no || ''}`,
                 message: `「${(bi as any).material_name || ''}${(bi as any).color ? ' · ' + (bi as any).color : ''}」${note}。需财务审批后采购才能确认。`,
                 related_order_id: orderId,
               })));
             } catch { /* 通知失败不影响拦截 */ }
-            return { error: `🔴 超报价基线(${note}),已自动提交财务审批,批准后才能确认` };
+            return { error: `🔴 超预算(${note}),已自动提交财务审批,批准后才能确认` };
           }
         }
       }
-    } catch { /* 基线闸异常不阻断(降级=不拦,避免误锁;审计可查) */ }
+    } catch { /* 超预算闸异常不阻断(降级=不拦,避免误锁;审计可查) */ }
   }
 
   const now = new Date().toISOString();

@@ -379,8 +379,6 @@ export function BomTab({ orderId }: { orderId: string }) {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="每包件数(如6件一中包填6)" type="number" step="1" min="1" value={form.pack_size} onChange={e => set('pack_size', e.target.value)}
-          title="打包辅料(中包袋/外箱等)填每包件数;需求=件数÷每包件数。空=不打包" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
       {editId && editingTemplate && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">

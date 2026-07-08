@@ -47,6 +47,7 @@ import { ProcurementTab } from '@/components/tabs/ProcurementTab';
 import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
 import { FinanceEventsTimeline } from '@/components/FinanceEventsTimeline';
 import { SupplyChainTab } from '@/components/tabs/SupplyChainTab';
+import { BomBudgetEntry } from '@/components/tabs/BomBudgetEntry';
 import { BackButton } from '@/components/BackButton';
 import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
@@ -881,6 +882,10 @@ export default async function OrderDetailPage({
               </>
             ) : (
               <>
+                {/* 业务价格录入入口(2026-07-08 弃用报价单识别/报价基线后,预算真相改由业务在采购核料按真实物料填) */}
+                {(isOrderOwner || currentRoles.some(r => ['sales', 'merchandiser', 'sales_manager', 'order_manager'].includes(r))) && (
+                  <BomBudgetEntry orderId={id} />
+                )}
                 <p className="text-xs text-gray-400 mb-4">核料是采购的工作,在采购中心进行。这里给业务<b>只读看采购进度</b>:</p>
                 <SupplyChainTab orderId={id} />
               </>

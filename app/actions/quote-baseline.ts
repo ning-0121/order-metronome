@@ -320,7 +320,7 @@ export async function saveQuoteBaseline(
 export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?: boolean; error?: string }> {
   const svc = createServiceRoleClient();
   const normS = (s: any) => String(s ?? '').trim().toLowerCase();
-  const { data: ord } = await (svc.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+  const { data: ord } = await (svc.from('orders') as any).select('id, order_no, internal_order_no, quantity').eq('id', orderId).maybeSingle();
   const orderQty = Number((ord as any)?.quantity) || 0;
 
   // 件数:按 款×色 / 款 / 整单
@@ -361,6 +361,12 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
   for (const b of styleBudgets) { const c = Number(b.cmt); const q = qtyForStyle(b.style_no); if (c > 0 && q > 0) { cmtTotal += c * q; qSum += q; } }
   const cmtQuote = qSum > 0 ? Math.round(cmtTotal / qSum * 10000) / 10000 : null;
 
+  // 辅料预算(逐款 辅料单件总价 trim_budget × 该款件数)—— 供财务即时同步的绝对总额口径
+  let trimTotal = 0; let trimQ = 0;
+  for (const b of styleBudgets) { const t = Number(b.trim_budget); const q = qtyForStyle(b.style_no); if (t > 0 && q > 0) { trimTotal += t * q; trimQ += q; } }
+  trimTotal = Math.round(trimTotal * 100) / 100;
+  const cmtTotalAmt = Math.round(cmtTotal * 100) / 100;
+
   const payload: Record<string, unknown> = {
     budget_fabric_amount: budgetFabricAmount > 0 ? budgetFabricAmount : null,
     budget_fabric_kg: budgetFabricKg > 0 ? budgetFabricKg : null,
@@ -380,5 +386,22 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
     const sb = await createClient();
     await calculateProfitSnapshot(sb, { orderId, snapshotType: 'live' });
   } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 利润重算失败(不阻断):', e?.message); }
+
+  // 即时推财务:业务在采购核料填/改预算 → 财务订单预算同步更新(内容哈希幂等,改了才更新;首发失败落 outbox 重试)
+  try {
+    const { syncOrderBudgetToFinance } = await import('@/lib/integration/finance-sync');
+    await syncOrderBudgetToFinance({
+      qimo_order_id: orderId,
+      order_no: (ord as any)?.order_no ?? null,
+      internal_order_no: (ord as any)?.internal_order_no ?? null,
+      quantity: orderQty || null,
+      fabric_amount: budgetFabricAmount || null,
+      cmt_amount: cmtTotalAmt || null,
+      accessory_amount: trimTotal || null,
+      fabric_per_piece: orderQty > 0 && budgetFabricAmount > 0 ? Math.round(budgetFabricAmount / orderQty * 10000) / 10000 : null,
+      cmt_per_piece: cmtQuote,
+      accessory_per_piece: trimQ > 0 ? Math.round(trimTotal / trimQ * 10000) / 10000 : null,
+    });
+  } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 财务预算同步失败(不阻断):', e?.message); }
   return { ok: true };
 }

@@ -304,11 +304,11 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   async function approveBaseline(item: any, ok: boolean) {
     let rejectReason: string | undefined;
     if (!ok) {
-      const r = await prompt({ title: '驳回超报价基线', fields: [{ name: 'reason', label: '驳回原因', type: 'textarea', required: true }], confirmText: '确认驳回' });
+      const r = await prompt({ title: '驳回超预算', fields: [{ name: 'reason', label: '驳回原因', type: 'textarea', required: true }], confirmText: '确认驳回' });
       if (!r) return;
       rejectReason = r.reason;
     } else if (!(await confirm({
-      title: `批准超报价基线「${item.material_name}」?`,
+      title: `批准超预算「${item.material_name}」?`,
       message: `${item.baseline_over_note || ''} · 批准后采购方可确认/下单`,
       confirmText: '批准',
     }))) {
@@ -316,7 +316,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     }
     const res = await approveBaselineOver(item.id, ok, rejectReason);
     if ((res as any).error) { setMsg((res as any).error); return; }
-    setMsg(ok ? '✅ 已批准超基线,采购可确认' : '已驳回超基线');
+    setMsg(ok ? '✅ 已批准超预算,采购可确认' : '已驳回超预算');
     await reload();
   }
 
@@ -360,8 +360,8 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     && (i.final_purchase_qty ?? i.suggested_purchase_qty) != null
     && !i.risk_flag && !i.is_substitute && !i.needs_reconfirm
     && !(i.is_supplement && i.finance_approval_status !== 'approved')
-    // 超报价基线未获财务批准 → 不可批量确认(与逐项确认闸一致)
-    && !(i.baseline && (i.baseline.over_consumption || i.baseline.over_price) && i.baseline_over_status !== 'approved');
+    // 超预算未获财务批准 → 不可批量确认(与逐项确认闸一致)
+    && !(i.baseline && i.baseline.over_price && i.baseline_over_status !== 'approved');
   const bulkEligible = items.filter(canBulkConfirm);
   const checkedEligible = bulkEligible.filter(i => checked.has(i.id));
   // ④ 下单倒计时:超最晚下单日=🔥,3天内=⏰
@@ -774,11 +774,11 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                       )}
                       {it.material_name || '—'}
                     </span>
-                    {it.baseline && (it.baseline.over_consumption || it.baseline.over_price) && (
+                    {it.baseline && it.baseline.over_price && (
                       <span
-                        title={`${it.baseline.over_consumption ? `大货单耗 超报价基线 +${it.baseline.consumption_over_pct}%（报价 ${it.baseline.quote_consumption}）` : ''}${it.baseline.over_price ? ` 采购单价 超报价基线 +${it.baseline.price_over_pct}%` : ''} · 超基线需财务审批`}
+                        title={`采购单价 超预算 +${it.baseline.price_over_pct}%（预算单价 ¥${it.baseline.quote_unit_price}）· 超预算需财务审批`}
                         className="ml-1 inline-block px-1.5 py-px rounded text-[10px] font-medium bg-rose-100 text-rose-700 align-middle">
-                        ⚠超基线{it.baseline.over_consumption ? `·耗+${it.baseline.consumption_over_pct}%` : ''}{it.baseline.over_price ? `·价+${it.baseline.price_over_pct}%` : ''}
+                        ⚠超预算·价+{it.baseline.price_over_pct}%
                       </span>
                     )}
                   </td>

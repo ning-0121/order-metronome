@@ -32,6 +32,7 @@ type WebhookEventType =
   | 'price_approval.requested'
   | 'delay.requested'
   | 'quotation.frozen'
+  | 'order.budget_updated'
   | 'supplier.upserted'
   | 'purchase_order.placed'
   | 'purchase_order.approval_requested'
@@ -462,6 +463,53 @@ export function buildQuotationFrozenPayload(
 export async function syncQuotationToFinance(order: Record<string, unknown>, baseline: Record<string, unknown> | null) {
   if (!baseline) return { success: true }   // 无成本基线(未上传核算单)则跳过
   return sendToFinanceSystem('quotation.frozen', buildQuotationFrozenPayload(order, baseline))
+}
+
+/**
+ * 采购核料预算 payload(纯,可测)。2026-07-08 弃用报价单识别后,预算由业务在采购核料按真实物料填,
+ * 送【绝对总额】(面料/加工/辅料),财务按 qimo_order_id 幂等 upsert 订单预算(不再靠 单件价×数量,
+ * 因为逐款件数不一,per-piece×总数会漂;总额是唯一权威口径)。unit_costs 仅供参考展示。
+ */
+export function buildOrderBudgetPayload(input: {
+  qimo_order_id: string; order_no?: string | null; internal_order_no?: string | null; quantity?: number | null;
+  fabric_amount?: number | null; cmt_amount?: number | null; accessory_amount?: number | null;
+  fabric_per_piece?: number | null; cmt_per_piece?: number | null; accessory_per_piece?: number | null;
+}): Record<string, unknown> {
+  const pos = (v: unknown) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.round(x * 100) / 100 : null }
+  const fabric = pos(input.fabric_amount); const cmt = pos(input.cmt_amount); const acc = pos(input.accessory_amount)
+  const total = Math.round(((fabric || 0) + (cmt || 0) + (acc || 0)) * 100) / 100
+  return {
+    qimo_order_id: input.qimo_order_id,
+    order_no: input.order_no ?? null,
+    internal_order_no: input.internal_order_no ?? null,
+    currency: 'CNY',
+    exchange_rate: 1,
+    quantity: input.quantity ?? null,
+    budget_totals: {
+      fabric_amount: fabric,
+      cmt_amount: cmt,
+      accessory_amount: acc,
+      total: total > 0 ? total : null,
+    },
+    unit_costs: {   // 参考口径(元/件);权威以 budget_totals 为准
+      fabric_per_piece: pos(input.fabric_per_piece),
+      processing_per_piece: pos(input.cmt_per_piece),
+      accessory_per_piece: pos(input.accessory_per_piece),
+    },
+    source: 'procurement_verify',
+  }
+}
+
+/**
+ * 采购核料预算即时同步 → 财务(2026-07-08:业务在采购核料填/改预算,立即推财务更新订单预算)。
+ * 全 0 = 还没填 → 跳过,不推空预算污染台账(与 PO 下单不建 ¥0 应付同理)。
+ * 内容哈希幂等:同预算重发去重,真改了就是新键 → 财务照常更新。首发失败落 outbox 自动重试。
+ */
+export async function syncOrderBudgetToFinance(input: Parameters<typeof buildOrderBudgetPayload>[0]) {
+  const payload = buildOrderBudgetPayload(input)
+  const total = Number((payload.budget_totals as Record<string, unknown>)?.total) || 0
+  if (total <= 0) return { success: true }   // 无预算,不推
+  return sendToFinanceSystem('order.budget_updated', payload)
 }
 
 /** 检查财务系统连通性 */
