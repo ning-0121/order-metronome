@@ -281,6 +281,8 @@ export async function createOrder(
       .eq('customer_name', customer_name)
       .eq('po_number', po_number)
       .eq('quantity', quantity)
+      // 废单/已完结不算重复(2026-07-08 用户:取消/完成的旧单不该挡新建)
+      .not('lifecycle_status', 'in', '("cancelled","已取消","completed","已完成","archived","已归档")')
       .limit(1);
     if (duplicates && duplicates.length > 0) {
       const skipDupCheck = formData.get('confirm_duplicate') === 'true';
