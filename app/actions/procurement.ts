@@ -1253,9 +1253,17 @@ export async function getProcurementQueues(): Promise<{
 
   // 基础读走用户会话(RLS 管范围),不含已封锁的 unit_price(price_variance_pct 是百分比、非绝对价,保留);
   // 底价对 floor 角色在下方经 service-role 补(此前此处直接返回 unit_price 未剥离,是泄价点)。
-  const { data, error } = await (supabase.from('procurement_line_items') as any)
-    .select('id, order_id, material_name, category, size, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, procurement_item_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
-    .in('line_status', ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
+  const QUEUE_STATES = ['pending_order', 'ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived'];
+  const SEL_NO_SIZE = 'id, order_id, material_name, category, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, procurement_item_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)';
+  let { data, error } = await (supabase.from('procurement_line_items') as any)
+    .select(`id, order_id, material_name, category, size, supplier_name, line_status, required_by, promised_date, expected_arrival, po_no, purchase_order_id, procurement_item_id, price_variance_pct, ordered_qty, ordered_unit, received_qty, chase_count, last_chased_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)`)
+    .in('line_status', QUEUE_STATES);
+  // ⚠ size 列(N1)若 PostgREST schema 缓存未刷新/迁移未应用 → 选它整查会 error。
+  //   绝不能让"新列"把采购中心整个变空 → 降级去掉 size 重查(尺码徽章暂不显示,功能不瘫)。
+  if (error && /size|schema cache|column|does not exist/i.test(error.message || '')) {
+    console.warn('[getProcurementQueues] size 列不可选(schema 缓存陈旧?),降级不带 size:', error.message);
+    ({ data, error } = await (supabase.from('procurement_line_items') as any).select(SEL_NO_SIZE).in('line_status', QUEUE_STATES));
+  }
   if (error) return { error: error.message };
 
   // 颜色回查:执行行无颜色列,经 procurement_item_id → procurement_items.color(同料不同色才分得清)

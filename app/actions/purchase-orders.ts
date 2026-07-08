@@ -523,11 +523,16 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     .select('*, suppliers(*)').eq('id', id).maybeSingle();
   if (!po) return { error: '采购单不存在' };
   // 含价版(仅采购)经 service-role 读底价;无价版走用户会话(RLS 管范围),不取价列
-  const { data: lines } = await ((withPrice ? createServiceRoleClient() : supabase).from('procurement_line_items') as any)
-    .select(withPrice
-      ? 'material_name, specification, category, size, ordered_qty, ordered_unit, unit_price, ordered_amount, notes, procurement_item_id'
-      : 'material_name, specification, category, size, ordered_qty, ordered_unit, notes, procurement_item_id')
-    .eq('purchase_order_id', id).order('created_at', { ascending: true });
+  const _db = (withPrice ? createServiceRoleClient() : supabase);
+  const _selWith = 'material_name, specification, category, size, ordered_qty, ordered_unit, unit_price, ordered_amount, notes, procurement_item_id';
+  const _selNo = 'material_name, specification, category, size, ordered_qty, ordered_unit, notes, procurement_item_id';
+  let { data: lines, error: linesErr } = await (_db.from('procurement_line_items') as any)
+    .select(withPrice ? _selWith : _selNo).eq('purchase_order_id', id).order('created_at', { ascending: true });
+  // size 列(N1)schema 缓存未刷新 → 降级去 size,采购单照样导得出(尺码列暂空)
+  if (linesErr && /size|schema cache|column|does not exist/i.test(linesErr.message || '')) {
+    ({ data: lines } = await (_db.from('procurement_line_items') as any)
+      .select((withPrice ? _selWith : _selNo).replace(', size', '')).eq('purchase_order_id', id).order('created_at', { ascending: true }));
+  }
 
   // 颜色 + 大货单耗:执行行无这些列 → 经 procurement_item_id 回查主数据(采购单按颜色分行,模板需要)
   const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];

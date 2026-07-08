@@ -299,9 +299,15 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
  * 改为两段查:行 + 按 order_id 批量取 order_no,手动附上,稳。
  */
 export async function fetchPurchaseOrderLinesRaw(db: any, poId: string): Promise<any[]> {
-  const { data: lines } = await db.from('procurement_line_items')
+  let { data: lines, error: le } = await db.from('procurement_line_items')
     .select('id, order_id, material_name, material_code, category, size, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
     .eq('purchase_order_id', poId)
+  // size 列 schema 缓存未刷新 → 降级去 size(财务对接不因新列拿不到明细)
+  if (le && /size|schema cache|column|does not exist/i.test(le.message || '')) {
+    ({ data: lines } = await db.from('procurement_line_items')
+      .select('id, order_id, material_name, material_code, category, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
+      .eq('purchase_order_id', poId))
+  }
   const rows: any[] = lines || []
   const orderIds = [...new Set(rows.map((l) => l.order_id).filter(Boolean))]
   if (orderIds.length) {
