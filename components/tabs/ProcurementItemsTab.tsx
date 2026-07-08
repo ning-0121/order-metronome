@@ -50,6 +50,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [msg, setMsg] = useState('');
   const [selId, setSelId] = useState<string | null>(null);
   const [sources, setSources] = useState<any[]>([]);
+  const [sizeBreakdown, setSizeBreakdown] = useState<Array<{ size: string | null; qty: number }>>([]);   // #3 尺码拆分预览
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [fulfillment, setFulfillment] = useState<any[]>([]);
@@ -208,7 +209,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
 
   async function select(item: any) {
     if (selId === item.id) { setSelId(null); return; }
-    setSelId(item.id); setSources([]);
+    setSelId(item.id); setSources([]); setSizeBreakdown([]);
     const f: Record<string, any> = {};
     for (const k of FORM_KEYS) f[k] = item[k] ?? '';
     // 采购计量单位默认=该项单位(物料录入时就选过,不让采购重敲;按匹/按卷等买法不同才改)
@@ -216,6 +217,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setForm(f);
     const res = await getProcurementItemSources(item.id);
     if ((res as any).data) setSources((res as any).data);
+    setSizeBreakdown((res as any).sizeBreakdown || []);
   }
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
@@ -915,6 +917,24 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             )}
           </div>
 
+          {/* 尺码拆分预览(#3:尺码 + 最终采购量 体现在上边)——生成执行行时会按此拆到逐尺码采购行 */}
+          {sizeBreakdown.length > 0 && (
+            <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-3">
+              <div className="text-xs font-semibold text-teal-800 mb-1.5">
+                📐 尺码拆分预览 · 最终采购量 <b>{(form.final_purchase_qty ?? liveSuggested ?? sel.final_purchase_qty ?? sel.suggested_purchase_qty) || '—'}</b> {sel.unit || ''}
+                <span className="font-normal text-teal-600 ml-1">(生成采购行时按各码件数拆分;想改单码数量在采购队列「✏️改」)</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {sizeBreakdown.map((s, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded-md bg-white border border-teal-200 px-2 py-0.5 text-xs">
+                    <span className="font-semibold text-teal-700">{s.size}</span>
+                    <span className="text-gray-600">{s.qty}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 来源明细(live;粒度=物料行)*/}
           <div className="rounded-lg border border-gray-200 bg-white p-3">
             <div className="text-xs font-semibold text-gray-500 mb-2">来源明细（{sources.length}）<span className="font-normal text-gray-400">· 暂到物料行粒度,产品拆分待 O 域</span></div>
@@ -1031,9 +1051,28 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
             <Field label="采购计量单位(米/kg/匹)" k="purchase_unit" form={form} set={set} />
           </div>
 
-          {/* 价格 */}
+          {/* 价格(单价带报价基线预算参考:采购填价时实时判断是否超预算 —— 2026-07-08 用户拍板) */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <Field label="单价" k="unit_price" form={form} set={set} type="number" />
+            {(() => {
+              const budPrice = sel.baseline?.quote_unit_price != null ? Number(sel.baseline.quote_unit_price) : null;
+              const cur = form.unit_price !== '' && form.unit_price != null ? Number(form.unit_price) : null;
+              const over = budPrice != null && budPrice > 0 && cur != null && cur > budPrice;
+              const overPct = over ? Math.round((cur! - budPrice) / budPrice * 1000) / 10 : null;
+              const within = budPrice != null && budPrice > 0 && cur != null && cur <= budPrice;
+              return (
+                <label className="text-gray-600">单价
+                  <input type="number" value={form.unit_price ?? ''} onChange={e => set('unit_price', e.target.value)}
+                    className={`mt-1 w-full rounded border px-2 py-1.5 ${over ? 'border-rose-400 bg-rose-50 text-rose-700 font-semibold' : 'border-gray-300'}`} />
+                  {budPrice != null && budPrice > 0
+                    ? <span className="block mt-0.5 text-[10px]">
+                        <span className="text-indigo-500">预算(报价)单价 ¥{budPrice}</span>
+                        {over && <span className="text-rose-600 font-medium"> · 🔴 超预算 +{overPct}%(需财务审批)</span>}
+                        {within && <span className="text-emerald-600"> · 🟢 在预算内</span>}
+                      </span>
+                    : <span className="block mt-0.5 text-[10px] text-gray-300">报价基线未冻结,无预算可比</span>}
+                </label>
+              );
+            })()}
             <Field label="币种" k="currency" form={form} set={set} />
             <Field label="税率%" k="tax_rate" form={form} set={set} type="number" />
             <Field label="报价日" k="quote_date" form={form} set={set} type="date" />

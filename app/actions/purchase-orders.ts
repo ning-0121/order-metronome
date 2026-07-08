@@ -37,13 +37,26 @@ export async function listUnassignedProcurementLines(orderId?: string): Promise<
   if (!userId) return { error: '请先登录' };
   if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可建采购单' };
   // 采购专用含底价 → 价列已列级封锁,经 service-role 读(本函数已 CAN_PROCURE 门禁)
-  let q = (createServiceRoleClient().from('procurement_line_items') as any)
-    .select('id, order_id, material_name, specification, category, ordered_qty, ordered_unit, unit_price, price_baseline')
-    .is('purchase_order_id', null)
-    .gt('ordered_qty', 0)                    // 0 量行(如误建/占位)不进待归单,免污染下单(2026-07-07 用户)
-    .order('created_at', { ascending: false });
-  if (orderId) q = q.eq('order_id', orderId);
-  const { data, error } = await q;
+  // 只收「真正待归单」的开放行:pending_order/draft。cancelled(取消订单遗留)保持 PO=null 却已作废,
+  // 若不按 line_status 过滤会一直躺在待归单里 → 用户看到的"取消订单没取消采购/重复采购单"(2026-07-08)。
+  const OPEN_UNASSIGNED = ['pending_order', 'draft'];
+  const SEL = 'id, order_id, material_name, specification, category, color, size, ordered_qty, ordered_unit, unit_price, price_baseline';
+  const SEL_NO_SIZE = 'id, order_id, material_name, specification, category, color, ordered_qty, ordered_unit, unit_price, price_baseline';
+  const run = (sel: string) => {
+    let q = (createServiceRoleClient().from('procurement_line_items') as any)
+      .select(sel)
+      .is('purchase_order_id', null)
+      .in('line_status', OPEN_UNASSIGNED)
+      .gt('ordered_qty', 0)                  // 0 量行(如误建/占位)不进待归单,免污染下单(2026-07-07 用户)
+      .order('created_at', { ascending: false });
+    if (orderId) q = q.eq('order_id', orderId);
+    return q;
+  };
+  let { data, error } = await run(SEL);
+  // size 列未授权/缓存陈旧 → 降级去 size,待归单不变空(2026-07-08)
+  if (error && /size|schema cache|column|does not exist|permission denied/i.test(error.message || '')) {
+    ({ data, error } = await run(SEL_NO_SIZE));
+  }
   if (error) return { error: error.message };
   return { data: data || [] };
 }

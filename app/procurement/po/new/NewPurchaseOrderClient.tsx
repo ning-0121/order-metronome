@@ -91,7 +91,7 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="bg-gray-50 text-left text-gray-500">
-                <th className="px-3 py-2"></th><th className="px-3 py-2">物料</th><th className="px-3 py-2">规格</th>
+                <th className="px-3 py-2"></th><th className="px-3 py-2">物料</th><th className="px-3 py-2">颜色</th><th className="px-3 py-2">规格</th><th className="px-3 py-2 text-center">尺码</th>
                 <th className="px-3 py-2 text-center">数量</th><th className="px-3 py-2 text-right">建议价</th><th className="px-3 py-2 text-right">底价</th>
               </tr></thead>
               <tbody className="divide-y divide-gray-100">
@@ -99,7 +99,9 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
                   <tr key={l.id} className={checked.has(l.id) ? 'bg-indigo-50' : ''}>
                     <td className="px-3 py-2"><input type="checkbox" checked={checked.has(l.id)} onChange={() => toggle(l.id)} /></td>
                     <td className="px-3 py-2">{l.material_name}</td>
+                    <td className="px-3 py-2 text-gray-500">{l.color || '—'}</td>
                     <td className="px-3 py-2 text-gray-500">{l.specification || '—'}</td>
+                    <td className="px-3 py-2 text-center">{l.size ? <span className="inline-block px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 font-medium">{l.size}</span> : '—'}</td>
                     <td className="px-3 py-2 text-center">{l.ordered_qty} {l.ordered_unit}</td>
                     <td className="px-3 py-2 text-right">{l.price_baseline ?? '—'}</td>
                     <td className="px-3 py-2 text-right">{l.unit_price ?? '—'}</td>

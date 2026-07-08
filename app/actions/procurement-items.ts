@@ -681,7 +681,7 @@ export async function getProcurementItemSources(itemId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: item } = await (supabase.from('procurement_items') as any)
-    .select('order_id, consolidation_key').eq('id', itemId).single();
+    .select('order_id, consolidation_key, color, unit, total_required_qty, suggested_purchase_qty, final_purchase_qty, stock_deduct_qty').eq('id', itemId).single();
   if (!item) return { error: '采购项不存在' };
 
   const { data: reqs } = await (supabase.from('material_requirements') as any)
@@ -712,7 +712,32 @@ export async function getProcurementItemSources(itemId: string) {
       development_consumption: sl?.qty_per_piece ?? null, net_demand: r.net_purchase_qty ?? null };
   }).filter((s: any) => s.key === (item as any).consolidation_key);
 
-  return { data: sources };
+  // 尺码拆分预览(2026-07-08 用户拍板:尺码+最终采购量要体现在上边)——
+  // 与 generateExecutionLines 同口径:按订单各码件数(优先本色,无则整单)把出单量拆到尺码。
+  // 让采购在确认前就看到"这单最终会按哪些尺码、各买多少",不用等生成执行行。
+  const normC = (s: any) => String(s ?? '').trim().toLowerCase();
+  const { data: lis } = await (supabase.from('order_line_items') as any)
+    .select('color_cn, color_en, sizes').eq('order_id', (item as any).order_id);
+  const byColorSizes = new Map<string, Record<string, number>>();
+  const totalSizes: Record<string, number> = {};
+  for (const li of (lis || [])) {
+    const sz = (li as any).sizes && typeof (li as any).sizes === 'object' ? (li as any).sizes : {};
+    for (const [k, v] of Object.entries(sz)) {
+      const n = Number(v) || 0; if (n <= 0) continue;
+      totalSizes[k] = (totalSizes[k] || 0) + n;
+      for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) {
+        const key = normC(col); if (!byColorSizes.has(key)) byColorSizes.set(key, {});
+        const m = byColorSizes.get(key)!; m[k] = (m[k] || 0) + n;
+      }
+    }
+  }
+  const itemColor = (item as any).color;
+  const sizeCounts = (itemColor && byColorSizes.get(normC(itemColor))) || totalSizes;
+  const orderable = orderableQty(item as any);
+  const sizeBreakdown = distributeBySize(orderable, sizeCounts).filter((s) => s.size != null);
+  const finalQty = (item as any).final_purchase_qty ?? (item as any).suggested_purchase_qty ?? (item as any).total_required_qty ?? null;
+
+  return { data: sources, sizeBreakdown, finalQty, unit: (item as any).unit ?? null };
 }
 
 /** 采购确认:填大货单耗/损耗/安全库存/MOQ/供应商/价/决策,重算 suggested。 */
