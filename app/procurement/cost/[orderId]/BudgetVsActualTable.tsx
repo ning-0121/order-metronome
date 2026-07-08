@@ -14,8 +14,8 @@ export function BudgetVsActualTable({ data }: { data: { rows: Row[]; totals: any
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
         <span className="text-sm font-semibold text-gray-800">📊 预算 vs 实际(逐物料)</span>
-        <span className="text-xs text-gray-400">预算来自报价单(单件用量 × 订单 {orderQty} 件)· 实际下单超预算标红</span>
-        {!has_budget && <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">⚠ 该单未录报价基线,预算列为空</span>}
+        <span className="text-xs text-gray-400">预算来自采购核料(业务填 大货单耗×预算单价 · 逐款加工费/辅料)· 实际下单超预算标红</span>
+        {!has_budget && <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">⚠ 该单未在采购核料录预算(单价/加工费/辅料),预算列为空</span>}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs whitespace-nowrap">

@@ -310,3 +310,75 @@ export async function saveQuoteBaseline(
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, count: lines.length };
 }
+
+/**
+ * 重算订单预算缓存(2026-07-08 弃用报价基线后的新口径:预算来自采购核料业务填的真实物料)。
+ * 面料预算 = Σ(materials_bom 布料行 大货单耗 × 预算单价 × 件数);cmt/辅料 = order_cost_baseline.quote_style_budgets 逐款。
+ * 写 order_cost_baseline 的成本兜底缓存(budget_fabric_amount/budget_fabric_kg/fabric_consumption_kg/cmt_factory_quote),
+ * 供 profit.service / order-financials / procurement / supply-chain 读;并触发利润重算。用 service-role(采购/业务都可触发)。
+ */
+export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?: boolean; error?: string }> {
+  const svc = createServiceRoleClient();
+  const normS = (s: any) => String(s ?? '').trim().toLowerCase();
+  const { data: ord } = await (svc.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+  const orderQty = Number((ord as any)?.quantity) || 0;
+
+  // 件数:按 款×色 / 款 / 整单
+  const { data: lis } = await (svc.from('order_line_items') as any).select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
+  const byStyle = new Map<string, number>(); const byStyleColor = new Map<string, number>();
+  for (const li of (lis || [])) {
+    const q = Number((li as any).qty_pcs) || 0; const st = normS((li as any).style_no);
+    byStyle.set(st, (byStyle.get(st) || 0) + q);
+    for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) byStyleColor.set(`${st}¦${normS(col)}`, q);
+  }
+  const singleStyle = byStyle.size <= 1;
+  const piecesForBom = (b: any): number => {
+    const st = normS(b.style_no);
+    if (b.style_no && b.color) { const v = byStyleColor.get(`${st}¦${normS(b.color)}`); if (v != null) return v; }
+    if (b.style_no) { const v = byStyle.get(st); if (v) return v; }
+    return orderQty;
+  };
+  const qtyForStyle = (st: string): number => { const q = byStyle.get(normS(st)); if (q && q > 0) return q; return singleStyle ? orderQty : 0; };
+
+  // 面料预算(materials_bom 布料行:大货单耗 × 预算单价 × 件数)
+  const { data: bom } = await (svc.from('materials_bom') as any).select('*').eq('order_id', orderId);
+  let budgetFabricAmount = 0; let budgetFabricKg = 0; let consPerPiece = 0;
+  for (const b of (bom || [])) {
+    if ((b as any).material_type !== 'fabric' && (b as any).material_type !== 'lining') continue;
+    const cons = Number((b as any).production_consumption) || 0;
+    const price = Number((b as any).budget_unit_price) || 0;
+    const pcs = piecesForBom(b);
+    if (cons > 0 && pcs > 0) { budgetFabricKg += cons * pcs; consPerPiece += cons; if (price > 0) budgetFabricAmount += cons * price * pcs; }
+  }
+  budgetFabricAmount = Math.round(budgetFabricAmount * 100) / 100;
+  budgetFabricKg = Math.round(budgetFabricKg * 100) / 100;
+  consPerPiece = Math.round(consPerPiece * 10000) / 10000;
+
+  // 加工费(逐款 cmt 按件数加权 → cmt_factory_quote × 总件数 = Σ 款cmt×款件数)
+  const { data: cb } = await (svc.from('order_cost_baseline') as any).select('id, quote_style_budgets').eq('order_id', orderId).maybeSingle();
+  const styleBudgets: any[] = (cb as any)?.quote_style_budgets || [];
+  let cmtTotal = 0; let qSum = 0;
+  for (const b of styleBudgets) { const c = Number(b.cmt); const q = qtyForStyle(b.style_no); if (c > 0 && q > 0) { cmtTotal += c * q; qSum += q; } }
+  const cmtQuote = qSum > 0 ? Math.round(cmtTotal / qSum * 10000) / 10000 : null;
+
+  const payload: Record<string, unknown> = {
+    budget_fabric_amount: budgetFabricAmount > 0 ? budgetFabricAmount : null,
+    budget_fabric_kg: budgetFabricKg > 0 ? budgetFabricKg : null,
+    fabric_consumption_kg: consPerPiece > 0 ? consPerPiece : null,
+    cmt_factory_quote: cmtQuote,
+    updated_at: new Date().toISOString(),
+  };
+  if ((cb as any)?.id) {
+    const { error } = await (svc.from('order_cost_baseline') as any).update(payload).eq('order_id', orderId);
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await (svc.from('order_cost_baseline') as any).insert({ order_id: orderId, ...payload });
+    if (error) return { error: error.message };
+  }
+  try {
+    const { calculateProfitSnapshot } = await import('@/lib/services/profit.service');
+    const sb = await createClient();
+    await calculateProfitSnapshot(sb, { orderId, snapshotType: 'live' });
+  } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 利润重算失败(不阻断):', e?.message); }
+  return { ok: true };
+}

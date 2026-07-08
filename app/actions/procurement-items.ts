@@ -322,8 +322,10 @@ export async function listBomConsumptionLines(orderId: string) {
     spec: b.spec || null,
     unit: b.unit || null,
     development_consumption: b.qty_per_piece ?? null,          // 开发单耗(业务,只读)
-    budget_consumption: quoteOf(b).cons,                       // 报价单耗(报价基线,只读带入)
-    budget_unit_price: quoteOf(b).price,                       // 报价单价(报价基线,只读带入,供比对)
+    // 预算单价:业务在采购核料填(存 materials_bom.budget_unit_price);老单退回报价基线(将弃用)
+    budget_unit_price: b.budget_unit_price ?? quoteOf(b).price ?? null,
+    // 预算单耗 = 大货单耗(采购真实口径);老单退回报价单耗。面料预算=预算单耗×预算单价×件数
+    budget_consumption: b.production_consumption ?? quoteOf(b).cons ?? null,
     production_consumption: b.production_consumption ?? null,  // 大货单耗(业务/技术填,采购核实)
     over_purchase_pct: b.over_purchase_pct ?? null,            // 抛量%(采购填)
     required: b.material_type === 'fabric' || b.material_type === 'lining',  // 布料必核
@@ -381,6 +383,82 @@ export async function saveBomOverPurchasePct(orderId: string, entries: Record<st
   }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, saved };
+}
+
+/** 保存面料预算单价(2026-07-08 用户拍板:预算改在采购核料按真实物料填,取代报价单识别)。批量 {bom_id: 单价}。 */
+export async function saveBomBudgetUnitPrice(orderId: string, entries: Record<string, number | null>) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const uRoles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!uRoles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
+    return { error: '仅业务/理单/采购/管理员可填预算单价' };
+  }
+  let saved = 0;
+  for (const [bomId, val] of Object.entries(entries || {})) {
+    const v = val === null || val === undefined || isNaN(Number(val)) || Number(val) <= 0 ? null : Number(val);
+    const { error } = await (supabase.from('materials_bom') as any)
+      .update({ budget_unit_price: v }).eq('id', bomId).eq('order_id', orderId);
+    if (error) {
+      if (/budget_unit_price|column .* does not exist/i.test(error.message || '')) {
+        return { error: '预算单价列尚未建立:请先在 Supabase 执行 20260708_bom_budget_unit_price.sql' };
+      }
+      return { error: friendlyError(error) };
+    }
+    saved++;
+  }
+  // 预算变动 → 重算财务成本兜底缓存(budget_fabric_amount 等)
+  try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, saved };
+}
+
+/** 逐款预算(加工费 + 辅料单件总价):读。存 order_cost_baseline.quote_style_budgets(复用,业务在采购核料填)。 */
+export async function getOrderStyleBudgets(orderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: cb } = await (supabase.from('order_cost_baseline') as any)
+    .select('quote_style_budgets').eq('order_id', orderId).maybeSingle();
+  const existing: any[] = (cb as any)?.quote_style_budgets || [];
+  // 款号来自 order_line_items(逐款明细),预填每款一行;已存的值带回
+  const { data: lis } = await (supabase.from('order_line_items') as any).select('style_no').eq('order_id', orderId);
+  const norm = (s: any) => String(s ?? '').trim();
+  const styles = [...new Set((lis || []).map((l: any) => norm(l.style_no)).filter(Boolean))];
+  const byStyle = new Map(existing.map((b: any) => [norm(b.style_no), b]));
+  const rows = (styles.length ? styles : existing.map((b: any) => norm(b.style_no))).map((st: string) => {
+    const b = byStyle.get(st) || {};
+    return { style_no: st, cmt: (b as any).cmt ?? null, trim_budget: (b as any).trim_budget ?? null };
+  });
+  return { data: rows };
+}
+
+/** 逐款预算:保存(加工费 cmt + 辅料单件总价 trim_budget)。业务/采购/管理员可填。 */
+export async function saveOrderStyleBudgets(orderId: string, budgets: Array<{ style_no: string; cmt: number | null; trim_budget: number | null }>) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const uRoles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!uRoles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
+    return { error: '仅业务/理单/采购/管理员可填加工费/辅料预算' };
+  }
+  const num = (v: any) => { const n = Number(v); return isFinite(n) && n > 0 ? n : null; };
+  const clean = (budgets || []).filter((b) => String(b.style_no || '').trim())
+    .map((b) => ({ style_no: String(b.style_no).trim(), cmt: num(b.cmt), trim_budget: num(b.trim_budget) }));
+  const { data: existing } = await (supabase.from('order_cost_baseline') as any).select('id').eq('order_id', orderId).maybeSingle();
+  const payload = { quote_style_budgets: clean, updated_at: new Date().toISOString() };
+  if (existing) {
+    const { error } = await (supabase.from('order_cost_baseline') as any).update(payload).eq('order_id', orderId);
+    if (error) return { error: friendlyError(error) };
+  } else {
+    const { error } = await (supabase.from('order_cost_baseline') as any).insert({ order_id: orderId, ...payload });
+    if (error) return { error: friendlyError(error) };
+  }
+  try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }
 
 /**

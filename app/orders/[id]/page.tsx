@@ -21,7 +21,6 @@ import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
 import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
-import { QuoteBaselineTab } from '@/components/tabs/QuoteBaselineTab';
 import { ProductVariantPicker } from '@/components/ProductVariantPicker';
 import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
 import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
@@ -80,8 +79,8 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  // 2026-07-08 用户拍板:弃用旧「成本控制」(单款折叠/取平均),成本单一真相全走「报价基线」。cost_control 不再是有效 tab。
-  const allowedTabs = ['basic', 'quote_baseline', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  // 2026-07-08 用户拍板:弃用「成本控制」+「报价基线/报价单识别」(布料名对不上采购)。预算/成本真相全走「采购核料」。
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -423,7 +422,6 @@ export default async function OrderDetailPage({
             {[
               // 精简为常用 8 个标签(用户 2026-07 拍板);其余隐藏、功能未删,仍可经 ?tab= URL 访问
               { key: 'basic', label: '基本信息' },
-              { key: 'quote_baseline', label: '📋 报价基线' },
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'manufacturing_order', label: '🏭 生产任务单' },
               { key: 'bom', label: '原辅料和包装' },
@@ -740,12 +738,7 @@ export default async function OrderDetailPage({
           </>
         )}
 
-        {/* Tab: 报价基线(成本单一真相 → BOM/核料超单耗超价对照 · 财务预算) */}
-        {activeTab === 'quote_baseline' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <QuoteBaselineTab orderId={id} />
-          </div>
-        )}
+        {/* Tab: 报价基线 —— 2026-07-08 已弃用(报价单布料名对不上采购)。预算/成本真相并入「🛒 采购核料」逐料填。 */}
 
         {/* Tab: 执行进度 */}
         {activeTab === 'progress' && (
