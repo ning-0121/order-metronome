@@ -17,7 +17,7 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '' };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[] };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -95,6 +95,25 @@ export function BomTab({ orderId }: { orderId: string }) {
     } finally { setImgUploadingId(null); }
   }
 
+  // 录料表单内直接传图(新增/编辑都可):slot 0→辅料单「示例画稿」列, slot 1→「位置说明及示意图」列。
+  // 按位置写进 form.image_urls[slot],保存时随行入库;生成辅料单直接读该位置,不用再单独去列表贴图。
+  const [formImgUploading, setFormImgUploading] = useState<0 | 1 | null>(null);
+  async function uploadFormImage(slot: 0 | 1, file: File) {
+    setFormImgUploading(slot);
+    try {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client');
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `materials/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type });
+      if (upErr) { alert('上传失败:' + upErr.message); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      setForm(f => { const arr = [...(f.image_urls || [])]; arr[slot] = data.publicUrl; return { ...f, image_urls: arr }; });
+    } finally { setFormImgUploading(null); }
+  }
+  const removeFormImage = (slot: 0 | 1) =>
+    setForm(f => { const arr = [...(f.image_urls || [])]; arr[slot] = ''; return { ...f, image_urls: arr }; });
+
   // 原辅料单批量识别(上传文件 → AI 读行 → 检查修改 → 批量入库)
   const [parsing, setParsing] = useState(false);
   const [parseRows, setParseRows] = useState<any[] | null>(null);
@@ -166,6 +185,7 @@ export function BomTab({ orderId }: { orderId: string }) {
       notes: form.notes || undefined, special_requirements: form.special_requirements || undefined,
       style_no: form.style_no?.trim() || undefined,
       pack_size: form.pack_size ? parseFloat(form.pack_size) : undefined,   // 每包件数(打包辅料;需求÷每包件数)
+      image_urls: (form.image_urls || []).map(u => u || ''),   // 辅料单图(示例画稿[0]/示意图[1]),按位置随行入库
       // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
       ...(editId && editingTemplate ? { override_reason: form.override_reason || undefined } : {}),
     };
@@ -210,7 +230,9 @@ export function BomTab({ orderId }: { orderId: string }) {
       qty_per_piece: item.qty_per_piece?.toString() || '',
       total_qty: item.total_qty?.toString() || '', unit: item.unit || 'meter', supplier: item.supplier || '',
       spec: item.spec || '', notes: item.notes || '', special_requirements: item.special_requirements || '',
+      image_urls: (Array.isArray(item.image_urls) ? item.image_urls : []).map((u: any) => String(u || '')),
       override_reason: item.override_reason || '', style_no: item.style_no || '',
+      pack_size: item.pack_size != null ? String(item.pack_size) : '',
     });
     setShowAdd(true);
   }
@@ -409,7 +431,7 @@ export function BomTab({ orderId }: { orderId: string }) {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="供应商" value={form.supplier} onChange={e => set('supplier', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="部位 placement" value={form.placement} onChange={e => set('placement', e.target.value)}
+        <input placeholder="位置说明(进辅料单)" title="辅料单「位置说明」列。如:左胸/后领中/侧缝" value={form.placement} onChange={e => set('placement', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="颜色 color" value={form.color} onChange={e => set('color', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
@@ -419,6 +441,36 @@ export function BomTab({ orderId }: { orderId: string }) {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
         <input placeholder="特殊要求" value={form.special_requirements} onChange={e => set('special_requirements', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
+      </div>
+      {/* 辅料单图:两个槽按位置直传,保存随行入库;「生成辅料单」直接读进对应列 */}
+      <div>
+        <p className="text-xs text-gray-500 mb-1.5">🖼 辅料单图片（可选，上传后「生成辅料单」自动填入对应列）</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {([0, 1] as const).map(slot => {
+            const url = form.image_urls?.[slot] || '';
+            const label = slot === 0 ? '示例画稿（以实际为准）' : '位置说明及示意图';
+            return (
+              <div key={slot} className="flex items-center gap-3 rounded-lg border border-dashed border-indigo-300 bg-white p-2">
+                {url
+                  ? <img src={url} alt={label} className="w-16 h-16 object-cover rounded border border-gray-200" />
+                  : <div className="w-16 h-16 rounded bg-gray-50 border border-gray-200 grid place-items-center text-[11px] text-gray-300">无图</div>}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-gray-700 truncate">{label}</p>
+                  <p className="text-[11px] text-gray-400">→ 辅料单「{label}」列</p>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <label className="text-xs px-2.5 py-1 rounded bg-indigo-600 text-white cursor-pointer hover:bg-indigo-700">
+                      {formImgUploading === slot ? '上传中…' : (url ? '换图' : '上传图片')}
+                      <input type="file" accept="image/*" className="hidden" disabled={formImgUploading !== null}
+                        onChange={e => { const f = e.target.files?.[0]; if (f) uploadFormImage(slot, f); e.currentTarget.value = ''; }} />
+                    </label>
+                    {url && <button type="button" onClick={() => removeFormImage(slot)}
+                      className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-200">移除</button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
       <div className="grid grid-cols-3 gap-3">
         <input placeholder="单件用量" type="number" step="0.01" value={form.qty_per_piece} onChange={e => set('qty_per_piece', e.target.value)}

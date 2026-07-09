@@ -76,6 +76,7 @@ export async function addBomItem(orderId: string, item: {
   notes?: string; special_requirements?: string;
   style_no?: string;   // S1.2:归属款号(空 = 整单通用)
   pack_size?: number;  // 每包件数(打包辅料;需求÷每包件数)
+  image_urls?: string[];   // [0]→辅料单「示例画稿」, [1]→「位置说明及示意图」(录料时直接上传)
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -109,6 +110,7 @@ export async function addBomItem(orderId: string, item: {
     special_requirements: item.special_requirements || null,
     style_no: item.style_no?.trim() || null,
     pack_size: item.pack_size != null && item.pack_size > 1 ? item.pack_size : null,   // 每包件数
+    image_urls: Array.isArray(item.image_urls) && item.image_urls.some(Boolean) ? item.image_urls : null,  // 辅料单图(示例画稿/示意图)
     source: 'manual',                      // 手动新增(Phase 2A 来源标记)
   };
   let { error } = await (supabase.from('materials_bom') as any).insert(insertRow);

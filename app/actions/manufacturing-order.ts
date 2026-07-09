@@ -466,10 +466,12 @@ async function buildMoWorkbook(
     ts.getRow(2).height = 40;
 
     const trims = bom.filter((b: any) => b.material_type !== 'fabric');
-    // 预取每行辅料图(image_urls[0]→示例画稿, image_urls[1]→示意图);并行,抓取失败不阻塞生成。
+    // 预取每行辅料图,位置固定:image_urls[0]→示例画稿, image_urls[1]→位置说明及示意图。
+    // 按位置取(不再 filter 压缩):表单两个图槽各写各的下标,只填示意图也不会错落到示例画稿列。并行,抓取失败不阻塞生成。
     const trimImgs = await Promise.all(trims.map(async (b: any) => {
-      const urls = (Array.isArray(b.image_urls) ? b.image_urls : []).filter((u: any) => typeof u === 'string' && u);
-      const [a, c] = await Promise.all([fetchImage(urls[0] || ''), fetchImage(urls[1] || '')]);
+      const urls = (Array.isArray(b.image_urls) ? b.image_urls : []);
+      const pick = (u: any) => (typeof u === 'string' && /^https?:\/\//.test(u)) ? u : '';
+      const [a, c] = await Promise.all([fetchImage(pick(urls[0])), fetchImage(pick(urls[1]))]);
       return { a, c };
     }));
 
