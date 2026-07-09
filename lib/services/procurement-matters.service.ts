@@ -86,7 +86,7 @@ export async function materializeProcurementMatters(
 
     // ════════ 采购行：缺料 / 供应商延期 / 催货停滞 / 价格异常 ════════
     const { data: lines, error: lineErr } = await (supabase.from('procurement_line_items') as any)
-      .select('id, order_id, line_status, material_name, category, supplier_id, supplier_name, required_by, promised_date, expected_arrival, po_no, unit_price, price_baseline, price_variance_pct, chase_count, last_chased_at, ordered_qty, ordered_unit, ordered_at, created_at, orders(order_no, customer_name, lifecycle_status)')
+      .select('id, order_id, procurement_item_id, line_status, material_name, category, supplier_id, supplier_name, required_by, promised_date, expected_arrival, po_no, unit_price, price_baseline, price_variance_pct, chase_count, last_chased_at, ordered_qty, ordered_unit, ordered_at, created_at, orders(order_no, customer_name, lifecycle_status, factory_date)')
       .in('line_status', PRICE_WATCH_STATUSES)
     if (lineErr) return err(`读取 procurement_line_items 失败: ${lineErr.message}`)
 
@@ -95,10 +95,28 @@ export async function materializeProcurementMatters(
     )
     const linesScanned = activeLines.length
 
+    // 风险基准日(2026-07-08 用户拍板:需到日优先,没填回退订单出厂日)——
+    // 采购手锁了「需到日」(required_date_locked)→ 用行上的 required_by(那个手选到货日);
+    // 没锁 → 系统那个"出厂日−交期"的自作主张日不算数,回退到订单出厂日(factory_date)判风险。
+    const piIds = [...new Set(activeLines.map((l: any) => l.procurement_item_id).filter(Boolean))]
+    const lockByPi = new Map<string, boolean>()
+    if (piIds.length) {
+      const { data: pis } = await (supabase.from('procurement_items') as any)
+        .select('id, required_date_locked').in('id', piIds)
+      for (const p of (pis || [])) lockByPi.set((p as any).id, !!(p as any).required_date_locked)
+    }
+    const effReqBy = (l: any): string | null => {
+      const locked = l.procurement_item_id ? lockByPi.get(l.procurement_item_id) : false
+      if (locked && l.required_by) return l.required_by
+      return l.orders?.factory_date || l.required_by || null
+    }
+    const shortageKeys = new Set<string>()   // 缺料风险按物料去重(同料同单只报一条,不再逐行刷屏)
+
     for (const l of activeLines) {
       const orderNo = l.orders?.order_no ?? null
       const catLabel = CAT_LABEL[l.category || 'other'] || l.category || ''
-      const lamp: LineLamp = computeLineLamp(l, { now })
+      const reqBy = effReqBy(l)                       // 生效需到日(需到日优先·否则出厂日)
+      const lamp: LineLamp = computeLineLamp({ ...l, required_by: reqBy }, { now })
       const isPreArrival = PRE_ARRIVAL_STATUSES.includes(l.line_status)
       const eta = l.expected_arrival || l.promised_date
 
@@ -107,21 +125,25 @@ export async function materializeProcurementMatters(
         const baseSeverity: 'high' | 'medium' = lamp === 'red' ? 'high' : 'medium'
 
         if (l.line_status === 'pending_order') {
-          // 还没下单就快/已晚 → 缺料风险
-          matters.push({
-            order_id: l.order_id, order_no: orderNo,
-            supplier_id: l.supplier_id ?? null, line_item_id: l.id,
-            matter_type: 'material_shortage', severity: baseSeverity,
-            title: `缺料风险：${l.material_name}（${catLabel}）需 ${fmtDate(l.required_by)} 前到，尚未下单`,
-            evidence: {
-              lamp, line_status: l.line_status, required_by: l.required_by,
-              supplier_name: l.supplier_name, category: l.category,
-              ordered_qty: l.ordered_qty, ordered_unit: l.ordered_unit,
-            },
-            source: 'line', source_ref: `line:${l.id}`,
-            matter_key: `material_shortage:line:${l.id}`,
-            detected_at: l.required_by || l.created_at || new Date(nowMs).toISOString(),
-          })
+          // 还没下单就快/已晚 → 缺料风险(按 订单+物料 去重,一料一条)
+          const mKey = `material_shortage:${l.order_id}:${String(l.material_name || '').trim()}`
+          if (!shortageKeys.has(mKey)) {
+            shortageKeys.add(mKey)
+            matters.push({
+              order_id: l.order_id, order_no: orderNo,
+              supplier_id: l.supplier_id ?? null, line_item_id: l.id,
+              matter_type: 'material_shortage', severity: baseSeverity,
+              title: `缺料风险：${l.material_name}（${catLabel}）需 ${fmtDate(reqBy)} 前到，尚未下单`,
+              evidence: {
+                lamp, line_status: l.line_status, required_by: reqBy,
+                supplier_name: l.supplier_name, category: l.category,
+                ordered_qty: l.ordered_qty, ordered_unit: l.ordered_unit,
+              },
+              source: 'line', source_ref: `line:${l.id}`,
+              matter_key: mKey,
+              detected_at: reqBy || l.created_at || new Date(nowMs).toISOString(),
+            })
+          }
         } else {
           // 在途行：催货达阈值 → 催货停滞；否则 → 供应商延期
           const chaseCount = l.chase_count || 0
@@ -134,29 +156,29 @@ export async function materializeProcurementMatters(
               title: `催货停滞：${l.material_name} 已催 ${chaseCount} 次仍未到（${l.supplier_name || '未填供应商'}）`,
               evidence: {
                 lamp, chase_count: chaseCount, last_chased_at: l.last_chased_at,
-                required_by: l.required_by, expected_arrival: eta,
+                required_by: reqBy, expected_arrival: eta,
                 supplier_name: l.supplier_name, line_status: l.line_status,
               },
               source: 'line', source_ref: `line:${l.id}`,
               matter_key: `chase_stalled:line:${l.id}`,
-              detected_at: l.required_by || l.last_chased_at || new Date(nowMs).toISOString(),
+              detected_at: reqBy || l.last_chased_at || new Date(nowMs).toISOString(),
             })
           } else {
             matters.push({
               order_id: l.order_id, order_no: orderNo,
               supplier_id: l.supplier_id ?? null, line_item_id: l.id,
               matter_type: 'supplier_delay', severity: baseSeverity,
-              title: `供应商交期风险：${l.supplier_name || '供应商'} 的 ${l.material_name} 预计 ${fmtDate(eta)}，需 ${fmtDate(l.required_by)} 前到`,
+              title: `供应商交期风险：${l.supplier_name || '供应商'} 的 ${l.material_name} 预计 ${fmtDate(eta)}，需 ${fmtDate(reqBy)} 前到`,
               evidence: {
-                lamp, line_status: l.line_status, required_by: l.required_by,
+                lamp, line_status: l.line_status, required_by: reqBy,
                 expected_arrival: l.expected_arrival, promised_date: l.promised_date,
                 chase_count: chaseCount, supplier_name: l.supplier_name,
                 material_name: l.material_name, supplier_id: l.supplier_id ?? null,   // 处置用:填预计到货日
               },
               source: 'line', source_ref: `line:${l.id}`,
               // 去重(2026-07-05 用户拍板:同料同供应商同需求日只报一条,不再黑/浓咖啡各一条)
-              matter_key: `supplier_delay:${l.order_id}:${l.supplier_id || 'nosup'}:${String(l.material_name || '').trim()}:${l.required_by || 'nodate'}`,
-              detected_at: l.required_by || l.created_at || new Date(nowMs).toISOString(),
+              matter_key: `supplier_delay:${l.order_id}:${l.supplier_id || 'nosup'}:${String(l.material_name || '').trim()}:${reqBy || 'nodate'}`,
+              detected_at: reqBy || l.created_at || new Date(nowMs).toISOString(),
             })
           }
         }
