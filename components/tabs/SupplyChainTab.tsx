@@ -39,7 +39,7 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-8 text-gray-400 text-sm">加载中...</div>;
   if (!data) return <div className="text-center py-8 text-gray-400 text-sm">暂无供应链数据</div>;
 
-  const { statusCounts: sc, attentionCount, byCategory, receipts, budget, canSeeFinancials, lines } = data;
+  const { statusCounts: sc, attentionCount, byCategory, receipts, lines } = data;
   const hasLines = lines.length > 0;
 
   const stats = [
@@ -69,23 +69,7 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
         ))}
       </div>
 
-      {/* 物料预算（红线：仅财务） */}
-      {canSeeFinancials && (
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-sm font-semibold text-gray-800 mb-2">🧵 物料预算</p>
-          {budget && (budget.budget_fabric_kg || budget.budget_fabric_amount) ? (
-            <div className="flex flex-wrap gap-x-8 gap-y-1 text-sm">
-              <span className="text-gray-500">单件用量 <strong className="text-gray-800 font-mono">{budget.fabric_consumption_kg ?? '—'} KG</strong></span>
-              <span className="text-gray-500">预算面料 <strong className="text-indigo-700 font-mono">{budget.budget_fabric_kg ?? '—'} KG</strong></span>
-              <span className="text-gray-500">预算金额 <strong className="text-indigo-700 font-mono">¥{budget.budget_fabric_amount?.toLocaleString() ?? '—'}</strong></span>
-            </div>
-          ) : (
-            <p className="text-xs text-amber-600">
-              未建立成本基线。请到「💰 成本控制」Tab 上传核算单或手工录入预算。
-            </p>
-          )}
-        </div>
-      )}
+      {/* 物料预算块已移除(2026-07-09 用户:已弃用成本基线,概览不再展示预算/未建基线提示) */}
 
       {/* 物料明细（只读） */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">

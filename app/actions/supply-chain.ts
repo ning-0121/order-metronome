@@ -68,10 +68,16 @@ export async function getOrderSupplyChainOverview(
   const roles = await getUserRoles(supabase, user.id);
   const fin = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
   const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
+  // 访问控制:先用用户会话(RLS)确认「能看这张订单」,再用 service-role 读执行行。
+  // 背景(2026-07-09 用户:业务视角下采购单后采购进度空):pli_select 只放行采购侧角色/订单归属人,
+  //   plain sales/非归属业务看订单虽被 orders RLS 放行,却看不到其 procurement_line_items → 概览整片为空。
+  //   概览是只读、已按 canSeeFloor 剥离底价 → 按「能看订单=能看其采购概览」对齐(底价仍列级门控,不泄价)。
+  const { data: canView } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
+  if (!canView) return { error: '无权查看此订单的采购概览' };
   const baseCols =
     'id, procurement_item_id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name' +
     (canSeeFloor ? ', unit_price' : '');
-  const client = (canSeeFloor ? createServiceRoleClient() : supabase);
+  const client = createServiceRoleClient();   // 可见性已由上方订单 RLS 校验;此处只读、底价按 baseCols 列门控
   // size 是真列(20260707);未授权/缓存陈旧 → 降级去 size(不 brick 整页)
   let { data: lines, error: linesErr } = await (client.from('procurement_line_items') as any)
     .select(baseCols + ', size').eq('order_id', orderId).order('category', { ascending: true });
