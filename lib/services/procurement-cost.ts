@@ -8,6 +8,26 @@
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** 实际辅料总价(2026-07-08 用户拍板 A:采购填的单价 × 采购数量,填了即算,不等下单)。
+ *  只统辅料(category≠面料/里料);采购数量 = 最终采购量(final ?? suggested ?? total_required)− 库存抵扣。 */
+export function computeActualAccessoryTotal(items: Array<{
+  category?: string | null; unit_price?: number | null;
+  final_purchase_qty?: number | null; suggested_purchase_qty?: number | null;
+  total_required_qty?: number | null; stock_deduct_qty?: number | null;
+}>): number {
+  let total = 0;
+  for (const it of items || []) {
+    const cat = String(it.category ?? '').trim().toLowerCase();
+    if (cat === 'fabric' || cat === 'lining' || cat === '面料' || cat === '里料') continue;   // 面料另算
+    const price = Number(it.unit_price) || 0;
+    if (!(price > 0)) continue;
+    const gross = Number(it.final_purchase_qty ?? it.suggested_purchase_qty ?? it.total_required_qty) || 0;
+    const qty = Math.max(0, gross - (Number(it.stock_deduct_qty) || 0));
+    total += price * qty;
+  }
+  return round2(total);
+}
+
 export interface CostLine {
   material_name?: string | null;
   category?: string | null;

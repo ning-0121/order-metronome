@@ -258,6 +258,29 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   return { data: { order, rows, totals, orderQty, has_budget: budgetMap.size > 0 || hasTrimBudget || hasCmtBudget } };
 }
 
+/** 辅料 预算 vs 实际(2026-07-08 用户拍板 A):实际=采购填的单价×采购数量(填了即算)。仅底价可见角色。 */
+export async function getAccessoryCostSummary(orderId: string): Promise<{ data?: { budget: number | null; actual: number; over: number | null; itemsPriced: number; itemsTotal: number }; error?: string }> {
+  const { userId, canFloor } = await authFloor();
+  if (!userId) return { error: '请先登录' };
+  if (!canFloor) return { error: '无权查看采购成本' };
+  const svc = createServiceRoleClient();
+  const { data: items } = await (svc.from('procurement_items') as any)
+    .select('category, unit_price, final_purchase_qty, suggested_purchase_qty, total_required_qty, stock_deduct_qty')
+    .eq('order_id', orderId);
+  const trims = (items || []).filter((it: any) => {
+    const c = String(it.category ?? '').trim().toLowerCase();
+    return c !== 'fabric' && c !== 'lining' && c !== '面料' && c !== '里料';
+  });
+  const { computeActualAccessoryTotal } = await import('@/lib/services/procurement-cost');
+  const actual = computeActualAccessoryTotal(trims as any);
+  const itemsPriced = trims.filter((it: any) => Number(it.unit_price) > 0).length;
+  const { data: base } = await (svc.from('order_cost_baseline') as any)
+    .select('accessory_budget_total').eq('order_id', orderId).maybeSingle();
+  const budget = (base as any)?.accessory_budget_total != null ? Number((base as any).accessory_budget_total) : null;
+  const over = budget != null ? Math.round((actual - budget) * 100) / 100 : null;
+  return { data: { budget, actual, over, itemsPriced, itemsTotal: trims.length } };
+}
+
 /** 显式回填：以采购实际成本写 order_financials.actual_material_cost + 重算利润（人工触发）。 */
 export async function backfillActualMaterialCost(orderId: string): Promise<{ error?: string; ok?: boolean; actual?: number }> {
   const { supabase, userId, canFloor } = await authFloor();

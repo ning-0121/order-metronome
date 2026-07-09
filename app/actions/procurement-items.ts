@@ -961,6 +961,10 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
         .eq('procurement_item_id', itemId).is('purchase_order_id', null);
     } catch { /* 不阻断 */ }
   }
+  // 采购填/改了单价 → 重算「实际辅料总价」并即时推财务(2026-07-08 用户拍板 A;幂等,改了才推)
+  if ('unit_price' in fields) {
+    try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
+  }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }

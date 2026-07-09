@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { SearchableSelect } from '@/components/SearchableSelect';
 import {
@@ -12,6 +12,7 @@ import {
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
 import { getOrderPurchaseOrders } from '@/app/actions/purchase-orders';
+import { getAccessoryCostSummary } from '@/app/actions/procurement-cost';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
 import { computeSuggestedPurchaseQty } from '@/lib/services/procurement-consolidation';
@@ -43,9 +44,12 @@ const FORM_KEYS = [
   'is_substitute', 'substitute_reason', 'is_split', 'is_outsourced', 'risk_flag', 'risk_note', 'procurement_notes',
 ];
 
-export function ProcurementItemsTab({ orderId }: { orderId: string }) {
+export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string; focusItemId?: string | null }) {
   const { confirm, prompt, dialog } = useDialogs();
   const [items, setItems] = useState<any[]>([]);
+  // 聚焦单料(采购中心点某行「任务单」带 ?item= 进来):只显示这一款料 + 顶部横幅可切回全部
+  const [focus, setFocus] = useState<string | null>(focusItemId ?? null);
+  const autoSelected = useRef(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -67,8 +71,10 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   const [priceEdit, setPriceEdit] = useState<Record<string, string>>({}); // 预算单价(业务填,逐料;2026-07-08 弃报价基线)
   const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/件)
   const [accessoryTotal, setAccessoryTotal] = useState('');   // 整单辅料总价一口价
+  const [accCost, setAccCost] = useState<{ budget: number | null; actual: number; over: number | null; itemsPriced: number; itemsTotal: number } | null>(null);  // 辅料 预算vs实际(采购填价)
   const [consSaving, setConsSaving] = useState(false);
   const loadCons = async () => {
+    getAccessoryCostSummary(orderId).then(r => setAccCost((r as any).data ?? null));
     const [r, sb] = await Promise.all([listBomConsumptionLines(orderId), getOrderStyleBudgets(orderId)]);
     if ((r as any).data) {
       setConsLines((r as any).data);
@@ -130,6 +136,14 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [orderId]);
+  // 带 ?item= 聚焦进来:首次加载到该料时自动展开其明细(找不到=已被归并/删除,退回全部,不留空白)
+  useEffect(() => {
+    if (autoSelected.current || !focus || items.length === 0) return;
+    autoSelected.current = true;
+    const it = items.find(i => i.id === focus);
+    if (it) select(it); else setFocus(null);
+    /* eslint-disable-next-line */
+  }, [items, focus]);
 
   // 删除整条采购项(仅草稿;连带清未归单执行行)
   async function delItem(it: any) {
@@ -388,6 +402,9 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
 
   const sel = items.find(i => i.id === selId);
+  // 聚焦单料:物料表只渲染这一款(进度/归并/核料对照等全局统计仍按整单,口径不变)
+  const focusItem = focus ? items.find(i => i.id === focus) : null;
+  const visibleItems = focusItem ? [focusItem] : items;
 
   // ── 阶段判定(2026-07-03 用户拍板:下完单核料转入追踪模式,不再摆工作台) ──
   const ORDERED_PLUS = ['ordered', 'partially_received', 'completed', 'closed'];
@@ -726,14 +743,28 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
                 </table>
               </div>
               <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-indigo-100">
-                <span className="text-xs font-semibold text-indigo-800">🧷 整单辅料总价</span>
+                <span className="text-xs font-semibold text-indigo-800">🧷 整单辅料总价(业务预算)</span>
                 <span className="text-gray-400 text-sm">¥</span>
                 <input type="number" step="any" min="0" value={accessoryTotal}
                   placeholder="全单辅料合并一口价" disabled={trackingPhase}
                   onChange={e => setAccessoryTotal(e.target.value)}
                   className="w-40 rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
-                <span className="text-[11px] text-gray-400">整单辅料(标/袋/吊牌…)合并一个总价,辅料预算 = 本值(不按款、不按件数)</span>
+                <span className="text-[11px] text-gray-400">业务给的辅料预算一口价(不按款/件数)</span>
               </div>
+              {/* 实际辅料总价(采购填的单价×数量,填了即算;2026-07-08 用户拍板 A)*/}
+              {accCost && (accCost.itemsTotal > 0) && (
+                <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-indigo-100 text-xs">
+                  <span className="font-semibold text-emerald-800">💰 实际辅料总价</span>
+                  <span className="font-mono font-semibold text-emerald-700">¥{accCost.actual.toLocaleString()}</span>
+                  <span className="text-gray-400">(采购填价 · {accCost.itemsPriced}/{accCost.itemsTotal} 项已填单价)</span>
+                  {accCost.over != null && accCost.budget != null && (
+                    accCost.over > 0
+                      ? <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">⚠️ 超预算 ¥{accCost.over.toLocaleString()}</span>
+                      : <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 省 ¥{Math.abs(accCost.over).toLocaleString()}</span>
+                  )}
+                  <span className="text-gray-400">已同步财务</span>
+                </div>
+              )}
             </div>
           )}
           </>}
@@ -753,6 +784,27 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
           <span className="text-xs text-emerald-700">
             归单页勾选执行行 → 建采购单 → 点「下单」(财务自动收到应付+付款计划,行进入待催货追踪) → 「导出采购单(含价)」发供应商 / 无价版发内部
           </span>
+        </div>
+      )}
+
+      {/* 聚焦单料横幅:从采购中心点某行「任务单」带 ?item= 进来时,只看这一款料;一键切回整单 */}
+      {focusItem && (
+        <div className="flex items-center gap-3 flex-wrap rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-2.5">
+          <span className="text-sm text-indigo-900">
+            🔎 只看这一款料:<b>{focusItem.material_name || focusItem.item_no || '—'}</b>
+            {focusItem.color ? <span className="ml-1 text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700">{focusItem.color}</span> : null}
+          </span>
+          <button onClick={() => { setFocus(null); setSelId(null); }}
+            className="ml-auto text-xs px-3 py-1.5 rounded-lg border border-indigo-300 bg-white text-indigo-700 font-medium hover:bg-indigo-50">
+            查看全部物料（{items.length}）
+          </button>
+        </div>
+      )}
+      {/* 聚焦进来但该料已不在清单(被归并/删除):提示并给回退,不留空白页 */}
+      {focus && !focusItem && items.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <span>该料已被归并或删除,已为你显示整单物料。</span>
+          <button onClick={() => setFocus(null)} className="ml-auto text-xs px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-700 font-medium hover:bg-amber-100">查看全部物料（{items.length}）</button>
         </div>
       )}
 
@@ -806,7 +858,7 @@ export function ProcurementItemsTab({ orderId }: { orderId: string }) {
               ))}
             </tr></thead>
             <tbody>
-              {items.map(it => (
+              {visibleItems.map(it => (
                 <tr key={it.id} className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${selId === it.id ? 'bg-indigo-50/40' : ''}`} onClick={() => select(it)}>
                   <td className="py-2 px-2" onClick={e => e.stopPropagation()}>
                     {canBulkConfirm(it) ? (
