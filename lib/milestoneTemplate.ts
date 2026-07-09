@@ -72,30 +72,32 @@ export const MILESTONE_TEMPLATE_V2: Array<{
   evidence_note?: string;
 }> = [
   // 2026-07-09 用户拍板:业务执行全流程 14 节点(把 V2 砍掉的业务节点补回 + 新增 PI/CI)。
-  // 业务线节点由业务开发(sales)/业务执行(merchandiser)牵头;采购/生产/财务节点保留。
+  // 业务线节点全部 owner_role=sales(节拍器里"业务"=业务执行部,getRoleLabel 显示"业务执行";
+  //   merchandiser 已并入"生产部QC",故业务节点不能用 merchandiser 否则责任人显示成生产部QC);
+  //   采购/生产/物流/财务节点保留各自角色。
   { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "业务 + 财务双确认;财务核价格/账期,业务核订单要求" },
   { step_key: "pi_confirmed", name: "PI制作·客户确认", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "业务制作 PI(形式发票)发客户确认;上传 PI 文件" },
-  { step_key: "production_order_upload", name: "生产单上传", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+  { step_key: "production_order_upload", name: "生产单上传", owner_role: "sales", is_critical: false, evidence_required: true,
     evidence_note: "业务上传生产单 + 原辅料单" },
   { step_key: "procurement_order_placed", name: "采购下单", owner_role: "procurement", is_critical: true, evidence_required: true,
     evidence_note: "完成后开启采购进度共享(无价单 + 采购进度 tab)" },
-  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "sales", is_critical: false, evidence_required: true,
     evidence_note: "业务寄产前样给客户,填快递单号" },
-  { step_key: "pre_production_sample_approved", name: "产前样确认", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+  { step_key: "pre_production_sample_approved", name: "产前样确认", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "采购(原辅料大货品质) + 业务(客户/自确认) 双确认" },
   { step_key: "production_kickoff", name: "生产启动", owner_role: "production", is_critical: true, evidence_required: false,
     evidence_note: "生产 + QC;完成后开启 QC 日常跟单打卡" },
-  { step_key: "mid_qc_sales_check", name: "中期验货业务确认", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+  { step_key: "mid_qc_sales_check", name: "中期验货业务确认", owner_role: "sales", is_critical: false, evidence_required: true,
     evidence_note: "业务对中期验货结果确认" },
-  { step_key: "shipping_sample_send", name: "船样", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+  { step_key: "shipping_sample_send", name: "船样", owner_role: "sales", is_critical: false, evidence_required: true,
     evidence_note: "业务寄船样(仅出口单)" },
-  { step_key: "final_qc_sales_check", name: "尾期验货业务确认", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+  { step_key: "final_qc_sales_check", name: "尾期验货业务确认", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "业务对尾期验货结果确认,放行依据" },
-  { step_key: "booking_done", name: "订舱出货", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+  { step_key: "booking_done", name: "订舱出货", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "业务订舱/报关安排(仅出口单)" },
-  { step_key: "ci_made", name: "CI制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+  { step_key: "ci_made", name: "CI制作", owner_role: "sales", is_critical: true, evidence_required: true,
     evidence_note: "业务制作 CI(商业发票);上传 CI 文件" },
   { step_key: "shipment_execute", name: "发货出运", owner_role: "logistics", is_critical: true, evidence_required: true,
     evidence_note: "含出运/送仓;采购尾料清点归库 + 财务确认" },

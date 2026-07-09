@@ -43,7 +43,7 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage1', emoji: '🟦',
     titleCn: '阶段 1：订单评审',
-    stepKeys: ['po_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'],
+    stepKeys: ['po_confirmed', 'pi_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'],
   },
   {
     key: 'stage2', emoji: '🟨',
@@ -77,7 +77,7 @@ const MILESTONE_GROUPS = [
     key: 'stage7', emoji: '🟫',
     titleCn: '阶段 7：物流收款',
     // domestic_delivery(国内送仓完成):国内单的最终交付节点,原先漏在分组外→时间线不显示,补入
-    stepKeys: ['booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'domestic_delivery', 'payment_received'],
+    stepKeys: ['booking_done', 'ci_made', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'domestic_delivery', 'payment_received'],
   },
 ];
 
