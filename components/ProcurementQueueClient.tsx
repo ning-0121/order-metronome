@@ -449,11 +449,27 @@ export function ProcurementQueueClient({
                 <span className="text-xs text-gray-400">
                   订购 {g.totalOrdered} {g.rep.ordered_unit} · <b className={totalOut > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {totalOut}</b>
                 </span>
-                <button className={`${btn} bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50`}
-                  onClick={() => setExpandRecv(s => { const n = new Set(s); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}
-                  title="同一款料按尺码拆的执行行合并显示;展开后逐个尺码收货登记/验收(收货数量按码)">
-                  {open ? '收起尺码' : `展开 ${g.sizes.length} 个尺码 · 逐码收货`}
-                </button>
+                {g.rep.po_not_placed ? <BlockedPoNote l={g.rep} /> : (
+                  <>
+                    {/* 三码一起到 → 一键把各尺码按订购量登记收齐(离队);逐码不同量的走「展开逐码收货」 */}
+                    <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${g.key}:recvall` || totalOut <= 0}
+                      title="全部尺码按订购量登记为已收齐(数量一致时用;有短缺/让步请展开逐码收)"
+                      onClick={async () => {
+                        if (!(await confirm({ title: '一键全部收齐?', message: `「${g.rep.material_name}」全部 ${g.sizes.length} 个尺码按订购量登记为已收齐(合计 ${g.totalOrdered} ${g.rep.ordered_unit || ''}),之后离开待验收。\n有短缺/让步/拒收的,请改用「展开逐码收货」。`, confirmText: '全部收齐' }))) return;
+                        runGroup(`${g.key}:recvall`, g.ids, (id) => {
+                          const line = g.lines.find(x => x.id === id)!;
+                          const out = outstanding(line);
+                          if (out == null || out <= 0) return Promise.resolve({});   // 该码已收满 → 跳过,避免超收
+                          return recordReceiptBatch(id, { received_qty: out, mark_complete: true });
+                        }, () => dropLines(g.ids));
+                      }}>✅ 全部收齐</button>
+                    <button className={`${btn} bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50`}
+                      onClick={() => setExpandRecv(s => { const n = new Set(s); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}
+                      title="同一款料按尺码拆的执行行合并显示;展开后逐个尺码收货登记/验收(收货数量按码)">
+                      {open ? '收起尺码' : `展开 ${g.sizes.length} 个尺码 · 逐码收货`}
+                    </button>
+                  </>
+                )}
               </RowShell>
               {open && <div className="bg-teal-50/30 border-l-2 border-teal-200">{g.lines.map(receiveLineBlock)}</div>}
             </div>
