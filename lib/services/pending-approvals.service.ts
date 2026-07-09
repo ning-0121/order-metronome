@@ -325,6 +325,11 @@ async function collectOrderConfirmations(
   supabase: any,
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
+  // 2026-07-09 用户拍板:订单确认模块(面料颜色/尺码配比/LOGO印花/包装)在订单详情里没有可确认的入口,
+  //   一直挂在审批中心是"点进去无处可确认"的空提示 → 不再进审批中心。数据仍在 order_confirmations,
+  //   由订单评审 checklist 自动推进,不靠人在审批中心点。
+  return [];
+  // eslint-disable-next-line no-unreachable
   // 订单确认模块（面料/颜色/印花/包装）not_started 或 pending
   // 只对 active/draft 订单关注
   const client = clientFor(ctx, supabase);
