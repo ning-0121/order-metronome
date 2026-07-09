@@ -23,6 +23,9 @@ const STEP_LANE_MAP: Record<string, SwimLane> = {
   // ─────────────────────────────────────────────
   po_confirmed:                  'sales',
   production_order_upload:       'sales',
+  // 节点体系 V2(9 节点)里业务牵头的两节点——此前未列入表 → 默认落到 sync,业务线看着"没节点"。
+  mo_released:                   'sales',  // 生产任务单下发(owner=sales)
+  pre_prod_meeting:              'sales',  // 产前会(owner=sales)
   pre_production_sample_sent:    'sales',  // 业务填快递单号、每日追踪
   pre_production_sample_approved:'sales',  // 客户确认
   mid_qc_sales_check:            'sales',
