@@ -227,12 +227,16 @@ export function ProcurementQueueClient({
     );
   }
 
+  // 分组行(同料多尺码合并显示)——计数用分组数,和实际看到的行数一致(2026-07-09 用户:计数对不上)
+  const chaseGroups = groupQueue(chase);
+  const readyShipGroups = groupQueue(readyShip);
+
   // 今日先处理(2026-07-05 简化:按优先级列出有活的队列,新人一眼知道从哪下手)
   const todo = [
     { label: '待采购订单(去核料下单)', n: pendingRequests.length, href: '#q-pendingRequests' },
     { label: '待验收', n: receive.length, href: '#q-receive' },
-    { label: '待催货', n: chase.length, href: '#q-chase' },
-    { label: '已完成待送货', n: readyShip.length, href: '#q-readyShip' },
+    { label: '待催货', n: chaseGroups.length, href: '#q-chase' },
+    { label: '已完成待送货', n: readyShipGroups.length, href: '#q-readyShip' },
     { label: '待下单(去归采购单)', n: pendingOrder.length, href: '#q-pendingOrder' },
   ].filter(t => t.n > 0);
 
@@ -250,8 +254,8 @@ export function ProcurementQueueClient({
       <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-3">
         <Stat label="📨 待采购订单" value={pendingRequests.length} href="#q-pendingRequests" tone="border-emerald-300 bg-emerald-50 text-emerald-800" />
         <Stat label="待下单" value={pendingOrder.length} href="#q-pendingOrder" tone="border-indigo-200 bg-indigo-50 text-indigo-800" />
-        <Stat label="待催货 / 生产中" value={chase.length} href="#q-chase" tone="border-amber-200 bg-amber-50 text-amber-800" />
-        <Stat label="已完成待送货" value={readyShip.length} href="#q-readyShip" tone="border-sky-200 bg-sky-50 text-sky-800" />
+        <Stat label="待催货 / 生产中" value={chaseGroups.length} href="#q-chase" tone="border-amber-200 bg-amber-50 text-amber-800" />
+        <Stat label="已完成待送货" value={readyShipGroups.length} href="#q-readyShip" tone="border-sky-200 bg-sky-50 text-sky-800" />
         <Stat label="已送达待验收" value={receive.length} href="#q-receive" tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
         <Stat label="🔴 到货逾期" value={counts.overdueOrders} href="#q-chase" tone="border-red-200 bg-red-50 text-red-800" />
         <Stat label="⚠️ 需抓紧追" value={counts.atRiskOrders} href="#q-chase" tone="border-rose-200 bg-rose-50 text-rose-800" />
@@ -336,9 +340,9 @@ export function ProcurementQueueClient({
       {/* ── 待催货(生产中) ── */}
       <section id="q-chase" className="scroll-mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-100 font-bold text-amber-900 text-sm">
-          🔔 待催货 / 生产中（{chase.length}）
+          🔔 待催货 / 生产中（{chaseGroups.length}）
         </div>
-        {chase.length === 0 ? <Empty /> : groupQueue(chase).map(g => {
+        {chaseGroups.length === 0 ? <Empty /> : chaseGroups.map(g => {
           const l = { ...g.rep, lamp: g.lamp } as QueueLine;
           const multi = g.sizes.length > 1;
           return (
@@ -369,9 +373,9 @@ export function ProcurementQueueClient({
       {/* ── 已完成待送货 / 在途 ── */}
       <section id="q-readyShip" className="scroll-mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-sky-50 px-4 py-2.5 border-b border-sky-100 font-bold text-sky-900 text-sm">
-          🚚 已完成待送货 / 在途（{readyShip.length}）
+          🚚 已完成待送货 / 在途（{readyShipGroups.length}）
         </div>
-        {readyShip.length === 0 ? <Empty /> : groupQueue(readyShip).map(g => {
+        {readyShipGroups.length === 0 ? <Empty /> : readyShipGroups.map(g => {
           const l = { ...g.rep, lamp: g.lamp } as QueueLine;
           const multi = g.sizes.length > 1;
           const out = multi ? g.totalOrdered : outstanding(l);

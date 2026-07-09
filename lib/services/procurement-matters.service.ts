@@ -86,7 +86,7 @@ export async function materializeProcurementMatters(
 
     // ════════ 采购行：缺料 / 供应商延期 / 催货停滞 / 价格异常 ════════
     const { data: lines, error: lineErr } = await (supabase.from('procurement_line_items') as any)
-      .select('id, order_id, procurement_item_id, line_status, material_name, category, supplier_id, supplier_name, required_by, promised_date, expected_arrival, po_no, unit_price, price_baseline, price_variance_pct, chase_count, last_chased_at, ordered_qty, ordered_unit, ordered_at, created_at, orders(order_no, customer_name, lifecycle_status, factory_date)')
+      .select('id, order_id, procurement_item_id, line_status, material_name, category, supplier_id, supplier_name, required_by, promised_date, expected_arrival, po_no, unit_price, price_baseline, price_variance_pct, chase_count, last_chased_at, ordered_qty, ordered_unit, ordered_at, created_at, orders(order_no, customer_name, lifecycle_status, factory_date, etd)')
       .in('line_status', PRICE_WATCH_STATUSES)
     if (lineErr) return err(`读取 procurement_line_items 失败: ${lineErr.message}`)
 
@@ -107,8 +107,10 @@ export async function materializeProcurementMatters(
     }
     const effReqBy = (l: any): string | null => {
       const locked = l.procurement_item_id ? lockByPi.get(l.procurement_item_id) : false
-      if (locked && l.required_by) return l.required_by
-      return l.orders?.factory_date || l.required_by || null
+      if (locked && l.required_by) return l.required_by       // 采购手锁了需到日 → 用它
+      // 没锁 → 用订单出厂日/发货日;那个"出厂日−交期"的自作主张日(required_by)一律不算数,
+      //   出厂日/发货日都没有 → 返回 null(无基准=不误报,而不是拿早得离谱的自算日报高危)。
+      return l.orders?.factory_date || l.orders?.etd || null
     }
     const shortageKeys = new Set<string>()   // 缺料风险按物料去重(同料同单只报一条,不再逐行刷屏)
 
