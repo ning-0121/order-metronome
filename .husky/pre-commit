@@ -1,3 +1,4 @@
 #!/bin/sh
-# pre-commit: 只检查构建，不运行完整回归（太慢）
+# pre-commit: 密钥扫描(公开仓库+生产在用,防手滑提交 key) + 构建提示
+sh "$(dirname "$0")/../scripts/scan-secrets.sh" || exit 1
 echo "🔨 构建检查..."
