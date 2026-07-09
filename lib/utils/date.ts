@@ -88,15 +88,6 @@ export function ensureBusinessDay(date: Date): Date {
 }
 
 /**
- * If date falls on non-workday, move to next working day
- */
-export function ensureBusinessDayForward(date: Date): Date {
-  const result = new Date(date);
-  while (isNonWorkday(result)) result.setDate(result.getDate() + 1);
-  return result;
-}
-
-/**
  * Format date for display
  */
 export function formatDate(date: string | Date, formatStr: string = 'yyyy-MM-dd'): string {

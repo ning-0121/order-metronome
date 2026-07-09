@@ -275,21 +275,3 @@ export function adjustGateTiming(
   return days;
 }
 
-/**
- * 按阶段分组 Gate
- */
-export function groupGatesByStage(gates: GateTemplate[]): Record<GateStage, GateTemplate[]> {
-  const grouped: Record<GateStage, GateTemplate[]> = {
-    '订单合法性': [],
-    '原辅料': [],
-    '生产': [],
-    'QC': [],
-    '出货': [],
-  };
-
-  for (const gate of gates) {
-    grouped[gate.stage].push(gate);
-  }
-
-  return grouped;
-}

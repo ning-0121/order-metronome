@@ -35,37 +35,12 @@ export const INDUSTRY_OPTIONS = [
   { value: 'other', label: '其他' },
 ] as const;
 
-export const INDUSTRY_SUB_OPTIONS: Record<string, { value: string; label: string }[]> = {
-  apparel: [
-    { value: 'casual_wear', label: '休闲装' },
-    { value: 'sportswear', label: '运动装' },
-    { value: 'workwear', label: '工装' },
-    { value: 'underwear', label: '内衣' },
-    { value: 'children', label: '童装' },
-    { value: 'formal', label: '正装' },
-    { value: 'outdoor', label: '户外服装' },
-  ],
-  textile: [
-    { value: 'knit', label: '针织' },
-    { value: 'woven', label: '梭织' },
-    { value: 'denim', label: '牛仔' },
-  ],
-};
-
 // ══════ 公司规模 ══════
 export const SCALE_OPTIONS = [
   { value: 'micro', label: '微型（<10人）' },
   { value: 'small', label: '小型（10-50人）' },
   { value: 'medium', label: '中型（50-200人）' },
   { value: 'large', label: '大型（200+人）' },
-] as const;
-
-// ══════ 年订单量 ══════
-export const ORDER_VOLUME_OPTIONS = [
-  { value: '<50', label: '<50单/年' },
-  { value: '50-200', label: '50-200单/年' },
-  { value: '200-500', label: '200-500单/年' },
-  { value: '500+', label: '500+单/年' },
 ] as const;
 
 // ══════ 知识类别映射 ══════

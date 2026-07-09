@@ -80,11 +80,6 @@ export const PM_OR_FINANCE_STEPS: string[] = [
   'processing_fee_confirmed',    // 加工费确认
 ];
 
-/** 判断 step_key 是否允许财务 auto-claim（除 PM 外的合法认领角色）*/
-export function canFinanceClaimStep(stepKey: string): boolean {
-  return PM_OR_FINANCE_STEPS.includes(stepKey);
-}
-
 interface ProfileLite {
   user_id: string;
   name?: string | null;

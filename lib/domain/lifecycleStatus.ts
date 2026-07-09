@@ -81,20 +81,3 @@ export function isCancelledLifecycle(status: string | null | undefined): boolean
   return (CANCELLED_LIFECYCLE_STATUSES as readonly string[]).includes(status);
 }
 
-/**
- * 把任意中文/英文 lifecycle_status 归一化为英文枚举
- * 未识别的值原样返回（不抛错，让上层决定）
- *
- * 注意：这个函数仅用于 UI 展示统一化，**不要在写入数据库前用此函数自动转换**，
- *      因为可能掩盖了上游 bug（应当从源头修复，不是在 UI 兜底）。
- *      数据库一次性归一化用迁移脚本，不用这个函数。
- */
-export function normalizeLifecycleStatus(status: string | null | undefined): string | null {
-  if (!status) return null;
-  const map: Record<string, string> = {
-    '已完成': 'completed',
-    '已取消': 'cancelled',
-    '已归档': 'archived',
-  };
-  return map[status] ?? status;
-}

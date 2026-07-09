@@ -344,9 +344,3 @@ export function formatKnowledgeForPrompt(items: KnowledgeItem[]): string {
     .join('\n\n');
 }
 
-/**
- * 获取所有待用户回答的问题 — 用于 /admin/knowledge-qa 页面
- */
-export function getPendingQuestions(): KnowledgeItem[] {
-  return ALL_KNOWLEDGE.filter(item => item.confidence === 'ask_user');
-}

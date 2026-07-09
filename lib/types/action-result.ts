@@ -68,14 +68,6 @@ export function failure(error: string, code?: ActionErrorCode | string): ActionR
 //  类型守卫
 // ═══════════════════════════════════════════════════════════════
 
-export function isOk<T>(r: ActionResult<T>): r is { ok: true; data: T } {
-  return r.ok === true;
-}
-
-export function isFail<T>(r: ActionResult<T>): r is { ok: false; error: string; code?: string } {
-  return r.ok === false;
-}
-
 // ═══════════════════════════════════════════════════════════════
 //  Adapter：把新契约转换为老格式（向后兼容用）
 // ═══════════════════════════════════════════════════════════════
@@ -92,16 +84,6 @@ export function toLegacyResult<T>(
 }
 
 /**
- * 转成 {success, error} 形式（部分 action 使用）
- */
-export function toLegacySuccessResult<T>(
-  r: ActionResult<T>,
-): { success?: boolean; error?: string; data?: T } {
-  if (r.ok) return { success: true, data: r.data };
-  return { success: false, error: r.error };
-}
-
-/**
  * 转成 {ok, error} 形式（与原契约结构一致，但去掉了 data 严格类型）
  */
 export function toLegacyOkResult<T>(
@@ -114,15 +96,6 @@ export function toLegacyOkResult<T>(
 // ═══════════════════════════════════════════════════════════════
 //  Adapter：把老格式转换为新契约（用于包装第三方 SDK 返回）
 // ═══════════════════════════════════════════════════════════════
-
-export function fromLegacyResult<T>(
-  legacy: { error?: string | null; data?: T | null } | null | undefined,
-): ActionResult<T> {
-  if (!legacy) return failure('无返回值', 'UNKNOWN');
-  if (legacy.error) return failure(legacy.error, 'UNKNOWN');
-  if (legacy.data === null || legacy.data === undefined) return failure('无数据返回', 'NOT_FOUND');
-  return success(legacy.data);
-}
 
 /**
  * 包裹一个可能抛错的异步函数，把异常转成 ActionResult

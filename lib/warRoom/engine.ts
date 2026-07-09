@@ -243,12 +243,3 @@ export function analyzeOrder(order: any, milestones: any[]): OrderWarRoomAnalysi
   };
 }
 
-export function getTopCriticalOrders(
-  ordersWithMilestones: Array<{ order: any; milestones: any[] }>,
-  topN = 3
-): OrderWarRoomAnalysis[] {
-  return ordersWithMilestones
-    .map(({ order, milestones }) => analyzeOrder(order, milestones))
-    .sort((a, b) => b.riskScore - a.riskScore)
-    .slice(0, topN);
-}

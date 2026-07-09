@@ -224,25 +224,6 @@ export async function pushPriceApprovalToFinance(approval: {
   return sendToFinanceSystem('price_approval.requested', approval as unknown as Record<string, unknown>)
 }
 
-/** 推送延期审批请求到财务系统 */
-export async function pushDelayApprovalToFinance(delay: {
-  id: string
-  order_id: string
-  order_no: string
-  milestone_name: string
-  requested_by: string
-  requester_name: string
-  reason_type: string
-  reason_detail: string
-  reason_category: string
-  proposed_new_date: string | null
-  current_due_date: string | null
-  requires_customer_approval: boolean
-  created_at: string
-}) {
-  return sendToFinanceSystem('delay.requested', delay as unknown as Record<string, unknown>)
-}
-
 // ============================================================
 // 采购 P2b — 供应商 + 采购单 → 财务系统同步
 // 财务侧建应付主体 / 应付+付款计划。共享 supplier_id / po_no，幂等 upsert。

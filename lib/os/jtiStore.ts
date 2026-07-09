@@ -32,11 +32,6 @@ export function rememberJti(jti: string, expSec: number, now: number = nowSec())
   store.set(jti, expSec);
 }
 
-/** 当前存量（诊断/测试用）。 */
-export function jtiStoreSize(): number {
-  return store.size;
-}
-
 /** 仅测试用：清空。 */
 export function _resetJtiStore(): void {
   store.clear();

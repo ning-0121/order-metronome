@@ -178,22 +178,3 @@ function buildActionsForOrder(wr: WarRoomOrder): SuggestedAction[] {
   return actions.slice(0, 3); // 硬限：最多3条
 }
 
-/** 主入口：对所有 warRoom 订单生成行动建议 */
-export function suggestActions(warRoomOrders: WarRoomOrder[]): SuggestedAction[] {
-  _id = 0;
-  return warRoomOrders.flatMap(wr => buildActionsForOrder(wr));
-}
-
-export function summarizeActions(actions: SuggestedAction[]): {
-  immediate: number;
-  recovery: number;
-  prevention: number;
-  total: number;
-} {
-  return {
-    immediate:  actions.filter(a => a.category === 'IMMEDIATE').length,
-    recovery:   actions.filter(a => a.category === 'RECOVERY').length,
-    prevention: actions.filter(a => a.category === 'PREVENTION').length,
-    total: actions.length,
-  };
-}

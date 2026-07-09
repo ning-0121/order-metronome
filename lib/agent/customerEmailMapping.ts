@@ -138,35 +138,3 @@ export async function identifyCustomerFromEmail(
   return { customerName: null, confidence: 'low', method: 'unmatched' };
 }
 
-/**
- * 从初始订单数据自动建立客户-邮箱映射
- * 在系统启动时运行一次
- */
-export async function buildInitialMappings(supabase: any): Promise<number> {
-  // 从已关联的邮件中提取映射
-  const { data: linkedEmails } = await supabase
-    .from('mail_inbox')
-    .select('from_email, customer_id')
-    .not('customer_id', 'is', null)
-    .limit(500);
-
-  let created = 0;
-  const seen = new Set<string>();
-
-  for (const email of linkedEmails || []) {
-    const domain = email.from_email?.split('@')[1]?.toLowerCase();
-    if (!domain || domain === 'qimoclothing.com') continue;
-    const key = `${email.customer_id}:${domain}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const { error } = await supabase.from('customer_email_domains').upsert({
-      customer_name: email.customer_id,
-      email_domain: domain,
-      sample_email: email.from_email,
-    }, { onConflict: 'customer_name,email_domain' });
-    if (!error) created++;
-  }
-
-  return created;
-}

@@ -156,20 +156,3 @@ export async function buildCustomerContext(supabase: any): Promise<string> {
     .join('\n');
 }
 
-/**
- * 通过发件人邮箱域名匹配客户
- */
-export function matchCustomerByEmail(
-  fromEmail: string,
-  customerEmails: Array<{ customer_name: string; email_domain: string }>
-): string | null {
-  const domain = fromEmail.split('@')[1]?.toLowerCase();
-  if (!domain) return null;
-
-  for (const ce of customerEmails) {
-    if (ce.email_domain && domain.includes(ce.email_domain.toLowerCase())) {
-      return ce.customer_name;
-    }
-  }
-  return null;
-}

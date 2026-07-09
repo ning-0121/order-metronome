@@ -13,15 +13,6 @@ export const REQUIREMENT_PRIORITY: RequirementType[] = [
   'new',
 ];
 
-// Chinese labels / badges for UI
-export const REQUIREMENT_BADGE_LABELS: Record<RequirementType, string> = {
-  risk: '🔴邮件高风险点',
-  change: '🟠邮件变更请求',
-  pending: '⚠️邮件待澄清',
-  confirmed: '✅邮件已确认',
-  new: '🟦邮件新增要求',
-};
-
 const KEYWORDS: Record<Exclude<RequirementType, 'new'>, string[]> = {
   risk: [
     'high risk',
@@ -88,54 +79,6 @@ export interface RequirementClassification {
   type: RequirementType;
   keywordsHit: string[];
   excerpt: string;
-}
-
-// Map requirement/category to responsible roles (owner_role), V1 heuristic.
-// - mail risk/change/pending -> sales
-// - packaging -> procurement
-// - fabric quality -> procurement + qc
-// - plus size/construction -> production
-// - logistics/booking/shipping -> logistics
-// - payment -> finance
-export function inferRolesFromCategoryAndRequirement(
-  category: string | null | undefined,
-  sourceType?: string | null
-): string[] {
-  const roles = new Set<string>();
-  const cat = (category || '').toLowerCase();
-  const src = (sourceType || '').toLowerCase();
-
-  if (src === 'mail') {
-    roles.add('sales');
-  }
-
-  if (cat === 'packaging') {
-    roles.add('procurement');
-  }
-
-  if (cat === 'fabric_quality') {
-    roles.add('procurement');
-    roles.add('qc');
-  }
-
-  if (cat === 'plus_size_stretch') {
-    roles.add('production');
-  }
-
-  if (cat === 'logistics') {
-    roles.add('logistics');
-  }
-
-  if (cat === 'payment') {
-    roles.add('finance');
-  }
-
-  // 默认：若来自邮件且未命中任何类别，则归为 sales
-  if (roles.size === 0 && src === 'mail') {
-    roles.add('sales');
-  }
-
-  return Array.from(roles);
 }
 
 /**

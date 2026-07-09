@@ -114,41 +114,6 @@ export function normalizeRoleToDb(
   return 'sales';
 }
 
-/**
- * 标准化角色值：将数据库枚举值映射为代码角色值
- * 
- * @param dbRole - 数据库枚举值
- * @returns 代码角色值
- */
-export function normalizeRoleFromDb(dbRole: string | null | undefined): AppRole {
-  if (!dbRole) {
-    return 'sales'; // 默认值
-  }
-  
-  const normalized = dbRole.trim().toLowerCase();
-  
-  if (normalized in ROLE_MAP_FROM_DB) {
-    return ROLE_MAP_FROM_DB[normalized as DbUserRole];
-  }
-  
-  console.warn(`[Roles] Unknown DB role value: ${dbRole}, defaulting to 'sales'`);
-  return 'sales';
-}
-
-/**
- * 验证角色值是否合法（数据库枚举值）
- */
-export function isValidDbRole(role: string): role is DbUserRole {
-  return role in ROLE_MAP_FROM_DB;
-}
-
-/**
- * 验证角色值是否合法（代码角色值）
- */
-export function isValidAppRole(role: string): role is AppRole {
-  return role in ROLE_MAP_TO_DB;
-}
-
 // ════════════════════════════════════════════════════════════════════
 // 权限分组单一来源（Sprint 0 加固）
 // ════════════════════════════════════════════════════════════════════

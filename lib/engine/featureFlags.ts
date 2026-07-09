@@ -53,12 +53,3 @@ export function runtimeProjectionEnabled(): boolean {
   return runtimeConfidenceMode() !== 'off';
 }
 
-/** 调试/审计辅助：导出当前所有 flag 状态 */
-export function getEngineFlags() {
-  return {
-    rootCauseEngine: rootCauseEngineEnabled(),
-    businessDecisionEngine: businessDecisionEngineEnabled(),
-    dataAssetLayer: dataAssetLayerEnabled(),
-    runtimeConfidenceMode: runtimeConfidenceMode(),
-  };
-}

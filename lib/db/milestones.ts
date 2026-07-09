@@ -266,24 +266,3 @@ export async function updateMilestones(
   return { data: results };
 }
 
-/**
- * Upsert 里程碑（统一入口）
- */
-export async function upsertMilestones(
-  payloads: Record<string, any>[]
-): Promise<{ data?: any[]; error?: string }> {
-  const supabase = await createClient();
-  
-  const sanitizedPayloads = payloads.map(p => sanitizeMilestonePayload(p, 'insert').payload);
-  
-  const { data, error } = await (supabase
-    .from('milestones') as any)
-    .upsert(sanitizedPayloads, { onConflict: 'id' })
-    .select();
-  
-  if (error) {
-    return { error: error.message };
-  }
-  
-  return { data: data || [] };
-}

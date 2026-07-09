@@ -43,16 +43,6 @@ export const DOCUMENT_STATUSES = {
   archived: { label: '已归档', color: 'bg-gray-100 text-gray-500' },
 } as const;
 
-// 审批规则：谁提交，谁审批
-export const APPROVAL_RULES: Record<string, { submitter: string[]; approver: string[] }> = {
-  pi: { submitter: ['sales'], approver: ['finance'] },
-  production_sheet: { submitter: ['sales'], approver: ['merchandiser'] },
-  packing_list: { submitter: ['merchandiser'], approver: ['finance'] },
-  ci: { submitter: ['sales'], approver: ['finance'] },
-  material_sheet: { submitter: ['procurement'], approver: ['sales'] },
-  purchase_order: { submitter: ['procurement'], approver: ['finance'] },
-};
-
 // PI 模板字段
 export interface PITemplate {
   pi_no: string;

@@ -621,9 +621,3 @@ export function getSOPForStep(stepKey: string): SOPConfig | null {
   return SOP_MAP[stepKey] || null;
 }
 
-/**
- * 判断节点是否有 SOP
- */
-export function hasSOPForStep(stepKey: string): boolean {
-  return stepKey in SOP_MAP;
-}

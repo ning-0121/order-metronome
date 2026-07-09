@@ -21,6 +21,3 @@ export const ALL_CAUSE_RULES: CauseRule[] = [
   ...delayCauseRules,
 ];
 
-export function getRuleByCode(code: string): CauseRule | undefined {
-  return ALL_CAUSE_RULES.find(r => r.code === code);
-}

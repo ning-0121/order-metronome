@@ -90,20 +90,3 @@ export function shouldSendEmail(type: string): boolean {
   return getTier(type) === 'URGENT';
 }
 
-/**
- * 该类型是否应该立即推送企业微信 / 个人微信
- * 规则：和 shouldSendEmail 相同 — URGENT 才推
- */
-export function shouldPushInstant(type: string): boolean {
-  return getTier(type) === 'URGENT';
-}
-
-/**
- * 是否进入每日简报（早 8 点汇总）
- * - DIGEST → true
- * - URGENT → false（已经立即推送了，不再重复）
- * - STATION_ONLY → false（纯站内流水，不进简报）
- */
-export function shouldAppearInDigest(type: string): boolean {
-  return getTier(type) === 'DIGEST';
-}

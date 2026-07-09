@@ -228,12 +228,6 @@ export const STEP_KEY_BY_FILE_TYPE: Record<string, string> = {
   payment_receipt:      'payment_received',
 };
 
-/** 从 fileType 反查 stepKey，找不到返回 null */
-export function getStepKeyForFileType(fileType: string | null | undefined): string | null {
-  if (!fileType) return null;
-  return STEP_KEY_BY_FILE_TYPE[fileType] || null;
-}
-
 /** 通用命名校验入口：可传 stepKey 或 docType */
 export function validateFileNameForLabel(
   fileName: string,

@@ -233,9 +233,3 @@ export async function pushToUsers(
   return sent;
 }
 
-/**
- * 向所有员工广播（用 @all）
- */
-export async function broadcastToAll(title: string, content: string): Promise<boolean> {
-  return sendWecomMessage('@all', title, content);
-}

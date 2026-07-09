@@ -60,13 +60,6 @@ export const SHIPMENT_STEP_KEYS = new Set<string>([
 ]);
 
 /**
- * 取节点的影响权重（默认 low）
- */
-export function getStepWeight(stepKey: string): 'critical' | 'high' | 'medium' | 'low' {
-  return STEP_WEIGHT[stepKey] || 'low';
-}
-
-/**
  * 判断节点是否在关键路径上
  */
 export function isCriticalStep(stepKey: string): boolean {

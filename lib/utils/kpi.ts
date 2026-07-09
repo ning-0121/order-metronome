@@ -89,36 +89,3 @@ export function computeKPI(milestones: MilestoneKPIInput[]): KPIResult {
   return { total, completed, onTime, lateCompleted, overdue, blocked, onTimeRate, completionRate };
 }
 
-/**
- * 按角色分组计算 KPI
- */
-export function computeKPIByRole(milestones: MilestoneKPIInput[]): Record<string, KPIResult> {
-  const groups: Record<string, MilestoneKPIInput[]> = {};
-  for (const m of milestones) {
-    const role = m.owner_role || 'unknown';
-    if (!groups[role]) groups[role] = [];
-    groups[role].push(m);
-  }
-  const result: Record<string, KPIResult> = {};
-  for (const [role, ms] of Object.entries(groups)) {
-    result[role] = computeKPI(ms);
-  }
-  return result;
-}
-
-/**
- * 按用户分组计算 KPI
- */
-export function computeKPIByUser(milestones: MilestoneKPIInput[]): Record<string, KPIResult> {
-  const groups: Record<string, MilestoneKPIInput[]> = {};
-  for (const m of milestones) {
-    const uid = m.owner_user_id || 'unassigned';
-    if (!groups[uid]) groups[uid] = [];
-    groups[uid].push(m);
-  }
-  const result: Record<string, KPIResult> = {};
-  for (const [uid, ms] of Object.entries(groups)) {
-    result[uid] = computeKPI(ms);
-  }
-  return result;
-}

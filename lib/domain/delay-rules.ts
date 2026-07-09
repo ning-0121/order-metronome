@@ -214,25 +214,3 @@ export function validateDelayRequest(params: {
   };
 }
 
-/**
- * 计算内部原因延期后，下游节点的压缩空间
- * 返回每个下游节点的新 due_at（保持最终交期不变）
- */
-export function calculateCompressedDownstream(
-  currentMilestone: { id: string; step_key: string; due_at: string },
-  downstreamMilestones: Array<{ id: string; step_key: string; due_at: string }>,
-  newCurrentDueAt: string,
-): Array<{ id: string; newDueAt: string; squeezeDays: number }> {
-  // 下游节点的 due_at 不变（保持最终交期）
-  // 但每个节点的"可用时间窗口"被压缩
-  // 这里我们不改下游 due_at，只返回压缩信息用于告警
-  const delayDays = Math.ceil(
-    (new Date(newCurrentDueAt).getTime() - new Date(currentMilestone.due_at).getTime()) / (1000 * 60 * 60 * 24)
-  );
-
-  return downstreamMilestones.map(m => ({
-    id: m.id,
-    newDueAt: m.due_at, // 不变
-    squeezeDays: delayDays, // 压缩了多少天
-  }));
-}

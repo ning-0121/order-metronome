@@ -330,14 +330,3 @@ export async function pollBatchResults(
   }
 }
 
-/**
- * 取消进行中的 Batch（用于错误恢复）
- */
-export async function cancelBatch(batchId: string): Promise<void> {
-  const client = getClient();
-  if (!client) return;
-  try {
-    await (client.messages.batches as any).cancel(batchId);
-    console.log(`[claude:batch] cancelled ${batchId}`);
-  } catch {}
-}

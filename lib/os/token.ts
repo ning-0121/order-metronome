@@ -20,8 +20,6 @@ export interface OsHandoffClaims {
   nonce: string;
 }
 
-export const OS_TOKEN_TTL_SEC = 90;
-
 /** 规范签名串（确定性、字段固定顺序）。铸/验两侧必须一致拼装。 */
 export function canonicalizeClaims(c: OsHandoffClaims): string {
   return [c.sub, c.roles.join(','), c.aud, String(c.iat), String(c.exp), c.nonce].join('\n');

@@ -233,36 +233,3 @@ export async function convertQuoteToOrderFinancials(
 
 // ── 管理员 API 快速查询：报价是否可桥接 ───────────────────────
 
-/**
- * 检查报价单是否满足桥接条件（字段完整性 + 状态检查）
- * 仅查询，不写入
- */
-export async function checkQuoteBridgeEligibility(
-  supabase: any,
-  quoteId: string,
-): Promise<{ eligible: boolean; reason?: string; missingFields?: string[] }> {
-  const { data: quote } = await (supabase.from('quoter_quotes') as any)
-    .select('id, quote_no, status, quote_price_per_piece, currency, quantity')
-    .eq('id', quoteId)
-    .single();
-
-  if (!quote) return { eligible: false, reason: '报价单不存在' };
-
-  const missing: string[] = [];
-  if (!quote.quote_price_per_piece) missing.push('quote_price_per_piece');
-  if (!quote.currency)              missing.push('currency');
-  if (!quote.quantity)              missing.push('quantity');
-
-  if (missing.length > 0) {
-    return { eligible: false, reason: '缺少必要字段', missingFields: missing };
-  }
-
-  if (!['sent', 'won'].includes(quote.status)) {
-    return {
-      eligible: false,
-      reason: `报价状态为 "${quote.status}"，建议在 sent/won 状态下桥接`,
-    };
-  }
-
-  return { eligible: true };
-}

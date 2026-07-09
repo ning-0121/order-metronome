@@ -116,13 +116,6 @@ export interface TargetProgress {
 }
 
 /**
- * @deprecated 用 getLunarYearProgress（按农历年）— 此函数仅做兼容兜底
- */
-export function getYearProgress(year: number, today: Date = new Date()) {
-  return getLunarYearProgress(year, today);
-}
-
-/**
  * 件数格式化：>= 10000 显示万件，否则件
  */
 export function formatQty(qty: number): string {

@@ -27,60 +27,6 @@ export interface GateSchedule {
 }
 
 /**
- * 计算所有 Gate 的时间表
- */
-export function calculateGateSchedule(params: {
-  createdAt: Date;
-  incoterm: 'FOB' | 'DDP';
-  orderType: 'sample' | 'bulk';
-  packagingType: 'standard' | 'custom';
-  etd?: string | null;
-  warehouseDueDate?: string | null;
-}): GateSchedule[] {
-  const { createdAt, incoterm, orderType, packagingType, etd, warehouseDueDate } = params;
-
-  // 确定目标日期（锚点）
-  const anchorStr = incoterm === 'FOB' ? etd : warehouseDueDate;
-  if (!anchorStr) {
-    throw new Error('Missing anchor date (ETD for FOB or Warehouse Due Date for DDP)');
-  }
-
-  const anchor = ensureBusinessDay(new Date(anchorStr + 'T00:00:00'));
-
-  // 计算每个 Gate 的时间
-  const schedules: GateSchedule[] = [];
-
-  // 第一遍：计算所有 Gate 的时间
-  for (const gate of GATE_TEMPLATE_V2) {
-    const adjustedDays = adjustGateTiming(gate, incoterm, orderType, packagingType);
-    // adjustedDays 是负数（表示提前多少天），需要转换为正数传给 subtractWorkingDays
-    const daysBeforeAnchor = Math.abs(adjustedDays);
-    const dueDate = subtractWorkingDays(anchor, daysBeforeAnchor);
-    const plannedDate = subtractWorkingDays(dueDate, 1); // planned_at 是 due_at 前1个工作日
-
-    // 初始状态：只有第一个 Gate（po_confirmed）是 in_progress
-    const initialStatus: 'pending' | 'in_progress' = 
-      gate.gate_key === 'po_confirmed' ? 'in_progress' : 'pending';
-
-    schedules.push({
-      gate_key: gate.gate_key,
-      name: gate.name,
-      stage: gate.stage,
-      owner_role: gate.owner_role,
-      required: gate.required,
-      depends_on: gate.depends_on || [],
-      planned_at: ensureBusinessDay(plannedDate),
-      due_at: ensureBusinessDay(dueDate),
-      is_critical: gate.is_critical,
-      evidence_required: gate.evidence_required,
-      initial_status: initialStatus,
-    });
-  }
-
-  return schedules;
-}
-
-/**
  * 检查 Gate 是否可以进入"进行中"状态
  * 
  * 规则：
@@ -113,31 +59,3 @@ export function canGateStart(
   return { canStart: true };
 }
 
-/**
- * 获取下一个可以开始的 Gate
- */
-export function getNextAvailableGate(
-  schedules: GateSchedule[],
-  completedGates: Set<string>,
-  currentStatus: Map<string, string>
-): GateSchedule | null {
-  for (const gate of schedules) {
-    // 跳过已完成的
-    if (completedGates.has(gate.gate_key)) {
-      continue;
-    }
-
-    // 跳过已在进行中的
-    if (isActiveStatus(currentStatus.get(gate.gate_key) || '')) {
-      continue;
-    }
-
-    // 检查是否可以开始
-    const { canStart } = canGateStart(gate.gate_key, schedules, completedGates);
-    if (canStart) {
-      return gate;
-    }
-  }
-
-  return null;
-}

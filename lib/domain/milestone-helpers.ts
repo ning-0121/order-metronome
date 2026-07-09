@@ -97,22 +97,6 @@ export function isMilestoneOverdue(milestone: MilestoneData): boolean {
 }
 
 /**
- * 判断里程碑是否即将到期（48小时内）
- */
-export function isMilestoneDueSoon(milestone: MilestoneData, hoursThreshold: number = 48): boolean {
-  if (!milestone.due_at) return false;
-  const normalized = normalizeMilestoneStatus(milestone.status);
-  if (normalized === '已完成') return false;
-  
-  const dueDate = new Date(milestone.due_at);
-  const now = new Date();
-  const diffMs = dueDate.getTime() - now.getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-  
-  return diffHours > 0 && diffHours <= hoursThreshold;
-}
-
-/**
  * 从 notes 中提取卡住原因
  * 格式：如果 notes 以 "卡住原因：" 开头，提取原因部分
  */

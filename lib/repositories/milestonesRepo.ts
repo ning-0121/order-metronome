@@ -736,28 +736,3 @@ export async function updateMilestones(
   return { data: results };
 }
 
-/**
- * 追加 notes（用于日志记录等场景）
- */
-export async function appendMilestoneNotes(
-  milestoneId: string,
-  content: string,
-  timestamp: boolean = true
-): Promise<{ data?: any; error?: string }> {
-  const supabase = await createClient();
-  
-  // 获取当前 notes
-  const { data: milestone, error: getError } = await (supabase
-    .from('milestones') as any)
-    .select('notes')
-    .eq('id', milestoneId)
-    .single();
-  
-  if (getError) {
-    return { error: getError.message };
-  }
-  
-  const updatedNotes = appendToNotes(milestone.notes, content, timestamp);
-  
-  return updateMilestone(milestoneId, { notes: updatedNotes });
-}
