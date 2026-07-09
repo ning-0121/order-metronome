@@ -110,13 +110,14 @@ export default async function ProcurementCenterPage() {
           <div className="space-y-2">
             {pendingApprovalPOs.map((p) => {
               const isPending = p.approval_status === 'pending';
-              // ¥0/未填价的单不是"可下单",而是"待填价"(2026-07-09 用户:没填价格不该到下单这步)
-              const noPrice = !isPending && (p.total_amount == null || Number(p.total_amount) <= 0);
+              const tbd = !isPending && p.price_tbd === true;   // 价格待定:允许无价下单
+              // ¥0/未填价且非"价格待定"的单不是"可下单",而是"待填价"(2026-07-09 用户:没填价格不该到下单这步)
+              const noPrice = !isPending && !tbd && (p.total_amount == null || Number(p.total_amount) <= 0);
               return (
               <div key={p.id} className="flex items-center gap-3 flex-wrap bg-white rounded-lg border border-orange-200 px-3 py-2">
                 <Link href={`/procurement/po/${p.id}`} className="text-sm font-semibold text-indigo-600 hover:underline">{p.po_no}</Link>
-                <span className={`text-[11px] px-1.5 py-0.5 rounded ${isPending ? 'bg-amber-100 text-amber-700' : noPrice ? 'bg-rose-100 text-rose-700' : 'bg-sky-100 text-sky-700'}`}>
-                  {isPending ? '待审批' : noPrice ? '待填价' : '可下单(未下单)'}
+                <span className={`text-[11px] px-1.5 py-0.5 rounded ${isPending ? 'bg-amber-100 text-amber-700' : noPrice ? 'bg-rose-100 text-rose-700' : tbd ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'}`}>
+                  {isPending ? '待审批' : noPrice ? '待填价' : tbd ? '价格待定·可下单' : '可下单(未下单)'}
                 </span>
                 <span className="text-xs text-gray-500">{p.supplier_name || '—'}</span>
                 {p.total_amount != null && <span className="text-xs text-gray-700">¥{p.total_amount}</span>}
@@ -136,7 +137,7 @@ export default async function ProcurementCenterPage() {
                   </>
                 )}
                 <Link href={`/procurement/po/${p.id}`} className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-orange-600 text-white font-medium hover:bg-orange-700">
-                  {isPending ? '去审批 →' : noPrice ? '去填价 →' : '去下单 →'}
+                  {isPending ? '去审批 →' : noPrice ? '去填价 →' : '去下单 →'}{/* tbd 也走去下单 */}
                 </Link>
               </div>
             );})}

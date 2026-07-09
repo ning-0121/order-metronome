@@ -401,6 +401,27 @@ async function computeBudgetGate(svc: any, poId: string, orderIds: string[]) {
 }
 
 /**
+ * 设置/取消采购单「价格待定」(仅采购、仅草稿)。勾上后允许无底价下单(先下单后议价,单上标注);
+ * 价格填好后可取消。列缺失(迁移未跑)→ 提示先执行迁移。
+ */
+export async function setPurchaseOrderPriceTbd(poId: string, value: boolean): Promise<{ ok?: boolean; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可设置价格待定' };
+  const { error } = await (supabase.from('purchase_orders') as any)
+    .update({ price_tbd: value }).eq('id', poId).eq('status', 'draft');
+  if (error) {
+    if (/price_tbd|column|does not exist|schema cache/i.test(error.message || '')) {
+      return { error: '「价格待定」需先执行数据库迁移 20260709_po_price_tbd.sql,执行后即可用。' };
+    }
+    return { error: error.message };
+  }
+  revalidatePath(`/procurement/po/${poId}`);
+  revalidatePath('/procurement');
+  return { ok: true };
+}
+
+/**
  * 下单（P2a）：draft → placed。**始终跑风险闸**（无法绕过审批）。
  * 已 approved → 直接下单;否则评估:有风险 → 转 pending 并阻断;无风险 → 直接下单。
  */
@@ -417,8 +438,16 @@ export async function placePurchaseOrder(poId: string): Promise<{
   if ((po as any).status !== 'draft') return { error: '仅草稿可下单' };
 
   // 价格闸(2026-07-09 用户:没填价格不该能一步步走到下单):下单前每行必须有单价(底价>0),
-  // ¥0/漏填价的单一律拦下。unit_price 是列级封锁的底价,经 service-role 读(本函数已 CAN_PROCURE 门禁)。
+  // ¥0/漏填价的单一律拦下。显式勾了「价格待定」(先下单后议价)的单豁免(单上已标注)。
+  // price_tbd 列单独容错查(迁移未跑则视为 false,照常要求填价,不 brick 下单)。
+  let priceTbd = false;
   {
+    const { data: tbdRow, error: tbdErr } = await (supabase.from('purchase_orders') as any)
+      .select('price_tbd').eq('id', poId).maybeSingle();
+    if (!tbdErr) priceTbd = !!(tbdRow as any)?.price_tbd;
+  }
+  if (!priceTbd) {
+    // unit_price 是列级封锁的底价,经 service-role 读(本函数已 CAN_PROCURE 门禁)。
     const { data: priceLines } = await (createServiceRoleClient().from('procurement_line_items') as any)
       .select('unit_price, material_name, line_status').eq('purchase_order_id', poId);
     const active = ((priceLines || []) as any[]).filter((l) => l.line_status !== 'cancelled');
@@ -426,7 +455,7 @@ export async function placePurchaseOrder(poId: string): Promise<{
     const unpriced = active.filter((l) => l.unit_price == null || Number(l.unit_price) <= 0);
     if (unpriced.length > 0) {
       const names = [...new Set(unpriced.map((l) => l.material_name).filter(Boolean))].slice(0, 4).join('、');
-      return { error: `下单前必须先给每行填单价(底价):还有 ${unpriced.length} 行未填价${names ? `（${names}…）` : ''}、合计 ¥0。请在采购单页把单价填好再下单。` };
+      return { error: `下单前必须先给每行填单价(底价):还有 ${unpriced.length} 行未填价${names ? `（${names}…）` : ''}、合计 ¥0。若确为「先下单后议价」,可在采购单页勾「价格待定」;否则请把单价填好再下单。` };
     }
   }
 

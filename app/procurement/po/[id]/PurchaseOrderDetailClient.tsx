@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd } from '@/app/actions/purchase-orders';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
@@ -22,6 +22,15 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
   const [busy, setBusy] = useState('');
   const [proofPaths, setProofPaths] = useState<string[]>(Array.isArray(po.order_proof_paths) ? po.order_proof_paths : []);
   const [proofUploading, setProofUploading] = useState(false);
+  const [priceTbd, setPriceTbd] = useState<boolean>(po.price_tbd === true);
+
+  async function handleSetPriceTbd(v: boolean) {
+    setBusy('tbd');
+    const res = await setPurchaseOrderPriceTbd(po.id, v);
+    setBusy('');
+    if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
+    setPriceTbd(v); router.refresh();
+  }
 
   async function handleProofUpload(files: FileList) {
     setProofUploading(true);
@@ -164,6 +173,14 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
             ) : (
               <p className="text-sm text-gray-500 mt-1">草稿 · 点"下单"自动查风险:标准单直接下单,风险单转审批</p>
             )}
+            {/* 价格待定(先下单后议价):勾上后允许无底价下单,单上标注。仅采购、仅草稿。 */}
+            {po.approval_status !== 'pending' && canProcure && (
+              <label className="flex items-center gap-1.5 mt-2 text-xs text-gray-600 cursor-pointer select-none">
+                <input type="checkbox" checked={priceTbd} disabled={busy !== ''} onChange={(e) => handleSetPriceTbd(e.target.checked)} />
+                <span>价格待定(先下单后议价)—— 勾选后可无底价下单,单上标注 <span className="text-rose-600">「价格待定」</span></span>
+              </label>
+            )}
+            {priceTbd && <span className="inline-block mt-1 text-[11px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-medium">🕓 价格待定 · 已允许无价下单</span>}
           </div>
           <div className="flex gap-2 shrink-0">
             {po.approval_status === 'pending' && (canApproveProcurement || canApproveFinance) && (
