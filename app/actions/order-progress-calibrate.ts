@@ -35,15 +35,19 @@ export async function listOrdersForCalibration(): Promise<{
   if (list.length === 0) return { data: [] };
   const orderIds = list.map((o) => o.id);
 
+  // ⚠ 关键(2026-07-09 修):默认 1000 行上限 + 全局按 sequence 排序 → 会把各单靠后的节点(尾查/工厂完成/
+  //   出运/收款)整批截断,下拉只到 包装方式确认 附近。显式高 limit + 按 order_id 再 sequence 排,取全每单节点。
   const { data: ms } = await (supabase.from('milestones') as any)
     .select('order_id, step_key, name, status, sequence_number').in('order_id', orderIds)
-    .order('sequence_number', { ascending: true });
+    .order('order_id', { ascending: true }).order('sequence_number', { ascending: true })
+    .limit(20000);
   const byOrder = new Map<string, any[]>();
   for (const m of (ms || [])) { const a = byOrder.get((m as any).order_id) || []; a.push(m); byOrder.set((m as any).order_id, a); }
 
   const isDone = (s: any) => ['done', '已完成', 'completed'].includes(String(s || ''));
   const out = list.map((o) => {
-    const steps = (byOrder.get(o.id) || []).map((m: any) => ({ step_key: m.step_key, name: m.name, status: m.status, sequence: Number(m.sequence_number) }));
+    const steps = (byOrder.get(o.id) || []).map((m: any) => ({ step_key: m.step_key, name: m.name, status: m.status, sequence: Number(m.sequence_number) }))
+      .sort((a: any, b: any) => a.sequence - b.sequence);
     const doneCount = steps.filter((s) => isDone(s.status)).length;
     const firstUndone = steps.find((s) => !isDone(s.status));
     return {
