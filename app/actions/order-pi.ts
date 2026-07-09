@@ -13,13 +13,22 @@ import { revalidatePath } from 'next/cache';
 
 const CAN_EDIT_PI = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'];
 
-// 开票方固定抬头(取自绮陌标准 PI 模板 · Jojo Fashion Inc)
+// 开票方固定抬头 · 义乌市绮陌服饰有限公司(2026-07-09 用户拍板,统一用此抬头)
 const ISSUER = {
-  company: 'Jojo Fashion Inc',
-  address: '16 Technology Dr, Ste 152,Irvine, CA, 92618',
-  contact: 'CONTACT: ALEX QIN    PHONE: +86-18267048811   EMAIL: ALEX@QIMOCLOTHING.COM',
+  company: 'YIWU QIMO CLOTHING CO.,LTD（义乌市绮陌服饰有限公司）',
+  address: '2108 Room, Global Building, No.168 Financial 6th Street, Yiwu City, Zhejiang Province, China',
+  contact: 'CONTACT: ALEX QIN    TEL: 86-15924281155    FAX: 0579-81548728    EMAIL: ALEX@QIMOCLOTHING.COM',
   title: 'PROFORMA INVOICE',
 };
+
+// 从「规格/面料名」抠出克重(如 280GSM)。规格文本形如 "85%P 15%S 280g 纱支…"。
+function parseGsm(...texts: string[]): string {
+  for (const t of texts) {
+    const m = String(t || '').match(/(\d{2,4})\s*(?:gsm|g\/m2|g\b|克)/i);
+    if (m) return `${m[1]}GSM`;
+  }
+  return '';
+}
 
 // 一行 = 一个款(多颜色并入 COLOR 单元格逐色带量)。列序严格对齐模板 A–N。
 export interface PILine {
@@ -97,6 +106,16 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
     .select('style_no, product_name, product_name_en, color_cn, color_en, sizes, unit, qty_pcs, fabric_name, fabric_width, carton_count, po_unit_price, remark, line_no')
     .eq('order_id', orderId).order('line_no', { ascending: true });
 
+  // 面料 BOM(克重/成分自动带过去):materials_bom 里 material_type=fabric/lining 行的 spec = 成分/克重/纱支
+  const { data: bomFab } = await (supabase.from('materials_bom') as any)
+    .select('style_no, material_name, spec, material_type')
+    .eq('order_id', orderId).in('material_type', ['fabric', 'lining']);
+  const fabByStyle = new Map<string, { spec: string; name: string }>();
+  for (const b of (bomFab || []) as any[]) {
+    const key = b.style_no || '';
+    if (!fabByStyle.has(key)) fabByStyle.set(key, { spec: b.spec || '', name: b.material_name || '' });
+  }
+
   const poNo = (order as any).po_number || (order as any).order_no || '';
   const qtyOf = (l: any) => Number(l.qty_pcs) || Object.values(l.sizes && typeof l.sizes === 'object' ? l.sizes : {}).reduce((s: number, v: any) => s + (Number(v) || 0), 0);
 
@@ -117,6 +136,7 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
       return q ? `${nm}(${q}${unitLabel})` : nm;
     }).filter(Boolean).join('\n');
     const sizeKeys = Object.keys(first.sizes && typeof first.sizes === 'object' ? first.sizes : {});
+    const fab = fabByStyle.get(first.style_no || '') || fabByStyle.get('');
     return {
       po_no: poNo,
       style_no: first.style_no || '',
@@ -124,13 +144,13 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
       size: sizeKeys.join('-'),
       color,
       description: first.product_name_en || first.product_name || '',
-      composition: '',
-      fabric_weight: '',
+      composition: fab?.spec || '',                                         // 成分/规格自动带(materials_bom.spec)
+      fabric_weight: parseGsm(fab?.spec || '', first.fabric_name || ''),    // 克重自动抠(280GSM)
       total_carton: totalCarton,
       unit_per_carton: totalCarton > 0 ? Math.round(totalQty / totalCarton) : 0,
       qty: totalQty,
       unit_price: Number(first.po_unit_price) || 0,
-      notes: first.fabric_name || first.remark || '',
+      notes: first.fabric_name || fab?.name || first.remark || '',
     };
   });
 
