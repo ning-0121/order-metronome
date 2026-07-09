@@ -91,9 +91,14 @@ export async function loadShippingDocModel(
   for (const l of lines) {
     const s = l.style_no || '';
     let g = byStyle.get(s);
-    if (!g) g = { style_no: s, cartons: 0, qty: 0, per: Number(l.qty_per_carton) || 0, colors: [], sizes: {} };
-    g.cartons += Number(l.carton_count) || 0;
+    if (!g) g = { style_no: s, cartons: 0, qty: 0, per: Number(l.qty_per_carton) || 0, colors: [], sizes: {}, gross: 0, net: 0, vol: 0 };
+    const cc = Number(l.carton_count) || 0;
+    g.cartons += cc;
     g.qty += Number(l.total_qty) || 0;
+    g.gross += cc * (Number(l.gross_weight_per_carton) || 0);
+    g.net += cc * (Number(l.net_weight_per_carton) || 0);
+    const d = l.carton_dims_cm || {};
+    if (d.l && d.w && d.h) g.vol += (Number(d.l) * Number(d.w) * Number(d.h)) * cc / 1_000_000;
     if (!g.per && Number(l.qty_per_carton) > 0) g.per = Number(l.qty_per_carton);
     if (l.color) g.colors.push({ color: l.color, qty: Number(l.total_qty) || 0 });
     const sb = l.size_breakdown || {};
@@ -113,6 +118,7 @@ export async function loadShippingDocModel(
       sizeRatio: sizeRatioText(g.sizes),
       colorBreakdown: g.colors.map((c: any) => `${c.color}(${c.qty}${uw})`).join('\n'),
       cartons: g.cartons, per: g.per, qty: g.qty, unitWord: uw,
+      gross: Math.round(g.gross * 10) / 10, net: Math.round(g.net * 10) / 10, vol: Math.round(g.vol * 1000) / 1000,
       unitPrice: price, amount,
     });
   }

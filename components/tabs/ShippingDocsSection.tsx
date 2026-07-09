@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getShippingDraft, saveShippingLines, saveShippingDocMeta } from '@/app/actions/packing';
 import { generatePackingList } from '@/app/actions/generate-packing-list';
-import { generateCommercialInvoice, previewShippingDocs } from '@/app/actions/shipping-docs';
+import { generateCommercialInvoice, generateCustomsDocs, previewShippingDocs } from '@/app/actions/shipping-docs';
 
 function downloadBase64(base64: string, fileName: string) {
   const bytes = atob(base64);
@@ -31,6 +31,7 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(false);
   const [metaOpen, setMetaOpen] = useState(false);
+  const [czOpen, setCzOpen] = useState(false);
   const [preview, setPreview] = useState<any>(null);
 
   const load = useCallback(async () => {
@@ -48,6 +49,13 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
   const setField = (i: number, k: string, v: string) => setRows(rs => rs.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
   const setM = (k: string, v: any) => setMeta((m: any) => ({ ...m, [k]: v }));
   const setBank = (k: string, v: any) => setMeta((m: any) => ({ ...m, bank: { ...(m.bank || {}), [k]: v } }));
+  const setCz = (k: string, v: any) => setMeta((m: any) => ({ ...m, customs: { ...(m.customs || {}), [k]: v } }));
+  const setCzStyle = (style: string, k: string, v: any) => setMeta((m: any) => {
+    const cz = m.customs || {}; const styles = { ...(cz.styles || {}) };
+    styles[style] = { ...(styles[style] || {}), [k]: v };
+    return { ...m, customs: { ...cz, styles } };
+  });
+  const uniqueStyles = [...new Set(rows.map(r => r.style_no).filter(Boolean))];
 
   const num = (v: any) => (v === '' || v == null ? 0 : Number(v) || 0);
   const tot = rows.reduce((a, l) => {
@@ -72,15 +80,17 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
     if (e) { setErr(e); return; }
     setMsg('✅ 出货数据 + 单据信息已保存'); await load();
   }
-  async function doGen(kind: 'pl' | 'ci') {
+  async function doGen(kind: 'pl' | 'ci' | 'customs') {
     setGen(kind); setErr(''); setMsg('');
     const e = await persist();
     if (e) { setErr(e); setGen(''); return; }
-    const res = kind === 'pl' ? await generatePackingList(orderId) : await generateCommercialInvoice(orderId);
+    const res = kind === 'pl' ? await generatePackingList(orderId)
+      : kind === 'ci' ? await generateCommercialInvoice(orderId)
+      : await generateCustomsDocs(orderId);
     setGen('');
     if ((res as any).error || !(res as any).base64) { setErr((res as any).error || '生成失败'); return; }
     downloadBase64((res as any).base64, (res as any).fileName);
-    setMsg(`✅ ${kind === 'pl' ? 'Packing List' : 'CI'} 已生成下载`);
+    setMsg(`✅ ${kind === 'pl' ? 'Packing List' : kind === 'ci' ? 'CI' : '报关资料'} 已生成下载`);
   }
   async function doPreview() {
     setGen('preview'); setErr(''); setMsg('');
@@ -194,13 +204,53 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
               )}
             </div>
 
+            {/* 报关信息(业务填,存 doc_meta.customs) */}
+            <div className="rounded-lg border border-gray-200">
+              <button onClick={() => setCzOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <span>🛃 报关信息(海关字段 + 每款 HS 编码/报关品名 —— 生成报关资料用)</span><span className="text-xs text-gray-400">{czOpen ? '收起 ▲' : '展开 ▼'}</span>
+              </button>
+              {czOpen && (
+                <div className="p-3 border-t border-gray-100 space-y-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {([['overseas_buyer', '境外收货人'], ['overseas_addr', '收货人地址'], ['contract_no', '合同协议号(默认PO)'], ['customs_port', '出境关别(宁波港)'], ['transport', '运输方式(江海运输)'], ['supervision', '监管方式(一般贸易)'], ['levy_type', '征免性质(一般征税)'], ['trade_terms', '成交方式(FOB)'], ['trade_country', '贸易国(美国)'], ['dest_country', '运抵国(美国)'], ['dest_port', '指运港'], ['exit_port', '离境口岸'], ['package_type', '包装种类'], ['source_place', '境内货源地(义乌)'], ['origin_country', '原产国(中国)']] as [string, string][]).map(([k, label]) => (
+                      <label key={k} className="flex flex-col gap-0.5 text-[11px] text-gray-500">{label}
+                        <input className={finp} value={(meta.customs?.[k]) ?? ''} onChange={e => setCz(k, e.target.value)} placeholder={label.match(/\((.+)\)/)?.[1] || ''} />
+                      </label>
+                    ))}
+                  </div>
+                  {uniqueStyles.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <div className="text-[11px] font-semibold text-gray-600 mb-1">每款报关信息</div>
+                      <table className="w-full text-xs border-collapse">
+                        <thead><tr className="bg-gray-50 text-gray-500">{['款号', 'HS 编码', '报关品名', '规格型号', '单位'].map(h => <th key={h} className="border border-gray-100 px-1.5 py-1 font-medium">{h}</th>)}</tr></thead>
+                        <tbody>
+                          {uniqueStyles.map(st => {
+                            const cs = meta.customs?.styles?.[st] || {};
+                            return (
+                              <tr key={st}>
+                                <td className="border border-gray-100 px-1.5 py-1 font-mono whitespace-nowrap">{st}</td>
+                                <td className="border border-gray-100 px-1 py-0.5"><input className={inp + ' text-left'} value={cs.hs_code ?? ''} onChange={e => setCzStyle(st, 'hs_code', e.target.value)} placeholder="6104230000" /></td>
+                                <td className="border border-gray-100 px-1 py-0.5"><input className={inp + ' text-left'} value={cs.customs_name ?? ''} onChange={e => setCzStyle(st, 'customs_name', e.target.value)} placeholder="女式针织便服套装" /></td>
+                                <td className="border border-gray-100 px-1 py-0.5"><input className={inp + ' text-left'} value={cs.customs_spec ?? ''} onChange={e => setCzStyle(st, 'customs_spec', e.target.value)} placeholder="1.女式针织便服套装 2.针织..." /></td>
+                                <td className="border border-gray-100 px-1 py-0.5"><input className={inp} value={cs.unit ?? ''} onChange={e => setCzStyle(st, 'unit', e.target.value)} placeholder="套" /></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* 操作 */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
               <button onClick={save} disabled={saving || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50">{saving ? '保存中…' : '💾 保存'}</button>
               <button onClick={doPreview} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-50">{gen === 'preview' ? '生成中…' : '👁 预览'}</button>
               <button onClick={() => doGen('pl')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{gen === 'pl' ? '生成中…' : '📦 生成 Packing List'}</button>
               <button onClick={() => doGen('ci')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">{gen === 'ci' ? '生成中…' : '💰 生成 CI'}</button>
-              <button disabled title="P3 即将上线" className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 font-medium cursor-not-allowed">🛃 生成报关资料(P3)</button>
+              <button onClick={() => doGen('customs')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">{gen === 'customs' ? '生成中…' : '🛃 生成报关资料'}</button>
             </div>
 
             {/* 预览 */}
