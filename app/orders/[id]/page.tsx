@@ -27,6 +27,7 @@ import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
 import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
 import { OrderActions } from '@/components/OrderActions';
 import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
+import { PITab } from '@/components/tabs/PITab';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
 import { RescheduleBanner } from '@/components/RescheduleBanner';
@@ -83,7 +84,7 @@ export default async function OrderDetailPage({
     redirect(`/orders/${id}?tab=basic`);
   }
   // 2026-07-08 用户拍板:弃用「成本控制」+「报价基线/报价单识别」(布料名对不上采购)。预算/成本真相全走「采购核料」。
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'procurement_items', 'procurement', 'supply_chain', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'procurement', 'supply_chain', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -419,6 +420,7 @@ export default async function OrderDetailPage({
               { key: 'basic', label: '基本信息' },
               { key: 'progress', label: `执行进度 ${overdueCount > 0 ? '🔴' : blockedCount > 0 ? '🟡' : ''}` },
               { key: 'manufacturing_order', label: '🏭 生产任务单' },
+              { key: 'pi', label: '🧾 PI' },
               { key: 'bom', label: '原辅料和包装' },
               { key: 'procurement_items', label: '🛒 采购核料' },
               { key: 'procurement', label: '📦 采购进度' },
@@ -859,6 +861,12 @@ export default async function OrderDetailPage({
               <PackingFilesSection orderId={id} fileTypes={['size_chart']} emptyText="暂无尺码表;请到「原辅料和包装」页上传(建单不再传尺码表)" />
             </div>
             <ManufacturingOrderTab orderId={id} />
+          </div>
+        )}
+        {/* Tab: PI 形式发票(2026-07-09:从生产单+客户PO价+交期生成,业务改/预览/下载)*/}
+        {activeTab === 'pi' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <PITab orderId={id} />
           </div>
         )}
         {/* Tab: 产品款（Order Line ↔ Product Variant)*/}
