@@ -196,6 +196,46 @@ export async function createPurchaseOrder(input: {
 }
 
 /**
+ * 全部采购单档案(采购/管理员)。列出所有采购单——草稿/已下单/收货中/已收/已关都能调回,
+ * 用于「订单已入库、采购中心队列里不再显示,但想调回之前的采购表」。含关联订单双号,便于按订单找。
+ * 合计仅底价角色可见(非底价角色返回 null)。
+ */
+export async function listAllPurchaseOrders(): Promise<{ data?: any[]; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购/管理员可查看采购单档案' };
+  const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
+  // select * :price_tbd 等列未建也不报错,拿到什么用什么
+  const { data: pos, error } = await (supabase.from('purchase_orders') as any)
+    .select('*, suppliers(name)')
+    .order('created_at', { ascending: false }).limit(500);
+  if (error) return { error: error.message };
+  const rows = (pos || []) as any[];
+  const allOids = [...new Set(rows.flatMap((p) => p.order_ids || []))] as string[];
+  const orderMap = new Map<string, any>();
+  if (allOids.length) {
+    const { data: ords } = await (supabase.from('orders') as any)
+      .select('id, order_no, internal_order_no, customer_name').in('id', allOids);
+    for (const o of (ords || [])) orderMap.set(o.id, o);
+  }
+  return {
+    data: rows.map((p) => ({
+      id: p.id, po_no: p.po_no,
+      supplier_name: p.suppliers?.name ?? null,
+      status: p.status ?? null, approval_status: p.approval_status ?? null,
+      total_amount: canSeeFloor ? (p.total_amount ?? null) : null,
+      currency: p.currency || 'CNY',
+      price_tbd: p.price_tbd === true,
+      delivery_date: p.delivery_date ?? null, created_at: p.created_at ?? null,
+      orders: (p.order_ids || []).map((oid: string) => {
+        const o = orderMap.get(oid);
+        return { order_no: o?.order_no ?? null, internal_order_no: o?.internal_order_no ?? null, customer_name: o?.customer_name ?? null };
+      }),
+    })),
+  };
+}
+
+/**
  * 某订单关联的采购单档案(2026-07-03:下单后核料页转入追踪模式,这里是"下文"的家)。
  * 每单:PO号/供应商/状态/订购合计/已收/未到,链到采购单详情(批次历史在详情里)。
  */
