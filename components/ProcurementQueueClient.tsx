@@ -40,7 +40,7 @@ function LampDot({ lamp }: { lamp: string | null }) {
   return <span className={`inline-block w-2.5 h-2.5 rounded-full ${LAMP[lamp]}`} title={lamp} />;
 }
 
-function RowShell({ line, children }: { line: QueueLine; children: React.ReactNode }) {
+function RowShell({ line, sizes, children }: { line: QueueLine; sizes?: string[]; children: React.ReactNode }) {
   return (
     <div className="border-b border-gray-100 py-2 px-3 hover:bg-gray-50">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -48,7 +48,9 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
           <LampDot lamp={line.lamp} />
           <span className="font-medium text-gray-900 truncate">{line.material_name}</span>
           {line.color && <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 shrink-0">{line.color}</span>}
-          {(line as any).size && <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 shrink-0" title="尺码(N1 按码拆行)">{(line as any).size}码</span>}
+          {sizes && sizes.length > 1
+            ? <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 shrink-0" title={`该料多个尺码合并显示:${sizes.join('·')}`}>{sizes.length}个尺码</span>
+            : (line as any).size && <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 shrink-0" title="尺码(N1 按码拆行)">{(line as any).size}码</span>}
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{CAT[line.category || 'other'] || line.category}</span>
           {/* 已归到采购单的行 → 主链接进"单张采购单"(按供应商/颜色,同供应商多色即合并单,正是用户要的"单个采购单的样子");
               未归单的行 → 进核料页(整单核料+任务单下载)。2026-07-06 用户反馈:点了总看到总订单,要能点进单张采购单。 */}
@@ -72,6 +74,25 @@ function RowShell({ line, children }: { line: QueueLine; children: React.ReactNo
       </div>
     </div>
   );
+}
+
+/** 队列行按 采购单+物料+颜色+状态 合并(2026-07-08 用户:同料多尺码太乱)。
+ *  历史按码拆的执行行在此合并显示,催货/推进对该组所有行一起操作;收货仍逐行(数量按码)。 */
+type QueueGroup = { key: string; rep: QueueLine; ids: string[]; sizes: string[]; totalOrdered: number; lamp: string | null };
+function groupQueue(lines: QueueLine[]): QueueGroup[] {
+  const m = new Map<string, QueueGroup>();
+  for (const l of lines) {
+    const key = `${(l as any).purchase_order_id || ''}¦${l.material_name || ''}¦${l.color || ''}¦${l.line_status}`;
+    let g = m.get(key);
+    if (!g) { g = { key, rep: l, ids: [], sizes: [], totalOrdered: 0, lamp: null }; m.set(key, g); }
+    g.ids.push(l.id);
+    const sz = (l as any).size; if (sz && !g.sizes.includes(String(sz))) g.sizes.push(String(sz));
+    g.totalOrdered += Number((l as any).ordered_qty) || 0;
+    if (l.lamp === 'red') g.lamp = 'red';
+    else if (l.lamp === 'yellow' && g.lamp !== 'red') g.lamp = 'yellow';
+    else if (!g.lamp) g.lamp = l.lamp ?? null;
+  }
+  return [...m.values()];
 }
 
 /** 内控:该行所在采购单尚未下单(草稿/待审批/驳回)—— 不给验收/催货/推进按钮,引导先去审批下单。
@@ -108,6 +129,15 @@ export function ProcurementQueueClient({
     if (r?.error) { setErr(r.error); return false; }
     setOpenForm(null); router.refresh(); return true;
   }
+  // 组操作:对该组所有行(各尺码)依次执行,汇总首个错误
+  async function runGroup(key: string, ids: string[], fn: (id: string) => Promise<{ error?: string }>) {
+    setBusy(key); setErr('');
+    let firstErr: string | undefined;
+    for (const id of ids) { const r = await fn(id); if (r?.error && !firstErr) firstErr = r.error; }
+    setBusy(null);
+    if (firstErr) { setErr(firstErr); return false; }
+    setOpenForm(null); router.refresh(); return true;
+  }
 
   const btn = 'text-xs px-2 py-1 rounded font-medium disabled:opacity-50';
 
@@ -116,10 +146,26 @@ export function ProcurementQueueClient({
     if (!(await confirm({ title: '确认操作?', message: text, confirmText: '确认' }))) return;
     run(`${l.id}:${key}`, () => transitionProcurementLine(l.id, to as any));
   }
+  async function confirmRunGroup(g: QueueGroup, key: string, to: string, text: string) {
+    if (!(await confirm({ title: '确认操作?', message: text, confirmText: '确认' }))) return;
+    runGroup(`${g.key}:${key}`, g.ids, (id) => transitionProcurementLine(id, to as any));
+  }
   const BACK_ONE: Record<string, string> = {
     confirmed: 'ordered', in_production: 'confirmed',
     ready_to_ship: 'in_production', shipped: 'ready_to_ship', arrived: 'shipped',
   };
+  function GroupBackButton({ g }: { g: QueueGroup }) {
+    const backTo = BACK_ONE[g.rep.line_status];
+    if (!backTo) return null;
+    return (
+      <button className={`${btn} border border-gray-200 text-gray-400 hover:text-red-500`}
+        title="点错了?退回上一状态(操作留痕)" disabled={busy === `${g.key}:back`}
+        onClick={async () => {
+          if (!(await confirm({ title: '退回上一状态?', message: `把「${g.rep.material_name}」从「${STATUS_LABEL[g.rep.line_status] || g.rep.line_status}」退回「${STATUS_LABEL[backTo] || backTo}」\n(误点纠正,操作会留痕)`, danger: true, confirmText: '回退' }))) return;
+          runGroup(`${g.key}:back`, g.ids, (id) => transitionProcurementLine(id, backTo as any, { note: '误点回退' }));
+        }}>↩ 回退</button>
+    );
+  }
   function BackButton({ l }: { l: QueueLine }) {
     const backTo = BACK_ONE[l.line_status];
     if (!backTo) return null;
@@ -223,27 +269,32 @@ export function ProcurementQueueClient({
         <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-100 font-bold text-amber-900 text-sm">
           🔔 待催货 / 生产中（{chase.length}）
         </div>
-        {chase.length === 0 ? <Empty /> : chase.map(l => (
-          <RowShell key={l.id} line={l}>
+        {chase.length === 0 ? <Empty /> : groupQueue(chase).map(g => {
+          const l = { ...g.rep, lamp: g.lamp } as QueueLine;
+          const multi = g.sizes.length > 1;
+          return (
+          <RowShell key={g.key} line={l} sizes={g.sizes}>
             <span className="text-xs text-gray-400">
               {STATUS_LABEL[l.line_status]} · 预计 {fmt(l.expected_arrival || l.promised_date)}
+              {multi && <span className="ml-1">· 合计 {g.totalOrdered} {(l as any).ordered_unit || ''}</span>}
               {(l.chase_count ?? 0) > 0 && <span className="text-amber-600 ml-1">催{l.chase_count}次</span>}
             </span>
             {l.po_not_placed ? <BlockedPoNote l={l} /> : (<>
-              <button className={`${btn} bg-amber-500 text-white hover:bg-amber-600`} disabled={busy === `${l.id}:chase`}
-                onClick={async () => { const v = await prompt({ title: `催货「${l.material_name}」`, message: `已催 ${l.chase_count ?? 0} 次`, fields: [{ name: 'note', label: '催货备注(可选)', type: 'textarea' }], confirmText: '记一次催货', }); if (v) run(`${l.id}:chase`, () => chaseProcurementLine(l.id, v.note || undefined)); }}>催货</button>
+              <button className={`${btn} bg-amber-500 text-white hover:bg-amber-600`} disabled={busy === `${g.key}:chase`}
+                onClick={async () => { const v = await prompt({ title: `催货「${l.material_name}」${multi ? `(${g.sizes.length}个尺码一起)` : ''}`, message: `已催 ${l.chase_count ?? 0} 次`, fields: [{ name: 'note', label: '催货备注(可选)', type: 'textarea' }], confirmText: '记一次催货', }); if (v) runGroup(`${g.key}:chase`, g.ids, (id) => chaseProcurementLine(id, v.note || undefined)); }}>催货</button>
               {l.line_status === 'ordered' && (
-                <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:conf`}
-                  onClick={() => confirmRun(l, 'conf', 'confirmed', `确认「${l.material_name}」供应商已接单/确认交期?`)}>确认</button>
+                <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${g.key}:conf`}
+                  onClick={() => confirmRunGroup(g, 'conf', 'confirmed', `确认「${l.material_name}」供应商已接单/确认交期?${multi ? `(${g.sizes.length}个尺码)` : ''}`)}>确认</button>
               )}
-              <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:rts`}
-                onClick={() => confirmRun(l, 'rts', 'ready_to_ship', `确定「${l.material_name}」工厂已完成、进入待送货?\n(点错可用「↩回退」退回)`)}>✅ 工厂已完成</button>
-              <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${l.id}:ship`}
-                onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」已直接发货(跳过待送货)?`)}>直接发货</button>
-              <BackButton l={l} />
+              <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${g.key}:rts`}
+                onClick={() => confirmRunGroup(g, 'rts', 'ready_to_ship', `确定「${l.material_name}」工厂已完成、进入待送货?${multi ? `(${g.sizes.length}个尺码一起)` : ''}\n(点错可用「↩回退」退回)`)}>✅ 工厂已完成</button>
+              <button className={`${btn} border border-gray-200 text-gray-600`} disabled={busy === `${g.key}:ship`}
+                onClick={() => confirmRunGroup(g, 'ship', 'shipped', `确定「${l.material_name}」已直接发货(跳过待送货)?${multi ? `(${g.sizes.length}个尺码)` : ''}`)}>直接发货</button>
+              <GroupBackButton g={g} />
             </>)}
           </RowShell>
-        ))}
+          );
+        })}
       </section>
 
       {/* ── 已完成待送货 / 在途 ── */}
@@ -251,24 +302,26 @@ export function ProcurementQueueClient({
         <div className="bg-sky-50 px-4 py-2.5 border-b border-sky-100 font-bold text-sky-900 text-sm">
           🚚 已完成待送货 / 在途（{readyShip.length}）
         </div>
-        {readyShip.length === 0 ? <Empty /> : readyShip.map(l => {
-          const out = outstanding(l);
+        {readyShip.length === 0 ? <Empty /> : groupQueue(readyShip).map(g => {
+          const l = { ...g.rep, lamp: g.lamp } as QueueLine;
+          const multi = g.sizes.length > 1;
+          const out = multi ? g.totalOrdered : outstanding(l);
           return (
-            <RowShell key={l.id} line={l}>
+            <RowShell key={g.key} line={l} sizes={g.sizes}>
               <span className="text-xs text-gray-400">
                 {STATUS_LABEL[l.line_status]} · 预计 {fmt(l.expected_arrival || l.promised_date)}
                 {out != null && <> · <b className={out > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {out}</b> {l.ordered_unit}</>}
               </span>
               {l.po_not_placed ? <BlockedPoNote l={l} /> : (<>
                 {l.line_status === 'ready_to_ship' && (
-                  <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${l.id}:ship`}
-                    onClick={() => confirmRun(l, 'ship', 'shipped', `确定「${l.material_name}」供应商已发货?`)}>🚚 已发货</button>
+                  <button className={`${btn} bg-sky-600 text-white hover:bg-sky-700`} disabled={busy === `${g.key}:ship`}
+                    onClick={() => confirmRunGroup(g, 'ship', 'shipped', `确定「${l.material_name}」供应商已发货?${multi ? `(${g.sizes.length}个尺码)` : ''}`)}>🚚 已发货</button>
                 )}
                 {l.line_status === 'shipped' && (
-                  <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${l.id}:arr`}
-                    onClick={() => confirmRun(l, 'arr', 'arrived', `确定「${l.material_name}」货已送达工厂/仓库?\n送达后进入待验收。`)}>📦 已送达</button>
+                  <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `${g.key}:arr`}
+                    onClick={() => confirmRunGroup(g, 'arr', 'arrived', `确定「${l.material_name}」货已送达工厂/仓库?${multi ? `(${g.sizes.length}个尺码)` : ''}\n送达后进入待验收。`)}>📦 已送达</button>
                 )}
-                <BackButton l={l} />
+                <GroupBackButton g={g} />
               </>)}
             </RowShell>
           );
