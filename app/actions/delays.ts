@@ -2,7 +2,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { calcDueDates } from '@/lib/schedule';
+import { calcDueDates, compressRemainingIntoWindow } from '@/lib/schedule';
 import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 // updateMilestone/updateMilestones 不再在 recalculateSchedule 中使用
 // （系统级联操作直接走 supabase，避免 repo 层权限校验干扰）
@@ -59,7 +59,10 @@ export async function createDelayRequest(
   proposedNewDueAt?: string,
   requiresCustomerApproval: boolean = false,
   customerApprovalEvidenceUrl?: string,
-  reasonCategory?: 'customer' | 'supplier' | 'internal' | 'force_majeure'
+  reasonCategory?: 'customer' | 'supplier' | 'internal' | 'force_majeure',
+  // 2026-07-09 用户拍板:延期强制二选一,下游必动。
+  //   push_delivery = 顺延交期(交期+下游都后移 N 天) | hold_delivery = 保交期(交期不动,下游压缩)
+  mode?: 'push_delivery' | 'hold_delivery',
 ) {
   const supabase = await createClient();
 
@@ -148,7 +151,7 @@ export async function createDelayRequest(
     }
   }
 
-  // 计算延期天数
+  // 计算延期天数(该节点新截止 − 原截止)
   let delayDays = 0;
   if (proposedNewDueAt && milestoneData.due_at) {
     delayDays = Math.ceil(
@@ -161,6 +164,26 @@ export async function createDelayRequest(
         (new Date(proposedNewAnchorDate).getTime() - new Date(oldAnchor).getTime()) / 86400000
       );
     }
+  }
+
+  // ── 二选一路由(mode 显式优先;缺省回退到 category)──
+  // 顺延交期:新交期 = 原交期 + 延期天数(服务端算,绝不把"某个中间节点的新日期"当交期,修历史 bug)。
+  // 保交期:不动交期,只带节点新日期,审批落地时把下游压进剩余窗口。
+  let impactsFinalDelivery = categoryInfo.impactsFinalDeliveryDate;
+  let rescheduleModeInit: 'push_delivery' | 'urgent' | null = null;
+  if (mode === 'push_delivery') {
+    const oldAnchor = orderData.incoterm === 'FOB' ? (orderData.etd || orderData.factory_date) : (orderData.warehouse_due_date || orderData.eta);
+    if (oldAnchor && delayDays > 0) {
+      const a = new Date(oldAnchor + 'T00:00:00+08:00');
+      a.setDate(a.getDate() + delayDays);
+      proposedNewAnchorDate = a.toISOString().slice(0, 10);
+    }
+    impactsFinalDelivery = true;
+    rescheduleModeInit = 'push_delivery';
+  } else if (mode === 'hold_delivery') {
+    proposedNewAnchorDate = undefined;   // 保交期:绝不动锚点
+    impactsFinalDelivery = false;
+    rescheduleModeInit = 'urgent';
   }
 
   // 改期审批链快照(2026-07-05 P1):按该节点 owner_role 从路由表冻结审批链,逐级确认
@@ -179,7 +202,8 @@ export async function createDelayRequest(
     proposed_new_due_at: proposedNewDueAt || null,
     requires_customer_approval: requiresCustomerApproval,
     delay_days: delayDays,
-    impacts_final_delivery: categoryInfo.impactsFinalDeliveryDate,
+    impacts_final_delivery: impactsFinalDelivery,
+    reschedule_mode: rescheduleModeInit,
     status: 'pending',
     approval_chain: approvalChain,
     current_step: 0,
@@ -956,36 +980,34 @@ async function recalculateSchedule(
       console.error(`[recalculateSchedule] due_at-branch: failed to update current milestone ${milestoneData.id}:`, curErr.message);
     }
 
-    // Shift downstream milestones by same delta
-    const { data: downstreamMilestones } = await supabase
-      .from('milestones')
-      .select('id, due_at, step_key')
-      .eq('order_id', orderData.id)
-      .gte('due_at', milestoneData.due_at)
-      .neq('id', milestoneData.id);
-
-    if (downstreamMilestones) {
-      for (const m of downstreamMilestones as any[]) {
-        if (!m.due_at) continue;
-        const newDue = new Date(new Date(m.due_at).getTime() + deltaDays * 24 * 60 * 60 * 1000);
-        const { error: dsErr } = await supabase
-          .from('milestones')
-          .update({ due_at: newDue.toISOString(), planned_at: newDue.toISOString() })
-          .eq('id', m.id);
-        if (dsErr) {
-          console.error(`[recalculateSchedule] due_at-branch: failed to update downstream milestone ${m.id} (${m.step_key}):`, dsErr.message);
+    // 保交期(hold):把下游未完成节点压进 [新节点日期, 锚点],绝不推过交期(与顺延的整体后移相反)。
+    try {
+      const anchorStr = orderData.incoterm === 'FOB'
+        ? (orderData.etd || orderData.factory_date)
+        : (orderData.warehouse_due_date || orderData.eta);
+      const stepKey = milestoneData.step_key;
+      if (anchorStr && stepKey) {
+        const compressed = compressRemainingIntoWindow(stepKey, newDueAt, new Date(anchorStr + 'T00:00:00+08:00'));
+        const { data: dsm } = await supabase
+          .from('milestones').select('id, step_key, status')
+          .eq('order_id', orderData.id).neq('id', milestoneData.id);
+        for (const m of (dsm || []) as any[]) {
+          const nd = (compressed as any)[m.step_key];
+          if (!nd) continue;
+          if (['done', '已完成'].includes(String(m.status || '').toLowerCase())) continue;   // 已完成不动
+          const { error: dsErr } = await supabase.from('milestones')
+            .update({ due_at: nd.toISOString(), planned_at: nd.toISOString() }).eq('id', m.id);
+          if (dsErr) console.error(`[recalculateSchedule] 保交期压缩 ${m.step_key} 失败:`, dsErr.message);
         }
       }
+    } catch (e: any) {
+      console.error('[recalculateSchedule] 保交期压缩下游异常:', e?.message);
     }
 
-    // Log recalculation
     await logMilestoneAction(
-      supabase,
-      milestoneData.id,
-      orderData.id,
-      'recalc_schedule',
-      `Schedule shifted by ${deltaDays} days`,
-      { new_due_at: delayRequest.proposed_new_due_at }
+      supabase, milestoneData.id, orderData.id, 'recalc_schedule',
+      `保交期:节点后移 ${deltaDays} 天,下游压入剩余窗口`,
+      { new_due_at: delayRequest.proposed_new_due_at },
     );
   }
 }

@@ -297,6 +297,33 @@ export function recalcRemainingDueDates(
   return result;
 }
 
+/**
+ * 保交期压缩(2026-07-09):某节点延后后,把其下游节点等比例压进 [fromDate, anchor],
+ * 硬帽在 anchor(绝不越交期,与 recalcRemainingDueDates 的 min-14 天保障不同——那个会溢出锚点)。
+ * 窗口挤没了(fromDate≥anchor)则下游全部塌到 anchor。返回 { step_key: Date }(仅下游,不含当前节点)。
+ */
+export function compressRemainingIntoWindow(
+  currentStepKey: string, fromDate: Date, anchor: Date,
+): Record<string, Date> {
+  const currentDay = TIMELINE[currentStepKey as keyof typeof TIMELINE];
+  if (currentDay === undefined) throw new Error(`Unknown step_key: ${currentStepKey}`);
+  const remaining = Object.entries(TIMELINE)
+    .filter(([k, day]) => day > currentDay && k !== 'payment_received')
+    .sort((a, b) => a[1] - b[1]);
+  const result: Record<string, Date> = {};
+  if (remaining.length === 0) return result;
+  const maxDay = remaining[remaining.length - 1][1];
+  const span = maxDay - currentDay;
+  const windowMs = Math.max(anchor.getTime() - fromDate.getTime(), 0);
+  for (const [key, day] of remaining) {
+    const frac = span > 0 ? (day - currentDay) / span : 1;
+    let d = new Date(fromDate.getTime() + frac * windowMs);
+    if (d.getTime() > anchor.getTime()) d = new Date(anchor);   // 硬帽:不越交期
+    result[key] = d;
+  }
+  return result;
+}
+
 export function calcDueDates(params: CalcDueDatesParams) {
   const {
     orderDate, createdAt, incoterm,

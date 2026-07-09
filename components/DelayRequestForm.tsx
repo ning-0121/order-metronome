@@ -16,6 +16,7 @@ interface DelayRequestFormProps {
 export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milestoneDueAt }: DelayRequestFormProps) {
   const router = useRouter();
   const [category, setCategory] = useState<DelayCategory>('customer');
+  const [mode, setMode] = useState<'push_delivery' | 'hold_delivery'>('push_delivery');  // 强制二选一
   const [reasonDetail, setReasonDetail] = useState('');
   const [proposedNewDueAt, setProposedNewDueAt] = useState('');
   const [customerEvidenceUrl, setCustomerEvidenceUrl] = useState('');
@@ -41,6 +42,11 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
     });
     setValidationResult(result);
   }, [category, proposedNewDueAt, milestoneDueAt, stepKey]);
+
+  // 分类切换时给个默认建议:客户/不可抗力 → 顺延交期;内部/供应商 → 保交期(可手动改)
+  useEffect(() => {
+    setMode(categoryInfo.impactsFinalDeliveryDate ? 'push_delivery' : 'hold_delivery');
+  }, [category, categoryInfo.impactsFinalDeliveryDate]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -68,18 +74,17 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
       return;
     }
 
-    // 根据分类决定是否要修改 anchor（客户/不可抗力 → 改 anchor，内部/供应商 → 只改节点）
-    const shouldUpdateAnchor = categoryInfo.impactsFinalDeliveryDate;
-
+    // 强制二选一:始终传节点新日期,顺延/保交期交给 mode,新交期由服务端 = 原交期 + 延期天数 算(不再把节点日期当交期)
     const result = await createDelayRequest(
       milestoneId,
       category, // 使用 category 作为 reasonType
       reasonDetail,
-      shouldUpdateAnchor ? proposedNewDueAt.slice(0, 10) : undefined, // anchor date
-      !shouldUpdateAnchor ? proposedNewDueAt : undefined,                // milestone due
+      undefined,                     // anchor 由服务端按 mode 计算
+      proposedNewDueAt,              // 节点新截止(始终传)
       category === 'force_majeure',
       customerEvidenceUrl || undefined,
       category,
+      mode,                          // push_delivery=顺延交期 / hold_delivery=保交期
     );
 
     if (result.error) {
@@ -134,23 +139,28 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
         </div>
       </div>
 
-      {/* 分类影响提示 */}
-      <div className={`rounded-lg p-3 text-xs ${
-        categoryInfo.impactsFinalDeliveryDate
-          ? 'bg-blue-50 border border-blue-200 text-blue-800'
-          : 'bg-amber-50 border border-amber-200 text-amber-800'
-      }`}>
-        {categoryInfo.impactsFinalDeliveryDate ? (
-          <>📅 <strong>将顺延最终交期</strong>：所有下游节点和 {orderIncoterm === 'FOB' ? 'ETD' : '入仓日'} 同步后移</>
-        ) : (
-          <>⚠️ <strong>不能影响最终交期</strong>：下游节点保持原日期，窗口被压缩，需加快进度
-            {maxDays !== undefined && maxDays > 0 && (
-              <div className="mt-1">该节点最多允许延期 <strong>{maxDays} 天</strong></div>
-            )}
-            {maxDays === 0 && (
-              <div className="mt-1 text-red-700">⛔ 该节点是硬性死线，不允许内部原因延期</div>
-            )}
-          </>
+      {/* 强制二选一:顺延交期 / 保交期(下游必动) */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          这次延期怎么处理交期? <span className="text-red-500">*</span>
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setMode('push_delivery')}
+            className={`text-left p-3 rounded-lg border-2 transition-all ${mode === 'push_delivery' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+            <div className="font-semibold text-sm text-gray-900">📅 顺延交期</div>
+            <div className="text-xs text-gray-500 mt-1 leading-snug">交期({orderIncoterm === 'FOB' ? 'ETD' : '入仓日'}) 和所有下游节点一起后移相同天数</div>
+          </button>
+          <button type="button" onClick={() => setMode('hold_delivery')}
+            className={`text-left p-3 rounded-lg border-2 transition-all ${mode === 'hold_delivery' ? 'border-amber-500 bg-amber-50' : 'border-gray-200'}`}>
+            <div className="font-semibold text-sm text-gray-900">⚡ 保交期</div>
+            <div className="text-xs text-gray-500 mt-1 leading-snug">交期不动,下游节点压进剩余窗口(标「交期紧急」,需赶工)</div>
+          </button>
+        </div>
+        {mode === 'hold_delivery' && maxDays === 0 && (
+          <div className="mt-1.5 text-xs text-red-700">⛔ 该节点是硬性死线,保交期下不允许延期</div>
+        )}
+        {mode === 'hold_delivery' && maxDays !== undefined && maxDays > 0 && (
+          <div className="mt-1.5 text-xs text-amber-700">该节点保交期下最多延 <strong>{maxDays} 天</strong></div>
         )}
       </div>
 
