@@ -35,28 +35,29 @@ console.log('\n🔍 部署前回归检查\n');
 console.log('📋 里程碑模板');
 // 2026-07-03 节点体系 V2:生产模板 9 节点(设计 docs/Designs/Milestone-V2-Departments-Redesign.md)。
 //   V2 只对新订单生效;V1(11节点)保留服务在途订单与回滚,故仍校验其存在。
-assert(MILESTONE_TEMPLATE_V2.length === 9, `V2 生产模板有 ${MILESTONE_TEMPLATE_V2.length} 个节点 (=9)`);
+assert(MILESTONE_TEMPLATE_V2.length === 14, `标准生产模板有 ${MILESTONE_TEMPLATE_V2.length} 个节点 (=14,业务执行全流程)`);
 assert(MILESTONE_TEMPLATE_V1.length >= 11, `V1 生产模板(在途兜底)有 ${MILESTONE_TEMPLATE_V1.length} 个节点 (≥11)`);
 assert(SAMPLE_MILESTONE_TEMPLATE.length === 8, `打样模板有 ${SAMPLE_MILESTONE_TEMPLATE.length} 个节点 (=8)`);
 
-// V2 生产模板必须包含的 9 个节点(顺序=排期递增)
+// 标准生产模板(14 节点)必须包含的节点(顺序=排期递增)
 const requiredSteps = [
-  'po_confirmed', 'mo_released', 'pre_prod_meeting', 'procurement_order_placed',
-  'pre_production_sample_approved', 'production_kickoff', 'final_qc_check',
-  'shipment_execute', 'payment_received',
+  'po_confirmed', 'pi_confirmed', 'production_order_upload', 'procurement_order_placed',
+  'pre_production_sample_sent', 'pre_production_sample_approved', 'production_kickoff',
+  'mid_qc_sales_check', 'shipping_sample_send', 'final_qc_sales_check',
+  'booking_done', 'ci_made', 'shipment_execute', 'payment_received',
 ];
 for (const step of requiredSteps) {
-  assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `V2 生产模板包含 ${step}`);
+  assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `标准生产模板包含 ${step}`);
 }
-// V2 已折叠/移除的旧节点不应再出现在新模板
-for (const gone of ['finance_approval', 'factory_completion', 'inspection_release', 'booking_done']) {
-  assert(!MILESTONE_TEMPLATE_V2.some(m => m.step_key === gone), `V2 生产模板已移除 ${gone}`);
+// 已折叠/移除的旧节点不应再出现在标准模板
+for (const gone of ['finance_approval', 'factory_completion', 'inspection_release', 'mo_released', 'pre_prod_meeting', 'final_qc_check']) {
+  assert(!MILESTONE_TEMPLATE_V2.some(m => m.step_key === gone), `标准生产模板不含 ${gone}`);
 }
-// V2 新增节点必须在 calcDueDates 有排期(否则建单缺日期)
+// 新增节点必须在 calcDueDates 有排期(否则建单缺日期)
 {
   const due = calcDueDates({ orderDate: '2026-07-03', incoterm: 'FOB', etd: '2026-09-30' });
-  for (const step of ['mo_released', 'pre_prod_meeting']) {
-    assert(due[step] instanceof Date && !isNaN(due[step].getTime()), `calcDueDates 含 V2 节点 ${step}`);
+  for (const step of ['pi_confirmed', 'ci_made']) {
+    assert(due[step] instanceof Date && !isNaN(due[step].getTime()), `calcDueDates 含新节点 ${step}`);
   }
 }
 
@@ -64,10 +65,9 @@ for (const gone of ['finance_approval', 'factory_completion', 'inspection_releas
 console.log('\n🤝 多方确认');
 {
   const expected: Record<string, number> = {
-    po_confirmed: 2,                     // 业务执行 + 财务
-    pre_prod_meeting: 3,                 // 业务执行 + 生产 + 采购
+    po_confirmed: 2,                     // 业务 + 财务
     pre_production_sample_approved: 2,   // 采购 + 业务执行
-    final_qc_check: 2,                   // QC + 业务执行
+    final_qc_sales_check: 2,             // QC + 业务执行
     shipment_execute: 3,                 // 业务执行 + 采购 + 财务
   };
   for (const [step, n] of Object.entries(expected)) {
@@ -210,13 +210,15 @@ for (const step of sampleSteps) {
 // ════ 2. getApplicableMilestones 路由正确 ════
 console.log('\n🔀 模板路由');
 const prodMilestones = getApplicableMilestones('bulk', false, 'export');
-assert(prodMilestones.length === 9, `export订单返回 ${prodMilestones.length} 个节点 (=9, V2)`);
+assert(prodMilestones.length === 14, `export订单返回 ${prodMilestones.length} 个节点 (=14,标准全流程)`);
 assert(prodMilestones.some(m => m.step_key === 'shipment_execute'), 'export包含 shipment_execute');
+assert(prodMilestones.some(m => m.step_key === 'booking_done'), 'export包含订舱出货');
 
 const domesticMilestones = getApplicableMilestones('bulk', false, 'domestic');
-// 2026-07-06 用户拍板:生产单固定 9 标准节点,不再按 domestic 换送仓 → domestic 与 export 相同
-assert(domesticMilestones.length === 9, `domestic生产单固定 ${domesticMilestones.length} 节点 (=9)`);
-assert(domesticMilestones.some(m => m.step_key === 'shipment_execute'), 'domestic固定含 shipment_execute(生产单不再换送仓节点)');
+// 2026-07-09:国内单跳过出口专属节点(船样/订舱)→ 14-2=12
+assert(domesticMilestones.length === 12, `domestic生产单 ${domesticMilestones.length} 节点 (=12,跳过船样/订舱)`);
+assert(domesticMilestones.some(m => m.step_key === 'shipment_execute'), 'domestic含 shipment_execute');
+assert(!domesticMilestones.some(m => m.step_key === 'booking_done'), 'domestic不含订舱(出口专属)');
 
 const sampleMilestones = getApplicableMilestones('sample', false, 'domestic', 'sample');
 assert(sampleMilestones.length === 8, `sample订单返回 ${sampleMilestones.length} 个节点 (=8)`);
@@ -252,27 +254,28 @@ for (const k of tradeScheduleKeys) {
   assert(tradeDue[k] instanceof Date && !isNaN(tradeDue[k].getTime()), `trade step_key ${k} 能被 schedule 排期(calcDueDates 返回有效日期)`);
 }
 
-// 2026-07-06 用户拍板:标准生产单执行时间线固定 9 节点 —— 免产前样/头样/二次样 都不再增删,均返回标准 9。
+// 2026-07-09:出口标准单固定 14 节点 —— 免产前样/头样/二次样 都不再增删,均返回标准 14(出口)。
 const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);
-assert(skipSampleMilestones.length === 9, `免产前样仍固定 ${skipSampleMilestones.length} 节点 (=9)`);
-assert(skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_approved'), '免产前样仍含产前样确认(固定9节点)');
+assert(skipSampleMilestones.length === 14, `免产前样仍固定 ${skipSampleMilestones.length} 节点 (=14)`);
+assert(skipSampleMilestones.some(m => m.step_key === 'pre_production_sample_approved'), '免产前样仍含产前样确认(固定14节点)');
 
 const devSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', false, 'dev_sample');
-assert(devSampleMilestones.length === 9, `头样模式仍固定 ${devSampleMilestones.length} 节点 (=9,不再插头样节点)`);
+assert(devSampleMilestones.length === 14, `头样模式仍固定 ${devSampleMilestones.length} 节点 (=14,不再插头样节点)`);
 
 const devRevisionMilestones = getApplicableMilestones('bulk', false, 'export', 'production', false, 'dev_sample_with_revision');
-assert(devRevisionMilestones.length === 9, `二次样模式仍固定 ${devRevisionMilestones.length} 节点 (=9)`);
+assert(devRevisionMilestones.length === 14, `二次样模式仍固定 ${devRevisionMilestones.length} 节点 (=14)`);
 
-// ════ 2b. V2 生产模板(9 节点骨架)节点顺序正确性 ════
+// ════ 2b. 标准生产模板(14 节点)节点顺序正确性 ════
 console.log('\n📐 节点顺序');
 function stepIdx(template: typeof prodMilestones, key: string) {
   return template.findIndex((m: any) => m.step_key === key);
 }
-// V2 骨架顺序(=排期递增):PO确认→生产任务单下发→产前会→采购下单→产前样确认→生产启动→尾查验货→发货出运→收款
+// 骨架顺序(=排期递增)
 const spine = [
-  'po_confirmed', 'mo_released', 'pre_prod_meeting', 'procurement_order_placed',
-  'pre_production_sample_approved', 'production_kickoff', 'final_qc_check',
-  'shipment_execute', 'payment_received',
+  'po_confirmed', 'pi_confirmed', 'production_order_upload', 'procurement_order_placed',
+  'pre_production_sample_sent', 'pre_production_sample_approved', 'production_kickoff',
+  'mid_qc_sales_check', 'shipping_sample_send', 'final_qc_sales_check',
+  'booking_done', 'ci_made', 'shipment_execute', 'payment_received',
 ];
 let prevIdx = -1;
 for (const key of spine) {

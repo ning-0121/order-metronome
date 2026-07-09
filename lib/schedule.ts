@@ -121,6 +121,8 @@ function countWorkdays(from: Date, to: Date): number {
 const TIMELINE = {
   // ── 阶段 1：订单评审（0-3 天）──
   po_confirmed:                  0,
+  pi_confirmed:                  1,   // PI制作·客户确认(PO后 1 天)
+  ci_made:                       43,  // CI制作(发货出运前,与订舱/报关同期)
   finance_approval:              1,
   mo_released:                   0,   // V2:生产任务单下发(与PO同日,MO→executing 自动完成)
   pre_prod_meeting:              2,   // V2:产前会(业务+生产+采购三方,PO后 2 天)
@@ -338,6 +340,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
 
   const result: Record<string, Date> = {
     po_confirmed:                  cap(calc(TIMELINE.po_confirmed)),
+    pi_confirmed:                  cap(calc(TIMELINE.pi_confirmed)),   // PI制作·客户确认
+    ci_made:                       cap(calc(TIMELINE.ci_made)),        // CI制作
     finance_approval:              cap(calc(TIMELINE.finance_approval)),
     mo_released:                   cap(calc(TIMELINE.mo_released)),        // V2:生产任务单下发(T+0)
     pre_prod_meeting:              cap(calc(TIMELINE.pre_prod_meeting)),   // V2:产前会(T+2)

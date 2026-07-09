@@ -12,14 +12,17 @@
 /** 关键路径节点 step_key 集合 */
 export const CRITICAL_STEP_KEYS = new Set<string>([
   'po_confirmed',         // V2:PO确认(并入财务审核,订单+资金起跑门)
+  'pi_confirmed',         // 14节点:PI客户确认(关键)
   'finance_approval',     // V1 在途订单仍有此节点
   'procurement_order_placed',
   'pre_production_sample_approved',
   'production_kickoff',
   'final_qc_check',
+  'final_qc_sales_check', // 14节点:业务尾查(放行依据,关键)
   'factory_completion',
-  'booking_done',         // V1 出口订单的最后阻塞点
-  'shipment_execute',     // V2 出口订单的最后阻塞点(订舱/报关/出运折进此节点)
+  'booking_done',         // 出口订单订舱/出货
+  'ci_made',              // 14节点:CI制作(出货单证,关键)
+  'shipment_execute',     // 出口订单的最后阻塞点
   'domestic_delivery',    // 国内送仓订单的最后阻塞点
 ]);
 

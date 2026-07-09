@@ -43,19 +43,13 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
     { key: 'finance', label: '财务', roles: FINANCE, hint: '价格/账期/额度审核通过' },
     { key: 'production', label: '生产部', roles: PRODUCTION_QC, hint: '订单要求/工艺可执行,已知悉' },
   ],
-  // 3. 产前会 = 业务执行 + 生产 + 采购 三方
-  pre_prod_meeting: [
-    { key: 'sales_exec', label: '业务执行', roles: SALES_EXEC, hint: '订单要求已向生产/采购交底' },
-    { key: 'production', label: '生产部', roles: PRODUCTION_QC, hint: '产能/工艺可行,重点已知悉' },
-    { key: 'procurement', label: '采购部', roles: PROCUREMENT, hint: '物料需求已确认,可下单' },
-  ],
-  // 5. 产前样确认 = 采购(原辅料大货品质) + 业务执行(客户/自确认) 双确认
+  // 产前样确认 = 采购(原辅料大货品质) + 业务执行(客户/自确认) 双确认
   pre_production_sample_approved: [
     { key: 'procurement', label: '采购部', roles: PROCUREMENT, hint: '大货原辅料品质与样一致' },
     { key: 'sales_exec', label: '业务执行', roles: SALES_EXEC, hint: '客户确认/自确认通过' },
   ],
-  // 7. 尾查验货 = 业务执行 + QC 双确认
-  final_qc_check: [
+  // 尾期验货业务确认 = 业务执行 + QC 双确认(14 节点模板:业务对尾查结果确认放行)
+  final_qc_sales_check: [
     { key: 'qc', label: '生产部QC', roles: PRODUCTION_QC, hint: '尾查合格,问题已闭环' },
     { key: 'sales_exec', label: '业务执行', roles: SALES_EXEC, hint: '验货结果可对客户交付' },
   ],

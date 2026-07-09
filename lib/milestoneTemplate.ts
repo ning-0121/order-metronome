@@ -71,22 +71,34 @@ export const MILESTONE_TEMPLATE_V2: Array<{
   evidence_required: boolean;
   evidence_note?: string;
 }> = [
-  { step_key: "po_confirmed", name: "PO确认", owner_role: "finance", is_critical: true, evidence_required: true,
-    evidence_note: "财务确认 + 生产部确认(双确认;业务建单即已确认,不再自确认);财务核价格/账期,生产核订单要求/工艺" },
-  { step_key: "mo_released", name: "生产任务单下发", owner_role: "sales", is_critical: false, evidence_required: false,
-    evidence_note: "生产任务单状态推进到「已下发生产」时系统自动完成本节点" },
-  { step_key: "pre_prod_meeting", name: "产前会", owner_role: "sales", is_critical: false, evidence_required: true,
-    evidence_note: "业务执行 + 生产 + 采购 三方确认;上传产前会纪要" },
+  // 2026-07-09 用户拍板:业务执行全流程 14 节点(把 V2 砍掉的业务节点补回 + 新增 PI/CI)。
+  // 业务线节点由业务开发(sales)/业务执行(merchandiser)牵头;采购/生产/财务节点保留。
+  { step_key: "po_confirmed", name: "PO确认", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "业务 + 财务双确认;财务核价格/账期,业务核订单要求" },
+  { step_key: "pi_confirmed", name: "PI制作·客户确认", owner_role: "sales", is_critical: true, evidence_required: true,
+    evidence_note: "业务制作 PI(形式发票)发客户确认;上传 PI 文件" },
+  { step_key: "production_order_upload", name: "生产单上传", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务上传生产单 + 原辅料单" },
   { step_key: "procurement_order_placed", name: "采购下单", owner_role: "procurement", is_critical: true, evidence_required: true,
     evidence_note: "完成后开启采购进度共享(无价单 + 采购进度 tab)" },
-  { step_key: "pre_production_sample_approved", name: "产前样确认", owner_role: "procurement", is_critical: true, evidence_required: true,
-    evidence_note: "采购(原辅料大货品质) + 业务执行(客户/自确认) 双确认" },
+  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务寄产前样给客户,填快递单号" },
+  { step_key: "pre_production_sample_approved", name: "产前样确认", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "采购(原辅料大货品质) + 业务(客户/自确认) 双确认" },
   { step_key: "production_kickoff", name: "生产启动", owner_role: "production", is_critical: true, evidence_required: false,
     evidence_note: "生产 + QC;完成后开启 QC 日常跟单打卡" },
-  { step_key: "final_qc_check", name: "尾查验货", owner_role: "production", is_critical: true, evidence_required: true,
-    evidence_note: "业务执行 + QC 双确认;汇总打卡记录作为验货依据" },
+  { step_key: "mid_qc_sales_check", name: "中期验货业务确认", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务对中期验货结果确认" },
+  { step_key: "shipping_sample_send", name: "船样", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务寄船样(仅出口单)" },
+  { step_key: "final_qc_sales_check", name: "尾期验货业务确认", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "业务对尾期验货结果确认,放行依据" },
+  { step_key: "booking_done", name: "订舱出货", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "业务订舱/报关安排(仅出口单)" },
+  { step_key: "ci_made", name: "CI制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "业务制作 CI(商业发票);上传 CI 文件" },
   { step_key: "shipment_execute", name: "发货出运", owner_role: "logistics", is_critical: true, evidence_required: true,
-    evidence_note: "业务执行 + 采购(尾料清点归库) + 财务 三方确认;含订舱/报关/出运" },
+    evidence_note: "含出运/送仓;采购尾料清点归库 + 财务确认" },
   { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false,
     evidence_note: "按账期(发货日 + 账期天数);财务系统回传可自动完成" },
 ];
@@ -268,9 +280,12 @@ export function getApplicableMilestones(
     return [...TRADE_MILESTONE_TEMPLATE];
   }
 
-  // 2026-07-06 用户拍板:标准生产单执行时间线【固定显示这 9 个标准节点】,
-  // 不再按 国内送仓 / 翻单 / 免产前样 动态增删(打样单/经销单仍走上方各自模板)。
-  // 保留形参签名兼容调用方;samplePhase/deliveryType/skipPreProductionSample 现不影响节点集。
-  void samplePhase; void skipPreProductionSample; void deliveryType;
-  return [...MILESTONE_TEMPLATE_V2];
+  // 2026-07-09 用户拍板:标准生产单执行时间线 14 节点(业务执行全流程);
+  //   仅出口专属节点(船样/订舱)对非出口单跳过,其余固定。样品/翻单不再动态增删。
+  void samplePhase; void skipPreProductionSample;
+  const base = [...MILESTONE_TEMPLATE_V2];
+  if (deliveryType !== 'export') {
+    return base.filter(m => !['shipping_sample_send', 'booking_done'].includes(m.step_key));
+  }
+  return base;
 }
