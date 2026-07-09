@@ -80,14 +80,15 @@ function RowShell({ line, sizes, children }: { line: QueueLine; sizes?: string[]
 
 /** 队列行按 采购单+物料+颜色+状态 合并(2026-07-08 用户:同料多尺码太乱)。
  *  历史按码拆的执行行在此合并显示,催货/推进对该组所有行一起操作;收货仍逐行(数量按码)。 */
-type QueueGroup = { key: string; rep: QueueLine; ids: string[]; sizes: string[]; totalOrdered: number; lamp: string | null };
+type QueueGroup = { key: string; rep: QueueLine; ids: string[]; lines: QueueLine[]; sizes: string[]; totalOrdered: number; lamp: string | null };
 function groupQueue(lines: QueueLine[]): QueueGroup[] {
   const m = new Map<string, QueueGroup>();
   for (const l of lines) {
     const key = `${(l as any).purchase_order_id || ''}¦${l.material_name || ''}¦${l.color || ''}¦${l.line_status}`;
     let g = m.get(key);
-    if (!g) { g = { key, rep: l, ids: [], sizes: [], totalOrdered: 0, lamp: null }; m.set(key, g); }
+    if (!g) { g = { key, rep: l, ids: [], lines: [], sizes: [], totalOrdered: 0, lamp: null }; m.set(key, g); }
     g.ids.push(l.id);
+    g.lines.push(l);
     const sz = (l as any).size; if (sz && !g.sizes.includes(String(sz))) g.sizes.push(String(sz));
     g.totalOrdered += Number((l as any).ordered_qty) || 0;
     if (l.lamp === 'red') g.lamp = 'red';
@@ -126,6 +127,7 @@ export function ProcurementQueueClient({
   const [busy, setBusy] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<string | null>(null); // `${rowId}:${kind}`
   const [err, setErr] = useState('');
+  const [expandRecv, setExpandRecv] = useState<Set<string>>(new Set()); // 待验收:同料多尺码合并行的展开态(按 group key)
 
   // 队列本地镜像:操作成功后即时移动行 + 更新头部计数,不必等整页 router.refresh()
   // (2026-07-09 用户:点「工厂已完成」料还留在待催货、上方数字要手动刷新才一起跳过去)。
@@ -230,11 +232,41 @@ export function ProcurementQueueClient({
   // 分组行(同料多尺码合并显示)——计数用分组数,和实际看到的行数一致(2026-07-09 用户:计数对不上)
   const chaseGroups = groupQueue(chase);
   const readyShipGroups = groupQueue(readyShip);
+  // 待验收也合并(2026-07-09 用户:水洗标同料 3 个尺码显示成 3 行,看着像重复采购)——归总一条,展开逐码收货
+  const receiveGroups = groupQueue(receive);
+
+  // 单行待验收块(RowShell + 收货登记/验收判定/回退表单)—— 合并组展开后逐码复用同一块,逻辑不变
+  const receiveLineBlock = (l: QueueLine): React.ReactNode => (
+    <div key={l.id}>
+      <RowShell line={l}>
+        <span className="text-xs text-gray-400">
+          订购 {l.ordered_qty ?? '—'} {l.ordered_unit}{l.received_qty ? ` · 已收 ${l.received_qty}` : ''}
+          {outstanding(l) != null && <> · <b className={outstanding(l)! > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {outstanding(l)}</b></>}
+        </span>
+        {l.po_not_placed ? <BlockedPoNote l={l} /> : (
+          <>
+            <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`}
+              onClick={() => setOpenForm(openForm === `${l.id}:reg` ? null : `${l.id}:reg`)}>📥 收货登记</button>
+            <button className={`${btn} bg-white text-gray-600 border border-gray-300 hover:bg-gray-50`}
+              onClick={() => setOpenForm(openForm === `${l.id}:recv` ? null : `${l.id}:recv`)}>验收判定</button>
+            <BackButton l={l} />
+          </>
+        )}
+      </RowShell>
+      {!l.po_not_placed && openForm === `${l.id}:reg` && (
+        <ReceiptRegisterForm line={l} canFinanceOver={canFinanceOver} onDone={() => { setOpenForm(null); dropLines([l.id]); router.refresh(); }} />
+      )}
+      {!l.po_not_placed && openForm === `${l.id}:recv` && (
+        <ReceiveForm line={l} busy={!!busy && busy.startsWith(`${l.id}:recv`)}
+          onSubmit={(p) => run(`${l.id}:recv:${p.result}`, () => recordGoodsReceipt(l.id, p))} />
+      )}
+    </div>
+  );
 
   // 今日先处理(2026-07-05 简化:按优先级列出有活的队列,新人一眼知道从哪下手)
   const todo = [
     { label: '待采购订单(去核料下单)', n: pendingRequests.length, href: '#q-pendingRequests' },
-    { label: '待验收', n: receive.length, href: '#q-receive' },
+    { label: '待验收', n: receiveGroups.length, href: '#q-receive' },
     { label: '待催货', n: chaseGroups.length, href: '#q-chase' },
     { label: '已完成待送货', n: readyShipGroups.length, href: '#q-readyShip' },
     { label: '待下单(去归采购单)', n: pendingOrder.length, href: '#q-pendingOrder' },
@@ -256,7 +288,7 @@ export function ProcurementQueueClient({
         <Stat label="待下单" value={pendingOrder.length} href="#q-pendingOrder" tone="border-indigo-200 bg-indigo-50 text-indigo-800" />
         <Stat label="待催货 / 生产中" value={chaseGroups.length} href="#q-chase" tone="border-amber-200 bg-amber-50 text-amber-800" />
         <Stat label="已完成待送货" value={readyShipGroups.length} href="#q-readyShip" tone="border-sky-200 bg-sky-50 text-sky-800" />
-        <Stat label="已送达待验收" value={receive.length} href="#q-receive" tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
+        <Stat label="已送达待验收" value={receiveGroups.length} href="#q-receive" tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
         <Stat label="🔴 到货逾期" value={counts.overdueOrders} href="#q-chase" tone="border-red-200 bg-red-50 text-red-800" />
         <Stat label="⚠️ 需抓紧追" value={counts.atRiskOrders} href="#q-chase" tone="border-rose-200 bg-rose-50 text-rose-800" />
       </div>
@@ -404,34 +436,29 @@ export function ProcurementQueueClient({
       {/* ── 已送达待验收 ── */}
       <section id="q-receive" className="scroll-mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-emerald-50 px-4 py-2.5 border-b border-emerald-100 font-bold text-emerald-900 text-sm">
-          ✅ 已送达待验收（{receive.length}）
+          ✅ 已送达待验收（{receiveGroups.length}）
         </div>
-        {receive.length === 0 ? <Empty /> : receive.map(l => (
-          <div key={l.id}>
-            <RowShell line={l}>
-              <span className="text-xs text-gray-400">
-                订购 {l.ordered_qty ?? '—'} {l.ordered_unit}{l.received_qty ? ` · 已收 ${l.received_qty}` : ''}
-                {outstanding(l) != null && <> · <b className={outstanding(l)! > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {outstanding(l)}</b></>}
-              </span>
-              {l.po_not_placed ? <BlockedPoNote l={l} /> : (
-                <>
-                  <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`}
-                    onClick={() => setOpenForm(openForm === `${l.id}:reg` ? null : `${l.id}:reg`)}>📥 收货登记</button>
-                  <button className={`${btn} bg-white text-gray-600 border border-gray-300 hover:bg-gray-50`}
-                    onClick={() => setOpenForm(openForm === `${l.id}:recv` ? null : `${l.id}:recv`)}>验收判定</button>
-                  <BackButton l={l} />
-                </>
-              )}
-            </RowShell>
-            {!l.po_not_placed && openForm === `${l.id}:reg` && (
-              <ReceiptRegisterForm line={l} canFinanceOver={canFinanceOver} onDone={() => { setOpenForm(null); dropLines([l.id]); router.refresh(); }} />
-            )}
-            {!l.po_not_placed && openForm === `${l.id}:recv` && (
-              <ReceiveForm line={l} busy={!!busy && busy.startsWith(`${l.id}:recv`)}
-                onSubmit={(p) => run(`${l.id}:recv:${p.result}`, () => recordGoodsReceipt(l.id, p))} />
-            )}
-          </div>
-        ))}
+        {receiveGroups.length === 0 ? <Empty /> : receiveGroups.map(g => {
+          // 单尺码/未拆码 → 原样单行;同料多尺码 → 归总一条,展开逐码收货(收货数量按码,故不在合并行直接收)
+          if (g.ids.length <= 1) return receiveLineBlock(g.rep);
+          const totalOut = g.lines.reduce((s, x) => s + (outstanding(x) || 0), 0);
+          const open = expandRecv.has(g.key);
+          return (
+            <div key={g.key}>
+              <RowShell line={g.rep} sizes={g.sizes}>
+                <span className="text-xs text-gray-400">
+                  订购 {g.totalOrdered} {g.rep.ordered_unit} · <b className={totalOut > 0 ? 'text-amber-600' : 'text-emerald-600'}>未到 {totalOut}</b>
+                </span>
+                <button className={`${btn} bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50`}
+                  onClick={() => setExpandRecv(s => { const n = new Set(s); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}
+                  title="同一款料按尺码拆的执行行合并显示;展开后逐个尺码收货登记/验收(收货数量按码)">
+                  {open ? '收起尺码' : `展开 ${g.sizes.length} 个尺码 · 逐码收货`}
+                </button>
+              </RowShell>
+              {open && <div className="bg-teal-50/30 border-l-2 border-teal-200">{g.lines.map(receiveLineBlock)}</div>}
+            </div>
+          );
+        })}
       </section>
       {/* 对话框宿主:confirm/prompt(工厂已完成/确认/取消等)全靠它渲染。
           复审误删过一次(把它当成 ReceiptRegisterForm 的越界引用),导致按钮点不了 → 已恢复。 */}
