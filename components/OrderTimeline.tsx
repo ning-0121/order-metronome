@@ -39,45 +39,38 @@ interface OrderTimelineProps {
 }
 
 // V1 最终分组（对齐新节点表）
+// 2026-07-09 业务执行节拍:订单详情节拍器 = 业务执行视角的 5 段(生产大货细节在生产中心、采购下单在采购中心)。
+// 每段 stepKeys 顺序 = 段内显示顺序;段与段顺序 = 数组顺序。新 15 节点排在各段前列,
+// 旧模板(V1/9节点)的 step_key 折进最贴近的段尾,保证存量单仍能显示、次序合理。
 const MILESTONE_GROUPS = [
   {
     key: 'stage1', emoji: '🟦',
-    titleCn: '阶段 1：订单评审',
-    stepKeys: ['po_confirmed', 'pi_confirmed', 'finance_approval', 'order_kickoff_meeting', 'production_order_upload'],
+    titleCn: '阶段 1：订单确认',
+    stepKeys: ['po_confirmed', 'pi_confirmed', 'finance_approval'],
   },
   {
     key: 'stage2', emoji: '🟨',
-    titleCn: '阶段 2：预评估',
-    stepKeys: ['order_docs_bom_complete', 'bulk_materials_confirmed'],
+    titleCn: '阶段 2：订单准备',
+    // 业务:生产单/原辅料单 → 订单评审会 → 采购核料提交(采购下单细节在采购中心);后接旧模板准备类节点
+    stepKeys: ['production_order_upload', 'order_kickoff_meeting', 'procurement_order_placed',
+      'order_docs_bom_complete', 'bulk_materials_confirmed', 'processing_fee_confirmed', 'factory_confirmed', 'materials_received_inspected', 'pre_production_meeting'],
   },
   {
     key: 'stage3', emoji: '🟧',
-    titleCn: '阶段 3：工厂匹配 & 产前样',
-    stepKeys: ['processing_fee_confirmed', 'factory_confirmed', 'pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
+    titleCn: '阶段 3：产前样',
+    stepKeys: ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
   },
   {
     key: 'stage4', emoji: '🟩',
-    titleCn: '阶段 4：采购与生产准备',
-    // 顺序修复（2026-04-08）：产前会必须在原料到货后、开裁前
-    stepKeys: ['procurement_order_placed', 'materials_received_inspected', 'pre_production_meeting', 'production_kickoff'],
+    titleCn: '阶段 4：生产过程',
+    // 业务盯:中期验货 → 包装方式确认 → 尾期验货(大货生产/QC 明细在生产中心);production_kickoff 等旧节点折入
+    stepKeys: ['production_kickoff', 'mid_qc_check', 'mid_qc_sales_check', 'packing_method_confirmed', 'final_qc_check', 'final_qc_sales_check', 'factory_completion', 'leftover_collection'],
   },
   {
-    key: 'stage5', emoji: '🟪',
-    titleCn: '阶段 5：过程控制（跟单+业务双重验货）',
-    // 补全（2026-04-08）：之前漏了 mid_qc_sales_check / final_qc_sales_check
-    stepKeys: ['mid_qc_check', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check'],
-  },
-  {
-    key: 'stage6', emoji: '🟥',
-    titleCn: '阶段 6：出货控制',
-    // 顺序修复（2026-04-08）：船样寄送必须在包装确认后、工厂完成前
-    stepKeys: ['packing_method_confirmed', 'shipping_sample_send', 'factory_completion', 'leftover_collection', 'finished_goods_warehouse', 'inspection_release'],
-  },
-  {
-    key: 'stage7', emoji: '🟫',
-    titleCn: '阶段 7：物流收款',
-    // domestic_delivery(国内送仓完成):国内单的最终交付节点,原先漏在分组外→时间线不显示,补入
-    stepKeys: ['booking_done', 'ci_made', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'domestic_delivery', 'payment_received'],
+    key: 'stage5', emoji: '🟫',
+    titleCn: '阶段 5：出货与收款',
+    // 业务:船样 → PackingList/CI/报关单 → 订舱出货 → 发货出运(物流) → 收款
+    stepKeys: ['shipping_sample_send', 'ci_made', 'finished_goods_warehouse', 'inspection_release', 'booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'domestic_delivery', 'payment_received'],
   },
 ];
 

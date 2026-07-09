@@ -29,11 +29,15 @@ const STEP_LANE_MAP: Record<string, SwimLane> = {
   pre_prod_meeting:              'sales',  // 产前会(owner=sales)
   pre_production_sample_sent:    'sales',  // 业务填快递单号、每日追踪
   pre_production_sample_approved:'sales',  // 客户确认
-  booking_done:                  'sales',  // 订舱出货(业务订舱/报关;14 节点模板归业务线)
-  ci_made:                       'sales',  // CI制作(业务)
+  booking_done:                  'sales',  // 订舱出货(业务订舱)
+  ci_made:                       'sales',  // PackingList·CI·报关单制作(业务)
   mid_qc_sales_check:            'sales',
   shipping_sample_send:          'sales',
   final_qc_sales_check:          'sales',
+  // 2026-07-09 业务执行节拍:采购核料提交/包装方式确认/订单评审会 归业务线(owner=sales)
+  procurement_order_placed:      'sales',  // 采购核料提交(业务提交→采购部下单,下单进度在采购中心)
+  packing_method_confirmed:      'sales',  // 包装方式确认(业务)
+  order_kickoff_meeting:         'sales',  // 订单评审会(业务牵头,业务·生产·采购)
 
   // 头样 / 二次样的客户对接也属业务线
   dev_sample_sent:                'sales',
@@ -49,12 +53,10 @@ const STEP_LANE_MAP: Record<string, SwimLane> = {
   processing_fee_confirmed:      'production',
   factory_confirmed:             'production',
   pre_production_sample_ready:   'production',
-  procurement_order_placed:      'production',
   materials_received_inspected:  'production',
   pre_production_meeting:        'production',
   production_kickoff:            'production',
   mid_qc_check:                  'production',
-  packing_method_confirmed:      'production',
   final_qc_check:                'production',
   factory_completion:            'production',
   leftover_collection:           'production',
@@ -67,7 +69,6 @@ const STEP_LANE_MAP: Record<string, SwimLane> = {
   // 🟣 跨部门同步（sync）— 财务/物流/QC 放行/出运
   // ─────────────────────────────────────────────
   finance_approval:              'sync',
-  order_kickoff_meeting:         'sync',
   finished_goods_warehouse:      'sync',
   inspection_release:            'sync',
   customs_export:                'sync',
