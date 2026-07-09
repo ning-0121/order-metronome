@@ -100,6 +100,31 @@ function countWorkdays(from: Date, to: Date): number {
   return count;
 }
 
+/** 从 base 往前回退 n 个工作日(跳过周日+法定节假日) */
+function subtractBusinessDays(base: Date, n: number): Date {
+  const d = new Date(base);
+  let left = n;
+  while (left > 0) {
+    d.setDate(d.getDate() - 1);
+    if (!isNonWorkday(d)) left--;
+  }
+  return d;
+}
+
+/**
+ * 关键工序真实工期地板(2026-07-09 用户拍板)。
+ * 比例挤压后,关键工序若被压得比真实工期还短 → 把上游节点往前拉,保证最小工作日间隔。
+ * 只往前拉(保交期,绝不越锚点);拉到下单日之前由校验4 clamp。数字=绮陌实际工期。
+ * 顺序按 to 节点从晚到早,保证链式传导(如 工厂完成 先被 验货 拉早,再传给 开裁)。
+ */
+const CRITICAL_FLOORS: Array<{ from: string; to: string; biz: number; label: string }> = [
+  { from: 'booking_done', to: 'shipment_execute', biz: 2, label: '订舱→出运' },
+  { from: 'factory_completion', to: 'inspection_release', biz: 2, label: '工厂完成→验货出结果' },
+  { from: 'production_kickoff', to: 'factory_completion', biz: 12, label: '开裁→工厂完成' },
+  { from: 'procurement_order_placed', to: 'materials_received_inspected', biz: 4, label: '采购下单→原料到货' },
+  { from: 'pre_production_sample_ready', to: 'pre_production_sample_approved', biz: 5, label: '产前样完成→客户确认' },
+];
+
 /**
  * 标准45天时间线（Day数 = 从下单日起的天数）
  *
@@ -395,6 +420,26 @@ export function calcDueDates(params: CalcDueDatesParams) {
       incoterm === 'FOB' ? new Date(rawAnchor) : addDays(rawAnchor, 10),
     ),
   };
+
+  // ══════ 关键工序真实工期地板（比例挤压后强制最小工作日间隔，保交期）══════
+  // 单趟反向传导:按 TIMELINE 顺序从晚到早,每个节点取「不晚于后一节点(排序)」与
+  // 「不晚于其地板下游 − 最小工作日」的更早者。只往前拉(不越锚点);拉到下单日前由校验4 clamp。
+  // 反向处理保证地板的 to 节点已定稿,from 相对最终 to 保证间隔,链式挤压不互相破坏。
+  const orderedKeys = Object.keys(result)
+    .filter(k => k !== 'payment_received' && TIMELINE[k as keyof typeof TIMELINE] != null)
+    .sort((a, b) => (TIMELINE[a as keyof typeof TIMELINE] as number) - (TIMELINE[b as keyof typeof TIMELINE] as number));
+  for (let i = orderedKeys.length - 2; i >= 0; i--) {
+    const node = orderedKeys[i];
+    let latest = result[orderedKeys[i + 1]];   // 排序约束:不晚于后一节点
+    for (const f of CRITICAL_FLOORS) {
+      if (f.from !== node) continue;
+      const to = result[f.to];
+      if (!to) continue;
+      const bound = subtractBusinessDays(to, f.biz);   // 地板:不晚于下游 − 最小工作日
+      if (bound.getTime() < latest.getTime()) latest = bound;
+    }
+    if (result[node] && latest && result[node].getTime() > latest.getTime()) result[node] = new Date(latest);
+  }
 
   // ══════ 四重校验 ══════
 
