@@ -10,8 +10,9 @@ import { MoDownloadButton } from './MoDownloadButton';
  * 只给:只读订单摘要(双号/客户/数量/交期) + 采购核料 + 生产任务单下载。
  * 订单的编辑、节点、财务等一概不在此页;纯采购角色访问订单详情会被改道到这里。
  */
-export default async function ProcurementVerifyPage({ params }: { params: Promise<{ orderId: string }> }) {
+export default async function ProcurementVerifyPage({ params, searchParams }: { params: Promise<{ orderId: string }>; searchParams: Promise<{ item?: string }> }) {
   const { orderId } = await params;
+  const { item: focusItemId } = await searchParams;
   await requireProcurementPage();
 
   const supabase = await createClient();
@@ -46,8 +47,8 @@ export default async function ProcurementVerifyPage({ params }: { params: Promis
         <MoDownloadButton orderId={order.id} orderNo={order.order_no} />
       </div>
 
-      {/* 订单信息只读;采购的工作面 = 核料确认 */}
-      <ProcurementItemsTab orderId={order.id} />
+      {/* 订单信息只读;采购的工作面 = 核料确认。带 ?item= 时聚焦到那一款料 */}
+      <ProcurementItemsTab orderId={order.id} focusItemId={focusItemId} />
 
       <p className="text-[11px] text-gray-400">
         本页为采购专用工作台:订单资料只读,核料/确认/补采购在此完成;生产任务单点右上下载。订单内容有误请联系业务执行修改。
