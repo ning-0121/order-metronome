@@ -149,6 +149,7 @@ export async function markMilestoneDone(
   milestoneId: string,
   checklistData?: Array<{ key: string; value: any; pending_date?: string }> | null,
   actualAtOverride?: string | null,
+  force?: boolean,
 ) {
   try {
   const supabase = await createClient();
@@ -200,6 +201,26 @@ export async function markMilestoneDone(
   );
   if (!isAssignedUser && !roleMatches && !isAdmin) {
     return { error: '无权操作：只有对应角色的负责人或管理员可以标记完成' };
+  }
+
+  // ── 链内前置软门禁(2026-07-09):前置节点没完成 → 警示 + 二次确认可强行(force)完成 ──
+  // 软门禁:不硬卡,只提醒(符合宪法「系统计算·人决策」);强行完成会在日志留「⚠ 前置未完成强行完成」。
+  let forcedOverPrereq: string[] = [];
+  if (!isDoneStatus(milestone.status)) {
+    const { data: allMs } = await (supabase.from('milestones') as any)
+      .select('step_key, status, name').eq('order_id', milestone.order_id);
+    const { unmetPrerequisites } = await import('@/lib/domain/milestoneDeps');
+    const unmet = unmetPrerequisites(milestone.step_key, (allMs || []) as any[], isDoneStatus);
+    if (unmet.length > 0) {
+      if (!force) {
+        return {
+          needsConfirm: true,
+          warning: `前置节点还没完成:${unmet.map((u) => u.name).join('、')}。确定要强行完成「${milestone.name}」吗?`,
+          unmet: unmet.map((u) => u.name),
+        };
+      }
+      forcedOverPrereq = unmet.map((u) => u.name);
+    }
   }
 
   // ── 国内送仓信息硬阻塞 ──
@@ -640,10 +661,14 @@ export async function markMilestoneDone(
     order_id: milestone.order_id,
     actor_user_id: user.id,
     action: backfillNote ? 'mark_done_backfill' : 'mark_done',
-    note: backfillNote ? `${baseNote}（${backfillNote}）` : baseNote,
+    note: [
+      backfillNote ? `${baseNote}（${backfillNote}）` : baseNote,
+      forcedOverPrereq.length ? `⚠ 前置未完成强行完成：${forcedOverPrereq.join('、')}` : '',
+    ].filter(Boolean).join(' · '),
     payload: {
       ...(overdueDays > 0 ? { overdue_days: overdueDays } : {}),
       ...(actualAtOverride ? { backfilled: true, actual_at_override: resolvedActualAt } : {}),
+      ...(forcedOverPrereq.length ? { forced_over_prereq: forcedOverPrereq } : {}),
     },
   });
 

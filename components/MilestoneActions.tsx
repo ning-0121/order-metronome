@@ -314,7 +314,16 @@ export function MilestoneActions({
       }
 
       // 标记完成（服务端会先保存清单再验证）
-      const result = await markMilestoneDone(milestone.id, checklistPayload, actualAtOverride);
+      let result = await markMilestoneDone(milestone.id, checklistPayload, actualAtOverride);
+      // 链内前置软门禁:前置未完成 → 二次确认可强行完成(记录原因)
+      if ((result as any).needsConfirm) {
+        if (window.confirm(`⚠ ${(result as any).warning}`)) {
+          result = await markMilestoneDone(milestone.id, checklistPayload, actualAtOverride, true);
+        } else {
+          setLoading(false);
+          return;
+        }
+      }
       if (result.error) {
         setSubmitError(result.error);
       } else {
