@@ -1422,6 +1422,14 @@ export async function getProcurementQueues(): Promise<{
 
   const lampRank = (l: string | null) => (l === 'red' ? 0 : l === 'yellow' ? 1 : l === 'green' ? 2 : 3);
   const byLamp = (a: QueueLine, b: QueueLine) => lampRank(a.lamp) - lampRank(b.lamp);
+  // 待验收排序(2026-07-09 用户:顺序乱)——按 类别→料名→颜色,同类同料聚一起(与采购对账同口径,好点货)
+  const CAT_RANK: Record<string, number> = { fabric: 0, lining: 1, trim: 3, label: 4, zipper: 5, button: 6, elastic: 7, packing: 8, other: 9 };
+  const catRank = (c?: string | null) => CAT_RANK[String(c || 'other')] ?? 2;   // 未知类目排面料/里料之后、辅料之间
+  const zh = (s: unknown) => String(s ?? '');
+  const byReceive = (a: QueueLine, b: QueueLine) =>
+    catRank(a.category) - catRank(b.category)
+    || zh(a.material_name).localeCompare(zh(b.material_name), 'zh')
+    || zh((a as any).color).localeCompare(zh((b as any).color), 'zh');
 
   // 2026-07-03 用户拍板四段:待下单 / 待催货(生产中) / 已完成待送货+在途 / 已送达待验收
   // 2026-07-04 修:已挂到采购单的行(即使 PO 还没 placed/待审批)不再算"待下单",否则
@@ -1429,7 +1437,7 @@ export async function getProcurementQueues(): Promise<{
   const pendingOrder = rows.filter(r => r.line_status === 'pending_order' && !r.purchase_order_id).sort(byLamp);
   const chase = rows.filter(r => ['ordered', 'confirmed', 'in_production'].includes(r.line_status)).sort(byLamp);
   const readyShip = rows.filter(r => ['ready_to_ship', 'shipped'].includes(r.line_status)).sort(byLamp);
-  const receive = rows.filter(r => r.line_status === 'arrived');
+  const receive = rows.filter(r => r.line_status === 'arrived').sort(byReceive);
 
   // 待审批采购单:已建、撞风险闸卡在 pending 的采购单(下单没走完的真相在这)。
   const pendingApprovalPOs: PendingApprovalPO[] = [];
