@@ -423,6 +423,7 @@ export default async function OrderDetailPage({
               { key: 'procurement_items', label: '🛒 采购核料' },
               { key: 'procurement', label: '📦 采购进度' },
               { key: 'production', label: '生产进度' },
+              { key: 'shipment', label: '🚢 出货单据' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             ].map(t => (
               <Link
