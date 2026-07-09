@@ -59,6 +59,9 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
   const [sizeEdit, setSizeEdit] = useState<Record<string, string>>({});   // 尺码拆分可编辑(码→量)
   const [sizeOverrideActive, setSizeOverrideActive] = useState(false);    // 是否已存人工覆盖
   const [suggestedSplit, setSuggestedSplit] = useState<Array<{ size: string | null; qty: number }>>([]);  // 系统按比例建议(点「按尺码录入」时预填)
+  const [splittable, setSplittable] = useState(true);   // 该料能否按尺码拆(面料/散装=否)
+  const [sizeOpen, setSizeOpen] = useState(false);      // 尺码录入面板是否展开(即使系统没建议也能手动加码)
+  const [newSize, setNewSize] = useState('');           // 手动加尺码输入
   const [sizeSaving, setSizeSaving] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
@@ -261,7 +264,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
 
   async function select(item: any) {
     if (selId === item.id) { setSelId(null); return; }
-    setSelId(item.id); setSources([]); setSizeBreakdown([]); setSizeEdit({}); setSizeOverrideActive(false); setSuggestedSplit([]);
+    setSelId(item.id); setSources([]); setSizeBreakdown([]); setSizeEdit({}); setSizeOverrideActive(false); setSuggestedSplit([]); setSizeOpen(false); setNewSize('');
     const f: Record<string, any> = {};
     for (const k of FORM_KEYS) f[k] = item[k] ?? '';
     // 采购计量单位默认=该项单位(物料录入时就选过,不让采购重敲;按匹/按卷等买法不同才改)
@@ -274,6 +277,8 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
     setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
     setSizeOverrideActive(!!(res as any).sizeOverrideActive);
     setSuggestedSplit(((res as any).suggestedSplit || []) as Array<{ size: string | null; qty: number }>);
+    setSplittable((res as any).splittable !== false);
+    setSizeOpen(bd.some(s => s.size != null));   // 已存尺码拆分 → 展开面板
   }
   // 重新拉取当前项的尺码拆分(保存/恢复后刷新预览,不切换选中)
   async function refreshSizes(itemId: string) {
@@ -284,6 +289,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
     setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
     setSizeOverrideActive(!!(res as any).sizeOverrideActive);
     setSuggestedSplit(((res as any).suggestedSplit || []) as Array<{ size: string | null; qty: number }>);
+    setSplittable((res as any).splittable !== false);
   }
   // 保存尺码拆分(采购在预览直接改比例/每码数量)
   async function saveSizes() {
@@ -304,7 +310,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
     const r = await saveSizeQtyOverride(selId, orderId, {});
     setSizeSaving(false);
     if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
-    setSizeEdit({});   // 收起录入框,回到「按尺码录入」入口
+    setSizeEdit({}); setSizeOpen(false); setNewSize('');   // 收起录入框,回到「按尺码录入」入口
     setMsg('✅ 已改回整单一个数量(不分尺码)');
     await Promise.all([reload(), refreshSizes(selId)]);
   }
@@ -1083,16 +1089,16 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
             )}
           </div>
 
-          {/* 尺码 opt-in(2026-07-08 用户:辅料很多不带尺码 → 默认整单一个数量;需要分尺码点此打开逐码录入)*/}
-          {Object.keys(sizeEdit).length === 0 && suggestedSplit.length > 0 && sel && !['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status) && (
-            <button onClick={() => setSizeEdit(Object.fromEntries(suggestedSplit.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])))}
+          {/* 尺码 opt-in(2026-07-08:辅料默认整单一个数量;点此打开逐码录入。系统有建议则预填,没建议也能手动加码)*/}
+          {!sizeOpen && splittable && sel && !['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status) && (
+            <button onClick={() => { setSizeOpen(true); if (Object.keys(sizeEdit).length === 0 && suggestedSplit.length > 0) setSizeEdit(Object.fromEntries(suggestedSplit.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)]))); }}
               className="text-xs px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 hover:bg-teal-50 font-medium">
               ➕ 按尺码录入（默认整单一个数量·不分尺码；点此逐码填量）
             </button>
           )}
 
           {/* 尺码拆分:可直接改比例/每码数量(2026-07-08 用户拍板)——生成执行行按此逐码出量 */}
-          {Object.keys(sizeEdit).length > 0 && (() => {
+          {sizeOpen && (() => {
             const sizeLocked = ['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status);
             const sizeSum = Object.values(sizeEdit).reduce((a, v) => a + (Number(v) || 0), 0);
             return (
@@ -1104,15 +1110,29 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
                   : <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">未保存·保存后才按码拆</span>}
                 {sizeLocked && <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">🔒 已下单锁定</span>}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 items-center">
                 {Object.keys(sizeEdit).map((sz) => (
                   <label key={sz} className="inline-flex items-center gap-1 rounded-md bg-white border border-teal-200 px-2 py-1 text-xs">
                     <span className="font-semibold text-teal-700">{sz}</span>
                     <input type="number" min="0" step="1" value={sizeEdit[sz]} disabled={sizeLocked}
                       onChange={e => setSizeEdit(prev => ({ ...prev, [sz]: e.target.value }))}
                       className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-right disabled:bg-gray-50 disabled:text-gray-500" />
+                    {!sizeLocked && <button onClick={() => setSizeEdit(prev => { const n = { ...prev }; delete n[sz]; return n; })} className="text-gray-300 hover:text-rose-500 leading-none" title="删除此码">×</button>}
                   </label>
                 ))}
+                {/* 手动加尺码:系统没建议 / 需要额外码(如洗标要 XL)时用 —— 输码名回车或点 ＋ */}
+                {!sizeLocked && (() => {
+                  const addSize = () => { const s = newSize.trim(); if (s && !(s in sizeEdit)) { setSizeEdit(prev => ({ ...prev, [s]: '0' })); setNewSize(''); } };
+                  return (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-white border border-dashed border-teal-300 px-2 py-1 text-xs">
+                      <input value={newSize} onChange={e => setNewSize(e.target.value)} placeholder="加尺码(如 XL/均码)"
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSize(); } }}
+                        className="w-24 rounded border border-gray-300 px-1.5 py-0.5" />
+                      <button onClick={addSize} className="text-teal-600 font-bold leading-none" title="加这个码">＋</button>
+                    </span>
+                  );
+                })()}
+                {Object.keys(sizeEdit).length === 0 && <span className="text-[11px] text-gray-400">系统没查到本单尺码 → 在左边手动加码填量(如 S/M/L 或 均码)</span>}
               </div>
               {!sizeLocked && (
                 <div className="flex items-center gap-2 flex-wrap">

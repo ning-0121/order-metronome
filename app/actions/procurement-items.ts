@@ -841,7 +841,7 @@ export async function getProcurementItemSources(itemId: string) {
   const suggestedSplit = splittable ? distributeBySize(orderable, sizeCounts).filter((s) => s.size != null) : [];
   const finalQty = (item as any).final_purchase_qty ?? (item as any).suggested_purchase_qty ?? (item as any).total_required_qty ?? null;
 
-  return { data: sources, sizeBreakdown, suggestedSplit, sizeOverrideActive, finalQty, unit: (item as any).unit ?? null };
+  return { data: sources, sizeBreakdown, suggestedSplit, sizeOverrideActive, finalQty, splittable, unit: (item as any).unit ?? null };
 }
 
 /**
