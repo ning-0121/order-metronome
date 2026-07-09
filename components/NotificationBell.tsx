@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { getUnreadNotifications, markNotificationRead, markAllNotificationsRead } from '@/app/actions/notification-queries';
 import Link from 'next/link';
 
-export function NotificationBell() {
+/** dropUp:面板向上+向右展开(用于左侧栏底部的铃铛,否则面板会掉到屏幕底以下看不见);
+ *  默认向下+向右对齐(用于移动端顶栏)。 */
+export function NotificationBell({ dropUp = false }: { dropUp?: boolean }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [hasPermission, setHasPermission] = useState(false);
@@ -79,7 +81,7 @@ export function NotificationBell() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-white rounded-xl shadow-xl border border-gray-200 z-50 max-h-96 overflow-hidden">
+          <div className={`absolute ${dropUp ? 'bottom-full mb-2 left-0' : 'top-full mt-2 right-0'} w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-white rounded-xl shadow-xl border border-gray-200 z-50 max-h-96 overflow-hidden`}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
               <span className="text-sm font-semibold text-gray-900">通知 ({count})</span>
               {count > 0 && (

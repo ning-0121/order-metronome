@@ -201,7 +201,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
         </div>
         {navContent()}
         <div className="border-t border-gray-100 px-3 py-2 flex items-center justify-between shrink-0">
-          <NotificationBell />
+          <NotificationBell dropUp />
           <form action={signOut}>
             <button
               type="submit"
