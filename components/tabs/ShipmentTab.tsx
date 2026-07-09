@@ -168,7 +168,16 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
 
   return (
     <div className="space-y-8">
-      {/* ===== 出货单据:录实发装箱 → 生成 Packing List / CI / 报关 ===== */}
+      {/* ===== 出货流程导航(2026-07-09 用户:tab 里两套流程打架,理成一条线)===== */}
+      <div className="rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-sky-900">
+        <div className="font-semibold mb-1">🚢 出货流程(款号/尺码/数量已从生产单自动同步,业务只改实发数量)</div>
+        <div className="text-xs text-sky-800 leading-relaxed">
+          ① 下方【出货单据】录实发数量 → ② 生成 Packing List → ③ 生成 CI(价取 PO)→ ④ 生成 报关资料
+          → <b>⑤ 财务审批</b>(核尾款到账放货 · 硬闸,未批不能出运)→ ⑥ 物流出运
+        </div>
+      </div>
+
+      {/* ===== ①–④ 出货单据:录实发装箱 → 生成 Packing List / CI / 报关 ===== */}
       <ShippingDocsSection orderId={orderId} />
 
       {/* ===== 流程步骤条 ===== */}
@@ -199,12 +208,12 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
 
-      {/* ===== Packing List 区域 ===== */}
+      {/* ===== 外部单据(可选上传)：主路径是上方【出货单据】直接生成;此处仅供上传外部版本 ===== */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-gray-900">📦 Packing List（装箱单）</h3>
-          {packingDocs.length === 0 && canApply && (
-            <a href={`/orders/${orderId}?tab=documents`} className="text-xs text-indigo-600 hover:underline font-medium">去单据中心上传 →</a>
+          <h3 className="text-sm font-semibold text-gray-900">📎 外部装箱单(可选)</h3>
+          {canApply && (
+            <a href={`/orders/${orderId}?tab=documents`} className="text-xs text-indigo-600 hover:underline font-medium">上传外部版本 →</a>
           )}
         </div>
         {packingDocs.length > 0 ? (
@@ -224,8 +233,8 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
             ))}
           </div>
         ) : (
-          <div className="text-center py-3 text-sm text-amber-700 bg-amber-50 rounded-lg border border-amber-200">
-            ⚠️ 尚未上传 Packing List，请业务在「单据中心 → 装箱单」中上传后再申请出货
+          <div className="text-center py-3 text-sm text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
+            Packing List / CI / 报关 请在上方【出货单据】直接生成;如客户有指定格式的外部装箱单,可在此上传。
           </div>
         )}
       </div>

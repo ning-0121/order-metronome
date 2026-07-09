@@ -29,7 +29,7 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
   const [gen, setGen] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);   // 默认展开:这是出货主操作区
   const [metaOpen, setMetaOpen] = useState(false);
   const [czOpen, setCzOpen] = useState(false);
   const [preview, setPreview] = useState<any>(null);
@@ -246,11 +246,12 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
 
             {/* 操作 */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
-              <button onClick={save} disabled={saving || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50">{saving ? '保存中…' : '💾 保存'}</button>
+              <button onClick={save} disabled={saving || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50">{saving ? '保存中…' : '① 💾 保存实发数量'}</button>
               <button onClick={doPreview} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-50">{gen === 'preview' ? '生成中…' : '👁 预览'}</button>
-              <button onClick={() => doGen('pl')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{gen === 'pl' ? '生成中…' : '📦 生成 Packing List'}</button>
-              <button onClick={() => doGen('ci')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">{gen === 'ci' ? '生成中…' : '💰 生成 CI'}</button>
-              <button onClick={() => doGen('customs')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">{gen === 'customs' ? '生成中…' : '🛃 生成报关资料'}</button>
+              <span className="text-xs text-gray-400">按顺序生成 →</span>
+              <button onClick={() => doGen('pl')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{gen === 'pl' ? '生成中…' : '② 📦 Packing List'}</button>
+              <button onClick={() => doGen('ci')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">{gen === 'ci' ? '生成中…' : '③ 💰 CI'}</button>
+              <button onClick={() => doGen('customs')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">{gen === 'customs' ? '生成中…' : '④ 🛃 报关资料'}</button>
             </div>
 
             {/* 预览 */}
