@@ -1308,3 +1308,73 @@ export async function deleteProcurementItemRow(itemId: string): Promise<{ ok?: b
   revalidatePath(`/orders/${(item as any).order_id}`);
   return { ok: true };
 }
+
+/**
+ * 一次性清理:把历史按尺码拆开的执行行合并回「每料一条」(2026-07-09 用户拍板 B)。
+ * 生成执行行现已默认不拆码,本函数治遗留:同一采购单+采购项(退回 物料+颜色)的多条尺码行 →
+ * 合并成一条(数量求和·size 清空·取最保守状态·需到日取最早)。
+ * 安全闸:任一行已收货(received>0)的组不合并(避免丢收货数据),跳过并回报。
+ * 财务:PO 应付总额不变(数量总和不变),重推受影响采购单让 kept 行 qty 对齐;删掉的旧行财务侧留存但永不核销(无害)。
+ */
+export async function mergeSplitExecutionLines(orderId: string): Promise<{ ok?: true; mergedGroups?: number; deleted?: number; skipped?: string[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
+  const svc = createServiceRoleClient();
+
+  const { data: lines } = await (svc.from('procurement_line_items') as any)
+    .select('id, purchase_order_id, procurement_item_id, material_name, color, size, line_status, ordered_qty, received_qty, required_by')
+    .eq('order_id', orderId);
+  if (!lines || lines.length === 0) return { ok: true, mergedGroups: 0, deleted: 0, skipped: [] };
+
+  const RANK: Record<string, number> = { draft: 0, pending_order: 1, ordered: 2, confirmed: 3, in_production: 4, ready_to_ship: 5, shipped: 6, arrived: 7 };
+  const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+  const groups = new Map<string, any[]>();
+  for (const l of (lines as any[])) {
+    const key = `${l.purchase_order_id || ''}¦${l.procurement_item_id || `${norm(l.material_name)}|${norm(l.color)}`}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(l);
+  }
+
+  let mergedGroups = 0, deleted = 0; const skipped: string[] = []; const affectedPOs = new Set<string>();
+  const now = new Date().toISOString();
+  for (const grp of groups.values()) {
+    if (grp.length <= 1) continue;   // 单行不用合
+    if (grp.some((l: any) => Number(l.received_qty) > 0)) { skipped.push(`${grp[0].material_name || '?'}(已有收货,未合并)`); continue; }
+    grp.sort((a: any, b: any) => (RANK[a.line_status] ?? 0) - (RANK[b.line_status] ?? 0));
+    const keep = grp[0];   // 最保守(最不推进)的一条作主
+    const sumQty = grp.reduce((s: number, l: any) => s + (Number(l.ordered_qty) || 0), 0);
+    const reqs = grp.map((l: any) => l.required_by).filter(Boolean).sort();
+    const upd: any = { ordered_qty: Math.round(sumQty * 1000) / 1000, size: null, updated_at: now };
+    if (reqs.length) upd.required_by = reqs[0];
+    const { error: uErr } = await (svc.from('procurement_line_items') as any).update(upd).eq('id', keep.id);
+    if (uErr) { skipped.push(`${grp[0].material_name || '?'}:${uErr.message}`); continue; }
+    const delIds = grp.slice(1).map((l: any) => l.id);
+    const { error: dErr } = await (svc.from('procurement_line_items') as any).delete().in('id', delIds);
+    if (dErr) { skipped.push(`${grp[0].material_name || '?'}:删除失败 ${dErr.message}`); continue; }
+    mergedGroups++; deleted += delIds.length;
+    if (keep.purchase_order_id) affectedPOs.add(keep.purchase_order_id);
+  }
+
+  // 财务重推受影响采购单(kept 行数量对齐;PO 应付总额不变)
+  if (affectedPOs.size) {
+    try {
+      const { syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw, fetchSupplierName, fetchOrderRefs } = await import('@/lib/integration/finance-sync');
+      for (const poId of affectedPOs) {
+        const { data: full } = await (svc.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
+        if (!full) continue;
+        const st = String((full as any).status || '');
+        if (!['placed', 'confirmed', 'receiving', 'received', 'closed'].includes(st)) continue;
+        (full as any).supplier_name = await fetchSupplierName(svc, (full as any).supplier_id);
+        const orderRefs = await fetchOrderRefs(svc, (full as any).order_ids);
+        const poLines = await fetchPurchaseOrderLinesRaw(svc, poId);
+        await syncPurchaseOrderToFinance(full, orderRefs, [], poLines);
+      }
+    } catch (e: any) { console.warn('[mergeSplitExecutionLines] 财务重推失败(不阻断):', e?.message); }
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, mergedGroups, deleted, skipped };
+}

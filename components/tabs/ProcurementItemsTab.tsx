@@ -7,7 +7,7 @@ import {
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
   listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
-  saveBomBudgetUnitPrice, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride,
+  saveBomBudgetUnitPrice, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, mergeSplitExecutionLines,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
@@ -170,6 +170,22 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
     }
     setLinesReady(true);
     setMsg((res as any).created > 0 ? `✅ 已生成 ${(res as any).created} 条采购执行行` : ((res as any).message || '执行行已就绪'));
+    await reload();
+  }
+
+  // 一次性清理:把历史按尺码拆开的执行行合并回「每料一条」(2026-07-09 用户拍板 B)
+  async function mergeSizes() {
+    if (!(await confirm({
+      title: '合并同料尺码行?',
+      message: '把本单历史按尺码拆开的执行行合并成「每料一条」(数量求和、清尺码、取最保守状态)。\n已收货的料不动;PO 应付总额不变。用于治历史拆码遗留,合并后待催货/待送货不再一料多行。',
+      confirmText: '合并',
+    }))) return;
+    setBusy(true); setMsg('');
+    const res = await mergeSplitExecutionLines(orderId);
+    setBusy(false);
+    if ((res as any).error) { setMsg('❌ ' + (res as any).error); return; }
+    const r = res as any;
+    setMsg(`✅ 合并完成:${r.mergedGroups || 0} 个料合并、清掉 ${r.deleted || 0} 条拆码行${r.skipped?.length ? `;跳过 ${r.skipped.length}(${r.skipped[0]})` : ''}`);
     await reload();
   }
 
@@ -608,7 +624,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
       {/* 顶部 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-gray-500">{items.length} 个采购核料项 · 同订单按 物料+颜色+单位 自动归并</div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {trackingPhase ? (
             <span className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500" title="全部采购项已下单;核定/归并已锁定,改量走「补数量申请」">
               🔒 已全部下单 — 进入跟单追踪(下方采购单档案)
@@ -624,6 +640,11 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
               className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
               {busy ? '核料中…' : '🔄 核料归并 / 刷新'}</button>
           </>)}
+          {/* 合并尺码行:治历史拆码遗留,任何阶段可用(已下单/追踪期也常见拆码堆积) */}
+          <button onClick={mergeSizes} disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-50 disabled:opacity-50"
+            title="把历史按尺码拆开的执行行合并回每料一条(治遗留;已收货的不动,PO应付不变)">
+            {busy ? '处理中…' : '🧹 合并尺码行'}</button>
         </div>
       </div>
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
