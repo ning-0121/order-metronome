@@ -4,6 +4,7 @@
 // admin/生产主管 选"实际到了哪个节点" → 之前标完成(风险消失)、该节点进行中。仅 admin/生产主管 可见。
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { calibrateOrderStage } from '@/app/actions/order-progress-calibrate';
 
 export function OrderProgressCalibrate({ orderId, steps }: {
@@ -30,11 +31,14 @@ export function OrderProgressCalibrate({ orderId, steps }: {
   if (!steps.length) return null;
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)}
-        className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium"
-        title="真实订单之前没人在系统推进导致一片风险 → 选实际到了哪个节点,之前的标完成、清风险">
-        🎯 进度校准（清历史风险）
-      </button>
+      <div className="flex items-center gap-2 flex-wrap justify-end">
+        <button onClick={() => setOpen(true)}
+          className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium"
+          title="真实订单之前没人在系统推进导致一片风险 → 选实际到了哪个节点,之前的标完成、清风险">
+          🎯 进度校准（清历史风险）
+        </button>
+        <Link href="/orders/progress-calibrate" className="text-[11px] text-indigo-600 hover:underline">批量校准多单 →</Link>
+      </div>
     );
   }
   return (

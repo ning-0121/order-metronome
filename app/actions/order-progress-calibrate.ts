@@ -10,6 +10,51 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
+/** 批量进度校准页数据:活单(未完成/取消/归档)+ 各单里程碑步骤 + 自动推测的当前节点(首个未完成)。仅 admin/生产主管。 */
+export async function listOrdersForCalibration(): Promise<{
+  data?: Array<{
+    order_id: string; order_no: string | null; customer_name: string | null; factory_date: string | null;
+    lifecycle_status: string | null; done_count: number; total: number; current_hint: string;
+    steps: Array<{ step_key: string; name: string; status: string; sequence: number }>;
+  }>;
+  error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!roles.includes('admin') && !roles.includes('production_manager')) return { error: '仅管理员或生产主管可批量校准' };
+
+  const HIDDEN = ['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档'];
+  const { data: orders } = await (supabase.from('orders') as any)
+    .select('id, order_no, customer_name, factory_date, lifecycle_status')
+    .not('lifecycle_status', 'in', `(${HIDDEN.map((s) => `"${s}"`).join(',')})`)
+    .order('factory_date', { ascending: true }).limit(300);
+  const list = (orders || []) as any[];
+  if (list.length === 0) return { data: [] };
+  const orderIds = list.map((o) => o.id);
+
+  const { data: ms } = await (supabase.from('milestones') as any)
+    .select('order_id, step_key, name, status, sequence_number').in('order_id', orderIds)
+    .order('sequence_number', { ascending: true });
+  const byOrder = new Map<string, any[]>();
+  for (const m of (ms || [])) { const a = byOrder.get((m as any).order_id) || []; a.push(m); byOrder.set((m as any).order_id, a); }
+
+  const isDone = (s: any) => ['done', '已完成', 'completed'].includes(String(s || ''));
+  const out = list.map((o) => {
+    const steps = (byOrder.get(o.id) || []).map((m: any) => ({ step_key: m.step_key, name: m.name, status: m.status, sequence: Number(m.sequence_number) }));
+    const doneCount = steps.filter((s) => isDone(s.status)).length;
+    const firstUndone = steps.find((s) => !isDone(s.status));
+    return {
+      order_id: o.id, order_no: o.order_no, customer_name: o.customer_name, factory_date: o.factory_date,
+      lifecycle_status: o.lifecycle_status, done_count: doneCount, total: steps.length,
+      current_hint: firstUndone?.step_key || (steps[steps.length - 1]?.step_key ?? ''), steps,
+    };
+  }).filter((o) => o.steps.length > 0);
+  return { data: out };
+}
+
 export async function calibrateOrderStage(
   orderId: string,
   currentStepKey: string,
