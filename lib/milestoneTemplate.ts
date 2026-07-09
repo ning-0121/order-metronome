@@ -285,12 +285,12 @@ export function getApplicableMilestones(
     return [...TRADE_MILESTONE_TEMPLATE];
   }
 
-  // 2026-07-09 用户拍板:标准生产单执行时间线 14 节点(业务执行全流程);
-  //   仅出口专属节点(船样/订舱)对非出口单跳过,其余固定。样品/翻单不再动态增删。
+  // 2026-07-09 用户拍板:标准生产单=业务执行节拍(出口 15 节点)。
+  //   送仓单也要船样(用户 2026-07-09 更正)→ 只砍「订舱出货」(送仓无海运订舱),保留船样 → 送仓 14 节点。
   void samplePhase; void skipPreProductionSample;
   const base = [...MILESTONE_TEMPLATE_V2];
   if (deliveryType !== 'export') {
-    return base.filter(m => !['shipping_sample_send', 'booking_done'].includes(m.step_key));
+    return base.filter(m => m.step_key !== 'booking_done');
   }
   return base;
 }
