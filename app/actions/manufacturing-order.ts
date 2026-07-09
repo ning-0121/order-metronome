@@ -275,9 +275,14 @@ async function buildMoWorkbook(
       const cell = ws.getCell(r1, c1);
       cell.value = (value === undefined || value === null) ? '' : value;
       cell.font = { name: '宋体', size: o.size ?? 14, bold: o.bold ?? false, color: o.color ? { argb: o.color } : undefined };
-      cell.alignment = { horizontal: o.align ?? 'center', vertical: 'middle', wrapText: o.wrap ?? true };
+      // 自动优化(2026-07-09 用户:导出内容被截断)——单格且未强制换行 → shrinkToFit 让 Excel
+      // 自动缩字号铺满、绝不截断(如「1.75*2」「13.875」在窄列);合并格 Excel 不支持 shrinkToFit
+      // → 退回换行(wrapText)。长文本(品名/面料描述)可显式 wrap:true 走多行换行。
+      const merged = r2 > r1 || c2 > c1;
+      const shrink = !merged && o.wrap !== true;
+      cell.alignment = { horizontal: o.align ?? 'center', vertical: 'middle', wrapText: shrink ? false : (o.wrap ?? true), shrinkToFit: shrink };
       if (o.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: o.fill } };
-      if (r2 > r1 || c2 > c1) ws.mergeCells(r1, c1, r2, c2);
+      if (merged) ws.mergeCells(r1, c1, r2, c2);
       const mode = o.border ?? 'full';
       if (mode !== 'none') for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) {
         ws.getCell(r, c).border = mode === 'full' ? { ...B4 } : mode === 'bottom' ? { bottom: thin } : { top: thin };
