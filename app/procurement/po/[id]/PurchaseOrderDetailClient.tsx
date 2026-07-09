@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance } from '@/app/actions/purchase-orders';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
@@ -16,7 +16,7 @@ const REASON_LABELS: Record<string, string> = {
 export function PurchaseOrderDetailClient({ view }: { view: any }) {
   const router = useRouter();
   const { confirm, prompt, dialog } = useDialogs();
-  const { po, lines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance } = view;
+  const { po, lines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance, isAdmin } = view;
   const sup = po.suppliers || {};
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState('');
@@ -81,6 +81,15 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     await confirm({ title: '✅ 审批通过', confirmText: '知道了' }); router.refresh();
   }
 
+  async function handleResync() {
+    if (!(await confirm({ title: '重发财务同步?', message: '把本采购单的完整数据(供应商/明细/内部订单号)重推给财务系统,用于订正旧事件。', confirmText: '重发', cancelText: '取消' }))) return;
+    setBusy('resync');
+    const res = await resyncPurchaseOrderToFinance(po.id);
+    setBusy('');
+    if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
+    await confirm({ title: '✅ 已重发财务同步', message: `事件:${(res as any).sent}`, confirmText: '知道了' });
+  }
+
   const dualNo = `${po.po_no} · 订单 ${(orderRefs || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
 
   async function handleExport(withPrice: boolean) {
@@ -127,6 +136,13 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
             className="text-xs px-3 py-2 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-medium disabled:opacity-50">
             {exporting ? '导出中…' : '📤 导出无价版(发内部)'}
           </button>
+          {isAdmin && (
+            <button onClick={handleResync} disabled={busy === 'resync'}
+              title="把完整数据重推财务系统,订正旧事件(无供应商/无明细)"
+              className="text-xs px-3 py-2 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 font-medium disabled:opacity-50">
+              {busy === 'resync' ? '重发中…' : '🔄 重发财务同步'}
+            </button>
+          )}
         </div>
       </div>
 

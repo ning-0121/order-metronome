@@ -11,7 +11,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { hasRoleInGroup } from '@/lib/domain/roles';
+import { hasRoleInGroup, isAdminRole } from '@/lib/domain/roles';
 import { maskFloorForLines, maskSupplierFinance } from '@/lib/procurement/purchaseOrder';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 import { evaluateProcurementApproval, evaluateBudgetGate, reasonsCn, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
@@ -301,7 +301,55 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
   // 供应商财务字段(银行/税号/账期)按角色剥离(审计 P0:join 出的 suppliers(*) 此前对全员可读)
   (po as any).suppliers = maskSupplierFinance((po as any).suppliers, hasRoleInGroup(roles, 'CAN_EDIT_SUPPLIER_FINANCE'));
 
-  return { data: { po, lines: maskedLines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance } };
+  return { data: { po, lines: maskedLines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance, isAdmin: isAdminRole(roles) } };
+}
+
+/**
+ * 管理员:对指定采购单【重发财务同步】。用于订正修复前发出的旧事件(截图 PO 无供应商/无明细)。
+ * 按当前状态择事件:待审批 → 重发 approval_requested;已下单/在收/已收 → 重发 placed。
+ * 全字段(单头 supplier_name + lines[] + 富 order_refs)由 service-role 补齐,与正常发送同源。
+ */
+export async function resyncPurchaseOrderToFinance(poId: string): Promise<{ ok?: true; sent?: string; error?: string }> {
+  const { roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!isAdminRole(roles)) return { error: '仅管理员可重发财务同步' };
+
+  const svc = createServiceRoleClient();
+  const { data: full } = await (svc.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
+  if (!full) return { error: '采购单不存在' };
+
+  const { requestPurchaseOrderApproval, syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw, fetchSupplierName, fetchOrderRefs } = await import('@/lib/integration/finance-sync');
+  const poLines = await fetchPurchaseOrderLinesRaw(svc, poId);
+  (full as any).supplier_name = await fetchSupplierName(svc, (full as any).supplier_id);
+  const orderRefs = await fetchOrderRefs(svc, (full as any).order_ids);
+
+  // 补采购项(与正常发送同口径)
+  let supplements: Array<{ item_no?: string; material_name?: string; qty?: number; reason?: string }> = [];
+  try {
+    const { data: sl } = await (svc.from('procurement_line_items') as any)
+      .select('procurement_item_id').eq('purchase_order_id', poId).not('procurement_item_id', 'is', null);
+    const piIds = [...new Set((sl || []).map((l: any) => l.procurement_item_id))];
+    if (piIds.length) {
+      const { data: si } = await (svc.from('procurement_items') as any)
+        .select('item_no, material_name, total_required_qty, supplement_reason').in('id', piIds).eq('is_supplement', true);
+      supplements = (si || []).map((s: any) => ({ item_no: s.item_no, material_name: s.material_name, qty: s.total_required_qty, reason: s.supplement_reason }));
+    }
+  } catch { /* 补采购列未建 */ }
+
+  const status = String((full as any).status || '');
+  try {
+    if ((full as any).approval_status === 'pending') {
+      await requestPurchaseOrderApproval(full, orderRefs, supplements, undefined, poLines);
+      return { ok: true, sent: 'approval_requested' };
+    }
+    if (['placed', 'confirmed', 'receiving', 'received', 'closed'].includes(status)) {
+      await syncPurchaseOrderToFinance(full, orderRefs, supplements, poLines);
+      return { ok: true, sent: 'placed' };
+    }
+    return { error: `当前状态(${status || '草稿'})未提交财务/未下单,无需重发` };
+  } catch (e: any) {
+    return { error: `重发失败:${e?.message || e}` };
+  }
 }
 
 /** 审批采购单（P2a 单签：取最高所需角色）。采购经理 / 财务按 scope 门控。 */
