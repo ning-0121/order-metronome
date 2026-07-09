@@ -44,7 +44,9 @@ export function evaluateProcurementApproval(input: ProcApprovalInput): ProcAppro
   });
   if (hasVariance) { reasons.push('price_variance'); req.add('procurement'); req.add('finance'); }
 
-  if (input.isNewSupplier) { reasons.push('new_supplier'); req.add('procurement'); }
+  // 新供应商不再触发审批(2026-07-08 用户拍板):新供应商本身不是风险,标准单快路径零审批。
+  // 仍保留 isNewSupplier 入参与 new_supplier 原因码(≥¥5000 外部财务审批路径把它作为"信息标签"带给财务参考),
+  // 但它不再单独要求采购经理审批。真风险仍由大额/偏离基线/超预算/非标账期把关。
 
   if (input.orderBudget != null && input.orderBudget > 0 && total > input.orderBudget) {
     reasons.push('over_budget'); req.add('procurement'); req.add('finance');

@@ -39,9 +39,10 @@ assert(!evaluateProcurementApproval({ ...base, lines: [{ unit_price: 10.5, price
 assert(!evaluateProcurementApproval({ ...base, lines: [{ unit_price: null, price_baseline: 10 }] }).reasons.includes('price_variance'), '无底价/建议价 → 不判');
 
 // ── 新供应商 ─────────────────────────────────────────────
+// 2026-07-08 用户拍板:新供应商不再触发审批(本身不是风险),标准单快路径零审批。
 section('新供应商');
 const ns = evaluateProcurementApproval({ ...base, isNewSupplier: true });
-assert(ns.reasons.includes('new_supplier') && ns.requiredBy.includes('procurement'), '新供应商 → 采购经理');
+assert(ns.needsApproval === false && !ns.reasons.includes('new_supplier'), '新供应商 → 不再需要审批');
 
 // ── 非标账期（供应商账期 <60）───────────────────────────
 section('非标账期 <60 天');
@@ -64,7 +65,7 @@ assert(topRequiredScope([]) === null, '空 → null');
 // ── 组合 ─────────────────────────────────────────────────
 section('组合触发');
 const combo = evaluateProcurementApproval({ totalAmount: 60000, lines: [{ unit_price: 12, price_baseline: 10 }], supplierNetDays: 30, isNewSupplier: true, orderBudget: 50000 });
-assert(combo.reasons.length === 5, '五类全中', combo.reasons.join(','));
+assert(combo.reasons.length === 4, '四类全中(新供应商不再触发)', combo.reasons.join(','));
 assert(combo.requiredBy.includes('procurement') && combo.requiredBy.includes('finance'), '组合 → 采购+财务');
 
 // 阈值可见
