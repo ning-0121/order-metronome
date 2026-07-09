@@ -59,8 +59,10 @@ function RowShell({ line, sizes, children }: { line: QueueLine; sizes?: string[]
             title={line.purchase_order_id ? '打开这张采购单(按供应商/颜色)' : '打开核料页'}>
             {line.internal_order_no ? `${line.internal_order_no} | ` : ''}{line.order_no}·{line.customer_name}
           </Link>
-          {/* 核料页/整单任务单下载(始终保留入口) */}
-          <Link href={`/procurement/verify/${line.order_id}`} className="text-xs text-gray-400 hover:text-indigo-600 shrink-0" title="打开核料页,右上可下载生产任务单">
+          {/* 核料页:带 procurement_item_id 时聚焦到这一款料(2026-07-09 用户:点单料别看到整单);无 id 兜底进整单核料页 */}
+          <Link href={line.procurement_item_id ? `/procurement/verify/${line.order_id}?item=${line.procurement_item_id}` : `/procurement/verify/${line.order_id}`}
+            className="text-xs text-gray-400 hover:text-indigo-600 shrink-0"
+            title={line.procurement_item_id ? `只看「${line.material_name}」这一款料的核料明细(可切换查看全部)` : '打开核料页,右上可下载生产任务单'}>
             📋任务单
           </Link>
           {/* 每行点开对应的采购单详情(供应商/合计/明细/状态)——该行已挂到某采购单时显示 */}
@@ -110,10 +112,13 @@ function BlockedPoNote({ l }: { l: QueueLine }) {
 }
 
 export function ProcurementQueueClient({
-  pendingRequests = [], pendingOrder, chase, readyShip, receive, canFinanceOver = false,
+  pendingRequests = [], pendingOrder: pendingOrder0, chase: chase0, readyShip: readyShip0, receive: receive0,
+  counts, banner, canFinanceOver = false,
 }: {
   pendingRequests?: Array<{ order_id: string; order_no: string | null; internal_order_no?: string | null; customer_name: string | null; submitted_at: string | null; req_count: number; late_count: number }>;
   pendingOrder: QueueLine[]; chase: QueueLine[]; readyShip: QueueLine[]; receive: QueueLine[];
+  counts: { pendingRequests: number; pendingOrder: number; chase: number; readyShip: number; receive: number; overdueOrders: number; atRiskOrders: number };
+  banner?: React.ReactNode;
   canFinanceOver?: boolean;
 }) {
   const router = useRouter();
@@ -122,20 +127,63 @@ export function ProcurementQueueClient({
   const [openForm, setOpenForm] = useState<string | null>(null); // `${rowId}:${kind}`
   const [err, setErr] = useState('');
 
-  async function run(key: string, fn: () => Promise<{ error?: string }>) {
+  // 队列本地镜像:操作成功后即时移动行 + 更新头部计数,不必等整页 router.refresh()
+  // (2026-07-09 用户:点「工厂已完成」料还留在待催货、上方数字要手动刷新才一起跳过去)。
+  const [q, setQ] = useState({ pendingOrder: pendingOrder0, chase: chase0, readyShip: readyShip0, receive: receive0 });
+  // 服务端新数据到达(router.refresh 后 props 换新引用)→ 以服务端真相覆盖本地乐观态,二者对齐
+  useEffect(() => {
+    setQ({ pendingOrder: pendingOrder0, chase: chase0, readyShip: readyShip0, receive: receive0 });
+  }, [pendingOrder0, chase0, readyShip0, receive0]);
+  const { pendingOrder, chase, readyShip, receive } = q;
+
+  // 状态 → 所属队列(与服务端 getProcurementQueues 分桶口径一致);离队状态(取消/已验收等)返回 null
+  function bucketOf(status: string): 'pendingOrder' | 'chase' | 'readyShip' | 'receive' | null {
+    if (status === 'pending_order') return 'pendingOrder';
+    if (['ordered', 'confirmed', 'in_production'].includes(status)) return 'chase';
+    if (['ready_to_ship', 'shipped'].includes(status)) return 'readyShip';
+    if (status === 'arrived') return 'receive';
+    return null;
+  }
+  // 乐观移动:把这些行从当前所在队列取出、置为新状态、按 bucketOf 重新归队(null=离队删除)
+  function moveLines(ids: string[], to: string) {
+    const idSet = new Set(ids);
+    setQ(prev => {
+      const all = [...prev.pendingOrder, ...prev.chase, ...prev.readyShip, ...prev.receive];
+      const moved = all.filter(l => idSet.has(l.id)).map(l => ({ ...l, line_status: to }));
+      const keep = (arr: QueueLine[]) => arr.filter(l => !idSet.has(l.id));
+      const next = { pendingOrder: keep(prev.pendingOrder), chase: keep(prev.chase), readyShip: keep(prev.readyShip), receive: keep(prev.receive) };
+      const b = bucketOf(to);
+      if (b) next[b] = [...next[b], ...moved];
+      return next;
+    });
+  }
+  // 乐观离队(收货收齐等已确定离开队列的操作)
+  function dropLines(ids: string[]) {
+    const idSet = new Set(ids);
+    setQ(prev => ({
+      pendingOrder: prev.pendingOrder.filter(l => !idSet.has(l.id)),
+      chase: prev.chase.filter(l => !idSet.has(l.id)),
+      readyShip: prev.readyShip.filter(l => !idSet.has(l.id)),
+      receive: prev.receive.filter(l => !idSet.has(l.id)),
+    }));
+  }
+
+  async function run(key: string, fn: () => Promise<{ error?: string }>, onSuccess?: () => void) {
     setBusy(key); setErr('');
     const r = await fn();
     setBusy(null);
     if (r?.error) { setErr(r.error); return false; }
+    onSuccess?.();                       // 先本地即时反映,再拉服务端对齐
     setOpenForm(null); router.refresh(); return true;
   }
   // 组操作:对该组所有行(各尺码)依次执行,汇总首个错误
-  async function runGroup(key: string, ids: string[], fn: (id: string) => Promise<{ error?: string }>) {
+  async function runGroup(key: string, ids: string[], fn: (id: string) => Promise<{ error?: string }>, onSuccess?: () => void) {
     setBusy(key); setErr('');
     let firstErr: string | undefined;
     for (const id of ids) { const r = await fn(id); if (r?.error && !firstErr) firstErr = r.error; }
     setBusy(null);
     if (firstErr) { setErr(firstErr); return false; }
+    onSuccess?.();                       // 先本地即时反映,再拉服务端对齐
     setOpenForm(null); router.refresh(); return true;
   }
 
@@ -144,11 +192,11 @@ export function ProcurementQueueClient({
   // 2026-07-03 用户拍板:状态推进全部二次确认;点错可「↩回退」上一状态(留痕)
   async function confirmRun(l: QueueLine, key: string, to: string, text: string) {
     if (!(await confirm({ title: '确认操作?', message: text, confirmText: '确认' }))) return;
-    run(`${l.id}:${key}`, () => transitionProcurementLine(l.id, to as any));
+    run(`${l.id}:${key}`, () => transitionProcurementLine(l.id, to as any), () => moveLines([l.id], to));
   }
   async function confirmRunGroup(g: QueueGroup, key: string, to: string, text: string) {
     if (!(await confirm({ title: '确认操作?', message: text, confirmText: '确认' }))) return;
-    runGroup(`${g.key}:${key}`, g.ids, (id) => transitionProcurementLine(id, to as any));
+    runGroup(`${g.key}:${key}`, g.ids, (id) => transitionProcurementLine(id, to as any), () => moveLines(g.ids, to));
   }
   const BACK_ONE: Record<string, string> = {
     confirmed: 'ordered', in_production: 'confirmed',
@@ -162,7 +210,7 @@ export function ProcurementQueueClient({
         title="点错了?退回上一状态(操作留痕)" disabled={busy === `${g.key}:back`}
         onClick={async () => {
           if (!(await confirm({ title: '退回上一状态?', message: `把「${g.rep.material_name}」从「${STATUS_LABEL[g.rep.line_status] || g.rep.line_status}」退回「${STATUS_LABEL[backTo] || backTo}」\n(误点纠正,操作会留痕)`, danger: true, confirmText: '回退' }))) return;
-          runGroup(`${g.key}:back`, g.ids, (id) => transitionProcurementLine(id, backTo as any, { note: '误点回退' }));
+          runGroup(`${g.key}:back`, g.ids, (id) => transitionProcurementLine(id, backTo as any, { note: '误点回退' }), () => moveLines(g.ids, backTo));
         }}>↩ 回退</button>
     );
   }
@@ -174,7 +222,7 @@ export function ProcurementQueueClient({
         title="点错了?退回上一状态(操作留痕)" disabled={busy === `${l.id}:back`}
         onClick={async () => {
           if (!(await confirm({ title: '退回上一状态?', message: `把「${l.material_name}」从「${STATUS_LABEL[l.line_status] || l.line_status}」退回「${STATUS_LABEL[backTo] || backTo}」\n(误点纠正,操作会留痕)`, danger: true, confirmText: '回退' }))) return;
-          run(`${l.id}:back`, () => transitionProcurementLine(l.id, backTo as any, { note: '误点回退' }));
+          run(`${l.id}:back`, () => transitionProcurementLine(l.id, backTo as any, { note: '误点回退' }), () => moveLines([l.id], backTo));
         }}>↩ 回退</button>
     );
   }
@@ -188,8 +236,29 @@ export function ProcurementQueueClient({
     { label: '待下单(去归采购单)', n: pendingOrder.length, href: '#q-pendingOrder' },
   ].filter(t => t.n > 0);
 
+  // 头部计数:队列数从本地镜像即时算,风险数(逾期/需抓紧追)是订单级派生,沿用服务端值(下次刷新对齐)
+  const Stat = ({ label, value, tone, href }: { label: string; value: number; tone: string; href: string }) => (
+    <a href={href} className={`block rounded-xl border px-4 py-3 transition hover:shadow-md hover:-translate-y-0.5 ${tone}`}>
+      <div className="text-2xl font-bold">{value}</div>
+      <div className="text-xs mt-0.5 opacity-80">{label}</div>
+    </a>
+  );
+
   return (
     <div className="space-y-3">
+      {/* Dashboard 壳:计数(本地即时) */}
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-3">
+        <Stat label="📨 待采购订单" value={pendingRequests.length} href="#q-pendingRequests" tone="border-emerald-300 bg-emerald-50 text-emerald-800" />
+        <Stat label="待下单" value={pendingOrder.length} href="#q-pendingOrder" tone="border-indigo-200 bg-indigo-50 text-indigo-800" />
+        <Stat label="待催货 / 生产中" value={chase.length} href="#q-chase" tone="border-amber-200 bg-amber-50 text-amber-800" />
+        <Stat label="已完成待送货" value={readyShip.length} href="#q-readyShip" tone="border-sky-200 bg-sky-50 text-sky-800" />
+        <Stat label="已送达待验收" value={receive.length} href="#q-receive" tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
+        <Stat label="🔴 到货逾期" value={counts.overdueOrders} href="#q-chase" tone="border-red-200 bg-red-50 text-red-800" />
+        <Stat label="⚠️ 需抓紧追" value={counts.atRiskOrders} href="#q-chase" tone="border-rose-200 bg-rose-50 text-rose-800" />
+      </div>
+
+      {banner}
+
       {err && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{err}</div>}
 
       {/* 今日先处理:一眼知道从哪下手 */}
@@ -257,7 +326,7 @@ export function ProcurementQueueClient({
                     if (v) run(`${l.id}:edit`, () => updateProcurementLineFields(l.id, { size: v.size, ordered_qty: v.ordered_qty ? Number(v.ordered_qty) : undefined, specification: v.specification }));
                   }}>✏️ 改</button>
                 <button className={`${btn} border border-gray-200 text-gray-500`} disabled={busy === `${l.id}:cancel`}
-                  onClick={async () => { const v = await prompt({ title: '取消该采购行', fields: [{ name: 'reason', label: '取消理由', type: 'textarea', required: true }], confirmText: '确认取消', }); if (v) run(`${l.id}:cancel`, () => transitionProcurementLine(l.id, 'cancelled', { note: v.reason })); }}>取消</button>
+                  onClick={async () => { const v = await prompt({ title: '取消该采购行', fields: [{ name: 'reason', label: '取消理由', type: 'textarea', required: true }], confirmText: '确认取消', }); if (v) run(`${l.id}:cancel`, () => transitionProcurementLine(l.id, 'cancelled', { note: v.reason }), () => dropLines([l.id])); }}>取消</button>
               </RowShell>
             ))}
           </>
@@ -351,7 +420,7 @@ export function ProcurementQueueClient({
               )}
             </RowShell>
             {!l.po_not_placed && openForm === `${l.id}:reg` && (
-              <ReceiptRegisterForm line={l} canFinanceOver={canFinanceOver} onDone={() => { setOpenForm(null); router.refresh(); }} />
+              <ReceiptRegisterForm line={l} canFinanceOver={canFinanceOver} onDone={() => { setOpenForm(null); dropLines([l.id]); router.refresh(); }} />
             )}
             {!l.po_not_placed && openForm === `${l.id}:recv` && (
               <ReceiveForm line={l} busy={!!busy && busy.startsWith(`${l.id}:recv`)}

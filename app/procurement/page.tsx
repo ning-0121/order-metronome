@@ -49,16 +49,50 @@ export default async function ProcurementCenterPage() {
   const matters = mattersResult.data?.matters ?? [];
   const matterCounts = mattersResult.data?.counts ?? { total: 0, high: 0, medium: 0 };
 
-  // 卡片可点开:锚到下方对应队列区块(2026-07-05 用户拍板)
-  const Stat = ({ label, value, tone, href }: { label: string; value: number; tone: string; href?: string }) => {
-    const inner = (<>
-      <div className="text-2xl font-bold">{value}</div>
-      <div className="text-xs mt-0.5 opacity-80">{label}</div>
-    </>);
-    return href
-      ? <a href={href} className={`block rounded-xl border px-4 py-3 transition hover:shadow-md hover:-translate-y-0.5 ${tone}`}>{inner}</a>
-      : <div className={`rounded-xl border px-4 py-3 ${tone}`}>{inner}</div>;
-  };
+  // ⏳ 待审批采购单横幅:传入客户端,渲染在「计数卡 → 队列」之间(计数/队列需随操作即时刷新,横幅是静态服务端数据)
+  const banner = pendingApprovalPOs.length > 0 ? (
+    <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm font-bold text-orange-800">🧾 草稿采购单（{pendingApprovalPOs.length}）待下单/待审批</span>
+        <span className="text-xs text-orange-600">这些单已建但还没真正下单;待审批的需先审批,可下单的进 PO 页传凭证后下单。不处理,订单会一直显示"待采购"。</span>
+      </div>
+      <div className="space-y-2">
+        {pendingApprovalPOs.map((p) => {
+          const isPending = p.approval_status === 'pending';
+          const tbd = !isPending && p.price_tbd === true;   // 价格待定:允许无价下单
+          // ¥0/未填价且非"价格待定"的单不是"可下单",而是"待填价"(2026-07-09 用户:没填价格不该到下单这步)
+          const noPrice = !isPending && !tbd && (p.total_amount == null || Number(p.total_amount) <= 0);
+          return (
+          <div key={p.id} className="flex items-center gap-3 flex-wrap bg-white rounded-lg border border-orange-200 px-3 py-2">
+            <Link href={`/procurement/po/${p.id}`} className="text-sm font-semibold text-indigo-600 hover:underline">{p.po_no}</Link>
+            <span className={`text-[11px] px-1.5 py-0.5 rounded ${isPending ? 'bg-amber-100 text-amber-700' : noPrice ? 'bg-rose-100 text-rose-700' : tbd ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'}`}>
+              {isPending ? '待审批' : noPrice ? '待填价' : tbd ? '价格待定·可下单' : '可下单(未下单)'}
+            </span>
+            <span className="text-xs text-gray-500">{p.supplier_name || '—'}</span>
+            {p.total_amount != null && <span className="text-xs text-gray-700">¥{p.total_amount}</span>}
+            <span className="text-xs text-gray-400">
+              {(p.orders || []).map(o => o.internal_order_no || o.order_no).filter(Boolean).join(' / ')}
+            </span>
+            {isPending && (
+              <>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {(p.reasons || []).map(r => (
+                    <span key={r} className="text-[11px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">{REASON_CN[r] || r}</span>
+                  ))}
+                </div>
+                <span className="text-[11px] text-gray-500">
+                  需{(p.required_by || []).map(s => s === 'finance' ? '财务' : '采购经理').join('+')}审批
+                </span>
+              </>
+            )}
+            <Link href={`/procurement/po/${p.id}`} className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-orange-600 text-white font-medium hover:bg-orange-700">
+              {isPending ? '去审批 →' : noPrice ? '去填价 →' : '去下单 →'}{/* tbd 也走去下单 */}
+            </Link>
+          </div>
+        );})}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
@@ -89,63 +123,7 @@ export default async function ProcurementCenterPage() {
         </div>
       </div>
 
-      {/* Dashboard 壳：计数 */}
-      <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-6">
-        <Stat label="📨 待采购订单" value={counts.pendingRequests} href="#q-pendingRequests" tone="border-emerald-300 bg-emerald-50 text-emerald-800" />
-        <Stat label="待下单" value={counts.pendingOrder} href="#q-pendingOrder" tone="border-indigo-200 bg-indigo-50 text-indigo-800" />
-        <Stat label="待催货 / 生产中" value={counts.chase} href="#q-chase" tone="border-amber-200 bg-amber-50 text-amber-800" />
-        <Stat label="已完成待送货" value={counts.readyShip} href="#q-readyShip" tone="border-sky-200 bg-sky-50 text-sky-800" />
-        <Stat label="已送达待验收" value={counts.receive} href="#q-receive" tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
-        <Stat label="🔴 到货逾期" value={counts.overdueOrders} href="#q-chase" tone="border-red-200 bg-red-50 text-red-800" />
-        <Stat label="⚠️ 需抓紧追" value={counts.atRiskOrders} href="#q-chase" tone="border-rose-200 bg-rose-50 text-rose-800" />
-      </div>
-
-      {/* ⏳ 待审批采购单:已建、撞风险闸卡在待审批(下单没走完的真相在这)。不批准=永远挂着"待下单/待采购"。 */}
-      {pendingApprovalPOs.length > 0 && (
-        <div className="mb-6 rounded-xl border-2 border-orange-300 bg-orange-50 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-sm font-bold text-orange-800">🧾 草稿采购单（{pendingApprovalPOs.length}）待下单/待审批</span>
-            <span className="text-xs text-orange-600">这些单已建但还没真正下单;待审批的需先审批,可下单的进 PO 页传凭证后下单。不处理,订单会一直显示"待采购"。</span>
-          </div>
-          <div className="space-y-2">
-            {pendingApprovalPOs.map((p) => {
-              const isPending = p.approval_status === 'pending';
-              const tbd = !isPending && p.price_tbd === true;   // 价格待定:允许无价下单
-              // ¥0/未填价且非"价格待定"的单不是"可下单",而是"待填价"(2026-07-09 用户:没填价格不该到下单这步)
-              const noPrice = !isPending && !tbd && (p.total_amount == null || Number(p.total_amount) <= 0);
-              return (
-              <div key={p.id} className="flex items-center gap-3 flex-wrap bg-white rounded-lg border border-orange-200 px-3 py-2">
-                <Link href={`/procurement/po/${p.id}`} className="text-sm font-semibold text-indigo-600 hover:underline">{p.po_no}</Link>
-                <span className={`text-[11px] px-1.5 py-0.5 rounded ${isPending ? 'bg-amber-100 text-amber-700' : noPrice ? 'bg-rose-100 text-rose-700' : tbd ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'}`}>
-                  {isPending ? '待审批' : noPrice ? '待填价' : tbd ? '价格待定·可下单' : '可下单(未下单)'}
-                </span>
-                <span className="text-xs text-gray-500">{p.supplier_name || '—'}</span>
-                {p.total_amount != null && <span className="text-xs text-gray-700">¥{p.total_amount}</span>}
-                <span className="text-xs text-gray-400">
-                  {(p.orders || []).map(o => o.internal_order_no || o.order_no).filter(Boolean).join(' / ')}
-                </span>
-                {isPending && (
-                  <>
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {(p.reasons || []).map(r => (
-                        <span key={r} className="text-[11px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">{REASON_CN[r] || r}</span>
-                      ))}
-                    </div>
-                    <span className="text-[11px] text-gray-500">
-                      需{(p.required_by || []).map(s => s === 'finance' ? '财务' : '采购经理').join('+')}审批
-                    </span>
-                  </>
-                )}
-                <Link href={`/procurement/po/${p.id}`} className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-orange-600 text-white font-medium hover:bg-orange-700">
-                  {isPending ? '去审批 →' : noPrice ? '去填价 →' : '去下单 →'}{/* tbd 也走去下单 */}
-                </Link>
-              </div>
-            );})}
-          </div>
-        </div>
-      )}
-
-      <ProcurementQueueClient pendingRequests={pendingRequests} pendingOrder={pendingOrder} chase={chase} readyShip={readyShip} receive={receive} canFinanceOver={canFinanceOver} />
+      <ProcurementQueueClient pendingRequests={pendingRequests} pendingOrder={pendingOrder} chase={chase} readyShip={readyShip} receive={receive} counts={counts} banner={banner} canFinanceOver={canFinanceOver} />
 
       {/* ── 风险中心（只读，物化投影）── */}
       <div className="mt-8">
