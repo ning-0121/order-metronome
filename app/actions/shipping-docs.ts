@@ -11,12 +11,12 @@ async function canSeeFinOf(supabase: any, userId: string): Promise<boolean> {
 }
 
 /** 单据预览(PL + CI 结构化数据,供 UI 渲染 HTML 预览)。价列仅财务口径可见。 */
-export async function previewShippingDocs(orderId: string) {
+export async function previewShippingDocs(orderId: string, batchId?: string | null) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   const canSeeFin = await canSeeFinOf(supabase, user.id);
-  const { data, error } = await loadShippingDocModel(supabase, orderId, canSeeFin);
+  const { data, error } = await loadShippingDocModel(supabase, orderId, canSeeFin, batchId);
   if (error) return { error };
   return { data };
 }
@@ -26,7 +26,7 @@ export async function previewShippingDocs(orderId: string) {
  * 币种可选(USD/RMB);页脚 = 定金/尾款 + 付款条件/运费/出厂日 + 银行信息(业务填,存 doc_meta)。
  */
 export async function generateCommercialInvoice(
-  orderId: string,
+  orderId: string, batchId?: string | null,
 ): Promise<{ ok?: boolean; base64?: string; fileName?: string; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -35,7 +35,7 @@ export async function generateCommercialInvoice(
   const canSeeFin = await canSeeFinOf(supabase, user.id);
   if (!canSeeFin) return { error: 'CI 含客户成交价,仅财务/业务/管理员可生成' };
 
-  const { data: m, error } = await loadShippingDocModel(supabase, orderId, true);
+  const { data: m, error } = await loadShippingDocModel(supabase, orderId, true, batchId);
   if (error || !m) return { error: error || '数据不足' };
   const { order, seller, currency, docMeta, plNumber, ciStyles, ciTotals } = m;
   const bank = docMeta.bank || {};
@@ -128,7 +128,7 @@ export async function generateCommercialInvoice(
  * 海关字段(HS编码/报关品名/规格/监管方式/成交方式等)存 doc_meta.customs,业务填、给默认。
  */
 export async function generateCustomsDocs(
-  orderId: string,
+  orderId: string, batchId?: string | null,
 ): Promise<{ ok?: boolean; base64?: string; fileName?: string; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -137,7 +137,7 @@ export async function generateCustomsDocs(
   const canSeeFin = await canSeeFinOf(supabase, user.id);
   if (!canSeeFin) return { error: '报关资料含成交价,仅财务/业务/管理员可生成' };
 
-  const { data: m, error } = await loadShippingDocModel(supabase, orderId, true);
+  const { data: m, error } = await loadShippingDocModel(supabase, orderId, true, batchId);
   if (error || !m) return { error: error || '数据不足' };
   const { order, seller, currency, docMeta, plNumber, ciStyles, ciTotals, plTotals } = m;
   const cz = docMeta.customs || {};

@@ -8,14 +8,14 @@ import { loadShippingDocModel } from '@/lib/services/shipping-docs';
  * 数据统一走 loadShippingDocModel(与 CI/预览同源,永不偏差)。返回 { ok, base64, fileName }。
  */
 export async function generatePackingList(
-  orderId: string,
+  orderId: string, batchId?: string | null,
 ): Promise<{ ok?: boolean; base64?: string; fileName?: string; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   if (!user.email?.endsWith('@qimoclothing.com')) return { error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
 
-  const { data: m, error } = await loadShippingDocModel(supabase, orderId, false);  // PL 不含价
+  const { data: m, error } = await loadShippingDocModel(supabase, orderId, false, batchId);  // PL 不含价
   if (error || !m) return { error: error || '数据不足' };
   const { order, seller, plNumber, plRows, plTotals } = m;
 

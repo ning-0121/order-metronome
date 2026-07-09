@@ -82,7 +82,7 @@ export async function deletePackingLine(lineId: string, packingListId: string, o
  * 返回订单头 + 该单唯一 draft 装箱单(不存则建) + 逐款×色行(供最后一道节点录实发数据)。
  * packing_list_lines 只存「出货事实」(每箱数/箱数/实发数/毛净重/箱规);成分/尺码/PO# 生成时回查主数据。
  */
-export async function getShippingDraft(orderId: string) {
+export async function getShippingDraft(orderId: string, batchId?: string | null) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -93,19 +93,32 @@ export async function getShippingDraft(orderId: string) {
   if (oe) return { error: oe.message };
   if (!order) return { error: '订单不存在' };
 
-  // 主数据:款×色×数量 + 成分(fabric_name)+ 尺码(prefill 订单数量,供对照实发)
+  // 主数据:款×色×数量 + 成分(fabric_name)+ 尺码(prefill 订单/批次数量,供对照实发)
   const { data: oli } = await (supabase.from('order_line_items') as any)
-    .select('style_no, product_name, color_cn, color_en, sizes, qty_pcs, fabric_name')
+    .select('id, style_no, product_name, color_cn, color_en, sizes, qty_pcs, fabric_name')
     .eq('order_id', orderId).order('line_no', { ascending: true });
 
-  // get-or-create 唯一 draft 装箱单
-  let { data: pl } = await (supabase.from('packing_lists') as any)
-    .select('id, pl_number, status, doc_meta').eq('order_id', orderId).eq('status', 'draft')
-    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  // 分批:该批分配到各行的数量(order_line_item_id → qty_pcs);无 batchId 则整单
+  const batchQtyByLine = new Map<string, number>();
+  if (batchId) {
+    const { data: sbi } = await (supabase.from('shipment_batch_items') as any)
+      .select('order_line_item_id, qty_pcs').eq('batch_id', batchId);
+    for (const it of (sbi || [])) batchQtyByLine.set(it.order_line_item_id, Number(it.qty_pcs) || 0);
+  }
+
+  // get-or-create 该批(或整单)的 draft 装箱单;分批时 batch_id 作用域隔离
+  let plQ = (supabase.from('packing_lists') as any)
+    .select('id, pl_number, status, doc_meta').eq('order_id', orderId).eq('status', 'draft');
+  plQ = batchId ? plQ.eq('batch_id', batchId) : plQ.is('batch_id', null);
+  let { data: pl } = await plQ.order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (!pl) {
+    // 新批装箱单:doc_meta 继承同单已有(币种/银行/报关字段填一次即传各批)
+    const { data: sibling } = await (supabase.from('packing_lists') as any)
+      .select('doc_meta').eq('order_id', orderId).not('doc_meta', 'is', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
     const plNumber = `PL-${Date.now().toString(36).toUpperCase()}`;
     const { data: created, error: ce } = await (supabase.from('packing_lists') as any)
-      .insert({ order_id: orderId, created_by: user.id, pl_number: plNumber, status: 'draft' })
+      .insert({ order_id: orderId, batch_id: batchId || null, created_by: user.id, pl_number: plNumber, status: 'draft', doc_meta: sibling?.doc_meta || null })
       .select('id, pl_number, status, doc_meta').single();
     if (ce) return { error: ce.message };
     pl = created;
@@ -122,16 +135,19 @@ export async function getShippingDraft(orderId: string) {
   const rows: any[] = [];
   let seq = 1;
   for (const r of (oli || [])) {
+    // 分批:只带该批分配到的行;订单量取该批分配量
+    const orderQty = batchId ? (batchQtyByLine.get(r.id) || 0) : (Number(r.qty_pcs) || 0);
+    if (batchId && orderQty <= 0) continue;
     const color = r.color_cn || r.color_en || '';
     const key = `${r.style_no || ''}¦${color}`;
     const ex = byKey.get(key);
     rows.push({
       style_no: r.style_no || '', color, product_name: r.product_name || '',
       composition: r.fabric_name || '', sizes: r.sizes || {},
-      order_qty: Number(r.qty_pcs) || 0,
+      order_qty: orderQty,
       // 实发装箱(已录则回填,否则空待录)
       qty_per_carton: ex?.qty_per_carton ?? '', carton_count: ex?.carton_count ?? '',
-      actual_qty: ex?.total_qty ?? (Number(r.qty_pcs) || ''),   // 默认=订单量,可改
+      actual_qty: ex?.total_qty ?? (orderQty || ''),   // 默认=订单/批次量,可改
       net_weight_per_carton: ex?.net_weight_per_carton ?? '',
       gross_weight_per_carton: ex?.gross_weight_per_carton ?? '',
       dim_l: ex?.carton_dims_cm?.l ?? '', dim_w: ex?.carton_dims_cm?.w ?? '', dim_h: ex?.carton_dims_cm?.h ?? '',

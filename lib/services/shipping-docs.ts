@@ -32,16 +32,19 @@ export interface ShippingDocModel {
 
 /** 装载出货单据模型(canSeeFin 由调用方按角色决定,决定是否带客户成交价)。 */
 export async function loadShippingDocModel(
-  supabase: any, orderId: string, canSeeFin: boolean,
+  supabase: any, orderId: string, canSeeFin: boolean, batchId?: string | null,
 ): Promise<{ data?: ShippingDocModel; error?: string }> {
   const { data: order } = await (supabase.from('orders') as any)
     .select('id, order_no, internal_order_no, po_number, customer_name, style_no, currency, etd, factory_date')
     .eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
 
-  const { data: pl } = await (supabase.from('packing_lists') as any)
-    .select('id, pl_number, doc_meta').eq('order_id', orderId)
-    .in('status', ['draft', 'confirmed', 'locked']).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  // 分批:batchId 有值取该批装箱单;否则取整单(batch_id IS NULL)装箱单
+  let plQ = (supabase.from('packing_lists') as any)
+    .select('id, pl_number, doc_meta, batch_id').eq('order_id', orderId)
+    .in('status', ['draft', 'confirmed', 'locked']);
+  plQ = batchId ? plQ.eq('batch_id', batchId) : plQ.is('batch_id', null);
+  const { data: pl } = await plQ.order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (!pl) return { error: '尚未录入出货装箱数据' };
 
   const { data: lines } = await (supabase.from('packing_list_lines') as any)

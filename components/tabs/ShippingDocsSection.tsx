@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { getShippingDraft, saveShippingLines, saveShippingDocMeta } from '@/app/actions/packing';
 import { generatePackingList } from '@/app/actions/generate-packing-list';
 import { generateCommercialInvoice, generateCustomsDocs, previewShippingDocs } from '@/app/actions/shipping-docs';
+import { getShipmentBatches } from '@/app/actions/shipment-batches';
 
 function downloadBase64(base64: string, fileName: string) {
   const bytes = atob(base64);
@@ -24,6 +25,9 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
   const [plId, setPlId] = useState('');
   const [plNumber, setPlNumber] = useState('');
   const [rows, setRows] = useState<any[]>([]);
+  const [batches, setBatches] = useState<any[]>([]);        // 分批出货批次(空=整单)
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const [batchesLoaded, setBatchesLoaded] = useState(false);
   const [meta, setMeta] = useState<any>({ currency: 'USD', bank: {} });
   const [saving, setSaving] = useState(false);
   const [gen, setGen] = useState('');
@@ -36,15 +40,24 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
 
   const load = useCallback(async () => {
     setLoading(true); setErr('');
-    const r = await getShippingDraft(orderId);
+    const r = await getShippingDraft(orderId, batchId);
     if ((r as any).error) { setErr((r as any).error); setLoading(false); return; }
     const d = (r as any).data;
     setOrder(d.order); setPlId(d.packingListId); setPlNumber(d.plNumber); setRows(d.rows || []);
     const dm = d.docMeta || {};
     setMeta({ currency: 'USD', ...dm, bank: { ...(dm.bank || {}) } });
     setLoading(false);
-  }, [orderId]);
-  useEffect(() => { if (open) load(); }, [open, load]);
+  }, [orderId, batchId]);
+  // 展开时先探分批批次:有批次 → 默认选第一批(分批模式);无 → 整单(batchId=null)
+  useEffect(() => {
+    if (!open || batchesLoaded) return;
+    getShipmentBatches(orderId).then(r => {
+      const bs = ((r as any).data || []).filter((b: any) => b.status !== 'cancelled');
+      setBatches(bs); setBatchesLoaded(true);
+      if (bs.length > 0) setBatchId(bs[0].id);
+    });
+  }, [open, batchesLoaded, orderId]);
+  useEffect(() => { if (open && batchesLoaded) load(); }, [open, batchesLoaded, load]);
 
   const setField = (i: number, k: string, v: string) => setRows(rs => rs.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
   const setM = (k: string, v: any) => setMeta((m: any) => ({ ...m, [k]: v }));
@@ -84,9 +97,9 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
     setGen(kind); setErr(''); setMsg('');
     const e = await persist();
     if (e) { setErr(e); setGen(''); return; }
-    const res = kind === 'pl' ? await generatePackingList(orderId)
-      : kind === 'ci' ? await generateCommercialInvoice(orderId)
-      : await generateCustomsDocs(orderId);
+    const res = kind === 'pl' ? await generatePackingList(orderId, batchId)
+      : kind === 'ci' ? await generateCommercialInvoice(orderId, batchId)
+      : await generateCustomsDocs(orderId, batchId);
     setGen('');
     if ((res as any).error || !(res as any).base64) { setErr((res as any).error || '生成失败'); return; }
     downloadBase64((res as any).base64, (res as any).fileName);
@@ -96,7 +109,7 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
     setGen('preview'); setErr(''); setMsg('');
     const e = await persist();
     if (e) { setErr(e); setGen(''); return; }
-    const res = await previewShippingDocs(orderId);
+    const res = await previewShippingDocs(orderId, batchId);
     setGen('');
     if ((res as any).error) { setErr((res as any).error); return; }
     setPreview((res as any).data);
@@ -119,8 +132,23 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
           {loading ? <div className="text-center py-6 text-gray-400 text-sm">加载中…</div> : (<>
             {err && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{err}</div>}
             {msg && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">{msg}</div>}
+
+            {/* 分批出货:每批各自实发数量 + 各自一套单据 */}
+            {batches.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <span className="text-xs font-medium text-amber-800 mr-1">📦 分批出货 · 选批次:</span>
+                {batches.map((b, i) => (
+                  <button key={b.id} onClick={() => setBatchId(b.id)}
+                    className={`text-xs px-2.5 py-1 rounded-full border font-medium ${batchId === b.id ? 'border-amber-500 bg-amber-500 text-white' : 'border-amber-300 bg-white text-amber-700 hover:bg-amber-100'}`}>
+                    批次{b.batch_no || i + 1}{b.etd ? ` · ETD ${String(b.etd).slice(5)}` : ''}{b.status && b.status !== 'planned' ? ` · ${({ shipped: '已发', delivered: '已到' } as any)[b.status] || b.status}` : ''}
+                  </button>
+                ))}
+                <span className="text-[11px] text-amber-600 ml-1">当前批单据只含该批分配到的款/色/数量</span>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 flex-wrap text-xs text-gray-500">
-              <span>装箱单号 <b className="text-gray-700">{plNumber}</b></span>
+              <span>装箱单号 <b className="text-gray-700">{plNumber}</b>{batches.length > 0 ? <span className="ml-1 text-amber-600">(批次{batches.find(b => b.id === batchId)?.batch_no || ''})</span> : null}</span>
               <span>· 客户 {order?.customer_name || '—'}</span>
               <span>· PO# {order?.po_number || '—'}</span>
               <label className="ml-auto flex items-center gap-1">币种
