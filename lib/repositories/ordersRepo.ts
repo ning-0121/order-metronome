@@ -724,7 +724,12 @@ export async function requestCancel(
       customer_name: (order as any)?.customer_name ?? null,
       requester_name: (reqProf as any)?.name ?? null,
       summary: `订单取消申请:${reasonType}`,
-      detail: reasonDetail,
+      // 结构化:原因 + 订单金额(财务据此判取消影响的资金),财务按 KEY_LABEL 中文铺开
+      detail: {
+        reason: reasonDetail,
+        amount: (order as any)?.total_amount ?? null,
+        currency: (order as any)?.currency ?? null,
+      },
       created_at: (cancelRequest as any).created_at,
     });
   } catch (e: any) { console.warn('[requestCancel] 发财务取消审批请求失败(已落 outbox/不阻断):', e?.message); }

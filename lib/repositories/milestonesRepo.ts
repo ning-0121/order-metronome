@@ -682,12 +682,18 @@ export async function updateMilestone(
       try {
         const { createServiceRoleClient } = await import('@/lib/supabase/server');
         const svc = createServiceRoleClient();
-        const { data: ord } = await (svc.from('orders') as any).select('order_no, customer_name').eq('id', currentMilestone.order_id).maybeSingle();
+        const { data: ord } = await (svc.from('orders') as any).select('order_no, customer_name, total_amount, currency').eq('id', currentMilestone.order_id).maybeSingle();
         const { syncMilestoneRequestToFinance } = await import('@/lib/integration/finance-sync');
         const label = currentMilestone.name || currentMilestone.step_key || '里程碑';
         await syncMilestoneRequestToFinance({
           id, order_no: (ord as any)?.order_no ?? null, customer_name: (ord as any)?.customer_name ?? null,
-          requester_name: null, summary: `里程碑待财务确认:${label}`, detail: label,
+          requester_name: null, summary: `里程碑待财务确认:${label}`,
+          // 结构化:审批环节 + 订单金额(收款/PO确认等财务据此对本次金额;财务按 step_key 高亮对应决算桶)
+          detail: {
+            step_key: currentMilestone.step_key ?? null,
+            amount: (ord as any)?.total_amount ?? null,
+            currency: (ord as any)?.currency ?? null,
+          },
           created_at: new Date().toISOString(),
         });
       } catch (e: any) { console.warn('[milestone-hook] milestone.requested 发送失败(不阻断):', e?.message); }

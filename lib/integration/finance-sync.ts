@@ -421,7 +421,9 @@ export interface ApprovalRequestPayload {
   customer_name?: string | null
   requester_name?: string | null
   summary?: string | null
-  detail?: string | null
+  // detail:结构化对象最佳(财务 toPairs 按 KEY_LABEL 中文铺开:step_key/amount/currency/reason/
+  // old_price/new_price/processing_amount/… 见财务 IntegrationApprovals.tsx)。字符串亦兼容(显示为「说明」)。
+  detail?: string | Record<string, unknown> | null
   created_at?: string | null
 }
 export async function syncCancelRequestToFinance(p: ApprovalRequestPayload) {
