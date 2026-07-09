@@ -100,16 +100,18 @@ export async function getShippingDraft(orderId: string) {
 
   // get-or-create 唯一 draft 装箱单
   let { data: pl } = await (supabase.from('packing_lists') as any)
-    .select('id, pl_number, status').eq('order_id', orderId).eq('status', 'draft')
+    .select('id, pl_number, status, doc_meta').eq('order_id', orderId).eq('status', 'draft')
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (!pl) {
     const plNumber = `PL-${Date.now().toString(36).toUpperCase()}`;
     const { data: created, error: ce } = await (supabase.from('packing_lists') as any)
       .insert({ order_id: orderId, created_by: user.id, pl_number: plNumber, status: 'draft' })
-      .select('id, pl_number, status').single();
+      .select('id, pl_number, status, doc_meta').single();
     if (ce) return { error: ce.message };
     pl = created;
   }
+  // CI 页脚元数据(业务填):无则给默认;币种默认取订单币种
+  const docMeta = { currency: order.currency || 'USD', ...(pl.doc_meta || {}) };
 
   const { data: existing } = await (supabase.from('packing_list_lines') as any)
     .select('*').eq('packing_list_id', pl.id).order('sequence_no', { ascending: true });
@@ -149,7 +151,19 @@ export async function getShippingDraft(orderId: string) {
     });
   }
 
-  return { data: { order, packingListId: pl.id, plNumber: pl.pl_number, status: pl.status, rows } };
+  return { data: { order, packingListId: pl.id, plNumber: pl.pl_number, status: pl.status, rows, docMeta } };
+}
+
+/** 保存 CI 页脚/币种元数据(业务填:币种/定金/付款条件/运费/出厂日/银行信息)。 */
+export async function saveShippingDocMeta(orderId: string, packingListId: string, meta: any) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { error } = await (supabase.from('packing_lists') as any)
+    .update({ doc_meta: meta || {}, updated_at: new Date().toISOString() }).eq('id', packingListId);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }
 
 /** 批量保存出货装箱行(replace 该装箱单全部行 + 重算合计)。lines 为 getShippingDraft 行形状。 */

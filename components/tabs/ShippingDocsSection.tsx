@@ -1,24 +1,37 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { getShippingDraft, saveShippingLines } from '@/app/actions/packing';
+import { getShippingDraft, saveShippingLines, saveShippingDocMeta } from '@/app/actions/packing';
 import { generatePackingList } from '@/app/actions/generate-packing-list';
+import { generateCommercialInvoice, previewShippingDocs } from '@/app/actions/shipping-docs';
+
+function downloadBase64(base64: string, fileName: string) {
+  const bytes = atob(base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
+  URL.revokeObjectURL(url);
+}
 
 /**
  * 出运节点「录实际出货 → 生成单据」。
- * P1:逐款×色录实发数量 + 装箱参数(每箱数/箱数/箱规/毛净重)→ 存 packing_list_lines → 生成 Packing List。
- * (CI / 报关 为 P2 / P3,占位按钮先留出。)
+ * P1 Packing List + P2 CI(单价取 PO 价 / 可选币种 / 业务填页脚) + 预览。报关(P3)占位。
  */
 export function ShippingDocsSection({ orderId }: { orderId: string }) {
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<any>(null);
-  const [plId, setPlId] = useState<string>('');
-  const [plNumber, setPlNumber] = useState<string>('');
+  const [plId, setPlId] = useState('');
+  const [plNumber, setPlNumber] = useState('');
   const [rows, setRows] = useState<any[]>([]);
+  const [meta, setMeta] = useState<any>({ currency: 'USD', bank: {} });
   const [saving, setSaving] = useState(false);
-  const [gen, setGen] = useState(false);
+  const [gen, setGen] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(false);
+  const [metaOpen, setMetaOpen] = useState(false);
+  const [preview, setPreview] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr('');
@@ -26,52 +39,62 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
     if ((r as any).error) { setErr((r as any).error); setLoading(false); return; }
     const d = (r as any).data;
     setOrder(d.order); setPlId(d.packingListId); setPlNumber(d.plNumber); setRows(d.rows || []);
+    const dm = d.docMeta || {};
+    setMeta({ currency: 'USD', ...dm, bank: { ...(dm.bank || {}) } });
     setLoading(false);
   }, [orderId]);
   useEffect(() => { if (open) load(); }, [open, load]);
 
-  const setField = (i: number, k: string, v: string) =>
-    setRows(rs => rs.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
+  const setField = (i: number, k: string, v: string) => setRows(rs => rs.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
+  const setM = (k: string, v: any) => setMeta((m: any) => ({ ...m, [k]: v }));
+  const setBank = (k: string, v: any) => setMeta((m: any) => ({ ...m, bank: { ...(m.bank || {}), [k]: v } }));
 
   const num = (v: any) => (v === '' || v == null ? 0 : Number(v) || 0);
-  // 客户端合计预览
   const tot = rows.reduce((a, l) => {
     const cartons = num(l.carton_count);
-    a.cartons += cartons;
-    a.qty += num(l.actual_qty) || cartons * num(l.qty_per_carton);
+    a.cartons += cartons; a.qty += num(l.actual_qty) || cartons * num(l.qty_per_carton);
     a.gross += cartons * num(l.gross_weight_per_carton);
     const dl = num(l.dim_l), dw = num(l.dim_w), dh = num(l.dim_h);
     if (dl && dw && dh) a.vol += (dl * dw * dh) * cartons / 1_000_000;
     return a;
   }, { cartons: 0, qty: 0, gross: 0, vol: 0 });
 
+  async function persist() {
+    const s = await saveShippingLines(orderId, plId, rows);
+    if ((s as any).error) return (s as any).error;
+    const mm = await saveShippingDocMeta(orderId, plId, meta);
+    if ((mm as any).error) return (mm as any).error;
+    return null;
+  }
   async function save() {
     setSaving(true); setErr(''); setMsg('');
-    const r = await saveShippingLines(orderId, plId, rows);
-    setSaving(false);
-    if ((r as any).error) { setErr((r as any).error); return; }
-    setMsg('✅ 出货数据已保存'); await load();
+    const e = await persist(); setSaving(false);
+    if (e) { setErr(e); return; }
+    setMsg('✅ 出货数据 + 单据信息已保存'); await load();
   }
-
-  async function downloadPL() {
-    setGen(true); setErr(''); setMsg('');
-    // 先存,保证生成用最新数据
-    const s = await saveShippingLines(orderId, plId, rows);
-    if ((s as any).error) { setErr((s as any).error); setGen(false); return; }
-    const res = await generatePackingList(orderId);
-    setGen(false);
+  async function doGen(kind: 'pl' | 'ci') {
+    setGen(kind); setErr(''); setMsg('');
+    const e = await persist();
+    if (e) { setErr(e); setGen(''); return; }
+    const res = kind === 'pl' ? await generatePackingList(orderId) : await generateCommercialInvoice(orderId);
+    setGen('');
     if ((res as any).error || !(res as any).base64) { setErr((res as any).error || '生成失败'); return; }
-    const bytes = atob((res as any).base64);
-    const arr = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-    const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = (res as any).fileName; a.click();
-    URL.revokeObjectURL(url);
-    setMsg('✅ Packing List 已生成下载');
+    downloadBase64((res as any).base64, (res as any).fileName);
+    setMsg(`✅ ${kind === 'pl' ? 'Packing List' : 'CI'} 已生成下载`);
+  }
+  async function doPreview() {
+    setGen('preview'); setErr(''); setMsg('');
+    const e = await persist();
+    if (e) { setErr(e); setGen(''); return; }
+    const res = await previewShippingDocs(orderId);
+    setGen('');
+    if ((res as any).error) { setErr((res as any).error); return; }
+    setPreview((res as any).data);
   }
 
   const inp = 'w-full rounded border border-gray-300 px-1.5 py-1 text-xs text-center';
+  const finp = 'rounded border border-gray-300 px-2 py-1 text-xs';
+  const cur = meta.currency === 'CNY' ? 'RMB' : 'USD';
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -90,9 +113,15 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
               <span>装箱单号 <b className="text-gray-700">{plNumber}</b></span>
               <span>· 客户 {order?.customer_name || '—'}</span>
               <span>· PO# {order?.po_number || '—'}</span>
-              <span className="ml-auto">按 款×色 录实发数量 + 装箱参数;成分/尺码/PO# 生成时自动带出</span>
+              <label className="ml-auto flex items-center gap-1">币种
+                <select value={meta.currency} onChange={e => setM('currency', e.target.value)} className="rounded border border-gray-300 px-2 py-0.5">
+                  <option value="USD">美元 USD</option>
+                  <option value="CNY">人民币 RMB</option>
+                </select>
+              </label>
             </div>
 
+            {/* 出货装箱明细 */}
             {rows.length === 0 ? (
               <div className="text-center py-6 text-gray-400 text-sm">该订单暂无款/色明细(需先在富录入表填款色数量)</div>
             ) : (
@@ -128,26 +157,114 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
                       <td className="border border-gray-100 px-1.5 py-1 text-center">{tot.cartons || '—'}</td>
                       <td className="border border-gray-100 px-1.5 py-1"></td>
                       <td className="border border-gray-100 px-1.5 py-1 text-center" title="总毛重">{tot.gross ? Math.round(tot.gross * 10) / 10 : '—'}</td>
-                      <td className="border border-gray-100 px-1.5 py-1 text-center" colSpan={3} title="总体积M³">{tot.vol ? `${Math.round(tot.vol * 1000) / 1000} M³` : '—'}</td>
+                      <td className="border border-gray-100 px-1.5 py-1 text-center" colSpan={3}>{tot.vol ? `${Math.round(tot.vol * 1000) / 1000} M³` : '—'}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             )}
 
+            {/* CI 抬头/页脚(业务填) */}
+            <div className="rounded-lg border border-gray-200">
+              <button onClick={() => setMetaOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <span>🧾 CI 单据信息(业务填:发运/付款条件/银行 —— 生成 CI 用)</span><span className="text-xs text-gray-400">{metaOpen ? '收起 ▲' : '展开 ▼'}</span>
+              </button>
+              {metaOpen && (
+                <div className="p-3 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">开票日期<input type="date" className={finp} value={meta.issue_date || ''} onChange={e => setM('issue_date', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">SHIP VIA<input className={finp} value={meta.ship_via || ''} onChange={e => setM('ship_via', e.target.value)} placeholder="SEA DDP SHANGHAI" /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">目的地 DESTINATION<input className={finp} value={meta.destination || ''} onChange={e => setM('destination', e.target.value)} placeholder="NY" /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">定金 DEPOSIT ({cur})<input type="number" className={finp} value={meta.deposit ?? ''} onChange={e => setM('deposit', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">HBL#<input className={finp} value={meta.hbl || ''} onChange={e => setM('hbl', e.target.value)} placeholder="To be updated" /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">柜号 CONTAINER#<input className={finp} value={meta.container_no || ''} onChange={e => setM('container_no', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">ETD<input type="date" className={finp} value={meta.etd || ''} onChange={e => setM('etd', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">ETA<input type="date" className={finp} value={meta.eta || ''} onChange={e => setM('eta', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500 col-span-2">付款条件 PAYMENT TERMS<input className={finp} value={meta.payment_terms || ''} onChange={e => setM('payment_terms', e.target.value)} placeholder="10% DEPOSIT, BALANCE PAYMENT BEFORE DELIVERY" /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">运费 FREIGHT<input className={finp} value={meta.freight || ''} onChange={e => setM('freight', e.target.value)} placeholder="DELIVERED TO NY WH" /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">出厂日 EXIT FACTORY<input type="date" className={finp} value={meta.exit_factory_date || ''} onChange={e => setM('exit_factory_date', e.target.value)} /></label>
+                  <div className="col-span-2 md:col-span-4 mt-1 text-[11px] font-semibold text-gray-600">银行信息 BANK INFORMATION</div>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">收款银行 BANK<input className={finp} value={meta.bank?.beneficiary_bank || ''} onChange={e => setBank('beneficiary_bank', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">SWIFT BIC<input className={finp} value={meta.bank?.swift || ''} onChange={e => setBank('swift', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500 col-span-2">银行地址 BANK ADD<input className={finp} value={meta.bank?.bank_address || ''} onChange={e => setBank('bank_address', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">收款人 BENEFICIARY<input className={finp} value={meta.bank?.beneficiary_name || ''} onChange={e => setBank('beneficiary_name', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">ROUTING NO.<input className={finp} value={meta.bank?.routing_no || ''} onChange={e => setBank('routing_no', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">ACCOUNT NO.<input className={finp} value={meta.bank?.account_no || ''} onChange={e => setBank('account_no', e.target.value)} /></label>
+                  <label className="flex flex-col gap-0.5 text-[11px] text-gray-500">公司地址 COMPANY ADD<input className={finp} value={meta.bank?.company_address || ''} onChange={e => setBank('company_address', e.target.value)} /></label>
+                </div>
+              )}
+            </div>
+
+            {/* 操作 */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
-              <button onClick={save} disabled={saving || rows.length === 0}
-                className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50">
-                {saving ? '保存中…' : '💾 保存出货数据'}</button>
-              <button onClick={downloadPL} disabled={gen || rows.length === 0}
-                className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">
-                {gen ? '生成中…' : '📦 生成 Packing List'}</button>
-              <button disabled title="P2 即将上线" className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 font-medium cursor-not-allowed">💰 生成 CI(P2)</button>
+              <button onClick={save} disabled={saving || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50">{saving ? '保存中…' : '💾 保存'}</button>
+              <button onClick={doPreview} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-50">{gen === 'preview' ? '生成中…' : '👁 预览'}</button>
+              <button onClick={() => doGen('pl')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{gen === 'pl' ? '生成中…' : '📦 生成 Packing List'}</button>
+              <button onClick={() => doGen('ci')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">{gen === 'ci' ? '生成中…' : '💰 生成 CI'}</button>
               <button disabled title="P3 即将上线" className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 font-medium cursor-not-allowed">🛃 生成报关资料(P3)</button>
             </div>
+
+            {/* 预览 */}
+            {preview && <DocPreview data={preview} onClose={() => setPreview(null)} />}
           </>)}
         </div>
       )}
+    </div>
+  );
+}
+
+function DocPreview({ data, onClose }: { data: any; onClose: () => void }) {
+  const cur = data.currency?.label || 'USD';
+  const money = (v: any) => (v == null ? '—' : `${data.currency?.symbol || ''}${v}`);
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-auto p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-5xl w-full my-6 shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <span className="font-semibold text-gray-800">👁 单据预览(与导出 Excel 同源)</span>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-sm">关闭 ✕</button>
+        </div>
+        <div className="p-4 space-y-5 text-xs">
+          <div className="text-center">
+            <div className="font-bold text-sm">{data.seller?.name_en}</div>
+            <div className="text-gray-500">{data.seller?.address_en}</div>
+          </div>
+
+          {/* Packing List */}
+          <div>
+            <div className="font-bold text-gray-800 mb-1">📦 PACKING LIST</div>
+            <div className="overflow-x-auto"><table className="w-full border-collapse">
+              <thead><tr className="bg-gray-50 text-gray-500">{['款号', '成分', '尺码', '颜色', '箱数', '每箱', '数量', 'L', 'W', 'H', '毛重kg', '体积M³'].map(h => <th key={h} className="border px-1 py-0.5">{h}</th>)}</tr></thead>
+              <tbody>
+                {data.plRows?.map((l: any, i: number) => (
+                  <tr key={i}><td className="border px-1 py-0.5 font-mono">{l.style_no}</td><td className="border px-1 py-0.5">{l.composition}</td><td className="border px-1 py-0.5 whitespace-pre">{l.sizeText}</td><td className="border px-1 py-0.5">{l.color}</td><td className="border px-1 py-0.5 text-center">{l.cartons}</td><td className="border px-1 py-0.5 text-center">{l.per}</td><td className="border px-1 py-0.5 text-center">{l.qty}</td><td className="border px-1 py-0.5 text-center">{l.dl}</td><td className="border px-1 py-0.5 text-center">{l.dw}</td><td className="border px-1 py-0.5 text-center">{l.dh}</td><td className="border px-1 py-0.5 text-center">{l.grossTotal}</td><td className="border px-1 py-0.5 text-center">{l.vol}</td></tr>
+                ))}
+                <tr className="bg-sky-50 font-semibold"><td className="border px-1 py-0.5" colSpan={4}>TOTAL</td><td className="border px-1 py-0.5 text-center">{data.plTotals?.cartons}</td><td className="border"></td><td className="border px-1 py-0.5 text-center">{data.plTotals?.qty}</td><td className="border" colSpan={3}></td><td className="border px-1 py-0.5 text-center">{Math.round((data.plTotals?.gross || 0) * 10) / 10}</td><td className="border px-1 py-0.5 text-center">{Math.round((data.plTotals?.vol || 0) * 1000) / 1000}</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+
+          {/* CI */}
+          <div>
+            <div className="font-bold text-gray-800 mb-1">💰 COMMERCIAL INVOICE {!data.canSeeFin && <span className="text-amber-600 font-normal">(你无价格权限,单价/金额不显示)</span>}</div>
+            <div className="overflow-x-auto"><table className="w-full border-collapse">
+              <thead><tr className="bg-gray-50 text-gray-500">{['款号', '尺码', '颜色分布', '描述', '成分', '箱数', '每箱', '数量', `单价${cur}`, `金额${cur}`].map(h => <th key={h} className="border px-1 py-0.5">{h}</th>)}</tr></thead>
+              <tbody>
+                {data.ciStyles?.map((s: any, i: number) => (
+                  <tr key={i}><td className="border px-1 py-0.5 font-mono">{s.style_no}</td><td className="border px-1 py-0.5 whitespace-pre">{s.sizeRatio}</td><td className="border px-1 py-0.5 whitespace-pre">{s.colorBreakdown}</td><td className="border px-1 py-0.5">{s.description}</td><td className="border px-1 py-0.5">{s.composition}</td><td className="border px-1 py-0.5 text-center">{s.cartons}</td><td className="border px-1 py-0.5 text-center">{s.per}</td><td className="border px-1 py-0.5 text-center">{s.qty}</td><td className="border px-1 py-0.5 text-center">{money(s.unitPrice)}</td><td className="border px-1 py-0.5 text-center">{money(s.amount)}</td></tr>
+                ))}
+                <tr className="bg-emerald-50 font-semibold"><td className="border px-1 py-0.5" colSpan={5}>TOTAL</td><td className="border px-1 py-0.5 text-center">{data.ciTotals?.cartons}</td><td className="border"></td><td className="border px-1 py-0.5 text-center">{data.ciTotals?.qty}</td><td className="border"></td><td className="border px-1 py-0.5 text-center">{data.canSeeFin ? money(data.ciTotals?.amount) : '—'}</td></tr>
+              </tbody>
+            </table></div>
+            <div className="mt-2 text-gray-600 space-y-0.5">
+              {data.docMeta?.deposit ? <div>DEPOSIT: {money(Number(data.docMeta.deposit))} · BALANCE: {data.canSeeFin ? money(Math.round(((data.ciTotals?.amount || 0) - Number(data.docMeta.deposit)) * 100) / 100) : '—'}</div> : null}
+              <div className="font-semibold mt-1">TERMS & BANK</div>
+              <div>1. PAYMENT: {data.docMeta?.payment_terms || '—'}</div>
+              <div>2. FREIGHT: {data.docMeta?.freight || '—'}</div>
+              <div>3. EXIT FACTORY: {data.docMeta?.exit_factory_date || '—'}</div>
+              <div>BANK: {data.docMeta?.bank?.beneficiary_bank || '—'} · SWIFT {data.docMeta?.bank?.swift || '—'} · A/C {data.docMeta?.bank?.account_no || '—'} · {data.docMeta?.bank?.beneficiary_name || '—'}</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
