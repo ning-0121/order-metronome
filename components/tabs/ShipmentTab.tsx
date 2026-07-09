@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { BatchAllocationEditor } from '@/components/BatchAllocationEditor';
+import { ShippingDocsSection } from '@/components/tabs/ShippingDocsSection';
 import { getShipmentConfirmation, createShipmentConfirmation, approveShipment, executeShipment } from '@/app/actions/shipments';
 import { getShipmentBatches, enableSplitShipment, updateShipmentBatch } from '@/app/actions/shipment-batches';
 import { createClient } from '@/lib/supabase/client';
@@ -167,6 +168,9 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
 
   return (
     <div className="space-y-8">
+      {/* ===== 出货单据:录实发装箱 → 生成 Packing List / CI / 报关 ===== */}
+      <ShippingDocsSection orderId={orderId} />
+
       {/* ===== 流程步骤条 ===== */}
       <div className="flex items-center gap-1">
         {STEPS.map((step, i) => {

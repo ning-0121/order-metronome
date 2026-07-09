@@ -14,6 +14,20 @@ export const COMPANY_INFO = {
   swift_code: '',
 };
 
+// 出口单据抬头(PL/CI/报关 统一用绮陌自营出口主体)。
+// 取自绮陌报关资料模板;email 待用户确认后补(2026-07-09)。
+export const EXPORT_SELLER = {
+  name_cn: '义乌市绮陌服饰有限公司',
+  name_en: 'YIWU QIMO CLOTHING CO.,LTD',
+  address_cn: '浙江省义乌市金融六街168号环球大厦2108室',
+  address_en: '2108 Room, Global Building, No.168 Financial 6th Street, Yiwu, Zhejiang, China',
+  tel: '86-15924281155',
+  fax: '0579-81548728',
+  email: 'alex@qimoclothing.com',            // 出口联系邮箱
+  usci: '91330782MA2DFE4R9P',                // 统一社会信用代码
+  origin: '义乌',                             // 境内货源地 / 原产地
+};
+
 // 单据类型
 export const DOCUMENT_TYPES = {
   pi: { label: 'PI (形式发票)', icon: '📄', prefix: 'PI' },

@@ -77,6 +77,137 @@ export async function deletePackingLine(lineId: string, packingListId: string, o
   return {};
 }
 
+/**
+ * 出货录入草稿:从 order_line_items(款×色×数量+成分/尺码)预填,叠加已存的实发装箱数据。
+ * 返回订单头 + 该单唯一 draft 装箱单(不存则建) + 逐款×色行(供最后一道节点录实发数据)。
+ * packing_list_lines 只存「出货事实」(每箱数/箱数/实发数/毛净重/箱规);成分/尺码/PO# 生成时回查主数据。
+ */
+export async function getShippingDraft(orderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: order, error: oe } = await (supabase.from('orders') as any)
+    .select('id, order_no, internal_order_no, po_number, customer_name, style_no, etd, incoterm, currency, quantity')
+    .eq('id', orderId).maybeSingle();
+  if (oe) return { error: oe.message };
+  if (!order) return { error: '订单不存在' };
+
+  // 主数据:款×色×数量 + 成分(fabric_name)+ 尺码(prefill 订单数量,供对照实发)
+  const { data: oli } = await (supabase.from('order_line_items') as any)
+    .select('style_no, product_name, color_cn, color_en, sizes, qty_pcs, fabric_name')
+    .eq('order_id', orderId).order('line_no', { ascending: true });
+
+  // get-or-create 唯一 draft 装箱单
+  let { data: pl } = await (supabase.from('packing_lists') as any)
+    .select('id, pl_number, status').eq('order_id', orderId).eq('status', 'draft')
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (!pl) {
+    const plNumber = `PL-${Date.now().toString(36).toUpperCase()}`;
+    const { data: created, error: ce } = await (supabase.from('packing_lists') as any)
+      .insert({ order_id: orderId, created_by: user.id, pl_number: plNumber, status: 'draft' })
+      .select('id, pl_number, status').single();
+    if (ce) return { error: ce.message };
+    pl = created;
+  }
+
+  const { data: existing } = await (supabase.from('packing_list_lines') as any)
+    .select('*').eq('packing_list_id', pl.id).order('sequence_no', { ascending: true });
+  const byKey = new Map<string, any>();
+  for (const l of (existing || [])) byKey.set(`${l.style_no || ''}¦${l.color || ''}`, l);
+
+  // 合并:每个「款×色」一行,带出订单数量,叠加已录实发装箱
+  const rows: any[] = [];
+  let seq = 1;
+  for (const r of (oli || [])) {
+    const color = r.color_cn || r.color_en || '';
+    const key = `${r.style_no || ''}¦${color}`;
+    const ex = byKey.get(key);
+    rows.push({
+      style_no: r.style_no || '', color, product_name: r.product_name || '',
+      composition: r.fabric_name || '', sizes: r.sizes || {},
+      order_qty: Number(r.qty_pcs) || 0,
+      // 实发装箱(已录则回填,否则空待录)
+      qty_per_carton: ex?.qty_per_carton ?? '', carton_count: ex?.carton_count ?? '',
+      actual_qty: ex?.total_qty ?? (Number(r.qty_pcs) || ''),   // 默认=订单量,可改
+      net_weight_per_carton: ex?.net_weight_per_carton ?? '',
+      gross_weight_per_carton: ex?.gross_weight_per_carton ?? '',
+      dim_l: ex?.carton_dims_cm?.l ?? '', dim_w: ex?.carton_dims_cm?.w ?? '', dim_h: ex?.carton_dims_cm?.h ?? '',
+      sequence_no: seq++,
+    });
+    byKey.delete(key);
+  }
+  // 主数据里没有、但已录过的行(手工加的)也带出来,不丢
+  for (const ex of byKey.values()) {
+    rows.push({
+      style_no: ex.style_no || '', color: ex.color || '', product_name: '', composition: '', sizes: ex.size_breakdown || {},
+      order_qty: 0, qty_per_carton: ex.qty_per_carton ?? '', carton_count: ex.carton_count ?? '',
+      actual_qty: ex.total_qty ?? '', net_weight_per_carton: ex.net_weight_per_carton ?? '',
+      gross_weight_per_carton: ex.gross_weight_per_carton ?? '',
+      dim_l: ex.carton_dims_cm?.l ?? '', dim_w: ex.carton_dims_cm?.w ?? '', dim_h: ex.carton_dims_cm?.h ?? '',
+      sequence_no: seq++,
+    });
+  }
+
+  return { data: { order, packingListId: pl.id, plNumber: pl.pl_number, status: pl.status, rows } };
+}
+
+/** 批量保存出货装箱行(replace 该装箱单全部行 + 重算合计)。lines 为 getShippingDraft 行形状。 */
+export async function saveShippingLines(orderId: string, packingListId: string, lines: any[]) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const num = (v: any) => (v === '' || v == null ? null : Number(v));
+  const clean = (lines || [])
+    .filter(l => (l.style_no || l.color) && (num(l.actual_qty) || num(l.carton_count)))
+    .map((l, i) => {
+      const cartons = num(l.carton_count) || 0;
+      const perCarton = num(l.qty_per_carton);
+      // 实发数量优先取录入值;没录则 箱数×每箱数
+      const totalQty = num(l.actual_qty) ?? (perCarton != null ? cartons * perCarton : 0);
+      const dims = (num(l.dim_l) || num(l.dim_w) || num(l.dim_h))
+        ? { l: num(l.dim_l), w: num(l.dim_w), h: num(l.dim_h) } : null;
+      return {
+        packing_list_id: packingListId, order_id: orderId,
+        style_no: l.style_no || null, color: l.color || null,
+        size_breakdown: l.sizes && typeof l.sizes === 'object' ? l.sizes : {},
+        qty_per_carton: perCarton, carton_count: cartons, total_qty: totalQty || 0,
+        net_weight_per_carton: num(l.net_weight_per_carton),
+        gross_weight_per_carton: num(l.gross_weight_per_carton),
+        carton_dims_cm: dims, sequence_no: i + 1,
+      };
+    });
+
+  // replace
+  const { error: de } = await (supabase.from('packing_list_lines') as any).delete().eq('packing_list_id', packingListId);
+  if (de) return { error: de.message };
+  if (clean.length) {
+    const { error: ie } = await (supabase.from('packing_list_lines') as any).insert(clean);
+    if (ie) return { error: ie.message };
+  }
+
+  // 重算装箱单合计
+  const totalCartons = clean.reduce((s, l) => s + (l.carton_count || 0), 0);
+  const totalPcs = clean.reduce((s, l) => s + (l.total_qty || 0), 0);
+  const totalNet = clean.reduce((s, l) => s + (l.carton_count || 0) * (l.net_weight_per_carton || 0), 0);
+  const totalGross = clean.reduce((s, l) => s + (l.carton_count || 0) * (l.gross_weight_per_carton || 0), 0);
+  const totalVol = clean.reduce((s, l) => {
+    const d = l.carton_dims_cm; if (!d?.l || !d?.w || !d?.h) return s;
+    return s + (d.l * d.w * d.h) * (l.carton_count || 0) / 1_000_000;
+  }, 0);
+  await (supabase.from('packing_lists') as any).update({
+    total_cartons: totalCartons, total_qty: totalPcs,
+    total_net_weight: Math.round(totalNet * 100) / 100,
+    total_gross_weight: Math.round(totalGross * 100) / 100,
+    total_volume: Math.round(totalVol * 1000) / 1000,
+    updated_at: new Date().toISOString(),
+  }).eq('id', packingListId);
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
 export async function confirmPackingList(id: string, orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
