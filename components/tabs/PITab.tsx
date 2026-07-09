@@ -1,14 +1,33 @@
 'use client';
 
-// PI(形式发票)· 2026-07-09 用户:从生产单带款/色/面料/数量,FOB=客户PO成交价,交期=出厂日 → 生成草稿,
-// 业务改价/折扣/交期/买方 → 保存 → 下载 Excel(贴样板)。卖方+银行固定,只读展示。
+// PI(形式发票)· 2026-07-09 用户:严格对齐绮陌标准 PI 模板(14 列 A–N + Jojo Fashion 抬头 + 运输表头 + DEPOSIT)。
+// 从生产单按款归组生成草稿(款/色逐色带量/尺码/箱数/数量/PO价),业务补齐成分/克重/运输信息 → 保存 → 下载 Excel。
 import { useEffect, useState } from 'react';
 import { getPI, savePI, exportPI, type PIData, type PILine } from '@/app/actions/order-pi';
 
 const n2 = (n: number) => (Math.round(n * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
+type Bundle = PIData & { issuer: { company: string; address: string; contact: string; title: string }; has_saved: boolean; order_no: string | null };
+
+// 明细列定义(对齐模板 A–N;multiline 的用 textarea)
+const COLS: { key: keyof PILine; label: string; w: string; type?: 'num' | 'multi' }[] = [
+  { key: 'po_no', label: 'PO NO.', w: 'w-24' },
+  { key: 'style_no', label: 'STYLE NO.', w: 'w-28' },
+  { key: 'style', label: 'STYLE', w: 'w-28' },
+  { key: 'size', label: 'SIZE', w: 'w-28', type: 'multi' },
+  { key: 'color', label: 'COLOR', w: 'w-44', type: 'multi' },
+  { key: 'description', label: 'DESCRIPTION', w: 'w-40', type: 'multi' },
+  { key: 'composition', label: 'COMPOSITION', w: 'w-36', type: 'multi' },
+  { key: 'fabric_weight', label: 'FABRIC WEIGHT', w: 'w-24' },
+  { key: 'total_carton', label: 'TOTAL CARTON', w: 'w-20', type: 'num' },
+  { key: 'unit_per_carton', label: 'UNIT/CTN', w: 'w-20', type: 'num' },
+  { key: 'qty', label: 'QTY(SETS/PCS)', w: 'w-20', type: 'num' },
+  { key: 'unit_price', label: 'UNIT PRICE LDP', w: 'w-24', type: 'num' },
+  { key: 'notes', label: 'NOTES', w: 'w-36', type: 'multi' },
+];
+
 export function PITab({ orderId }: { orderId: string }) {
-  const [pi, setPi] = useState<(PIData & { seller: any; has_saved: boolean; order_no: string | null }) | null>(null);
+  const [pi, setPi] = useState<Bundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dl, setDl] = useState(false);
@@ -24,14 +43,18 @@ export function PITab({ orderId }: { orderId: string }) {
 
   function setH<K extends keyof PIData>(k: K, v: any) { setPi(p => p ? { ...p, [k]: v } : p); setMsg(''); }
   function setLine(i: number, k: keyof PILine, v: any) { setPi(p => p ? { ...p, lines: p.lines.map((l, j) => j === i ? { ...l, [k]: v } : l) } : p); setMsg(''); }
-  function addLine() { setPi(p => p ? { ...p, lines: [...p.lines, { style_no: '', color: '', fabric: '', qty: 0, fob: 0 }] } : p); }
+  function addLine() { setPi(p => p ? { ...p, lines: [...p.lines, { po_no: p.lines[0]?.po_no || '', style_no: '', style: '', size: '', color: '', description: '', composition: '', fabric_weight: '', total_carton: 0, unit_per_carton: 0, qty: 0, unit_price: 0, notes: '' }] } : p); }
   function delLine(i: number) { setPi(p => p ? { ...p, lines: p.lines.filter((_, j) => j !== i) } : p); }
+
+  function strip(p: Bundle): PIData {
+    const { issuer, has_saved, order_no, ...data } = p as any;
+    return data as PIData;
+  }
 
   async function save() {
     if (!pi) return;
     setSaving(true); setMsg('');
-    const { seller, has_saved, order_no, ...data } = pi as any;
-    const r = await savePI(orderId, data as PIData);
+    const r = await savePI(orderId, strip(pi));
     setSaving(false);
     setMsg((r as any).error ? '❌ ' + (r as any).error : '✅ 已保存 PI');
   }
@@ -39,9 +62,7 @@ export function PITab({ orderId }: { orderId: string }) {
   async function download() {
     if (!pi) return;
     setDl(true); setMsg('');
-    // 先存再导(导出读库,保证下载的是最新编辑)
-    const { seller, has_saved, order_no, ...data } = pi as any;
-    const s = await savePI(orderId, data as PIData);
+    const s = await savePI(orderId, strip(pi)); // 先存再导(导出读库)
     if ((s as any).error) { setMsg('❌ ' + (s as any).error); setDl(false); return; }
     const r = await exportPI(orderId);
     setDl(false);
@@ -56,9 +77,9 @@ export function PITab({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-8 text-gray-400 text-sm">加载 PI…</div>;
   if (!pi) return <div className="rounded-lg bg-rose-50 text-rose-700 px-4 py-3 text-sm">{msg || '无法加载 PI'}</div>;
 
-  const total = pi.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.fob) || 0), 0);
-  const disc = total * (Number(pi.discount_pct) || 0) / 100;
-  const net = total - disc;
+  const sumCarton = pi.lines.reduce((s, l) => s + (Number(l.total_carton) || 0), 0);
+  const sumQty = pi.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const sumAmount = pi.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0), 0);
   const inp = 'rounded border border-gray-300 px-2 py-1 text-sm';
 
   return (
@@ -66,7 +87,8 @@ export function PITab({ orderId }: { orderId: string }) {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h3 className="text-sm font-semibold text-gray-800">🧾 PI（形式发票 Proforma Invoice）</h3>
-          <p className="text-xs text-gray-500 mt-0.5">从生产单带款/色/面料/数量,FOB=客户PO成交价,交期=出厂日。可改价/折扣/交期 → 保存 → 下载。{pi.has_saved ? <span className="text-emerald-600"> · 已存过</span> : <span className="text-amber-600"> · 草稿(未保存)</span>}</p>
+          <p className="text-xs text-gray-500 mt-0.5">按绮陌标准模板(14 列)。款/色/尺码/数量/箱数/PO价自动带出,业务补齐成分·克重·运输信息 → 保存 → 下载。
+            {pi.has_saved ? <span className="text-emerald-600"> · 已存过</span> : <span className="text-amber-600"> · 草稿(未保存)</span>}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={save} disabled={saving} className="text-sm px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-50 font-medium disabled:opacity-50">{saving ? '保存中…' : '💾 保存'}</button>
@@ -75,55 +97,80 @@ export function PITab({ orderId }: { orderId: string }) {
       </div>
       {msg && <div className={`rounded-lg px-3 py-2 text-sm ${msg.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{msg}</div>}
 
-      {/* 表头:买方 + 合同号 + 交期 + 折扣 */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <label className="text-xs text-gray-500">Buyer 买方<input value={pi.buyer_name} onChange={e => setH('buyer_name', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
-        <label className="text-xs text-gray-500">PURCHASE CONTRACT# 合同号<input value={pi.contract_no} onChange={e => setH('contract_no', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
-        <label className="text-xs text-gray-500">Buyer Address 买方地址<input value={pi.buyer_address} onChange={e => setH('buyer_address', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
-        <label className="text-xs text-gray-500">Buyer TEL 买方电话<input value={pi.buyer_tel} onChange={e => setH('buyer_tel', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
-        <label className="text-xs text-gray-500">READY TO SHIP DATE 交期<input value={pi.ready_to_ship} onChange={e => setH('ready_to_ship', e.target.value)} placeholder="2026/7/25" className={`${inp} w-full mt-0.5`} /></label>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-xs text-gray-500">Discount 折扣 %<input type="number" step="any" value={pi.discount_pct} onChange={e => setH('discount_pct', e.target.value === '' ? 0 : Number(e.target.value))} className={`${inp} w-full mt-0.5`} /></label>
-          <label className="text-xs text-gray-500">Currency 币种<input value={pi.currency} onChange={e => setH('currency', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
-        </div>
+      {/* 开票方抬头(固定) */}
+      <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-2 text-center">
+        <div className="font-bold text-gray-800">{pi.issuer.company}</div>
+        <div className="text-xs text-gray-500">{pi.issuer.address}</div>
+        <div className="text-xs text-gray-500">{pi.issuer.contact}</div>
+        <div className="text-xs font-semibold text-gray-700 mt-1">{pi.issuer.title}</div>
       </div>
 
-      {/* 明细表 */}
+      {/* 买方 + 运输表头 */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+        <label className="text-xs text-gray-500">BUYER 买方<input value={pi.buyer_name} onChange={e => setH('buyer_name', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+        <label className="text-xs text-gray-500">INVOICE NO. 发票号<input value={pi.invoice_no} onChange={e => setH('invoice_no', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+        <label className="text-xs text-gray-500">BUYER ADDRESS 买方地址<input value={pi.buyer_address} onChange={e => setH('buyer_address', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+        <label className="text-xs text-gray-500">ISSUE DATE 开票日期<input value={pi.issue_date} onChange={e => setH('issue_date', e.target.value)} placeholder="2026-05-13" className={`${inp} w-full mt-0.5`} /></label>
+        <label className="text-xs text-gray-500">TEL 买方电话<input value={pi.buyer_tel} onChange={e => setH('buyer_tel', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+        <label className="text-xs text-gray-500">SHIP VIA 运输方式<input value={pi.ship_via} onChange={e => setH('ship_via', e.target.value)} placeholder="SEA DDP SHANGHAI PORT" className={`${inp} w-full mt-0.5`} /></label>
+        <label className="text-xs text-gray-500">DESTINATION 目的地<input value={pi.destination} onChange={e => setH('destination', e.target.value)} placeholder="NY" className={`${inp} w-full mt-0.5`} /></label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-xs text-gray-500">ETD<input value={pi.etd} onChange={e => setH('etd', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+          <label className="text-xs text-gray-500">ETA<input value={pi.eta} onChange={e => setH('eta', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-xs text-gray-500">HBL#<input value={pi.hbl} onChange={e => setH('hbl', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+          <label className="text-xs text-gray-500">CONTAINER#<input value={pi.container} onChange={e => setH('container', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+        </div>
+        <label className="text-xs text-gray-500">Currency 币种<input value={pi.currency} onChange={e => setH('currency', e.target.value)} className={`${inp} w-full mt-0.5`} /></label>
+      </div>
+
+      {/* 明细表(14 列,横向滚动) */}
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-        <table className="w-full text-sm">
+        <table className="text-sm">
           <thead><tr className="bg-gray-50 text-left text-gray-500 text-xs">
-            {['STYLE # 款号', 'COLOR 颜色', 'FABRIC 面料', 'Quantity 数量', `FOB 单价`, `AMOUNT 金额`, ''].map(h => <th key={h} className="px-2 py-2 font-medium whitespace-nowrap">{h}</th>)}
+            {COLS.map(c => <th key={c.key} className="px-1.5 py-2 font-medium whitespace-nowrap">{c.label}</th>)}
+            <th className="px-1.5 py-2 font-medium text-right whitespace-nowrap">AMOUNT LDP</th>
+            <th className="px-1 py-2"></th>
           </tr></thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-gray-100 align-top">
             {pi.lines.map((l, i) => (
               <tr key={i}>
-                <td className="px-2 py-1"><input value={l.style_no} onChange={e => setLine(i, 'style_no', e.target.value)} className={`${inp} w-28`} /></td>
-                <td className="px-2 py-1"><input value={l.color} onChange={e => setLine(i, 'color', e.target.value)} className={`${inp} w-24`} /></td>
-                <td className="px-2 py-1"><input value={l.fabric} onChange={e => setLine(i, 'fabric', e.target.value)} className={`${inp} w-44`} /></td>
-                <td className="px-2 py-1"><input type="number" value={l.qty} onChange={e => setLine(i, 'qty', e.target.value === '' ? 0 : Number(e.target.value))} className={`${inp} w-20 text-right`} /></td>
-                <td className="px-2 py-1"><input type="number" step="any" value={l.fob} onChange={e => setLine(i, 'fob', e.target.value === '' ? 0 : Number(e.target.value))} className={`${inp} w-20 text-right`} /></td>
-                <td className="px-2 py-1 text-right font-mono text-indigo-700">{n2((Number(l.qty) || 0) * (Number(l.fob) || 0))}</td>
-                <td className="px-2 py-1 text-center"><button onClick={() => delLine(i)} className="text-gray-300 hover:text-rose-500 text-xs">✕</button></td>
+                {COLS.map(c => (
+                  <td key={c.key} className="px-1 py-1">
+                    {c.type === 'multi'
+                      ? <textarea value={String(l[c.key] ?? '')} onChange={e => setLine(i, c.key, e.target.value)} rows={2} className={`${inp} ${c.w} resize-y`} />
+                      : c.type === 'num'
+                        ? <input type="number" step="any" value={l[c.key] as number} onChange={e => setLine(i, c.key, e.target.value === '' ? 0 : Number(e.target.value))} className={`${inp} ${c.w} text-right`} />
+                        : <input value={String(l[c.key] ?? '')} onChange={e => setLine(i, c.key, e.target.value)} className={`${inp} ${c.w}`} />}
+                  </td>
+                ))}
+                <td className="px-1.5 py-1 text-right font-mono text-indigo-700 whitespace-nowrap">{n2((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</td>
+                <td className="px-1 py-1 text-center"><button onClick={() => delLine(i)} className="text-gray-300 hover:text-rose-500 text-xs">✕</button></td>
               </tr>
             ))}
-            {pi.lines.length === 0 && <tr><td colSpan={7} className="px-2 py-6 text-center text-gray-400 text-sm">无明细(生产单里逐款明细为空)。点下方「加一行」手工录。</td></tr>}
           </tbody>
+          <tfoot>
+            <tr className="bg-gray-50 font-semibold text-gray-800 text-xs">
+              <td className="px-1.5 py-2" colSpan={8}>TOTAL</td>
+              <td className="px-1.5 py-2 text-right font-mono">{n2(sumCarton)}</td>
+              <td></td>
+              <td className="px-1.5 py-2 text-right font-mono">{n2(sumQty)}</td>
+              <td></td>
+              <td className="px-1.5 py-2 text-right font-mono">{pi.currency} {n2(sumAmount)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
         </table>
       </div>
       <button onClick={addLine} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">＋ 加一行</button>
 
-      {/* 合计 */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4 max-w-sm ml-auto text-sm space-y-1">
-        <div className="flex justify-between"><span className="text-gray-500">TOTAL</span><span className="font-mono">{pi.currency} {n2(total)}</span></div>
-        <div className="flex justify-between"><span className="text-gray-500">Less {pi.discount_pct || 0}% Discount</span><span className="font-mono">{pi.currency} {n2(disc)}</span></div>
-        <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-100 pt-1"><span>Net Amount</span><span className="font-mono">{pi.currency} {n2(net)}</span></div>
-      </div>
+      {/* DEPOSIT / 付款条款 */}
+      <label className="block text-xs text-gray-500">DEPOSIT / 付款条款(定金、余款、条件等)
+        <textarea value={pi.deposit} onChange={e => setH('deposit', e.target.value)} rows={2} className={`${inp} w-full mt-0.5`} placeholder="如:30% DEPOSIT, BALANCE BEFORE SHIPMENT" />
+      </label>
 
-      {/* 卖方(固定,只读) */}
-      <details className="rounded-xl border border-gray-200 bg-gray-50/50 p-3 text-xs text-gray-500">
-        <summary className="cursor-pointer font-medium text-gray-600">Seller 卖方 + 银行信息（固定,导出自动带上）</summary>
-        <p className="mt-2 whitespace-pre-wrap">{pi.seller.name}｜{pi.seller.address}｜TEL {pi.seller.tel}｜FAX {pi.seller.fax}{'\n\n'}{pi.seller.bank}</p>
-      </details>
+      <p className="text-xs text-gray-400">提示:COLOR/SIZE/DESCRIPTION 支持多行(单元格内换行);AMOUNT = 数量 × 单价 自动算;合计箱数/数量/金额自动汇总。导出 Excel 与模板列序、抬头一致。</p>
     </div>
   );
 }
