@@ -78,11 +78,13 @@ export async function DELETE(
   // ── 采购单孤儿清理(2026-07-04 审计 P0):purchase_orders 靠 order_ids 数组关联,不 CASCADE ──
   // 从相关 PO 的 order_ids 移除本单;数组空了 → 作废该 PO(整单就为它一个订单)。
   const poNos: string[] = [];
+  const pendingApprovalPos: Array<{ id: string; po_no: string | null }> = []; // 待财务审批的 PO → 删单后要通知财务撤审批
   try {
     const { data: pos } = await (supabase.from('purchase_orders') as any)
-      .select('id, po_no, order_ids').contains('order_ids', [id]);
+      .select('id, po_no, order_ids, approval_status').contains('order_ids', [id]);
     for (const po of (pos || [])) {
       poNos.push((po as any).po_no);
+      if ((po as any).approval_status === 'pending') pendingApprovalPos.push({ id: (po as any).id, po_no: (po as any).po_no ?? null });
       const remain = ((po as any).order_ids || []).filter((x: string) => x !== id);
       if (remain.length === 0) {
         await (supabase.from('purchase_orders') as any).update({ status: 'cancelled', order_ids: [], updated_at: new Date().toISOString() }).eq('id', (po as any).id);
@@ -113,11 +115,15 @@ export async function DELETE(
 
   // ── 财务作废(2026-07-04 审计 P0):独立财务仓库不 CASCADE,必须 webhook 冲销应收/应付/预算 ──
   try {
-    const { notifyOrderDeleted } = await import('@/lib/integration/finance-sync');
+    const { notifyOrderDeleted, cancelPurchaseOrderApproval } = await import('@/lib/integration/finance-sync');
     await notifyOrderDeleted({
       id, order_no: order.order_no, internal_order_no: order.internal_order_no,
       customer_name: order.customer_name, po_nos: poNos,
     });
+    // 删单 → 撤掉挂在财务「采购审批」队列里的待审 PO(否则订单没了、审批还在,截图 217 条积压的来源)
+    for (const p of pendingApprovalPos) {
+      await cancelPurchaseOrderApproval({ purchase_order_id: p.id, po_no: p.po_no, order_id: id, reason: 'order_deleted' });
+    }
   } catch (e: any) { console.warn('[deleteOrder] 财务作废通知失败(未配置即跳过):', e?.message); }
 
   return NextResponse.json({ success: true, order_no: order.order_no, forced: order.lifecycle_status !== 'draft' });

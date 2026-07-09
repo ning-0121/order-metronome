@@ -503,10 +503,12 @@ export async function placePurchaseOrder(poId: string): Promise<{
             supplements = (si || []).map((s: any) => ({ item_no: s.item_no, material_name: s.material_name, qty: s.total_required_qty, reason: s.supplement_reason }));
           }
         } catch { /* 补采购列未建 */ }
-        const { requestPurchaseOrderApproval, fetchPurchaseOrderLinesRaw, fetchSupplierName } = await import('@/lib/integration/finance-sync');
-        const poLines = await fetchPurchaseOrderLinesRaw(supabase, poId);   // 原辅料明细(财务预算+核销共同源)
-        (full as any).supplier_name = await fetchSupplierName(supabase, (full as any).supplier_id); // 单头供应商名必带(整单一口价时财务全靠它)
-        await requestPurchaseOrderApproval(full, undefined, supplements, flags, poLines); // 带内部风险信号给财务
+        const { requestPurchaseOrderApproval, fetchPurchaseOrderLinesRaw, fetchSupplierName, fetchOrderRefs } = await import('@/lib/integration/finance-sync');
+        // 用 service-role 查(供应商名/明细),避免用户会话撞 suppliers/line RLS 把供应商查空(截图"未带供应商"根因之一)
+        const poLines = await fetchPurchaseOrderLinesRaw(svc, poId);   // 原辅料明细(财务预算+核销共同源)
+        (full as any).supplier_name = await fetchSupplierName(svc, (full as any).supplier_id); // 单头供应商名必带(整单一口价时财务全靠它)
+        const orderRefs = await fetchOrderRefs(svc, (full as any).order_ids); // 富标识(内部订单号)→ 财务按内部单号聚合采购单
+        await requestPurchaseOrderApproval(full, orderRefs, supplements, flags, poLines); // 带内部风险信号给财务
       }
     } catch (e: any) { console.warn('[placePurchaseOrder] 财务审批请求发送失败(已置待审批,失败已落 outbox):', e?.message); }
     const budgetWarn = flags.over_budget_materials.length ? ` ⚠ 系统检测到疑重复下单料:${flags.over_budget_materials.slice(0, 4).join('、')}` : (flags.over_budget_total ? ' ⚠ 系统检测到整单超预算' : '');

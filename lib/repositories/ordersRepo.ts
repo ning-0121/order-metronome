@@ -867,11 +867,13 @@ export async function decideCancel(
  */
 export async function finalizeCancelledOrder(client: any, orderId: string): Promise<void> {
   const poNos: string[] = [];
+  const pendingApprovalPos: Array<{ id: string; po_no: string | null }> = []; // 待财务审批的 PO → 取消单后通知财务撤审批
   try {
     const { data: pos } = await (client.from('purchase_orders') as any)
-      .select('id, po_no, order_ids, status').contains('order_ids', [orderId]);
+      .select('id, po_no, order_ids, status, approval_status').contains('order_ids', [orderId]);
     for (const po of (pos || [])) {
       if ((po as any).po_no) poNos.push((po as any).po_no);
+      if ((po as any).approval_status === 'pending') pendingApprovalPos.push({ id: (po as any).id, po_no: (po as any).po_no ?? null });
       const remain = ((po as any).order_ids || []).filter((x: string) => x !== orderId);
       const settled = ['received', 'closed'].includes((po as any).status);
       if (remain.length === 0 && !settled) {
@@ -887,8 +889,12 @@ export async function finalizeCancelledOrder(client: any, orderId: string): Prom
   } catch (e: any) { console.warn('[finalizeCancelledOrder] 采购/风险清理失败(不阻断):', e?.message); }
   try {
     const { data: ord } = await (client.from('orders') as any).select('order_no, internal_order_no, customer_name').eq('id', orderId).maybeSingle();
-    const { notifyOrderCancelled } = await import('@/lib/integration/finance-sync');
+    const { notifyOrderCancelled, cancelPurchaseOrderApproval } = await import('@/lib/integration/finance-sync');
     await notifyOrderCancelled({ id: orderId, lifecycle_status: '已取消', order_no: (ord as any)?.order_no ?? null, internal_order_no: (ord as any)?.internal_order_no ?? null, customer_name: (ord as any)?.customer_name ?? null, po_nos: poNos } as Record<string, unknown>);
+    // 取消单 → 撤掉挂在财务「采购审批」队列里的待审 PO
+    for (const p of pendingApprovalPos) {
+      await cancelPurchaseOrderApproval({ purchase_order_id: p.id, po_no: p.po_no, order_id: orderId, reason: 'order_cancelled' });
+    }
   } catch (e: any) { console.warn('[finalizeCancelledOrder] 财务冲销通知失败(不阻断):', e?.message); }
   try {
     const { notifyUsersByRole } = await import('@/lib/utils/notifications');

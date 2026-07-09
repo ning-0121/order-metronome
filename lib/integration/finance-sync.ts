@@ -36,6 +36,7 @@ type WebhookEventType =
   | 'supplier.upserted'
   | 'purchase_order.placed'
   | 'purchase_order.approval_requested'
+  | 'purchase_order.approval_cancelled'
   | 'cancel.requested'
   | 'milestone.requested'
   | 'goods_receipt.recorded'
@@ -310,6 +311,35 @@ export async function fetchSupplierName(db: any, supplierId: string | null | und
     const { data } = await db.from('suppliers').select('name').eq('id', supplierId).maybeSingle()
     return (data as { name?: string } | null)?.name ?? null
   } catch { return null }
+}
+
+/**
+ * 取订单富标识作 order_refs —— 让财务能按【内部订单号】把一张单下面的多张采购单聚合展示。
+ * 此前 order_refs 退回用裸 order_ids(UUID),财务只看到 UUID、无法按内部单号归集。db=service-role/任意 client。
+ * 查不到返回空(不阻断)。
+ */
+export async function fetchOrderRefs(
+  db: any,
+  orderIds: string[] | null | undefined,
+): Promise<Array<{ id: string; order_no: string | null; internal_order_no: string | null; customer_name: string | null }>> {
+  const ids = [...new Set((orderIds || []).filter(Boolean))]
+  if (!ids.length) return []
+  try {
+    const { data } = await db.from('orders').select('id, order_no, internal_order_no, customer_name').in('id', ids)
+    return ((data || []) as any[]).map((o) => ({
+      id: o.id, order_no: o.order_no ?? null, internal_order_no: o.internal_order_no ?? null, customer_name: o.customer_name ?? null,
+    }))
+  } catch { return [] }
+}
+
+/**
+ * 撤销一张采购单的财务审批(订单被删除/取消时)。财务据此撤掉挂在"采购审批"队列里的待审条目,
+ * 否则订单没了、审批还在(payload 幂等,按 po_no/purchase_order_id 定位)。
+ */
+export async function cancelPurchaseOrderApproval(payload: {
+  purchase_order_id: string; po_no?: string | null; order_id?: string | null; reason?: string
+}) {
+  return sendToFinanceSystem('purchase_order.approval_cancelled', payload as any)
 }
 
 /** 采购单同步 payload（纯，可测）。placed 时推金额/账期供财务建应付+付款计划;lines=原辅料明细(财务预算+核销源)。 */

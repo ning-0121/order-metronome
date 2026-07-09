@@ -1,5 +1,5 @@
 import { revalidatePath } from 'next/cache';
-import { syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw, fetchSupplierName } from '@/lib/integration/finance-sync';
+import { syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw, fetchSupplierName, fetchOrderRefs } from '@/lib/integration/finance-sync';
 
 /**
  * 采购单下单核心(draft → placed):状态推进 + 行→ordered + 财务应付同步(purchase_order.placed)
@@ -43,7 +43,8 @@ export async function placePurchaseOrderCore(supabase: any, poId: string): Promi
       const poLines = await fetchPurchaseOrderLinesRaw(supabase, poId);
       // 单头供应商名必带(整单一口价时财务全靠它显示供应商)
       (full as any).supplier_name = await fetchSupplierName(supabase, (full as any).supplier_id);
-      await syncPurchaseOrderToFinance(full, undefined, supplements, poLines);
+      const orderRefs = await fetchOrderRefs(supabase, (full as any).order_ids); // 富标识(内部订单号)→ 财务按内部单号聚合
+      await syncPurchaseOrderToFinance(full, orderRefs, supplements, poLines);
     }
   } catch { /* 财务同步失败不影响下单 */ }
 

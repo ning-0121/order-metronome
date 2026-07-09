@@ -824,10 +824,11 @@ export async function transitionProcurementLine(
         .update({ total_amount: Math.round(total * 100) / 100, updated_at: now }).eq('id', poId);
       const { data: full } = await (svc.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
       if (full && (full as any).status !== 'draft') {   // 已下单的才推财务(草稿未发应付)
-        const { syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw, fetchSupplierName } = await import('@/lib/integration/finance-sync');
+        const { syncPurchaseOrderToFinance, fetchPurchaseOrderLinesRaw, fetchSupplierName, fetchOrderRefs } = await import('@/lib/integration/finance-sync');
         const poLines = await fetchPurchaseOrderLinesRaw(svc, poId);   // 补价 resync 也带上原辅料明细
         (full as any).supplier_name = await fetchSupplierName(svc, (full as any).supplier_id); // 单头供应商名必带
-        await syncPurchaseOrderToFinance(full as Record<string, unknown>, undefined, undefined, poLines);
+        const orderRefs = await fetchOrderRefs(svc, (full as any).order_ids); // 富标识(内部订单号)→ 财务按内部单号聚合
+        await syncPurchaseOrderToFinance(full as Record<string, unknown>, orderRefs, undefined, poLines);
       }
     } catch (e: any) { console.warn('[procurement] 补价后 PO 总额 resync 失败(不阻断):', e?.message); }
   }
