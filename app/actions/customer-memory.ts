@@ -56,16 +56,3 @@ export async function getCustomerMemoryByCustomer(customerId: string): Promise<{
   return { data: data ?? [] };
 }
 
-/**
- * V1.1: Return top 3 memories relevant to the given context (order/milestone/delay text).
- * Uses keyword matching; HIGH risk first, then MEDIUM; then category-keyword match.
- */
-export async function getRelevantCustomerMemory(
-  customerName: string,
-  contextString: string
-): Promise<{ data: any[] | null; error?: string }> {
-  const { data, error } = await getCustomerMemoryByCustomer(customerName);
-  if (error || !data) return { data: null, error: error ?? undefined };
-  const top = getTopRelevantMemories(data, contextString, 3);
-  return { data: top };
-}

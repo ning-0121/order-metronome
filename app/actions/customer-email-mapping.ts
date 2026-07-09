@@ -30,22 +30,6 @@ export async function getCustomerEmailDomains(
 }
 
 /**
- * 获取所有客户邮箱映射（管理页面用）
- */
-export async function getAllEmailDomains(): Promise<{ data: EmailDomainMapping[] | null; error: string | null }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { data: null, error: '请先登录' };
-
-  const { data, error } = await (supabase.from('customer_email_domains') as any)
-    .select('id, customer_name, email_domain, sample_email, created_at')
-    .order('customer_name', { ascending: true });
-
-  if (error) return { data: null, error: error.message };
-  return { data: data || [], error: null };
-}
-
-/**
  * 手动添加客户邮箱域名映射
  */
 export async function addEmailDomainMapping(

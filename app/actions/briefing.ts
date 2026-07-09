@@ -33,22 +33,6 @@ export async function getTodayBriefing() {
 // ── 邮件晨报：按需触发 + 缓存 ─────────────────────────────────
 
 /**
- * 仅查今日已有的晨报（不调 AI）
- */
-export async function getMyBriefingAction(): Promise<{
-  data?: BriefingRecord | null;
-  error?: string;
-}> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '未登录' };
-
-  const result = await svcGetTodayBriefing(supabase, user.id);
-  if (!result.ok) return { error: result.error };
-  return { data: result.data };
-}
-
-/**
  * 按需生成 / 强制刷新今日晨报（会调 Claude）
  */
 export async function generateMyBriefingAction(
@@ -89,41 +73,3 @@ export async function generateMyBriefingAction(
   return { data: result.data };
 }
 
-/**
- * 确认对照发现
- */
-export async function acknowledgeComplianceFinding(findingId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-
-  const { error } = await (supabase.from('compliance_findings') as any)
-    .update({
-      status: 'acknowledged',
-      resolved_by: user.id,
-      resolved_at: new Date().toISOString(),
-    })
-    .eq('id', findingId);
-
-  return { error: error?.message || null };
-}
-
-/**
- * 解决对照发现
- */
-export async function resolveComplianceFinding(findingId: string, note: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-
-  const { error } = await (supabase.from('compliance_findings') as any)
-    .update({
-      status: 'resolved',
-      resolved_by: user.id,
-      resolved_at: new Date().toISOString(),
-      resolution_note: note,
-    })
-    .eq('id', findingId);
-
-  return { error: error?.message || null };
-}

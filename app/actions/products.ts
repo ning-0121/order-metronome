@@ -52,19 +52,6 @@ export async function createProduct(input: {
   return { data: { id: (p as any).id } };
 }
 
-export async function updateProduct(id: string, patch: Record<string, any>) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-  const allow = ['product_name', 'product_code', 'category', 'season', 'brand', 'target_customer', 'status'];
-  const upd: any = { updated_at: new Date().toISOString() };
-  for (const k of allow) if (k in patch) upd[k] = patch[k] || null;
-  const { error } = await (supabase.from('products') as any).update(upd).eq('id', id);
-  if (error) return { error: friendlyError(error) };
-  revalidatePath('/products');
-  return { ok: true };
-}
-
 /** 款详情:product + variants + 最新 definition + bom template 行。 */
 export async function getProductDetail(productId: string) {
   const supabase = await createClient();
@@ -141,19 +128,6 @@ export async function addBomTemplateRow(definitionId: string, input: {
     default_color: input.default_color || null, default_placement: input.default_placement || null,
     special_requirements: input.special_requirements || null,
   });
-  if (error) return { error: friendlyError(error) };
-  revalidatePath('/products');
-  return { ok: true };
-}
-
-export async function updateBomTemplateRow(id: string, patch: Record<string, any>) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-  const numKeys = ['development_consumption', 'production_consumption'];
-  const upd: any = { updated_at: new Date().toISOString() };
-  for (const k of Object.keys(patch)) upd[k] = numKeys.includes(k) ? num(patch[k]) : (patch[k] || null);
-  const { error } = await (supabase.from('product_bom_templates') as any).update(upd).eq('id', id);
   if (error) return { error: friendlyError(error) };
   revalidatePath('/products');
   return { ok: true };

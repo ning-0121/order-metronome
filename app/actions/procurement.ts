@@ -292,50 +292,6 @@ export async function addProcurementItem(
 }
 
 /**
- * 批量添加采购明细（从表格粘贴）
- */
-export async function batchAddProcurementItems(
-  orderId: string,
-  items: Array<{
-    material_name: string;
-    material_code?: string;
-    specification?: string;
-    supplier_name?: string;
-    category?: string;
-    ordered_qty: number;
-    ordered_unit?: string;
-    unit_price?: number;
-  }>,
-): Promise<{ error?: string; count?: number }> {
-  const auth = await checkAccess();
-  if (!auth.ok || !auth.userId) return { error: auth.error };
-  // 泄价红线③同源:批量增执行层含价行仅限采购角色
-  if (!hasRoleInGroup(auth.roles || [], 'CAN_EDIT_PROCUREMENT_EXEC'))
-    return { error: '仅采购/采购经理/管理员可编辑采购执行层' };
-
-  const supabase = await createClient();
-  const rows = items.map(item => ({
-    order_id: orderId,
-    material_name: item.material_name,
-    material_code: item.material_code || null,
-    specification: item.specification || null,
-    supplier_name: item.supplier_name || null,
-    category: item.category || 'fabric',
-    ordered_qty: item.ordered_qty,
-    ordered_unit: item.ordered_unit || 'KG',
-    unit_price: item.unit_price || null,
-    ordered_by: auth.userId,
-    ordered_at: new Date().toISOString(),
-  }));
-
-  const { error } = await (supabase.from('procurement_line_items') as any).insert(rows);
-  if (error) return { error: error.message };
-
-  revalidatePath(`/orders/${orderId}`);
-  return { count: rows.length };
-}
-
-/**
  * 从采购进度（procurement_tracking）同步到对账明细
  * 将采购进度里的条目转为对账明细的"订购数量"，跳过已存在的物料名（去重）
  */

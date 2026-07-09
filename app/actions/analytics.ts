@@ -164,60 +164,6 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   };
 }
 
-export async function getPhaseEfficiency(): Promise<PhaseEfficiency[]> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('请先登录');
-
-  const { data: milestones, error: msErr } = await (supabase.from('milestones') as any)
-    .select('id, status, due_at, actual_at, updated_at, step_key, orders!inner(order_purpose)')
-    .eq('orders.order_purpose', 'production');
-  if (msErr) throw new Error(`加载里程碑失败: ${msErr.message}`);
-  const { data: doneLogs, error: logErr } = await (supabase.from('milestone_logs') as any)
-    .select('milestone_id, created_at')
-    .eq('action', 'mark_done');
-  if (logErr) throw new Error(`加载完成日志失败: ${logErr.message}`);
-
-  const doneLogMap = new Map<string, string>();
-  (doneLogs || []).forEach((l: any) => {
-    if (!doneLogMap.has(l.milestone_id) || l.created_at < doneLogMap.get(l.milestone_id)!) {
-      doneLogMap.set(l.milestone_id, l.created_at);
-    }
-  });
-
-  const now = new Date();
-  const phaseData: Record<string, { total: number; completed: number; onTime: number; overdue: number }> = {};
-
-  (milestones || []).forEach((m: any) => {
-    const phase = PHASE_MAP[m.step_key];
-    if (!phase) return;
-    if (!phaseData[phase]) phaseData[phase] = { total: 0, completed: 0, onTime: 0, overdue: 0 };
-    phaseData[phase].total += 1;
-
-    if (_isDone(m.status)) {
-      phaseData[phase].completed += 1;
-      if (m.due_at) {
-        const completedAt = m.actual_at ? new Date(m.actual_at) : (m.updated_at ? new Date(m.updated_at) : null);
-        if (completedAt && completedAt <= new Date(m.due_at)) {
-          phaseData[phase].onTime += 1;
-        }
-      }
-    } else if ((isActiveStatus(m.status)) && m.due_at && new Date(m.due_at) < now) {
-      phaseData[phase].overdue += 1;
-    }
-  });
-
-  return Object.entries(phaseData)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([phase, data]) => ({
-      phase,
-      completedCount: data.completed,
-      totalCount: data.total,
-      onTimeCount: data.onTime,
-      onTimeRate: (data.completed + data.overdue) > 0 ? Math.round(data.onTime / (data.completed + data.overdue) * 100) : 0,
-    }));
-}
-
 export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

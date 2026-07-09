@@ -73,27 +73,6 @@ export async function setCustomerTarget(
 }
 
 // ─────────────────────────────────────────────────────────────
-// 2. 删除目标
-// ─────────────────────────────────────────────────────────────
-export async function deleteCustomerTarget(targetId: string): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可删除销售目标' };
-
-  const { error } = await (supabase.from('customer_sales_targets') as any)
-    .delete()
-    .eq('id', targetId);
-
-  if (error) return { error: friendlyError(error) };
-  revalidatePath('/sales-targets');
-  revalidatePath('/ceo');
-  return {};
-}
-
-// ─────────────────────────────────────────────────────────────
 // 3. 列出目标 + 进度（件数）
 //    - admin/finance：看全部客户
 //    - 其他角色：仅看自己负责过订单的客户

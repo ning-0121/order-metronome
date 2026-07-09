@@ -46,45 +46,6 @@ export interface OrderFinancials {
 
 const CONFIRM_MODULES = ['fabric_color', 'size_breakdown', 'logo_print', 'packaging_label'] as const;
 
-/**
- * 获取订单经营数据（不存在则自动创建）
- */
-export async function getOrderFinancials(orderId: string): Promise<{ data?: OrderFinancials; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '未登录' };
-
-  let { data } = await (supabase.from('order_financials') as any)
-    .select('*').eq('order_id', orderId).maybeSingle();
-
-  // 不存在则自动创建（含从 cost_baseline 同步成本）
-  if (!data) {
-    const initResult = await initOrderFinancials(orderId);
-    if (initResult.error) return { error: initResult.error };
-    const { data: newData } = await (supabase.from('order_financials') as any)
-      .select('*').eq('order_id', orderId).maybeSingle();
-    data = newData;
-  }
-  if (!data) return { data: undefined };
-
-  // 审计修(2026-07-04):action 层加 CAN_SEE_FINANCIALS 门禁(原来只靠 RLS,而 RLS 的
-  // owner 子句会把成本/毛利超授给被指派为 owner 的 production/qc/跟单)。非授权角色剥离
-  // 金额/成本/利润,只保留控制开关+状态(生产/物流要用 allow_production/allow_shipment)。
-  const { data: prof } = await (supabase.from('profiles') as any)
-    .select('role, roles').eq('user_id', user.id).single();
-  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
-  if (!hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')) {
-    const SENSITIVE = ['sale_price_per_piece', 'sale_total', 'cost_material', 'cost_cmt',
-      'cost_shipping', 'cost_other', 'cost_total', 'gross_profit_rmb', 'margin_pct',
-      'deposit_rate', 'deposit_amount', 'deposit_received', 'balance_amount', 'balance_received'];
-    const masked = { ...(data as any) };
-    for (const k of SENSITIVE) masked[k] = null;
-    return { data: masked as OrderFinancials };
-  }
-
-  return { data: data as OrderFinancials };
-}
-
 export interface OrderFinanceEvent {
   id: string;
   event_type: 'settlement.closed' | 'collection.received' | 'payment.completed' | string;
@@ -194,97 +155,6 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
 }
 
 /**
- * 更新经营数据（仅 admin / finance）
- */
-export async function updateOrderFinancials(
-  orderId: string,
-  updates: Partial<Pick<OrderFinancials,
-    'sale_price_per_piece' | 'sale_currency' | 'sale_total' | 'exchange_rate' |
-    'cost_shipping' | 'cost_other' |
-    'deposit_rate' | 'deposit_amount' | 'balance_amount' | 'balance_due_date' |
-    'allow_production' | 'allow_shipment' | 'payment_hold'
-  >>,
-): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '未登录' };
-
-  // 权限：admin / finance
-  const { data: profile } = await (supabase.from('profiles') as any)
-    .select('role, roles').eq('user_id', user.id).single();
-  const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
-  if (!roles.some(r => ['admin', 'finance'].includes(r))) {
-    return { error: '仅财务和管理员可修改经营数据' };
-  }
-
-  // 自动计算利润:销售 或 运费/杂费 任一变动都要重算(此前只在销售变动时算 → 改运杂费不进 cost_total)
-  if (updates.sale_price_per_piece !== undefined || updates.sale_total !== undefined || updates.exchange_rate !== undefined
-      || updates.cost_shipping !== undefined || updates.cost_other !== undefined) {
-    const { data: current } = await (supabase.from('order_financials') as any)
-      .select('*').eq('order_id', orderId).single();
-    const { data: order } = await (supabase.from('orders') as any)
-      .select('quantity').eq('id', orderId).single();
-
-    const qty = order?.quantity || 0;
-    const price = updates.sale_price_per_piece ?? current?.sale_price_per_piece ?? 0;
-    const rate = updates.exchange_rate ?? current?.exchange_rate ?? 7.2;
-    const currency = updates.sale_currency ?? current?.sale_currency ?? 'USD';
-    const saleTotal = updates.sale_total ?? (price * qty * (currency === 'CNY' ? 1 : rate));
-    // 审计 P1:成本改由组件现算(料+加工+运+杂,与 profit.service 同口径),不再读从不写入的 cost_total 列。
-    const costTotal =
-      Number(current?.cost_material || 0) + Number(current?.cost_cmt || 0) +
-      Number(updates.cost_shipping ?? current?.cost_shipping ?? 0) +
-      Number(updates.cost_other ?? current?.cost_other ?? 0);
-    const costBasisMissing = costTotal === 0; // H1:成本组件全为 0 → 毛利待定
-    const grossProfit = saleTotal - costTotal;
-    const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
-
-    (updates as any).sale_total = saleTotal;
-    // ⚠️ cost_total 是生成列,不写(会 428C9);毛利用本地组件和 costTotal 现算写普通列。
-    (updates as any).cost_basis_missing = costBasisMissing;
-    (updates as any).gross_profit_rmb = costBasisMissing ? null : grossProfit;
-    (updates as any).margin_pct = costBasisMissing ? null : marginPct;
-    (updates as any).min_margin_alert = costBasisMissing ? null : (marginPct < 8);
-  }
-
-  // ── 金额守恒校验（2026-05-18, P1）──
-  // 定金 + 尾款 ≈ 销售总额（容差 0.01 CNY）
-  // 如果只录入部分字段（如先录销售额、定金/尾款待算），跳过校验
-  if (updates.deposit_amount !== undefined || updates.balance_amount !== undefined || (updates as any).sale_total !== undefined) {
-    const { data: existing } = await (supabase.from('order_financials') as any)
-      .select('sale_total, deposit_amount, balance_amount')
-      .eq('order_id', orderId)
-      .single();
-    const merged = {
-      sale_total: (updates as any).sale_total ?? (existing as any)?.sale_total,
-      deposit_amount: updates.deposit_amount ?? (existing as any)?.deposit_amount,
-      balance_amount: updates.balance_amount ?? (existing as any)?.balance_amount,
-    };
-    const { validateAmountConservation } = await import('@/lib/domain/orderInvariants');
-    const r = validateAmountConservation({
-      saleTotal: merged.sale_total,
-      depositAmount: merged.deposit_amount,
-      balanceAmount: merged.balance_amount,
-      toleranceCny: 0.01,
-    });
-    if (!r.ok) return { error: r.message };
-  }
-
-  const upd: Record<string, any> = { ...updates, updated_by: user.id, updated_at: new Date().toISOString() };
-  let { error } = await (supabase.from('order_financials') as any).update(upd).eq('order_id', orderId);
-  // H1 迁移未执行时降级:去掉 cost_basis_missing + min_margin_alert 回退 false(不 brick 财务更新)
-  if (error && /cost_basis_missing|min_margin_alert|does not exist|null value|not-null/i.test(error.message || '')) {
-    const { cost_basis_missing, ...rest } = upd;
-    if (rest.min_margin_alert === null) rest.min_margin_alert = false;
-    ({ error } = await (supabase.from('order_financials') as any).update(rest).eq('order_id', orderId));
-  }
-
-  if (error) return { error: error.message };
-  revalidatePath(`/orders/${orderId}`);
-  return {};
-}
-
-/**
  * 标记收款（仅 admin / finance）
  */
 export async function recordPayment(
@@ -332,40 +202,6 @@ export async function recordPayment(
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
   return {};
-}
-
-/**
- * 获取订单确认链（4 个模块）
- */
-export async function getOrderConfirmations(orderId: string): Promise<{
-  data?: Array<{
-    module: string;
-    status: string;
-    data: any;
-    customer_confirmed: boolean;
-    confirmed_at: string | null;
-    attachments: any[];
-  }>;
-  error?: string;
-}> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '未登录' };
-
-  const { data, error } = await (supabase.from('order_confirmations') as any)
-    .select('*').eq('order_id', orderId).order('created_at');
-
-  if (error) return { error: error.message };
-
-  // 确保 4 个模块都存在
-  if (!data || data.length < 4) {
-    await initOrderFinancials(orderId);
-    const { data: refreshed } = await (supabase.from('order_confirmations') as any)
-      .select('*').eq('order_id', orderId).order('created_at');
-    return { data: refreshed || [] };
-  }
-
-  return { data: data || [] };
 }
 
 /**

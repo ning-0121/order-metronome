@@ -519,32 +519,6 @@ export async function getCompanyProfile(): Promise<{ data?: CompanyProfile; erro
 }
 
 /**
- * 更新公司画像
- */
-export async function updateCompanyProfile(profile: Partial<CompanyProfile>): Promise<{ error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '未登录' };
-
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可修改公司画像' };
-
-  const { data: existing } = await (supabase.from('company_profile') as any).select('id').limit(1).maybeSingle();
-
-  if (existing?.id) {
-    const { error } = await (supabase.from('company_profile') as any)
-      .update({ ...profile, updated_at: new Date().toISOString() })
-      .eq('id', existing.id);
-    if (error) return { error: error.message };
-  } else {
-    const { error } = await (supabase.from('company_profile') as any).insert(profile);
-    if (error) return { error: error.message };
-  }
-
-  return {};
-}
-
-/**
  * 手动添加知识条目
  */
 export async function addManualKnowledge(entry: {

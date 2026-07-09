@@ -71,36 +71,3 @@ export async function recalcOrderMilestones(orderId: string) {
   return { data: { order_no: order.order_no, updated } };
 }
 
-/**
- * 批量重算所有未完成订单的关卡时间
- */
-export async function recalcAllOrders() {
-  const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '未登录' };
-
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可重算排期' };
-
-  // 获取所有未完成的订单
-  // 注意：必须用 TERMINAL_LIFECYCLE_FILTER 同时排除中英文枚举
-  const { data: orders } = await (supabase.from('orders') as any)
-    .select('id, order_no')
-    .not('lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER);
-
-  const results = [];
-  for (const order of orders || []) {
-    const result = await recalcOrderMilestones(order.id);
-    results.push({ order_no: order.order_no, ...result });
-  }
-
-  const successCount = results.filter(r => r.data).length;
-  return {
-    data: {
-      total: (orders || []).length,
-      success: successCount,
-      results,
-    },
-  };
-}

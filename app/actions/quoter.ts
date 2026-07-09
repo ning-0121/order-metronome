@@ -499,67 +499,6 @@ export async function submitQuoteFeedback(
 }
 
 /**
- * 多报价对比（最多 5 个）
- */
-export async function compareQuotes(quoteIds: string[]): Promise<{
-  data?: any[];
-  error?: string;
-}> {
-  const auth = await checkQuoterAccess();
-  if (!auth.ok) return { error: auth.error };
-  if (quoteIds.length > 5) return { error: '最多对比 5 个报价' };
-
-  const supabase = await createClient();
-  const { data, error } = await (supabase.from('quoter_quotes') as any)
-    .select('*')
-    .in('id', quoteIds);
-  if (error) return { error: error.message };
-  return { data: data || [] };
-}
-
-/**
- * 工价月度趋势（按品类）
- */
-export async function getCmtTrend(garmentType?: string): Promise<{
-  data?: Array<{ month: string; avgRate: number; count: number }>;
-  error?: string;
-}> {
-  const auth = await checkQuoterAccess();
-  if (!auth.ok) return { error: auth.error };
-
-  const supabase = await createClient();
-  let query = (supabase.from('quoter_cmt_training_samples') as any)
-    .select('total_cmt_rmb, created_at, garment_type')
-    .eq('status', 'confirmed')
-    .not('total_cmt_rmb', 'is', null)
-    .order('created_at', { ascending: true });
-
-  if (garmentType) query = query.eq('garment_type', garmentType);
-
-  const { data, error } = await query;
-  if (error) return { error: error.message };
-
-  // 按月分组
-  const byMonth: Record<string, { total: number; count: number }> = {};
-  for (const r of (data || []) as any[]) {
-    const month = String(r.created_at).slice(0, 7); // YYYY-MM
-    if (!byMonth[month]) byMonth[month] = { total: 0, count: 0 };
-    byMonth[month].total += r.total_cmt_rmb;
-    byMonth[month].count++;
-  }
-
-  const trend = Object.entries(byMonth)
-    .map(([month, { total, count }]) => ({
-      month,
-      avgRate: Number((total / count).toFixed(2)),
-      count,
-    }))
-    .sort((a, b) => a.month.localeCompare(b.month));
-
-  return { data: trend };
-}
-
-/**
  * 更新报价状态（sent/won/lost/abandoned）
  */
 export async function updateQuoteStatus(

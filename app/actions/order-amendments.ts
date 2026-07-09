@@ -335,19 +335,3 @@ export async function getOrderAmendments(orderId: string) {
   return { data: data || [], error: null };
 }
 
-/**
- * 获取所有待审批的修改申请（管理员用）
- */
-export async function getPendingAmendments() {
-  const supabase = await createClient();
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { data: [], error: '无权限' };
-
-  const { data, error } = await (supabase.from('order_amendments') as any)
-    .select('*, orders(order_no, customer_name, internal_order_no), requester:profiles!order_amendments_requested_by_fkey(name, email)')
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
-
-  if (error) return { data: [], error: null };
-  return { data: data || [], error: null };
-}

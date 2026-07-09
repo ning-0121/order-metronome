@@ -50,17 +50,6 @@ export async function listSuppliers(): Promise<{ data?: any[]; error?: string }>
   return { data: maskSupplierFinance(data || [], canFin) };
 }
 
-export async function getSupplier(id: string): Promise<{ data?: any; error?: string }> {
-  const auth = await authRoles();
-  if (!auth.userId) return { error: auth.error };
-  const supabase = await createClient();
-  const { data, error } = await (supabase.from('suppliers') as any).select('*').eq('id', id).maybeSingle();
-  if (error) return { error: error.message };
-  if (!data) return { error: '供应商不存在' };
-  const canFin = hasRoleInGroup(auth.roles, 'CAN_EDIT_SUPPLIER_FINANCE');
-  return { data: maskSupplierFinance(data, canFin) };
-}
-
 /** 同名(忽略大小写/首尾空格)未归档供应商 → 返回该行;无重复 → null。 */
 async function findDuplicateSupplier(supabase: any, name: string, excludeId?: string) {
   let q = (supabase.from('suppliers') as any)

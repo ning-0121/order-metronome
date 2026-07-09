@@ -195,16 +195,6 @@ export async function createPurchaseOrder(input: {
   return { id: poId, poNo };
 }
 
-export async function listPurchaseOrders(): Promise<{ data?: any[]; error?: string }> {
-  const { supabase, userId } = await authRoles();
-  if (!userId) return { error: '请先登录' };
-  const { data, error } = await (supabase.from('purchase_orders') as any)
-    .select('id, po_no, supplier_id, status, total_amount, delivery_date, created_at, suppliers(name)')
-    .order('created_at', { ascending: false }).limit(100);
-  if (error) return { error: error.message };
-  return { data: data || [] };
-}
-
 /**
  * 某订单关联的采购单档案(2026-07-03:下单后核料页转入追踪模式,这里是"下文"的家)。
  * 每单:PO号/供应商/状态/订购合计/已收/未到,链到采购单详情(批次历史在详情里)。

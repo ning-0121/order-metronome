@@ -135,27 +135,6 @@ export async function getMilestonesByOrder(orderId: string) {
   return { data: milestonesWithUsers };
 }
 
-export async function getUserMilestones(userId: string) {
-  const supabase = await createClient();
-  
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: '请先登录' };
-  }
-  
-  const { data: milestones, error } = await supabase
-    .from('milestones')
-    .select('*, orders(*)')
-    .eq('owner_user_id', userId)
-    .order('due_at', { ascending: true });
-  
-  if (error) {
-    return { error: error.message };
-  }
-  
-  return { data: milestones };
-}
-
 /**
  * 标记里程碑为已完成
  *
@@ -1277,59 +1256,6 @@ export async function updateMilestoneStatus(
   }
   
   return { data: result.data };
-}
-
-export async function blockMilestone(milestoneId: string, reason: string, note: string) {
-  const supabase = await createClient();
-  
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: '请先登录' };
-  }
-  
-  if (!reason || !note) {
-    return { error: '请填写阻塞原因和说明' };
-  }
-  
-  return updateMilestoneStatus(milestoneId, '阻塞', `${reason}: ${note}`);
-}
-
-export async function assignMilestoneOwner(milestoneId: string, userId: string) {
-  const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: '请先登录' };
-  }
-
-  // Check if user is admin (multi-role safe)
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, roles')
-    .eq('user_id', user.id)
-    .single();
-  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-
-  // admin + production_manager 可以指定执行人
-  // CEO 2026-04-09：生产主管需要能指定跟单
-  if (!hasRoleInGroup(userRoles, 'CAN_REASSIGN_OWNER')) {
-    return { error: '只有管理员、生产主管或业务部经理可以指定执行人' };
-  }
-
-  // 使用 repository 更新
-  const result = await updateMilestone(milestoneId, { owner_user_id: userId });
-  
-  if (result.error || !result.data) {
-    return { error: result.error || '节点状态更新失败，请重试' };
-  }
-  
-  const milestone = result.data;
-  const milestoneData = milestone as any;
-  
-  revalidatePath('/dashboard');
-  revalidatePath(`/orders/${milestoneData.order_id}`);
-  
-  return { data: milestone };
 }
 
 export async function markMilestoneUnblocked(milestoneId: string) {

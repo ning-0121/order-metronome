@@ -151,23 +151,3 @@ export async function getAttachmentDownloadUrl(
   return { url: signedData.signedUrl };
 }
 
-/**
- * 检查里程碑是否已上传凭证
- */
-export async function checkMilestoneEvidence(milestoneId: string) {
-  const supabase = await createClient();
-
-  const { data: milestone } = await (supabase.from('milestones') as any)
-    .select('evidence_required')
-    .eq('id', milestoneId)
-    .single();
-  if (!milestone) return { hasEvidence: false, required: false };
-  if (!milestone.evidence_required) return { hasEvidence: true, required: false };
-
-  const { data: rows } = await (supabase.from('order_attachments') as any)
-    .select('id')
-    .eq('milestone_id', milestoneId)
-    .limit(1);
-
-  return { hasEvidence: !!rows && rows.length > 0, required: true };
-}

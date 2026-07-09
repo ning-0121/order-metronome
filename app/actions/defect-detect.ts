@@ -36,91 +36,6 @@ const STEP_TO_SCENE: Record<string, string> = {
 };
 
 /**
- * 检测单张已上传的附件照片
- */
-export async function detectDefectsFromAttachment(
-  attachmentId: string,
-): Promise<{ data?: DefectDetectionResult; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-
-  // 获取附件信息
-  const { data: attachment } = await (supabase.from('order_attachments') as any)
-    .select('id, file_url, mime_type, file_name, storage_path, milestone_id, order_id')
-    .eq('id', attachmentId)
-    .single();
-
-  if (!attachment) return { error: '附件不存在' };
-  if (!attachment.mime_type?.startsWith('image/')) {
-    return { error: '仅支持图片格式（JPG/PNG）进行AI质检分析' };
-  }
-
-  // 获取 milestone 信息（确定检查场景）
-  let scene = 'general';
-  let orderContext = '';
-  if (attachment.milestone_id) {
-    const { data: milestone } = await (supabase.from('milestones') as any)
-      .select('step_key, name, order_id')
-      .eq('id', attachment.milestone_id)
-      .single();
-    if (milestone) {
-      scene = STEP_TO_SCENE[milestone.step_key] || 'general';
-    }
-  }
-
-  // 获取订单信息（提供上下文）
-  if (attachment.order_id) {
-    const { data: order } = await (supabase.from('orders') as any)
-      .select('order_no, customer_name, quantity, style_no')
-      .eq('id', attachment.order_id)
-      .single();
-    if (order) {
-      orderContext = `订单${order.order_no}，客户${order.customer_name}，款号${order.style_no || '?'}，数量${order.quantity || '?'}件`;
-    }
-  }
-
-  // 下载图片
-  const storagePath = attachment.storage_path
-    || attachment.file_url?.replace(/^.*\/order-docs\//, '');
-  if (!storagePath) return { error: '无法获取文件路径' };
-
-  try {
-    const { data: blob, error: dlErr } = await supabase.storage
-      .from('order-docs')
-      .download(storagePath);
-    if (dlErr || !blob) return { error: `下载图片失败: ${dlErr?.message || '未知'}` };
-
-    const arrayBuf = await blob.arrayBuffer();
-    const base64 = Buffer.from(arrayBuf).toString('base64');
-
-    const { detectGarmentDefects } = await import('@/lib/agent/skills/garmentDefectDetect');
-    const result = await detectGarmentDefects(
-      base64,
-      attachment.mime_type,
-      scene as any,
-      orderContext,
-    );
-
-    if (!result) return { error: 'AI 分析失败，请稍后重试' };
-
-    // 保存分析结果到附件记录（方便后续查看）
-    try {
-      await (supabase.from('order_attachments') as any)
-        .update({
-          ai_analysis: result,
-          ai_analyzed_at: new Date().toISOString(),
-        })
-        .eq('id', attachmentId);
-    } catch (e: any) { console.warn(`[defect-detect] 保存失败不影响返回结果:`, e?.message); }
-
-    return { data: result };
-  } catch (err: any) {
-    return { error: `AI分析异常: ${err?.message || '未知错误'}` };
-  }
-}
-
-/**
  * 检测某个订单+节点下所有已上传的照片
  */
 export async function detectDefectsForMilestone(
@@ -189,9 +104,3 @@ export async function detectDefectsForMilestone(
   return { data: result };
 }
 
-/**
- * 判断某个 step_key 是否支持 AI 质检
- */
-export async function isQCStep(stepKey: string): Promise<boolean> {
-  return QC_STEP_KEYS.has(stepKey);
-}

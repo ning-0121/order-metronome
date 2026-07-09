@@ -189,64 +189,6 @@ export async function runCustomerEmailInsights(orderId: string): Promise<{
   }
 }
 
-/**
- * 跑「报价审核」Skill
- */
-export async function runQuoteReview(orderId: string): Promise<{
-  result?: SkillResult;
-  error?: string;
-  shadow?: boolean;
-  cached?: boolean;
-}> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-  const allowed = await canAccessOrderSkill(supabase, orderId);
-  if (!allowed) return { error: '无权访问此订单的 AI Skill' };
-  try {
-    const output = await runSkill(quoteReviewSkill, { orderId }, { triggeredBy: 'user' });
-    if (output.circuitBroken) return { error: 'Skill 已熔断' };
-    return { result: output.displayResult || undefined, shadow: output.displayResult === null && output.internalResult !== null, cached: output.cacheHit };
-  } catch { return { error: 'Skill 运行异常' }; }
-}
-
-/**
- * 跑「交期可行性分析」Skill
- */
-export async function runDeliveryFeasibility(orderId: string): Promise<{
-  result?: SkillResult;
-  error?: string;
-  shadow?: boolean;
-  cached?: boolean;
-}> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-
-  const allowed = await canAccessOrderSkill(supabase, orderId);
-  if (!allowed) return { error: '无权访问此订单的 AI Skill' };
-
-  try {
-    const output = await runSkill(deliveryFeasibilitySkill, { orderId }, { triggeredBy: 'user' });
-    if (output.circuitBroken) return { error: 'Skill 已熔断' };
-    return {
-      result: output.displayResult || undefined,
-      shadow: output.displayResult === null && output.internalResult !== null,
-      cached: output.cacheHit,
-    };
-  } catch (err: any) {
-    return { error: 'Skill 运行异常' };
-  }
-}
-
-/**
- * 失效订单缓存 — 订单数据变更后调用
- * 内部使用，不对外暴露
- */
-export async function invalidateSkillCache(orderId: string): Promise<void> {
-  await invalidateOrderSkillCache(orderId);
-}
-
 // ─────────────────────────────────────────────────────────────
 // 缺失资料 → Daily Tasks 轻连接
 // ─────────────────────────────────────────────────────────────
