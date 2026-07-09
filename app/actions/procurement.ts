@@ -583,6 +583,19 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
   }
   const _nrm = (s: any) => String(s ?? '').trim().toLowerCase();
   const _isFabric = (c: any) => c === 'fabric' || c === 'lining';
+  // 预算(2026-07-09):面料逐行预算单价 materials_bom.budget_unit_price;辅料整单一口价 order_cost_baseline.accessory_budget_total
+  const [{ data: _bom }, { data: _cb }] = await Promise.all([
+    (createServiceRoleClient().from('materials_bom') as any).select('material_name, material_type, color, budget_unit_price').eq('order_id', orderId),
+    (createServiceRoleClient().from('order_cost_baseline') as any).select('accessory_budget_total').eq('order_id', orderId).maybeSingle(),
+  ]);
+  const _fabBudget = new Map<string, number>();
+  for (const b of (_bom || []) as any[]) {
+    if (b.budget_unit_price == null) continue;
+    const p = Number(b.budget_unit_price);
+    _fabBudget.set(`${_nrm(b.material_name)}¦${_nrm(b.color)}`, p);
+    if (!_fabBudget.has(_nrm(b.material_name))) _fabBudget.set(_nrm(b.material_name), p);   // 颜色对不上 → 按料名兜底
+  }
+  const _accBudgetTotal = Number((_cb as any)?.accessory_budget_total) || 0;
   const _grp = new Map<string, any>();
   for (const l of (items as any[])) {
     const color = l.procurement_item_id ? (_colorByPi.get(l.procurement_item_id) ?? null) : null;
@@ -601,7 +614,11 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
     const diffQty = recv !== null ? recv - ordered : null;
     const diffPct = recv !== null && ordered > 0 ? Number(((diffQty! / ordered) * 100).toFixed(1)) : null;
     const sizes = [...(g._sizes || [])];
+    const budgetUnitPrice = _isFabric(g.category)
+      ? (_fabBudget.get(`${_nrm(g.material_name)}¦${_nrm(g.color)}`) ?? _fabBudget.get(_nrm(g.material_name)) ?? null)
+      : null;
     return { ...g, received_qty: recv, difference_qty: diffQty, difference_pct: diffPct,
+      budget_unit_price: budgetUnitPrice,
       material_name: sizes.length ? `${g.material_name}${g.color ? ' ' + g.color : ''}(${sizes.join('/')})` : (g.color ? `${g.material_name} ${g.color}` : g.material_name) };
   });
 
@@ -611,7 +628,7 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
   const ws = wb.addWorksheet('采购对账单', { views: [{ state: 'frozen', ySplit: 3 }] });
 
   // 标题
-  ws.mergeCells('A1:K1');
+  ws.mergeCells('A1:L1');
   const titleCell = ws.getCell('A1');
   titleCell.value = `采购对账单 — ${(order as any).order_no} · ${(order as any).customer_name || ''}`;
   titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
@@ -620,13 +637,13 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
   ws.getRow(1).height = 28;
 
   // 副标题
-  ws.mergeCells('A2:K2');
+  ws.mergeCells('A2:L2');
   ws.getCell('A2').value = `工厂：${(order as any).factory_name || '—'} · 内部单号：${(order as any).internal_order_no || '—'} · 导出时间：${new Date().toLocaleDateString('zh-CN')}`;
   ws.getCell('A2').font = { size: 10, color: { argb: 'FF6B7280' } };
   ws.getCell('A2').alignment = { horizontal: 'center' };
 
   // 表头
-  const headers = ['物料名称', '规格', '供应商', '类别', '订购数量', '单位', '单价', '订购金额', '实收数量', '差异', '差异%'];
+  const headers = ['物料名称', '规格', '供应商', '类别', '预算单价', '订购数量', '单位', '单价', '订购金额', '实收数量', '差异', '差异%'];
   const headerRow = ws.getRow(3);
   headerRow.values = headers;
   headerRow.height = 20;
@@ -647,18 +664,21 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
 
   let totalOrderedAmt = 0;
   let totalReceivedAmt = 0;
+  let fabricBudgetAmt = 0;
 
   recItems.forEach((item, i) => {
     const row = ws.getRow(i + 4);
     const receivedAmt = (item.received_qty || 0) * (item.unit_price || 0);
     totalOrderedAmt += item.ordered_amount || 0;
     totalReceivedAmt += receivedAmt;
+    if (item.budget_unit_price != null) fabricBudgetAmt += Number(item.budget_unit_price) * (Number(item.ordered_qty) || 0);
 
     row.values = [
       item.material_name,
       item.specification || '',
       item.supplier_name || '',
       CATEGORY_LABELS[item.category] || item.category,
+      item.budget_unit_price != null ? Number(item.budget_unit_price) : '',   // 预算单价(面料);辅料一口价见表尾
       item.ordered_qty,
       item.ordered_unit || 'KG',
       item.unit_price || '',
@@ -668,10 +688,10 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
       item.difference_pct !== null ? `${item.difference_pct}%` : '',
     ];
 
-    // 差异标红
+    // 差异标红(列右移 1:差异=11 / 差异%=12)
     if (item.received_qty !== null && Math.abs(item.difference_pct || 0) > 3) {
-      row.getCell(10).font = { bold: true, color: { argb: 'FFDC2626' } };
       row.getCell(11).font = { bold: true, color: { argb: 'FFDC2626' } };
+      row.getCell(12).font = { bold: true, color: { argb: 'FFDC2626' } };
       row.eachCell(cell => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
       });
@@ -684,14 +704,24 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
     });
   });
 
-  // 合计行
-  const totalRow = ws.getRow(items.length + 4);
-  totalRow.values = ['合计', '', '', '', '', '', '', totalOrderedAmt.toFixed(2), '', (totalReceivedAmt - totalOrderedAmt).toFixed(2), ''];
+  // 合计行(放在合并后的最后一行,列右移 1:订购金额=9 / 差异=11)
+  const totalRow = ws.getRow(recItems.length + 4);
+  totalRow.values = ['合计', '', '', '', '', '', '', '', totalOrderedAmt.toFixed(2), '', (totalReceivedAmt - totalOrderedAmt).toFixed(2), ''];
   totalRow.font = { bold: true };
-  totalRow.getCell(8).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+  totalRow.getCell(9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
 
-  // 列宽
-  [18, 16, 14, 8, 10, 6, 8, 12, 10, 10, 8].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  // 预算总额(面料逐行预算 + 辅料整单一口价)—— 独立表尾行,辅料一口价无法逐行摊,故汇总在此
+  const budgetTotal = Math.round((fabricBudgetAmt + _accBudgetTotal) * 100) / 100;
+  const budgetRowIdx = recItems.length + 5;
+  ws.mergeCells(`A${budgetRowIdx}:L${budgetRowIdx}`);
+  const budgetCell = ws.getCell(`A${budgetRowIdx}`);
+  budgetCell.value = `预算总额：¥${budgetTotal.toLocaleString()}（面料预算 ¥${(Math.round(fabricBudgetAmt * 100) / 100).toLocaleString()} + 辅料整单一口价 ¥${_accBudgetTotal.toLocaleString()}）`;
+  budgetCell.font = { bold: true, color: { argb: 'FFB45309' } };
+  budgetCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+  budgetCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+  // 列宽(12 列:类别后插入「预算单价」)
+  [18, 16, 14, 8, 10, 10, 6, 8, 12, 10, 10, 8].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   const buffer = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buffer).toString('base64');
