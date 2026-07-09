@@ -953,12 +953,14 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
     ({ error } = await (supabase.from('procurement_items') as any).update(rest).eq('id', itemId));
   }
   if (error) return { error: friendlyError(error) };
-  // 需到日改了 → 同步未下单执行行的 required_by(缺料风险/在途灯立刻用新到货日)
+  // 需到日改了 → 同步所有执行行的 required_by(缺料风险/供应商延期/在途灯立刻用新到货日)。
+  // 修:此前只更"未下单"行(.is purchase_order_id null),导致已下单/在途行改了需到日不生效——
+  //     而供应商延期风险正是针对在途行,采购手选的到货日永远追不上,风险卡一直卡在旧日期。
   if ('required_date' in upd) {
     try {
       await (supabase.from('procurement_line_items') as any)
         .update({ required_by: upd.required_date, updated_at: new Date().toISOString() })
-        .eq('procurement_item_id', itemId).is('purchase_order_id', null);
+        .eq('procurement_item_id', itemId);
     } catch { /* 不阻断 */ }
   }
   // 采购填/改了单价 → 重算「实际辅料总价」并即时推财务(2026-07-08 用户拍板 A;幂等,改了才推)
