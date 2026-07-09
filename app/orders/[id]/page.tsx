@@ -26,6 +26,7 @@ import { ProductVariantPicker } from '@/components/ProductVariantPicker';
 import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
 import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
 import { OrderActions } from '@/components/OrderActions';
+import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
 import { RescheduleBanner } from '@/components/RescheduleBanner';
@@ -498,6 +499,13 @@ export default async function OrderDetailPage({
                     )}
                   </dd>
                 </div>
+                {/* 进度校准(2026-07-09 用户:真实订单之前没人推进→一片风险;admin/生产主管选实际节点,之前标完成清风险)*/}
+                {(isAdmin || currentRoles.includes('production_manager')) && (milestones || []).length > 0 && (
+                  <div className="flex justify-between items-center gap-2 flex-wrap">
+                    <dt className="text-sm text-gray-500">进度校准</dt>
+                    <OrderProgressCalibrate orderId={id} steps={(milestones as any[]).map((m: any) => ({ step_key: m.step_key, name: m.name }))} />
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <dt className="text-sm text-gray-500">生产跟单</dt>
                   <dd className="text-sm font-medium">
