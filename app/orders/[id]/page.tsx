@@ -35,7 +35,6 @@ import { OrderDelayPanel } from '@/components/OrderDelayPanel';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { CancelRequestPanel } from '@/components/CancelRequestPanel';
-import { AISkillSidebar } from '@/components/skills/AISkillSidebar';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { SplitShipmentTag } from '@/components/SplitShipmentTag';
 import { ProcurementTrackingTab } from '@/components/tabs/ProcurementTrackingTab';
@@ -47,7 +46,6 @@ import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
 import { RootCausesPanel } from '@/components/RootCausesPanel';
 import { rootCauseEngineEnabled } from '@/lib/engine/featureFlags';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
-import { OrderBusinessPanel } from '@/components/OrderBusinessPanel';
 import { FinanceEventsTimeline } from '@/components/FinanceEventsTimeline';
 import { SupplyChainTab } from '@/components/tabs/SupplyChainTab';
 import { BomBudgetEntry } from '@/components/tabs/BomBudgetEntry';
@@ -449,12 +447,8 @@ export default async function OrderDetailPage({
         {/* Tab: 基本信息 */}
         {activeTab === 'basic' && (
           <>
-          {/* AI Skills 侧栏 — 订单创建者/跟单/节点负责人/admin 都可见
-              （无权用户会被 server action 拦截，UI 自动隐藏） */}
-          <div className="mb-6">
-            <AISkillSidebar orderId={id} />
-          </div>
-          <OrderBusinessPanel orderId={id} isAdmin={isAdmin} userRoles={currentRoles} />
+          {/* AI 风险评估/缺失资料检查侧栏 + 经营卡(利润/收款/风险/确认链)已移除
+              (2026-07-09 用户:减少不必要的 AI 介入)。财务事件时间线保留。 */}
           {canSeeFinancials && <FinanceEventsTimeline orderId={id} />}
           <div className="grid gap-6 md:grid-cols-2">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
