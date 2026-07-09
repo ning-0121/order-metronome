@@ -601,6 +601,53 @@ export default async function CEOWarRoom() {
 
       {/* 状态概览卡片已下线（2026-04-27）— 用户反馈"风险/阻塞/完成率"统计应在数据分析页查看，首页只展示行动 */}
 
+      {/* ===== 待审批置顶(2026-07-09 用户:待审批放最上面)—— 有待审批项才显示,0 项不占顶部 ===== */}
+      {approvals.total > 0 && (
+        <div className="bg-white rounded-xl border border-yellow-200 shadow-sm overflow-hidden">
+          <Link href="/admin/pending-approvals" className="bg-yellow-50 px-5 py-3 border-b border-yellow-100 flex items-center justify-between hover:bg-yellow-100 transition-colors">
+            <h2 className="text-lg font-bold text-yellow-900">⏳ 审批中心（共 {approvals.total} 项）</h2>
+            <span className="text-sm text-blue-600 font-medium">全部 →</span>
+          </Link>
+          {approvalGroups.length > 0 ? (
+            <div className="divide-y divide-gray-100">
+              {approvalGroups.map((g) => {
+                const shown = g.items.slice(0, 5);
+                const rest = g.items.length - shown.length;
+                return (
+                  <div key={g.cat} className="px-5 py-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${g.meta.color}`}>{g.meta.icon} {g.meta.label}</span>
+                      <span className="text-xs text-gray-400">{g.items.length} 项</span>
+                    </div>
+                    <ul className="space-y-0.5">
+                      {shown.map((it: any) => (
+                        <li key={`${g.cat}-${it.id}`}>
+                          <Link href={it.sourceUrl} className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-gray-50 group">
+                            <span className="text-sm text-gray-800 truncate">
+                              {it.title}
+                              {it.subtitle && <span className="text-gray-400 ml-1">· {it.subtitle}</span>}
+                            </span>
+                            <span className="flex items-center gap-2 shrink-0">
+                              {it.ageDays >= 3 && <span className="text-[11px] text-red-500 font-medium">卡{it.ageDays}天</span>}
+                              <span className="text-xs text-blue-500 opacity-0 group-hover:opacity-100">去处理 →</span>
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                    {rest > 0 && (
+                      <Link href="/admin/pending-approvals" className="inline-block mt-1 ml-2 text-xs text-blue-500 hover:underline">还有 {rest} 项 →</Link>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-4 text-center text-gray-400 text-sm">暂无待审批事项</div>
+          )}
+        </div>
+      )}
+
       {/* ===== 1. 今日待办 — 紧急事项 / 自己订单风险 / 协作订单风险 ===== */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden">
         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-3 border-b border-gray-200">
@@ -765,50 +812,7 @@ export default async function CEOWarRoom() {
         )}
       </div>
 
-      {/* ===== 2. 审批中心 — 待办审批项按类展开(不同审批分组直达处理) ===== */}
-      <div className="bg-white rounded-xl border border-yellow-200 shadow-sm overflow-hidden">
-        <Link href="/admin/pending-approvals" className="bg-yellow-50 px-5 py-3 border-b border-yellow-100 flex items-center justify-between hover:bg-yellow-100 transition-colors">
-          <h2 className="text-lg font-bold text-yellow-900">⏳ 审批中心（共 {approvals.total} 项）</h2>
-          <span className="text-sm text-blue-600 font-medium">全部 →</span>
-        </Link>
-        {approvalGroups.length > 0 ? (
-          <div className="divide-y divide-gray-100">
-            {approvalGroups.map((g) => {
-              const shown = g.items.slice(0, 5);
-              const rest = g.items.length - shown.length;
-              return (
-                <div key={g.cat} className="px-5 py-3">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${g.meta.color}`}>{g.meta.icon} {g.meta.label}</span>
-                    <span className="text-xs text-gray-400">{g.items.length} 项</span>
-                  </div>
-                  <ul className="space-y-0.5">
-                    {shown.map((it: any) => (
-                      <li key={`${g.cat}-${it.id}`}>
-                        <Link href={it.sourceUrl} className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-gray-50 group">
-                          <span className="text-sm text-gray-800 truncate">
-                            {it.title}
-                            {it.subtitle && <span className="text-gray-400 ml-1">· {it.subtitle}</span>}
-                          </span>
-                          <span className="flex items-center gap-2 shrink-0">
-                            {it.ageDays >= 3 && <span className="text-[11px] text-red-500 font-medium">卡{it.ageDays}天</span>}
-                            <span className="text-xs text-blue-500 opacity-0 group-hover:opacity-100">去处理 →</span>
-                          </span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                  {rest > 0 && (
-                    <Link href="/admin/pending-approvals" className="inline-block mt-1 ml-2 text-xs text-blue-500 hover:underline">还有 {rest} 项 →</Link>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="p-4 text-center text-gray-400 text-sm">暂无待审批事项</div>
-        )}
-      </div>
+      {/* ===== 审批中心 已上移到「今日待办」之上(2026-07-09 用户:待审批放最上面)===== */}
 
       {/* 执行力快报、AI 智能助手已下线（2026-04-27）— 数据请去 /analytics/execution 查看 */}
 
