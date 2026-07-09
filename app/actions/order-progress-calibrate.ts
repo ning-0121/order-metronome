@@ -118,3 +118,85 @@ export async function calibrateOrderStage(
   revalidatePath('/orders');
   return { ok: true, done };
 }
+
+/**
+ * 重建订单里程碑为「最新适用模板」(2026-07-09 用户:部署前建的单还是老 9 节点,新 14 节点没生效)。
+ * 存量单建单时按当时模板物化,升级模板不回填 → 老单节点/责任人是旧的。此函数按订单类型重算适用模板
+ * (标准生产=14 节点出口/12 送仓),删旧里程碑重新物化(依赖行 ON DELETE CASCADE 自动清),
+ * 保留同 step_key 的指派人。删后走 init_order_milestones RPC 重建;完成后触发风险重算。
+ * 仅 admin / 生产主管。⚠ 会清掉该单里程碑的操作日志/确认记录(草稿/测试单无妨;正式单请先确认)。
+ */
+export async function rebuildOrderMilestones(orderId: string): Promise<{ ok?: boolean; count?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!roles.includes('admin') && !roles.includes('production_manager')) return { error: '仅管理员或生产主管可重建里程碑' };
+
+  const { data: order, error: oErr } = await (supabase.from('orders') as any)
+    .select('id, order_no, incoterm, delivery_type, order_purpose, order_type, order_date, created_at, etd, warehouse_due_date, eta, skip_pre_production_sample, sample_phase, sample_confirm_days_override, factory_date')
+    .eq('id', orderId).maybeSingle();
+  if (oErr) return { error: `读取订单失败:${oErr.message}` };
+  if (!order) return { error: '订单不存在' };
+  const o = order as any;
+
+  const { getApplicableMilestones } = await import('@/lib/milestoneTemplate');
+  const { calcDueDates } = await import('@/lib/schedule');
+
+  const incoterm: string = o.incoterm || 'FOB';
+  const deliveryType: string = o.delivery_type || (['RMB_EX_TAX', 'RMB_INC_TAX'].includes(incoterm) ? 'domestic' : 'export');
+  const orderPurpose: string = o.order_purpose || 'production';
+  const scheduleIncoterm = incoterm === 'DDP' ? 'DDP' : 'FOB';
+
+  // 适用模板(标准生产 = 14 节点出口 / 12 送仓)
+  const templates = getApplicableMilestones(o.order_type, deliveryType === 'export', deliveryType, orderPurpose, false, o.sample_phase || undefined);
+
+  // 排期:强制 shippingSampleRequired=export、skip=false,保证模板里每个 step_key 都拿到日期
+  let dueDates: Record<string, any> = {};
+  try {
+    dueDates = calcDueDates({
+      orderDate: o.order_date,
+      createdAt: o.created_at ? new Date(o.created_at) : undefined,
+      incoterm: scheduleIncoterm as 'FOB' | 'DDP',
+      etd: o.etd, warehouseDueDate: o.warehouse_due_date, eta: o.eta,
+      orderType: (o.order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
+      shippingSampleRequired: deliveryType === 'export',
+      sampleConfirmDaysOverride: o.sample_confirm_days_override,
+      skipPreProductionSample: false,
+    }) as any;
+  } catch (e: any) { return { error: `排期计算失败:${e?.message}` }; }
+
+  // 保留同 step_key 的指派人
+  const { data: existing } = await (supabase.from('milestones') as any).select('id, step_key, owner_user_id').eq('order_id', orderId);
+  const ownerByStep = new Map<string, string | null>();
+  for (const m of (existing || []) as any[]) if (m.owner_user_id) ownerByStep.set(m.step_key, m.owner_user_id);
+
+  const nowIso = new Date().toISOString();
+  const fallbackDue = o.factory_date ? new Date(o.factory_date + 'T00:00:00+08:00').toISOString() : (o.eta ? new Date(o.eta).toISOString() : nowIso);
+  const milestonesData = templates.map((t: any, i: number) => {
+    const raw = dueDates[t.step_key];
+    const dueIso = raw ? (raw instanceof Date ? raw.toISOString() : new Date(raw).toISOString()) : fallbackDue;
+    return {
+      step_key: t.step_key, name: t.name, owner_role: t.owner_role, owner_user_id: ownerByStep.get(t.step_key) || null,
+      planned_at: dueIso, due_at: dueIso, status: i === 0 ? 'in_progress' : 'pending',
+      is_critical: !!t.is_critical, evidence_required: !!t.evidence_required, evidence_note: t.evidence_note || null,
+      blocks: t.blocks || [], notes: null, sequence_number: i + 1,
+    };
+  });
+
+  // 删旧(依赖行 CASCADE)→ 重新物化
+  const { error: delErr } = await (supabase.from('milestones') as any).delete().eq('order_id', orderId);
+  if (delErr) return { error: `清除旧里程碑失败:${delErr.message}` };
+  const { error: rpcErr } = await (supabase.rpc as any)('init_order_milestones', { _order_id: orderId, _milestones_data: milestonesData });
+  if (rpcErr) return { error: `重建里程碑失败:${rpcErr.message}` };
+
+  try {
+    const { fireRuntimeRecompute } = await import('@/lib/repositories/milestonesRepo');
+    fireRuntimeRecompute(orderId, { type: 'milestones_rebuilt', count: milestonesData.length });
+  } catch (e: any) { console.warn('[rebuildOrderMilestones] 风险重算触发失败(不阻断):', e?.message); }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/orders');
+  return { ok: true, count: milestonesData.length };
+}

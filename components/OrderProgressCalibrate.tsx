@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { calibrateOrderStage } from '@/app/actions/order-progress-calibrate';
+import { calibrateOrderStage, rebuildOrderMilestones } from '@/app/actions/order-progress-calibrate';
 
 export function OrderProgressCalibrate({ orderId, steps }: {
   orderId: string;
@@ -15,7 +15,18 @@ export function OrderProgressCalibrate({ orderId, steps }: {
   const [open, setOpen] = useState(false);
   const [stepKey, setStepKey] = useState('');
   const [saving, setSaving] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
   const [msg, setMsg] = useState('');
+
+  async function rebuild() {
+    if (!confirm('把本单里程碑重建为「最新节点模板」(标准生产=14节点)?\n\n⚠ 会清掉本单里程碑现有的操作日志/确认记录,并重置进度(可随后用「进度校准」设回当前节点)。适用于部署前建的、节点还是老版的单。')) return;
+    setRebuilding(true); setMsg('');
+    const r = await rebuildOrderMilestones(orderId);
+    setRebuilding(false);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setMsg(`✅ 已重建为最新模板(${(r as any).count} 个节点)。如需设当前进度请用「进度校准」。`);
+    router.refresh();
+  }
 
   async function apply() {
     if (!stepKey) return;
@@ -37,7 +48,13 @@ export function OrderProgressCalibrate({ orderId, steps }: {
           title="真实订单之前没人在系统推进导致一片风险 → 选实际到了哪个节点,之前的标完成、清风险">
           🎯 进度校准（清历史风险）
         </button>
+        <button onClick={rebuild} disabled={rebuilding}
+          className="text-xs px-2.5 py-1 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 font-medium disabled:opacity-50"
+          title="部署前建的单节点还是老版(9节点)→ 重建为最新 14 节点模板(会重置进度,可再校准)">
+          {rebuilding ? '重建中…' : '🔧 重建为最新节点模板'}
+        </button>
         <Link href="/orders/progress-calibrate" className="text-[11px] text-indigo-600 hover:underline">批量校准多单 →</Link>
+        {msg && <span className="text-xs text-gray-600">{msg}</span>}
       </div>
     );
   }
