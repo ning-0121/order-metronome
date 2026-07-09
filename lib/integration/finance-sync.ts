@@ -257,10 +257,12 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
   const num = (v: unknown) => (v == null ? null : Number(v))
   return {
     line_id: l.id ?? null,
+    order_id: l.order_id ?? null,                             // 关联本系统订单 uuid(财务侧可选锚点;2026-07-08 财务对接补)
     order_no: l.order_no ?? orders?.order_no ?? null,
     internal_order_no: l.internal_order_no ?? orders?.internal_order_no ?? null,
     material_name: l.material_name ?? null,
     material_code: l.material_code ?? null,
+    specification: l.specification ?? null,                   // 规格(财务对账/预算按料+规格用;2026-07-08 财务对接补)
     category: l.category ?? null,
     size: l.size ?? null,                                     // 尺码(N1;按码拆的行带上,整行为 null)
     // 预算桶(2026-07-07 用户拍板:辅料不分细类,面料/辅料两桶即可)。财务按 budget_bucket 汇总预算。
@@ -283,12 +285,12 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
  */
 export async function fetchPurchaseOrderLinesRaw(db: any, poId: string): Promise<any[]> {
   let { data: lines, error: le } = await db.from('procurement_line_items')
-    .select('id, order_id, material_name, material_code, category, size, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
+    .select('id, order_id, material_name, material_code, specification, category, size, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
     .eq('purchase_order_id', poId)
   // size 列 schema 缓存未刷新 → 降级去 size(财务对接不因新列拿不到明细)
-  if (le && /size|schema cache|column|does not exist|permission denied/i.test(le.message || '')) {
+  if (le && /\bsize\b|schema cache|column .* does not exist|permission denied/i.test(le.message || '')) {
     ({ data: lines } = await db.from('procurement_line_items')
-      .select('id, order_id, material_name, material_code, category, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
+      .select('id, order_id, material_name, material_code, specification, category, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
       .eq('purchase_order_id', poId))
   }
   const rows: any[] = lines || []
@@ -485,6 +487,7 @@ export function buildOrderBudgetPayload(input: {
   qimo_order_id: string; order_no?: string | null; internal_order_no?: string | null; quantity?: number | null;
   fabric_amount?: number | null; cmt_amount?: number | null; accessory_amount?: number | null;
   fabric_per_piece?: number | null; cmt_per_piece?: number | null; accessory_per_piece?: number | null;
+  actual_accessory_amount?: number | null;   // 实际辅料总价(采购填的单价×数量)
 }): Record<string, unknown> {
   const pos = (v: unknown) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.round(x * 100) / 100 : null }
   const fabric = pos(input.fabric_amount); const cmt = pos(input.cmt_amount); const acc = pos(input.accessory_amount)
@@ -501,6 +504,10 @@ export function buildOrderBudgetPayload(input: {
       cmt_amount: cmt,
       accessory_amount: acc,
       total: total > 0 ? total : null,
+    },
+    // 实际(采购填价):目前先给辅料;面料/加工的实际走 PO 应付
+    actual_totals: {
+      accessory_amount: pos(input.actual_accessory_amount),
     },
     unit_costs: {   // 参考口径(元/件);权威以 budget_totals 为准
       fabric_per_piece: pos(input.fabric_per_piece),
@@ -519,7 +526,8 @@ export function buildOrderBudgetPayload(input: {
 export async function syncOrderBudgetToFinance(input: Parameters<typeof buildOrderBudgetPayload>[0]) {
   const payload = buildOrderBudgetPayload(input)
   const total = Number((payload.budget_totals as Record<string, unknown>)?.total) || 0
-  if (total <= 0) return { success: true }   // 无预算,不推
+  const actualAcc = Number((payload.actual_totals as Record<string, unknown>)?.accessory_amount) || 0
+  if (total <= 0 && actualAcc <= 0) return { success: true }   // 预算和实际都空 → 不推(不污染台账)
   return sendToFinanceSystem('order.budget_updated', payload)
 }
 
