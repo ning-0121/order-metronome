@@ -28,6 +28,25 @@ export function computeActualAccessoryTotal(items: Array<{
   return round2(total);
 }
 
+/** 实际面料总价(采购填的单价 × 采购数量,填了即算)。只统面料/里料(与辅料互补,口径同 computeActualAccessoryTotal)。 */
+export function computeActualFabricTotal(items: Array<{
+  category?: string | null; unit_price?: number | null;
+  final_purchase_qty?: number | null; suggested_purchase_qty?: number | null;
+  total_required_qty?: number | null; stock_deduct_qty?: number | null;
+}>): number {
+  let total = 0;
+  for (const it of items || []) {
+    const cat = String(it.category ?? '').trim().toLowerCase();
+    if (!(cat === 'fabric' || cat === 'lining' || cat === '面料' || cat === '里料')) continue;   // 只统面料/里料
+    const price = Number(it.unit_price) || 0;
+    if (!(price > 0)) continue;
+    const gross = Number(it.final_purchase_qty ?? it.suggested_purchase_qty ?? it.total_required_qty) || 0;
+    const qty = Math.max(0, gross - (Number(it.stock_deduct_qty) || 0));
+    total += price * qty;
+  }
+  return round2(total);
+}
+
 export interface CostLine {
   material_name?: string | null;
   category?: string | null;

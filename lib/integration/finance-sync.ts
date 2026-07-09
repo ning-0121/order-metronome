@@ -488,6 +488,8 @@ export function buildOrderBudgetPayload(input: {
   fabric_amount?: number | null; cmt_amount?: number | null; accessory_amount?: number | null;
   fabric_per_piece?: number | null; cmt_per_piece?: number | null; accessory_per_piece?: number | null;
   actual_accessory_amount?: number | null;   // 实际辅料总价(采购填的单价×数量)
+  actual_fabric_amount?: number | null;      // 实际面料总价(采购填的单价×数量)
+  actual_cmt_amount?: number | null;         // 实际加工费(采购核料填的加工费;采购不另议→= 预算加工费)
 }): Record<string, unknown> {
   const pos = (v: unknown) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.round(x * 100) / 100 : null }
   const fabric = pos(input.fabric_amount); const cmt = pos(input.cmt_amount); const acc = pos(input.accessory_amount)
@@ -505,8 +507,10 @@ export function buildOrderBudgetPayload(input: {
       accessory_amount: acc,
       total: total > 0 ? total : null,
     },
-    // 实际(采购填价):目前先给辅料;面料/加工的实际走 PO 应付
+    // 实际(采购填价):辅料 + 面料 + 加工,与 budget_totals 一一对照(财务看 预算 vs 采购价 差额)
     actual_totals: {
+      fabric_amount: pos(input.actual_fabric_amount),
+      cmt_amount: pos(input.actual_cmt_amount),
       accessory_amount: pos(input.actual_accessory_amount),
     },
     unit_costs: {   // 参考口径(元/件);权威以 budget_totals 为准
@@ -526,8 +530,9 @@ export function buildOrderBudgetPayload(input: {
 export async function syncOrderBudgetToFinance(input: Parameters<typeof buildOrderBudgetPayload>[0]) {
   const payload = buildOrderBudgetPayload(input)
   const total = Number((payload.budget_totals as Record<string, unknown>)?.total) || 0
-  const actualAcc = Number((payload.actual_totals as Record<string, unknown>)?.accessory_amount) || 0
-  if (total <= 0 && actualAcc <= 0) return { success: true }   // 预算和实际都空 → 不推(不污染台账)
+  const at = (payload.actual_totals as Record<string, unknown>) || {}
+  const actualSum = (Number(at.accessory_amount) || 0) + (Number(at.fabric_amount) || 0) + (Number(at.cmt_amount) || 0)
+  if (total <= 0 && actualSum <= 0) return { success: true }   // 预算和实际都空 → 不推(不污染台账)
   return sendToFinanceSystem('order.budget_updated', payload)
 }
 

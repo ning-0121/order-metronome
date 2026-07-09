@@ -385,14 +385,16 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
     await calculateProfitSnapshot(sb, { orderId, snapshotType: 'live' });
   } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 利润重算失败(不阻断):', e?.message); }
 
-  // 实际辅料总价(2026-07-08 用户拍板 A:采购填的单价×采购数量)—— 随预算一起推财务,财务看 预算vs实际
-  let actualAccessory = 0;
+  // 实际采购填价(2026-07-08/09:采购填的单价×采购数量)—— 辅料 + 面料,随预算推财务,财务看 预算 vs 采购价。
+  // 加工费:采购不下单加工费,采购核料填的加工费(=预算加工费 cmtTotalAmt)即为实际,一并送财务补上「加工采购价」列。
+  let actualAccessory = 0; let actualFabric = 0;
   try {
     const { data: pis } = await (svc.from('procurement_items') as any)
       .select('category, unit_price, final_purchase_qty, suggested_purchase_qty, total_required_qty, stock_deduct_qty').eq('order_id', orderId);
-    const { computeActualAccessoryTotal } = await import('@/lib/services/procurement-cost');
+    const { computeActualAccessoryTotal, computeActualFabricTotal } = await import('@/lib/services/procurement-cost');
     actualAccessory = computeActualAccessoryTotal((pis || []) as any);
-  } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 实际辅料合计失败(不阻断):', e?.message); }
+    actualFabric = computeActualFabricTotal((pis || []) as any);
+  } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 实际面料/辅料合计失败(不阻断):', e?.message); }
 
   // 即时推财务:业务改预算 或 采购填辅料价 → 财务订单 预算/实际 同步更新(内容哈希幂等,改了才更新;失败落 outbox)
   try {
@@ -409,6 +411,8 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
       cmt_per_piece: cmtQuote,
       accessory_per_piece: orderQty > 0 && trimTotal > 0 ? Math.round(trimTotal / orderQty * 10000) / 10000 : null,
       actual_accessory_amount: actualAccessory || null,   // 实际辅料总价(采购填价)
+      actual_fabric_amount: actualFabric || null,          // 实际面料总价(采购填价)
+      actual_cmt_amount: cmtTotalAmt || null,              // 实际加工费(采购核料填,采购不另议→=预算加工费)
     });
   } catch (e: any) { console.warn('[recomputeOrderBudgetCaches] 财务预算/实际同步失败(不阻断):', e?.message); }
   return { ok: true };
