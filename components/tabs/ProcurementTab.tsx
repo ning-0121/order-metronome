@@ -151,10 +151,14 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
     <div className="space-y-5">
       {/* 汇总卡片 */}
       {summary && summary.itemCount > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <div className="bg-white rounded-lg border border-gray-200 p-3 text-center">
             <div className="text-lg font-bold text-gray-800">{summary.itemCount}</div>
             <div className="text-xs text-gray-500">采购项</div>
+          </div>
+          <div className="bg-white rounded-lg border border-amber-200 p-3 text-center" title="面料逐行预算(单价×量) + 辅料整单一口价">
+            <div className="text-lg font-bold text-amber-600">¥{(summary.budgetTotal || 0).toLocaleString()}</div>
+            <div className="text-xs text-gray-500">预算总额</div>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-3 text-center">
             <div className="text-lg font-bold text-indigo-600">¥{summary.totalOrdered.toLocaleString()}</div>
@@ -258,7 +262,7 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
                   <th className="px-3 py-2 font-medium text-gray-600">供应商</th>
                   <th className="px-3 py-2 font-medium text-gray-600 text-center">类别</th>
                   <th className="px-3 py-2 font-medium text-gray-500 text-right">单件用量</th>
-                  <th className="px-3 py-2 font-medium text-amber-600 text-right">预算</th>
+                  <th className="px-3 py-2 font-medium text-amber-600 text-right" title="面料预算单价(业务在采购核料录);辅料预算为整单一口价,见上方「预算总额」">预算单价</th>
                   <th className="px-3 py-2 font-medium text-indigo-600 text-right">订购数量</th>
                   <th className="px-3 py-2 font-medium text-gray-600 text-center">单位</th>
                   <th className="px-3 py-2 font-medium text-gray-600 text-right">单价</th>
@@ -288,7 +292,9 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-gray-400">{(item as any).qty_per_piece || '-'}</td>
-                      <td className="px-3 py-2 text-right font-mono text-amber-600">{(item as any).budget_qty || '-'}</td>
+                      <td className="px-3 py-2 text-right font-mono text-amber-600" title={(item as any).budget_unit_price != null ? '面料预算单价(业务在采购核料录)' : '辅料预算为整单一口价,见上方「预算总额」'}>
+                        {(item as any).budget_unit_price != null ? `¥${Number((item as any).budget_unit_price).toLocaleString()}` : '—'}
+                      </td>
                       <td className="px-3 py-2 text-right font-mono text-indigo-700">{item.ordered_qty}</td>
                       <td className="px-3 py-2 text-center text-gray-500">{item.ordered_unit}</td>
                       <td className="px-3 py-2 text-right font-mono">{item.unit_price ?? '-'}</td>

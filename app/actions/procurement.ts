@@ -94,6 +94,9 @@ export async function getProcurementItems(orderId: string): Promise<{
     totalDifference: number;
     itemCount: number;
     discrepancyCount: number;
+    budgetTotal: number;            // 预算总额 = 面料预算(逐行单价×量) + 辅料整单一口价
+    fabricBudgetAmount: number;     // 其中面料预算
+    accessoryBudgetTotal: number;   // 其中辅料整单一口价
   };
 }> {
   const auth = await checkAccess();
@@ -175,6 +178,32 @@ export async function getProcurementItems(orderId: string): Promise<{
   // 底价剥离(红线③):非可见底价角色 → 剥 unit_price/金额;汇总金额也归零
   const items = maskFloorForLines(rawItems as any[], canSeeFloor) as ProcurementLineItem[];
 
+  // 预算接线(2026-07-09):对账「预算」列此前读死字段 budget_qty(旧报价基线模型,新流程从不写)→ 恒空。
+  // 改接 7-8 新预算模型:面料逐行预算单价来自 materials_bom.budget_unit_price;辅料整单一口价来自
+  // order_cost_baseline.accessory_budget_total。预算是业务自设目标价(≠供应商底价)→ 不做 floor 剥离,全员可见。
+  const svcBudget = createServiceRoleClient();
+  const [{ data: bomRows }, { data: costBase }] = await Promise.all([
+    (svcBudget.from('materials_bom') as any).select('material_name, material_type, color, budget_unit_price').eq('order_id', orderId),
+    (svcBudget.from('order_cost_baseline') as any).select('accessory_budget_total').eq('order_id', orderId).maybeSingle(),
+  ]);
+  const fabricBudgetPrice = new Map<string, number>();
+  for (const b of (bomRows || []) as any[]) {
+    if (b.budget_unit_price == null) continue;
+    const p = Number(b.budget_unit_price);
+    fabricBudgetPrice.set(`${nrm(b.material_name)}¦${nrm(b.color)}`, p);
+    if (!fabricBudgetPrice.has(nrm(b.material_name))) fabricBudgetPrice.set(nrm(b.material_name), p);  // 颜色对不上 → 按料名兜底
+  }
+  const accessoryBudgetTotal = Number((costBase as any)?.accessory_budget_total) || 0;
+  let fabricBudgetAmount = 0;
+  for (const it of items) {
+    if (!isFabricCat(it.category)) continue;
+    const bp = fabricBudgetPrice.get(`${nrm(it.material_name)}¦${nrm((it as any).color)}`)
+      ?? fabricBudgetPrice.get(nrm(it.material_name)) ?? null;
+    (it as any).budget_unit_price = bp;
+    if (bp != null) fabricBudgetAmount += bp * (Number(it.ordered_qty) || 0);
+  }
+  const budgetTotal = Math.round((fabricBudgetAmount + accessoryBudgetTotal) * 100) / 100;
+
   return {
     data: items,
     summary: {
@@ -183,6 +212,10 @@ export async function getProcurementItems(orderId: string): Promise<{
       totalDifference: canSeeFloor ? Number(totalDifference.toFixed(2)) : 0,
       itemCount: rawItems.length,
       discrepancyCount,
+      // 预算是业务目标价,业务/采购/财务都该看到 → 不受 canSeeFloor 限制
+      budgetTotal,
+      fabricBudgetAmount: Math.round(fabricBudgetAmount * 100) / 100,
+      accessoryBudgetTotal,
     },
   };
 }
@@ -1145,6 +1178,7 @@ export interface PendingApprovalPO {
   po_no: string | null;
   approval_status: string | null;   // pending=待审批 · not_required/approved=可下单(未 place)
   total_amount: number | null;
+  price_tbd?: boolean;               // 价格待定:允许无底价下单
   supplier_name: string | null;
   reasons: string[];
   required_by: string[];
@@ -1167,6 +1201,7 @@ export interface QueueLine {
   expected_arrival: string | null;
   po_no: string | null;
   purchase_order_id: string | null;   // 已挂到某采购单(即使未 placed)→ 不再算"待下单"
+  procurement_item_id: string | null; // 归并层采购项 id(核料页按此聚焦单料;2026-07-09)
   unit_price: number | null;
   price_variance_pct: number | null;
   ordered_qty: number | null;
@@ -1325,7 +1360,7 @@ export async function getProcurementQueues(): Promise<{
       category: r.category, supplier_name: r.supplier_name,
       line_status: r.line_status, required_by: r.required_by,
       promised_date: r.promised_date, expected_arrival: r.expected_arrival,
-      po_no: r.po_no, purchase_order_id: r.purchase_order_id, unit_price: r.unit_price, price_variance_pct: r.price_variance_pct,
+      po_no: r.po_no, purchase_order_id: r.purchase_order_id, procurement_item_id: r.procurement_item_id ?? null, unit_price: r.unit_price, price_variance_pct: r.price_variance_pct,
       ordered_qty: r.ordered_qty, ordered_unit: r.ordered_unit,
       received_qty: r.received_qty ?? null,
       chase_count: r.chase_count, last_chased_at: r.last_chased_at,
@@ -1372,8 +1407,9 @@ export async function getProcurementQueues(): Promise<{
     // 审计修(2026-07-04):放宽到所有草稿采购单(不只待审批)——归单后未 place 的草稿单
     // (approval_status=not_required/approved)本来会从所有队列消失(已挂 PO→不在待下单;未 place→不在待催货),
     // 形成盲区。全部露在横幅,按 approval_status 区分"待审批 / 可下单"。
+    // select * :price_tbd 列未建(迁移未跑)也不报错,拿到什么用什么(避免整条 banner 查询挂掉)
     const { data: pos } = await (supabase.from('purchase_orders') as any)
-      .select('id, po_no, total_amount, approval_status, approval_reasons, approval_required_by, order_ids, suppliers(name)')
+      .select('*, suppliers(name)')
       .eq('status', 'draft');
     const poOrderIds = [...new Set((pos || []).flatMap((p: any) => p.order_ids || []))];
     const poOrderMap = new Map<string, any>();
@@ -1390,6 +1426,7 @@ export async function getProcurementQueues(): Promise<{
       pendingApprovalPOs.push({
         id: p.id, po_no: p.po_no, approval_status: p.approval_status ?? null,
         total_amount: canSeeFloor ? (p.total_amount ?? null) : null,
+        price_tbd: p.price_tbd === true,
         supplier_name: p.suppliers?.name ?? null,
         reasons: p.approval_reasons || [], required_by: p.approval_required_by || [],
         orders: (p.order_ids || []).map((oid: string) => {
