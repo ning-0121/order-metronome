@@ -426,6 +426,20 @@ export async function placePurchaseOrder(poId: string): Promise<{
   if (!po) return { error: '采购单不存在' };
   if ((po as any).status !== 'draft') return { error: '仅草稿可下单' };
 
+  // 价格闸(2026-07-09 用户:没填价格不该能一步步走到下单):下单前每行必须有单价(底价>0),
+  // ¥0/漏填价的单一律拦下。unit_price 是列级封锁的底价,经 service-role 读(本函数已 CAN_PROCURE 门禁)。
+  {
+    const { data: priceLines } = await (createServiceRoleClient().from('procurement_line_items') as any)
+      .select('unit_price, material_name, line_status').eq('purchase_order_id', poId);
+    const active = ((priceLines || []) as any[]).filter((l) => l.line_status !== 'cancelled');
+    if (active.length === 0) return { error: '该采购单没有有效采购行,无法下单。' };
+    const unpriced = active.filter((l) => l.unit_price == null || Number(l.unit_price) <= 0);
+    if (unpriced.length > 0) {
+      const names = [...new Set(unpriced.map((l) => l.material_name).filter(Boolean))].slice(0, 4).join('、');
+      return { error: `下单前必须先给每行填单价(底价):还有 ${unpriced.length} 行未填价${names ? `（${names}…）` : ''}、合计 ¥0。请在采购单页把单价填好再下单。` };
+    }
+  }
+
   // 下单强制凭证(2026-07-04 用户拍板):没上传下单凭证不允许下单。
   // 凭证列单独容错查(不塞进上面主 select,否则迁移未执行时整条 select 报错→误报"采购单不存在"、下单全阻断)。
   const { data: proofRow, error: proofErr } = await (supabase.from('purchase_orders') as any)
