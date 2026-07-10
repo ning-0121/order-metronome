@@ -178,7 +178,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     await notifyUsersByRole(svc, ['sales', 'sales_manager', 'order_manager', 'admin'], {
       type: isSample ? 'araos_sample_request' : 'araos_deal_won',
       title: `${isSample ? '🧵 araos 打样/寄样' : '🎉 araos 赢单'}:${customerName}`,
-      message: `${dealBits || (isSample ? '新样单' : '新赢单')} —— 客户已${matchPath === 'created' ? '新建' : '匹配'}到系统,请在报价/建单流程录${isSample ? '样单' : ' PO 建单'}(生产链不自动建单)。${d.note ? ' 备注:' + d.note : ''}`,
+      message: `${dealBits || (isSample ? '新样单' : '新赢单')} —— 客户已${matchPath === 'created' ? '新建' : '匹配'}到系统。${isSample ? '请在报价/样单流程处理。' : '到「订单中心 · araos 待建单」一键建单(客户/款色/数量/PO原件已预填,补运营字段即可;生产链不自动建单)。'}${d.note ? ' 备注:' + d.note : ''}`,
       relatedOrderId: null,
     });
 
