@@ -110,7 +110,7 @@ export async function addBomItem(orderId: string, item: {
     special_requirements: item.special_requirements || null,
     style_no: item.style_no?.trim() || null,
     pack_size: item.pack_size != null && item.pack_size > 1 ? item.pack_size : null,   // 每包件数
-    image_urls: Array.isArray(item.image_urls) && item.image_urls.some(Boolean) ? item.image_urls : null,  // 辅料单图(示例画稿/示意图)
+    image_urls: Array.isArray(item.image_urls) && item.image_urls.some(Boolean) ? item.image_urls : [],  // 辅料单图(示例画稿/示意图);无图给 []——列 NOT NULL,写 null 会违反约束(2026-07-09 修)
     source: 'manual',                      // 手动新增(Phase 2A 来源标记)
   };
   let { error } = await (supabase.from('materials_bom') as any).insert(insertRow);
