@@ -55,6 +55,29 @@ export function distributeBySize(total: number, sizeCounts: Record<string, numbe
   return out;
 }
 
+/**
+ * 按权重把总量分摊到多个单元格(款×色×码 明细拆分用;distributeBySize 的泛化)。
+ * 保 Σ=total:各格四舍五入,余数(含小数)补给权重最大的格。无正权重 → 空数组。
+ * weights: [{key, weight}];返回 [{key, qty}],顺序与入参一致。
+ */
+export function distributeByWeights<K extends string | number>(
+  total: number,
+  weights: Array<{ key: K; weight: number }>,
+): Array<{ key: K; qty: number }> {
+  const entries = weights.filter((w) => Number(w.weight) > 0);
+  const sum = entries.reduce((a, w) => a + Number(w.weight), 0);
+  if (!(total > 0) || entries.length === 0 || sum <= 0) return [];
+  const out = entries.map((w) => ({ key: w.key, qty: Math.round((total * Number(w.weight)) / sum) }));
+  const allocated = out.reduce((a, o) => a + o.qty, 0);
+  const diff = total - allocated;                          // 可为小数
+  if (diff !== 0) {
+    let maxI = 0;
+    for (let i = 1; i < entries.length; i++) if (Number(entries[i].weight) > Number(entries[maxI].weight)) maxI = i;
+    out[maxI].qty = Math.round((out[maxI].qty + diff) * 100) / 100;
+  }
+  return out;
+}
+
 // 按尺码拆分只对"按件计数"的物料成立(如尺码唛、每件一个的辅料)。
 // 面料/布料等散装按重量/长度采购的物料:整卷开裁,采购量不该按各码件数均分
 // (且大码比小码更费料,按件数比例分摊本身也失真)。→ 这类物料不拆码,单行整量。

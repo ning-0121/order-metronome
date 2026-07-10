@@ -13,7 +13,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
-  buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, shouldSplitBySize,
+  buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, distributeByWeights, shouldSplitBySize,
 } from '@/lib/services/procurement-execution';
 import { getOrderLeftover } from '@/app/actions/inventory';
 
@@ -811,7 +811,7 @@ export async function getProcurementItemSources(itemId: string) {
   // 让采购在确认前就看到"这单最终会按哪些尺码、各买多少",不用等生成执行行。
   const normC = (s: any) => String(s ?? '').trim().toLowerCase();
   const { data: lis } = await (supabase.from('order_line_items') as any)
-    .select('color_cn, color_en, sizes').eq('order_id', (item as any).order_id);
+    .select('style_no, product_name, color_cn, color_en, sizes').eq('order_id', (item as any).order_id);
   const byColorSizes = new Map<string, Record<string, number>>();
   const totalSizes: Record<string, number> = {};
   for (const li of (lis || [])) {
@@ -841,7 +841,45 @@ export async function getProcurementItemSources(itemId: string) {
   const suggestedSplit = splittable ? distributeBySize(orderable, sizeCounts).filter((s) => s.size != null) : [];
   const finalQty = (item as any).final_purchase_qty ?? (item as any).suggested_purchase_qty ?? (item as any).total_required_qty ?? null;
 
-  return { data: sources, sizeBreakdown, suggestedSplit, sizeOverrideActive, finalQty, splittable, unit: (item as any).unit ?? null };
+  // ── 产品明细拆分「款号×颜色×尺码」(吊牌/洗唛等印 SKU 信息的辅料)──
+  // 系统建议 = 订单 SKU 件数矩阵(order_line_items)按出单量比例分配;采购可微调。
+  // 与尺码同口径:仅按件计数的辅料(splittable)才有;本色收窄由 item.color 决定。
+  const skuCells = buildSkuMatrixCells(lis || [], (item as any).color, normC).filter((c) => c.weight > 0);
+  const skuDist = distributeByWeights(orderable, skuCells.map((c, i) => ({ key: i, weight: c.weight })));
+  const skuQtyByI = new Map<number, number>(skuDist.map((d) => [d.key, d.qty]));
+  const skuSuggest = splittable
+    ? skuCells.map((c, i) => ({ style_no: c.style_no, product_name: c.product_name, color_cn: c.color_cn, color_en: c.color_en, size: c.size, qty: skuQtyByI.get(i) ?? 0 })).filter((c) => c.qty > 0)
+    : [];
+  const savedSku = Array.isArray((item as any).sku_breakdown) ? (item as any).sku_breakdown : [];
+  const skuActive = splittable && savedSku.length > 0;
+
+  return { data: sources, sizeBreakdown, suggestedSplit, sizeOverrideActive, finalQty, splittable, unit: (item as any).unit ?? null,
+    skuSuggest, skuSaved: savedSku, skuActive };
+}
+
+/** 把订单行(order_line_items)摊平成「款号×颜色×尺码」单元格,权重=该 SKU 件数。
+ *  itemColor 有值 → 只保留该颜色的行(本色辅料);为空(整单通用,如吊牌)→ 全部款色码。 */
+function buildSkuMatrixCells(
+  lis: any[], itemColor: any, normC: (s: any) => string,
+): Array<{ style_no: string; product_name: string; color_cn: string; color_en: string; size: string; weight: number }> {
+  const cells: Array<{ style_no: string; product_name: string; color_cn: string; color_en: string; size: string; weight: number }> = [];
+  const ic = itemColor ? normC(itemColor) : '';
+  for (const li of lis) {
+    if (ic) {
+      const match = [li.color_cn, li.color_en].some((c: any) => c && normC(c) === ic);
+      if (!match) continue;
+    }
+    const sz = li.sizes && typeof li.sizes === 'object' ? li.sizes : {};
+    for (const [size, v] of Object.entries(sz)) {
+      const n = Number(v) || 0;
+      if (n <= 0 || !String(size).trim()) continue;
+      cells.push({
+        style_no: li.style_no || '', product_name: li.product_name || '',
+        color_cn: li.color_cn || '', color_en: li.color_en || '', size: String(size).trim(), weight: n,
+      });
+    }
+  }
+  return cells;
 }
 
 /**
@@ -883,8 +921,72 @@ export async function saveSizeQtyOverride(itemId: string, orderId: string, sizes
     return { error: '尺码拆分列尚未建立:请先在 Supabase 执行 20260708_procurement_item_size_override.sql' };
   }
   if (error) return { error: friendlyError(error) };
+  // 手动改尺码 = 退出「按产品拆分(款×色×码)」模式:清掉产品矩阵。
+  // 独立语句 + 容忍 sku_breakdown 列未建(旧库),不影响尺码拆分本身可用。
+  await (supabase.from('procurement_items') as any).update({ sku_breakdown: null }).eq('id', itemId).eq('order_id', orderId);
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, total, cleared: !hasOverride };
+}
+
+/**
+ * 保存产品明细拆分「款号×颜色×尺码」(2026-07-10 用户拍板:吊牌等辅料印 SKU 信息,
+ * 供应商要按款×色×码分别印/采购)。cells 传 [{style_no,product_name,color_cn,color_en,size,qty}](qty>0 才留);
+ * 空数组 = 清空产品拆分,回到不按产品拆。
+ * 非空时:① 存 sku_breakdown(驱动采购单产品明细附页);② 各码合计回写 size_qty_override
+ * (执行行/收货/财务/主采购单表按尺码照旧走,零改动);③ final_purchase_qty = Σqty。
+ * 已下单(ordered+)不许改。
+ */
+export async function saveSkuBreakdown(
+  itemId: string, orderId: string,
+  cells: Array<{ style_no?: string; product_name?: string; color_cn?: string; color_en?: string; size?: string; qty?: number | null }>,
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };   // 产品拆分是采购职权
+
+  const { data: it } = await (supabase.from('procurement_items') as any)
+    .select('status').eq('id', itemId).eq('order_id', orderId).maybeSingle();
+  if (!it) return { error: '采购项不存在' };
+  if (['ordered', 'partially_received', 'completed', 'closed'].includes((it as any).status)) {
+    return { error: '该项已下单/在途,数量改动请走「补数量申请」或采购队列' };
+  }
+
+  // 清洗:qty 取整>0 才留;累计总量 + 按尺码聚合(回写 size_qty_override)
+  const clean: Array<Record<string, any>> = [];
+  const sizeTotals: Record<string, number> = {};
+  let total = 0;
+  for (const c of (cells || [])) {
+    const q = Math.round(Number(c?.qty) || 0);
+    if (q <= 0) continue;
+    const size = String(c?.size ?? '').trim();
+    clean.push({
+      style_no: String(c?.style_no ?? '').trim(),
+      product_name: String(c?.product_name ?? '').trim(),
+      color_cn: String(c?.color_cn ?? '').trim(),
+      color_en: String(c?.color_en ?? '').trim(),
+      size, qty: q,
+    });
+    total += q;
+    if (size) sizeTotals[size] = (sizeTotals[size] || 0) + q;
+  }
+  const hasBreakdown = clean.length > 0;
+  const patch: Record<string, any> = {
+    sku_breakdown: hasBreakdown ? clean : null,
+    // 各码合计 → size_qty_override:执行/收货/财务/主采购单表按尺码照旧;无尺码则清空
+    size_qty_override: hasBreakdown && Object.keys(sizeTotals).length > 0 ? sizeTotals : null,
+    updated_at: new Date().toISOString(),
+  };
+  if (hasBreakdown) patch.final_purchase_qty = total;   // 最终采购量 = 各格之和
+
+  const { error } = await (supabase.from('procurement_items') as any).update(patch).eq('id', itemId).eq('order_id', orderId);
+  if (error && /sku_breakdown|column .* does not exist/i.test(error.message || '')) {
+    return { error: '产品拆分列尚未建立:请先在 Supabase 执行 20260710_procurement_item_sku_breakdown.sql' };
+  }
+  if (error) return { error: friendlyError(error) };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, total, cleared: !hasBreakdown };
 }
 
 /** 采购确认:填大货单耗/损耗/安全库存/MOQ/供应商/价/决策,重算 suggested。 */

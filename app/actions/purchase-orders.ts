@@ -860,8 +860,13 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];
   const piMap = new Map<string, any>();
   if (piIds.length > 0) {
-    const { data: pis } = await (createServiceRoleClient().from('procurement_items') as any)
-      .select('id, color, production_consumption, development_consumption').in('id', piIds);
+    const _svc = createServiceRoleClient();
+    const _piSel = 'id, material_name, color, production_consumption, development_consumption, sku_breakdown';
+    let { data: pis, error: piErr } = await (_svc.from('procurement_items') as any).select(_piSel).in('id', piIds);
+    // sku_breakdown 列(2026-07-10)未建 → 降级去该列,采购单照样导(无产品明细附页)
+    if (piErr && /sku_breakdown|schema cache|column|does not exist/i.test(piErr.message || '')) {
+      ({ data: pis } = await (_svc.from('procurement_items') as any).select(_piSel.replace(', sku_breakdown', '')).in('id', piIds));
+    }
     for (const p of (pis || [])) piMap.set(p.id, p);
   }
   for (const l of (lines || [])) {
@@ -969,6 +974,55 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   ws.addRow(['业务员：', '', '采购员：', '', '下单日期：', new Date().toLocaleDateString('zh-CN')]);
 
   COLS.forEach((c, i) => { ws.getColumn(i + 1).width = c.w; });
+
+  // ── 产品明细附页(款号×颜色×尺码)——吊牌/洗唛等印 SKU 信息的辅料,供应商按此分色分码印 ──
+  // 数据来自 procurement_items.sku_breakdown(采购在核料确认时拆);主表仍按尺码汇总,附页给细分。
+  const skuRows: any[] = [];
+  for (const pi of piMap.values()) {
+    const bd = Array.isArray((pi as any).sku_breakdown) ? (pi as any).sku_breakdown : [];
+    for (const c of bd) {
+      const qty = Number(c?.qty) || 0;
+      if (qty <= 0) continue;
+      skuRows.push({
+        material: (pi as any).material_name || '', style_no: c?.style_no || '', product_name: c?.product_name || '',
+        color: c?.color_cn || c?.color_en || '', size: c?.size || '', qty,
+      });
+    }
+  }
+  if (skuRows.length > 0) {
+    const skuMulti = new Set(skuRows.map((r) => r.material).filter(Boolean)).size > 1;
+    const ws2 = wb.addWorksheet('产品明细(款×色×码)');
+    const SCOLS: Array<{ h: string; w: number }> = [
+      ...(skuMulti ? [{ h: '原辅料名', w: 20 }] : []),
+      { h: '款号', w: 16 }, { h: '品名', w: 20 }, { h: '颜色', w: 16 }, { h: '尺码', w: 8 }, { h: '数量', w: 12 },
+    ];
+    const sLast = String.fromCharCode(65 + SCOLS.length - 1);
+    ws2.mergeCells(`A1:${sLast}1`);
+    ws2.getCell('A1').value = '产品明细(款号 × 颜色 × 尺码)—— 供应商按此分款分色分码印制';
+    ws2.getCell('A1').font = { bold: true, size: 12 };
+    ws2.getCell('A1').alignment = { horizontal: 'center' };
+    ws2.getRow(1).height = 22;
+    const sHeader = ws2.addRow(SCOLS.map((c) => c.h));
+    sHeader.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+    });
+    // 排序:原辅料 → 款号 → 颜色 → 尺码,便于供应商看
+    skuRows.sort((a, b) => (a.material || '').localeCompare(b.material || '') || (a.style_no || '').localeCompare(b.style_no || '')
+      || (a.color || '').localeCompare(b.color || '') || (a.size || '').localeCompare(b.size || ''));
+    let skuTotal = 0;
+    for (const r of skuRows) {
+      skuTotal += r.qty;
+      const cells = [...(skuMulti ? [r.material] : []), r.style_no, r.product_name, r.color, r.size, r.qty];
+      const row = ws2.addRow(cells);
+      row.eachCell((cell) => { cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
+    }
+    const totalRow = ws2.addRow([...(skuMulti ? [''] : []), '', '', '', '合计', skuTotal]);
+    totalRow.eachCell((cell) => { cell.font = { bold: true }; });
+    SCOLS.forEach((c, i) => { ws2.getColumn(i + 1).width = c.w; });
+  }
 
   const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
   return { base64, fileName: `采购单${withPrice ? '' : '_无价版'}_${(po as any).po_no}_${sup.name || ''}.xlsx` };

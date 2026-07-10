@@ -7,7 +7,7 @@ import {
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
   listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
-  saveBomBudgetUnitPrice, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, mergeSplitExecutionLines,
+  saveBomBudgetUnitPrice, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
@@ -36,6 +36,11 @@ const STATUS_FLOW = [
 ];
 const statusLabel = (s: string) => STATUS_FLOW.find(x => x.key === s)?.label || s;
 const fmtD = (iso: any) => iso ? `${new Date(iso).getMonth() + 1}/${new Date(iso).getDate()}` : '';
+// 服务端 sku 单元格 → 可编辑列表(qty 转字符串给 input)
+const toSkuList = (cells: any[]) => (cells || []).map((c: any) => ({
+  style_no: c.style_no || '', product_name: c.product_name || '',
+  color_cn: c.color_cn || '', color_en: c.color_en || '', size: c.size || '', qty: String(c.qty ?? ''),
+}));
 
 const FORM_KEYS = [
   'production_consumption', 'procurement_loss_pct', 'safety_stock_qty', 'moq', 'purchase_unit', 'final_purchase_qty',
@@ -63,6 +68,12 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
   const [sizeOpen, setSizeOpen] = useState(false);      // 尺码录入面板是否展开(即使系统没建议也能手动加码)
   const [newSize, setNewSize] = useState('');           // 手动加尺码输入
   const [sizeSaving, setSizeSaving] = useState(false);
+  // ── 产品明细拆分「款号×颜色×尺码」(吊牌/洗唛等印 SKU 信息的辅料;2026-07-10)──
+  const [skuOpen, setSkuOpen] = useState(false);          // 产品拆分面板展开
+  const [skuActive, setSkuActive] = useState(false);      // DB 已存产品拆分
+  const [skuSuggest, setSkuSuggest] = useState<any[]>([]); // 系统按 SKU 件数比例的建议(展开时预填)
+  const [skuList, setSkuList] = useState<Array<{ style_no: string; product_name: string; color_cn: string; color_en: string; size: string; qty: string }>>([]);  // 可编辑矩阵
+  const [skuSaving, setSkuSaving] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [fulfillment, setFulfillment] = useState<any[]>([]);
@@ -265,6 +276,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
   async function select(item: any) {
     if (selId === item.id) { setSelId(null); return; }
     setSelId(item.id); setSources([]); setSizeBreakdown([]); setSizeEdit({}); setSizeOverrideActive(false); setSuggestedSplit([]); setSizeOpen(false); setNewSize('');
+    setSkuOpen(false); setSkuActive(false); setSkuSuggest([]); setSkuList([]);
     const f: Record<string, any> = {};
     for (const k of FORM_KEYS) f[k] = item[k] ?? '';
     // 采购计量单位默认=该项单位(物料录入时就选过,不让采购重敲;按匹/按卷等买法不同才改)
@@ -275,10 +287,14 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
     const bd = ((res as any).sizeBreakdown || []) as Array<{ size: string | null; qty: number }>;
     setSizeBreakdown(bd);
     setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
-    setSizeOverrideActive(!!(res as any).sizeOverrideActive);
     setSuggestedSplit(((res as any).suggestedSplit || []) as Array<{ size: string | null; qty: number }>);
     setSplittable((res as any).splittable !== false);
-    setSizeOpen(bd.some(s => s.size != null));   // 已存尺码拆分 → 展开面板
+    // 产品拆分状态(优先:产品拆分时 size_qty_override 是其派生影子,不单独展开尺码面板)
+    const skuA = !!(res as any).skuActive;
+    setSizeOverrideActive(!skuA && !!(res as any).sizeOverrideActive);
+    setSkuActive(skuA); setSkuSuggest(((res as any).skuSuggest || []) as any[]);
+    setSkuList(skuA ? toSkuList((res as any).skuSaved || []) : []); setSkuOpen(skuA);
+    setSizeOpen(!skuA && bd.some(s => s.size != null));   // 已存尺码拆分(非产品派生)→ 展开面板
   }
   // 重新拉取当前项的尺码拆分(保存/恢复后刷新预览,不切换选中)
   async function refreshSizes(itemId: string) {
@@ -286,8 +302,11 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
     if ((res as any).data) setSources((res as any).data);
     const bd = ((res as any).sizeBreakdown || []) as Array<{ size: string | null; qty: number }>;
     setSizeBreakdown(bd);
+    const skuA = !!(res as any).skuActive;
+    setSkuActive(skuA); setSkuSuggest(((res as any).skuSuggest || []) as any[]);
+    if (skuA) { setSkuList(toSkuList((res as any).skuSaved || [])); setSkuOpen(true); setSizeOpen(false); } else { setSkuList([]); }
     setSizeEdit(Object.fromEntries(bd.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)])));
-    setSizeOverrideActive(!!(res as any).sizeOverrideActive);
+    setSizeOverrideActive(!skuA && !!(res as any).sizeOverrideActive);
     setSuggestedSplit(((res as any).suggestedSplit || []) as Array<{ size: string | null; qty: number }>);
     setSplittable((res as any).splittable !== false);
   }
@@ -312,6 +331,34 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
     if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
     setSizeEdit({}); setSizeOpen(false); setNewSize('');   // 收起录入框,回到「按尺码录入」入口
     setMsg('✅ 已改回整单一个数量(不分尺码)');
+    await Promise.all([reload(), refreshSizes(selId)]);
+  }
+  // 展开产品拆分:首次展开用系统建议预填(款×色×码矩阵)
+  function openSku() {
+    setSkuOpen(true);
+    if (skuList.length === 0 && skuSuggest.length > 0) setSkuList(toSkuList(skuSuggest));
+  }
+  // 保存产品明细拆分(款×色×码)——各码合计自动同步尺码,最终采购量=各格之和
+  async function saveSku() {
+    if (!selId) return;
+    setSkuSaving(true); setMsg('');
+    const cells = skuList.map(c => ({ ...c, qty: c.qty === '' ? 0 : Number(c.qty) }));
+    const r = await saveSkuBreakdown(selId, orderId, cells as any);
+    setSkuSaving(false);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setMsg(`✅ 产品明细拆分已保存(最终采购量 ${(r as any).total})`);
+    set('final_purchase_qty', String((r as any).total));   // 同步「最终采购量(人拍板)」
+    await Promise.all([reload(), refreshSizes(selId)]);
+  }
+  // 取消产品拆分 → 清空矩阵,回到不按产品拆
+  async function cancelSku() {
+    if (!selId) return;
+    setSkuSaving(true); setMsg('');
+    const r = await saveSkuBreakdown(selId, orderId, []);
+    setSkuSaving(false);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setSkuList([]); setSkuOpen(false);
+    setMsg('✅ 已取消产品明细拆分');
     await Promise.all([reload(), refreshSizes(selId)]);
   }
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
@@ -1090,7 +1137,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
           </div>
 
           {/* 尺码 opt-in(2026-07-08:辅料默认整单一个数量;点此打开逐码录入。系统有建议则预填,没建议也能手动加码)*/}
-          {!sizeOpen && splittable && sel && !['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status) && (
+          {!sizeOpen && !skuOpen && !skuActive && splittable && sel && !['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status) && (
             <button onClick={() => { setSizeOpen(true); if (Object.keys(sizeEdit).length === 0 && suggestedSplit.length > 0) setSizeEdit(Object.fromEntries(suggestedSplit.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)]))); }}
               className="text-xs px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 hover:bg-teal-50 font-medium">
               ➕ 按尺码录入（默认整单一个数量·不分尺码；点此逐码填量）
@@ -1151,9 +1198,103 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
             );
           })()}
 
+          {/* 产品明细拆分:款号×颜色×尺码(吊牌/洗唛等印 SKU 信息的辅料;2026-07-10)*/}
+          {splittable && sel && (() => {
+            const locked = ['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status);
+            // 入口按钮:未按产品、未展开、未按尺码(与尺码互斥)、未锁定时显示
+            if (!skuOpen && !skuActive) {
+              if (sizeOverrideActive || sizeOpen || locked) return null;
+              return (
+                <button onClick={openSku}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 font-medium">
+                  🏷 按产品拆分（款号×颜色×尺码 · 吊牌/洗唛印 SKU 信息用）
+                </button>
+              );
+            }
+            if (!skuOpen) return null;
+            // 由可编辑列表构建矩阵:行=款号+颜色,列=尺码
+            const rowsMap = new Map<string, { style_no: string; product_name: string; color_cn: string; color_en: string }>();
+            const sizes: string[] = [];
+            for (const c of skuList) {
+              const rk = `${c.style_no}§${c.color_cn}§${c.color_en}`;
+              if (!rowsMap.has(rk)) rowsMap.set(rk, c);
+              if (c.size && !sizes.includes(c.size)) sizes.push(c.size);
+            }
+            const rows = [...rowsMap.values()];
+            const cellOf = (r: any, size: string) => skuList.find(c => c.style_no === r.style_no && c.color_cn === r.color_cn && c.color_en === r.color_en && c.size === size);
+            const setQty = (r: any, size: string, val: string) => setSkuList(prev => prev.map(c => (c.style_no === r.style_no && c.color_cn === r.color_cn && c.color_en === r.color_en && c.size === size) ? { ...c, qty: val } : c));
+            const total = skuList.reduce((a, c) => a + (Number(c.qty) || 0), 0);
+            return (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 space-y-2">
+                <div className="text-xs font-semibold text-indigo-800 flex items-center gap-2 flex-wrap">
+                  <span>🏷 产品明细拆分（款×色×码）· 最终采购量 <b>{total || '—'}</b> {sel.unit || ''}</span>
+                  {skuActive
+                    ? <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">✋ 已按产品</span>
+                    : <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">未保存·保存后才按产品拆</span>}
+                  {locked && <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">🔒 已下单锁定</span>}
+                </div>
+                {rows.length === 0 ? (
+                  <p className="text-[11px] text-gray-400">本单没有款号×颜色×尺码明细（订单逐款录入为空），无法按产品拆。</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="text-xs border-collapse">
+                      <thead>
+                        <tr className="text-indigo-700">
+                          <th className="py-1 px-2 text-left font-medium border border-indigo-100 bg-white whitespace-nowrap">款号 / 颜色</th>
+                          {sizes.map(s => <th key={s} className="py-1 px-2 font-medium border border-indigo-100 bg-white text-center">{s}</th>)}
+                          <th className="py-1 px-2 font-medium border border-indigo-100 bg-white text-center">小计</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r, ri) => {
+                          const rowSum = sizes.reduce((a, s) => { const c = cellOf(r, s); return a + (c ? Number(c.qty) || 0 : 0); }, 0);
+                          return (
+                            <tr key={ri}>
+                              <td className="py-1 px-2 border border-indigo-100 bg-white whitespace-nowrap">
+                                <span className="font-semibold text-gray-700">{r.style_no || '—'}</span>
+                                <span className="text-gray-400"> / {r.color_cn || r.color_en || '—'}</span>
+                                {r.product_name && <span className="text-gray-300"> · {r.product_name}</span>}
+                              </td>
+                              {sizes.map(s => {
+                                const c = cellOf(r, s);
+                                return (
+                                  <td key={s} className="border border-indigo-100 bg-white text-center p-0">
+                                    {c ? (
+                                      <input type="number" min="0" step="1" value={c.qty} disabled={locked}
+                                        onChange={e => setQty(r, s, e.target.value)}
+                                        className="w-16 px-1 py-1 text-right disabled:bg-gray-50 disabled:text-gray-500 outline-none" />
+                                    ) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-1 px-2 border border-indigo-100 bg-indigo-50/50 text-center font-medium text-indigo-700">{rowSum}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {!locked && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={saveSku} disabled={skuSaving || rows.length === 0}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+                      {skuSaving ? '保存中…' : '💾 保存产品明细拆分'}
+                    </button>
+                    <button onClick={cancelSku} disabled={skuSaving}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">
+                      ↺ 取消产品拆分
+                    </button>
+                    <span className="text-[11px] text-indigo-600">系统按订单各 SKU 件数预填,可改。最终采购量 = 各格之和;各码合计自动同步到尺码,采购单主表按尺码汇总、另附「产品明细」页发供应商。</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* 来源明细(live;粒度=物料行)*/}
           <div className="rounded-lg border border-gray-200 bg-white p-3">
-            <div className="text-xs font-semibold text-gray-500 mb-2">来源明细（{sources.length}）<span className="font-normal text-gray-400">· 暂到物料行粒度,产品拆分待 O 域</span></div>
+            <div className="text-xs font-semibold text-gray-500 mb-2">来源明细（{sources.length}）<span className="font-normal text-gray-400">· 物料行粒度;款×色×码拆分见上「产品明细拆分」</span></div>
             {sources.length === 0 ? <p className="text-xs text-gray-400">无来源</p> : (
               <table className="w-full text-xs">
                 <thead><tr className="text-gray-400 text-left">{['物料', '颜色', '开发单耗', '需求量'].map(h => <th key={h} className="py-1 pr-3 font-medium">{h}</th>)}</tr></thead>
