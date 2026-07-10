@@ -241,8 +241,38 @@ async function buildMoWorkbook(
   // 模板固定列宽 A–J
   const COLW = [22.05, 10.62, 9, 9, 12.25, 10.62, 11.62, 8.88, 9, 9];
 
+  // 从图片二进制头解析原始像素尺寸(JPEG/PNG/GIF),用于按比例贴图不拉伸。解析失败返回 null。
+  const imageDims = (buf: Buffer): { w: number; h: number } | null => {
+    try {
+      // PNG:签名 8B + IHDR,宽@16 高@20(大端)
+      if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
+        return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+      }
+      // GIF:宽@6 高@8(小端)
+      if (buf.length >= 10 && buf.toString('ascii', 0, 3) === 'GIF') {
+        return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+      }
+      // JPEG:扫描 SOF 段(0xFFC0–0xFFCF,除 C4/C8/CC),高@+3 宽@+5
+      if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+        let i = 2;
+        while (i + 9 < buf.length) {
+          if (buf[i] !== 0xff) { i++; continue; }
+          let marker = buf[i + 1];
+          while (marker === 0xff && i + 1 < buf.length) { i++; marker = buf[i + 1]; }
+          i += 2;
+          if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+            return { h: buf.readUInt16BE(i + 3), w: buf.readUInt16BE(i + 5) };
+          }
+          if (i + 1 >= buf.length) break;
+          i += buf.readUInt16BE(i);
+        }
+      }
+    } catch { /* 解析失败按未知尺寸处理 */ }
+    return null;
+  };
+
   // 产品图/辅料图:公开桶 URL,服务端抓取失败不阻塞生成
-  const fetchImage = async (url: string): Promise<{ buffer: Buffer; extension: 'jpeg' | 'png' | 'gif' } | null> => {
+  const fetchImage = async (url: string): Promise<{ buffer: Buffer; extension: 'jpeg' | 'png' | 'gif'; w: number | null; h: number | null } | null> => {
     if (!url || !/^https?:\/\//.test(url)) return null;
     try {
       const ctrl = new AbortController();
@@ -254,7 +284,8 @@ async function buildMoWorkbook(
       const extension = ct.includes('png') ? 'png' : ct.includes('gif') ? 'gif' : 'jpeg';
       const buffer = Buffer.from(await resp.arrayBuffer());
       if (buffer.length === 0 || buffer.length > 8 * 1024 * 1024) return null;
-      return { buffer, extension: extension as any };
+      const d = imageDims(buffer);
+      return { buffer, extension: extension as any, w: d?.w ?? null, h: d?.h ?? null };
     } catch { return null; }
   };
 
@@ -449,68 +480,102 @@ async function buildMoWorkbook(
     ws.pageSetup.printArea = `A1:J${r}`;
   }
 
-  // ══ 辅料明细 sheet(全款合一,1:1 复刻用户「辅料表」模板)══
-  // 列:物料 | 示例画稿(图) | 位置说明及示意图(图) | 位置说明(文) | 备注(文) | 工厂价格 | 采购价格
-  // 图从 materials_bom.image_urls 带出:[0]→示例画稿, [1]→位置示意图(业务在「原辅料」页 📷 上传的辅料/色卡图)。
+  // ══ 辅料明细(每个款号一张 sheet,1:1 复刻用户「辅料表」模板)══
+  // 列:物料 | 示例画稿(图) | 位置说明及示意图(图) | 位置说明(文) | 规格 | 备注(文) | 工厂价格 | 采购价格
+  // ① 顶部订单号用内部单号(internal_order_no),厂里能对上;② 贴图按原始比例居中不拉伸;
+  // ③ 规格单独成列(不再埋进备注);④ 按 materials_bom.style_no 分款,一款一 sheet。
+  // 图从 materials_bom.image_urls 带出:[0]→示例画稿, [1]→位置示意图(业务在「原辅料」页 📷 上传)。
   // 工厂价格/采购价格留空手填(不泄底价);辅料 = 所有非 fabric 的 BOM 行。
   if (opts.trims) {
-    const ts = wb.addWorksheet('辅料明细');
-    ts.pageSetup = {
-      paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
-      margins: { left: 0.35, right: 0.35, top: 0.3, bottom: 0.2, header: 0, footer: 0 },
-    };
-    const cw = [19.6, 38.5, 35.1, 35.4, 17.5, 13.7, 16.2];   // 对齐模板列宽
-    cw.forEach((w, i) => (ts.getColumn(i + 1).width = w));
-    const tbox = (r: number, c: number, v: any, o: { size?: number; bold?: boolean; align?: 'left' | 'center' } = {}) => {
-      const cell = ts.getCell(r, c); cell.value = (v === undefined || v === null) ? '' : v;
-      cell.font = { name: '宋体', size: o.size ?? 16, bold: o.bold ?? false };
-      cell.alignment = { horizontal: o.align ?? 'center', vertical: 'middle', wrapText: true };
-      cell.border = { ...B4 };
-    };
-    ts.mergeCells(1, 1, 1, 7); tbox(1, 1, `${order.order_no || ''}订单辅料明细`, { size: 16, bold: true });
-    ts.getRow(1).height = 33;
-    const th = ['', '示例画稿（以实际为准）', '位置说明及示意图', '位置说明', '备注', '工厂价格', '采购价格'];
-    th.forEach((h, i) => tbox(2, i + 1, h, { size: 14, bold: true }));
-    ts.getRow(2).height = 40;
+    const internalNo = order.internal_order_no || order.order_no || '';
+    // 按款号分组;无款号的行(整单共用辅料)归入「通用」组。保持录入顺序。
+    const COMMON = '__common__';
+    const trimGroups: { key: string; label: string; rows: any[] }[] = [];
+    for (const b of bom.filter((x: any) => x.material_type !== 'fabric')) {
+      const raw = b.style_no != null ? String(b.style_no).trim() : '';
+      const key = raw || COMMON;
+      let g = trimGroups.find(x => x.key === key);
+      if (!g) { g = { key, label: raw || '通用', rows: [] }; trimGroups.push(g); }
+      g.rows.push(b);
+    }
+    if (trimGroups.length === 0) trimGroups.push({ key: COMMON, label: order.style_no ? String(order.style_no) : '通用', rows: [] });
 
-    const trims = bom.filter((b: any) => b.material_type !== 'fabric');
-    // 预取每行辅料图,位置固定:image_urls[0]→示例画稿, image_urls[1]→位置说明及示意图。
-    // 按位置取(不再 filter 压缩):表单两个图槽各写各的下标,只填示意图也不会错落到示例画稿列。并行,抓取失败不阻塞生成。
-    const trimImgs = await Promise.all(trims.map(async (b: any) => {
-      const urls = (Array.isArray(b.image_urls) ? b.image_urls : []);
-      const pick = (u: any) => (typeof u === 'string' && /^https?:\/\//.test(u)) ? u : '';
-      const [a, c] = await Promise.all([fetchImage(pick(urls[0])), fetchImage(pick(urls[1]))]);
-      return { a, c };
-    }));
+    const usedSheetNames = new Set(wb.worksheets.map(w => w.name));
+    const trimSheetName = (label: string): string => {
+      const base = `${label}辅料`.replace(/[\\/*?:[\]]/g, '_').slice(0, 28) || '辅料';
+      let name = base, i = 2;
+      while (usedSheetNames.has(name)) name = `${base}_${i++}`.slice(0, 31);
+      usedSheetNames.add(name);
+      return name;
+    };
 
-    let tr = 3;
-    trims.forEach((b: any, idx: number) => {
-      // 备注:特殊要求 + 备注 + 规格 + 颜色(有则拼,便于工厂/采购一眼看全)
-      const remark = joinTxt(
-        b.special_requirements, b.notes,
-        b.spec ? `规格：${b.spec}` : '', b.color ? `颜色：${b.color}` : '',
-      );
-      tbox(tr, 1, b.material_name || '');                     // 物料
-      tbox(tr, 2, '');                                        // 示例画稿(下方贴图)
-      tbox(tr, 3, '');                                        // 位置说明及示意图(下方贴图)
-      tbox(tr, 4, b.placement || '', { align: 'left' });      // 位置说明(文字)
-      tbox(tr, 5, remark, { align: 'left' });                 // 备注
-      tbox(tr, 6, '');                                        // 工厂价格(采购填,不带底价)
-      tbox(tr, 7, '');                                        // 采购价格(采购填)
-      // 贴图(twoCell 锚点,略留内边距铺满单元格)。有图则加高行,无图给文字留高。
-      const { a, c } = trimImgs[idx];
-      ts.getRow(tr).height = (a || c) ? 150 : 44;
-      const place = (im: { buffer: Buffer; extension: 'jpeg' | 'png' | 'gif' } | null, col0: number) => {
-        if (!im) return;
-        const id = wb.addImage({ buffer: im.buffer as any, extension: im.extension });
-        ts.addImage(id, { tl: { col: col0 + 0.06, row: (tr - 1) + 0.06 } as any, br: { col: col0 + 0.94, row: tr - 0.06 } as any });
+    for (const g of trimGroups) {
+      const ts = wb.addWorksheet(trimSheetName(g.label));
+      ts.pageSetup = {
+        paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
+        margins: { left: 0.35, right: 0.35, top: 0.3, bottom: 0.2, header: 0, footer: 0 },
       };
-      place(a, 1);   // B 列(0-indexed 1)= 示例画稿
-      place(c, 2);   // C 列(0-indexed 2)= 位置示意图
-      tr++;
-    });
-    if (trims.length === 0) { for (let c = 1; c <= 7; c++) tbox(3, c, ''); ts.getRow(3).height = 44; }
-    ts.pageSetup.printArea = `A1:G${Math.max(3, tr - 1)}`;
+      const cw = [19.6, 38.5, 35.1, 30, 15, 22, 13.7, 16.2];   // 物料/示例画稿/位置图/位置说明/规格/备注/工厂价/采购价
+      cw.forEach((w, i) => (ts.getColumn(i + 1).width = w));
+      const NCOL = cw.length;   // 8 列
+      // 单元格像素尺寸(用于贴图按比例居中):列宽字符→px≈round(w*7)+5;行高 pt→px=pt*4/3。
+      const colPx = (c: number) => Math.round((cw[c - 1] || 9) * 7) + 5;
+      const tbox = (r: number, c: number, v: any, o: { size?: number; bold?: boolean; align?: 'left' | 'center' } = {}) => {
+        const cell = ts.getCell(r, c); cell.value = (v === undefined || v === null) ? '' : v;
+        cell.font = { name: '宋体', size: o.size ?? 16, bold: o.bold ?? false };
+        cell.alignment = { horizontal: o.align ?? 'center', vertical: 'middle', wrapText: true };
+        cell.border = { ...B4 };
+      };
+      const titleStyle = g.key === COMMON ? '' : `（${g.label}）`;
+      ts.mergeCells(1, 1, 1, NCOL); tbox(1, 1, `${internalNo}订单辅料明细${titleStyle}`, { size: 16, bold: true });
+      ts.getRow(1).height = 33;
+      const th = ['', '示例画稿（以实际为准）', '位置说明及示意图', '位置说明', '规格', '备注', '工厂价格', '采购价格'];
+      th.forEach((h, i) => tbox(2, i + 1, h, { size: 14, bold: true }));
+      ts.getRow(2).height = 40;
+
+      // 预取每行辅料图,位置固定:image_urls[0]→示例画稿, image_urls[1]→位置说明及示意图。
+      // 按位置取(不再 filter 压缩):表单两个图槽各写各的下标,只填示意图也不会错落到示例画稿列。并行,抓取失败不阻塞。
+      const trimImgs = await Promise.all(g.rows.map(async (b: any) => {
+        const urls = (Array.isArray(b.image_urls) ? b.image_urls : []);
+        const pick = (u: any) => (typeof u === 'string' && /^https?:\/\//.test(u)) ? u : '';
+        const [a, c] = await Promise.all([fetchImage(pick(urls[0])), fetchImage(pick(urls[1]))]);
+        return { a, c };
+      }));
+
+      const ROW_H = 150;   // 贴图行高(pt)
+      let tr = 3;
+      g.rows.forEach((b: any, idx: number) => {
+        // 备注:特殊要求 + 备注 + 颜色(规格已独立成列,不再并入)
+        const remark = joinTxt(b.special_requirements, b.notes, b.color ? `颜色：${b.color}` : '');
+        tbox(tr, 1, b.material_name || '');                     // 物料
+        tbox(tr, 2, '');                                        // 示例画稿(下方贴图)
+        tbox(tr, 3, '');                                        // 位置说明及示意图(下方贴图)
+        tbox(tr, 4, b.placement || '', { align: 'left' });      // 位置说明(文字)
+        tbox(tr, 5, b.spec || '');                              // 规格(独立列)
+        tbox(tr, 6, remark, { align: 'left' });                 // 备注
+        tbox(tr, 7, '');                                        // 工厂价格(采购填,不带底价)
+        tbox(tr, 8, '');                                        // 采购价格(采购填)
+        const { a, c } = trimImgs[idx];
+        ts.getRow(tr).height = (a || c) ? ROW_H : 44;
+        // 贴图:oneCell 锚点 + 原始比例缩放居中(不用 twoCell 铺满,避免拉伸变形)。
+        const place = (im: { buffer: Buffer; extension: 'jpeg' | 'png' | 'gif'; w: number | null; h: number | null } | null, col0: number) => {
+          if (!im) return;
+          const id = wb.addImage({ buffer: im.buffer as any, extension: im.extension });
+          const cellW = colPx(col0 + 1), cellH = Math.round(ROW_H * 4 / 3);
+          const maxW = cellW * 0.9, maxH = cellH * 0.9;
+          const nw = im.w && im.w > 0 ? im.w : maxW, nh = im.h && im.h > 0 ? im.h : maxH;
+          const scale = Math.min(maxW / nw, maxH / nh);
+          const drawW = Math.max(1, Math.round(nw * scale)), drawH = Math.max(1, Math.round(nh * scale));
+          const offC = (cellW - drawW) / 2 / cellW, offR = (cellH - drawH) / 2 / cellH;
+          ts.addImage(id, { tl: { col: col0 + offC, row: (tr - 1) + offR } as any, ext: { width: drawW, height: drawH } } as any);
+        };
+        place(a, 1);   // B 列(0-indexed 1)= 示例画稿
+        place(c, 2);   // C 列(0-indexed 2)= 位置示意图
+        tr++;
+      });
+      if (g.rows.length === 0) { for (let c = 1; c <= NCOL; c++) tbox(3, c, ''); ts.getRow(3).height = 44; }
+      ts.pageSetup.printArea = `A1:${COL(NCOL)}${Math.max(3, tr - 1)}`;
+    }
   }
 
   if (wb.worksheets.length === 0) return { error: '没有可生成的内容' };
