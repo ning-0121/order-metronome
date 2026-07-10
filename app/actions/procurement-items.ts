@@ -561,6 +561,16 @@ export async function consolidateOrderProcurementItems(
     afterProcurementPlaced = st === 'done' || st === '已完成';
   }
 
+  // 采购人工合并映射(同物料不同单位/键 的两条 → 归一):归并键计算后按此重映射,使合并永久生效。
+  const mergeMap = new Map<string, string>();
+  {
+    const { data: cbM } = await (supabase.from('order_cost_baseline') as any)
+      .select('consolidation_merges').eq('order_id', orderId).maybeSingle();
+    for (const m of (((cbM as any)?.consolidation_merges) || [])) {
+      if (m?.from && m?.to) mergeMap.set(String(m.from), String(m.to));
+    }
+  }
+
   // 1) 需求(pieces_qty=件数基数;迁移前老行为空,按 net/dev 反推兜底)
   const { data: reqs, error: rErr } = await (supabase.from('material_requirements') as any)
     .select('*').eq('order_id', orderId);
@@ -611,7 +621,8 @@ export async function consolidateOrderProcurementItems(
       color: sl?.color || null,
       unit: r.unit || null,
     };
-    const key = consolidationKey(identity);
+    const rawKey = consolidationKey(identity);
+    const key = mergeMap.get(rawKey) || rawKey;   // 人工合并:源键 → 目标键(两条同物料并一条)
     const net = Number(r.net_purchase_qty) || 0;
     const dev = sl?.qty_per_piece != null ? Number(sl.qty_per_piece) : null;
     const loss = sl?.loss_rate != null ? Number(sl.loss_rate) : null;
@@ -926,6 +937,74 @@ export async function getProcurementItemSources(itemId: string) {
 
   return { data: sources, sizeBreakdown, suggestedSplit, sizeOverrideActive, finalQty, splittable, unit: (item as any).unit ?? null,
     skuSuggest, skuSaved: savedSku, skuActive };
+}
+
+/**
+ * 采购项人工合并(2026-07-10 用户拍板):把 sourceItem 合并进 targetItem(目标保留、源删除)。
+ * 场景:同一辅料(主标/洗标等)因单位录得不一致(米 vs 个)没自动归并,拆成两条 → 人工并一条。
+ * 防呆:仅【同物料名】可合并(吊牌×洗标不给合并);仅【草稿】可合并(已确认/已下单不动)。
+ * 持久化:把 源归并键→目标归并键 记进 order_cost_baseline.consolidation_merges,重新核料归并也永久并一条
+ *   (归并 consolidateOrderProcurementItems 计算键后按此重映射)。数量并入目标,单位取目标。
+ */
+export async function mergeProcurementItems(orderId: string, sourceItemId: string, targetItemId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
+  if (sourceItemId === targetItemId) return { error: '不能合并到自己' };
+
+  const { data: rows } = await (supabase.from('procurement_items') as any)
+    .select('*').in('id', [sourceItemId, targetItemId]).eq('order_id', orderId);
+  const src = (rows || []).find((r: any) => r.id === sourceItemId);
+  const tgt = (rows || []).find((r: any) => r.id === targetItemId);
+  if (!src || !tgt) return { error: '采购项不存在或不属于本订单' };
+  const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+  if (norm(src.material_name) !== norm(tgt.material_name)) {
+    return { error: `不同物料不能合并:「${src.material_name || '?'}」≠「${tgt.material_name || '?'}」` };
+  }
+  if (src.status !== 'draft' || tgt.status !== 'draft') {
+    return { error: '仅草稿状态的采购项可合并;已确认/已下单的请先处理' };
+  }
+
+  const svc = createServiceRoleClient();
+  // 1) 记合并映射(源键→目标键),持久化;链式合并防断(旧映射指向源的改指目标)
+  const { data: cb } = await (svc.from('order_cost_baseline') as any)
+    .select('id, consolidation_merges').eq('order_id', orderId).maybeSingle();
+  const merges: any[] = Array.isArray((cb as any)?.consolidation_merges) ? (cb as any).consolidation_merges : [];
+  for (const m of merges) if (m?.to === src.consolidation_key) m.to = tgt.consolidation_key;
+  if (!merges.some((m) => m?.from === src.consolidation_key && m?.to === tgt.consolidation_key)) {
+    merges.push({ from: src.consolidation_key, to: tgt.consolidation_key });
+  }
+  if ((cb as any)?.id) {
+    const { error } = await (svc.from('order_cost_baseline') as any).update({ consolidation_merges: merges }).eq('order_id', orderId);
+    if (error && /consolidation_merges|column .* does not exist/i.test(error.message || '')) {
+      return { error: '合并映射列尚未建立:请先在 Supabase 执行 20260710_procurement_manual_merge.sql' };
+    }
+    if (error) return { error: friendlyError(error) };
+  } else {
+    const { error } = await (svc.from('order_cost_baseline') as any).insert({ order_id: orderId, consolidation_merges: merges });
+    if (error) return { error: friendlyError(error) };
+  }
+
+  // 2) 数量并入目标(总需求/建议/来源数求和,单位取目标)。重新归并会按 BOM 重算,此为即时口径。
+  const sum = (a: any, b: any) => Math.round(((Number(a) || 0) + (Number(b) || 0)) * 10) / 10;
+  await (supabase.from('procurement_items') as any).update({
+    total_required_qty: sum(tgt.total_required_qty, src.total_required_qty),
+    suggested_purchase_qty: sum(tgt.suggested_purchase_qty, src.suggested_purchase_qty),
+    source_count: (Number(tgt.source_count) || 0) + (Number(src.source_count) || 0),
+    updated_at: new Date().toISOString(),
+  }).eq('id', targetItemId);
+
+  // 3) 源的执行行改挂目标(草稿一般无;有则迁移不丢)
+  await (supabase.from('procurement_line_items') as any).update({ procurement_item_id: targetItemId }).eq('procurement_item_id', sourceItemId);
+
+  // 4) 删源采购项
+  const { error: delErr } = await (supabase.from('procurement_items') as any).delete().eq('id', sourceItemId);
+  if (delErr) return { error: friendlyError(delErr) };
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }
 
 /** 把订单行(order_line_items)摊平成「款号×颜色×尺码」单元格,权重=该 SKU 件数。

@@ -8,6 +8,7 @@ import {
   generateExecutionLines, getOrderProcurementFulfillment,
   listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
   saveBomBudgetUnitPrice, saveBomCustomerSupplied, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
+  mergeProcurementItems,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
@@ -60,6 +61,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [selId, setSelId] = useState<string | null>(null);
+  const [mergeSrc, setMergeSrc] = useState('');   // 人工合并:选中要并进本项的同物料另一条
   const [sources, setSources] = useState<any[]>([]);
   const [sizeBreakdown, setSizeBreakdown] = useState<Array<{ size: string | null; qty: number }>>([]);   // #3 尺码拆分预览
   const [sizeEdit, setSizeEdit] = useState<Record<string, string>>({});   // 尺码拆分可编辑(码→量)
@@ -169,6 +171,22 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     const r = await deleteProcurementItemRow(it.id);
     if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
     setMsg('✅ 已删除采购项'); if (selId === it.id) setSelId(null); await reload();
+  }
+
+  // 人工合并:把选中的同物料另一条(mergeSrc)合并进本项(sel 保留、源删除)
+  async function doMerge() {
+    const tgt = items.find(i => i.id === selId);
+    const src = items.find(i => i.id === mergeSrc);
+    if (!tgt || !src) return;
+    const merged = (Number(tgt.total_required_qty) || 0) + (Number(src.total_required_qty) || 0);
+    if (!(await confirm({
+      title: `合并采购项?`,
+      message: `把「${src.item_no} · ${src.material_name} · ${src.total_required_qty ?? '?'}${src.unit || ''}」合并进「${tgt.item_no} · ${tgt.unit || ''}」。\n合并后本项总需求 = ${merged} ${tgt.unit || ''}(单位取本项);源项将删除。重新核料归并也会保持合并。`,
+      confirmText: '确认合并',
+    }))) return;
+    const r = await mergeProcurementItems(orderId, mergeSrc, tgt.id);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setMsg('✅ 已合并'); setMergeSrc(''); await reload();
   }
 
   const confirmedCount = items.filter(i => i.status === 'confirmed').length;
@@ -1090,6 +1108,28 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
               <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">{statusLabel(sel.status)}</span>
             </div>
           </div>
+
+          {/* 人工合并:同物料因单位不同没自动归并(如主标 米/个)→ 选另一条并进本项。防呆:仅同物料名、仅草稿 */}
+          {sel.status === 'draft' && (() => {
+            const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+            const cands = items.filter(i => i.id !== sel.id && i.status === 'draft' && norm(i.material_name) === norm(sel.material_name));
+            if (cands.length === 0) return null;
+            return (
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sky-800">🔀 合并同物料</span>
+                <span className="text-sky-600">把另一条「{sel.material_name}」并进本项(单位/数量以本项为准,求和):</span>
+                <select value={mergeSrc} onChange={e => setMergeSrc(e.target.value)}
+                  className="rounded border border-sky-300 px-2 py-1 text-xs bg-white">
+                  <option value="">选择要并入的一条…</option>
+                  {cands.map(c => (
+                    <option key={c.id} value={c.id}>{c.item_no} · {c.total_required_qty ?? '?'}{c.unit || ''}{c.color ? ` · ${c.color}` : ''}</option>
+                  ))}
+                </select>
+                <button onClick={doMerge} disabled={!mergeSrc}
+                  className="px-2.5 py-1 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">合并</button>
+              </div>
+            );
+          })()}
 
           {/* 补采购信息 + 财务审批(服务端按角色把关:仅财务/管理员可批) */}
           {sel.is_supplement && (
