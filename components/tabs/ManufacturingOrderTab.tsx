@@ -265,12 +265,15 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
       <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
         <div className="text-xs font-semibold text-gray-600">工厂执行说明（业务翻译，结构化录入）</div>
         <div className="grid md:grid-cols-2 gap-3">
-          {field('印绣要求', 'print_embroidery_requirements')}
-          {field('QC 重点', 'qc_focus')}
+          {/* 标签与「生产任务单」Excel 行一一对齐(2026-07-10):字段 key 不变,只改显示名,避免误填。
+              缝制要求←print_embroidery_requirements / 检验要求←qc_focus / 包装要求←factory_packing_instructions
+              / 注意事项←risk_notes / 裁剪要求←factory_notes(见 manufacturing-order.ts 生成行) */}
+          {field('缝制要求', 'print_embroidery_requirements')}
+          {field('检验要求（QC 重点）', 'qc_focus')}
           {field('特殊要求', 'special_requirements')}
-          {field('风险提醒', 'risk_notes')}
-          {field('内部包装说明（≠客户原始要求）', 'factory_packing_instructions')}
-          {field('其他下厂说明', 'factory_notes')}
+          {field('注意事项', 'risk_notes')}
+          {field('包装要求（内部，≠客户原始要求）', 'factory_packing_instructions')}
+          {field('裁剪要求', 'factory_notes')}
         </div>
         <div className="flex items-center gap-3">
           <button onClick={save} disabled={saving}
@@ -326,13 +329,14 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
             const sizeKeys = sortSizeKeys([...sizeSet]).slice(0, 8);
             const styleTotal = g.items.reduce((a, li) => a + (Number(li.qty_pcs) || 0), 0) || (groups.length === 1 ? order.quantity : 0);
             const colTotals = sizeKeys.map(s => g.items.reduce((a, li) => a + ((li.sizes && Number(li.sizes[s])) || 0), 0));
+            // 与下载 Excel 逐行同源(manufacturing-order.ts 生成行);此前 preview 用了不同映射,导致预览≠成品单
             const reqRows: [string, string][] = [
-              ['装箱方式', order.packaging_type === 'custom' ? '定制包装（按客户要求）' : '标准包装'],
-              ['包装方式', mo.factory_packing_instructions || ''],
-              ['裁剪要求', ''],
-              ['缝制要求', joinTxt(mo.print_embroidery_requirements, mo.special_requirements)],
+              ['裁剪要求', mo.factory_notes || ''],
+              ['缝制要求', mo.print_embroidery_requirements || ''],
               ['检验要求', mo.qc_focus || ''],
-              ['注意事项', joinTxt(mo.risk_notes, mo.factory_notes)],
+              ['包装要求', mo.factory_packing_instructions || ''],
+              ['装箱要求', ''],
+              ['注意事项', mo.risk_notes || mo.special_requirements || ''],
             ];
             const nCols = Math.max(sizeKeys.length, 1) + 5;
             // S1.2 按款过滤 BOM:该款专属(含同步布料) + 整单通用
