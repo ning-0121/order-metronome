@@ -7,7 +7,7 @@ import {
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
   generateExecutionLines, getOrderProcurementFulfillment,
   listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
-  saveBomBudgetUnitPrice, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
+  saveBomBudgetUnitPrice, saveBomCustomerSupplied, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { requestSupplementQty, approveSupplement, approveBaselineOver } from '@/app/actions/procurement-supplement';
@@ -84,6 +84,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   const [consLines, setConsLines] = useState<any[]>([]);
   const [overEdit, setOverEdit] = useState<Record<string, string>>({});   // 抛量%(采购职权,逐料)
   const [priceEdit, setPriceEdit] = useState<Record<string, string>>({}); // 预算单价(业务填,逐料;2026-07-08 弃报价基线)
+  const [supplyEdit, setSupplyEdit] = useState<Record<string, boolean>>({}); // 客供料(来料加工:客户供、绮陌不采购)
   const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/件)
   const [accessoryTotal, setAccessoryTotal] = useState('');   // 整单辅料总价一口价
   const [accCost, setAccCost] = useState<{ budget: number | null; actual: number; over: number | null; itemsPriced: number; itemsTotal: number } | null>(null);  // 辅料 预算vs实际(采购填价)
@@ -95,13 +96,14 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
       setConsLines((r as any).data);
       setOverEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.over_purchase_pct != null ? String(l.over_purchase_pct) : ''])));
       setPriceEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.budget_unit_price != null ? String(l.budget_unit_price) : ''])));
+      setSupplyEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.customer_supplied === true])));
     }
     if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
     setAccessoryTotal((sb as any)?.accessoryTotal != null ? String((sb as any).accessoryTotal) : '');
   };
   useEffect(() => { loadCons(); /* eslint-disable-next-line */ }, [orderId]);
   // 布料大货单耗必须由业务填好(BOM 页),否则不许归并
-  const consMissing = consLines.filter(l => l.required && !(Number(l.production_consumption) > 0));
+  const consMissing = consLines.filter(l => l.required && !(Number(l.production_consumption) > 0) && !supplyEdit[l.id]);
   async function saveCons() {
     setConsSaving(true); setMsg('');
     // 一次保存:预算单价(业务)+ 逐款加工费 + 整单辅料总价(业务)+ 抛量%(采购,已下单则锁定不重存)
@@ -112,6 +114,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     const tasks: Promise<any>[] = [
       saveBomBudgetUnitPrice(orderId, prices as any),          // 预算单价(业务,任何阶段可填)
       saveOrderStyleBudgets(orderId, sbPayload as any, accTotal), // 逐款加工费 + 整单辅料总价(业务)
+      saveBomCustomerSupplied(orderId, supplyEdit),            // 客供料标记(来料加工:绮陌不采购)
     ];
     if (!trackingPhase) tasks.push(saveBomOverPurchasePct(orderId, over as any));  // 抛量:已下单锁定,不重存
     const results = await Promise.all(tasks);
@@ -751,28 +754,38 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400">
-                {['款号', '颜色', '物料', '类型', '数量', '开发单耗', '大货单耗', '预算单价(业务填)', '抛量%(采购填)', '单位'].map(h => (
+                {['款号', '颜色', '物料', '类型', '客供', '数量', '开发单耗', '大货单耗', '预算单价(业务填)', '抛量%(采购填)', '单位'].map(h => (
                   <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr></thead>
               <tbody>
                 {consLines.map(l => (
-                  <tr key={l.id} className={`border-t border-gray-100 ${l.required && !(Number(l.production_consumption) > 0) ? 'bg-amber-50' : ''}`}>
+                  <tr key={l.id} className={`border-t border-gray-100 ${l.required && !(Number(l.production_consumption) > 0) && !supplyEdit[l.id] ? 'bg-amber-50' : ''} ${supplyEdit[l.id] ? 'bg-sky-50/60' : ''}`}>
                     <td className="py-1.5 px-2 font-mono">{l.style_no || '—'}</td>
                     <td className="py-1.5 px-2">{l.color || '—'}</td>
                     <td className="py-1.5 px-2 text-gray-800">{l.material_name || '—'}</td>
                     <td className="py-1.5 px-2">{l.required ? <span className="text-amber-700 font-medium">布料·必核</span> : <span className="text-gray-400">辅料·可选</span>}</td>
+                    {/* 客供:勾了=客户供、绮陌不采购(不进采购/应付/面料成本),仅留规格用量给生产 */}
+                    <td className="py-1.5 px-2 whitespace-nowrap">
+                      <label className="inline-flex items-center gap-1 cursor-pointer" title="客户供料(来料加工):勾上后绮陌不采购此料、不进应付、财务不计其成本;仍保留规格/用量给生产">
+                        <input type="checkbox" checked={!!supplyEdit[l.id]} disabled={trackingPhase}
+                          onChange={e => setSupplyEdit(prev => ({ ...prev, [l.id]: e.target.checked }))}
+                          className="rounded border-gray-300" />
+                        {supplyEdit[l.id] && <span className="text-[11px] text-sky-700 font-medium">客供</span>}
+                      </label>
+                    </td>
                     <td className="py-1.5 px-2 font-medium text-gray-800" title="该款×色件数(整单通用辅料=订单总数)">{l.pieces ?? '—'}</td>
                     <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
                     {/* 大货单耗:业务在 BOM 页填,采购这里只读核实 */}
                     <td className="py-1.5 px-2">
                       {Number(l.production_consumption) > 0
                         ? <span className="font-medium text-gray-800">{l.production_consumption}</span>
-                        : l.required ? <span className="text-[11px] text-amber-600">业务未填 →</span> : <span className="text-gray-300">—</span>}
+                        : (l.required && !supplyEdit[l.id]) ? <span className="text-[11px] text-amber-600">业务未填 →</span> : <span className="text-gray-300">—</span>}
                     </td>
-                    {/* 预算单价:仅布料填(面料预算=大货单耗×本列×件数);辅料不逐个填价,走下方「辅料总价」 */}
+                    {/* 预算单价:仅布料填(面料预算=大货单耗×本列×件数);辅料不逐个填价,走下方「辅料总价」;客供料绮陌不买 → 免填 */}
                     <td className="py-1.5 px-2">
-                      {l.required ? (<>
+                      {supplyEdit[l.id] ? <span className="text-[11px] text-sky-600">客供·绮陌不采购</span>
+                        : l.required ? (<>
                         <span className="text-gray-400 mr-0.5">¥</span>
                         <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''}
                           placeholder="必填"
