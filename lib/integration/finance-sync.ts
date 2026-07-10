@@ -41,6 +41,7 @@ type WebhookEventType =
   | 'milestone.requested'
   | 'goods_receipt.recorded'
   | 'file.uploaded'
+  | 'shipping_invoice.issued'
 
 interface WebhookPayload {
   event: WebhookEventType
@@ -551,6 +552,42 @@ export async function syncFileToFinance(payload: {
   extracted_fields?: Record<string, unknown>;
 }) {
   return sendToFinanceSystem('file.uploaded', payload as unknown as Record<string, unknown>)
+}
+
+/**
+ * 出货发票金额 → 财务应收(阶段二,2026-07-10)。纯映射,可测。
+ * invoice_amount = 该订单【累计已出运各批 CI 金额之和】(整单口径,幂等:再算得同值)。
+ * 财务侧语义(用户拍板):budget_order 为 draft 未确认 → 以本金额更新 total_revenue(应收);
+ * 已确认(approved/closed 等)→ 只告警不改账。deposit_raw 是 PI 定金原文(可能是 "30%"/金额),财务存快照参考。
+ */
+export function buildShippingInvoicePayload(input: {
+  qimo_order_id: string; order_no?: string | null; internal_order_no?: string | null;
+  currency: string; invoice_amount: number | null; invoice_qty?: number | null;
+  deposit_raw?: string | null;
+  scopes?: Array<{ scope: string; amount: number | null; qty: number | null }>;
+}): Record<string, unknown> {
+  const r2 = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? Math.round(x * 100) / 100 : null }
+  return {
+    qimo_order_id: input.qimo_order_id,
+    order_no: input.order_no ?? null,
+    internal_order_no: input.internal_order_no ?? null,
+    currency: input.currency || 'USD',
+    invoice_amount: r2(input.invoice_amount),
+    invoice_qty: input.invoice_qty != null ? Number(input.invoice_qty) : null,
+    deposit_raw: input.deposit_raw ?? null,
+    scopes: (input.scopes ?? []).map((s) => ({ scope: s.scope, amount: r2(s.amount), qty: s.qty != null ? Number(s.qty) : null })),
+    source: 'qimo_shipping_ci',
+  }
+}
+
+/**
+ * 出货发票金额同步 → 财务(阶段二)。金额 ≤0(无价版/未出运)不发,避免把 ¥0 应收写进台账。
+ * 内容哈希幂等:同金额重发去重,再出一批(金额变)→ 新键 → 财务照常更新。首发失败落 outbox 自动重试。
+ */
+export async function syncShippingInvoiceToFinance(input: Parameters<typeof buildShippingInvoicePayload>[0]) {
+  const payload = buildShippingInvoicePayload(input)
+  if ((Number(payload.invoice_amount) || 0) <= 0) return { success: true }   // 无金额不入账
+  return sendToFinanceSystem('shipping_invoice.issued', payload)
 }
 
 /** 检查财务系统连通性 */

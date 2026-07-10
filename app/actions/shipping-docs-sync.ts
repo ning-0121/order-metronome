@@ -17,7 +17,7 @@ import { loadShippingDocModel } from '@/lib/services/shipping-docs';
 import {
   buildPackingListWorkbook, buildCommercialInvoiceWorkbook, buildCustomsWorkbook, buildPIWorkbook,
 } from '@/lib/services/shipping-doc-builders';
-import { syncFileToFinance } from '@/lib/integration/finance-sync';
+import { syncFileToFinance, syncShippingInvoiceToFinance } from '@/lib/integration/finance-sync';
 import type { PIData } from '@/app/actions/order-pi';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -81,6 +81,9 @@ export async function syncShippingDocsToFinance(
       skipped.push('proforma_invoice(未保存 PI)');
     }
 
+    // 阶段二:出货发票金额 → 财务应收(整单累计口径,独立于本次触发的 scope)。自带 try,失败不影响文件送达。
+    await emitShippingInvoiceToFinance(svc, orderId);
+
     if (docs.length === 0) return { ok: true, sent, skipped };
 
     const customerName = order?.customer_name ?? null;
@@ -118,5 +121,68 @@ export async function syncShippingDocsToFinance(
   } catch (e: any) {
     console.warn('[shipdoc-sync] 出货单据同步财务失败(不阻断):', e?.message);
     return { ok: false, sent, skipped, error: e?.message || String(e) };
+  }
+}
+
+/**
+ * 阶段二:算出订单【累计已出运各批 CI 金额之和】→ 发 shipping_invoice.issued 给财务(应收)。
+ * 整单口径,与哪个批次触发无关 → 幂等(再算同值)。分批订单累加所有 status='shipped' 批次的 CI;
+ * 无分批(整单)则取整单 CI。金额 ≤0(无价版)由 syncShippingInvoiceToFinance 内部跳过。
+ * 用 env kill-switch:SHIPPING_INVOICE_AR_SYNC='off' 关闭金额入账(文件送达不受影响,便于回滚)。
+ * 全程 try 吞错,永不阻断。
+ */
+async function emitShippingInvoiceToFinance(svc: any, orderId: string): Promise<void> {
+  try {
+    if (process.env.SHIPPING_INVOICE_AR_SYNC === 'off') return;
+
+    const scopes: Array<{ scope: string; amount: number | null; qty: number | null }> = [];
+    let currency = 'USD';
+    let orderRef: any = null;
+
+    const { data: shipped } = await (svc.from('shipment_batches') as any)
+      .select('id, batch_no').eq('order_id', orderId).eq('status', 'shipped');
+    const shippedBatches = (shipped as any[]) || [];
+
+    if (shippedBatches.length > 0) {
+      for (const b of shippedBatches) {
+        const { data: m } = await loadShippingDocModel(svc, orderId, true, b.id);
+        if (!m) continue;
+        orderRef = orderRef || m.order;
+        currency = m.currency?.label === 'RMB' ? 'CNY' : (m.currency?.code || currency);
+        scopes.push({ scope: `batch-${b.batch_no ?? b.id}`, amount: m.ciTotals?.amount ?? null, qty: m.ciTotals?.qty ?? null });
+      }
+    } else {
+      const { data: m } = await loadShippingDocModel(svc, orderId, true, null);
+      if (m) {
+        orderRef = m.order;
+        currency = m.currency?.label === 'RMB' ? 'CNY' : (m.currency?.code || currency);
+        scopes.push({ scope: 'whole', amount: m.ciTotals?.amount ?? null, qty: m.ciTotals?.qty ?? null });
+      }
+    }
+
+    const invoiceAmount = scopes.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+    if (invoiceAmount <= 0) return;   // 无价/未出运 → 不入账
+    const invoiceQty = scopes.reduce((s, x) => s + (Number(x.qty) || 0), 0);
+
+    if (!orderRef) {
+      const { data: o } = await (svc.from('orders') as any)
+        .select('order_no, internal_order_no').eq('id', orderId).maybeSingle();
+      orderRef = o;
+    }
+    const { data: piRow } = await (svc.from('order_pi') as any).select('data').eq('order_id', orderId).maybeSingle();
+    const depositRaw = ((piRow as any)?.data as PIData | undefined)?.deposit ?? null;
+
+    await syncShippingInvoiceToFinance({
+      qimo_order_id: orderId,
+      order_no: orderRef?.order_no ?? null,
+      internal_order_no: orderRef?.internal_order_no ?? null,
+      currency,
+      invoice_amount: invoiceAmount,
+      invoice_qty: invoiceQty,
+      deposit_raw: depositRaw,
+      scopes,
+    });
+  } catch (e: any) {
+    console.warn('[shipdoc-sync] 出货发票金额入账失败(不阻断):', e?.message);
   }
 }

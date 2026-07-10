@@ -417,16 +417,32 @@ export async function saveBomBudgetUnitPrice(orderId: string, entries: Record<st
   return { ok: true, saved };
 }
 
+// 可看/可填预算(加工费/辅料)的角色 —— 业务/理单/采购/财务/管理员。
+// order_cost_baseline 的 RLS 只放行 订单 owner/创建人/canSeeAll;非订单负责人的业务执行(merchandiser)、
+// 采购(procurement)会被 RLS 挡成空白(2026-07-10 实测:cathy/pin can_access_baseline=false),
+// 表现为「款号行在、加工费/辅料一口价空」。授权改由此角色门把关,DB 读写走 service-role,与 quote-baseline 一致。
+const BUDGET_ROLES = [
+  'sales', 'merchandiser', 'sales_manager', 'order_manager',
+  'procurement', 'procurement_manager', 'finance', 'admin',
+  'admin_assistant', 'production_manager',
+];
+
 /** 逐款预算(加工费,元/件)+ 整单辅料总价一口价:读。存 order_cost_baseline。业务在采购核料填。 */
 export async function getOrderStyleBudgets(orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { data: cb } = await (supabase.from('order_cost_baseline') as any)
+  // 角色门:授权由此把关(取代过严的 order_cost_baseline SELECT RLS),再用 service-role 读回预算
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const uRoles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!uRoles.some((r) => BUDGET_ROLES.includes(r))) return { error: '无权查看预算' };
+  const svc = createServiceRoleClient();
+  const { data: cb, error: cbErr } = await (svc.from('order_cost_baseline') as any)
     .select('*').eq('order_id', orderId).maybeSingle();   // select * → accessory_budget_total 列未建也不报错
+  if (cbErr) return { error: friendlyError(cbErr) };
   const existing: any[] = (cb as any)?.quote_style_budgets || [];
   // 款号来自 order_line_items(逐款明细),预填每款一行;已存的加工费带回
-  const { data: lis } = await (supabase.from('order_line_items') as any).select('style_no').eq('order_id', orderId);
+  const { data: lis } = await (svc.from('order_line_items') as any).select('style_no').eq('order_id', orderId);
   const norm = (s: any) => String(s ?? '').trim();
   const styles = [...new Set((lis || []).map((l: any) => norm(l.style_no)).filter(Boolean))];
   const byStyle = new Map(existing.map((b: any) => [norm(b.style_no), b]));
@@ -449,28 +465,32 @@ export async function saveOrderStyleBudgets(
   if (!user) return { error: '请先登录' };
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const uRoles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
-  if (!uRoles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
-    return { error: '仅业务/理单/采购/管理员可填加工费/辅料预算' };
+  if (!uRoles.some((r) => BUDGET_ROLES.includes(r))) {
+    return { error: '仅业务/理单/采购/财务/管理员可填加工费/辅料预算' };
   }
   const num = (v: any) => { const n = Number(v); return isFinite(n) && n > 0 ? n : null; };
   // 逐款只存加工费 cmt;辅料改整单一口价(清掉历史逐款 trim_budget,避免和一口价重复计)
   const clean = (budgets || []).filter((b) => String(b.style_no || '').trim())
     .map((b) => ({ style_no: String(b.style_no).trim(), cmt: num(b.cmt), trim_budget: null }));
   const accTotal = accessoryTotal === undefined ? undefined : num(accessoryTotal);
-  const { data: existing } = await (supabase.from('order_cost_baseline') as any).select('id').eq('order_id', orderId).maybeSingle();
+  // 写走 service-role:order_cost_baseline 的 INSERT/UPDATE RLS 只放行 owner/canSeeAll,
+  // 非订单负责人的业务/采购用 user session 写会静默 0 行(RLS)—— 授权已由上面角色门把关。
+  const svc = createServiceRoleClient();
+  const { data: existing } = await (svc.from('order_cost_baseline') as any).select('id').eq('order_id', orderId).maybeSingle();
   const basePayload: Record<string, any> = { quote_style_budgets: clean, updated_at: new Date().toISOString() };
   const withAcc = accTotal === undefined ? basePayload : { ...basePayload, accessory_budget_total: accTotal };
   let accColMissing = false;
   const run = async (payload: Record<string, any>) => existing
-    ? (supabase.from('order_cost_baseline') as any).update(payload).eq('order_id', orderId)
-    : (supabase.from('order_cost_baseline') as any).insert({ order_id: orderId, ...payload });
-  let { error } = await run(withAcc);
+    ? (svc.from('order_cost_baseline') as any).update(payload).eq('order_id', orderId).select('id')
+    : (svc.from('order_cost_baseline') as any).insert({ order_id: orderId, ...payload }).select('id');
+  let { data: wrote, error } = await run(withAcc);
   if (error && /accessory_budget_total|column .* does not exist/i.test(error.message || '')) {
     // 迁移未跑:降级只存加工费(不 brick),辅料总价待迁移后再存
     accColMissing = true;
-    ({ error } = await run(basePayload));
+    ({ data: wrote, error } = await run(basePayload));
   }
   if (error) return { error: friendlyError(error) };
+  if (!wrote || (wrote as any[]).length === 0) return { error: '预算未写入(0 行受影响),请重试或联系管理员' };
   try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
   if (accColMissing) return { ok: true, warning: '辅料总价列尚未建立:请先在 Supabase 执行 20260708_order_accessory_budget_total.sql(加工费已保存)' } as any;
   revalidatePath(`/orders/${orderId}`);
