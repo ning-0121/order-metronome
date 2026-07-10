@@ -8,6 +8,7 @@ import { OrderTimeline } from '@/components/OrderTimeline';
 import { DelayRequestsList } from '@/components/DelayRequestsList';
 import { OrderScoreCard } from '@/components/OrderScoreCard';
 import { MerchandiserAssign } from '@/components/MerchandiserAssign';
+import { FactoryAssign } from '@/components/FactoryAssign';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { LiveScorePreview } from '@/components/LiveScorePreview';
 import { DocumentCenterTab } from '@/components/tabs/DocumentCenterTab';
@@ -525,13 +526,21 @@ export default async function OrderDetailPage({
                   { label: '颜色数', value: orderData.color_count ? `${orderData.color_count} 色` : null },
                   { label: '下单日期', value: orderData.order_date ? formatDate(orderData.order_date) : null },
                   { label: '出厂日期', value: orderData.factory_date ? formatDate(orderData.factory_date) : null },
-                  { label: '工厂', value: orderData.factory_name },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between">
                     <dt className="text-sm text-gray-500">{label}</dt>
                     <dd className="text-sm font-medium text-gray-900">{value || '—'}</dd>
                   </div>
                 ))}
+                {/* 工厂 — admin/生产主管可更换(2026-07-09 用户) */}
+                <div className="flex justify-between items-center">
+                  <dt className="text-sm text-gray-500">工厂</dt>
+                  <dd className="text-sm font-medium text-gray-900">
+                    {(isAdmin || currentRoles.includes('production_manager'))
+                      ? <FactoryAssign orderId={id} currentFactoryName={orderData.factory_name} />
+                      : (orderData.factory_name || '—')}
+                  </dd>
+                </div>
                 {/* 备注高亮显示 */}
                 {orderData.notes ? (
                   <div className="mt-2 p-3 rounded-lg bg-amber-50 border border-amber-200">

@@ -1,6 +1,42 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
+import { isAdminRole } from '@/lib/domain/roles';
+
+/**
+ * 更换订单工厂(2026-07-09 用户:生产主管要能改工厂)。仅 admin / 生产主管。
+ * 传 factoryId 从工厂库带出名字;factoryId 为空则清空工厂。
+ */
+export async function updateOrderFactory(
+  orderId: string,
+  factoryId: string | null,
+): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!isAdminRole(userRoles) && !userRoles.includes('production_manager')) {
+    return { error: '只有管理员或生产主管可以更换工厂' };
+  }
+
+  let factory_name: string | null = null;
+  if (factoryId) {
+    const { data: f } = await (supabase.from('factories') as any)
+      .select('factory_name').eq('id', factoryId).is('deleted_at', null).maybeSingle();
+    if (!f) return { error: '工厂不存在' };
+    factory_name = (f as any).factory_name;
+  }
+
+  const { error } = await (supabase.from('orders') as any)
+    .update({ factory_id: factoryId, factory_name }).eq('id', orderId);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
 
 export interface Factory {
   id: string;
