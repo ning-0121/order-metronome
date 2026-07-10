@@ -18,6 +18,7 @@ import {
   submitRetrospective,
 } from '@/lib/repositories/ordersRepo';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
+import { normalizeStyleFabrics, primaryFabricColumns } from '@/lib/services/style-fabrics';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import type { IncotermType, OrderType, PackagingType } from '@/lib/types';
 
@@ -350,6 +351,24 @@ export async function createOrder(
     lifecycle_status: 'active',
     quantity: quantity,
     quantity_unit: quantityUnit,
+    // 客户 PO 成交价(业务上传 PO 解析所得,表单已人工复核)→ 落库并随 order.created 同步财务。
+    // 财务据 total_amount/unit_price 自动建 draft 预算(total_revenue=总额),供财务审 单价/件数/总额。
+    // 仅落草稿(财务侧 status=draft、created_by=null),财务审批后才入账 —— 符合 AI 产出须审批的铁律。
+    // FormData 无这些字段时(如报价快照建单路径未喂价)返回 {},对既有行为零影响。
+    ...(() => {
+      const up = Number(formData.get('unit_price'));
+      const ta = Number(formData.get('total_amount'));
+      const cur = (formData.get('currency') as string) || '';
+      const unitPrice = Number.isFinite(up) && up > 0 ? up : null;
+      const totalAmount = Number.isFinite(ta) && ta > 0
+        ? ta
+        : (unitPrice != null && quantity > 0 ? Number((unitPrice * quantity).toFixed(2)) : null);
+      const patch: Record<string, any> = {};
+      if (unitPrice != null) patch.unit_price = unitPrice;
+      if (totalAmount != null) patch.total_amount = totalAmount;
+      if (cur) patch.currency = cur;
+      return patch;
+    })(),
     style_count: styleCount ? parseInt(styleCount, 10) : null,
     color_count: colorCount ? parseInt(colorCount, 10) : null,
     factory_date: factory_date || null,
@@ -810,8 +829,9 @@ export async function createOrder(
       let lineNo = 0;
       for (const st of parsedStyles) {
         const colors = Array.isArray(st?.colors) ? st.colors : [];
-        const fabricCons = st?.fabric_consumption === '' || st?.fabric_consumption == null ? null : Number(st.fabric_consumption);
         const poPrice = st?.po_unit_price === '' || st?.po_unit_price == null ? null : Number(st.po_unit_price);
+        const fabrics = normalizeStyleFabrics(st);       // 多布料(优先 fabrics,缺则旧 fabric_* 合成)
+        const prim = primaryFabricColumns(fabrics);      // 第一条镜像回旧列做兼容
         for (const c of colors) {
           lineNo++;
           // qty 优先取 c.qty;富录入表不维护 qty 字段 → 从 sizes 求和兜底
@@ -834,10 +854,11 @@ export async function createOrder(
             carton_count: cartons != null && !isNaN(cartons) ? cartons : null,
             image_url: st?.image_url || null,
             remark: c?.remark || null,
-            fabric_name: st?.fabric_name?.trim?.() || null,
-            fabric_width: st?.fabric_width?.trim?.() || null,
-            fabric_consumption: fabricCons != null && !isNaN(fabricCons) ? fabricCons : null,
-            fabric_unit: st?.fabric_unit?.trim?.() || null,
+            fabric_name: prim.fabric_name,
+            fabric_width: prim.fabric_width,
+            fabric_consumption: prim.fabric_consumption,
+            fabric_unit: prim.fabric_unit,
+            fabrics: fabrics.length > 0 ? fabrics : null,   // 多布料明细(JSONB);列缺失时降级剔除见下
             po_unit_price: poPrice != null && !isNaN(poPrice) ? poPrice : null,   // 客户 PO 成交价(款级同值写每行)
             source: 'po_parse',
           });
@@ -845,9 +866,9 @@ export async function createOrder(
       }
       if (rows.length > 0) {
         let { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
-        if (liErr && /po_unit_price|carton_count|column .* does not exist/i.test(liErr.message || '')) {
-          // po_unit_price(20260706)/carton_count(20260703)迁移未执行 → 降级去掉这些列重插,不阻断建单
-          const plain = rows.map(({ po_unit_price, carton_count, ...rest }) => rest);
+        if (liErr && /po_unit_price|carton_count|fabrics|column .* does not exist/i.test(liErr.message || '')) {
+          // po_unit_price(20260706)/carton_count(20260703)/多布料(20260710)迁移未执行 → 降级去掉这些列重插,不阻断建单
+          const plain = rows.map(({ po_unit_price, carton_count, fabrics, ...rest }) => rest);
           ({ error: liErr } = await (supabase.from('order_line_items') as any).insert(plain));
         }
         if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);

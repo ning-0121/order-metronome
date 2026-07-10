@@ -583,6 +583,15 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     // AI 原始识别冻结底档(有 PO 解析时才带):建单落到 orders.po_parse_snapshot,供后续纠错追溯
     if (poParseResult) {
       rawFormData.set('po_parse_snapshot', JSON.stringify(poParseResult));
+      // 客户 PO 成交价 → 落 orders.unit_price/total_amount/currency,随 order.created 同步财务,
+      // 财务据此自动建 draft 预算(总额=应收),审单价/件数/总额。表单未显式有价字段时以解析值兜底;
+      // 仅当表单没手填时才用解析值,避免覆盖人工修正。
+      const up = Number(poParseResult.unit_price);
+      const ta = Number(poParseResult.total_amount);
+      const cur = poParseResult.currency;
+      if (!rawFormData.get('unit_price') && Number.isFinite(up) && up > 0) rawFormData.set('unit_price', String(up));
+      if (!rawFormData.get('total_amount') && Number.isFinite(ta) && ta > 0) rawFormData.set('total_amount', String(ta));
+      if (!rawFormData.get('currency') && cur) rawFormData.set('currency', String(cur));
     }
 
     try {

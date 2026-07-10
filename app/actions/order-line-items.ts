@@ -10,6 +10,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { syncStyleFabricsToBom } from '@/lib/services/style-fabric-sync';
+import { normalizeStyleFabrics, primaryFabricColumns } from '@/lib/services/style-fabrics';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 
@@ -82,6 +83,7 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
         product_name_en: r.product_name_en || '', image_url: r.image_url || '',
         fabric_name: r.fabric_name || '', fabric_width: r.fabric_width || '',
         fabric_consumption: r.fabric_consumption ?? '', fabric_unit: r.fabric_unit || 'kg',
+        fabrics: normalizeStyleFabrics(r),   // 多布料:优先 fabrics 列,缺则由旧 fabric_* 合成单条
         set_multiplier: Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1,  // 套装每套件数(1=非套装)
         ...(canSeeFin ? { po_unit_price: r.po_unit_price ?? '' } : {}),   // 客户成交价(款级,仅财务口径可见)
         colors: [],
@@ -95,6 +97,10 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
       st.fabric_consumption = r.fabric_consumption ?? ''; st.fabric_unit = r.fabric_unit || 'kg';
     }
     if (canSeeFin && (st.po_unit_price === '' || st.po_unit_price == null) && r.po_unit_price != null) st.po_unit_price = r.po_unit_price;
+    if ((!st.fabrics || st.fabrics.length === 0)) {   // 款级同值写每行:布料在任一行齐了就采纳
+      const f = normalizeStyleFabrics(r);
+      if (f.length > 0) st.fabrics = f;
+    }
     st.colors.push({ color_cn: r.color_cn || '', color_en: r.color_en || '', sizes: r.sizes || {}, qty: Number(r.qty_pcs) || 0, remark: r.remark || '', carton_count: r.carton_count ?? '' });
   }
   return { data: [...map.values()] };
@@ -179,11 +185,12 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
   const rows: any[] = [];
   let lineNo = 0;
   for (const st of (styles || [])) {
-    const fabricCons = st?.fabric_consumption === '' || st?.fabric_consumption == null ? null : Number(st.fabric_consumption);
     const submittedPrice = st?.po_unit_price === '' || st?.po_unit_price == null ? null : Number(st.po_unit_price);
     const poUnitPrice = canSeeFin
       ? (submittedPrice != null && !isNaN(submittedPrice) ? submittedPrice : null)   // 财务口径角色:用提交值
       : (existingPrice.get((st?.style_no || '').trim()) ?? null);                     // 其他角色:保留旧值
+    const fabrics = normalizeStyleFabrics(st);                 // 多布料(优先 fabrics,缺则旧 fabric_* 合成)
+    const prim = primaryFabricColumns(fabrics);                // 第一条镜像回旧列做兼容
     for (const c of (st?.colors || [])) {
       lineNo++;
       const sizesIn = c?.sizes || {};
@@ -203,10 +210,11 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
         qty_pcs: qty || null, qty_raw: qty || null,
         carton_count: cartons != null && !isNaN(cartons) ? cartons : null,   // 箱数(该色行)
         image_url: st?.image_url?.trim() || null, remark: c?.remark?.trim() || null,
-        fabric_name: st?.fabric_name?.trim() || null,
-        fabric_width: st?.fabric_width?.trim() || null,
-        fabric_consumption: fabricCons != null && !isNaN(fabricCons) ? fabricCons : null,
-        fabric_unit: st?.fabric_unit?.trim() || null,
+        fabric_name: prim.fabric_name,
+        fabric_width: prim.fabric_width,
+        fabric_consumption: prim.fabric_consumption,
+        fabric_unit: prim.fabric_unit,
+        fabrics: fabrics.length > 0 ? fabrics : null,   // 多布料明细(JSONB);列缺失时降级剔除见下
         po_unit_price: poUnitPrice,   // 客户成交价(款级同值写每行)
         source: 'manual',
         created_by: user.id,        // 录入留痕(整单替换式保存=最后保存人)
@@ -226,10 +234,10 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
   }
   if (rows.length > 0) {
     let { error: insErr } = await (supabase.from('order_line_items') as any).insert(rows);
-    if (insErr && /product_name_en|carton_count|created_by|po_unit_price|column .* does not exist/i.test(insErr.message || '')) {
+    if (insErr && /product_name_en|carton_count|created_by|po_unit_price|fabrics|column .* does not exist/i.test(insErr.message || '')) {
       // 新列迁移未执行 → 降级去掉新列重插(不 brick 保存),提醒执行迁移
-      console.warn('[saveOrderLineItems] 双语/箱数/录入人/PO价列缺失,降级保存。请执行 20260703/20260706 系列迁移');
-      const plain = rows.map(({ product_name_en, carton_count, created_by, po_unit_price, ...rest }) => rest);
+      console.warn('[saveOrderLineItems] 双语/箱数/录入人/PO价/多布料列缺失,降级保存。请执行 20260703/20260706/20260710 系列迁移');
+      const plain = rows.map(({ product_name_en, carton_count, created_by, po_unit_price, fabrics, ...rest }) => rest);
       ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(plain));
     }
     if (insErr) return { error: '写明细失败:' + insErr.message };

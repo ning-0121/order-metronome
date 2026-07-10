@@ -34,6 +34,33 @@ export interface EnsureMaterialInput {
  *  - 录入带规格 → 按规格精确配;配不上 → 建新变体行;
  *  - 录入无规格 → 同名只有一行才复用;有多行变体 = 歧义,不瞎猜(返回 null,BOM 行留空码,人来定)。
  */
+/**
+ * 只读匹配:找 同名+同类+同规格 的正式主数据,**绝不新建、绝不写库**。
+ * 用于「布料只挂库不自动补录」——业务手打的料若库里没有唯一对应,就留空码(名字仍在 BOM 上),等采购人工建/去重。
+ * 匹配规则同 ensureMaterialMaster 的 pickMatch:带规格按规格配;无规格仅唯一命中才复用,多变体歧义不猜(返回 null)。
+ */
+export async function findMaterialMaster(
+  supabase: any, input: { name: string; category: string; spec?: string | null },
+): Promise<{ id: string; code: string } | null> {
+  try {
+    const name = input.name?.trim();
+    if (!name) return null;
+    const cat = BOM_TO_MASTER_CAT[input.category] || (CODE_PREFIX[input.category] ? input.category : 'other');
+    const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+    const inSpec = norm(input.spec);
+    const { data: rows } = await supabase.from('material_master')
+      .select('id, material_code, specification')
+      .eq('is_temporary', false).eq('status', 'active').eq('category', cat)
+      .ilike('material_name', name).limit(20);
+    const list = rows || [];
+    if (list.length === 0) return null;
+    const specHit = list.find((r: any) => norm(r.specification) === inSpec);
+    if (specHit) return { id: specHit.id, code: specHit.material_code || '' };
+    if (inSpec) return null;                                              // 带规格但库里无此变体 → 不猜
+    return list.length === 1 ? { id: list[0].id, code: list[0].material_code || '' } : null;  // 无规格:唯一才复用
+  } catch { return null; }
+}
+
 export async function ensureMaterialMaster(
   supabase: any, userId: string, input: EnsureMaterialInput,
 ): Promise<{ id: string; code: string } | null> {

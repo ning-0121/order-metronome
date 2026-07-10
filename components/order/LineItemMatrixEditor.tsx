@@ -6,20 +6,33 @@
  * 图片本轮支持填 URL;上传按钮随 S1.1(公开图片桶)补。
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { getOrderLineItems, saveOrderLineItems, parseOrderFile } from '@/app/actions/order-line-items';
 import { parsePO } from '@/app/actions/po-parser';
+import { listMaterialMaster } from '@/app/actions/material-master';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys } from '@/lib/utils/size-sort';
 
 type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string; carton_count?: number | string };
+// S1.2 每款布料(可多种)——名/门幅/单耗/单位/单价;单价=采购参考价(¥,只登记不自动进成本)
+type Fabric = { material_id?: string | null; material_code?: string | null; name: string; width?: string; consumption?: string | number; unit?: string; price?: string | number };
 type Style = {
   style_no: string; product_name: string; image_url: string; colors: Color[];
   product_name_en?: string;   // 款式英文描述(生产任务单/PI 双语)
-  // S1.2 每款布料(自动同步成该款 BOM 第一行 + 生产任务单用料)
+  // 每款布料(自动同步成该款 BOM + 生产任务单用料)。fabrics 为准;fabric_* 存第一条做向后兼容。
+  fabrics?: Fabric[];
   fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
   set_multiplier?: number | string;   // 套装每套件数(1/空=非套装);算料按 件数×每套件数
   po_unit_price?: string | number;    // 客户 PO 成交单价(款级,给客户的价);仅 showPrice 时渲染,server 端按财务口径剥离
+};
+
+const emptyFabric = (): Fabric => ({ name: '', width: '', consumption: '', unit: 'kg', price: '', material_id: null, material_code: null });
+// 展示用布料列表:优先 fabrics;缺则用旧 fabric_* 合成单条;都空给一条空行
+const styleFabrics = (st: Style): Fabric[] => {
+  if (Array.isArray(st.fabrics) && st.fabrics.length > 0) return st.fabrics;
+  if (st.fabric_name || st.fabric_width || (st.fabric_consumption ?? '') !== '')
+    return [{ name: st.fabric_name || '', width: st.fabric_width || '', consumption: st.fabric_consumption ?? '', unit: st.fabric_unit || 'kg', price: '', material_id: null }];
+  return [emptyFabric()];
 };
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
@@ -169,7 +182,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   };
 
   // ── 款 ──
-  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', po_unit_price: '', set_multiplier: 1, colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
+  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabrics: [emptyFabric()], fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', po_unit_price: '', set_multiplier: 1, colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
   const removeStyle = (i: number) => setStyles(styles.filter((_, x) => x !== i));
   // 复制款:深拷贝(颜色/尺码件数/图片全带上),插在原款正下方,款号加「-副本」提示改;再改数量/图片即可
   const copyStyle = (i: number) => {
@@ -178,6 +191,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       style_no: src.style_no ? `${src.style_no}-副本` : '',
       product_name: src.product_name,
       image_url: src.image_url,
+      fabrics: styleFabrics(src).map((f) => ({ ...f })),   // 多布料整组深拷贝
       fabric_name: src.fabric_name || '', fabric_width: src.fabric_width || '',
       fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg', po_unit_price: src.po_unit_price ?? '',
       set_multiplier: src.set_multiplier ?? 1,
@@ -186,6 +200,51 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
     setStyles([...styles.slice(0, i + 1), dup, ...styles.slice(i + 1)]);
   };
   const setStyleField = (i: number, k: keyof Style, v: string) => setStyles(styles.map((st, x) => x === i ? { ...st, [k]: v } : st));
+
+  // ── 布料(每款可多种)──
+  // 布料名搜物料库(category=fabric):防抖 250ms,只开一个下拉(key=si-fi)
+  const [fabPick, setFabPick] = useState<{ key: string; results: any[]; loading: boolean } | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 写 fabrics 的同时把第一条镜像回旧 fabric_* 字段(老读者/建单只认单条时兜底)
+  const withFabrics = (st: Style, fabrics: Fabric[]): Style => {
+    const first = fabrics[0] || emptyFabric();
+    return { ...st, fabrics,
+      fabric_name: first.name || '', fabric_width: first.width || '',
+      fabric_consumption: first.consumption ?? '', fabric_unit: first.unit || 'kg' };
+  };
+  const mapFabrics = (si: number, fn: (fabrics: Fabric[]) => Fabric[]) =>
+    setStyles(styles.map((st, x) => x === si ? withFabrics(st, fn(styleFabrics(st))) : st));
+  const addFabric = (si: number) => mapFabrics(si, (fs) => [...fs, emptyFabric()]);
+  const removeFabric = (si: number, fi: number) => mapFabrics(si, (fs) => { const r = fs.filter((_, y) => y !== fi); return r.length ? r : [emptyFabric()]; });
+  // 改名即视为脱离物料库绑定(手打新料);其余字段原样改
+  const setFabricField = (si: number, fi: number, k: keyof Fabric, v: string) =>
+    mapFabrics(si, (fs) => fs.map((f, y) => y === fi ? { ...f, [k]: v, ...(k === 'name' ? { material_id: null, material_code: null } : {}) } : f));
+  // 选中物料库的料 → 带出 单价/单位/规格(门幅无独立列,用规格兜底)/单耗(仅当为空,不覆盖已填)
+  const pickMaterial = (si: number, fi: number, m: any) => {
+    mapFabrics(si, (fs) => fs.map((f, y) => y === fi ? {
+      ...f,
+      material_id: m.id || null,
+      material_code: m.material_code || null,
+      name: m.material_name || f.name,
+      unit: m.default_unit || f.unit || 'kg',
+      price: m.reference_price ?? f.price ?? '',
+      width: f.width || m.specification || '',
+      consumption: (f.consumption === '' || f.consumption == null) && m.default_consumption != null ? m.default_consumption : f.consumption,
+    } : f));
+    setFabPick(null);
+  };
+
+  const queryFabrics = (key: string, term: string) => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const q = term.trim();
+    if (!q) { setFabPick(null); return; }
+    setFabPick({ key, results: [], loading: true });
+    searchTimer.current = setTimeout(async () => {
+      const res = await listMaterialMaster({ search: q, category: 'fabric' });
+      const results = ((res as any).data || []).slice(0, 8);
+      setFabPick((prev) => (prev && prev.key === key ? { key, results, loading: false } : prev));
+    }, 250);
+  };
 
   // S1.1 上传产品图 → 公开桶 product-images → 存 publicUrl 进 image_url
   async function uploadImage(si: number, file: File) {
@@ -294,22 +353,55 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
             {canEdit && <button onClick={() => removeStyle(si)} className="text-xs text-red-500 hover:underline">删款</button>}
           </div>
 
-          {/* 每款布料(S1.2):自动同步成该款 BOM 第一行 + 生产任务单用料单耗 */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-gray-400 w-14 shrink-0">🧵 布料</span>
-            <input value={st.fabric_name || ''} onChange={(e) => setStyleField(si, 'fabric_name', e.target.value)} placeholder="布料名(如 280g 仿锦)" disabled={!canEdit} className={`${inp} w-44`} />
-            <input value={st.fabric_width || ''} onChange={(e) => setStyleField(si, 'fabric_width', e.target.value)} placeholder="门幅(如 150cm)" disabled={!canEdit} className={`${inp} w-28`} />
-            <input type="number" min="0" step="0.001" value={st.fabric_consumption ?? ''} onChange={(e) => setStyleField(si, 'fabric_consumption', e.target.value)} placeholder="单耗/件" disabled={!canEdit} className={`${inp} w-20 text-right`} />
-            <select value={st.fabric_unit || 'kg'} onChange={(e) => setStyleField(si, 'fabric_unit', e.target.value)} disabled={!canEdit} className={`${inp} bg-white`}>
-              {['kg', '米', '平方', '码'].map((u) => <option key={u} value={u}>{u}</option>)}
-            </select>
-            <span className="text-[11px] text-gray-400">录了会自动进该款 BOM 和生产任务单用料</span>
+          {/* 每款布料(S1.2,可多种):自动同步成该款 BOM + 生产任务单用料 */}
+          <div className="space-y-1.5">
+            {styleFabrics(st).map((fb, fi) => {
+              const pkKey = `${si}-${fi}`;
+              return (
+                <div key={fi} className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-gray-400 w-14 shrink-0">{fi === 0 ? '🧵 布料' : ''}</span>
+                  {/* 名称:可搜物料库,选中带出单价/单位/规格;也可手打新料 */}
+                  <div className="relative">
+                    <input value={fb.name || ''} disabled={!canEdit}
+                      onChange={(e) => { setFabricField(si, fi, 'name', e.target.value); queryFabrics(pkKey, e.target.value); }}
+                      onFocus={(e) => { if (e.target.value.trim()) queryFabrics(pkKey, e.target.value); }}
+                      onBlur={() => setTimeout(() => setFabPick((p) => (p && p.key === pkKey ? null : p)), 150)}
+                      placeholder="布料名(可搜物料库)" className={`${inp} w-44`} />
+                    {fb.material_id && <span className="absolute -top-1.5 right-1 text-[9px] text-emerald-600" title="已关联物料库">●库</span>}
+                    {canEdit && fabPick?.key === pkKey && (
+                      <div className="absolute z-20 mt-1 w-64 max-h-60 overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg text-xs">
+                        {fabPick.loading && <div className="px-3 py-2 text-gray-400">搜索中…</div>}
+                        {!fabPick.loading && fabPick.results.length === 0 && <div className="px-3 py-2 text-gray-400">物料库无匹配,直接手打即可</div>}
+                        {fabPick.results.map((m: any) => (
+                          <button key={m.id} type="button" onMouseDown={(e) => { e.preventDefault(); pickMaterial(si, fi, m); }}
+                            className="block w-full text-left px-3 py-1.5 hover:bg-indigo-50 border-b border-gray-50 last:border-0">
+                            <div className="font-medium text-gray-800">{m.material_name}{m.specification ? <span className="text-gray-400 font-normal"> · {m.specification}</span> : null}</div>
+                            <div className="text-[11px] text-gray-500">{m.material_code || '无编码'} · {m.reference_price != null ? `¥${m.reference_price}/${m.default_unit || 'kg'}` : '无参考价'}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <input value={fb.width || ''} onChange={(e) => setFabricField(si, fi, 'width', e.target.value)} placeholder="门幅(如 150cm)" disabled={!canEdit} className={`${inp} w-24`} />
+                  <input type="number" min="0" step="0.001" value={fb.consumption ?? ''} onChange={(e) => setFabricField(si, fi, 'consumption', e.target.value)} placeholder="单耗/件" disabled={!canEdit} className={`${inp} w-20 text-right`} />
+                  <select value={fb.unit || 'kg'} onChange={(e) => setFabricField(si, fi, 'unit', e.target.value)} disabled={!canEdit} className={`${inp} bg-white`}>
+                    {['kg', '米', '平方', '码'].map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <span className="inline-flex items-center gap-0.5 text-xs text-gray-400" title="采购参考单价(¥);选物料库自动带出,只登记不自动算成本">
+                    ¥<input type="number" min="0" step="0.01" value={fb.price ?? ''} onChange={(e) => setFabricField(si, fi, 'price', e.target.value)} placeholder="单价" disabled={!canEdit} className={`${inp} w-20 text-right`} />
+                  </span>
+                  {canEdit && styleFabrics(st).length > 1 && <button onClick={() => removeFabric(si, fi)} className="text-red-500 text-sm" title="删这条布料">×</button>}
+                </div>
+              );
+            })}
+            {canEdit && <button onClick={() => addFabric(si)} className="ml-14 text-xs text-indigo-600 hover:underline">+ 加布料</button>}
+            <p className="ml-14 text-[11px] text-gray-400">选物料库自动带出单价/单位(可改);录了会自动进该款 BOM 和生产任务单用料</p>
             {showPrice && (
-              <>
-                <span className="text-xs text-gray-400 ml-2">💰 PO单价</span>
+              <div className="flex items-center gap-2 ml-14">
+                <span className="text-xs text-gray-400">💰 PO单价</span>
                 <input type="number" min="0" step="0.01" value={st.po_unit_price ?? ''} onChange={(e) => setStyleField(si, 'po_unit_price', e.target.value)}
                   placeholder="给客户价/件" disabled={!canEdit} className={`${inp} w-24 text-right`} title="客户 PO 成交单价(给客户的价,非我们报价);AI 解析预填,请核对后保存冻结" />
-              </>
+              </div>
             )}
           </div>
 

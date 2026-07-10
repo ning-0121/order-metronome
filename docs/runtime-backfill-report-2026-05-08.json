@@ -1,0 +1,139 @@
+{
+  "ranAt": "2026-05-08T03:02:49.901Z",
+  "durationSec": 101,
+  "totals": {
+    "total": 50,
+    "ok": 50,
+    "failed": 0,
+    "skipped": 0
+  },
+  "distribution": {
+    "green": {
+      "count": 5,
+      "pct": "10.0%"
+    },
+    "yellow": {
+      "count": 5,
+      "pct": "10.0%"
+    },
+    "orange": {
+      "count": 10,
+      "pct": "20.0%"
+    },
+    "red": {
+      "count": 30,
+      "pct": "60.0%"
+    },
+    "gray": {
+      "count": 0,
+      "pct": "0.0%"
+    }
+  },
+  "confidence": {
+    "avg": 48,
+    "median": 45,
+    "min": 0,
+    "max": 100
+  },
+  "topRed": [
+    {
+      "order_no": "QM-20260403-030",
+      "customer_name": "rag",
+      "confidence": 0,
+      "topReason": "关键节点【工厂完成】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-029",
+      "customer_name": "rag",
+      "confidence": 0,
+      "topReason": "关键节点【生产启动/开裁】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-027",
+      "customer_name": "rag",
+      "confidence": 0,
+      "topReason": "关键节点【工厂完成】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-023",
+      "customer_name": "伊彤",
+      "confidence": 0,
+      "topReason": "关键节点【工厂完成】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-037",
+      "customer_name": "rag",
+      "confidence": 7,
+      "topReason": "关键节点【采购订单下达】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-032",
+      "customer_name": "rag",
+      "confidence": 10,
+      "topReason": "关键节点【生产启动/开裁】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-036",
+      "customer_name": "rag",
+      "confidence": 20,
+      "topReason": "关键节点【采购订单下达】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-035",
+      "customer_name": "rag",
+      "confidence": 20,
+      "topReason": "关键节点【生产启动/开裁】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-034",
+      "customer_name": "rag",
+      "confidence": 20,
+      "topReason": "关键节点【生产启动/开裁】被卡住且无延期申请"
+    },
+    {
+      "order_no": "QM-20260403-020",
+      "customer_name": "宁波巴拿马",
+      "confidence": 25,
+      "topReason": "关键节点【生产启动/开裁】被卡住且无延期申请"
+    }
+  ],
+  "topReasonCodes": [
+    {
+      "code": "critical_step_overdue",
+      "count": 109
+    },
+    {
+      "code": "noncritical_overdue",
+      "count": 46
+    },
+    {
+      "code": "critical_blocked_no_resolution",
+      "count": 19
+    },
+    {
+      "code": "tight_buffer",
+      "count": 14
+    },
+    {
+      "code": "factory_date_passed",
+      "count": 14
+    },
+    {
+      "code": "medium_buffer",
+      "count": 3
+    },
+    {
+      "code": "critical_delayed_but_approved",
+      "count": 1
+    },
+    {
+      "code": "balance_pending",
+      "count": 1
+    },
+    {
+      "code": "deposit_pending",
+      "count": 1
+    }
+  ],
+  "failedOrders": []
+}
