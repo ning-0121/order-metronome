@@ -1305,8 +1305,12 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
 
     // 超预算闸(2026-07-08 弃用报价基线):采购单价 > 业务在采购核料填的预算单价(容差0)→ 必须先经财务审批。
     try {
-      const { data: bi } = await (supabase.from('procurement_items') as any)
-        .select('material_name, color, style_no, unit_price, baseline_over_status').eq('id', itemId).maybeSingle();
+      // ⚠️ P1 修:原 select 查了 procurement_items 不存在的 style_no 列 → PostgREST 报错、
+      // 只解构 data 忽略 error → bi=null → 整个超预算闸静默跳过(采购超预算照样确认下单)。
+      // procurement_items 无款号(归并层丢 style),按物料+颜色匹配预算即可;并检查 error 不再吞。
+      const { data: bi, error: biErr } = await (supabase.from('procurement_items') as any)
+        .select('material_name, color, unit_price, baseline_over_status').eq('id', itemId).maybeSingle();
+      if (biErr) console.warn('[超预算闸] 读采购项失败,本次降级不拦:', biErr.message);
       const { data: bomRows } = await (supabase.from('materials_bom') as any)
         .select('material_name, color, style_no, budget_unit_price').eq('order_id', orderId);
       const budgetLines = ((bomRows || []) as any[])
@@ -1314,7 +1318,8 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
         .map((b) => ({ style_no: b.style_no, material_name: b.material_name, color: b.color, quote_consumption: null, quote_unit_price: Number(b.budget_unit_price) }));
       if (bi && budgetLines.length > 0) {
         const { matchBaseline, checkOverBaseline } = await import('@/lib/domain/cost-baseline');
-        const base = matchBaseline(budgetLines, (bi as any).material_name, (bi as any).color, (bi as any).style_no);
+        // 采购项无 style_no → 传 null,matchBaseline 退化为物料+颜色匹配(款级精度缺口是已知 P2)
+        const base = matchBaseline(budgetLines, (bi as any).material_name, (bi as any).color, null);
         const chk = base.matched ? checkOverBaseline(base, null, (bi as any).unit_price ?? null) : null;
         if (chk && chk.over_price) {
           const st = (bi as any).baseline_over_status;
