@@ -235,6 +235,123 @@ export async function listAllPurchaseOrders(): Promise<{ data?: any[]; error?: s
   };
 }
 
+const CAN_LEDGER = ['admin', 'procurement', 'procurement_manager', 'finance'];
+
+/**
+ * 采购流水导出(2026-07-09 用户:像银行流水,导出"在哪家供应商下过什么面辅料",时间可选,月度对账用)。
+ * 一行 = 一条采购明细(procurement_line_items),带 采购单号/关联订单/供应商/物料/类别/数量/单价/金额/状态/实收。
+ * 按 供应商 → 日期 排序,每家供应商小计 + 总计(对账口径)。日期 = 采购单下单日(created_at),按范围筛。
+ * 底价 unit_price 走 service-role(列级 REVOKE);仅采购/财务/管理员可导。默认排除 草稿/已取消(只导真下过的单)。
+ */
+export async function exportProcurementLedger(params: {
+  dateFrom?: string | null;   // 'YYYY-MM-DD' 含当天(北京时)
+  dateTo?: string | null;     // 'YYYY-MM-DD' 含当天
+  status?: string | null;     // 指定采购单状态;不传=排除 草稿/已取消
+}): Promise<{ base64?: string; fileName?: string; count?: number; total?: number; error?: string }> {
+  const { roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_LEDGER.includes(r))) return { error: '仅采购/财务/管理员可导出采购流水' };
+  const svc = createServiceRoleClient();
+
+  // 1. 采购单头(日期范围 + 状态)
+  let poq = (svc.from('purchase_orders') as any)
+    .select('id, po_no, status, created_at, delivery_date, order_ids')
+    .order('created_at', { ascending: true });
+  if (params.dateFrom) poq = poq.gte('created_at', `${params.dateFrom}T00:00:00+08:00`);
+  if (params.dateTo) poq = poq.lte('created_at', `${params.dateTo}T23:59:59+08:00`);
+  if (params.status) poq = poq.eq('status', params.status);
+  else poq = poq.not('status', 'in', '("草稿","已取消")');
+  const { data: pos, error: poErr } = await poq;
+  if (poErr) return { error: `读取采购单失败:${poErr.message}` };
+  const poList = (pos || []) as any[];
+  if (poList.length === 0) return { error: '该时间段没有采购单(可调整日期或状态)' };
+  const poById = new Map(poList.map((p) => [p.id, p]));
+
+  // 2. 明细行
+  const { data: lines, error: lErr } = await (svc.from('procurement_line_items') as any)
+    .select('purchase_order_id, order_id, material_name, category, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount, received_qty, received_at')
+    .in('purchase_order_id', poList.map((p) => p.id));
+  if (lErr) return { error: `读取采购明细失败:${lErr.message}` };
+  const lineList = (lines || []) as any[];
+
+  // 3. 订单号(order_id → orders)
+  const orderIds = [...new Set(lineList.map((l) => l.order_id).filter(Boolean))] as string[];
+  const orderById = new Map<string, any>();
+  if (orderIds.length) {
+    const { data: ords } = await (svc.from('orders') as any)
+      .select('id, order_no, internal_order_no, customer_name').in('id', orderIds);
+    for (const o of (ords || [])) orderById.set(o.id, o);
+  }
+
+  // 4. 组装(按 供应商 → 日期)
+  const CAT_CN: Record<string, string> = { fabric: '面料', trim: '辅料', packing: '包装', other: '其他' };
+  const rows = lineList.map((l) => {
+    const po = poById.get(l.purchase_order_id) || {};
+    const ord = orderById.get(l.order_id) || {};
+    const amt = l.ordered_amount != null ? Number(l.ordered_amount)
+      : (l.unit_price != null ? Number(l.ordered_qty || 0) * Number(l.unit_price) : null);
+    return {
+      date: po.created_at ? String(po.created_at).slice(0, 10) : '',
+      po_no: po.po_no || '', order_no: ord.internal_order_no || ord.order_no || '', customer: ord.customer_name || '',
+      supplier: l.supplier_name || '(未填供应商)', material: l.material_name || '', category: CAT_CN[l.category] || l.category || '',
+      qty: Number(l.ordered_qty || 0), unit: l.ordered_unit || '', price: l.unit_price != null ? Number(l.unit_price) : null,
+      amount: amt, status: po.status || '', received_qty: l.received_qty != null ? Number(l.received_qty) : null,
+      received_at: l.received_at ? String(l.received_at).slice(0, 10) : '',
+    };
+  }).sort((a, b) => a.supplier.localeCompare(b.supplier, 'zh') || a.date.localeCompare(b.date) || a.po_no.localeCompare(b.po_no));
+
+  // 5. Excel:表头 + 逐行 + 每供应商小计 + 总计
+  const ExcelJS = await import('exceljs');
+  const wb = new ExcelJS.default.Workbook();
+  const ws = wb.addWorksheet('采购流水');
+  ws.columns = [
+    { header: '日期', width: 12 }, { header: '采购单号', width: 18 }, { header: '关联订单', width: 12 }, { header: '客户', width: 16 },
+    { header: '供应商', width: 16 }, { header: '物料', width: 22 }, { header: '类别', width: 8 }, { header: '数量', width: 10 },
+    { header: '单位', width: 7 }, { header: '单价', width: 10 }, { header: '金额(RMB)', width: 13 }, { header: '状态', width: 9 },
+    { header: '实收数量', width: 10 }, { header: '实收日期', width: 12 },
+  ];
+  const rangeLabel = `${params.dateFrom || '起始'} ~ ${params.dateTo || '至今'}`;
+  ws.insertRow(1, [`采购流水对账 · ${rangeLabel}`]);
+  ws.mergeCells('A1:N1'); ws.getCell('A1').font = { bold: true, size: 14 }; ws.getCell('A1').alignment = { horizontal: 'center' };
+  const headRow = ws.getRow(2); headRow.font = { bold: true };
+  headRow.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } }; c.alignment = { horizontal: 'center' }; });
+
+  let grand = 0;
+  const supplierTotals = new Map<string, number>();
+  let curSupplier: string | null = null; let subTotal = 0;
+  const flush = () => {
+    if (curSupplier !== null) {
+      const r = ws.addRow(['', '', '', '', `小计 · ${curSupplier}`, '', '', '', '', '', Math.round(subTotal * 100) / 100, '', '', '']);
+      r.font = { bold: true }; r.getCell(5).alignment = { horizontal: 'right' };
+      r.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F7F7' } }; });
+      supplierTotals.set(curSupplier, Math.round(subTotal * 100) / 100);
+    }
+  };
+  for (const row of rows) {
+    if (row.supplier !== curSupplier) { flush(); curSupplier = row.supplier; subTotal = 0; }
+    const amt = row.amount != null ? Math.round(row.amount * 100) / 100 : null;
+    if (amt != null) { subTotal += amt; grand += amt; }
+    ws.addRow([row.date, row.po_no, row.order_no, row.customer, row.supplier, row.material, row.category,
+      row.qty, row.unit, row.price, amt, row.status, row.received_qty, row.received_at]);
+  }
+  flush();
+  const gr = ws.addRow(['', '', '', '', '总计', '', '', '', '', '', Math.round(grand * 100) / 100, '', '', '']);
+  gr.font = { bold: true, size: 12 }; gr.getCell(5).alignment = { horizontal: 'right' };
+  gr.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } }; });
+
+  // 汇总 sheet:每供应商合计(对账一眼看清各家多少钱)
+  const ws2 = wb.addWorksheet('供应商汇总');
+  ws2.columns = [{ header: '供应商', width: 24 }, { header: '金额合计(RMB)', width: 16 }];
+  ws2.getRow(1).font = { bold: true };
+  [...supplierTotals.entries()].sort((a, b) => b[1] - a[1]).forEach(([s, t]) => ws2.addRow([s, t]));
+  const g2 = ws2.addRow(['总计', Math.round(grand * 100) / 100]); g2.font = { bold: true };
+
+  const buf = await wb.xlsx.writeBuffer();
+  const base64 = Buffer.from(buf as ArrayBuffer).toString('base64');
+  const fileName = `采购流水_${(params.dateFrom || '起').replace(/-/g, '')}-${(params.dateTo || '今').replace(/-/g, '')}.xlsx`;
+  return { base64, fileName, count: rows.length, total: Math.round(grand * 100) / 100 };
+}
+
 /**
  * 某订单关联的采购单档案(2026-07-03:下单后核料页转入追踪模式,这里是"下文"的家)。
  * 每单:PO号/供应商/状态/订购合计/已收/未到,链到采购单详情(批次历史在详情里)。
