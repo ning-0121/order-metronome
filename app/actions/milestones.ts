@@ -1632,14 +1632,14 @@ export async function updateMilestoneOwner(
  */
 export async function assignMerchandiser(
   orderId: string,
-  merchandiserUserId: string
+  merchandiserUserId: string,
+  kind: 'merchandiser' | 'production' = 'merchandiser'
 ): Promise<{ data?: { updated: number }; error?: string }> {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  // 权限：管理员 / 生产主管 / 订单创建者
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, roles')
@@ -1647,14 +1647,30 @@ export async function assignMerchandiser(
     .single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdmin = isAdminRole(userRoles);
-  const isPM = userRoles.includes('production_manager');
+  const isPM = userRoles.includes('production_manager'); // 生产部主管(秦增富)
+  const isOM = userRoles.includes('order_manager');      // 业务执行部主管(高洁)
 
-  // 2026-07-08 用户拍板:指定跟单仅 admin 和生产主管;业务(订单负责人)不再能指定
-  if (!isAdmin && !isPM) {
-    return { error: '只有管理员或生产主管可以指定跟单' };
+  // 派单分工(2026-07-10 用户拍板):
+  //  - 生产主管 → 只能派「生产跟单/QC」(kind='production')
+  //  - 业务执行部主管 → 只能派「业务执行/理单」(kind='merchandiser')
+  //  - admin → 两类都可
+  const callerCanAssign = new Set<'merchandiser' | 'production'>();
+  if (isAdmin) { callerCanAssign.add('merchandiser'); callerCanAssign.add('production'); }
+  if (isPM) callerCanAssign.add('production');
+  if (isOM) callerCanAssign.add('merchandiser');
+
+  if (callerCanAssign.size === 0) {
+    return { error: '只有管理员、生产主管或业务执行部主管可以指定跟单' };
+  }
+  if (!callerCanAssign.has(kind)) {
+    return {
+      error: kind === 'production'
+        ? '只有管理员或生产主管可以指定生产跟单/QC'
+        : '只有管理员或业务执行部主管可以指定业务执行(理单)',
+    };
   }
 
-  // 验证目标用户确实是跟单角色
+  // 验证目标用户角色与 kind 匹配
   const { data: targetProfile } = await (supabase.from('profiles') as any)
     .select('name, role, roles')
     .eq('user_id', merchandiserUserId)
@@ -1662,9 +1678,11 @@ export async function assignMerchandiser(
   if (!targetProfile) return { error: '目标用户不存在' };
 
   const targetRoles: string[] = targetProfile.roles?.length > 0 ? targetProfile.roles : [targetProfile.role].filter(Boolean);
-  // 生产跟单(production)也可指派(2026-07-08 用户:生产部给生产跟单分配不了订单)
-  if (!targetRoles.includes('merchandiser') && !targetRoles.includes('production') && !targetRoles.includes('admin')) {
-    return { error: '目标用户不是跟单/生产跟单角色' };
+  const targetOkForKind = kind === 'production'
+    ? (targetRoles.includes('production') || targetRoles.includes('qc') || targetRoles.includes('admin'))
+    : (targetRoles.includes('merchandiser') || targetRoles.includes('admin'));
+  if (!targetOkForKind) {
+    return { error: kind === 'production' ? '目标用户不是生产跟单/QC角色' : '目标用户不是业务执行(理单)角色' };
   }
 
   // 批量更新 — 排除生产主管固定节点（工厂匹配确认 + 产前样准备完成）
@@ -1676,13 +1694,13 @@ export async function assignMerchandiser(
   // 只做已授权的定向写,并核对受影响行数,0 行则明确报错而不是假装成功。
   const admin = (() => { try { return createServiceRoleClient(); } catch { return supabase; } })();
 
-  // 按目标角色分配对应节点:生产跟单→owner_role='production' 节点;理单跟单→'merchandiser' 节点(2026-07-08)
-  const assignRoles = ['merchandiser', 'production'].filter((r) => targetRoles.includes(r));
-  if (assignRoles.length === 0) assignRoles.push('merchandiser');   // admin 兜底按跟单节点
+  // kind 决定派哪一类 owner_role 节点:业务执行→'merchandiser' 节点;生产跟单→'production' 节点
+  const assignRole = kind === 'production' ? 'production' : 'merchandiser';
+  const roleLabel = kind === 'production' ? '生产跟单' : '业务执行';
   const { data: allMerchMs } = await (admin.from('milestones') as any)
     .select('id, step_key')
     .eq('order_id', orderId)
-    .in('owner_role', assignRoles);
+    .eq('owner_role', assignRole);
 
   // 过滤掉生产主管固定节点
   const pmFixedSet = new Set(PRODUCTION_MANAGER_FIXED_STEPS);
@@ -1691,7 +1709,7 @@ export async function assignMerchandiser(
     .map(m => m.id);
 
   if (toUpdate.length === 0) {
-    return { error: `本单没有可指派给「${assignRoles.join('/')}」的跟单节点(可能都是生产主管固定节点)。` };
+    return { error: `本单没有可指派给「${roleLabel}」的节点(可能都是生产主管固定节点)。` };
   }
 
   const { data: upd, error: updateErr } = await (admin.from('milestones') as any)
@@ -1709,7 +1727,7 @@ export async function assignMerchandiser(
   for (const m of updated) {
     await logMilestoneAction(
       admin, m.id, orderId, 'update',
-      `跟单负责人指定为：${targetProfile.name || merchandiserUserId}`
+      `${roleLabel}负责人指定为：${targetProfile.name || merchandiserUserId}`
     );
   }
 

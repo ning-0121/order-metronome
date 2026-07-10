@@ -8,27 +8,31 @@ import { useRouter } from 'next/navigation';
 interface Props {
   orderId: string;
   currentMerchandiserName?: string | null;
+  /** 'merchandiser'=业务执行(理单) | 'production'=生产跟单/QC。决定候选人范围与派单节点。 */
+  kind?: 'merchandiser' | 'production';
 }
 
-export function MerchandiserAssign({ orderId, currentMerchandiserName }: Props) {
+export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'merchandiser' }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [candidates, setCandidates] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState('');
+  // 候选人加载态(修 P3 2026-07-09:此前只 if(res.data),失败/空态无反馈、且空态每次 open 重复请求 → 用户以为死了)
+  const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle');
 
   useEffect(() => {
-    if (open && candidates.length === 0) {
-      getMerchandiserCandidates().then(res => {
-        if (res.data) setCandidates(res.data);
-      });
-    }
-  }, [open, candidates.length]);
+    if (!open || fetchState !== 'idle') return;
+    setFetchState('loading');
+    getMerchandiserCandidates(kind)
+      .then(res => { setCandidates((res as any).data || []); setFetchState((res as any).error ? 'error' : 'ready'); })
+      .catch(() => setFetchState('error'));
+  }, [open, fetchState, kind]);
 
   async function handleAssign() {
     if (!selectedId) return;
     setLoading(true);
-    const result = await assignMerchandiser(orderId, selectedId);
+    const result = await assignMerchandiser(orderId, selectedId, kind);
     if (result.error) {
       alert(result.error);
     } else {

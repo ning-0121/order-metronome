@@ -361,9 +361,13 @@ export async function getOrderCommissions(orderId: string) {
 }
 
 /**
- * 获取跟单候选人列表（角色为 merchandiser 的用户）
+ * 获取跟单候选人列表
+ * kind='merchandiser' → 业务执行(理单)候选;kind='production' → 生产跟单/QC 候选。
+ * (2026-07-10:两类分开,业务执行由业务执行部主管派、生产跟单由生产主管派)
  */
-export async function getMerchandiserCandidates() {
+export async function getMerchandiserCandidates(
+  kind: 'merchandiser' | 'production' = 'merchandiser'
+) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '未登录' };
@@ -373,8 +377,10 @@ export async function getMerchandiserCandidates() {
 
   const candidates = (profiles || []).filter((p: any) => {
     const roles: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
-    // 生产跟单(production)也是可指派的跟单人(2026-07-08 用户:生产部给生产跟单分配不了订单)
-    return roles.includes('merchandiser') || roles.includes('production') || roles.includes('admin');
+    if (roles.includes('admin')) return true; // admin 两类都可作为候选人
+    return kind === 'production'
+      ? (roles.includes('production') || roles.includes('qc'))
+      : roles.includes('merchandiser');
   });
 
   return { data: candidates };
