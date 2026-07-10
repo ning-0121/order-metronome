@@ -49,9 +49,10 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
   // ── 阶段1：订单评审 ──────────────────────────
 
   po_confirmed: {
+    // 2026-07-10 用户拍板:PO确认不再要上传凭证(三份文件/三单比对已弃用);节点靠 财务+生产部 多方确认完成。
+    // 只保留「关键信息核对」+「条款确认」两组复核项。
     title: 'PO确认检查清单',
     items: [
-      { key: 'po_uploaded', label: '客户PO已上传', type: 'checkbox', required: true, role: 'sales', group: '文件上传' },
       { key: 'style_no_verified', label: '款号核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
       { key: 'quantity_verified', label: '数量核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
       { key: 'size_ratio_verified', label: '尺码配比核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
@@ -59,7 +60,6 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
       { key: 'delivery_verified', label: '交期核对一致', type: 'checkbox', required: true, role: 'sales', group: '关键信息核对' },
       { key: 'incoterm_payment', label: '贸易条款（FOB/DDP）和付款方式确认', type: 'checkbox', required: true, role: 'sales', group: '条款确认' },
       { key: 'special_requirements', label: '特殊要求已标注（浅色/撞色/特殊包装等）', type: 'checkbox', required: true, role: 'sales', group: '条款确认' },
-      { key: 'three_doc_ai_verified', label: 'AI三单比对已完成或已确认差异', type: 'checkbox', required: true, role: 'sales', group: 'AI核验' },
     ],
   },
 

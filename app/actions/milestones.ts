@@ -492,6 +492,25 @@ export async function markMilestoneDone(
       try { return createServiceRoleClient(); } catch { return supabase; }
     })();
 
+    // 制品已在其他模块产出(PI/生产单/装箱单)→ 视同凭证就绪,免重传
+    //   (2026-07-10 用户拍板:自动带过来,人仍点「完成」;这里只放宽、绝不加严)。
+    let producedElsewhere = false;
+    try {
+      if (milestone.step_key === 'pi_confirmed') {
+        const { data } = await (sysClient.from('order_pi') as any)
+          .select('order_id').eq('order_id', milestone.order_id).limit(1);
+        producedElsewhere = !!(data && data.length);
+      } else if (milestone.step_key === 'ci_made') {
+        const { data } = await (sysClient.from('packing_lists') as any)
+          .select('id').eq('order_id', milestone.order_id).eq('status', 'confirmed').limit(1);
+        producedElsewhere = !!(data && data.length);
+      } else if (milestone.step_key === 'production_order_upload') {
+        const { data } = await (sysClient.from('manufacturing_orders') as any)
+          .select('id').eq('order_id', milestone.order_id).limit(1);
+        producedElsewhere = !!(data && data.length);
+      }
+    } catch { /* 表未建/查询失败 → 当作没产出,回退原有凭证校验 */ }
+
     // 检查1: milestone_id 关联的附件（attachments 表）
     const { data: att1 } = await (sysClient.from('attachments') as any)
       .select('id')
@@ -579,12 +598,12 @@ export async function markMilestoneDone(
           .limit(1);
         if (!found || found.length === 0) missing.push(typeNames[ft] || ft);
       }
-      if (missing.length > 0) {
+      if (missing.length > 0 && !producedElsewhere) {
         return { error: `生产单上传需要两个文件：生产订单 + 原辅料单\n缺少：${missing.join('、')}\n（包装资料可以晚些上传，最晚在「包装方式确认」前 1 周）` };
       }
     } else {
       const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0 || att4.length > 0 || att5.length > 0;
-      if (!hasEvidence) {
+      if (!hasEvidence && !producedElsewhere) {
         const typeHint = expectedTypes ? `（需要：${expectedTypes.join(' 或 ')}）` : '';
         return { error: `此节点需要上传凭证后才能标记完成${typeHint}，请先上传对应文件` };
       }

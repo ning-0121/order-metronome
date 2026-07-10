@@ -11,11 +11,35 @@
  *    要证据 → 返回提示,负责人照常上传凭证后点完成(markMilestoneDone 的门禁会放行)。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import {
   requiredPartiesFor, canConfirmParty, pendingParties,
 } from '@/lib/domain/confirmationParties';
+import { notifyUsersByRole } from '@/lib/utils/notifications';
+
+/**
+ * 通知待确认方 —— 多方节点「其他方收不到确认请求」的修复(2026-07-10 用户拍板)。
+ * 站内通知按角色扇出(service-role,能读全 profiles + 为他人建 notifications);失败不阻断主链路。
+ */
+async function notifyPendingParties(
+  milestone: { order_id: string; step_key: string; name?: string | null },
+  parties: Array<{ label: string; roles: string[] }>,
+) {
+  if (parties.length === 0) return;
+  try {
+    const svc = createServiceRoleClient();
+    const nodeName = milestone.name || milestone.step_key;
+    for (const p of parties) {
+      await notifyUsersByRole(svc, p.roles, {
+        type: 'milestone_confirmation_pending',
+        title: `待你确认:${nodeName}`,
+        message: `有订单需要你以「${p.label}」身份确认「${nodeName}」节点。请打开该订单时间线,在此节点点「确认」。`,
+        relatedOrderId: milestone.order_id,
+      });
+    }
+  } catch { /* 通知非主链路,忽略 */ }
+}
 
 async function userAndRoles(supabase: any): Promise<{ userId?: string; roles: string[]; error?: string }> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -28,7 +52,7 @@ async function userAndRoles(supabase: any): Promise<{ userId?: string; roles: st
 }
 
 /** 按配置懒建缺失的确认行(幂等;insert 冲突静默忽略)。 */
-async function ensureConfirmationRows(supabase: any, milestone: { id: string; order_id: string; step_key: string }) {
+async function ensureConfirmationRows(supabase: any, milestone: { id: string; order_id: string; step_key: string; name?: string | null }) {
   const parties = requiredPartiesFor(milestone.step_key);
   if (parties.length === 0) return;
   const { data: existing } = await (supabase.from('milestone_confirmations') as any)
@@ -44,6 +68,8 @@ async function ensureConfirmationRows(supabase: any, milestone: { id: string; or
     })),
     { onConflict: 'milestone_id,party_key', ignoreDuplicates: true },
   );
+  // 首次建 pending 行 = 这些方第一次被要求确认 → 主动通知(只对新建的方发一次,避免每次查看都刷屏)
+  await notifyPendingParties(milestone, missing);
 }
 
 /**
@@ -64,7 +90,7 @@ export async function listMilestoneConfirmations(milestoneId: string): Promise<{
   if (!auth.userId) return { error: auth.error };
 
   const { data: ms, error: msErr } = await (supabase.from('milestones') as any)
-    .select('id, order_id, step_key').eq('id', milestoneId).single();
+    .select('id, order_id, step_key, name').eq('id', milestoneId).single();
   if (msErr || !ms) return { error: msErr?.message || '找不到该节点' };
 
   const config = requiredPartiesFor((ms as any).step_key);
@@ -156,6 +182,8 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
   const confirmedKeys = new Set<string>((rows || []).filter((r: any) => r.status === 'confirmed').map((r: any) => r.party_key));
   const remaining = pendingParties(stepKey, confirmedKeys);
   if (remaining.length > 0) {
+    // 一方已确认、还差其他方 → 再次提醒仍未确认的方(别让确认卡在"没人知道要确认")
+    await notifyPendingParties(ms as any, remaining);
     revalidatePath(`/orders/${(ms as any).order_id}`);
     return { ok: true, allConfirmed: false };
   }

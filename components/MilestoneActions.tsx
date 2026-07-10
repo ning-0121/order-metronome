@@ -19,6 +19,10 @@ const QC_STEPS = new Set([
   'packing_method_confirmed', 'inspection_release',
 ]);
 
+// 制品在其他模块产出的节点(PI/生产单/装箱单):不硬要求前端选文件,由服务端判定制品是否已产出
+// (2026-07-10 用户拍板:做好了自动带过来,人仍点「完成」,免重传)。
+const AUTO_ARTIFACT_STEPS = new Set(['pi_confirmed', 'production_order_upload', 'ci_made']);
+
 interface MilestoneActionsProps {
   milestone: any;
   /** 同一订单内所有里程碑（用于阻断校验） */
@@ -142,14 +146,15 @@ export function MilestoneActions({
       }
     }
 
-    // 必须上传证据
-    if (milestone.evidence_required && !evidenceFile) {
+    // 必须上传证据(制品在其他模块产出的节点除外 —— 交服务端判定,没产出时服务端会提示补传)
+    if (milestone.evidence_required && !evidenceFile && !AUTO_ARTIFACT_STEPS.has(milestone.step_key)) {
       setSubmitError('⚠️ 此节点需要上传凭证才能完成，请选择文件');
       return;
     }
 
-    // 生产单上传：前端校验两个文件（生产订单 + 原辅料单），包装资料拆到包装确认节点
-    if (milestone.step_key === 'production_order_upload') {
+    // 生产单上传：前端校验两个文件（生产订单 + 原辅料单）—— 仅当用户确实在手动上传时校验;
+    // 未选文件 = 依赖生产任务单已在生产模块产出,交服务端判定,不在前端硬卡。
+    if (milestone.step_key === 'production_order_upload' && evidenceFile) {
       const hasTrims = extraFiles.some((f: any) => f._fileType === 'trims_sheet');
       const missing: string[] = [];
       if (!evidenceFile) missing.push('生产订单');
@@ -631,7 +636,7 @@ export function MilestoneActions({
                 />
               )}
             </div>
-          ) : (
+          ) : milestone.step_key === 'po_confirmed' ? null : (
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
               {(() => {
@@ -652,6 +657,11 @@ export function MilestoneActions({
               })()}
               {milestone.evidence_required && <span className="text-red-500 ml-1">*必传</span>}
             </label>
+            {AUTO_ARTIFACT_STEPS.has(milestone.step_key) && (
+              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mb-2">
+                ✓ 若{milestone.step_key === 'pi_confirmed' ? ' PI 已在 PI 模块' : milestone.step_key === 'ci_made' ? ' 装箱单已在装箱/出货模块' : ' 生产任务单已在生产模块'}做好,这里<b>无需再传</b>,直接点下方「完成」即可(没做好则按提示补传)。
+              </p>
+            )}
             {/* 命名建议 — 让业务/采购/跟单按规范命名 */}
             {(() => {
               const hint = getNamingHint(milestone.step_key, orderNo);
