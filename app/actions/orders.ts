@@ -462,7 +462,9 @@ export async function createOrder(
   // ── 自动分配：查询各角色的默认负责人 ──
   // 优先级 1: DEFAULT_ASSIGNEES 配置（财务=方圆，采购=Helen，生产主管=秦增富）
   // 优先级 2: 角色匹配且全公司只有一个用户 → 自动分配
-  const roleUserMap: Record<string, string | null> = { sales: user.id };
+  // sales(po_confirmed=业务开发交接点)与 merchandiser(PO 后业务执行 12 节点,2026-07-10 由 sales 翻过来)
+  // 都默认归建单人 → 保证计分/催办/操作不中断;高洁(order_manager)可用「理单跟单」按需改派到具体理单员。
+  const roleUserMap: Record<string, string | null> = { sales: user.id, merchandiser: user.id };
   // 固定由生产主管负责的 step_key → user_id 映射
   const fixedStepOwnerMap: Record<string, string> = {};
   try {
