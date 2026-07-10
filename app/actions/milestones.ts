@@ -1753,7 +1753,7 @@ export async function saveChecklistData(
 
   // 角色校验：只能编辑自己角色对应的检查项（管理员一般不受限）
   // 例外：order_kickoff_meeting 的双签字段强制角色匹配，admin 也不能替代 sales
-  const { getChecklistForStep } = await import('@/lib/domain/checklist');
+  const { getChecklistForStep, canEditChecklistItemRole } = await import('@/lib/domain/checklist');
   const checklistConfig = getChecklistForStep(milestone.step_key);
   const STRICT_ROLE_FIELDS: Record<string, string[]> = {
     order_kickoff_meeting: ['sales_signed'],
@@ -1772,8 +1772,9 @@ export async function saveChecklistData(
       if (isStrict && !userHasRole) {
         return { error: `无权编辑「${itemDef.label}」— 必须由 ${itemDef.role} 角色本人勾选` };
       }
-      // 普通字段：admin 可以代任何角色
-      if (!isStrict && !isAdminUserCl && !userHasRole) {
+      // 普通字段：admin 可代任何角色;并放行同组(生产/QC/跟单)—— 与 client 保存过滤、节点操作权限一致
+      // 修:中查(mid_qc_check)字段标 merchandiser,实际由生产部QC填,以前被拒「需要merchandiser角色」
+      if (!isStrict && !isAdminUserCl && !canEditChecklistItemRole(itemDef.role, userRoles)) {
         return { error: `无权编辑「${itemDef.label}」（需要${itemDef.role}角色）` };
       }
     }

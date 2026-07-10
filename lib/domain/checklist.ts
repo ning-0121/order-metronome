@@ -484,6 +484,30 @@ function parseChecklistData(data: unknown): ChecklistData {
  *                  历史上有 mid_qc_check（merchandiser）里嵌业务必填项，导致跟单
  *                  永远无法提交。2026-05-15 修复
  */
+/**
+ * 用户能否编辑某检查项字段(单一真相,client 保存过滤 + server 校验 + 复选禁用 三处共用)。
+ * 规则:精确同角色 → 可编;并保留历史互通:
+ *  · 业务↔跟单(sales↔merchandiser,早期一人身兼);
+ *  · 生产组同组:merchandiser/production/production_manager/qc/quality —— mid_qc_check 等节点字段
+ *    历史标 role='merchandiser',实际由生产部QC/生产跟单填(org:production=生产跟单=QC,无独立qc角色),
+ *    以前 client/server 只桥接 sales↔merchandiser,导致 QC 填完却「没有可保存的字段」;
+ *  · 业务组同组:sales/sales_assistant/admin_assistant。
+ * 注:严格双签字段(如 order_kickoff_meeting.sales_signed)不走本函数,仍需精确角色。
+ */
+export function canEditChecklistItemRole(itemRole: string, userRoles: string[]): boolean {
+  const rr = String(itemRole || '').toLowerCase();
+  if (!rr) return true;   // 未标角色的字段人人可填
+  const ur = (userRoles || []).map(r => String(r || '').toLowerCase());
+  if (ur.includes(rr)) return true;
+  if (rr === 'sales' && ur.includes('merchandiser')) return true;
+  if (rr === 'merchandiser' && ur.includes('sales')) return true;
+  const merchGroup = ['merchandiser', 'production', 'production_manager', 'qc', 'quality'];
+  if (merchGroup.includes(rr) && ur.some(r => merchGroup.includes(r))) return true;
+  const salesGroup = ['sales', 'sales_assistant', 'admin_assistant'];
+  if (salesGroup.includes(rr) && ur.some(r => salesGroup.includes(r))) return true;
+  return false;
+}
+
 export function validateChecklistComplete(
   stepKey: string,
   data: ChecklistData | null,

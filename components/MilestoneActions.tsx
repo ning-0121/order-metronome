@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { isDoneStatus, isActiveStatus, isPendingStatus } from '@/lib/domain/types';
 import { AIAdviceBox } from '@/components/AIAdviceBox';
-import { getChecklistForStep, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
+import { getChecklistForStep, canEditChecklistItemRole, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
 import { getNamingHint, getAcceptString, validateFileExt, getFileTypeForStep } from '@/lib/domain/fileNaming';
@@ -1058,11 +1058,8 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
         if (isAdmin) return true;
         const itemDef = config?.items.find(i => i.key === key);
         if (!itemDef) return true;
-        const itemRole = itemDef.role.toLowerCase();
-        return rolesLower.includes(itemRole)
-          || (itemRole === 'sales' && rolesLower.includes('merchandiser'))
-          || (itemRole === 'merchandiser' && rolesLower.includes('sales'))
-          || (itemRole === 'admin_assistant' && rolesLower.includes('admin_assistant'));
+        // 生产/QC/跟单 同组可编(与节点操作权限、server 校验一致)—— 修 QC 填完中查却「没有可保存的字段」
+        return canEditChecklistItemRole(itemDef.role, currentRoles);
       })
       .map(([key, r]) => ({
         key, value: r.value, pending_date: r.pending_date,
@@ -1115,11 +1112,8 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
               const val = responses[item.key];
               // 双签：如果 item 有 role 限制，且当前用户角色不匹配 → 禁用
               const rolesLower = currentRoles.map(r => r.toLowerCase());
-              const itemRole = (item.role || '').toLowerCase();
-              const canEdit = rolesLower.includes(itemRole)
-                || rolesLower.includes('admin')
-                || (itemRole === 'sales' && rolesLower.includes('merchandiser'))
-                || (itemRole === 'merchandiser' && rolesLower.includes('sales'));
+              const canEdit = rolesLower.includes('admin')
+                || canEditChecklistItemRole(item.role || '', currentRoles);
               const roleRestricted = !canEdit;
               const alreadyDone = !!val?.value; // 别人已经勾了
               return (
