@@ -118,17 +118,10 @@ export async function parseOrderFile(base64: string): Promise<{
 
   try {
     const buf = Buffer.from(base64.replace(/^data:.*base64,/, ''), 'base64');
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.default.Workbook();
-    await wb.xlsx.load(buf as any);
-    const ws = wb.worksheets[0];
-    if (!ws) return { error: '空文件' };
-    const rows: unknown[][] = [];
-    for (let r = 1; r <= ws.rowCount; r++) {
-      const arr: unknown[] = [];
-      for (let c = 1; c <= ws.columnCount; c++) arr.push(ws.getCell(r, c).value);   // 原值:parseOrderSheet 的 cellText 兼容富文本/公式
-      rows.push(arr);
-    }
+    // 统一走 SheetJS:exceljs 读不了老 .xls(BIFF)会静默返回空表 → 客户订单被读成空。
+    const { readFirstSheetRows } = await import('@/lib/services/excel-read');
+    const rows = readFirstSheetRows(buf);
+    if (rows.length === 0) return { error: '空文件' };
     const { parseOrderSheet } = await import('@/lib/services/order-sheet-parser');
     const res = parseOrderSheet(rows);
     if (res.headerRow === -1) return { error: '没识别到尺码表头(需含 S/M/L 或 XS-XXL 等尺码列)。请确认上传的是含尺码数量的客户订单/生产单。' };

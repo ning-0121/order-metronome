@@ -46,7 +46,8 @@ const strOrNull = (v: unknown): string | null => { const s = cellText(v).trim();
 function isSizeToken(h: unknown): boolean {
   const n = norm(h);
   if (!n) return false;
-  if (/^(xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|xxxxl|[2-7]xl)$/.test(n)) return true;
+  if (/^(xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|xxxxl|[1-9]xl)$/.test(n)) return true;
+  if (/^[1-9]x$/.test(n)) return true;                  // 加大码 1X/2X/3X..(伊彤等)
   if (/^(f|os|均码|均|自由码|free)$/.test(n)) return true;
   if (/^\d{1,3}$/.test(n)) return true;                 // 数码尺 2/4/6/28/30..
   if (/^\d{1,3}[- ]?\d{0,3}$/.test(n) && n.length <= 6) return true; // 26-28 等
@@ -91,6 +92,8 @@ export function parseOrderSheet(rows: unknown[][]): ParsedOrderSheet {
     const row = rows[r] || [];
     const style = cStyle >= 0 ? strOrNull(row[cStyle]) : null;
     if (!style) continue;
+    // 跳过合计/总计行(不是真实款):否则"合计"会被当成一个款号
+    if (/^(合计|总计|小计|total|subtotal|sum)$/.test(norm(style))) continue;
 
     const sizes: Record<string, number> = {};
     let sizeSum = 0;

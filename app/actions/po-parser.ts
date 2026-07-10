@@ -54,31 +54,47 @@ export interface POParsedData {
   warning_notes?: string;
 }
 
-const SYSTEM_PROMPT = `你是一个外贸服装订单解析专家。你的任务是从客户PO（采购订单）中提取信息，返回标准化的JSON格式。
+const SYSTEM_PROMPT = `你是绮陌服饰的订单录入专家。你正在为一张【生产单/生产任务单】提取数据。
+
+⚠️ 最重要的原则:客户 PO 的格式、语言、排版千差万别——中文订货合同、英文 PO、邮件正文、
+拍照、图片、老式 Excel 都有,同一个信息在不同客户那里放在完全不同的位置和叫法。
+你的职责不是"套某个客户的模板",而是**不管来源长什么样,都把它统一映射到下面生产单需要的
+固定字段**。以"生产单需要什么"为准,不受 PO 排版影响。看不懂/找不到的字段留空并写进
+confidence_notes,绝不编造、不猜。
+
+生产单需要的固定字段(逐个去 PO 里找,不管它叫什么、在哪):
+- 订单头:PO号/订单号、客户名、下单日期、交期(出货日期)
+- 每款:款号、品名、面料/原料成分、面料克重
+- 每款每色:颜色(中文+英文原文)、色号/颜色参考、**每个尺码的件数**、该色总数量
+- 要求类(生产单要印给工厂):包装方法、质量要求、产前样/船样要求、尺寸表(各码测量值)、辅料清单
+- 价格(如有):单价、币种、总金额、贸易条款、付款条款
 
 要求：
-0. PO 可能是中文或英文,不同客户版式差异很大(表格式/清单式/邮件正文式都有)。常见英文字段名对照:
-   Style#/Style No/Item → 款号;Description/Item Name → 品名;Color/Colour/Colorway → 颜色;
-   Qty/Quantity/Units → 数量;Size Breakdown/Size Ratio/尺码横排表头 → 尺码配比;
-   Delivery Date/Ship Date/Cancel Date → 交期;PO#/Order No → PO号;Fabric/Material/Composition → 面料。
-   识别不到的字段留空并写进 confidence_notes,不要猜。
-1. 仔细识别每个款式/SKU的颜色、尺码配比、数量
-2. 尺码标签可能是 S/M/L/XL 或 2/4/6/8 或其他，请如实提取
-3. 如果PO是英文，颜色名请同时提供中文翻译和英文原文
-4. 如果某些字段在PO中找不到，填空字符串或0，并在confidence_notes中说明
-5. packaging、quality_notes、sample_requirements等信息如果PO中没有，留空即可
-6. 数量必须是数字，不要带单位
-7. 判断服装品类（pants/tops/dress/outerwear/other）
-8. 如果PO中包含尺寸表/测量数据（如腰围、臀围、胸围等各尺码的数值），请提取到measurements数组中
-9. 单件用量（unit_consumption）：如果PO提到"单耗"、"用量"、"每件"加面料数据（如"1.2平方"、"0.346公斤"），合并成一个字符串返回，例如 "280克直贡呢 1.2平方 0.346公斤"；找不到就留空
-10. 每色客户包装（colors[].packaging）：如果PO对不同颜色有不同包装要求（如黑色"一套一袋"、深红"S:M:L=1:2:2"），分别提取到对应 color 的 packaging 字段
-11. 尺码配比换算（重要！sizes 必须是"件数"，不是比例）：
-   - 很多PO的尺码行给的是配比（如 S:M:L:XL = 1:2:2:1，或尺码下一行小数字 1/2/2/1），不是件数。
-     判断标准：尺码数字之和远小于该色总数量 → 那是配比。
-   - 遇到配比：按比例把该色数量分摊到各尺码，sizes 填分摊后的整数件数，
-     必须满足 各尺码之和 = 该色 qty（余数补给占比最大的码）。
-     例：qty=3600、配比1:2:2:1 → {"S":600,"M":1200,"L":1200,"XL":600}。
-   - PO直接给了每尺码件数：如实提取，并自检 各尺码之和 = 该色 qty，对不上在 confidence_notes 说明。
+0. 常见字段中英对照(仅供识别,不是唯一叫法):
+   Style#/Style No/Item/款号/货号 → style_no;Description/Item Name/品名/名称 → product_name;
+   Color/Colour/Colorway/颜色 → color;Qty/Quantity/Units/数量/总数 → qty;
+   Size Breakdown/Size Ratio/配比/尺码横排 → 尺码;Delivery/Ship/Cancel Date/交期/出货日期 → delivery_date;
+   PO#/Order No/订单号 → order_no;Fabric/Material/Composition/面料/布面/原料 → material。
+   品牌(Brand,如 otos-BP)如遇到,写进对应款的 product_name 或 confidence_notes 备注。
+1. 仔细识别每个款式/SKU的颜色、尺码、数量。一份 PO 可能多款多色,逐个提取,别漏。
+2. 尺码标签可能是 S/M/L/XL、加大码 1X/2X/3X/4X、数字码 2/4/6/8/28/30、F/均码 等——**原样提取**,别改名。
+3. 如果PO是英文，颜色名请同时提供中文翻译(color_cn)和英文原文(color_en);中文 PO 则 color_en 可留空。
+4. 找不到的字段：填空字符串或0，并在confidence_notes中说明是哪个字段没找到。
+5. packaging、quality_notes、sample_requirements 等要求类信息,PO 里有就抓全(常在表格下方的
+   "包装方法/质量要求/注意事项/船头版/布面要求"等段落),没有就留空。
+6. 数量必须是纯数字，不要带单位。
+7. 判断服装品类（pants/tops/dress/outerwear/other）。
+8. 如果PO中包含尺寸表/测量数据（腰围、臀围、胸围等各尺码的数值），提取到measurements数组。
+9. 单件用量（unit_consumption）：如果PO提到"单耗/用量/每件"加面料数据（如"1.2平方"、"0.346公斤"），合并成一个字符串返回；找不到就留空。
+10. 每色客户包装（colors[].packaging）：如果PO对不同颜色有不同包装要求,分别提取到对应 color 的 packaging 字段。
+11. 尺码件数换算（最关键！sizes 必须是"件数",不是比例）：
+   - **若 PO 表里已直接给了每个尺码的件数(如列 1X=300, 2X=150, 3X=150)→ 就用这些件数**,
+     并自检 各尺码之和 = 该色总数量,对不上在 confidence_notes 说明。此时哪怕另有一行"配比:1X-3X=211"
+     也只作参考,不要拿配比去覆盖已有的件数。
+   - **若只给了配比没给件数**(如表头/备注写 "配比 S:M:L:XL=1:2:2:1" 或 "1X-3X=211",或尺码下一行是小数字
+     1/2/2/1)→ 按比例把该色总数量分摊到各尺码,填分摊后的整数件数,必须满足 各尺码之和 = 该色 qty
+     (余数补给占比最大的码)。例:qty=3600、配比1:2:2:1 → {"S":600,"M":1200,"L":1200,"XL":600};
+     "1X-3X=211" 表示 1X:2X:3X=2:1:1。
    - 完全没有尺码信息：sizes 留空对象{}，不要编造。
 
 日期解析规则（重要！）：
@@ -243,6 +259,7 @@ export async function parsePO(
           response = await client.messages.create({
             model: MODEL_CHAIN[attempt],
             max_tokens: 8192,                // 4096→8192:款多的 PO 避免响应截断→JSON解析失败
+            thinking: { type: 'disabled' },  // sonnet-5 默认开思考,吃 max_tokens 会截断 JSON(见 memory ai-model-ids)
             system: SYSTEM_PROMPT,
             messages,
           }, { signal: controller.signal });
@@ -450,31 +467,7 @@ export async function deletePOParseDraft(draftId: string): Promise<{ ok: boolean
 }
 
 async function excelToText(buffer: Buffer, fileName: string): Promise<string> {
-  // Use exceljs to read Excel and convert to text
-  const ExcelJS = await import('exceljs');
-  const workbook = new ExcelJS.default.Workbook();
-
-  if (fileName.endsWith('.csv')) {
-    const csvContent = buffer.toString('utf-8');
-    return csvContent;
-  }
-
-  await workbook.xlsx.load(buffer);
-
-  const lines: string[] = [];
-  workbook.eachSheet((sheet) => {
-    lines.push(`\n=== Sheet: ${sheet.name} ===`);
-    sheet.eachRow((row, rowNumber) => {
-      const values = (row.values as (string | number | null)[]).slice(1); // skip index 0
-      const cells = values.map(v => {
-        if (v === null || v === undefined) return '';
-        if (typeof v === 'object' && 'text' in v) return (v as { text: string }).text;
-        if (typeof v === 'object' && 'result' in v) return String((v as { result: unknown }).result);
-        return String(v);
-      });
-      lines.push(`Row ${rowNumber}: ${cells.join(' | ')}`);
-    });
-  });
-
-  return lines.join('\n');
+  // 统一走 SheetJS:exceljs 读不了老 .xls(BIFF)会静默返回空表 → PO 被读成空。
+  const { readWorkbookText } = await import('@/lib/services/excel-read');
+  return readWorkbookText(buffer, fileName);
 }
