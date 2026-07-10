@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { listQuotes } from '@/app/actions/quoter';
 import { getApprovedQuoteForCompare } from '@/app/actions/quote-consumption';
 import { createPO } from '@/app/actions/customer-po';
+import { getAraosHandoffForCustomer, type AraosHandoffSummary } from '@/app/actions/araos-handoff';
 import type { CompareBasis } from '@/lib/quoter/consumption';
 
 export function CreatePOForm() {
@@ -18,6 +19,14 @@ export function CreatePOForm() {
   const [checking, setChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createdId, setCreatedId] = useState('');
+  const [araosRef, setAraosRef] = useState<AraosHandoffSummary | null>(null);   // 该客户的 araos 中标单(建单参考)
+
+  // 客户确定后拉 araos 中标单摘要,供建单参考(定价仍人工确认)——审计 #6:此前 inbox 无人读、业务只能切回 araos 抄录
+  useEffect(() => {
+    const cid = (basis?.snapshot?.header as any)?.customer_id ?? null;
+    if (!cid) { setAraosRef(null); return; }
+    getAraosHandoffForCustomer(cid).then((r) => setAraosRef((r as any).data || null)).catch(() => setAraosRef(null));
+  }, [basis]);
 
   useEffect(() => {
     const preQuote = searchParams.get('quote'); // P1a:从报价详情「立即建 PO」带过来的报价
@@ -114,6 +123,34 @@ export function CreatePOForm() {
           ) : (
             <p className="text-sm text-gray-500">该报价快照当前不可消费,无法建 PO(只有已审批冻结版可建)。</p>
           )}
+        </section>
+      )}
+
+      {/* araos 中标单参考(建单核对款/量/交期,减少切回 araos 抄录;定价不自动带入) */}
+      {araosRef && (
+        <section className="bg-amber-50/60 rounded-xl border border-amber-200 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-amber-900">🏆 来自 araos 的中标单(建单参考)</h3>
+            <span className="text-xs text-amber-600">{araosRef.received_at ? String(araosRef.received_at).slice(0, 10) : ''}</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs text-gray-700">
+            {araosRef.order_ref && <div><span className="text-gray-400">客户单号:</span> {araosRef.order_ref}</div>}
+            {araosRef.quantity != null && <div><span className="text-gray-400">数量:</span> {araosRef.quantity}</div>}
+            {araosRef.required_delivery && <div><span className="text-gray-400">要求交期:</span> {araosRef.required_delivery}</div>}
+            {araosRef.order_value != null && <div><span className="text-gray-400">货值:</span> {araosRef.currency || '$'}{araosRef.order_value.toLocaleString()}</div>}
+          </div>
+          {araosRef.product_lines.length > 0 && (
+            <div className="mt-2 text-xs">
+              <div className="text-gray-400 mb-1">款 / 色 / 码 / 数量:</div>
+              <div className="space-y-0.5">
+                {araosRef.product_lines.map((l, i) => (
+                  <div key={i} className="text-gray-700">{[l.style, l.color, l.size].filter(Boolean).join(' · ') || '—'}{l.qty != null ? ` × ${l.qty}` : ''}</div>
+                ))}
+              </div>
+            </div>
+          )}
+          {araosRef.note && <div className="mt-2 text-xs text-gray-500">备注: {araosRef.note}</div>}
+          <p className="mt-2 text-[11px] text-amber-700">↳ 供核对款/量/交期,减少切回 araos 抄录;成交价以本次报价快照为准,不自动带入。</p>
         </section>
       )}
 
