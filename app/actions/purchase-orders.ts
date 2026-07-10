@@ -879,10 +879,10 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const piMap = new Map<string, any>();
   if (piIds.length > 0) {
     const _svc = createServiceRoleClient();
-    const _piSel = 'id, material_name, color, production_consumption, development_consumption, sku_breakdown, purchase_spec, image_urls';
+    const _piSel = 'id, material_name, color, production_consumption, development_consumption, sku_breakdown, purchase_spec, image_urls, attachment_files';
     let { data: pis, error: piErr } = await (_svc.from('procurement_items') as any).select(_piSel).in('id', piIds);
-    // sku_breakdown / purchase_spec 列(2026-07-10)未建 → 降级去这些新列,采购单照样导(无产品明细/规格附页)
-    if (piErr && /sku_breakdown|purchase_spec|schema cache|column|does not exist/i.test(piErr.message || '')) {
+    // sku_breakdown / purchase_spec / attachment_files 列(2026-07-10)未建 → 降级去这些新列,采购单照样导(无相应附页)
+    if (piErr && /sku_breakdown|purchase_spec|attachment_files|schema cache|column|does not exist/i.test(piErr.message || '')) {
       const _piSelSafe = 'id, material_name, color, production_consumption, development_consumption, image_urls';
       ({ data: pis } = await (_svc.from('procurement_items') as any).select(_piSelSafe).in('id', piIds));
     }
@@ -1083,6 +1083,39 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
           ws3.addImage(imgId, { tl: { col: 2 + i, row: row.number - 1 }, ext: { width: 120, height: 88 } } as any);
         } catch { /* 取不到/超时的图跳过,不阻断导出 */ }
       }
+    }
+  }
+
+  // ── 辅料附件清单附页 ── 业务/采购上传的排版稿(分款吊卡/箱唛/PDF/AI…)文件名 + 下载链接。
+  // 文档嵌不进 Excel,故只列清单;采购按此把附件文件连同本采购单一起发给供应商。
+  const attachRows: Array<{ material: string; name: string; url: string }> = [];
+  for (const pi of piMap.values() as any) {
+    const files = Array.isArray((pi as any).attachment_files) ? (pi as any).attachment_files : [];
+    for (const f of files) {
+      if (f?.url && /^https?:\/\//.test(String(f.url))) attachRows.push({ material: (pi as any).material_name || '', name: String(f.name || f.url), url: String(f.url) });
+    }
+  }
+  if (attachRows.length > 0) {
+    const ws4 = wb.addWorksheet('辅料附件清单');
+    [22, 40, 70].forEach((w, i) => { ws4.getColumn(i + 1).width = w; });
+    ws4.mergeCells('A1:C1');
+    ws4.getCell('A1').value = '辅料附件清单(排版稿/箱唛/吊卡等)—— 请连同本采购单一起发给供应商';
+    ws4.getCell('A1').font = { bold: true, size: 12 };
+    ws4.getCell('A1').alignment = { horizontal: 'center' };
+    ws4.getRow(1).height = 22;
+    const ah = ws4.addRow(['原辅料', '文件名', '下载链接']);
+    ah.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+    });
+    attachRows.sort((a, b) => (a.material || '').localeCompare(b.material || '') || (a.name || '').localeCompare(b.name || ''));
+    for (const r of attachRows) {
+      const row = ws4.addRow([r.material, r.name, r.url]);
+      row.getCell(3).value = { text: r.url, hyperlink: r.url } as any;
+      row.getCell(3).font = { color: { argb: 'FF2563EB' }, underline: true };
+      row.eachCell((cell) => { cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
     }
   }
 

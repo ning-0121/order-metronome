@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { SearchableSelect } from '@/components/SearchableSelect';
 import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
-  updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages,
+  updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages, updateProcurementItemAttachments,
   generateExecutionLines, getOrderProcurementFulfillment,
   listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
   saveBomBudgetUnitPrice, saveBomCustomerSupplied, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
@@ -412,6 +412,33 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     if (!sel || !(await confirm({ title: '移除这张图?', message: '不删除原文件,只从此项摘掉', danger: true, confirmText: '移除' }))) return;
     const next = (Array.isArray(sel.image_urls) ? sel.image_urls : []).filter((u: string) => u !== url);
     const res = await updateProcurementItemImages(sel.id, orderId, next);
+    if ((res as any).error) { setMsg((res as any).error); return; }
+    await reload();
+  }
+
+  // ── 排版稿/文件附件(分款吊卡/箱唛等;PDF/AI/CDR/xlsx…业务传→采购带过来,双方可补删)──
+  const [attBusy, setAttBusy] = useState(false);
+  async function uploadItemAttachment(file: File) {
+    if (!sel) return;
+    if (file.size > 50 * 1024 * 1024) { setMsg('❌ 文件超过 50MB'); return; }
+    setAttBusy(true); setMsg('');
+    try {
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+      const path = `procurement/${orderId}/attach/${sel.id}-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type });
+      if (error) { setMsg('上传失败:' + error.message); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      const next = [...(Array.isArray(sel.attachment_files) ? sel.attachment_files : []), { name: file.name, url: data.publicUrl }].slice(0, 12);
+      const res = await updateProcurementItemAttachments(sel.id, orderId, next);
+      if ((res as any).error) { setMsg((res as any).error); return; }
+      await reload();
+    } finally { setAttBusy(false); }
+  }
+  async function removeItemAttachment(url: string) {
+    if (!sel || !(await confirm({ title: '移除这个附件?', message: '不删除原文件,只从此项摘掉', danger: true, confirmText: '移除' }))) return;
+    const next = (Array.isArray(sel.attachment_files) ? sel.attachment_files : []).filter((f: any) => f?.url !== url);
+    const res = await updateProcurementItemAttachments(sel.id, orderId, next);
     if ((res as any).error) { setMsg((res as any).error); return; }
     await reload();
   }
@@ -1148,6 +1175,32 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                   </span>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* 排版稿/文件附件(分款吊卡/箱唛等复杂辅料;业务传的排版稿随归并带过来,双方可补删)*/}
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-500">📎 排版稿 / 文件附件({(sel.attachment_files || []).length})<span className="font-normal text-gray-400"> · 分款吊卡/箱唛等每款排版不同 → 传做好的稿(PDF/AI/CDR/xlsx…),进采购单附件清单发供应商</span></span>
+              <label className={`text-xs px-2.5 py-1 rounded-lg cursor-pointer font-medium ${attBusy ? 'bg-gray-100 text-gray-400' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+                {attBusy ? '上传中…' : '📎 上传附件'}
+                <input type="file" accept=".pdf,.ai,.cdr,.eps,.svg,.psd,.xlsx,.xls,.csv,.doc,.docx,.zip,.rar,.png,.jpg,.jpeg" className="hidden" disabled={attBusy}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadItemAttachment(f); }} />
+              </label>
+            </div>
+            {(sel.attachment_files || []).length === 0 ? (
+              <p className="text-xs text-gray-400">暂无附件 — 业务在「原辅料」上传排版稿后点「核料归并/刷新」会自动带入;或直接点上方上传</p>
+            ) : (
+              <ul className="space-y-1">
+                {(sel.attachment_files as Array<{ name: string; url: string }>).map((f, i) => (
+                  <li key={i} className="flex items-center gap-2 text-xs">
+                    <a href={f.url} target="_blank" rel="noreferrer" download
+                      className="text-indigo-600 hover:underline truncate max-w-[26rem]" title={f.name}>📄 {f.name}</a>
+                    <button onClick={() => removeItemAttachment(f.url)} title="移除"
+                      className="text-gray-300 hover:text-rose-500 leading-none shrink-0">×</button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 

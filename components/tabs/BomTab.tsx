@@ -95,6 +95,26 @@ export function BomTab({ orderId }: { orderId: string }) {
     } finally { setImgUploadingId(null); }
   }
 
+  // 排版稿/文件附件上传(分款吊卡/箱唛等;公开桶 product-images/materials/attach/,追加进 attachment_files)
+  const [attUploadingId, setAttUploadingId] = useState<string | null>(null);
+  async function uploadBomAttachment(item: any, file: File) {
+    if (file.size > 50 * 1024 * 1024) { alert('文件超过 50MB'); return; }
+    setAttUploadingId(item.id);
+    try {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client');
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+      const path = `materials/attach/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type });
+      if (upErr) { alert('上传失败:' + upErr.message); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      const next = [...(Array.isArray(item.attachment_files) ? item.attachment_files : []), { name: file.name, url: data.publicUrl }].slice(0, 12);
+      const res = await updateBomItem(item.id, orderId, { attachment_files: next });
+      if ((res as any).error) { alert('保存失败:' + (res as any).error); return; }
+      await reload();
+    } finally { setAttUploadingId(null); }
+  }
+
   // 录料表单内直接传图(新增/编辑都可):slot 0→辅料单「示例画稿」列, slot 1→「位置说明及示意图」列。
   // 按位置写进 form.image_urls[slot],保存时随行入库;生成辅料单直接读该位置,不用再单独去列表贴图。
   const [formImgUploading, setFormImgUploading] = useState<0 | 1 | null>(null);
@@ -959,6 +979,17 @@ export function BomTab({ orderId }: { orderId: string }) {
                         {imgUploadingId === item.id ? '…' : '📷'}
                         <input type="file" accept="image/*" className="hidden" disabled={!!imgUploadingId}
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBomImage(item, f); e.currentTarget.value = ''; }} />
+                      </label>
+                      {/* 排版稿/文件附件(分款吊卡/箱唛等) */}
+                      {(Array.isArray(item.attachment_files) ? item.attachment_files : []).map((f: any, i: number) => (
+                        <a key={i} href={f.url} target="_blank" rel="noreferrer" download title={f.name}
+                          className="text-[11px] text-indigo-600 hover:underline">📄</a>
+                      ))}
+                      <label className={`text-[10px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 border border-violet-200 cursor-pointer hover:bg-violet-100 whitespace-nowrap ${attUploadingId ? 'opacity-50 pointer-events-none' : ''}`}
+                        title="上传排版稿/文件附件(分款吊卡/箱唛等;PDF/AI/CDR/xlsx…)">
+                        {attUploadingId === item.id ? '…' : '📎'}
+                        <input type="file" accept=".pdf,.ai,.cdr,.eps,.svg,.psd,.xlsx,.xls,.csv,.doc,.docx,.zip,.rar,.png,.jpg,.jpeg" className="hidden" disabled={!!attUploadingId}
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBomAttachment(item, f); e.currentTarget.value = ''; }} />
                       </label>
                     </div>
                   </td>

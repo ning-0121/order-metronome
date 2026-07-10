@@ -579,12 +579,14 @@ export async function consolidateOrderProcurementItems(
   const bomIds = Array.from(new Set([...slMap.values()].map((s: any) => s.bom_id).filter(Boolean)));
   const bomMaster = new Map<string, string | null>();
   const bomImages = new Map<string, string[]>();
+  const bomAttach = new Map<string, Array<{ name: string; url: string }>>();   // 辅料排版稿/文件附件
   const bomExtra = new Map<string, { prod: number | null; style_no: string | null; overPct: number; customerSupplied: boolean }>();
   if (bomIds.length) {
     const { data: bs } = await (supabase.from('materials_bom') as any).select('*').in('id', bomIds);
     for (const b of (bs || [])) {
       bomMaster.set(b.id, b.material_master_id);
       if (Array.isArray(b.image_urls) && b.image_urls.length) bomImages.set(b.id, b.image_urls);
+      if (Array.isArray(b.attachment_files) && b.attachment_files.length) bomAttach.set(b.id, b.attachment_files);
       bomExtra.set(b.id, {
         prod: b.production_consumption != null && Number(b.production_consumption) > 0 ? Number(b.production_consumption) : null,
         style_no: b.style_no || null,
@@ -636,12 +638,15 @@ export async function consolidateOrderProcurementItems(
     // 2026-07-07 用户拍板:抛量%是【唯一】buffer,只在【采购量=总需求×(1+抛量%)】处算一次。
     //   总需求(g.total)是裸数(件数×大货单耗),不再把抛量乘进总需求 —— 否则和建议采购的损耗叠成双 3%。
     let g = groups.get(key);
-    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, overTop: 0, imgs: [] as string[], reqDate: null, orderBy: null }; groups.set(key, g); }
+    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, overTop: 0, imgs: [] as string[], attach: [] as Array<{ name: string; url: string }>, reqDate: null, orderBy: null }; groups.set(key, g); }
     g.total += lineTotal; g.count += 1;
     if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; g.overTop = extra?.overPct ?? 0; }   // 主导来源的开发单耗/抛量作代表
     // 汇集来源图(去重,封顶 8 张)
     const imgs = sl?.bom_id ? (bomImages.get(sl.bom_id) || []) : [];
     for (const u of imgs) if (g.imgs.length < 8 && !g.imgs.includes(u)) g.imgs.push(u);
+    // 汇集来源排版稿/文件附件(按 url 去重,封顶 12)
+    const atts = sl?.bom_id ? (bomAttach.get(sl.bom_id) || []) : [];
+    for (const a of atts) if (a?.url && g.attach.length < 12 && !g.attach.some((x: any) => x.url === a.url)) g.attach.push({ name: String(a.name || a.url), url: String(a.url) });
     // 到货倒推:取各来源最早的 需到日/最晚下单日(宁早勿晚)
     if (r.required_date && (!g.reqDate || r.required_date < g.reqDate)) g.reqDate = r.required_date;
     if (r.order_by_date && (!g.orderBy || r.order_by_date < g.orderBy)) g.orderBy = r.order_by_date;
@@ -725,6 +730,13 @@ export async function consolidateOrderProcurementItems(
         for (const u of g.imgs) if (merged.length < 8 && !merged.includes(u)) merged.push(u);
         if (merged.length !== cur.length) upd.image_urls = merged;
       }
+      // 排版稿/文件附件合并:来源 BOM 新增的并进去,采购已补的保留(按 url union,封顶 12)
+      if (g.attach.length > 0 && 'attachment_files' in (ex as any)) {
+        const cur: Array<{ name: string; url: string }> = Array.isArray((ex as any).attachment_files) ? (ex as any).attachment_files : [];
+        const merged = [...cur];
+        for (const a of g.attach) if (merged.length < 12 && !merged.some((x) => x.url === a.url)) merged.push(a);
+        if (merged.length !== cur.length) upd.attachment_files = merged;
+      }
       // 到货倒推日期刷新(列存在才写,迁移未跑不报错)。采购手锁了需到日 → 不覆盖(required_date_locked)
       if ('order_by_date' in (ex as any) && !(ex as any).required_date_locked) { upd.required_date = g.reqDate; upd.order_by_date = g.orderBy; }
       const totalChanged = Number(ex.total_required_qty) !== g.total;
@@ -768,6 +780,7 @@ export async function consolidateOrderProcurementItems(
         suggested_purchase_qty: suggested, status: 'draft', created_by: user.id,
       };
       if (g.imgs.length > 0) row.image_urls = g.imgs;   // 业务传的色卡/辅料图随归并流转
+      if (g.attach.length > 0) row.attachment_files = g.attach;   // 业务传的排版稿/文件附件随归并流转
       if (g.reqDate) row.required_date = g.reqDate;     // 需到日/最晚下单日(到货倒推亮灯)
       if (g.orderBy) row.order_by_date = g.orderBy;
       // 品类补:采购下单后才冒出来的新项 = 漏采补录 → 标补采购,待财务审批
@@ -1155,6 +1168,33 @@ export async function updateProcurementItemImages(itemId: string, orderId: strin
   if (error) {
     if (/image_urls|column .* does not exist/i.test(error.message || '')) {
       return { error: '图片列尚未建立:请先在 Supabase 执行 20260703_procurement_item_images.sql' };
+    }
+    return { error: friendlyError(error) };
+  }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
+/** 更新采购项的排版稿/文件附件(业务/采购都可增删)。files=[{name,url}];url 须公网可下载,封顶 12。 */
+export async function updateProcurementItemAttachments(itemId: string, orderId: string, files: Array<{ name?: string; url?: string }>) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: profile } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!roles.some(r => ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
+    return { error: '无权更新附件' };
+  }
+  const clean = (Array.isArray(files) ? files : [])
+    .filter(f => f && typeof f.url === 'string' && /^https?:\/\//.test(f.url))
+    .map(f => ({ name: String(f.name || f.url).slice(0, 200), url: String(f.url) }))
+    .slice(0, 12);
+  const { error } = await (supabase.from('procurement_items') as any)
+    .update({ attachment_files: clean, updated_at: new Date().toISOString() }).eq('id', itemId);
+  if (error) {
+    if (/attachment_files|column .* does not exist/i.test(error.message || '')) {
+      return { error: '附件列尚未建立:请先在 Supabase 执行 20260710_material_attachment_files.sql' };
     }
     return { error: friendlyError(error) };
   }
