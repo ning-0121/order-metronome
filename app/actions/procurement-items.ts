@@ -303,7 +303,8 @@ export async function listBomConsumptionLines(orderId: string) {
     const q = Number((li as any).qty_pcs) || 0;
     const st = norm((li as any).style_no);
     byStyle.set(st, (byStyle.get(st) || 0) + q);
-    for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) byStyleColor.set(`${st}¦${norm(col)}`, q);
+    // 累加(原用 = 覆盖:同款×色多行(客户加单)只显示最后一行量,预览失真)
+    for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) { const k = `${st}¦${norm(col)}`; byStyleColor.set(k, (byStyleColor.get(k) || 0) + q); }
   }
   const pieceOf = (b: any): number | null => {
     // 辅料业务手填了总需用量 → 数量列直接显示它(中包袋按业务填的 1250,不是件数 7500)

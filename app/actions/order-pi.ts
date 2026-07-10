@@ -144,12 +144,18 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
     const unitLabel = first.unit && !/pcs|件/i.test(first.unit) ? 'SETS' : 'PCS';
     const totalQty = rows.reduce((s, l) => s + qtyOf(l), 0);
     const totalCarton = rows.reduce((s, l) => s + (Number(l.carton_count) || 0), 0);
-    const color = rows.map((l) => {
-      const nm = l.color_en || l.color_cn || '';
-      const q = qtyOf(l);
-      return q ? `${nm}(${q}${unitLabel})` : nm;
-    }).filter(Boolean).join('\n');
-    const sizeKeys = Object.keys(first.sizes && typeof first.sizes === 'object' ? first.sizes : {});
+    // 按款×色合并(客户加单同款×色多行 → 合并求和,PI 不出 BLACK(500)\nBLACK(300))
+    const _colorMap = new Map<string, { nm: string; qty: number; sizes: Record<string, number> }>();
+    for (const l of rows) {
+      const ck = `${(l.color_cn || '').trim()}|${(l.color_en || '').trim()}`;
+      let m = _colorMap.get(ck);
+      if (!m) { m = { nm: l.color_en || l.color_cn || '', qty: 0, sizes: {} }; _colorMap.set(ck, m); }
+      m.qty += qtyOf(l);
+      for (const [k, v] of Object.entries(l.sizes && typeof l.sizes === 'object' ? l.sizes : {})) m.sizes[k] = (Number(m.sizes[k]) || 0) + (Number(v) || 0);
+    }
+    const mergedColors = [..._colorMap.values()];
+    const color = mergedColors.map((m) => m.qty ? `${m.nm}(${m.qty}${unitLabel})` : m.nm).filter(Boolean).join('\n');
+    const sizeKeys = Object.keys(mergedColors.reduce((acc, m) => { for (const k of Object.keys(m.sizes)) acc[k] = 1; return acc; }, {} as Record<string, number>));
     const fab = fabByStyle.get(first.style_no || '') || fabByStyle.get('');
     return {
       po_no: poNo,

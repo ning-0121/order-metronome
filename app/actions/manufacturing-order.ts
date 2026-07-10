@@ -428,7 +428,17 @@ async function buildMoWorkbook(
     box(18, 2, 18, 10, '订单数量');        // B18:J18
     groups.forEach(([c1, c2], i) => box(19, c1, 19, c2, sizeKeys[i]));   // R19 尺码分组表头
     let r = 20;
-    const colorItems = g.items.length ? g.items : [{}];
+    // 按款×色合并(客户加单会产生同款×色多行 → 工厂只看每 SKU 总数,合并求和 sizes/箱数/件数)
+    const _mergedColors = new Map<string, any>();
+    for (const li of g.items) {
+      const key = `${(li.color_cn || '').trim()}|${(li.color_en || '').trim()}`;
+      let m = _mergedColors.get(key);
+      if (!m) { m = { color_cn: li.color_cn, color_en: li.color_en, sizes: {} as Record<string, number>, qty_pcs: 0, carton_count: 0 }; _mergedColors.set(key, m); }
+      for (const [k, v] of Object.entries(li.sizes || {})) m.sizes[k] = (Number(m.sizes[k]) || 0) + (Number(v) || 0);
+      m.qty_pcs += Number(li.qty_pcs) || 0;
+      m.carton_count += Number(li.carton_count) || 0;
+    }
+    const colorItems = _mergedColors.size ? [..._mergedColors.values()] : [{}];
     const colorRowNo: number[] = [];
     for (const li of colorItems) {
       ws.getRow(r).height = 25;
