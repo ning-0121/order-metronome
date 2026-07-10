@@ -12,7 +12,8 @@
  */
 
 import { createHash } from 'crypto';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { loadShippingDocModel } from '@/lib/services/shipping-docs';
 import {
   buildPackingListWorkbook, buildCommercialInvoiceWorkbook, buildCustomsWorkbook, buildPIWorkbook,
@@ -46,6 +47,12 @@ export async function syncShippingDocsToFinance(
 ): Promise<{ ok: boolean; sent: string[]; skipped: string[]; error?: string }> {
   const sent: string[] = [];
   const skipped: string[] = [];
+  // 鉴权(P0 修:此 action 用 service-role 生成含价 CI/报关并落公开 URL)。合法调用者=出运节点
+  // 完成(用户会话,fire-and-forget)。要求登录 + 对本单有访问权,挡住直连滥用/跨订单导出含价单。
+  const auth = await createClient();
+  const { data: { user } } = await auth.auth.getUser();
+  if (!user) return { ok: false, sent, skipped, error: '未登录' };
+  if (!(await canUserAccessOrder(auth, user.id, orderId))) return { ok: false, sent, skipped, error: '无权访问该订单' };
   try {
     const svc = createServiceRoleClient();
 

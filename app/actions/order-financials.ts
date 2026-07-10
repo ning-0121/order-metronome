@@ -281,6 +281,12 @@ export async function backfillConfirmationsForExistingOrders(): Promise<{
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { processed: 0, skipped: 0, error: '未登录' };
+  // P0 修:此维护函数会把全体订单的客户确认链解锁 + 打开 allow_production/allow_shipment 放货闸,
+  // 原来只校验登录 → 任意员工可越权放货。Constitution:覆盖经营闸仅 admin。
+  const { data: prof } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!hasRoleInGroup(roles, 'ALL_ADMIN')) return { processed: 0, skipped: 0, error: '无权限:仅管理员可批量初始化确认链' };
 
   const { data: orders } = await (supabase.from('orders') as any)
     .select('id').not('lifecycle_status', 'in', '("cancelled","已取消")');

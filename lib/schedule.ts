@@ -206,6 +206,7 @@ const TIMELINE = {
   sample_material:               2,
   sample_making:                 5,
   sample_qc:                     9,
+  sample_shipping_arrange:       9,   // 寄样安排(QC 过后安排寄送);缺此 key 会让打样单建单失败
   sample_sent:                   10,
   sample_customer_confirm:       12,
   sample_complete:               14,
@@ -438,6 +439,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
     sample_material:               cap(calc(TIMELINE.sample_material)),
     sample_making:                 cap(calc(TIMELINE.sample_making)),
     sample_qc:                     cap(calc(TIMELINE.sample_qc)),
+    sample_shipping_arrange:       cap(calc(TIMELINE.sample_shipping_arrange)),
     sample_sent:                   cap(calc(TIMELINE.sample_sent)),
     sample_customer_confirm:       cap(calc(TIMELINE.sample_customer_confirm)),
     sample_complete:               cap(calc(TIMELINE.sample_complete)),
