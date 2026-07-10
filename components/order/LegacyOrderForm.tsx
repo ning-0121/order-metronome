@@ -924,11 +924,11 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   /** 实际创建订单 */
   async function doCreateOrder(rawFormData: FormData, filesToUpload: { file: File; fileType: string; label: string }[]) {
     setLoading(true);
-    // 订单用途标记:样品单 > 采购成品/贸易订单 > 生产(默认)
+    // 订单用途标记:样品单 > 采购成品/贸易订单 / 委托加工·外发单 > 生产(默认)
     if (isSampleOrder) {
       rawFormData.set('order_purpose', 'sample');
-    } else if (orderPurpose === 'trade') {
-      rawFormData.set('order_purpose', 'trade');
+    } else if (orderPurpose === 'trade' || orderPurpose === 'consign') {
+      rawFormData.set('order_purpose', orderPurpose);
     }
     // 已批准的价格审批 ID 透传到服务端校验
     if (priceApprovalId) {
@@ -1241,10 +1241,14 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                       onChange={e => setOrderPurpose(e.target.value)}
                       className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                       <option value="production">生产订单</option>
+                      <option value="consign">委托加工/外发单</option>
                       <option value="trade">采购成品/贸易订单</option>
                     </select>
                     {orderPurpose === 'trade' && (
                       <p className="text-xs text-amber-600 mt-1">采购成品/贸易订单:只走 采购→验收→出运→回款,不生成开裁/中查/尾查/工厂生产等节点。</p>
+                    )}
+                    {orderPurpose === 'consign' && (
+                      <p className="text-xs text-amber-600 mt-1">委托加工/外发单:照常做生产单·原辅料单给工厂,料由工厂自采(不走采购核料)。保留产前样/中查/尾查/CI报关/出运/回款。</p>
                     )}
                   </div>
                 )}

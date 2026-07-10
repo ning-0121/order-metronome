@@ -255,6 +255,26 @@ for (const k of tradeScheduleKeys) {
   assert(tradeDue[k] instanceof Date && !isNaN(tradeDue[k].getTime()), `trade step_key ${k} 能被 schedule 排期(calcDueDates 返回有效日期)`);
 }
 
+// ════ 2c. consign(委托加工/外发单)模板 ════
+console.log('\n🏭 consign 模板');
+// = 标准生产 V2 砍掉「采购核料提交」;出口 14 / 送仓 13
+const consignExport = getApplicableMilestones('bulk', false, 'export', 'consign');
+assert(consignExport.length === 14, `consign export ${consignExport.length} 节点 (=15-采购核料=14)`);
+assert(!consignExport.some(m => m.step_key === 'procurement_order_placed'), 'consign 不含采购核料提交');
+// 保留:生产单/评审/产前样/中查/尾查/CI报关/订舱/出运/收款
+for (const step of ['po_confirmed', 'production_order_upload', 'order_kickoff_meeting', 'pre_production_sample_approved', 'mid_qc_sales_check', 'final_qc_sales_check', 'ci_made', 'booking_done', 'shipment_execute', 'payment_received']) {
+  assert(consignExport.some(m => m.step_key === step), `consign export 保留 ${step}`);
+}
+const consignDomestic = getApplicableMilestones('bulk', false, 'domestic', 'consign');
+assert(consignDomestic.length === 13, `consign domestic ${consignDomestic.length} 节点 (=14-订舱=13)`);
+assert(!consignDomestic.some(m => m.step_key === 'booking_done'), 'consign domestic 不含订舱');
+assert(consignDomestic.some(m => m.step_key === 'shipping_sample_send'), 'consign domestic 保留船样(与生产同口径)');
+// 所有 consign step_key 必须能被 schedule 排期
+const consignDue = calcDueDates({ orderDate: '2026-01-01', createdAt: new Date('2026-01-01'), incoterm: 'FOB', etd: '2026-03-01' });
+for (const k of new Set<string>([...consignExport.map(m => m.step_key), ...consignDomestic.map(m => m.step_key)])) {
+  assert(consignDue[k] instanceof Date && !isNaN(consignDue[k].getTime()), `consign step_key ${k} 能被 schedule 排期`);
+}
+
 // 2026-07-09:出口标准单固定 15 节点(业务执行节拍)—— 免产前样/头样/二次样 都不再增删,均返回标准 15(出口)。
 const skipSampleMilestones = getApplicableMilestones('bulk', false, 'export', 'production', true);
 assert(skipSampleMilestones.length === 15, `免产前样仍固定 ${skipSampleMilestones.length} 节点 (=15)`);

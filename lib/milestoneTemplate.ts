@@ -74,33 +74,37 @@ export const MILESTONE_TEMPLATE_V2: Array<{
   // 2026-07-09 用户拍板:订单详情节拍器 = 【业务执行自己的节拍】(15 节点出口/13 送仓)。
   //   生产大货节拍在【生产中心】、采购下单细节在【采购中心】,此处只放业务执行要盯的节拍。
   //   → 移除"生产启动"(归生产中心);新增"订单评审会""包装方式确认";"采购下单"改为业务的"采购核料提交"。
-  // 业务线节点全部 owner_role=sales(节拍器里"业务"=业务执行部,getRoleLabel 显示"业务执行";
-  //   merchandiser 已并入"生产部QC",业务节点不能用 merchandiser)。物流/财务节点保留各自角色。
+  // 2026-07-10 派单归位:PO 后业务执行节点 owner_role 由 sales → merchandiser。
+  //   sales=业务开发(到 PO 交接为止);merchandiser=业务执行部(PO 后接手一路到出货)。
+  //   仅 po_confirmed 保留 sales(=业务开发的交接点)。物流/财务节点保留各自角色。
+  //   配套(orders.ts):这些 merchandiser 节点默认自动指派给建单人(owner_user_id=creator),
+  //   保证计分/催办/操作不中断;高洁(order_manager)用「理单跟单」按需改派。仅新单生效,存量不动。
+  //   evidence_note 中"业务…"沿用旧文案,语义指业务执行部(理单)。
   { step_key: "po_confirmed", name: "PO审查确认", owner_role: "sales", is_critical: true, evidence_required: false,
     evidence_note: "财务确认价格/账期 + 生产部确认可执行(多方确认即完成,免凭证)" },
-  { step_key: "pi_confirmed", name: "PI制作·客户确认", owner_role: "sales", is_critical: true, evidence_required: true,
+  { step_key: "pi_confirmed", name: "PI制作·客户确认", owner_role: "merchandiser", is_critical: true, evidence_required: true,
     evidence_note: "业务制作 PI 发客户确认 + 财务审核 PI;上传 PI 文件" },
-  { step_key: "production_order_upload", name: "生产单·原辅料单制作", owner_role: "sales", is_critical: false, evidence_required: true,
+  { step_key: "production_order_upload", name: "生产单·原辅料单制作", owner_role: "merchandiser", is_critical: false, evidence_required: true,
     evidence_note: "业务制作生产单 + 原辅料单" },
-  { step_key: "order_kickoff_meeting", name: "订单评审会", owner_role: "sales", is_critical: true, evidence_required: true,
+  { step_key: "order_kickoff_meeting", name: "订单评审会", owner_role: "merchandiser", is_critical: true, evidence_required: true,
     evidence_note: "业务牵头,业务·生产·采购三方评审(款式/面料/工艺/交期/成本)" },
-  { step_key: "procurement_order_placed", name: "采购核料提交", owner_role: "sales", is_critical: true, evidence_required: true,
+  { step_key: "procurement_order_placed", name: "采购核料提交", owner_role: "merchandiser", is_critical: true, evidence_required: true,
     evidence_note: "业务提交采购核料 → 采购部安排下单;采购下单进度在【采购中心】跟。完成后开启采购进度共享" },
-  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "sales", is_critical: false, evidence_required: true,
+  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "merchandiser", is_critical: false, evidence_required: true,
     evidence_note: "业务寄产前样给客户,填快递单号(生产做样在生产中心)" },
-  { step_key: "pre_production_sample_approved", name: "产前样确认", owner_role: "sales", is_critical: true, evidence_required: false,
+  { step_key: "pre_production_sample_approved", name: "产前样确认", owner_role: "merchandiser", is_critical: true, evidence_required: false,
     evidence_note: "采购确认大货原辅料品质 + 业务确认客户通过(多方确认即完成,免凭证)" },
-  { step_key: "mid_qc_sales_check", name: "中期验货", owner_role: "sales", is_critical: false, evidence_required: true,
+  { step_key: "mid_qc_sales_check", name: "中期验货", owner_role: "merchandiser", is_critical: false, evidence_required: true,
     evidence_note: "业务对中期验货结果确认" },
-  { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "sales", is_critical: false, evidence_required: true,
+  { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: false, evidence_required: true,
     evidence_note: "业务确认包装方式/唛头/装箱资料" },
-  { step_key: "final_qc_sales_check", name: "尾期验货", owner_role: "sales", is_critical: true, evidence_required: false,
+  { step_key: "final_qc_sales_check", name: "尾期验货", owner_role: "merchandiser", is_critical: true, evidence_required: false,
     evidence_note: "生产部QC确认尾查合格 + 业务确认可交付(多方确认即完成,免凭证)" },
-  { step_key: "shipping_sample_send", name: "船样准备·寄出", owner_role: "sales", is_critical: false, evidence_required: true,
+  { step_key: "shipping_sample_send", name: "船样准备·寄出", owner_role: "merchandiser", is_critical: false, evidence_required: true,
     evidence_note: "业务准备并寄出船样(仅出口单)" },
-  { step_key: "ci_made", name: "PackingList·CI·报关单制作", owner_role: "sales", is_critical: true, evidence_required: true,
+  { step_key: "ci_made", name: "PackingList·CI·报关单制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
     evidence_note: "业务制作装箱单 + 商业发票 + 报关单;上传文件" },
-  { step_key: "booking_done", name: "订舱出货", owner_role: "sales", is_critical: true, evidence_required: true,
+  { step_key: "booking_done", name: "订舱出货", owner_role: "merchandiser", is_critical: true, evidence_required: true,
     evidence_note: "业务订舱安排(仅出口单)" },
   { step_key: "shipment_execute", name: "发货出运", owner_role: "logistics", is_critical: true, evidence_required: false,
     evidence_note: "业务/采购/财务三方确认后出运(填 BL/船名即可,免凭证)" },
@@ -283,6 +287,17 @@ export function getApplicableMilestones(
       return [...filtered, ...DOMESTIC_MILESTONES];
     }
     return [...TRADE_MILESTONE_TEMPLATE];
+  }
+
+  // 委托加工 / 外发单:料由工厂自采 → 标准生产模板只砍掉「采购核料提交」一节点。
+  //   生产单·原辅料单制作 / 订单评审会 / 产前样 / 中查 / 尾查 / CI报关 / 出运 / 收款 全保留。
+  //   送仓口径与 production 一致(再砍「订舱出货」)。出口 14 节点 / 送仓 13 节点。
+  if (orderPurpose === 'consign') {
+    const consignBase = MILESTONE_TEMPLATE_V2.filter(m => m.step_key !== 'procurement_order_placed');
+    if (deliveryType !== 'export') {
+      return consignBase.filter(m => m.step_key !== 'booking_done');
+    }
+    return consignBase;
   }
 
   // 2026-07-09 用户拍板:标准生产单=业务执行节拍(出口 15 节点)。

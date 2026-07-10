@@ -336,6 +336,14 @@ export function shouldGenerateGate(
     return false;
   }
 
+  // 委托加工/外发单:料由工厂自采,只跳过原辅料采购/到货/检验门禁,其余生产门禁(产前样/中查/尾查等)保留
+  if (order.order_purpose === 'consign' &&
+      (gate.gate_key === 'raw_materials_procurement' ||
+       gate.gate_key === 'raw_materials_arrival' ||
+       gate.gate_key === 'raw_materials_inspection')) {
+    return false;
+  }
+
   // 如果没有条件，默认生成
   if (!gate.condition) {
     return true;
