@@ -11,8 +11,19 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { buildPIWorkbook } from '@/lib/services/shipping-doc-builders';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 const CAN_EDIT_PI = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'];
+
+// 谁能看到 PI 上的客户成交价(po_unit_price):财务可见组 ∪ PI 编辑者(理单跟单要填 PI 故保留)。
+// 排除生产/QC/物流/仓库/纯采购等无关角色——修 P0:此前 getPI/exportPI 无门禁,客户成交价泄露给所有登录角色(2026-07-09 审计)。
+function canSeePIPrice(roles: string[]): boolean {
+  return hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS') || roles.some((r) => CAN_EDIT_PI.includes(r));
+}
+// 无权角色下发降级版:抹掉逐款单价 + 定金,其余(款/色/码/箱数/数量/运输)照常。
+function maskPIPrices<T extends { lines?: PILine[]; deposit?: string }>(d: T): T {
+  return { ...d, deposit: '', lines: (d.lines || []).map((l) => ({ ...l, unit_price: 0 })) };
+}
 
 // 开票方固定抬头 · 义乌市绮陌服饰有限公司(2026-07-09 用户拍板,统一用此抬头)
 const ISSUER = {
@@ -55,7 +66,7 @@ export interface PIData {
   lines: PILine[];
 }
 
-type PIBundle = PIData & { issuer: typeof ISSUER; has_saved: boolean; order_no: string | null };
+type PIBundle = PIData & { issuer: typeof ISSUER; has_saved: boolean; order_no: string | null; price_masked?: boolean };
 
 function emptyLine(): PILine {
   return { po_no: '', style_no: '', style: '', size: '', color: '', description: '', composition: '', fabric_weight: '', total_carton: 0, unit_per_carton: 0, qty: 0, unit_price: 0, notes: '' };
@@ -88,8 +99,9 @@ function cleanData(data: Partial<PIData>): PIData {
 
 /** 取 PI:有存过的返回存的;否则从生产单按款归组 + 客户PO价现算一份草稿。 */
 export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?: string }> {
-  const { supabase, userId } = await auth();
+  const { supabase, userId, roles } = await auth();
   if (!userId) return { error: '请先登录' };
+  const seePrice = canSeePIPrice(roles);   // 无权看客户成交价 → 下方两个返回都抹价
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
     .select('order_no, customer_name, po_number, factory_date, currency, eta').eq('id', orderId).maybeSingle();
@@ -99,7 +111,8 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
   const { data: saved } = await (supabase.from('order_pi') as any).select('data').eq('order_id', orderId).maybeSingle();
   const savedData = (saved as any)?.data as PIData | undefined;
   if (savedData && Array.isArray(savedData.lines) && savedData.lines.length) {
-    return { data: { ...cleanData(savedData), issuer: ISSUER, has_saved: true, order_no: (order as any).order_no ?? null } };
+    const clean = cleanData(savedData);
+    return { data: { ...(seePrice ? clean : maskPIPrices(clean)), issuer: ISSUER, has_saved: true, order_no: (order as any).order_no ?? null, price_masked: !seePrice } };
   }
 
   // 现算草稿:按款号归组(多颜色行并入一款)
@@ -165,7 +178,7 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
     deposit: '', currency: (order as any).currency || 'USD',
     lines: lines.length ? lines : [emptyLine()],
   };
-  return { data: { ...draft, issuer: ISSUER, has_saved: false, order_no: (order as any).order_no ?? null } };
+  return { data: { ...(seePrice ? draft : maskPIPrices(draft)), issuer: ISSUER, has_saved: false, order_no: (order as any).order_no ?? null, price_masked: !seePrice } };
 }
 
 /** 保存 PI(业务改完存)。 */

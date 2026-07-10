@@ -105,7 +105,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const supabase = await createClient()
+    // 修 P0/P1(2026-07-09 审计):回调无用户登录会话,匿名 createClient() 下 auth.uid()=NULL,
+    // price/delay/milestone 三表的 UPDATE 会被 RLS 静默挡成 0 行 → 财务批过的审批永久写不回、订单卡死。
+    // 统一走 service-role(与 cancel/purchase 分支一致);状态闸 .eq('status','pending') 保留做幂等。
+    const { createServiceRoleClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceRoleClient()
 
     // 4. 根据审批类型更新对应表。H2 复审:各分支加状态闸(仅"仍待审批"命中才落地),
     //    防不同 request_id 的重复回调覆盖已处理/已被人工修正的记录(request_id 幂等只挡同键重放)。
