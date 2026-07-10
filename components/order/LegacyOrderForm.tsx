@@ -1329,7 +1329,10 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
               <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/30 p-3">
                 <div className="text-sm font-semibold text-gray-800 mb-1">逐款明细(款 / 颜色 / 尺码 × 件数)</div>
                 <p className="text-[11px] text-gray-500 mb-3">手工录逐款明细 → 上面的总量/款数/颜色数自动算,且喂生产任务单和客户 PI。不录也能建单(上面三个数字手填)。</p>
-                <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit showPrice={showPrice} />
+                {/* onParsed:富录入表里做的 AI 解析也把完整结果(交期/包装/质量要求/辅料)带回来,
+                    随建单冻结进 orders.po_parse_snapshot;主 PO 上传已解析过则不覆盖(首解析优先) */}
+                <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit showPrice={showPrice}
+                  onParsed={(data) => setPoParseResult((prev: any) => prev ?? data)} />
               </div>
             </div>
 

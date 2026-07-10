@@ -25,9 +25,12 @@ type Style = {
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
 const sumSizes = (s: Record<string, number>) => Object.values(s || {}).reduce((a, v) => a + (Number(v) || 0), 0);
 
-export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false }: {
+export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false, onParsed }: {
   orderId?: string; canEdit?: boolean; value?: Style[]; onChange?: (styles: Style[]) => void;
   showPrice?: boolean;   // 是否渲染客户 PO 成交价列(仅建单/售价可见场景传 true;生产任务单等不传)
+  /** AI 解析成功时把完整解析结果(POParsedData:含交期/包装/质量要求/辅料/尺寸表)交给父组件——
+   *  建单表单拿它随 createOrder 冻结进 orders.po_parse_snapshot(别处提取用);不传则忽略 */
+  onParsed?: (data: any) => void;
 }) {
   // 受控模式(建单页:父组件持有明细,无 orderId,不自加载/自保存);否则详情模式(自加载 orderId + 保存按钮)
   const controlled = value !== undefined && !!onChange;
@@ -90,8 +93,10 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await parsePO(fd);
+      // 详情模式带 orderId:解析成功后服务端把 AI 原文冻结到 orders.po_parse_snapshot(首冻,别处提取用)
+      const res = await parsePO(fd, orderId);
       if (!res.ok || !res.data) { setMsg('❌ ' + (res.error || 'AI 解析失败')); setParsing(false); return; }
+      onParsed?.(res.data);   // 建单(受控)模式:把完整解析结果交给父表单,随建单冻结
       const isImg = /\.(png|jpe?g)$/i.test(file.name);
       const notes = (res.data.confidence_notes || []).filter(Boolean).join('；');
       const aiStyles: Style[] = (res.data.styles || []).map((s: any) => ({

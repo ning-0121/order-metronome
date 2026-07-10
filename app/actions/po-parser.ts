@@ -330,6 +330,15 @@ export async function parsePO(
       return undefined;
     });
 
+    // 冻结底档(2026-07-10 用户拍板:解析后要冻结,方便以后其他地方提取——生产单/辅料/要求类
+    // 都从 orders.po_parse_snapshot 读)。首冻不覆盖:已有底档不动(人工「重新冻结」按钮才覆盖);
+    // 走 user session 受 RLS 管;失败不阻断解析结果返回。
+    // await 而非 fire-and-forget:Vercel serverless 响应返回后悬空 Promise 会被掐,冻结必须落地。
+    if (orderId) {
+      try { await freezeSnapshotIfEmpty(orderId, parsed); }
+      catch (e: any) { console.warn('[parsePO] freeze snapshot failed (non-blocking):', e?.message); }
+    }
+
     return { ok: true, data: parsed, draftId };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -350,6 +359,23 @@ export async function parsePO(
 // ──────────────────────────────────────────────────────────
 // P0-1: 草稿持久化（po_parse_drafts 表）
 // ──────────────────────────────────────────────────────────
+
+/**
+ * 内部辅助:解析成功后把 AI 原文冻结到 orders.po_parse_snapshot(只读底档,别处提取用)。
+ * 只在底档为空时写(首冻);已有底档不静默覆盖——人工走「重新冻结」(refreezePoParseSnapshot)。
+ * 走 user session(RLS 管权限:无权改该订单的人写不进,静默跳过)。
+ */
+async function freezeSnapshotIfEmpty(orderId: string, parsed: POParsedData): Promise<void> {
+  const supabase = await createClient();
+  const { data: ord } = await (supabase.from('orders') as any)
+    .select('id, po_parse_snapshot').eq('id', orderId).maybeSingle();
+  if (!ord || (ord as any).po_parse_snapshot) return;   // 订单不存在/已有底档 → 不动
+  const { error } = await (supabase.from('orders') as any)
+    .update({ po_parse_snapshot: parsed, po_parse_snapshot_at: new Date().toISOString() })
+    .eq('id', orderId);
+  if (error) console.warn('[freezeSnapshotIfEmpty] update failed:', error.message);
+  else console.log('[parsePO] 底档已冻结到订单:', orderId);
+}
 
 /**
  * 内部辅助：把解析结果存入草稿表。返回 draftId。
