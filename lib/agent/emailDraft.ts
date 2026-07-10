@@ -62,7 +62,9 @@ ${contextStr || '暂无关联订单信息'}
 只返回JSON。`;
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514', max_tokens: 800,
+      model: 'claude-sonnet-5',
+      thinking: { type: 'disabled' },
+      max_tokens: 800,
       messages: [{ role: 'user', content: prompt }],
     });
 

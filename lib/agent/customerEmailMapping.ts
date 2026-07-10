@@ -117,7 +117,9 @@ export async function identifyCustomerFromEmail(
     const client = new Anthropic();
     const prompt = `从以下邮件中识别客户名称。已知客户列表：${uniqueCustomers.join('、')}\n\n发件人：${fromEmail}\n主题：${subject}\n正文：${body.slice(0, 500)}\n\n返回JSON：{"customerName":"识别到的客户名或null","isNewCustomer":true/false}\n只返回JSON。`;
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514', max_tokens: 100,
+      model: 'claude-sonnet-5',
+      thinking: { type: 'disabled' },
+      max_tokens: 100,
       messages: [{ role: 'user', content: prompt }],
     });
     const text = response.content[0].type === 'text' ? response.content[0].text : '';

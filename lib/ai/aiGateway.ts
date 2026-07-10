@@ -76,7 +76,7 @@ export interface GatewayRunOptions<TFallback = null> {
   maxTokens?: number;
 
   /**
-   * 模型 ID，默认 claude-sonnet-4-20250514
+   * 模型 ID，默认 claude-sonnet-5
    * 通常不需要指定
    */
   model?: string;

@@ -218,7 +218,7 @@ export async function extractPOFromAttachment(
           };
 
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-5', thinking: { type: 'disabled' },
         max_tokens: 3000,
         system: systemPrompt,
         messages: [{
@@ -256,7 +256,7 @@ export async function extractPOFromAttachment(
         extracted_json: extracted,
         confidence_score: extracted?.extraction_meta?.confidence ?? null,
         uncertain_fields: extracted?.extraction_meta?.uncertain_fields ?? [],
-        extraction_model: 'claude-sonnet-4-20250514',
+        extraction_model: 'claude-sonnet-5',
         extraction_tokens: extractionTokens,
         extracted_at: new Date().toISOString(),
         extract_error: extractError,

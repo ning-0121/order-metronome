@@ -263,7 +263,7 @@ PO行项目: ${JSON.stringify(lineItemsFromPO)}
   try {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5', thinking: { type: 'disabled' },
       max_tokens: 2000,
       system: `你是外贸单据专家，擅长生成标准、规范的外贸单据。
 规则：

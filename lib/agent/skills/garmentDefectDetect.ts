@@ -92,7 +92,7 @@ export async function detectGarmentDefects(
 
   const result = await callClaudeJSON<DefectDetectionResult>({
     scene: 'garment-defect-detect',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5', thinking: { type: 'disabled' },
     maxTokens: 2048,
     timeoutMs: 45_000,
     system: GARMENT_QC_SYSTEM_PROMPT,

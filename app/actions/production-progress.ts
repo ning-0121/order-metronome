@@ -415,7 +415,7 @@ export async function extractTextFromAttachment(attachmentId: string): Promise<{
   const { callClaude } = await import('@/lib/agent/anthropicClient');
   const result = await callClaude({
     scene: 'production-ocr',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5', thinking: { type: 'disabled' },
     maxTokens: 2048,
     timeoutMs: 45_000,
     system: '你是一个服装生产车间的跟单助手，专门把车间的手写/打印单据识别成结构化中文文本。',

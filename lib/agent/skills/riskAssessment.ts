@@ -960,7 +960,7 @@ ${findings
 
   return await callClaudeJSON<NarrativePayload>({
     scene: 'risk_assessment_narrative',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5', thinking: { type: 'disabled' },
     system: systemPrompt,
     prompt: userPrompt,
     maxTokens: 1500,

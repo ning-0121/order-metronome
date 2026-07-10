@@ -146,7 +146,7 @@ ${emailDigest}`;
 
     const aiResult = await callClaudeJSON<InsightsPayload>({
       scene: 'customer-email-insights',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5', thinking: { type: 'disabled' },
       maxTokens: 2048,
       timeoutMs: 40_000,
       system: systemPrompt,

@@ -138,7 +138,7 @@ async function extractFinancialData(
 
     const result = await callClaudeJSON<any>({
       scene: 'quote-review-extract',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5', thinking: { type: 'disabled' },
       maxTokens: 1024,
       timeoutMs: 60_000,
       system: '你是一个专业的服装外贸财务助手。从文件中提取财务数据，严格返回JSON格式。',
