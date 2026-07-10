@@ -254,9 +254,12 @@ export async function generateProductionOrder(
         colorCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         // 箱数：公式 =D{r}/48
         styleCell(r, 3, { formula: `D${r}/48` } as any, { font: NUM_FONT, bold: false, color: 'FF000000' });
-        // 数量：公式 =E+F+G+H 红字
-        styleCell(r, 4, { formula: `E${r}+F${r}+G${r}+H${r}` } as any, { font: NUM_FONT, bold: false, color: RED });
-        // 尺码配比
+        // 数量：该色【全尺码】真实总量(修 P2 2026-07-09:此前 =E+F+G+H 只加 S/M/L/XL,
+        //   含 XXL/数字码时少算、纯数字码整单归 0 → 工厂裁错量。总量按所有尺码求和;逐码明细见「尺寸表」sheet)。
+        const colorTotal = Object.values((color.sizes && typeof color.sizes === 'object' ? color.sizes : {}))
+          .reduce((s: number, v: any) => s + (Number(v) || 0), 0);
+        styleCell(r, 4, colorTotal, { font: NUM_FONT, bold: false, color: RED });
+        // 尺码配比(主表展示标准 S/M/L/XL;非标码在「尺寸表」sheet 动态全列)
         ['S', 'M', 'L', 'XL'].forEach((sz, si) => {
           styleCell(r, 5 + si, color.sizes?.[sz] || 0, { font: NUM_FONT, bold: false });
         });

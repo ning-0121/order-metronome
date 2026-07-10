@@ -122,13 +122,17 @@ export async function loadShippingDocModel(
     byStyle.set(s, g);
   }
   const ciStyles: any[] = [];
-  const ciTotals = { cartons: 0, qty: 0, amount: 0 };
+  // missingPrice(修 P2 2026-07-09):有量却缺客户成交价的款数(仅 canSeeFin 有意义)——此前静默不计入
+  // 总额、发票金额虚低且无警示。据此在 CI 页/导出显著提示,不再默默漏总。
+  const ciTotals = { cartons: 0, qty: 0, amount: 0, missingPrice: 0 };
   for (const g of byStyle.values()) {
     const m = styleMeta.get(g.style_no) || {};
     const uw = unitWord(m.unit);
     const price = canSeeFin ? (m.po_unit_price ?? null) : null;
     const amount = price != null ? Math.round(price * g.qty * 100) / 100 : null;
-    ciTotals.cartons += g.cartons; ciTotals.qty += g.qty; if (amount != null) ciTotals.amount += amount;
+    ciTotals.cartons += g.cartons; ciTotals.qty += g.qty;
+    if (amount != null) ciTotals.amount += amount;
+    else if (canSeeFin && g.qty > 0) ciTotals.missingPrice += 1;
     ciStyles.push({
       style_no: g.style_no, description: m.description || '', composition: m.composition || '',
       sizeRatio: sizeRatioText(g.sizes),

@@ -47,9 +47,10 @@ const FORM_KEYS = [
   'confirmed_supplier_name', 'backup_supplier_name', 'supplier_contact', 'lead_days', 'required_date',
   'unit_price', 'currency', 'tax_rate', 'price_inclusive_tax', 'quote_date',
   'is_substitute', 'substitute_reason', 'is_split', 'is_outsourced', 'risk_flag', 'risk_note', 'procurement_notes',
+  'purchase_spec',
 ];
 
-export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string; focusItemId?: string | null }) {
+export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: { orderId: string; focusItemId?: string | null; internalOrderNo?: string | null }) {
   const { confirm, prompt, dialog } = useDialogs();
   const [items, setItems] = useState<any[]>([]);
   // 聚焦单料(采购中心点某行「任务单」带 ?item= 进来):只显示这一款料 + 顶部横幅可切回全部
@@ -927,7 +928,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 text-left text-gray-500">
-              {['☑', '编号', '物料', '类别', '颜色', '单位', '总需求', '库存可用', '来源', '建议采购', '最终', '供应商', '状态', ''].map(h => (
+              {['☑', '编号', '内部订单号', '物料', '类别', '颜色', '单位', '总需求', '库存可用', '来源', '建议采购', '最终', '供应商', '状态', ''].map(h => (
                 <th key={h} className="py-2 px-2 font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
@@ -946,6 +947,7 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
                     {it.is_supplement && <span title={`补采购:${it.supplement_reason || ''}`} className={`mr-1 px-1.5 py-px rounded text-[10px] font-medium ${SUPP_STATUS[it.finance_approval_status]?.cls || 'bg-amber-100 text-amber-700'}`}>🟠补</span>}
                     {(() => { const b = deadlineBadge(it); return b ? <span title={b.tip} className={`mr-1 px-1.5 py-px rounded text-[10px] font-medium ${b.cls}`}>{b.text}</span> : null; })()}
                     {it.item_no || '—'}</td>
+                  <td className="py-2 px-2 font-mono text-xs text-gray-500 whitespace-nowrap">{internalOrderNo || '—'}</td>
                   <td className="py-2 px-2 font-medium text-gray-900">
                     <span className="inline-flex items-center gap-1.5">
                       {Array.isArray(it.image_urls) && it.image_urls[0] && (
@@ -1134,6 +1136,17 @@ export function ProcurementItemsTab({ orderId, focusItemId }: { orderId: string;
                 ))}
               </div>
             )}
+          </div>
+
+          {/* 采购规格(供应商-facing;采购员自填·自由多行)——进采购单发供应商,整个辅料一份 */}
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-semibold text-gray-500">📋 采购规格<span className="font-normal text-gray-400"> · 发供应商的规格(尺寸/材质/工艺…);整个辅料一份,改后点下方「保存」</span></span>
+            </div>
+            <textarea value={form.purchase_spec ?? ''} onChange={e => set('purchase_spec', e.target.value)}
+              rows={3} placeholder="例:吊牌 80×40mm · 300g 铜版纸 · 双面四色印 + 过哑膜 · 棉绳吊绳"
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
+            <p className="mt-1 text-[11px] text-gray-400">此规格 + 上方图片会一起进「采购单 → 辅料规格&图片」附页,直接发供应商照做。</p>
           </div>
 
           {/* 尺码 opt-in(2026-07-08:辅料默认整单一个数量;点此打开逐码录入。系统有建议则预填,没建议也能手动加码)*/}

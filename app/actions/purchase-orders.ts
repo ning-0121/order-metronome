@@ -879,11 +879,12 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const piMap = new Map<string, any>();
   if (piIds.length > 0) {
     const _svc = createServiceRoleClient();
-    const _piSel = 'id, material_name, color, production_consumption, development_consumption, sku_breakdown';
+    const _piSel = 'id, material_name, color, production_consumption, development_consumption, sku_breakdown, purchase_spec, image_urls';
     let { data: pis, error: piErr } = await (_svc.from('procurement_items') as any).select(_piSel).in('id', piIds);
-    // sku_breakdown 列(2026-07-10)未建 → 降级去该列,采购单照样导(无产品明细附页)
-    if (piErr && /sku_breakdown|schema cache|column|does not exist/i.test(piErr.message || '')) {
-      ({ data: pis } = await (_svc.from('procurement_items') as any).select(_piSel.replace(', sku_breakdown', '')).in('id', piIds));
+    // sku_breakdown / purchase_spec 列(2026-07-10)未建 → 降级去这些新列,采购单照样导(无产品明细/规格附页)
+    if (piErr && /sku_breakdown|purchase_spec|schema cache|column|does not exist/i.test(piErr.message || '')) {
+      const _piSelSafe = 'id, material_name, color, production_consumption, development_consumption, image_urls';
+      ({ data: pis } = await (_svc.from('procurement_items') as any).select(_piSelSafe).in('id', piIds));
     }
     for (const p of (pis || [])) piMap.set(p.id, p);
   }
@@ -891,6 +892,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     const pi = l.procurement_item_id ? piMap.get(l.procurement_item_id) : null;
     (l as any).color = pi?.color ?? null;
     (l as any).consumption = pi?.production_consumption ?? pi?.development_consumption ?? null;
+    (l as any).purchase_spec = pi?.purchase_spec ?? null;
   }
 
   const { data: ords } = await (supabase.from('orders') as any)
@@ -902,7 +904,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     const key = `${l.material_name || ''}|${l.color || ''}|${l.specification || ''}|${l.size || ''}|${l.ordered_unit || ''}`;
     const g = rowMap.get(key) || {
       material_name: l.material_name || '', color: l.color || '', specification: l.specification || '', size: l.size || '',
-      unit: l.ordered_unit || '', consumption: l.consumption ?? null, notes: l.notes || '',
+      unit: l.ordered_unit || '', consumption: l.consumption ?? null, notes: l.notes || '', purchase_spec: l.purchase_spec || '',
       qty: 0, amount: 0, prices: new Set<number>(),
     };
     g.qty += Number(l.ordered_qty) || 0;
@@ -932,7 +934,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     { h: '单件平方用量', w: 12 }, { h: '单件用量(kg)', w: 12 }, { h: '订单数量', w: 10 },
     { h: '总用量', w: 12 }, { h: '单位', w: 8 },
     ...(withPrice ? [{ h: '单价', w: 10, price: true }, { h: '金额', w: 14, price: true }] : []),
-    { h: '备注', w: 20 },
+    { h: '规格', w: 24 }, { h: '备注', w: 20 },
   ];
   const NC = COLS.length;
   const colLetter = (i: number) => String.fromCharCode(65 + i);
@@ -970,7 +972,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
       r.consumption ?? '', '',                          // 单件用量kg · 订单数量(空)
       Math.round(r.qty * 1000) / 1000, r.unit || '',    // 总用量 · 单位
       ...(withPrice ? [r.unit_price ?? '', r.amount ? Math.round(r.amount * 100) / 100 : ''] : []),
-      r.notes || '',
+      r.purchase_spec || '', r.notes || '',              // 规格(采购填) · 备注
     ];
     if (withPrice && r.amount) totalAmount += r.amount;
     const row = ws.addRow(cells);
@@ -1040,6 +1042,48 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     const totalRow = ws2.addRow([...(skuMulti ? [''] : []), '', '', '', '合计', skuTotal]);
     totalRow.eachCell((cell) => { cell.font = { bold: true }; });
     SCOLS.forEach((c, i) => { ws2.getColumn(i + 1).width = c.w; });
+  }
+
+  // ── 辅料规格 & 图片附页 ── 采购员填的 purchase_spec + 色卡/辅料参考图,直接发供应商照做。
+  // 图片从 product-images 公开桶按 URL 抓字节嵌入;抓不到/超时的图跳过,绝不阻断采购单导出。
+  const specItems = [...piMap.values()].filter((pi: any) =>
+    (pi.purchase_spec && String(pi.purchase_spec).trim()) ||
+    (Array.isArray(pi.image_urls) && pi.image_urls.length > 0));
+  if (specItems.length > 0) {
+    const ws3 = wb.addWorksheet('辅料规格&图片');
+    [22, 50, 20, 20, 20].forEach((w, i) => { ws3.getColumn(i + 1).width = w; });
+    ws3.mergeCells('A1:E1');
+    ws3.getCell('A1').value = '辅料规格 & 图片 —— 供应商按此规格与图样制作';
+    ws3.getCell('A1').font = { bold: true, size: 12 };
+    ws3.getCell('A1').alignment = { horizontal: 'center' };
+    ws3.getRow(1).height = 22;
+    const sh = ws3.addRow(['原辅料', '规格', '图片①', '图片②', '图片③']);
+    sh.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+    });
+    for (const pi of specItems as any[]) {
+      const row = ws3.addRow([pi.material_name || '', pi.purchase_spec || '', '', '', '']);
+      row.height = 96;
+      row.getCell(1).alignment = { vertical: 'top', wrapText: true };
+      row.getCell(2).alignment = { vertical: 'top', wrapText: true };
+      row.eachCell((cell) => { cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
+      const urls = (Array.isArray(pi.image_urls) ? pi.image_urls : [])
+        .filter((u: any) => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 3);
+      for (let i = 0; i < urls.length; i++) {
+        try {
+          const resp = await fetch(urls[i], { signal: AbortSignal.timeout(8000) });
+          if (!resp.ok) continue;
+          const buf = Buffer.from(await resp.arrayBuffer());
+          if (buf.length === 0 || buf.length > 5_000_000) continue;   // 跳过空图/超大图(>5MB)
+          const ext = /\.png(\?|$)/i.test(urls[i]) ? 'png' : (/\.gif(\?|$)/i.test(urls[i]) ? 'gif' : 'jpeg');
+          const imgId = wb.addImage({ buffer: buf as any, extension: ext as any });
+          ws3.addImage(imgId, { tl: { col: 2 + i, row: row.number - 1 }, ext: { width: 120, height: 88 } } as any);
+        } catch { /* 取不到/超时的图跳过,不阻断导出 */ }
+      }
+    }
   }
 
   const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');

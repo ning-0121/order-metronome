@@ -1032,7 +1032,7 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
 
   const numFields = ['production_consumption', 'procurement_loss_pct', 'safety_stock_qty', 'final_purchase_qty', 'lead_days', 'moq', 'unit_price', 'tax_rate'];
   const boolFields = ['is_substitute', 'is_split', 'is_outsourced', 'risk_flag', 'price_inclusive_tax'];
-  const textFields = ['confirmed_supplier_name', 'backup_supplier_name', 'supplier_contact', 'purchase_unit', 'currency', 'substitute_reason', 'risk_note', 'procurement_notes'];
+  const textFields = ['confirmed_supplier_name', 'backup_supplier_name', 'supplier_contact', 'purchase_unit', 'currency', 'substitute_reason', 'risk_note', 'procurement_notes', 'purchase_spec'];
 
   const upd: any = { updated_at: new Date().toISOString() };
   for (const k of numFields) if (k in fields) upd[k] = num(fields[k]);
@@ -1069,6 +1069,11 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
   });
 
   let { error } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
+  if (error && /purchase_spec/i.test(error.message || '')) {
+    // 采购规格列迁移未跑 → 去掉该列重试(其余字段照存,规格待迁移后再存)
+    delete upd.purchase_spec;
+    ({ error } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId));
+  }
   if (error && /required_date_locked|column .* does not exist/i.test(error.message || '')) {
     // 迁移未跑 → 去掉锁标志重试(需到日/最晚下单日仍写入,只是不"锁"、可能被下次归并覆盖)
     const { required_date_locked, ...rest } = upd;

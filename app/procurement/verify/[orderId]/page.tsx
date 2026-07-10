@@ -48,7 +48,7 @@ export default async function ProcurementVerifyPage({ params, searchParams }: { 
       </div>
 
       {/* 订单信息只读;采购的工作面 = 核料确认。带 ?item= 时聚焦到那一款料 */}
-      <ProcurementItemsTab orderId={order.id} focusItemId={focusItemId} />
+      <ProcurementItemsTab orderId={order.id} focusItemId={focusItemId} internalOrderNo={order.internal_order_no} />
 
       <p className="text-[11px] text-gray-400">
         本页为采购专用工作台:订单资料只读,核料/确认/补采购在此完成;生产任务单点右上下载。订单内容有误请联系业务执行修改。

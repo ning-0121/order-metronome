@@ -333,6 +333,11 @@ function DocPreview({ data, onClose }: { data: any; onClose: () => void }) {
                 <tr className="bg-emerald-50 font-semibold"><td className="border px-1 py-0.5" colSpan={5}>TOTAL</td><td className="border px-1 py-0.5 text-center">{data.ciTotals?.cartons}</td><td className="border"></td><td className="border px-1 py-0.5 text-center">{data.ciTotals?.qty}</td><td className="border"></td><td className="border px-1 py-0.5 text-center">{data.canSeeFin ? money(data.ciTotals?.amount) : '—'}</td></tr>
               </tbody>
             </table></div>
+            {data.canSeeFin && (data.ciTotals?.missingPrice || 0) > 0 && (
+              <div className="mt-2 text-xs px-2 py-1 rounded bg-red-50 border border-red-200 text-red-700 font-medium">
+                ⚠ 有 {data.ciTotals.missingPrice} 款缺客户成交价 —— 发票 TOTAL 金额<b>不含</b>这些款,金额虚低。请先在 PI/订单补价再出 CI,否则报关/收汇金额不实。
+              </div>
+            )}
             <div className="mt-2 text-gray-600 space-y-0.5">
               {data.docMeta?.deposit ? <div>DEPOSIT: {money(Number(data.docMeta.deposit))} · BALANCE: {data.canSeeFin ? money(Math.round(((data.ciTotals?.amount || 0) - Number(data.docMeta.deposit)) * 100) / 100) : '—'}</div> : null}
               <div className="font-semibold mt-1">TERMS & BANK</div>

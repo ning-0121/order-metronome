@@ -494,18 +494,25 @@ function ReceiveForm({ line, busy, onSubmit }: {
 }) {
   const [qty, setQty] = useState(line.ordered_qty?.toString() || '');
   const [defect, setDefect] = useState('');
+  const [vErr, setVErr] = useState('');
   const submit = (result: 'pass' | 'concession' | 'reject') => {
     const q = parseFloat(qty);
-    if (!(q >= 0)) return;
-    onSubmit({ received_qty: q, result, defect_notes: defect || undefined });
+    if (!(q >= 0)) { setVErr('请填实收数量'); return; }
+    // 让步/拒收必须填缺陷说明(修 P3 2026-07-09:此前文案说必填却无校验,审计留痕缺失)
+    if ((result === 'concession' || result === 'reject') && !defect.trim()) {
+      setVErr(`${result === 'concession' ? '让步' : '拒收'}必须填写缺陷说明(留痕、供追责/退货)`); return;
+    }
+    setVErr('');
+    onSubmit({ received_qty: q, result, defect_notes: defect.trim() || undefined });
   };
   return (
     <div className="bg-emerald-50/50 px-3 py-3 flex flex-wrap items-center gap-2 border-b border-gray-100">
       <input className="rounded border border-gray-300 px-2 py-1 text-xs w-28" placeholder={`实收(${line.ordered_unit || ''})`} type="number" step="0.01" value={qty} onChange={e => setQty(e.target.value)} />
-      <input className="rounded border border-gray-300 px-2 py-1 text-xs flex-1 min-w-[160px]" placeholder="缺陷说明（让步/拒收必填写清楚）" value={defect} onChange={e => setDefect(e.target.value)} />
+      <input className="rounded border border-gray-300 px-2 py-1 text-xs flex-1 min-w-[160px]" placeholder="缺陷说明（让步/拒收必填）" value={defect} onChange={e => { setDefect(e.target.value); if (vErr) setVErr(''); }} />
       <button disabled={busy} className="text-xs px-2 py-1 rounded bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50" onClick={() => submit('pass')}>通过</button>
       <button disabled={busy} className="text-xs px-2 py-1 rounded bg-amber-500 text-white font-medium hover:bg-amber-600 disabled:opacity-50" onClick={() => submit('concession')} title="需采购经理/管理员">让步</button>
       <button disabled={busy} className="text-xs px-2 py-1 rounded bg-red-500 text-white font-medium hover:bg-red-600 disabled:opacity-50" onClick={() => submit('reject')}>拒收</button>
+      {vErr && <span className="text-xs text-red-600 w-full">{vErr}</span>}
     </div>
   );
 }
