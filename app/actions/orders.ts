@@ -1051,8 +1051,10 @@ export async function getOrder(id: string) {
       return { error: '无权查看此订单(仅创建者/负责人/被指派人/管理层可见)' };
     }
   } catch (e: any) {
-    // 权限判定异常 → 保守放行但记录(不因鉴权查询抖动锁死合法用户)
-    console.warn('[getOrder] 访问控制判定异常,保守放行:', e?.message);
+    // 修 P3(2026-07-09 审计):鉴权判定异常应 fail-safe 拒绝(与 canUserAccessOrder 一致),
+    // 不再 fail-open 放行——否则一旦 SELECT RLS 放宽,这里就是唯一越权口子。
+    console.warn('[getOrder] 访问控制判定异常,安全拒绝:', e?.message);
+    return { error: '订单访问校验异常,请刷新重试' };
   }
 
   return { data: order };

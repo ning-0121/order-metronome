@@ -59,26 +59,36 @@ export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'm
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <select
-        value={selectedId}
-        onChange={(e) => setSelectedId(e.target.value)}
-        className="text-sm border border-gray-300 rounded-lg px-2 py-1 bg-white"
-      >
-        <option value="">选择跟单人员</option>
-        {candidates.map((c: any) => (
-          <option key={c.user_id} value={c.user_id}>
-            {c.name || c.email}
-          </option>
-        ))}
-      </select>
-      <button
-        onClick={handleAssign}
-        disabled={loading || !selectedId}
-        className="text-xs px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-      >
-        {loading ? '...' : '确认'}
-      </button>
+    <div className="flex items-center gap-2 flex-wrap">
+      {fetchState === 'loading' ? (
+        <span className="text-xs text-gray-400">加载候选人…</span>
+      ) : fetchState === 'error' ? (
+        <span className="text-xs text-red-600">加载候选人失败,请刷新重试</span>
+      ) : candidates.length === 0 ? (
+        <span className="text-xs text-amber-600">无可指派的跟单人员(该类型下无符合角色的用户,请先在用户管理设角色)</span>
+      ) : (
+        <>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+            className="text-sm border border-gray-300 rounded-lg px-2 py-1 bg-white"
+          >
+            <option value="">选择跟单人员</option>
+            {candidates.map((c: any) => (
+              <option key={c.user_id} value={c.user_id}>
+                {c.name || c.email}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={handleAssign}
+            disabled={loading || !selectedId}
+            className="text-xs px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {loading ? '...' : '确认'}
+          </button>
+        </>
+      )}
       <button
         onClick={() => setOpen(false)}
         className="text-xs text-gray-400 hover:text-gray-600"
