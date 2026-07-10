@@ -260,7 +260,9 @@ export async function exportProcurementLedger(params: {
   if (params.dateFrom) poq = poq.gte('created_at', `${params.dateFrom}T00:00:00+08:00`);
   if (params.dateTo) poq = poq.lte('created_at', `${params.dateTo}T23:59:59+08:00`);
   if (params.status) poq = poq.eq('status', params.status);
-  else poq = poq.not('status', 'in', '("草稿","已取消")');
+  // status 存英文枚举(draft/placed/…/cancelled)——修 P2(2026-07-09 审计):此前用中文字面量过滤永不命中,
+  // 草稿/已取消采购单混进采购流水对账、供应商应付虚高。
+  else poq = poq.not('status', 'in', '("draft","cancelled")');
   const { data: pos, error: poErr } = await poq;
   if (poErr) return { error: `读取采购单失败:${poErr.message}` };
   const poList = (pos || []) as any[];

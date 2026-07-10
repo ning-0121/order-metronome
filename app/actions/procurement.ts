@@ -663,14 +663,11 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
   };
 
   let totalOrderedAmt = 0;
-  let totalReceivedAmt = 0;
   let fabricBudgetAmt = 0;
 
   recItems.forEach((item, i) => {
     const row = ws.getRow(i + 4);
-    const receivedAmt = (item.received_qty || 0) * (item.unit_price || 0);
     totalOrderedAmt += item.ordered_amount || 0;
-    totalReceivedAmt += receivedAmt;
     if (item.budget_unit_price != null) fabricBudgetAmt += Number(item.budget_unit_price) * (Number(item.ordered_qty) || 0);
 
     row.values = [
@@ -704,9 +701,11 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
     });
   });
 
-  // 合计行(放在合并后的最后一行,列右移 1:订购金额=9 / 差异=11)
+  // 合计行(放在合并后的最后一行,列右移 1:订购金额=9)。修 P2(2026-07-09 审计):
+  // 「差异」列逐行是【数量差】,合计不能塞【金额差】(单位混算)、且未收货行整额被算成差异 → 合计差异留空;
+  // 订购金额用数值(不 .toFixed 文本),保持可求和。财务看逐行差异/差异%,不看合计差异。
   const totalRow = ws.getRow(recItems.length + 4);
-  totalRow.values = ['合计', '', '', '', '', '', '', '', totalOrderedAmt.toFixed(2), '', (totalReceivedAmt - totalOrderedAmt).toFixed(2), ''];
+  totalRow.values = ['合计', '', '', '', '', '', '', '', Number(totalOrderedAmt.toFixed(2)), '', '', ''];
   totalRow.font = { bold: true };
   totalRow.getCell(9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
 

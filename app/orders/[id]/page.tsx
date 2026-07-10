@@ -108,6 +108,9 @@ export default async function OrderDetailPage({
   }
   // 价格/利润可见性（红线：production/merchandiser/admin_assistant/procurement/logistics 不可见）
   const canSeeFinancials = isAdmin || hasRoleInGroup(currentRoles, 'CAN_SEE_FINANCIALS');
+  // 谁能看/录采购核料预算(有价):财务可见组 ∪ 预算录入白名单(理单/采购要填)。
+  // 修 P2(2026-07-09 审计):此前非 admin 一律显示 BomBudgetEntry,预算单价/加工费泄露给 production/qc/logistics 等无关角色。
+  const canEnterBudget = canSeeFinancials || currentRoles.some((r) => ['merchandiser', 'procurement', 'procurement_manager'].includes(r));
 
   // ── 并行加载 5 个独立查询（owner profile 之前是串行额外查询，2026-05-19 合并到并行池）──
   const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult, ownerProfileResult] = await Promise.all([
@@ -486,12 +489,13 @@ export default async function OrderDetailPage({
                     </dd>
                   </div>
                 ))}
-                {/* 跟单负责人 — 理单跟单 / 生产跟单 两组分开显示,各自可指定(2026-07-08:仅管理员/生产主管) */}
+                {/* 跟单负责人 — 理单(业务执行)/ 生产跟单 两组分开(2026-07-10 派单分工):
+                    业务执行由业务执行部主管(order_manager)派;生产跟单由生产主管派;admin 两者都可 */}
                 <div className="flex justify-between items-center">
                   <dt className="text-sm text-gray-500">理单跟单</dt>
                   <dd className="text-sm font-medium">
-                    {(isAdmin || currentRoles.includes('production_manager')) ? (
-                      <MerchandiserAssign orderId={id} currentMerchandiserName={merchandiserName} />
+                    {(isAdmin || currentRoles.includes('order_manager')) ? (
+                      <MerchandiserAssign orderId={id} currentMerchandiserName={merchandiserName} kind="merchandiser" />
                     ) : (
                       <span className="text-gray-900">{merchandiserName || '未指定'}</span>
                     )}
@@ -508,7 +512,7 @@ export default async function OrderDetailPage({
                   <dt className="text-sm text-gray-500">生产跟单</dt>
                   <dd className="text-sm font-medium">
                     {(isAdmin || currentRoles.includes('production_manager')) ? (
-                      <MerchandiserAssign orderId={id} currentMerchandiserName={productionFollowName} />
+                      <MerchandiserAssign orderId={id} currentMerchandiserName={productionFollowName} kind="production" />
                     ) : (
                       <span className="text-gray-900">{productionFollowName || '未指定'}</span>
                     )}
@@ -893,13 +897,16 @@ export default async function OrderDetailPage({
             {isAdmin ? (
               <>
                 <p className="text-xs text-gray-400 mb-4">采购请到「采购中心 → 该订单核料页」核定/归并/下单;此处仅管理员可编。</p>
-                <ProcurementItemsTab orderId={id} />
+                <ProcurementItemsTab orderId={id} internalOrderNo={orderData.internal_order_no} />
               </>
-            ) : (
+            ) : canEnterBudget ? (
               // 2026-07-08 用户:采购核料 tab 专做「核料/预算录入」——业务按采购真实物料逐料手填预算
               //   (面料预算单价 + 逐款加工费/辅料);采购的核定/归并/下单在采购中心(右上链接)。
               //   供应链概览/采购进度已在「采购进度」tab,这里不再重复塞。
               <BomBudgetEntry orderId={id} />
+            ) : (
+              // 无价角色(生产/QC/物流等):不展示预算金额,引导去只读的采购进度(修 P2 价格泄露)
+              <p className="text-sm text-gray-400">此页为预算/成本录入(含金额),你的角色无需在此操作。采购到货进度请看「📦 采购进度」tab。</p>
             )}
           </div>
         )}
