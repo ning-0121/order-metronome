@@ -154,6 +154,18 @@ export async function processFinanceOutbox(limit = 30): Promise<{ retried: numbe
       }).eq('id', row.id)
     }
   }
+  // 死信告警(修 P3 2026-07-09):outbox 重试耗尽转 dead 后此前只计数、无人告警 → 审批/应付同步永久失败成无人知晓死行。
+  // 给 admin 发站内告警,引导人工处理。fire-and-forget,不阻断 cron。
+  if (dead > 0) {
+    try {
+      const { notifyUsersByRole } = await import('@/lib/utils/notifications')
+      await notifyUsersByRole(svc, ['admin'], {
+        type: 'integration_dead',
+        title: `⛔ ${dead} 条财务同步彻底失败(转 dead)`,
+        message: `财务集成 outbox 有 ${dead} 条重试耗尽转为 dead、不再自动重投,可能影响应付/审批/预算同步。请到 integration_outbox 查 status='dead' 的行并人工处理。`,
+      })
+    } catch (e) { console.error('[processFinanceOutbox] dead 告警发送失败:', e instanceof Error ? e.message : e) }
+  }
   return { retried: (due || []).length, sent, dead }
 }
 
