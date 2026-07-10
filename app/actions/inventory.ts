@@ -23,9 +23,11 @@ async function authIssueRoles() {
 
 /** 采购行收货 → 自动入库(增量)。多次收货/更正只补差额。append-only。 */
 export async function recordInventoryReceipt(lineId: string): Promise<{ ok?: boolean; delta?: number; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
+  // 写 append-only 库存台账 → 限收发料角色(与 issue/return/reserve 兄弟入口同口径 CAN_ISSUE_MATERIAL)。
+  // 合法调用者=收货登记(procurement,在组内),直连滥用被挡。
+  const { supabase, userId, roles } = await authIssueRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!hasRoleInGroup(roles, 'CAN_ISSUE_MATERIAL')) return { error: '无入库权限(需仓库/采购/生产/物流/管理员)' };
 
   const { data: line } = await (supabase.from('procurement_line_items') as any)
     .select('id, order_id, material_name, specification, category, ordered_unit, received_qty, procurement_item_id')
@@ -59,7 +61,7 @@ export async function recordInventoryReceipt(lineId: string): Promise<{ ok?: boo
     qty: delta,
     order_id: (line as any).order_id,
     source_ref: lineId,
-    created_by: user.id,
+    created_by: userId,
     note: '采购收货自动入库',
     receipt_cumulative_qty: received, // 幂等目标:该行累计收货到 received
   };

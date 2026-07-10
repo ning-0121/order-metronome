@@ -318,6 +318,11 @@ export async function saveQuoteBaseline(
  * 供 profit.service / order-financials / procurement / supply-chain 读;并触发利润重算。用 service-role(采购/业务都可触发)。
  */
 export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?: boolean; error?: string }> {
+  // P1 修:原无任何鉴权 + service-role 推预算到财务、可对任意 orderId 触发。数值全派生自现有数据,
+  // 故最小门禁=要求登录(挡匿名直连);内部调用方(采购确认等)都在用户会话下,不受影响。
+  const authClient = await createClient();
+  const { data: { user: _rbcUser } } = await authClient.auth.getUser();
+  if (!_rbcUser) return { error: '未登录' };
   const svc = createServiceRoleClient();
   const normS = (s: any) => String(s ?? '').trim().toLowerCase();
   const { data: ord } = await (svc.from('orders') as any).select('id, order_no, internal_order_no, quantity').eq('id', orderId).maybeSingle();

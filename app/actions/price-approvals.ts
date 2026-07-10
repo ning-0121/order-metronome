@@ -114,6 +114,12 @@ export async function approvePriceApproval(
     .single();
   if (!row) return { error: '审批记录不存在' };
   if (!isApprovalPending(row.status)) return { error: `该申请已是「${row.status}」状态，无法重复审批` };
+  // P1 修:不能审批自己提交的价格申请(admin 例外)
+  if (row.requested_by === user.id) {
+    const { data: pProf } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+    const pRoles: string[] = (pProf as any)?.roles?.length > 0 ? (pProf as any).roles : [(pProf as any)?.role].filter(Boolean);
+    if (!pRoles.includes('admin')) return { error: '不能审批自己提交的价格申请' };
+  }
 
   const { error } = await (supabase.from('pre_order_price_approvals') as any)
     .update({

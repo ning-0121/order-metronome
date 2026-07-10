@@ -190,6 +190,9 @@ export const ROLE_GROUPS = {
 
   /** 可写采购执行层(增删对账行/手填底价):采购/采购经理/admin —— 业务执行请走「补数量申请」，不能直接改执行层含价数据 */
   CAN_EDIT_PROCUREMENT_EXEC: ['admin', 'procurement', 'procurement_manager'] as const,
+
+  /** 可增删改物料清单(BOM):业务+采购+管理 —— 生产/QC/物流/财务不碰料单(2026-07-10 审计 #5) */
+  CAN_EDIT_BOM: ['admin', 'sales', 'sales_manager', 'order_manager', 'merchandiser', 'admin_assistant', 'procurement', 'procurement_manager'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;

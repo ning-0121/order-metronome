@@ -102,6 +102,8 @@ export async function decideBudgetApproval(id: string, decision: 'approved' | 'r
   const { data: a } = await (svc.from('procurement_budget_approvals') as any).select('*').eq('id', id).maybeSingle();
   if (!a) return { error: '审批单不存在' };
   if (a.status !== 'pending') return { error: '该审批已结束' };
+  // P1 修:不能审批自己提交的申请(admin 例外)——小组织里业务经理既提又批的自批洞
+  if (a.requested_by === user.id && !roles.includes('admin')) return { error: '不能审批自己提交的超预算申请' };
 
   const now = new Date().toISOString();
   const upd: Record<string, any> = { updated_at: now };

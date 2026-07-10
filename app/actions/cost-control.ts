@@ -43,6 +43,8 @@ export async function uploadCostSheet(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  // P1 修:原只校验登录 → 任意角色可上传成本表覆写基线与售价。与 saveCostBaselineManual 同门禁。
+  if (!(await assertCanSeeFinancials(supabase, user.id))) return { error: '无权上传成本核算单（仅财务/管理员/业务）' };
 
   // 读取 Excel
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -440,6 +442,7 @@ export async function autoParseExistingCostSheet(orderId: string): Promise<{
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { parsed: false, error: '未登录' };
+  if (!(await assertCanSeeFinancials(supabase, user.id))) return { parsed: false, error: '无权解析成本单（仅财务/管理员/业务）' };
 
   // 检查是否已有基线
   const { data: existing } = await (supabase.from('order_cost_baseline') as any)

@@ -555,6 +555,19 @@ async function approveDelayRequestCore(
     );
   }
 
+  const isAdmin = userRoles.includes('admin');
+  // P1 修:不能审批自己提交的延期(admin 例外)
+  if (delayRequestData.requested_by === user.id && !isAdmin) {
+    return failure('不能审批自己提交的延期申请', 'SELF_APPROVAL');
+  }
+  // P1 修:有未走满的多级审批链 → 不能单人直批,必须逐级确认(approveDeferralStep),与 bulkApprove 同口径;
+  // 否则绕过采购/生产下游压缩逐级确认,留下 status=approved 但 current_step 未走满的矛盾态。
+  const _dChain = Array.isArray(delayRequestData.approval_chain) ? delayRequestData.approval_chain : [];
+  const _dStep = Number(delayRequestData.current_step) || 0;
+  if (_dChain.length > 0 && _dStep < _dChain.length && !isAdmin) {
+    return failure('此改期有多级审批链未走满,请逐级确认(不能单人直批)', 'CHAIN_INCOMPLETE');
+  }
+
   // Get milestone and order separately
   const { data: milestone } = await supabase
     .from('milestones')

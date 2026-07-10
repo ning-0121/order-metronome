@@ -16,6 +16,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 // ── 标准化 PO 提取 JSON 结构 ──────────────────────────────────────
 export interface POLineItem {
@@ -334,6 +335,8 @@ export async function updateProcurementItem(
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { ok: false, error: '请先登录' };
+    // P1 修:原注释"任意角色可更新"→ 含 unit_price。收紧到采购执行角色。
+    { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_PROCUREMENT_EXEC', '仅采购/采购经理/管理员可改采购明细'); if (err) return { ok: false, error: err }; }
 
     const { error } = await (supabase.from('procurement_sheet_items') as any)
       .update({ ...updates, last_updated_by: user.id, last_updated_at: new Date().toISOString() })

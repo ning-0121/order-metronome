@@ -6,6 +6,7 @@ import { computeMaterialRequirement } from '@/lib/services/mrp';
 import { aggregateInventoryBalance, reservedByKey } from '@/lib/services/inventory';
 import { consolidationKey } from '@/lib/services/procurement-consolidation';
 import { subtractWorkingDays } from '@/lib/utils/date';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -81,6 +82,7 @@ export async function addBomItem(orderId: string, item: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
   if (!item.material_name?.trim()) return { error: '物料名称不能为空' };
 
   // 没手填代码 → 自动赋码(同名同类复用主数据码,没有就建主数据生成 FAB/TRM/PKG-xxxx)
@@ -133,6 +135,7 @@ export async function addBomItemsBatch(orderId: string, items: Array<{
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
   const VALID_TYPES = ['fabric', 'trim', 'lining', 'label', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
   const valid = (items || []).filter(i => i?.material_name?.trim());
@@ -192,6 +195,7 @@ export async function addBomItemFromMaster(orderId: string, masterId: string, pe
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
   if (!masterId) return { error: '请选择物料' };
 
   const { data: m, error: mErr } = await (supabase.from('material_master') as any)
@@ -242,6 +246,7 @@ export async function addTemporaryBomItem(orderId: string, input: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
   if (!input.material_name?.trim()) return { error: '物料名称不能为空' };
   if (!input.category) return { error: '请选择类别' };
 
@@ -358,6 +363,7 @@ export async function copyBomFromOrder(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
   if (!sourceOrderId || sourceOrderId === currentOrderId) return { error: '请选择有效的历史订单' };
 
   // 服务端读 source BOM(只取要复制的列)
@@ -407,6 +413,7 @@ export async function instantiateOrderMaterialPackage(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
   // 1) 订单行绑定的 Variant
   const { data: lines } = await (supabase.from('order_line_items') as any)
@@ -470,6 +477,7 @@ export async function updateBomItem(id: string, orderId: string, patch: Record<s
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
   // 该行来自产品款模板(有 product_bom_template_id)→ 编辑即记 Override 留痕(单向,不回写模板)
   const { data: row } = await (supabase.from('materials_bom') as any)
@@ -491,6 +499,7 @@ export async function deleteBomItem(id: string, orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
   const { error } = await (supabase.from('materials_bom') as any).delete().eq('id', id);
   if (error) return { error: error.message };
@@ -548,6 +557,7 @@ export async function importFromTrimLibrary(orderId: string, brand: string | nul
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
     .select('customer_name').eq('id', orderId).single();
@@ -621,6 +631,7 @@ export async function submitBomToProcurement(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
   // 权限:业务/理单/业务经理/订单经理/管理员可提交
   const { data: profile } = await (supabase.from('profiles') as any)
@@ -959,6 +970,7 @@ export async function setBomSampleGiven(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
   const { error } = await (supabase.from('materials_bom') as any)
     .update({ sample_given: given }).eq('id', id).eq('order_id', orderId);
   if (error) return { error: error.message };

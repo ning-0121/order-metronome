@@ -26,6 +26,7 @@ import {
   type BatchAwareStepKey,
 } from '@/lib/domain/batchAwareSteps';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { fireRuntimeRecompute } from '@/lib/repositories/milestonesRepo';
 import { syncShippingDocsToFinance } from '@/app/actions/shipping-docs-sync';
 
 export interface MarkBatchStepResult {
@@ -202,6 +203,15 @@ export async function markBatchMilestoneStep(
         .update({ status: 'in_progress' })
         .eq('id', mainMilestone.id);
     }
+  }
+
+  // 主节点被批次自动升/降级 → 交付置信度重算(否则关键节点标完/回退后风险卡陈旧;
+  // 违反 production-report-milestone-wiring 铁律「任何里程碑状态写入路径都必须调它」)。fire-and-forget。
+  if (mainMilestone) {
+    fireRuntimeRecompute(orderId, {
+      type: 'milestone_status_changed', source: `batch:${stepKey}`, severity: 'info',
+      payload: { milestone_id: mainMilestone.id, note: 'batch promote/demote' },
+    });
   }
 
   // ── 4. 写批次操作审计 ──

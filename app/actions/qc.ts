@@ -2,6 +2,10 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
+
+// QC 抽检是放行依据 → 写入(增/改判/删)限执行组(生产/QC/跟单/生产主管/admin),不再任意登录用户可篡改
+const QC_WRITE_MSG = '仅生产/QC/跟单/管理员可录入或修改质检结果';
 
 export async function getQcInspections(orderId: string) {
   const supabase = await createClient();
@@ -20,6 +24,7 @@ export async function addQcInspection(orderId: string, rec: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', QC_WRITE_MSG); if (err) return { error: err }; }
   if (!rec.qty_inspected || rec.qty_inspected <= 0) return { error: '抽检数量必须大于0' };
 
   const { error } = await (supabase.from('qc_inspections') as any).insert({
@@ -41,6 +46,7 @@ export async function updateQcResult(id: string, orderId: string, result: 'pass'
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', QC_WRITE_MSG); if (err) return { error: err }; }
 
   const { error } = await (supabase.from('qc_inspections') as any)
     .update({ result, updated_at: new Date().toISOString() }).eq('id', id);
@@ -53,6 +59,7 @@ export async function deleteQcInspection(id: string, orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', QC_WRITE_MSG); if (err) return { error: err }; }
 
   const { error } = await (supabase.from('qc_inspections') as any).delete().eq('id', id);
   if (error) return { error: error.message };
