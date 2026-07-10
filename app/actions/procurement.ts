@@ -1059,9 +1059,10 @@ export async function recordGoodsReceipt(
   });
   if (grErr) return { error: grErr.message };
 
-  // 汇总该行已验收数量，回写 received_qty
+  // 汇总该行【合格】已验收数量，回写 received_qty —— 与上方超收闸同口径排除拒收(reject 是退货、不入实收)。
+  // 修 P1(2026-07-09 审计):此前含拒收批次 → 拒收料被当良品入库 + 按拒收量核销应付 + 顶到订购量误判「料齐」。
   const { data: receipts } = await (supabase.from('goods_receipts') as any)
-    .select('received_qty').eq('line_item_id', lineItemId);
+    .select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
   const totalReceived = (receipts || []).reduce((s: number, r: any) => s + (Number(r.received_qty) || 0), 0);
 
   const { error: upErr } = await (supabase.from('procurement_line_items') as any)
@@ -1121,7 +1122,7 @@ export async function recordReceiptBatch(
 
   // ── 收货 ±10% 硬闸(统一纯函数 overReceiptCheck)──
   {
-    const { data: prev } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId);
+    const { data: prev } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
     const prevTotal = ((prev || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
     const gate = overReceiptCheck(line.ordered_qty, prevTotal, payload.received_qty);
     if (gate.over) {
@@ -1150,7 +1151,7 @@ export async function recordReceiptBatch(
   if (grErr) return { error: grErr.message };
 
   // 2. 汇总实收 → 回写
-  const { data: receipts } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId);
+  const { data: receipts } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
   const total = ((receipts || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
   const ordered = Number(line.ordered_qty) || 0;
   const complete = payload.mark_complete === true || (ordered > 0 && total >= ordered);
