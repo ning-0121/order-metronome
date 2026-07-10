@@ -26,6 +26,7 @@ import {
   type BatchAwareStepKey,
 } from '@/lib/domain/batchAwareSteps';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { syncShippingDocsToFinance } from '@/app/actions/shipping-docs-sync';
 
 export interface MarkBatchStepResult {
   ok: boolean;
@@ -213,6 +214,12 @@ export async function markBatchMilestoneStep(
       note: `批次 #${batch.batch_no} ${meta_def.label}${action === 'complete' ? ' 已标完' : ' 已撤销'}`,
       payload: { batch_id: batchId, batch_no: batch.batch_no, step_key: stepKey, progress },
     });
+  }
+
+  // ── 5. 出运完成 → 出货单据同步财务(阶段一,fire-and-forget,永不阻塞出运)──
+  //   本批标出运(status_shipped + complete)即推该批的 装箱单/CI/PI/报关 到财务。
+  if (meta_def.source === 'status_shipped' && action === 'complete') {
+    void syncShippingDocsToFinance(orderId, batchId);   // 不 await:同步内部已吞错,永不阻塞出运
   }
 
   revalidatePath(`/orders/${orderId}`);

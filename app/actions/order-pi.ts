@@ -10,6 +10,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { buildPIWorkbook } from '@/lib/services/shipping-doc-builders';
 
 const CAN_EDIT_PI = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'];
 
@@ -190,70 +191,7 @@ export async function exportPI(orderId: string): Promise<{ base64?: string; file
   if ((res as any).error || !res.data) return { error: (res as any).error || 'PI 数据为空' };
   const pi = res.data;
 
-  const ExcelJS = await import('exceljs');
-  const wb = new ExcelJS.default.Workbook();
-  const ws = wb.addWorksheet('Invoice');
-  // 列宽对齐模板:A12 B18 C18 D12 E30 F19 G15 H9 I9 J9 K9 L13 M13 N13
-  ws.columns = [
-    { width: 12 }, { width: 18 }, { width: 18 }, { width: 12 }, { width: 30 }, { width: 19 }, { width: 15 },
-    { width: 9 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 13 }, { width: 13 }, { width: 13 },
-  ];
-  const bold = { bold: true } as any;
-  const center = { horizontal: 'center', vertical: 'middle', wrapText: true } as any;
-  const box = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } } as any;
-
-  // ── 抬头 ──
-  ws.mergeCells('A1:N1'); ws.getCell('A1').value = ISSUER.company; ws.getCell('A1').font = { bold: true, size: 18 }; ws.getCell('A1').alignment = { horizontal: 'center' };
-  ws.mergeCells('A2:N2'); ws.getCell('A2').value = ISSUER.address; ws.getCell('A2').alignment = { horizontal: 'center' };
-  ws.mergeCells('A3:N3'); ws.getCell('A3').value = ISSUER.contact; ws.getCell('A3').alignment = { horizontal: 'center' };
-  ws.mergeCells('A4:N4'); ws.getCell('A4').value = ISSUER.title; ws.getCell('A4').font = { bold: true, size: 14 }; ws.getCell('A4').alignment = { horizontal: 'center' };
-
-  // ── 买方 + 运输表头 ──
-  ws.getCell('A5').value = `BUYER: ${pi.buyer_name || ''}`; ws.getCell('A5').font = bold;
-  ws.getCell('J5').value = 'INVOICE NO:'; ws.getCell('J5').font = bold; ws.getCell('L5').value = pi.invoice_no || '';
-  ws.getCell('A6').value = pi.buyer_address || '';
-  ws.getCell('J6').value = `ISSUE DATE: ${pi.issue_date || ''}`;
-  ws.getCell('A7').value = `TEL. ${pi.buyer_tel || ''}`;
-  ws.getCell('J7').value = `SHIP VIA:${pi.ship_via || ''}`;
-  ws.getCell('A8').value = `HBL#${pi.hbl || ''}`; ws.getCell('F8').value = `ETD ${pi.etd || ''}`; ws.getCell('J8').value = `DESTINATION:${pi.destination || ''}`;
-  ws.getCell('A9').value = `CONTAINER#${pi.container || ''}`; ws.getCell('F9').value = `ETA ${pi.eta || ''}`;
-
-  // ── 表头行(row 10) ──
-  const HEAD = ['PO NO.', 'STYLE NO.', 'STYLE', 'SIZE', 'COLOR', 'DESCRIPTION', 'COMPOSITION', 'FABRIC WEIGHT', 'TOTAL CARTON', 'UNIT PER CARTON', 'QTY(SETS/PCS)', 'UNIT PRICE(USD) LDP', 'AMOUNT(USD)LDP', 'NOTES'];
-  const HROW = 10;
-  HEAD.forEach((h, i) => {
-    const c = ws.getCell(HROW, i + 1);
-    c.value = h; c.font = bold; c.alignment = center; c.border = box;
-    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
-  });
-  ws.getRow(HROW).height = 34;
-
-  // ── 明细行 ──
-  let r = HROW + 1; let sumCarton = 0, sumQty = 0, sumAmount = 0;
-  for (const ln of pi.lines) {
-    const amount = Math.round((Number(ln.qty) || 0) * (Number(ln.unit_price) || 0) * 100) / 100;
-    sumCarton += Number(ln.total_carton) || 0; sumQty += Number(ln.qty) || 0; sumAmount += amount;
-    const vals: any[] = [ln.po_no, ln.style_no, ln.style, ln.size, ln.color, ln.description, ln.composition, ln.fabric_weight,
-      Number(ln.total_carton) || 0, Number(ln.unit_per_carton) || 0, Number(ln.qty) || 0, Number(ln.unit_price) || 0, amount, ln.notes];
-    vals.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v; c.alignment = { vertical: 'middle', wrapText: true }; c.border = box; });
-    // 行高按多行单元格(COLOR/DESCRIPTION/SIZE/COMPOSITION)最多行数撑开
-    const maxLines = Math.max(1, ...[ln.color, ln.description, ln.size, ln.composition].map((t) => String(t || '').split('\n').length));
-    ws.getRow(r).height = Math.max(20, maxLines * 15);
-    r++;
-  }
-  // ── 合计行(对齐模板:I=箱数 K=数量 M=金额) ──
-  sumAmount = Math.round(sumAmount * 100) / 100;
-  ws.getCell(r, 1).value = 'TOTAL'; ws.getCell(r, 1).font = bold;
-  const totalMap: Record<number, number> = { 9: sumCarton, 11: sumQty, 13: sumAmount };
-  for (const col of [9, 11, 13]) { const c = ws.getCell(r, col); c.value = totalMap[col]; c.font = bold; }
-  for (let col = 1; col <= 14; col++) ws.getCell(r, col).border = box;
-  r++;
-
-  // ── DEPOSIT 行(整行合并) ──
-  ws.mergeCells(r, 1, r, 14);
-  ws.getCell(r, 1).value = pi.deposit ? `DEPOSIT: ${pi.deposit}` : 'DEPOSIT';
-  ws.getCell(r, 1).font = bold; ws.getCell(r, 1).border = box;
-
+  const wb = await buildPIWorkbook(pi);
   const buf = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buf as ArrayBuffer).toString('base64');
   const fileName = `PI-${res.data.order_no || orderId}-${pi.invoice_no || pi.lines[0]?.po_no || ''}.xlsx`.replace(/[^\w.\-]/g, '_');

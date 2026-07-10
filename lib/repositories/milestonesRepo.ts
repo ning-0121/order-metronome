@@ -528,7 +528,24 @@ export async function transitionMilestoneStatus(
     },
   });
 
+  // 出运完成(整单,非分批)→ 出货单据同步财务(阶段一,lazy import 避免把 exceljs 拉进 repo 图)。
+  fireShippingDocsOnShipment(milestone.step_key, updatePayload.status, milestone.status, milestone.order_id, null);
+
   return { data: updated };
+}
+
+/**
+ * shipment_execute 首次进入 done → fire-and-forget 推出货单据到财务。仅整单路径调用(分批走 batch-milestones)。
+ * 用动态 import 延迟加载 shipping-docs-sync(内含 exceljs),避免污染 milestonesRepo 的模块图与冷启动。
+ */
+function fireShippingDocsOnShipment(
+  stepKey: string | null | undefined, newStatus: any, oldStatus: any, orderId: string | null | undefined, batchId: string | null,
+): void {
+  if (stepKey !== 'shipment_execute' || !orderId) return;
+  if (String(newStatus) !== 'done' || String(oldStatus) === 'done') return;   // 仅首次进 done
+  void import('@/app/actions/shipping-docs-sync')
+    .then((m) => m.syncShippingDocsToFinance(orderId, batchId))   // 内部已吞错,永不阻塞
+    .catch((e: any) => console.error('[shipdoc-sync] lazy import 失败(不阻断):', e?.message));
 }
 
 /**
@@ -672,6 +689,11 @@ export async function updateMilestone(
         old_status: currentMilestone.status,
       },
     });
+  }
+
+  // 出运完成(整单,非分批)→ 出货单据同步财务(阶段一)。
+  if (currentMilestone?.order_id) {
+    fireShippingDocsOnShipment(currentMilestone.step_key, sanitized.status, currentMilestone.status, currentMilestone.order_id, null);
   }
 
   // ── H3:财务确认节点(owner_role='finance',如财务审核/核准出运/收款)推进到 in_progress(待财务确认)

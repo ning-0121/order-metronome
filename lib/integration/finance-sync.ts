@@ -40,6 +40,7 @@ type WebhookEventType =
   | 'cancel.requested'
   | 'milestone.requested'
   | 'goods_receipt.recorded'
+  | 'file.uploaded'
 
 interface WebhookPayload {
   event: WebhookEventType
@@ -536,6 +537,20 @@ export async function syncOrderBudgetToFinance(input: Parameters<typeof buildOrd
   const actualSum = (Number(at.accessory_amount) || 0) + (Number(at.fabric_amount) || 0) + (Number(at.cmt_amount) || 0)
   if (total <= 0 && actualSum <= 0) return { success: true }   // 预算和实际都空 → 不推(不污染台账)
   return sendToFinanceSystem('order.budget_updated', payload)
+}
+
+/**
+ * 出货单据文件送达财务(阶段一,2026-07-10):出运完成时把 装箱单/CI/PI/报关 的 Excel
+ * 落存储、取 URL,逐张发本事件 → 财务 uploaded_documents 出现这几张单(财务侧已有 file.uploaded
+ * 处理器,零改动)。id 由内容确定性生成(见 caller),重发按 id upsert 幂等。
+ * extracted_fields 带业务锚点(order_no/internal_order_no/doc_kind/batch_id)供财务归集。
+ */
+export async function syncFileToFinance(payload: {
+  id: string; file_name: string; file_type?: string; file_size?: number | null;
+  file_url: string; matched_customer?: string | null;
+  extracted_fields?: Record<string, unknown>;
+}) {
+  return sendToFinanceSystem('file.uploaded', payload as unknown as Record<string, unknown>)
 }
 
 /** 检查财务系统连通性 */
