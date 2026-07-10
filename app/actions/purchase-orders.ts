@@ -693,7 +693,23 @@ export async function placePurchaseOrder(poId: string): Promise<{
   // 采购单 ≥ ¥5000 → 走外部财务系统审批(审计 B):置待审批 + emit approval_requested,不真下单。
   // 财务系统审批后回调 finance-callback(approval_type='purchase')→ 批准自动下单/驳回拦下。
   const FINANCE_EXT_APPROVAL_THRESHOLD = 5000;
-  if ((Number((po as any).total_amount) || 0) >= FINANCE_EXT_APPROVAL_THRESHOLD) {
+  // 修 P2(2026-07-09 审计):「价格待定」单 total_amount=0 会绕过 ≥¥5000 审批闸。改用【预估额】评审——
+  //   有下单额用下单额;否则按 price_baseline(建议价)×数量 估;连建议价都估不出 → 保守视为达阈值、强制进审批,
+  //   不让"价格待定"成为任意金额绕过审批的口子。
+  let effectiveAmount = Number((po as any).total_amount) || 0;
+  if (effectiveAmount <= 0) {
+    const svcEst = createServiceRoleClient();
+    const { data: estLines } = await (svcEst.from('procurement_line_items') as any)
+      .select('price_baseline, unit_price, ordered_qty').eq('purchase_order_id', poId);
+    let est = 0; let anyPrice = false;
+    for (const l of (estLines || []) as any[]) {
+      const p = Number(l.price_baseline) || Number(l.unit_price) || 0;
+      const q = Number(l.ordered_qty) || 0;
+      if (p > 0 && q > 0) { est += p * q; anyPrice = true; }
+    }
+    effectiveAmount = anyPrice ? est : FINANCE_EXT_APPROVAL_THRESHOLD;
+  }
+  if (effectiveAmount >= FINANCE_EXT_APPROVAL_THRESHOLD) {
     // 复审:≥5000 走外部财务审批时,内部风险闸此前被跳过、结果没送到财务。
     // 修:先跑内部风险(预算/付重 + 偏离基线/新供应商),结构化写 approval_reasons + 带进财务 payload,
     //    让财务审批时看到风险信号(财务是钱的权威,看到后自行决定;不在回调处二次硬拦以免推翻财务决定)。
