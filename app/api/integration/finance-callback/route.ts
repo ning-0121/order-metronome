@@ -65,7 +65,7 @@ export async function POST(request: Request) {
 
   // 财务进度事件（结算/收款/付款完成）——append-only 记进 order_finance_events，
   // 让节拍器看到资金进度(此前财务进度对节拍器全黑盒)。按 qimo_order_id=orders.id 精确关联。
-  const FINANCE_PROGRESS = new Set(['settlement.closed', 'collection.received', 'payment.completed'])
+  const FINANCE_PROGRESS = new Set(['settlement.closed', 'collection.received', 'payment.completed', 'budget.confirmed'])
   if (FINANCE_PROGRESS.has((payload as unknown as { event?: string }).event || '')) {
     const d = payload.data as unknown as { qimo_order_id?: string; order_no?: string; amount?: number; currency?: string; note?: string; at?: string }
     try {

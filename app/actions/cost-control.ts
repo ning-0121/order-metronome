@@ -56,7 +56,7 @@ export async function uploadCostSheet(
 
   // 找到匹配当前订单款号的行（如果有多行），否则取第一行
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, style_no, quantity')
+    .select('id, order_no, style_no, quantity, internal_order_no, quote_id, quote_snapshot_version')
     .eq('id', orderId)
     .single();
   if (!order) return { error: '订单不存在' };
@@ -118,6 +118,17 @@ export async function uploadCostSheet(
     : await (supabase.from('order_cost_baseline') as any).insert(baselineData);
   if (baselineErr) {
     return { error: `成本基线写入失败：${baselineErr.message}` };
+  }
+
+  // 成本核算单已定稿(order_cost_baseline 写入) → 立即 emit quotation.frozen 给财务。
+  // 这是本订单「报价/成本价定稿」的真实时刻;此前只在 createOrder 时发,而基线是这里(订单详情页)
+  // 才写的 → 那时基线为空、财务收不到价(老问题)。财务用 单件单价×订单数量 自动填 draft 预算(单价/件数/总额),
+  // 供财务审。失败落 outbox 重试,不阻断上传;内容哈希幂等,重传不变则财务去重、改了则重填 draft。
+  try {
+    const { syncQuotationToFinance } = await import('@/lib/integration/finance-sync');
+    await syncQuotationToFinance(order as Record<string, unknown>, baselineData);
+  } catch (e: any) {
+    console.warn('[uploadCostSheet] 报价推送财务失败(不阻断,已落 outbox):', e?.message);
   }
 
   // 解析完整性检查：关键字段缺失则收集，前端据此显示「解析不完整」而非「已解析 ✅」

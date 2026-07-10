@@ -50,7 +50,30 @@ export async function GET(request: Request) {
     try {
       const { processFinanceOutbox } = await import('@/lib/integration/finance-sync');
       financeOutbox = await processFinanceOutbox();
+      // E-1(2026-07-11):转 dead 时企微群告警。此前只返回计数、无人看见 → 订单/采购/收货对财务的同步永久失败无感知
+      //（反向 财务→节拍器 已有此告警,正向缺,补上对称)。
+      if (financeOutbox && typeof financeOutbox === 'object' && (financeOutbox.dead || 0) > 0) {
+        try {
+          const { sendWecomWebhook } = await import('@/lib/utils/wechat-push');
+          await sendWecomWebhook(
+            '⛔ 财务外发同步失败(转 dead)',
+            `有 ${financeOutbox.dead} 条推送重试耗尽转 dead——订单/采购/收货等对财务的同步永久失败。请到 integration_outbox 查 status='dead' 人工重发或核查。`,
+          );
+        } catch (e: any) { console.error('[reminders] finance dead 告警发送失败:', e?.message); }
+      }
     } catch (e: any) { console.error('[reminders] finance outbox retry error:', e?.message); financeOutbox = 'error'; }
+
+    // 配置盲区探针(2026-07-11):env 缺失时 sync*ToFinance 会静默 return{success:true}——既不发、也不入 outbox,
+    // 连上面的 dead 告警都测不到。这是唯一"看着健康实则全丢"的静默盲区,必须显性告警(缺配置=部署错,应当响)。
+    if (!process.env.FINANCE_SYSTEM_URL || !process.env.INTEGRATION_API_KEY) {
+      try {
+        const { sendWecomWebhook } = await import('@/lib/utils/wechat-push');
+        await sendWecomWebhook(
+          '⚠️ 财务同步未配置',
+          '缺 FINANCE_SYSTEM_URL / INTEGRATION_API_KEY → 所有对财务系统的推送被静默跳过(不发也不入 outbox),财务收不到任何订单/采购/收货数据。请检查节拍器生产环境变量。',
+        );
+      } catch (e: any) { console.error('[reminders] 财务配置缺失告警发送失败:', e?.message); }
+    }
 
     return NextResponse.json({
       success: true,
