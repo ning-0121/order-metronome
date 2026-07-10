@@ -308,8 +308,16 @@ async function buildMoWorkbook(
 
     const styleTotal = g.items.reduce((a, li) => a + (Number(li.qty_pcs) || 0), 0) || (styleGroups.length === 1 ? order.quantity : 0);
 
-    // 面料(最多 2 种:主面料 + 第二面料;BOM fabric 行,无 style_no 视为整单通用)
-    const styleFabrics = bom.filter((b: any) => b.material_type === 'fabric' && (!b.style_no || String(b.style_no).trim() === String(g.style_no).trim()));
+    // 面料(最多 2 种:主面料 + 第二面料;BOM fabric 行,无 style_no 视为整单通用)。
+    // 去重:同一面料若既有款专属行又有整单通用行(或重复录入)会被当成"两种面料"填两次
+    //   (用户反馈:只有一种面料却填了两次)。按 料号/(料名+规格) 归并,款专属行优先(用料更准)。
+    // 按显示身份(料名+规格)归并 —— 用户眼里"同名同规格"就是同一种面料,料号可能一有一无反而漏并
+    const fabKey = (b: any) => `${String(b?.material_name || '').trim().toLowerCase()}|${String(b?.spec || '').trim().toLowerCase()}`;
+    const seenFab = new Set<string>();
+    const styleFabrics = bom
+      .filter((b: any) => b.material_type === 'fabric' && (!b.style_no || String(b.style_no).trim() === String(g.style_no).trim()))
+      .sort((a: any, b: any) => (a.style_no ? 0 : 1) - (b.style_no ? 0 : 1))   // 款专属行排前,去重时优先保留
+      .filter((b: any) => { const k = fabKey(b); if (seenFab.has(k)) return false; seenFab.add(k); return true; });
     const fbDesc = (f: any) => [f?.material_name, f?.spec].filter(Boolean).join(' ');
     const fbUse = (f: any) => (f && f.qty_per_piece != null) ? `${f.qty_per_piece} ${f.unit || 'kg'}/件` : '';
     const f0 = styleFabrics[0], f1 = styleFabrics[1];
