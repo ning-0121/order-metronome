@@ -20,7 +20,7 @@ interface ApprovalCallback {
     approval_id: string
     // P0-4 修复：补 'milestone'。L106 实际处理这种类型（财务确认加工费/核准出运/收款等里程碑）
     // 但 union 之前漏写，导致 TS 判类型不重叠、IDE 提示死代码
-    approval_type: 'price' | 'delay' | 'cancel' | 'milestone' | 'purchase'
+    approval_type: 'price' | 'cancel' | 'milestone' | 'purchase'
     decision: 'approved' | 'rejected'
     decided_by: string
     decider_name: string
@@ -127,18 +127,7 @@ export async function POST(request: Request) {
       if (!rows || rows.length === 0) skipLog('price')
     }
 
-    if (approval_type === 'delay') {
-      const { data: rows, error } = await supabase
-        .from('delay_requests')
-        .update({
-          status: decision,
-          decision_note: decision_note ? `[财务系统-${decider_name}] ${decision_note}` : `[财务系统-${decider_name}] ${decision === 'approved' ? '审批通过' : '审批驳回'}`,
-          approved_at: new Date().toISOString(),
-        })
-        .eq('id', approval_id).eq('status', 'pending').select('id')
-      if (error) throw new Error(`Delay approval update failed: ${error.message}`)
-      if (!rows || rows.length === 0) skipLog('delay')
-    }
+    // (delay 审批回调已移除 2026-07-09:改期只走节拍器内部审批链,从不推财务→此分支永不触发,删幽灵能力)
 
     if (approval_type === 'cancel') {
       // H3:财务批准/驳回 → 真执行取消(service-role;decideCancel 内部 isApprovalPending 幂等,非 pending 返 error 即跳过)。

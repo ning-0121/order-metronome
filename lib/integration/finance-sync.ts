@@ -30,7 +30,6 @@ type WebhookEventType =
   | 'order.resync'
   | 'milestone.updated'
   | 'price_approval.requested'
-  | 'delay.requested'
   | 'quotation.frozen'
   | 'order.budget_updated'
   | 'supplier.upserted'
