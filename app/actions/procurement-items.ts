@@ -859,9 +859,10 @@ export async function getProcurementItemSources(itemId: string) {
   }
   const bomIds = Array.from(new Set([...slMap.values()].map((s: any) => s.bom_id).filter(Boolean)));
   const bomMaster = new Map<string, string | null>();
+  const bomStyle = new Map<string, string | null>();   // bom_id → 款号(多款单辅料要显示,采购才知这批是哪个款的)
   if (bomIds.length) {
-    const { data: bs } = await (supabase.from('materials_bom') as any).select('id, material_master_id').in('id', bomIds);
-    for (const b of (bs || [])) bomMaster.set(b.id, b.material_master_id);
+    const { data: bs } = await (supabase.from('materials_bom') as any).select('id, material_master_id, style_no').in('id', bomIds);
+    for (const b of (bs || [])) { bomMaster.set(b.id, b.material_master_id); bomStyle.set(b.id, b.style_no || null); }
   }
 
   const sources = (reqs || []).map((r: any) => {
@@ -872,6 +873,7 @@ export async function getProcurementItemSources(itemId: string) {
       specification: sl?.specification, category: r.category, color: sl?.color, unit: r.unit,
     });
     return { key, material_name: r.material_name || sl?.material_name, color: sl?.color || null,
+      style_no: sl?.bom_id ? (bomStyle.get(sl.bom_id) || null) : null,   // 款号(整单通用辅料为 null)
       development_consumption: sl?.qty_per_piece ?? null, net_demand: r.net_purchase_qty ?? null };
   }).filter((s: any) => s.key === (item as any).consolidation_key);
 

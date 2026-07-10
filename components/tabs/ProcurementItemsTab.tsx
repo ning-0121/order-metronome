@@ -1376,10 +1376,11 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
             <div className="text-xs font-semibold text-gray-500 mb-2">来源明细（{sources.length}）<span className="font-normal text-gray-400">· 物料行粒度;款×色×码拆分见上「产品明细拆分」</span></div>
             {sources.length === 0 ? <p className="text-xs text-gray-400">无来源</p> : (
               <table className="w-full text-xs">
-                <thead><tr className="text-gray-400 text-left">{['物料', '颜色', '开发单耗', '需求量'].map(h => <th key={h} className="py-1 pr-3 font-medium">{h}</th>)}</tr></thead>
+                <thead><tr className="text-gray-400 text-left">{['物料', '款号', '颜色', '开发单耗', '需求量'].map(h => <th key={h} className="py-1 pr-3 font-medium">{h}</th>)}</tr></thead>
                 <tbody>{sources.map((s, i) => (
                   <tr key={i} className="border-t border-gray-50">
                     <td className="py-1 pr-3 text-gray-700">{s.material_name || '—'}</td>
+                    <td className="py-1 pr-3 font-mono text-gray-700">{s.style_no || <span className="text-gray-400 font-sans">整单通用</span>}</td>
                     <td className="py-1 pr-3 text-gray-500">{s.color || '—'}</td>
                     <td className="py-1 pr-3 text-gray-500">{s.development_consumption ?? '—'}</td>
                     <td className="py-1 pr-3 text-gray-700">{s.net_demand ?? '—'}</td>
