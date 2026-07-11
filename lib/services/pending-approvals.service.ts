@@ -23,8 +23,12 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
  * 已经发生过事故（2026-05-26 alex 是 DB role=admin，但「延期申请」仍显示 0），
  * 改成 admin 路径直接用 service-role，保证看得到所有数据；非 admin 仍走 RLS。
  */
+// 2026-07-11:原来只有 admin 用 service-role,其余(含 order_manager/sales_manager 等监督经理)走 user session
+//   → 被 orders RLS 限成只看自己的单,看不到别人订单的待审批(高洁收不到延期的根因之一)。
+//   监督/管理角色(CAN_SEE_ALL_ORDERS)本就"看所有订单",一律给 service-role 看全量待审批。
+const CAN_SEE_ALL_APPROVALS = ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'];
 function clientFor(ctx: UserContext, fallback: any): any {
-  if (ctx.roles?.includes('admin')) {
+  if (ctx.roles?.some(r => CAN_SEE_ALL_APPROVALS.includes(r))) {
     try {
       return createServiceRoleClient();
     } catch (e: any) {
