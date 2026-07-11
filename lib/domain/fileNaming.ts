@@ -84,7 +84,7 @@ export const FILE_NAMING_BY_STEP: Record<
   //
   // PO / 报价单等在「订单创建时」上传的文档，本身不绑定具体节点，
   // 但仍需有自己的命名关键词，不能误用其他节点的 label。
-  _internal_quote:                 { label: '内部成本核算单', suffixHint: '多份请加 _v1/_v2 或 _报价人 区分', example: 'QM-20260415-001_内部成本核算单_v1.xlsx' },
+  _internal_quote:                 { label: '报价单', suffixHint: '内部报价单;多份请加 _v1/_v2 区分', example: 'QM-20260415-001_报价单_v1.xlsx' },
   _customer_quote:                 { label: '客户最终报价单', suffixHint: '多份请加 _v1/_v2 或 _PO号 区分',  example: 'QM-20260415-001_客户最终报价单_v1.pdf' },
 };
 
@@ -197,8 +197,8 @@ export const FILE_NAMING_BY_DOC_TYPE: Record<
   // 这些 key 以 _ 开头，避免与真实 step_key 冲突。
   // 用途：PO/报价单等在「订单创建时」上传的文档，本身不绑定具体节点，
   //      但仍需有自己的命名关键词，不能误用其他节点的 label。
-  _internal_quote:  { label: '内部成本核算单', suffixHint: '多份请加 _v1/_v2 或 _报价人 区分', example: 'QM-20260415-001_内部成本核算单_v1.xlsx' },
-  _customer_quote:  { label: '客户最终报价单', suffixHint: '多份请加 _v1/_v2 或 _PO号 区分',  example: 'QM-20260415-001_客户最终报价单_v1.pdf' },
+  _internal_quote:  { label: '报价单', example: 'QM-20260415-001_报价单_v1.xlsx' },
+  _customer_quote:  { label: '客户最终报价单', example: 'QM-20260415-001_客户最终报价单_v1.pdf' },
 };
 
 /**

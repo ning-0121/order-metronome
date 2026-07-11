@@ -577,7 +577,8 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
   const FILE_FIELDS = [
     { formKey: 'customer_po_file', fileType: 'customer_po', label: '客户PO' },
-    // 2026-07-08 用户拍板:建单不再传 报价单(成本走采购核料)/尺码表(改在原辅料和包装页上传,喂生产任务单)
+    // 2026-07-11 用户拍板:建单必传「客户PO + 内部报价单」两个附件(见下方校验闸);报价单即时共享财务
+    { formKey: 'internal_quote_file', fileType: 'internal_quote', label: '内部报价单' },
     { formKey: 'production_order_file', fileType: 'production_order', label: '生产制单' },
     { formKey: 'trims_sheet_file', fileType: 'trims_sheet', label: '辅料表' },
     { formKey: 'packing_requirement_file', fileType: 'packing_requirement', label: '装箱要求' },
@@ -680,13 +681,16 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
       rawFormData.delete(formKey);
     }
 
-    // 校验：客户 PO / 报价单「至少给一个」(2026-07-03 放开:部分客户无正式 PO,允许纯手工建单)。
-    // 有 PO → 走上传预录;无 PO → 手工填明细即可。两者都没有才拦。
+    // 校验(2026-07-11 用户拍板):has_po 模式必传「客户PO + 内部报价单」两个附件才能建单;
+    //   报价单即时共享财务、财务审批PO时要看到两份附件。no_po(客户确无正式PO)保留为显式例外:手工录明细即可。
     const poFile = filesToUpload.find(f => f.fileType === 'customer_po');
+    const quoteFile = filesToUpload.find(f => f.fileType === 'internal_quote');
     const hasManualLines = (lineStyles.length > 0) || (poParseResult?.styles?.length > 0);
-    if (!poFile && !hasManualLines) {
-      showError('请上传客户 PO,或在下方「逐款明细」手工录入款色码');
-      return;
+    if (poMode === 'no_po') {
+      if (!hasManualLines) { showError('无 PO 模式:请在下方「逐款明细」手工录入款色码'); return; }
+    } else {
+      if (!poFile) { showError('请上传客户 PO 附件(建单必传)'); return; }
+      if (!quoteFile) { showError('请上传内部报价单附件(建单必传;将即时共享给财务)'); return; }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -993,6 +997,11 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
       if (filesToUpload.length > 0) {
         const uploadWarns = await uploadFilesToStorage(newOrderId, filesToUpload);
         if (uploadWarns.length > 0) setUploadWarnings(uploadWarns);
+        // 客户PO + 内部报价单 → 即时共享财务(file.uploaded webhook),财务审批PO时可见。fire-and-forget,不阻断。
+        try {
+          const { shareBuildDocsToFinance } = await import('@/app/actions/order-build-docs');
+          void shareBuildDocsToFinance(newOrderId);
+        } catch { /* 不阻断建单 */ }
       }
 
       const milestonesResult = await getMilestonesByOrder(newOrderId);
@@ -1651,8 +1660,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
               </p>
               <div className="space-y-3">
                 {(([
-                  // 2026-07-08 用户拍板:建单只留客户PO;报价单不传(成本走采购核料),尺码表改在「原辅料和包装」页传(喂生产任务单)
-                  { name: 'customer_po_file',        label: '客户 PO（可多个,可选）',  required: false, multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
+                  // 2026-07-11 用户拍板:建单必传「客户PO + 内部报价单」两个附件;内部报价单即时共享给财务,财务审批PO时可见
+                  { name: 'customer_po_file',        label: '客户 PO（可多个,必传）',  required: true, multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
+                  { name: 'internal_quote_file',     label: '内部报价单（必传·即时共享财务）', required: true, multiple: false, stepKey: '_internal_quote', hint: '上传后即时推送财务系统;财务审批PO时可看到' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
                   .filter(() => poMode !== 'no_po'))
                   .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (

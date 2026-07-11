@@ -10,6 +10,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { listMilestoneConfirmations, confirmMilestoneParty } from '@/app/actions/milestone-confirmations';
+import { getPoApprovalDocs } from '@/app/actions/order-build-docs';
 import { requiredPartiesFor } from '@/lib/domain/confirmationParties';
 
 interface PartyRow {
@@ -19,10 +20,11 @@ interface PartyRow {
   canConfirm: boolean;
 }
 
-export function MilestoneConfirmations({ milestoneId, stepKey, milestoneStatus }: {
+export function MilestoneConfirmations({ milestoneId, stepKey, milestoneStatus, orderId }: {
   milestoneId: string;
   stepKey: string;
   milestoneStatus?: string;
+  orderId?: string;
 }) {
   const router = useRouter();
   // 纯配置判定(客户端零请求):非多方节点直接不渲染
@@ -30,6 +32,9 @@ export function MilestoneConfirmations({ milestoneId, stepKey, milestoneStatus }
   const [parties, setParties] = useState<PartyRow[] | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
+  // PO确认节点:内联展示「客户PO + 内部报价单」附件,财务审批PO时一眼可见(角色门在 server action 里)
+  const showPoDocs = stepKey === 'po_confirmed';
+  const [poDocs, setPoDocs] = useState<Array<{ id: string; file_type: string; file_name: string; url: string | null }> | null>(null);
 
   const load = useCallback(async () => {
     const res = await listMilestoneConfirmations(milestoneId);
@@ -38,6 +43,10 @@ export function MilestoneConfirmations({ milestoneId, stepKey, milestoneStatus }
   }, [milestoneId]);
 
   useEffect(() => { if (isMultiParty) load(); }, [isMultiParty, load]);
+  useEffect(() => {
+    if (!showPoDocs || !orderId) return;
+    (async () => { const r = await getPoApprovalDocs(orderId); if (r.docs) setPoDocs(r.docs); })();
+  }, [showPoDocs, orderId]);
 
   if (!isMultiParty) return null;
 
@@ -91,6 +100,21 @@ export function MilestoneConfirmations({ milestoneId, stepKey, milestoneStatus }
           </span>
         ))}
       </div>
+      {showPoDocs && poDocs && poDocs.length > 0 && (
+        <div className="mt-2 border-t border-indigo-100 pt-2">
+          <p className="text-[11px] font-medium text-indigo-700 mb-1">📎 审批参考附件(财务/负责人可见)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {poDocs.map(d => (
+              <a key={d.id} href={d.url || '#'} target="_blank" rel="noreferrer"
+                title={d.file_name}
+                className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2 py-0.5 text-[11px] text-indigo-700 hover:bg-indigo-50">
+                {d.file_type === 'customer_po' ? '📄 客户PO' : '💰 内部报价单'}
+                <span className="max-w-[140px] truncate text-gray-400">{d.file_name}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
       {msg && <p className="mt-1.5 text-xs text-indigo-700">{msg}</p>}
     </div>
   );

@@ -604,6 +604,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                           milestoneId={m.id}
                           stepKey={m.step_key}
                           milestoneStatus={m.status as any}
+                          orderId={orderId}
                         />
 
                         {/* 核心操作区：MilestoneActions（去处理 + 申请延期）— 仅对应角色可见 */}
