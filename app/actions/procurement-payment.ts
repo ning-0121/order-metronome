@@ -166,8 +166,10 @@ export async function submitPurchaseDeposit(poId: string, amount: any, opts?: { 
   const amt = round2(num(amount));
   if (amt <= 0) return { error: '定金金额必须大于 0' };
 
-  const { data: po } = await (supabase.from('purchase_orders') as any)
-    .select('id, po_no, status, supplier_id, supplier_name, order_ids, currency, suppliers(name)').eq('id', poId).maybeSingle();
+  // 注:purchase_orders 无 supplier_name 列(供应商名在行上/靠 suppliers join),不能 select 它,否则整条查询报错→误判"采购单不存在"。
+  const { data: po, error: poErr } = await (supabase.from('purchase_orders') as any)
+    .select('id, po_no, status, supplier_id, order_ids, currency, suppliers(name)').eq('id', poId).maybeSingle();
+  if (poErr) return { error: `读取采购单失败:${poErr.message}` };
   if (!po) return { error: '采购单不存在' };
   // 定金是对「已下单」的单预付;草稿单还不是真订单,不给付定金(避免给没成立的单打款)
   if (['draft', 'cancelled'].includes(String((po as any).status || ''))) {
@@ -179,7 +181,7 @@ export async function submitPurchaseDeposit(poId: string, amount: any, opts?: { 
   if ((rc as any).error) return { error: `建对账单失败:${(rc as any).error}` };
   const recon = (rc as any).data.reconciliation;
   const reconId = recon.id;
-  const supplierName = recon.supplier_name || (po as any).supplier_name || (po as any).suppliers?.name || null;
+  const supplierName = recon.supplier_name || (po as any).suppliers?.name || null;
   const supplierId = recon.supplier_id || (po as any).supplier_id || null;
   const currency = recon.currency || (po as any).currency || 'RMB';
 
