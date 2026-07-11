@@ -51,6 +51,22 @@ export async function previewQuote(input: QuoteInput): Promise<{
   }
 }
 
+// 生成 quote_no QT-YYYYMMDD-NNN(3 位)——取当天已存在最大序号+1(删单不复用空缺号)。
+// 修(2026-07-11):原按「当天 created_at 记录数+1」算序号——删报价会让计数缩水→下一号撞现存号
+//   (同 purchase_orders_po_no_key 一类隐患)。此处只算号,调用处对唯一键冲突自增重试(bump)防并发抢号。
+async function nextQuoteNo(supabase: any, bump: number): Promise<string> {
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const qtPrefix = `QT-${today}-`;
+  const { data: existing } = await (supabase.from('quoter_quotes') as any)
+    .select('quote_no').like('quote_no', `${qtPrefix}%`);
+  let maxN = 0;
+  for (const r of (existing || []) as any[]) {
+    const m = /-(\d+)$/.exec(String(r.quote_no || ''));
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  return `${qtPrefix}${String(maxN + 1 + bump).padStart(3, '0')}`;
+}
+
 /**
  * 保存一个报价到数据库
  */
@@ -66,46 +82,47 @@ export async function saveQuote(
 
   const supabase = await createClient();
 
-  // 生成报价编号 QT-20260409-001
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const { count } = await (supabase.from('quoter_quotes') as any)
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
-  const seq = String((count || 0) + 1).padStart(3, '0');
-  const quoteNo = `QT-${today}-${seq}`;
-
-  const { data, error } = await (supabase.from('quoter_quotes') as any)
-    .insert({
-      quote_no: quoteNo,
-      customer_id: input.customer_id,            // ← 客户真相（引用）
-      customer_name: input.customer_name || null, // ← 显示快照 + 旧链路兼容（继续写）
-      style_no: input.style_no || null,
-      style_name: input.style_name || null,
-      garment_type: input.garment_type,
-      garment_subtype: input.subtype || null,
-      quantity: input.quantity || 0,
-      size_distribution: input.size_distribution || null,
-      fabric_type: input.fabric.fabric_type || null,
-      fabric_composition: input.fabric.composition || null,
-      fabric_width_cm: input.fabric.width_cm || null,
-      fabric_price_per_kg: input.fabric.price_per_kg || null,
-      fabric_consumption_kg: result.fabric.avg_kg,
-      cmt_factory: input.cmt_factory || null,
-      cmt_operations: result.cmt.operations,
-      cmt_cost_per_piece: result.costs.cmt_rmb,
-      trim_cost_per_piece: input.trim_cost_per_piece || 0,
-      packing_cost_per_piece: input.packing_cost_per_piece || 0,
-      logistics_cost_per_piece: input.logistics_cost_per_piece || 0,
-      margin_rate: input.margin_rate ?? 15.0,
-      total_cost_per_piece: result.costs.subtotal_rmb,
-      quote_price_per_piece: result.quote_currency_per_piece,
-      currency: input.currency || 'USD',
-      exchange_rate: input.exchange_rate || 7.2,
-      status: 'draft',
-      created_by: auth.userId,
-    })
-    .select('id, quote_no')
-    .single();
+  // 生成报价编号 QT-20260409-001(见 nextQuoteNo:取当天最大序号+1,唯一键冲突自增重试)
+  let data: any = null; let error: any = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const quoteNo = await nextQuoteNo(supabase, attempt);   // 每次重试重算最大值 + attempt 偏移
+    const res = await (supabase.from('quoter_quotes') as any)
+      .insert({
+        quote_no: quoteNo,
+        customer_id: input.customer_id,            // ← 客户真相（引用）
+        customer_name: input.customer_name || null, // ← 显示快照 + 旧链路兼容（继续写）
+        style_no: input.style_no || null,
+        style_name: input.style_name || null,
+        garment_type: input.garment_type,
+        garment_subtype: input.subtype || null,
+        quantity: input.quantity || 0,
+        size_distribution: input.size_distribution || null,
+        fabric_type: input.fabric.fabric_type || null,
+        fabric_composition: input.fabric.composition || null,
+        fabric_width_cm: input.fabric.width_cm || null,
+        fabric_price_per_kg: input.fabric.price_per_kg || null,
+        fabric_consumption_kg: result.fabric.avg_kg,
+        cmt_factory: input.cmt_factory || null,
+        cmt_operations: result.cmt.operations,
+        cmt_cost_per_piece: result.costs.cmt_rmb,
+        trim_cost_per_piece: input.trim_cost_per_piece || 0,
+        packing_cost_per_piece: input.packing_cost_per_piece || 0,
+        logistics_cost_per_piece: input.logistics_cost_per_piece || 0,
+        margin_rate: input.margin_rate ?? 15.0,
+        total_cost_per_piece: result.costs.subtotal_rmb,
+        quote_price_per_piece: result.quote_currency_per_piece,
+        currency: input.currency || 'USD',
+        exchange_rate: input.exchange_rate || 7.2,
+        status: 'draft',
+        created_by: auth.userId,
+      })
+      .select('id, quote_no')
+      .single();
+    data = res.data; error = res.error;
+    if (!error) break;
+    // 仅对「单号唯一键冲突」重试;其他错误立即抛出,不空转
+    if (!/quote_no_key|duplicate key/i.test(error.message || '')) break;
+  }
 
   if (error) return { error: '保存失败：' + error.message };
 
@@ -409,26 +426,27 @@ export async function duplicateQuote(quoteId: string): Promise<{
     .select('*').eq('id', quoteId).single();
   if (!original) return { error: '原报价不存在' };
 
-  // 生成新报价号
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const { count } = await (supabase.from('quoter_quotes') as any)
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
-  const seq = String((count || 0) + 1).padStart(3, '0');
-  const quoteNo = `QT-${today}-${seq}`;
-
+  // 生成新报价号(见 nextQuoteNo:取当天最大序号+1,唯一键冲突自增重试)
   const { id, quote_no, created_at, updated_at, fabric_cost_per_piece, ...fields } = original as any;
 
-  const { data: newQ, error } = await (supabase.from('quoter_quotes') as any)
-    .insert({
-      ...fields,
-      quote_no: quoteNo,
-      status: 'draft',
-      created_by: auth.userId,
-      notes: `复制自 ${(original as any).quote_no}`,
-    })
-    .select('id, quote_no')
-    .single();
+  let newQ: any = null; let error: any = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const quoteNo = await nextQuoteNo(supabase, attempt);   // 每次重试重算最大值 + attempt 偏移
+    const res = await (supabase.from('quoter_quotes') as any)
+      .insert({
+        ...fields,
+        quote_no: quoteNo,
+        status: 'draft',
+        created_by: auth.userId,
+        notes: `复制自 ${(original as any).quote_no}`,
+      })
+      .select('id, quote_no')
+      .single();
+    newQ = res.data; error = res.error;
+    if (!error) break;
+    // 仅对「单号唯一键冲突」重试;其他错误立即抛出,不空转
+    if (!/quote_no_key|duplicate key/i.test(error.message || '')) break;
+  }
 
   if (error) return { error: error.message };
   revalidatePath('/quoter');
