@@ -74,38 +74,60 @@ export async function requestSupplementQty(
 
   const { data: order } = await (supabase.from('orders') as any)
     .select('order_no').eq('id', orderId).single();
-  const { count } = await (supabase.from('procurement_items') as any)
-    .select('id', { count: 'exact', head: true }).eq('order_id', orderId);
+  const orderNo = (order as any)?.order_no || 'ORD';
 
   const now = new Date().toISOString();
-  const itemNo = `PI-${(order as any)?.order_no || 'ORD'}-S${String((count || 0) + 1).padStart(2, '0')}`;
   // 独立 consolidation_key:补采购单独跟踪/单独核销,不与原项混(五层脊柱口径不变)
   const suppKey = `${(base as any).consolidation_key}|supp:${crypto.randomUUID().slice(0, 8)}`;
 
-  const { error: iErr } = await (supabase.from('procurement_items') as any).insert({
-    order_id: orderId,
-    consolidation_key: suppKey,
-    item_no: itemNo,
-    material_master_id: (base as any).material_master_id,
-    material_name: (base as any).material_name,
-    specification: (base as any).specification,
-    category: (base as any).category,
-    color: (base as any).color,
-    unit: (base as any).unit,
-    purchase_unit: (base as any).purchase_unit,
-    development_consumption: (base as any).development_consumption,
-    total_required_qty: qty,
-    source_count: 1,
-    suggested_purchase_qty: qty,
-    status: 'draft',
-    is_supplement: true,
-    supplement_reason: reason.trim(),
-    supplement_base_item_id: baseItemId,
-    supplement_requested_by: auth.userId,
-    supplement_requested_at: now,
-    finance_approval_status: 'pending',
-    created_by: auth.userId,
-  });
+  // 生成 item_no PI-<order_no>-SNN(2 位)。
+  // 修(2026-07-11):原按「该订单 procurement_items 记录数+1」算序号——删项/并发建会撞现存号
+  //   (同 purchase_orders_po_no_key 一类隐患)。改为【取该订单已存在 PI-<order_no>-S% 的最大序号+1】
+  //   (删项不复用空缺号),并对唯一键冲突自增重试(防并发建单撞号)。
+  const piPrefix = `PI-${orderNo}-S`;
+  const nextItemNo = async (bump: number): Promise<string> => {
+    const { data: existing } = await (supabase.from('procurement_items') as any)
+      .select('item_no').eq('order_id', orderId).like('item_no', `${piPrefix}%`);
+    let maxN = 0;
+    for (const r of (existing || []) as any[]) {
+      const m = /-S(\d+)$/.exec(String(r.item_no || ''));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    }
+    return `${piPrefix}${String(maxN + 1 + bump).padStart(2, '0')}`;
+  };
+
+  let iErr: any = null; let itemNo = '';
+  for (let attempt = 0; attempt < 6; attempt++) {
+    itemNo = await nextItemNo(attempt);   // 每次重试重算最大值 + attempt 偏移,跳过并发被抢占的号
+    const res = await (supabase.from('procurement_items') as any).insert({
+      order_id: orderId,
+      consolidation_key: suppKey,
+      item_no: itemNo,
+      material_master_id: (base as any).material_master_id,
+      material_name: (base as any).material_name,
+      specification: (base as any).specification,
+      category: (base as any).category,
+      color: (base as any).color,
+      unit: (base as any).unit,
+      purchase_unit: (base as any).purchase_unit,
+      development_consumption: (base as any).development_consumption,
+      total_required_qty: qty,
+      source_count: 1,
+      suggested_purchase_qty: qty,
+      status: 'draft',
+      is_supplement: true,
+      supplement_reason: reason.trim(),
+      supplement_base_item_id: baseItemId,
+      supplement_requested_by: auth.userId,
+      supplement_requested_at: now,
+      finance_approval_status: 'pending',
+      created_by: auth.userId,
+    });
+    iErr = res.error;
+    if (!iErr) break;
+    // 仅对「单号唯一键冲突」重试;其他错误(缺列/权限)立即抛出,不空转
+    if (!/item_no_key|duplicate key/i.test(iErr.message || '')) break;
+  }
   if (iErr) {
     if (/is_supplement|finance_approval_status|column .* does not exist/i.test(iErr.message || '')) {
       return { error: '补采购字段尚未建立:请先在 Supabase 执行 20260703_procurement_supplement.sql' };
