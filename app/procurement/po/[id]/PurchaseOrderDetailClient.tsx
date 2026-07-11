@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier } from '@/app/actions/purchase-orders';
+import { listSuppliers } from '@/app/actions/suppliers';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
 import { ProcurementReconciliationPanel } from '@/components/procurement/ProcurementReconciliationPanel';
@@ -26,6 +27,34 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
   const [proofPaths, setProofPaths] = useState<string[]>(Array.isArray(po.order_proof_paths) ? po.order_proof_paths : []);
   const [proofUploading, setProofUploading] = useState(false);
   const [priceTbd, setPriceTbd] = useState<boolean>(po.price_tbd === true);
+
+  // 修改供应商(仅草稿·仅采购):按需拉全量供应商,名称/联系人子串搜索,选中即改。
+  const [supPicker, setSupPicker] = useState(false);
+  const [supList, setSupList] = useState<any[] | null>(null);
+  const [supQuery, setSupQuery] = useState('');
+  const [supLoading, setSupLoading] = useState(false);
+
+  async function openSupPicker() {
+    setSupPicker(true);
+    if (supList === null && !supLoading) {
+      setSupLoading(true);
+      const res = await listSuppliers();
+      setSupLoading(false);
+      if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); setSupPicker(false); return; }
+      setSupList((res as any).data || []);
+    }
+  }
+
+  async function pickSupplier(s: any) {
+    if (s.id === po.supplier_id) { setSupPicker(false); return; }
+    if (!(await confirm({ title: `改供应商为「${s.name}」?`, message: '仅草稿采购单可改;采购行供应商同步更新。', confirmText: '确认修改', cancelText: '取消' }))) return;
+    setBusy('supplier');
+    const res = await changePurchaseOrderSupplier(po.id, s.id);
+    setBusy('');
+    if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
+    setSupPicker(false);
+    router.refresh();
+  }
 
   async function handleSetPriceTbd(v: boolean) {
     setBusy('tbd');
@@ -260,10 +289,47 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-5 text-sm space-y-1.5">
-          <h3 className="font-semibold text-gray-800 mb-2">供应商</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-gray-800">供应商</h3>
+            {canProcure && po.status === 'draft' && (
+              <button onClick={() => (supPicker ? setSupPicker(false) : openSupPicker())} disabled={busy === 'supplier'}
+                className="text-[11px] px-2 py-1 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 font-medium disabled:opacity-50">
+                {busy === 'supplier' ? '修改中…' : supPicker ? '收起' : '✏️ 修改供应商'}
+              </button>
+            )}
+          </div>
           <div className="flex justify-between"><span className="text-gray-500">名称</span><span>{sup.name || '—'}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">联系人</span><span>{sup.contact_name || '—'} {sup.phone || ''}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">付款/账期</span><span>{sup.payment_method || '—'} / {sup.net_days != null ? sup.net_days + '天' : '—'}</span></div>
+          {supPicker && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <input autoFocus value={supQuery} onChange={(e) => setSupQuery(e.target.value)}
+                placeholder="搜索供应商(名称 / 联系人 / 电话)…"
+                className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:border-indigo-300 focus:outline-none" />
+              <div className="mt-2 max-h-56 overflow-y-auto space-y-0.5">
+                {supLoading && <p className="text-xs text-gray-400 px-1 py-2">加载供应商…</p>}
+                {!supLoading && (supList || [])
+                  .filter((s: any) => {
+                    const q = supQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return [s.name, s.contact_name, s.phone].some((f: any) => String(f || '').toLowerCase().includes(q));
+                  })
+                  .slice(0, 60)
+                  .map((s: any) => (
+                    <button key={s.id} onClick={() => pickSupplier(s)} disabled={busy === 'supplier'}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-indigo-50 disabled:opacity-50 ${s.id === po.supplier_id ? 'bg-indigo-50/60' : ''}`}>
+                      <span className="font-medium text-gray-800">{s.name}</span>
+                      {s.id === po.supplier_id && <span className="ml-1.5 text-[10px] text-indigo-600">· 当前</span>}
+                      {(s.contact_name || s.phone) && <span className="text-gray-400 ml-1.5">{s.contact_name || ''} {s.phone || ''}</span>}
+                    </button>
+                  ))}
+                {!supLoading && (supList || []).length > 0 && (supList || []).filter((s: any) => {
+                  const q = supQuery.trim().toLowerCase(); if (!q) return true;
+                  return [s.name, s.contact_name, s.phone].some((f: any) => String(f || '').toLowerCase().includes(q));
+                }).length === 0 && <p className="text-xs text-gray-400 px-1 py-2">无匹配供应商</p>}
+              </div>
+            </div>
+          )}
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5 text-sm space-y-1.5">
           <h3 className="font-semibold text-gray-800 mb-2">采购单</h3>

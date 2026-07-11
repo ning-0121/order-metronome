@@ -652,6 +652,45 @@ async function computeBudgetGate(svc: any, poId: string, orderIds: string[]) {
 }
 
 /**
+ * 修改采购单供应商(仅采购、仅草稿)。截图场景:草稿采购单选错/需换供应商。
+ * 只允许草稿单改(已下单/审批中的单供应商已随财务事件送出,不能就地改——须撤回/重建)。
+ * 整单一个供应商:单头 supplier_id 改,采购行 supplier_id/supplier_name 同步改(与导出/财务同源)。
+ */
+export async function changePurchaseOrderSupplier(poId: string, supplierId: string): Promise<{ ok?: boolean; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可修改供应商' };
+  if (!supplierId) return { error: '请选择供应商' };
+
+  const { data: po } = await (supabase.from('purchase_orders') as any)
+    .select('id, status').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') {
+    return { error: '仅「草稿」采购单可改供应商;已下单/审批中的请先撤回或重建。' };
+  }
+
+  const { data: sup } = await (supabase.from('suppliers') as any)
+    .select('id, name').eq('id', supplierId).maybeSingle();
+  if (!sup) return { error: '供应商不存在' };
+
+  const { error } = await (supabase.from('purchase_orders') as any)
+    .update({ supplier_id: supplierId, updated_at: new Date().toISOString() })
+    .eq('id', poId).eq('status', 'draft');
+  if (error) return { error: error.message };
+
+  // 采购行同步改供应商(整单一口价;行上带 supplier_name 供导出/财务)。列缺失则忽略。
+  try {
+    await (supabase.from('procurement_line_items') as any)
+      .update({ supplier_id: supplierId, supplier_name: (sup as any).name })
+      .eq('purchase_order_id', poId);
+  } catch { /* 行无 supplier_* 列 → 单头已改即可 */ }
+
+  revalidatePath(`/procurement/po/${poId}`);
+  revalidatePath('/procurement');
+  return { ok: true };
+}
+
+/**
  * 设置/取消采购单「价格待定」(仅采购、仅草稿)。勾上后允许无底价下单(先下单后议价,单上标注);
  * 价格填好后可取消。列缺失(迁移未跑)→ 提示先执行迁移。
  */
