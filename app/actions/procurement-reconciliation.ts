@@ -221,17 +221,38 @@ export async function createProcurementReturn(poId: string, payload: {
 
   const totalQty = clean.reduce((s, l) => s + l.qty, 0);
   const totalAmount = round2(clean.filter((l) => l.disposition === 'refund').reduce((s, l) => s + l.amount, 0));
+  // 生成 return_no RT-YYYYMMDD-NNN(3 位)。
+  // 修(2026-07-11):原按「全表记录数+1」算序号——删退货单会让计数缩水→下一号撞现存号
+  //   (同 purchase_orders_po_no_key 一类隐患)。改为【取当天已存在最大序号+1】(删单不复用空缺号),
+  //   并对唯一键冲突自增重试(防并发建单撞号)。
   const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const { count } = await (supabase.from('procurement_returns') as any).select('id', { count: 'exact', head: true });
-  const returnNo = `RT-${dateTag}-${String((count || 0) + 1).padStart(3, '0')}`;
+  const rtPrefix = `RT-${dateTag}-`;
+  const nextReturnNo = async (bump: number): Promise<string> => {
+    const { data: existing } = await (supabase.from('procurement_returns') as any)
+      .select('return_no').like('return_no', `${rtPrefix}%`);
+    let maxN = 0;
+    for (const r of (existing || []) as any[]) {
+      const m = /-(\d+)$/.exec(String(r.return_no || ''));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    }
+    return `${rtPrefix}${String(maxN + 1 + bump).padStart(3, '0')}`;
+  };
 
-  const { data: ret, error } = await (supabase.from('procurement_returns') as any).insert({
-    return_no: returnNo, purchase_order_id: poId, supplier_id: (po as any).supplier_id,
-    supplier_name: (po as any).suppliers?.name || null, type: payload.type || 'return', status: 'draft',
-    reason: payload.reason || null, notes: payload.notes || null,
-    attachment_paths: Array.isArray(payload.attachment_paths) ? payload.attachment_paths : [],
-    total_qty: totalQty, total_amount: totalAmount, created_by: user.id,
-  }).select('id').single();
+  let ret: any = null; let error: any = null; let returnNo = '';
+  for (let attempt = 0; attempt < 6; attempt++) {
+    returnNo = await nextReturnNo(attempt);   // 每次重试重算最大值 + attempt 偏移,跳过并发被抢占的号
+    const res = await (supabase.from('procurement_returns') as any).insert({
+      return_no: returnNo, purchase_order_id: poId, supplier_id: (po as any).supplier_id,
+      supplier_name: (po as any).suppliers?.name || null, type: payload.type || 'return', status: 'draft',
+      reason: payload.reason || null, notes: payload.notes || null,
+      attachment_paths: Array.isArray(payload.attachment_paths) ? payload.attachment_paths : [],
+      total_qty: totalQty, total_amount: totalAmount, created_by: user.id,
+    }).select('id').single();
+    ret = res.data; error = res.error;
+    if (!error) break;
+    // 仅对「单号唯一键冲突」重试;其他错误(权限/外键/列缺失)立即抛出,不空转
+    if (!/return_no_key|duplicate key/i.test(error.message || '')) break;
+  }
   if (error) return { error: friendlyError(error) };
 
   await (supabase.from('procurement_return_lines') as any).insert(clean.map((l) => ({ return_id: (ret as any).id, ...l })));
