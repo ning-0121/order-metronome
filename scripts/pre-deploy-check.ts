@@ -347,6 +347,35 @@ for (const key of spine) {
   assert(!doneUntouched.some((r: any) => r.id === 'x'), '单调修复:已完成节点不被改动');
 }
 
+// ════ 免验货(出货前验货豁免)════
+console.log('\n🏷️ 免验货');
+{
+  const {
+    INSPECTION_STEP_KEYS, isInspectionStep, isInspectionWaived, roleAllowed,
+    INSPECTION_WAIVED_TAG, CAN_RELEASE_WITHOUT_INSPECTION, CAN_SET_INSPECTION_WAIVER,
+  } = require('../lib/domain/inspectionWaiver');
+  // 免验节点必须是真实存在的 step_key(在 V1/trade 模板里)——防止改名后免验静默失效
+  const allTemplateKeys = new Set([
+    ...MILESTONE_TEMPLATE_V1, ...MILESTONE_TEMPLATE_V2, ...TRADE_MILESTONE_TEMPLATE,
+  ].map((m: any) => m.step_key));
+  for (const k of INSPECTION_STEP_KEYS) {
+    assert(allTemplateKeys.has(k), `免验节点 ${k} 在里程碑模板中真实存在`);
+    assert(isInspectionStep(k), `isInspectionStep 识别 ${k}`);
+  }
+  assert(!isInspectionStep('po_confirmed'), 'isInspectionStep 不误伤非验货节点');
+  // 标签读取
+  assert(isInspectionWaived({ special_tags: [INSPECTION_WAIVED_TAG] }) === true, 'isInspectionWaived 命中标签');
+  assert(isInspectionWaived({ special_tags: [] }) === false, 'isInspectionWaived 无标签为 false');
+  // 放行门禁:业务不能免验放行,QC/生产主管/admin 可以
+  assert(roleAllowed(['admin'], CAN_RELEASE_WITHOUT_INSPECTION) === true, '放行:admin 恒可');
+  assert(roleAllowed(['production'], CAN_RELEASE_WITHOUT_INSPECTION) === true, '放行:生产/QC 可');
+  assert(roleAllowed(['production_manager'], CAN_RELEASE_WITHOUT_INSPECTION) === true, '放行:生产主管 可');
+  assert(roleAllowed(['sales'], CAN_RELEASE_WITHOUT_INSPECTION) === false, '放行:业务不可(不能自免自放)');
+  // 设置门禁:业务/QC 都可提出免验
+  assert(roleAllowed(['sales'], CAN_SET_INSPECTION_WAIVER) === true, '设置免验:业务可提出');
+  assert(roleAllowed(['production'], CAN_SET_INSPECTION_WAIVER) === true, '设置免验:QC可提出');
+}
+
 // ════ 3. Agent 配置完整性 ════
 console.log('\n🤖 Agent 配置');
 assert(CIRCUIT_BREAKER.maxPerOrderPerDay === 5, `单订单限制 ${CIRCUIT_BREAKER.maxPerOrderPerDay}/天`);

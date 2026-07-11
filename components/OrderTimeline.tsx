@@ -36,6 +36,8 @@ interface OrderTimelineProps {
   currentRoles?: string[];
   currentUserId?: string;
   isAdmin?: boolean;
+  /** 本单是否「免验货」(出货前验货节点免报告放行) */
+  inspectionWaived?: boolean;
 }
 
 // V1 最终分组（对齐新节点表）
@@ -170,7 +172,7 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   );
 }
 
-export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false }: OrderTimelineProps) {
+export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false, inspectionWaived = false }: OrderTimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
   const [showPOParser, setShowPOParser] = useState(false);
@@ -614,6 +616,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                           isAdmin={isAdmin}
                           orderId={orderId}
                           orderNo={orderNo}
+                          inspectionWaived={inspectionWaived}
                         />
 
                         {/* 分批出货节点：嵌入批次进度面板 */}

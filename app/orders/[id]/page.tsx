@@ -41,6 +41,8 @@ import { CancelRequestPanel } from '@/components/CancelRequestPanel';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { SplitShipmentTag } from '@/components/SplitShipmentTag';
 import { ColorPendingTag } from '@/components/ColorPendingTag';
+import { InspectionWaiverTag } from '@/components/InspectionWaiverTag';
+import { isInspectionWaived } from '@/lib/domain/inspectionWaiver';
 import { isColorPending } from '@/lib/domain/colorPending';
 import { ProcurementTrackingTab } from '@/components/tabs/ProcurementTrackingTab';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
@@ -323,7 +325,7 @@ export default async function OrderDetailPage({
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">新工厂首单</span>
                 )}
                 {(orderData.special_tags || [])
-                  .filter((tag: string) => tag !== '分批出货中')
+                  .filter((tag: string) => tag !== '分批出货中' && tag !== '免验货')
                   .map((tag: string) => (
                     <span
                       key={tag}
@@ -346,6 +348,11 @@ export default async function OrderDetailPage({
                   orderNo={orderData.order_no}
                   initialTags={orderData.special_tags || []}
                   canEdit={isAdmin || isOrderOwner || currentRoles.some((r) => ['sales', 'sales_manager', 'merchandiser', 'order_manager'].includes(r))}
+                />
+                <InspectionWaiverTag
+                  orderId={id}
+                  initialTags={orderData.special_tags || []}
+                  canEdit={isAdmin || isOrderOwner || currentRoles.some((r) => ['sales', 'sales_manager', 'merchandiser', 'order_manager', 'production', 'qc', 'quality', 'production_manager'].includes(r))}
                 />
               </div>
               <div className="flex items-center gap-3 mt-1">
@@ -806,6 +813,7 @@ export default async function OrderDetailPage({
                 currentRoles={currentRoles}
                 currentUserId={user.id}
                 isAdmin={isAdmin}
+                inspectionWaived={isInspectionWaived(orderData)}
               />
             ) : (
               <p className="text-gray-400 text-center py-8">暂无执行节点数据</p>
