@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { KICKOFF_KEYS, FACTORY_DONE_KEYS, STAGE_SIGNAL_STEP_KEYS, pickStageSignal, REPORT_STEP_ALIASES } from '@/lib/production/stage';
 
 export interface ProductionReport {
   id: string;
@@ -141,10 +142,12 @@ export async function addProductionReport(
       ? report.report_subtype
       : ((report.qty_produced || 0) > 0 ? 'production_kickoff' : null);
     if (targetStep) {
+      // V1/V2 兼容:报告 step_key 可能是 V2 已砍掉的旧 key(mid_qc_check/final_qc_check…)→ 按别名回落到 V2 承载节点
+      const candidates = REPORT_STEP_ALIASES[targetStep] || [targetStep];
       const { data: ms } = await (supabase.from('milestones') as any)
         .select('id, status')
         .eq('order_id', orderId)
-        .eq('step_key', targetStep)
+        .in('step_key', candidates)
         .limit(1)
         .maybeSingle();
       const st = String((ms as any)?.status || '').toLowerCase();
@@ -486,7 +489,7 @@ export async function getProductionAnalysis(orderId: string): Promise<{ data?: P
     (supabase.from('milestones') as any)
       .select('step_key, due_at, actual_at, status')
       .eq('order_id', orderId)
-      .in('step_key', ['production_kickoff', 'factory_completion']),
+      .in('step_key', STAGE_SIGNAL_STEP_KEYS),
     (supabase.from('production_reports') as any)
       .select('qty_produced, qty_defect, workers_count, report_date')
       .eq('order_id', orderId)
@@ -499,10 +502,11 @@ export async function getProductionAnalysis(orderId: string): Promise<{ data?: P
   if (totalQty === 0) return { error: '订单未设置数量，无法分析' };
 
   const milestones = (msRes.data || []) as any[];
-  const kickoff = milestones.find((m: any) => m.step_key === 'production_kickoff');
-  const completion = milestones.find((m: any) => m.step_key === 'factory_completion');
+  const _byKey: Record<string, any> = Object.fromEntries(milestones.map((m: any) => [m.step_key, m]));
+  const kickoff = pickStageSignal(_byKey, KICKOFF_KEYS);        // V2:回落产前样确认(大货启动)
+  const completion = pickStageSignal(_byKey, FACTORY_DONE_KEYS); // V2:回落尾期验货(完工)
 
-  if (!kickoff?.due_at || !completion?.due_at) return { error: '缺少生产启动或工厂完成日期' };
+  if (!kickoff?.due_at || !completion?.due_at) return { error: '缺少生产启动或工厂完成日期(该单里程碑模板可能缺产前样确认/尾期验货排期)' };
 
   // 生产启动状态检测
   const DONE = new Set(['done', '已完成', 'completed']);

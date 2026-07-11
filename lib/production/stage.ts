@@ -46,6 +46,33 @@ export const RECEIVED = new Set(['received', 'accepted', 'closed', 'concession']
 export const IN_TRANSIT = new Set(['ordered', 'confirmed', 'in_production', 'ready_to_ship', 'shipped', 'arrived']);
 export const NOT_SECURED = new Set(['draft', 'pending_order']);
 
+// ── V1↔V2 生产信号映射(2026-07-11 审计 #3)──
+// V2 模板砍掉了 production_kickoff / factory_completion / final_qc_check,改由「产前样确认(大货启动)」
+// 与「尾期验货(完工)」承载。消费者(生产中心/进度分析/报告联动)按下面 key 组取信号:V1 优先、回落 V2,
+// 新旧单都能算。否则 V2 新单查不到旧 key → 阶段永卡、进度分析报错、报告联动失效。
+export const KICKOFF_KEYS = ['production_kickoff', 'pre_production_sample_approved'] as const;
+export const FACTORY_DONE_KEYS = ['final_qc_check', 'factory_completion', 'final_qc_sales_check'] as const;
+export const MID_QC_KEYS = ['mid_qc_check', 'mid_qc_sales_check'] as const;
+
+/** 生产阶段/进度所需里程碑的全部候选 step_key(用于一次性 fetch)。 */
+export const STAGE_SIGNAL_STEP_KEYS: string[] = [
+  ...KICKOFF_KEYS, ...FACTORY_DONE_KEYS, 'shipment_execute', 'procurement_order_placed',
+];
+
+/** 从 step_key→节点 的 map 里,按 keys 顺序取第一个存在的节点(V1 优先回落 V2)。 */
+export function pickStageSignal<T>(mo: Record<string, T>, keys: readonly string[]): T | null {
+  for (const k of keys) if (mo[k] != null) return mo[k];
+  return null;
+}
+
+/** 专项报告 step_key → 里程碑候选(V1 原样 + V2 承载节点);报告联动查里程碑时用。 */
+export const REPORT_STEP_ALIASES: Record<string, string[]> = {
+  production_kickoff: ['production_kickoff', 'pre_production_sample_approved'],
+  mid_qc_check: ['mid_qc_check', 'mid_qc_sales_check'],
+  final_qc_check: ['final_qc_check', 'final_qc_sales_check'],
+  inspection_release: ['inspection_release', 'final_qc_sales_check'],
+};
+
 /**
  * 依 物料就绪 + 生产节点 自动推算订单当前阶段。
  * 返回 'done' 表示工厂已完工/已出运 → 离开生产中心。

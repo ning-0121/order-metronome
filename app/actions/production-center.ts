@@ -15,6 +15,7 @@ import {
   type ProductionStage,
   DONE, RECEIVED, IN_TRANSIT, NOT_SECURED,
   computeStage, effectiveStage, STAGE_ORDER,
+  KICKOFF_KEYS, FACTORY_DONE_KEYS, STAGE_SIGNAL_STEP_KEYS, pickStageSignal,
 } from '@/lib/production/stage';
 
 export interface ProductionOrderRow {
@@ -99,7 +100,7 @@ export async function getProductionCenter(): Promise<{
   const [{ data: lines }, { data: ms }, { data: mos }] = await Promise.all([
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
     (svc.from('milestones') as any).select('order_id, step_key, status, due_at')
-      .in('order_id', orderIds).in('step_key', ['production_kickoff', 'factory_completion', 'shipment_execute']),
+      .in('order_id', orderIds).in('step_key', STAGE_SIGNAL_STEP_KEYS),
     (svc.from('manufacturing_orders') as any).select('order_id').in('order_id', orderIds),
   ]);
 
@@ -127,8 +128,8 @@ export async function getProductionCenter(): Promise<{
   for (const o of list) {
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
-    const kickoff = mo['production_kickoff'] || null;
-    const factoryDone = mo['final_qc_check'] || mo['factory_completion'] || null;  // 尾查/工厂完成=完工信号
+    const kickoff = pickStageSignal(mo, KICKOFF_KEYS);            // V2:回落产前样确认(大货启动)
+    const factoryDone = pickStageSignal(mo, FACTORY_DONE_KEYS);   // 尾查/工厂完成;V2:回落尾期验货(完工)
     const shipped = mo['shipment_execute'] || null;                                // 发货出运=出运信号(出运才离开生产中心)
     const completion = factoryDone || shipped; // 展示「工厂完成」列
     const auto = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
@@ -199,7 +200,7 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
   const [{ data: lines }, { data: ms }] = await Promise.all([
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
     (svc.from('milestones') as any).select('order_id, step_key, status, due_at')
-      .in('order_id', orderIds).in('step_key', ['production_kickoff', 'factory_completion', 'shipment_execute']),
+      .in('order_id', orderIds).in('step_key', STAGE_SIGNAL_STEP_KEYS),
   ]);
   const matByOrder = new Map<string, ProductionOrderRow['material']>();
   for (const l of (lines || []) as any[]) {
@@ -245,8 +246,8 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
   for (const o of list) {
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
-    const kickoff = mo['production_kickoff'] || null;
-    const factoryDone = mo['final_qc_check'] || mo['factory_completion'] || null;  // 尾查/工厂完成=完工信号
+    const kickoff = pickStageSignal(mo, KICKOFF_KEYS);            // V2:回落产前样确认(大货启动)
+    const factoryDone = pickStageSignal(mo, FACTORY_DONE_KEYS);   // 尾查/工厂完成;V2:回落尾期验货(完工)
     const shipped = mo['shipment_execute'] || null;                                // 发货出运=出运信号(出运才离开生产中心)
     const completion = factoryDone || shipped; // 展示「工厂完成」列
     const stage = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
