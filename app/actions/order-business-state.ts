@@ -112,12 +112,16 @@ export async function overrideBusinessControl(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '未登录' };
 
-  // 权限：仅 admin / finance
+  // 权限(2026-07-11 审计:按 Constitution 拆权限,不再硬编码 ['admin','finance'] 一刀切)——
+  // 放货/投产闸(allow_shipment/allow_production)= 经营控制,CAN_OVERRIDE_BUSINESS_BLOCK 仅 admin
+  //   (Constitution:避免越权放货);付款暂停(payment_hold)= 财务职权,CAN_APPROVE_PROC_FINANCE(admin/finance)。
   const { data: profile } = await (supabase.from('profiles') as any)
     .select('role, roles, name, email').eq('user_id', user.id).single();
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
-  if (!roles.some(r => ['admin', 'finance'].includes(r))) {
-    return { error: '仅管理员和财务可以覆盖经营控制' };
+  if (field === 'payment_hold') {
+    if (!hasRoleInGroup(roles, 'CAN_APPROVE_PROC_FINANCE')) return { error: '仅财务/管理员可改付款暂停' };
+  } else {
+    if (!hasRoleInGroup(roles, 'CAN_OVERRIDE_BUSINESS_BLOCK')) return { error: '仅管理员可覆盖放货/投产闸(经营控制)' };
   }
 
   // 更新
