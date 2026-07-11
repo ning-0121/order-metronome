@@ -207,7 +207,9 @@ export async function createOrder(
   // 国内送仓校验：创建时允许全部为空（部分客户尚未确认仓库/地址/联系人/送达日期）。
   // 推进到「包装方式确认」节点前必须补齐 → 见 app/actions/milestones.ts hard-block。
   // 14 天后仍缺失则由 missing_info 任务自动催办 → 见 generateMissingInfoTasks。
-  if (!colorCount) return { ok: false, error: '请填写颜色数' };
+  // 颜色待定:颜色还没定就能先建单(勾了「颜色待定」免填颜色数),后期到订单明细补齐并取消标签。
+  const colorPending = formData.get('color_pending') === 'true';
+  if (!colorCount && !colorPending) return { ok: false, error: '请填写颜色数（颜色还没定?勾「颜色待定」即可先建单,后期补）' };
 
   // ── 日期合理性校验 ──
   const today = new Date();
@@ -398,6 +400,7 @@ export async function createOrder(
       formData.get('color_clash_risk') === 'true' ? '撞色风险' : '',
       formData.get('complex_print') === 'true' ? '复杂印花' : '',
       formData.get('tight_deadline') === 'true' ? '交期紧急' : '',
+      colorPending ? '颜色待定' : '',   // = COLOR_PENDING_TAG(lib/domain/colorPending):PO确认免颜色核对,顶部常驻提醒
     ].filter(Boolean),
   };
 

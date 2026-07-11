@@ -136,6 +136,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const [poVerifyResult, setPoVerifyResult] = useState<POVerifyResult | null>(null);
   const [showVerifyDialog, setShowVerifyDialog] = useState(false);
   const [pendingFormData, setPendingFormData] = useState<FormData | null>(null);
+  const [colorPending, setColorPending] = useState(false);   // 颜色待定:免填颜色数先建单,后期补
   const [pendingFiles, setPendingFiles] = useState<{ file: File; fileType: string; label: string }[]>([]);
   const [verifying, setVerifying] = useState(false);
   const [threeDocResult, setThreeDocResult] = useState<ThreeDocVerifyResult | null>(null);
@@ -1366,12 +1367,17 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    颜色数 <span className="text-red-500">*</span>
+                  <label className="text-sm font-medium text-gray-700 mb-1 flex items-center gap-2 flex-wrap">
+                    颜色数 {!colorPending && <span className="text-red-500">*</span>}
+                    <label className="inline-flex items-center gap-1 text-[11px] font-normal text-amber-700 cursor-pointer">
+                      <input type="checkbox" checked={colorPending} onChange={e => setColorPending(e.target.checked)} className="accent-amber-600" />
+                      ⏳ 颜色待定(后期补)
+                    </label>
                   </label>
-                  <input type="number" name="color_count" min="1" required
-                    placeholder="此 PO 共计颜色数"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <input type="number" name="color_count" min="1" required={!colorPending} disabled={colorPending}
+                    placeholder={colorPending ? '颜色待定 · 免填,后期到订单明细补齐' : '此 PO 共计颜色数'}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-amber-50 disabled:text-amber-500 disabled:cursor-not-allowed" />
+                  <input type="hidden" name="color_pending" value={colorPending ? 'true' : 'false'} />
                 </div>
               </div>
 
