@@ -13,7 +13,7 @@ export function getRoleLabel(role: string): string {
     'sales': '业务开发',       // 开发业务部:PO 前主导(客户开发/报价/PO确认);PO 后只读全程可见
     'sales_manager': '开发业务经理',
     'merchandiser': '业务执行',  // 业务执行部(原理单):PO 确认后接手,一路跟到出货
-    'order_manager': '订单管理经理', // 业务执行部主管(高洁)
+    'order_manager': '业务执行经理', // 业务执行部主管(高洁);key 仍是 order_manager,只改显示名
     'finance': '财务',
     'procurement': '采购',
     'procurement_manager': '采购经理',

@@ -10,7 +10,7 @@ const ALL_ROLES = [
   { value: 'sales', label: '业务开发', desc: '开发业务部：新客户开发、客情维护、报价打样、PO确认；PO后只读全程可见订单进度，不再操作执行节点' },
   { value: 'sales_manager', label: '开发业务经理', desc: '开发业务部负责人：查看所有订单、看金额利润、审批客户价格与延期、调配负责人（不操作节点、不绕过付款门禁）' },
   { value: 'merchandiser', label: '业务执行', desc: 'PO 确认后接手，一路跟到出货：订单评审、单据、到料跟踪、包装规格、产前样寄客户、订舱报关物流、验货放行、异常统筹' },
-  { value: 'order_manager', label: '订单管理经理', desc: '订单管理部负责人（监督角色）：查看所有订单、调配负责人、审批延期、统筹交付与异常；不直接操作执行节点' },
+  { value: 'order_manager', label: '业务执行经理', desc: '业务执行部负责人（监督角色）：查看所有订单、调配负责人、审批延期与改单、统筹交付与异常；不直接操作执行节点' },
   { value: 'finance', label: '财务', desc: '订单审核、加工费确认、成本核算、收款' },
   { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认、催货到货' },
   { value: 'procurement_manager', label: '采购经理', desc: '采购部负责人：供应商开发与分级、价格成本控制、让步接收审批、采购异常处理（查看所有订单）' },

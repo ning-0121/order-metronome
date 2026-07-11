@@ -98,7 +98,7 @@ export async function createOrder(
   const creatorRoles: string[] = (creatorProfile as any)?.roles?.length > 0 ? (creatorProfile as any).roles : [(creatorProfile as any)?.role].filter(Boolean);
   const canCreate = creatorRoles.some(r => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'].includes(r));
   if (!canCreate) {
-    return { ok: false, error: '仅业务开发/理单、业务部或订单管理经理、管理员可以创建订单（当前账号角色：' + (creatorRoles.join('、') || '未设置') + '）' };
+    return { ok: false, error: '仅业务开发/理单、业务部或业务执行经理、管理员可以创建订单（当前账号角色：' + (creatorRoles.join('、') || '未设置') + '）' };
   }
 
   if (!preGeneratedOrderNo) {
