@@ -510,10 +510,12 @@ export function validateChecklistComplete(
   stepKey: string,
   data: ChecklistData | null,
   ownerRole?: string | null,
+  waiveKeys?: string[] | null,   // 免校验的必填项 key(如订单「颜色待定」→ 免 color_verified)
 ): { valid: boolean; missing: string[] } {
   const config = CHECKLIST_MAP[stepKey];
   if (!config) return { valid: true, missing: [] };
 
+  const waived = new Set(waiveKeys || []);
   const missing: string[] = [];
   const safeData = parseChecklistData(data);
   const responseMap = new Map(safeData.map(r => [r.key, r]));
@@ -532,6 +534,7 @@ export function validateChecklistComplete(
 
   for (const item of config.items) {
     if (!item.required) continue;
+    if (waived.has(item.key)) continue;   // 免校验(如颜色待定 → 免 color_verified)
     // 2026-05-15: 跨角色 required 项不参与当前提交者的校验
     // 防御历史上 mid_qc_check 类节点嵌入跨角色必填项导致死锁的问题
     if (normalizedOwnerRole && item.role) {

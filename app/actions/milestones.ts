@@ -389,10 +389,19 @@ export async function markMilestoneDone(
     // 跨角色嵌入的 required 项不阻塞当前提交（见 validateChecklistComplete 注释）
     const { data: msWithChecklist } = await (supabase.from('milestones') as any)
       .select('checklist_data').eq('id', milestoneId).single();
+    // 颜色待定的订单:PO确认免「颜色核对一致」(color_verified),待颜色确定后取消标签再核对
+    let waiveKeys: string[] | undefined;
+    if (milestone.step_key === 'po_confirmed') {
+      const { data: ord } = await (supabase.from('orders') as any)
+        .select('special_tags').eq('id', milestone.order_id).single();
+      const { isColorPending } = await import('@/lib/domain/colorPending');
+      if (isColorPending(ord)) waiveKeys = ['color_verified'];
+    }
     const checkResult = validateChecklistComplete(
       milestone.step_key,
       msWithChecklist?.checklist_data || null,
       milestone.owner_role,
+      waiveKeys,
     );
     if (!checkResult.valid) {
       return { error: `检查清单未完成，缺少：${checkResult.missing.join('、')}` };

@@ -40,6 +40,8 @@ import { PerPoOperationsPanel } from '@/components/order/PerPoOperationsPanel';
 import { CancelRequestPanel } from '@/components/CancelRequestPanel';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { SplitShipmentTag } from '@/components/SplitShipmentTag';
+import { ColorPendingTag } from '@/components/ColorPendingTag';
+import { isColorPending } from '@/lib/domain/colorPending';
 import { ProcurementTrackingTab } from '@/components/tabs/ProcurementTrackingTab';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
@@ -93,6 +95,7 @@ export default async function OrderDetailPage({
 
   const orderData = order as any;
   const customerShipHold = isCustomerShipHoldFromOrder(orderData);
+  const colorPending = isColorPending(orderData);
   const customerHoldStale = isCustomerHoldStale(orderData);
   const supabase = await createClient();
   // 复审性能:getCurrentUserRole 已做 auth+profiles,直接复用它返回的 userId/roles,
@@ -212,6 +215,17 @@ export default async function OrderDetailPage({
             </div>
           );
         })()}
+        {colorPending && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+            <span className="text-xl shrink-0">⏳</span>
+            <div className="text-sm">
+              <p className="font-semibold text-amber-900">颜色待定 —— 本单颜色尚未确定</p>
+              <p className="text-amber-800 mt-1">
+                已允许先推进(PO确认免「颜色核对一致」)。颜色确定后请到<b>「原辅料」/订单明细</b>补齐颜色,再点顶部「⏳ 颜色待定」标签取消。
+              </p>
+            </div>
+          </div>
+        )}
         {customerShipHold && customerHoldStale && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
             <span className="text-xl shrink-0">🟡</span>
@@ -326,6 +340,12 @@ export default async function OrderDetailPage({
                   orderNo={orderData.order_no}
                   initialTags={orderData.special_tags || []}
                   canEdit={isAdmin || isOrderOwner || currentRoles.includes('sales') || currentRoles.includes('sales_manager')}
+                />
+                <ColorPendingTag
+                  orderId={id}
+                  orderNo={orderData.order_no}
+                  initialTags={orderData.special_tags || []}
+                  canEdit={isAdmin || isOrderOwner || currentRoles.some((r) => ['sales', 'sales_manager', 'merchandiser', 'order_manager'].includes(r))}
                 />
               </div>
               <div className="flex items-center gap-3 mt-1">
