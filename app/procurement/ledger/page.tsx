@@ -3,7 +3,9 @@ import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getSupplierLedger } from '@/app/actions/supplier-ledger';
+import { listGoodsReceiptRecords } from '@/app/actions/goods-receipts-ledger';
 import { SupplierLedgerClient } from './SupplierLedgerClient';
+import { GoodsReceiptsPanel } from './GoodsReceiptsPanel';
 
 // 供应商采购对账台账(面料账目导入,2026-07-11)。
 // 导入《面料采购明细表汇总》(每 sheet=一供应商)→ 按供应商×订单归集不含税应付,预埋财务对接锚点。
@@ -13,7 +15,11 @@ export default async function SupplierLedgerPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { groups, grandTotalExTax, grandTotalInclTax } = await getSupplierLedger();
+  // 台账 + 收货记录并行取(收货记录 2026-07-11 老板:按供应商/日期/物料名调取所有收货)
+  const [{ groups, grandTotalExTax, grandTotalInclTax }, receiptsRes] = await Promise.all([
+    getSupplierLedger(),
+    listGoodsReceiptRecords(),
+  ]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -26,6 +32,9 @@ export default async function SupplierLedgerPage() {
         每行带<b>内部订单号</b>锚点,将来申请付款 / 推财务可直接对接。
       </p>
       <SupplierLedgerClient initialGroups={groups} initialGrandTotalExTax={grandTotalExTax} initialGrandTotalInclTax={grandTotalInclTax} />
+
+      {/* 收货记录台账:全部收货流水,按供应商/日期/物料名调取 */}
+      <GoodsReceiptsPanel rows={receiptsRes.data || []} />
     </div>
   );
 }
