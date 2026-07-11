@@ -40,17 +40,18 @@ emit 载荷(`ApprovalRequestPayload`):
 
 ```sql
 -- migrations/20260711_pending_approval_shipment.sql
+-- ⚠️ 循环变量(r)与表别名(c)必须不同名,否则 con.conname 会被当成未赋值的循环记录(55000)。
 DO $do$
-DECLARE con record;
+DECLARE r record;
 BEGIN
-  FOR con IN
-    SELECT con.conname FROM pg_constraint con
-    JOIN pg_class rel ON rel.oid = con.conrelid
+  FOR r IN
+    SELECT c.conname FROM pg_constraint c
+    JOIN pg_class rel ON rel.oid = c.conrelid
     JOIN pg_namespace n ON n.oid = rel.relnamespace
     WHERE n.nspname='public' AND rel.relname='pending_approvals'
-      AND con.contype='c' AND pg_get_constraintdef(con.oid) ILIKE '%approval_type%'
+      AND c.contype='c' AND pg_get_constraintdef(c.oid) ILIKE '%approval_type%'
   LOOP
-    EXECUTE format('ALTER TABLE public.pending_approvals DROP CONSTRAINT %I', con.conname);
+    EXECUTE format('ALTER TABLE public.pending_approvals DROP CONSTRAINT %I', r.conname);
   END LOOP;
   ALTER TABLE public.pending_approvals ADD CONSTRAINT pending_approvals_approval_type_check
     CHECK (approval_type IN ('price','delay','cancel','milestone','shipment'));
