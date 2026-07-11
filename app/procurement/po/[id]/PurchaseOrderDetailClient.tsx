@@ -157,11 +157,11 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
               : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">未上传 — 下单前必传</span>}
             <label className={`ml-auto text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 font-medium hover:bg-indigo-50 cursor-pointer ${proofUploading ? 'opacity-50 pointer-events-none' : ''}`}>
               {proofUploading ? '上传中…' : '+ 上传凭证'}
-              <input type="file" accept="image/*,.pdf" multiple className="hidden" disabled={proofUploading}
+              <input type="file" accept="image/*,.pdf,.xlsx,.xls,.xlsm,.csv,.doc,.docx" multiple className="hidden" disabled={proofUploading}
                 onChange={(e) => { if (e.target.files?.length) handleProofUpload(e.target.files); e.currentTarget.value = ''; }} />
             </label>
           </div>
-          <p className="text-[11px] text-gray-500 mt-1">给供应商的下单截图 / 付款凭证 / 回单等。下单(placed)前必须至少 1 个。</p>
+          <p className="text-[11px] text-gray-500 mt-1">发供应商的采购单(Excel/PDF）/ 下单截图 / 付款凭证 / 回单等。下单(placed)前必须至少 1 个。</p>
           {proofPaths.length > 0 && (
             <ul className="mt-2 space-y-1">
               {proofPaths.map((p, i) => (
