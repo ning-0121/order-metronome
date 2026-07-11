@@ -688,6 +688,13 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     const hasManualLines = (lineStyles.length > 0) || (poParseResult?.styles?.length > 0);
     if (poMode === 'no_po') {
       if (!hasManualLines) { showError('无 PO 模式:请在下方「逐款明细」手工录入款色码'); return; }
+    } else if (orderPurpose === 'trade') {
+      // 经销/采购成品:必传客户PO + 填 采购价/客户报价(不传报价单文件;两价推财务生成预算单)
+      if (!poFile) { showError('请上传客户 PO 附件(建单必传)'); return; }
+      const purch = Number(rawFormData.get('purchase_unit_cost'));
+      const cust = Number(rawFormData.get('unit_price'));
+      if (!(purch > 0)) { showError('经销/采购成品单:请填采购单价'); return; }
+      if (!(cust > 0)) { showError('经销/采购成品单:请填客户报价单价'); return; }
     } else {
       if (!poFile) { showError('请上传客户 PO 附件(建单必传)'); return; }
       if (!quoteFile) { showError('请上传内部报价单附件(建单必传;将即时共享给财务)'); return; }
@@ -1305,7 +1312,25 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                       <option value="trade">采购成品/贸易订单</option>
                     </select>
                     {orderPurpose === 'trade' && (
-                      <p className="text-xs text-amber-600 mt-1">采购成品/贸易订单:只走 采购→验收→出运→回款,不生成开裁/中查/尾查/工厂生产等节点。</p>
+                      <>
+                        <p className="text-xs text-amber-600 mt-1">采购成品/贸易订单:只走 采购→验收→出运→回款,不生成开裁/中查/尾查/工厂生产等节点。</p>
+                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+                          <p className="text-xs font-medium text-amber-800">💰 报价(不用传报价单文件,直接生成财务预算单)</p>
+                          <div className="flex flex-wrap gap-3">
+                            <label className="text-xs text-gray-600">
+                              采购单价(¥/件)<span className="text-red-500">*</span>
+                              <input type="number" name="purchase_unit_cost" min="0" step="0.01" placeholder="我们采购成本价"
+                                className="mt-0.5 block w-40 rounded border border-gray-300 px-2 py-1 text-sm focus:border-amber-400 focus:outline-none" />
+                            </label>
+                            <label className="text-xs text-gray-600">
+                              客户报价单价<span className="text-red-500">*</span>
+                              <input type="number" name="unit_price" min="0" step="0.01" placeholder="给客户的价"
+                                className="mt-0.5 block w-40 rounded border border-gray-300 px-2 py-1 text-sm focus:border-amber-400 focus:outline-none" />
+                            </label>
+                          </div>
+                          <p className="text-[11px] text-amber-600">采购价→财务预算成本面;客户报价→应收面;财务据此生成预算单算毛利。</p>
+                        </div>
+                      </>
                     )}
                     {orderPurpose === 'consign' && (
                       <p className="text-xs text-amber-600 mt-1">委托加工/外发单:照常做生产单·原辅料单给工厂,料由工厂自采(不走采购核料)。保留产前样/中查/尾查/CI报关/出运/回款。</p>
@@ -1664,7 +1689,8 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   { name: 'customer_po_file',        label: '客户 PO（可多个,必传）',  required: true, multiple: true, stepKey: 'po_confirmed',           onPOChange: handlePOFileChange },
                   { name: 'internal_quote_file',     label: '内部报价单（必传·即时共享财务）', required: true, multiple: false, stepKey: '_internal_quote', hint: '上传后即时推送财务系统;财务审批PO时可看到' },
                 ] as Array<{ name: string; label: string; required: boolean; stepKey: string; multiple?: boolean; hint?: string; onPOChange?: any }>)
-                  .filter(() => poMode !== 'no_po'))
+                  // trade(经销/采购成品)不传报价单文件,改填采购价+客户报价(见订单用途下方);故隐藏内部报价单槽
+                  .filter((f) => poMode !== 'no_po' && !(orderPurpose === 'trade' && f.name === 'internal_quote_file')))
                   .map(({ name, label, required, hint, multiple, stepKey, onPOChange }) => (
                   <div key={name} className="rounded-lg border border-gray-200 p-3">
                     <div className="flex items-center gap-4">

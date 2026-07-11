@@ -712,6 +712,37 @@ export async function createOrder(
     }
   } catch (e: any) { console.warn(`[orders] 财务推送失败不阻断订单创建:`, e?.message); }
 
+  // ── 经销/采购成品单(trade):采购价落库 + 采购成本推财务预算单(成本面)──
+  // 客户报价已随 order.created(unit_price)推应收面;这里补成本面 → 财务同一预算单得 成本+应收→毛利。
+  // 采购成本走现有 order.budget_updated 通道,放 cmt 桶让 budget_totals.total=采购成本(财务以 total 为权威)。
+  if (order_purpose === 'trade') {
+    const puc = Number(formData.get('purchase_unit_cost'));
+    const purchaseUnitCost = Number.isFinite(puc) && puc > 0 ? Math.round(puc * 100) / 100 : null;
+    if (purchaseUnitCost != null) {
+      // 落库(列缺失降级不阻断建单)
+      try {
+        const { error: pucErr } = await (supabase.from('orders') as any)
+          .update({ purchase_unit_cost: purchaseUnitCost }).eq('id', orderData.id);
+        if (pucErr) console.warn('[orders] 采购价落库失败(列缺/不阻断;迁移 20260711_orders_purchase_unit_cost.sql 待执行):', pucErr.message);
+      } catch (e: any) { console.warn('[orders] 采购价落库异常(不阻断):', e?.message); }
+      // 采购成本总额 → 财务预算单成本面
+      if (quantity && quantity > 0) {
+        try {
+          const { syncOrderBudgetToFinance } = await import('@/lib/integration/finance-sync');
+          const purchaseTotal = Math.round(purchaseUnitCost * quantity * 100) / 100;
+          await syncOrderBudgetToFinance({
+            qimo_order_id: orderData.id,
+            order_no: (orderData as any).order_no ?? null,
+            internal_order_no: (orderData as any).internal_order_no ?? null,
+            quantity,
+            cmt_amount: purchaseTotal,          // 成品采购成本 → 总额桶(finance 以 budget_totals.total 为权威)
+            actual_cmt_amount: purchaseTotal,   // 采购即实付,预算=实际
+          });
+        } catch (e: any) { console.warn('[orders] 采购成本推财务失败(不阻断):', e?.message); }
+      }
+    }
+  }
+
   // ── STEP 7: 初始化经营数据 + 确认链 ──
   try {
     const { initOrderFinancials } = await import('@/app/actions/order-financials');
