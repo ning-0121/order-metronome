@@ -280,6 +280,7 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
     specification: l.specification ?? null,                   // 规格(财务对账/预算按料+规格用;2026-07-08 财务对接补)
     category: l.category ?? null,
     size: l.size ?? null,                                     // 尺码(N1;按码拆的行带上,整行为 null)
+    color: l.color ?? null,                                   // 颜色(2026-07-11;财务审批按色核数量,fetchPurchaseOrderLinesRaw 回查附上)
     // 预算桶(2026-07-07 用户拍板:辅料不分细类,面料/辅料两桶即可)。财务按 budget_bucket 汇总预算。
     budget_bucket: l.category === 'fabric' ? 'fabric' : 'accessory',
     supplier_id: l.supplier_id ?? null,
@@ -300,10 +301,10 @@ export function mapPoLineForFinance(l: Record<string, any>): Record<string, unkn
  */
 export async function fetchPurchaseOrderLinesRaw(db: any, poId: string): Promise<any[]> {
   let { data: lines, error: le } = await db.from('procurement_line_items')
-    .select('id, order_id, material_name, material_code, specification, category, size, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
+    .select('id, order_id, procurement_item_id, material_name, material_code, specification, category, size, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
     .eq('purchase_order_id', poId)
-  // size 列 schema 缓存未刷新 → 降级去 size(财务对接不因新列拿不到明细)
-  if (le && /\bsize\b|schema cache|column .* does not exist|permission denied/i.test(le.message || '')) {
+  // size/procurement_item_id 列 schema 缓存未刷新 → 降级去新列(财务对接不因新列拿不到明细)
+  if (le && /\bsize\b|procurement_item_id|schema cache|column .* does not exist|permission denied/i.test(le.message || '')) {
     ({ data: lines } = await db.from('procurement_line_items')
       .select('id, order_id, material_name, material_code, specification, category, supplier_id, supplier_name, ordered_qty, ordered_unit, unit_price, ordered_amount')
       .eq('purchase_order_id', poId))
@@ -314,6 +315,16 @@ export async function fetchPurchaseOrderLinesRaw(db: any, poId: string): Promise
     const { data: ords } = await db.from('orders').select('id, order_no, internal_order_no').in('id', orderIds)
     const m = new Map((ords || []).map((o: any) => [o.id, o]))
     for (const l of rows) { const o: any = m.get(l.order_id); if (o) { l.order_no = o.order_no; l.internal_order_no = o.internal_order_no } }
+  }
+  // 颜色回查(2026-07-11 财务审批要按色核数量):procurement_line_items 没有 color 列 ——
+  // 颜色在 procurement_items 上,经 procurement_item_id 两段查附上(直接 select color 整查打挂,2026-07-08 血泪)。
+  const piIds = [...new Set(rows.map((l) => l.procurement_item_id).filter(Boolean))]
+  if (piIds.length) {
+    try {
+      const { data: pis } = await db.from('procurement_items').select('id, color').in('id', piIds)
+      const cm = new Map((pis || []).map((p: any) => [p.id, p.color ?? null]))
+      for (const l of rows) { if (l.procurement_item_id && cm.has(l.procurement_item_id)) l.color = cm.get(l.procurement_item_id) }
+    } catch { /* 颜色附不上不阻断明细 */ }
   }
   return rows
 }
