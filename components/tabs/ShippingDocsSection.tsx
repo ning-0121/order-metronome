@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { getShippingDraft, saveShippingLines, saveShippingDocMeta } from '@/app/actions/packing';
 import { generatePackingList } from '@/app/actions/generate-packing-list';
 import { generateCommercialInvoice, generateCustomsDocs, previewShippingDocs } from '@/app/actions/shipping-docs';
@@ -60,8 +60,20 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
   useEffect(() => { if (open && batchesLoaded) load(); }, [open, batchesLoaded, load]);
 
   const setField = (i: number, k: string, v: string) => setRows(rs => rs.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
-  const setM = (k: string, v: any) => setMeta((m: any) => ({ ...m, [k]: v }));
-  const setBank = (k: string, v: any) => setMeta((m: any) => ({ ...m, bank: { ...(m.bank || {}), [k]: v } }));
+  const metaDirty = useRef(false);
+  const setM = (k: string, v: any) => { metaDirty.current = true; setMeta((m: any) => ({ ...m, [k]: v })); };
+  const setBank = (k: string, v: any) => { metaDirty.current = true; setMeta((m: any) => ({ ...m, bank: { ...(m.bank || {}), [k]: v } })); };
+
+  // 单据信息(CI/报关表头)编辑后防抖自动保存(离开页面前早已存好;手动「保存单据信息」按钮做保底)。
+  // 只在用户真编辑过(metaDirty)且草稿单据已就绪(plId)时触发;仅存 doc_meta,不碰实发数量行。
+  useEffect(() => {
+    if (!metaDirty.current || !plId) return;
+    const t = setTimeout(async () => {
+      const r = await saveShippingDocMeta(orderId, plId, meta);
+      if (!(r as any)?.error) { metaDirty.current = false; setMsg('✓ 单据信息已自动保存'); }
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [meta, plId, orderId]);
   const setCz = (k: string, v: any) => setMeta((m: any) => ({ ...m, customs: { ...(m.customs || {}), [k]: v } }));
   const setCzStyle = (style: string, k: string, v: any) => setMeta((m: any) => {
     const cz = m.customs || {}; const styles = { ...(cz.styles || {}) };
