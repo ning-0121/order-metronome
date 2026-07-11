@@ -38,7 +38,7 @@ export async function getManufacturingOrder(orderId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, po_parse_snapshot')
+    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, created_by, po_parse_snapshot')
     .eq('id', orderId).single();
   if (oErr) return { error: friendlyError(oErr) };
   // 尺码列手排顺序(容错读:列未建/迁移未执行时静默为 null,不 brick 生产任务单)
@@ -228,7 +228,7 @@ async function buildMoWorkbook(
   };
 
   // ── 名字解析(owner/confirmed/released → profiles.name)+ 格式化 ──
-  const userIds = [order.owner_user_id, mo.confirmed_by, mo.released_to_factory_by, mo.created_by].filter(Boolean);
+  const userIds = [order.owner_user_id, order.created_by, mo.confirmed_by, mo.released_to_factory_by, mo.created_by].filter(Boolean);
   const nameMap: Record<string, string> = {};
   if (userIds.length > 0) {
     const { data: profs } = await (supabase.from('profiles') as any).select('user_id, name').in('user_id', userIds);
@@ -510,7 +510,7 @@ async function buildMoWorkbook(
     // ── 抄送 + 签名(无外框,仅抄送顶线)──
     box(r, 1, r, 10, `抄送:采购、面料仓、辅料仓、QC、包装组长、打包组长${order.factory_name ? '、' + order.factory_name : ''}`, { align: 'left', border: 'top' });
     ws.getRow(r).height = 21; r++;
-    box(r, 1, r, 1, `制单：${nameOf(mo.created_by)}`, { align: 'left', border: 'none' });
+    box(r, 1, r, 1, `制单：${nameOf(order.created_by) || nameOf(mo.created_by)}`, { align: 'left', border: 'none' });
     box(r, 2, r, 2, `跟单：${nameOf(order.owner_user_id)}`, { align: 'left', border: 'none' });
     box(r, 7, r, 7, '批准：', { align: 'left', border: 'none' });
     ws.getRow(r).height = 24.75;
