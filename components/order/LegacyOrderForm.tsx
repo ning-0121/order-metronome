@@ -154,6 +154,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const [poParsing, setPoParsing] = useState(false);
   const [poParseResult, setPoParseResult] = useState<any>(null);
   const [poAutoFilled, setPoAutoFilled] = useState(false);
+  // 多客户PO合单:上传≥2张不同PO号 → 记来源PO列表,建单时落 order_customer_pos。
+  //   单PO/手工建单 = 空数组 → 服务端不写来源PO,行为不变(向后兼容)。
+  const [customerPos, setCustomerPos] = useState<{ po_number: string; po_amount?: string }[]>([]);
   const isSampleOrder = searchParams.get('type') === 'sample';
   const [orderType, setOrderType] = useState('');
   // 订单用途:production(默认) | trade(采购成品/贸易订单)。sample 由独立入口决定。
@@ -353,6 +356,17 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
       } as any;
       setPoParseResult(aggregatedDisplay);
 
+      // ─── 多客户PO合单:上传≥2张不同PO → 记来源PO列表(键与款上 source_po_number 一致)───
+      //   键 = order_no || fileName,与下方款级 source_po_number 同源,保证服务端能映射回 FK。
+      //   仅 1 张(或多文件同一PO号)→ 视为单PO,不写来源PO容器,老路径不变。
+      const poKeys: string[] = [];
+      const seenPoKey = new Set<string>();
+      for (const s of successes) {
+        const key = (s.data.order_no || '').trim() || s.fileName;
+        if (key && !seenPoKey.has(key)) { seenPoKey.add(key); poKeys.push(key); }
+      }
+      setCustomerPos(poKeys.length >= 2 ? poKeys.map(k => ({ po_number: k })) : []);
+
       // ─── 逐款明细预填富录入表(业务可见可改;已手工录了就不覆盖)───
       if (lineStyles.length === 0) {
         // 从解析的单件用量文本(如"1.2平方,0.346kg/件")抽数字单耗:优先 kg,其次 米/码/平方
@@ -380,12 +394,16 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
           for (let i = 0; remain > 0; i = (i + 1) % floored.length, remain--) floored[i].n += 1;
           return Object.fromEntries(entries.map(([k]) => [k, floored.find(f => f.k === k)!.n]));
         };
-        const parsedStyles = successes.flatMap(s => (s.data.styles || [])).map((st: any) => {
+        // 多PO合单:逐个 PO 文件的款各自带上「来源PO号」(s.data.order_no),不跨PO去重合并 →
+        //   同款同色来自两张PO保持两块,生产单按批次拆(用户 2026-07-11 口径①)。
+        //   来源PO号缺失时用文件名兜底,保证每款都能回溯。
+        const parsedStyles = successes.flatMap(s => (s.data.styles || []).map((st: any) => {
           const cons = parseConsumption(st.unit_consumption || '');
           return {
           style_no: st.style_no || '',
           product_name: st.product_name || '',
           image_url: st.image_url || '',
+          source_po_number: (s.data.order_no || '').trim() || s.fileName,   // 来源客户PO溯源
           fabric_name: [st.material, st.fabric_weight].filter(Boolean).join(' '),
           fabric_width: '',
           fabric_consumption: cons.qty,
@@ -397,7 +415,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
             remark: c.packaging || '',
           })),
           };
-        }).filter((st: any) => st.style_no || st.colors.length > 0);
+        })).filter((st: any) => st.style_no || st.colors.length > 0);
         if (parsedStyles.length > 0) setLineStyles(parsedStyles);
       }
 
@@ -579,6 +597,11 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     const submitStyles = lineStyles.length > 0 ? lineStyles : (poParseResult?.styles || []);
     if (submitStyles.length) {
       rawFormData.set('line_items', JSON.stringify(submitStyles));
+    }
+    // 多客户PO合单:来源PO列表 → 服务端落 order_customer_pos,并按款上 source_po_number 回填 FK。
+    //   空数组(单PO/手工建单)不写,老路径不变。
+    if (customerPos.length >= 2) {
+      rawFormData.set('customer_pos', JSON.stringify(customerPos));
     }
     // AI 原始识别冻结底档(有 PO 解析时才带):建单落到 orders.po_parse_snapshot,供后续纠错追溯
     if (poParseResult) {
@@ -1212,6 +1235,17 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <input type="text" name="customer_po_number" required
                     placeholder="客户采购单号"
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  {customerPos.length >= 2 && (
+                    <div className="mt-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-800">
+                      <span className="font-medium">📄 多PO合单</span>:检测到 {customerPos.length} 张客户PO,合并为本内部订单统一生产。
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {customerPos.map((p, i) => (
+                          <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-white border border-amber-200 font-medium">PO{i + 1} · {p.po_number}</span>
+                        ))}
+                      </div>
+                      <p className="mt-0.5 text-amber-600">下方明细每款已标来源PO;生产单将按PO批次拆。如识别有误可在明细区调整。</p>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

@@ -53,7 +53,11 @@ export async function getManufacturingOrder(orderId: string) {
     .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec')
     .eq('order_id', orderId).order('material_type');
 
-  return { data: { mo: mo || null, order, lineItems: lineItems || [], bom: bom || [] } };
+  // 多客户PO合单:来源PO容器(生产单按PO批次拆用)。表未建时静默返回空,不影响生产单生成。
+  const { data: customerPos } = await (supabase.from('order_customer_pos') as any)
+    .select('id, customer_po_number, seq').eq('order_id', orderId).order('seq');
+
+  return { data: { mo: mo || null, order, lineItems: lineItems || [], bom: bom || [], customerPos: customerPos || [] } };
 }
 
 /** 录入/保存生产任务单的 6 个翻译字段(无则建,自动赋 mo_no=MO-{order_no})。 */
@@ -203,9 +207,22 @@ async function buildMoWorkbook(
 
   const res = await getManufacturingOrder(orderId);
   if ((res as any).error) return { error: (res as any).error };
-  const { mo: moRaw, order, lineItems, bom } = (res as any).data;
+  const { mo: moRaw, order, lineItems, bom, customerPos } = (res as any).data;
   // 放宽:无 MO 记录也能生成(建单即可出「生产订单」);翻译/确认字段缺省则留白手填。
   const mo = moRaw || {};
+
+  // 多客户PO合单:同一内部订单由多张客户PO合成时,生产单按PO批次拆(用户 2026-07-11 口径①)。
+  //   同款同色来自两张PO → 明细两行不合并求和,车间按PO分批投产。
+  //   单PO/老单(customerPos ≤ 1)→ multiPO=false,按款×色合并(不受影响,向后兼容)。
+  const poList: any[] = Array.isArray(customerPos) ? customerPos : [];
+  const multiPO = poList.length >= 2;
+  const poById = new Map<string, { seq: number; num: string }>();
+  for (const p of poList) poById.set(p.id, { seq: p.seq, num: p.customer_po_number });
+  const poBatchLabel = (li: any): string => {
+    if (!multiPO) return '';
+    const p = li?.source_order_po_id ? poById.get(li.source_order_po_id) : null;
+    return p ? `PO${p.seq}` : '';
+  };
 
   // ── 名字解析(owner/confirmed/released → profiles.name)+ 格式化 ──
   const userIds = [order.owner_user_id, mo.confirmed_by, mo.released_to_factory_by, mo.created_by].filter(Boolean);
@@ -428,12 +445,14 @@ async function buildMoWorkbook(
     box(18, 2, 18, 10, '订单数量');        // B18:J18
     groups.forEach(([c1, c2], i) => box(19, c1, 19, c2, sizeKeys[i]));   // R19 尺码分组表头
     let r = 20;
-    // 按款×色合并(客户加单会产生同款×色多行 → 工厂只看每 SKU 总数,合并求和 sizes/箱数/件数)
+    // 按款×色合并(客户加单会产生同款×色多行 → 工厂只看每 SKU 总数,合并求和 sizes/箱数/件数)。
+    // 多PO合单(multiPO)时改按 色×来源PO 合并 → 同款同色来自两张PO保持两行,车间按PO分批投产(口径①)。
     const _mergedColors = new Map<string, any>();
     for (const li of g.items) {
-      const key = `${(li.color_cn || '').trim()}|${(li.color_en || '').trim()}`;
+      const batch = poBatchLabel(li);   // 多PO时 = PO1/PO2…;单PO/老单 = ''
+      const key = `${(li.color_cn || '').trim()}|${(li.color_en || '').trim()}|${multiPO ? (li.source_order_po_id || '') : ''}`;
       let m = _mergedColors.get(key);
-      if (!m) { m = { color_cn: li.color_cn, color_en: li.color_en, sizes: {} as Record<string, number>, qty_pcs: 0, carton_count: 0 }; _mergedColors.set(key, m); }
+      if (!m) { m = { color_cn: li.color_cn, color_en: li.color_en, po_batch: batch, sizes: {} as Record<string, number>, qty_pcs: 0, carton_count: 0 }; _mergedColors.set(key, m); }
       for (const [k, v] of Object.entries(li.sizes || {})) m.sizes[k] = (Number(m.sizes[k]) || 0) + (Number(v) || 0);
       m.qty_pcs += Number(li.qty_pcs) || 0;
       m.carton_count += Number(li.carton_count) || 0;
@@ -442,7 +461,7 @@ async function buildMoWorkbook(
     const colorRowNo: number[] = [];
     for (const li of colorItems) {
       ws.getRow(r).height = 25;
-      box(r, 1, r, 1, [li.color_en, li.color_cn].filter(Boolean).join(' ') || '');
+      box(r, 1, r, 1, [li.po_batch, li.color_en, li.color_cn].filter(Boolean).join(' ') || '');
       groups.forEach(([c1, c2], i) => box(r, c1, r, c2, (li.sizes && Number(li.sizes[sizeKeys[i]])) || ''));
       colorRowNo.push(r); r++;
     }
@@ -453,7 +472,7 @@ async function buildMoWorkbook(
     // 各色箱数(公式 =(各码合计)/每箱件数,同模板)
     colorItems.forEach((li: any, i: number) => {
       ws.getRow(r).height = 25;
-      const name = [li.color_en, li.color_cn].filter(Boolean).join(' ') || '颜色';
+      const name = [li.po_batch, li.color_en, li.color_cn].filter(Boolean).join(' ') || '颜色';
       box(r, 1, r, 1, `${name}箱数`);
       if (cartonPer) box(r, 2, r, 10, { formula: `(${groups.map(([c1]) => COL(c1) + colorRowNo[i]).join('+')})/B${cartonRow}` } as any);
       else box(r, 2, r, 10, '');

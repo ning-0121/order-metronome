@@ -24,6 +24,7 @@ type Style = {
   fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
   set_multiplier?: number | string;   // 套装每套件数(1/空=非套装);算料按 件数×每套件数
   po_unit_price?: string | number;    // 客户 PO 成交单价(款级,给客户的价);仅 showPrice 时渲染,server 端按财务口径剥离
+  source_po_number?: string;          // 多PO合单:本款来自哪张客户PO(只读溯源徽标;server 端解析成 source_order_po_id)
 };
 
 const emptyFabric = (): Fabric => ({ name: '', width: '', consumption: '', unit: 'kg', price: '', material_id: null, material_code: null });
@@ -195,6 +196,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       fabric_name: src.fabric_name || '', fabric_width: src.fabric_width || '',
       fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg', po_unit_price: src.po_unit_price ?? '',
       set_multiplier: src.set_multiplier ?? 1,
+      source_po_number: src.source_po_number,   // 多PO合单:复制款保留来源PO溯源
       colors: src.colors.map((c) => ({ ...c, sizes: { ...c.sizes } })),
     };
     setStyles([...styles.slice(0, i + 1), dup, ...styles.slice(i + 1)]);
@@ -330,6 +332,11 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       {styles.map((st, si) => (
         <div key={si} className="bg-white rounded-xl border border-gray-200 p-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
+            {st.source_po_number && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-medium whitespace-nowrap" title="本款来自这张客户PO(多PO合单溯源)">
+                📄 PO {st.source_po_number}
+              </span>
+            )}
             <input value={st.style_no} onChange={(e) => setStyleField(si, 'style_no', e.target.value)} placeholder="款号 *" disabled={!canEdit} className={`${inp} w-28`} />
             <input value={st.product_name} onChange={(e) => setStyleField(si, 'product_name', e.target.value)} placeholder="品名/款式描述(中)" disabled={!canEdit} className={`${inp} w-40`} />
             <input value={st.product_name_en || ''} onChange={(e) => setStyleField(si, 'product_name_en', e.target.value)} placeholder="款式描述(英) Style Desc" disabled={!canEdit} className={`${inp} w-44`} />

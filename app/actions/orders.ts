@@ -824,6 +824,45 @@ export async function createOrder(
       try { parsedStyles = JSON.parse(lineItemsRaw); } catch { parsedStyles = []; }
     }
 
+    // ── 多客户PO合单:先落库来源PO容器,得到 po_number → order_customer_pos.id 映射 ──
+    // 客户裂分多张PO但交期一致 → 合并为一个内部订单号。前端只传 PO号字符串做归属,
+    // 这里解析成 FK(source_order_po_id)。设计:docs/Designs/Multi-PO-Merge-Order-V1.0.md。
+    // 单PO/老单不传 customer_pos → poMap 为空,source_order_po_id 全为 null,行为不变(向后兼容)。
+    // 优雅降级:order_customer_pos 表未建时静默跳过,绝不阻断建单(沿用 po_unit_price 降级哲学)。
+    const poMap = new Map<string, string>();   // customer_po_number → order_customer_pos.id
+    try {
+      const customerPosRaw = formData.get('customer_pos') as string | null;
+      let customerPos: any[] = [];
+      if (customerPosRaw) { try { customerPos = JSON.parse(customerPosRaw); } catch { customerPos = []; } }
+      // 去重 + 保序:同一 PO 号只落一行
+      const seenPo = new Set<string>();
+      const poRows: any[] = [];
+      let poSeq = 0;
+      for (const p of (Array.isArray(customerPos) ? customerPos : [])) {
+        const num = String(p?.po_number ?? '').trim();
+        if (!num || seenPo.has(num)) continue;
+        seenPo.add(num);
+        poSeq++;
+        const amt = p?.po_amount === '' || p?.po_amount == null ? null : Number(p.po_amount);
+        poRows.push({
+          order_id: orderData.id,
+          customer_po_number: num,
+          seq: poSeq,
+          po_amount: amt != null && !isNaN(amt) ? amt : null,
+          created_by: user.id,
+        });
+      }
+      if (poRows.length > 0) {
+        const { data: insertedPos, error: poErr } = await (supabase.from('order_customer_pos') as any)
+          .insert(poRows).select('id, customer_po_number');
+        if (poErr) {
+          console.warn('[createOrder] order_customer_pos 落库失败(不阻断,来源PO溯源降级):', poErr.message);
+        } else {
+          for (const row of (insertedPos || [])) poMap.set(row.customer_po_number, row.id);
+        }
+      }
+    } catch (e: any) { console.warn('[createOrder] 多PO容器处理异常(不阻断):', e?.message); }
+
     if (Array.isArray(parsedStyles) && parsedStyles.length > 0) {
       const rows: any[] = [];
       let lineNo = 0;
@@ -860,15 +899,16 @@ export async function createOrder(
             fabric_unit: prim.fabric_unit,
             fabrics: fabrics.length > 0 ? fabrics : null,   // 多布料明细(JSONB);列缺失时降级剔除见下
             po_unit_price: poPrice != null && !isNaN(poPrice) ? poPrice : null,   // 客户 PO 成交价(款级同值写每行)
+            source_order_po_id: poMap.get(String(st?.source_po_number ?? '').trim()) || null,  // 多PO合单:本行来自哪张客户PO
             source: 'po_parse',
           });
         }
       }
       if (rows.length > 0) {
         let { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
-        if (liErr && /po_unit_price|carton_count|fabrics|column .* does not exist/i.test(liErr.message || '')) {
-          // po_unit_price(20260706)/carton_count(20260703)/多布料(20260710)迁移未执行 → 降级去掉这些列重插,不阻断建单
-          const plain = rows.map(({ po_unit_price, carton_count, fabrics, ...rest }) => rest);
+        if (liErr && /po_unit_price|carton_count|fabrics|source_order_po_id|column .* does not exist/i.test(liErr.message || '')) {
+          // po_unit_price(20260706)/carton_count(20260703)/多布料(20260710)/source_order_po_id(20260711)迁移未执行 → 降级去掉这些列重插,不阻断建单
+          const plain = rows.map(({ po_unit_price, carton_count, fabrics, source_order_po_id, ...rest }) => rest);
           ({ error: liErr } = await (supabase.from('order_line_items') as any).insert(plain));
         }
         if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);
