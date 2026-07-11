@@ -153,7 +153,8 @@ export async function convertQuoteToOrderFinancials(
     cost_cmt:             Number(costCmtRmb.toFixed(2)),
     cost_shipping:        Number(costShippingRmb.toFixed(2)),
     cost_other:           Number(costOtherRmb.toFixed(2)),
-    cost_total:           Number(costTotalRmb.toFixed(2)),
+    // cost_total 是 DB 生成列(=料+工+运+杂),严禁 app 写入否则 428C9(见 order-financials-cost-total-generated)。
+    // 本函数当前无调用方(死代码),重新启用前已去掉,防接线即炸。
     // 利润
     gross_profit_rmb:     Number(grossProfitRmb.toFixed(2)),
     margin_pct:           marginPct !== null ? Number(marginPct.toFixed(4)) : null,

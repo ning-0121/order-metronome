@@ -388,6 +388,10 @@ export async function sendCostAlert(
   responsibleUserId?: string,
 ): Promise<void> {
   const supabase = await createClient();
+  // P2 修:原完全无鉴权 → 任意人可对任意订单向财务/CEO 发通知+企微(骚扰面)。至少要求登录
+  // (内部合法调用方=采购/生产/财务的已鉴权 action,都有会话,不受影响)。
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
 
   const { data: order } = await (supabase.from('orders') as any)
     .select('order_no, customer_name')

@@ -87,9 +87,19 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
 
   // 读取订单基本信息
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, quantity, unit_price, currency, total_amount, incoterm')
+    .select('id, quantity, unit_price, currency, total_amount, incoterm, created_by, owner_user_id')
     .eq('id', orderId).single();
   if (!order) return { error: '订单不存在' };
+  // P2 修:原仅校验登录 → 任意角色可 upsert 重算财务、把 4 个确认模块重置 not_started(冲掉已确认进度)。
+  // 收紧到 财务/管理 或 本单创建者/负责人(建单时 createOrder 由创建者调,走归属分支)。
+  {
+    const { data: _p } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+    const _roles: string[] = (_p as any)?.roles?.length > 0 ? (_p as any).roles : [(_p as any)?.role].filter(Boolean);
+    const _finAdmin = _roles.some((r) => ['admin', 'finance'].includes(r));
+    if (!_finAdmin && (order as any).created_by !== user.id && (order as any).owner_user_id !== user.id) {
+      return { error: '无权初始化订单财务' };
+    }
+  }
 
   // 读取成本基线（如果有）
   const { data: baseline } = await (supabase.from('order_cost_baseline') as any)
@@ -177,7 +187,7 @@ export async function recordPayment(
   // 读当前累计，本次金额按"增量"累加（原先是覆盖 + 一律标全收，分次收款会错）
   const { data: fin } = await (supabase.from('order_financials') as any)
     .select('deposit_amount, deposit_received, balance_amount, balance_received')
-    .eq('order_id', orderId).single();
+    .eq('order_id', orderId).maybeSingle();   // maybeSingle:无行不报错(下面 upsert 兜底,不再静默吞收款)
 
   const now = new Date().toISOString();
   const updates: any = { updated_by: user.id, updated_at: now };
@@ -196,8 +206,10 @@ export async function recordPayment(
     updates.balance_status = due > 0 && cum + 0.01 >= due ? 'received' : 'partial';
   }
 
+  // P2 修:原用 .update().eq('order_id') —— 该单尚无 order_financials 行时命中 0 行、无 error、
+  // 返回成功但收款没落库(静默吞单)。改 upsert:无行则建、有行则更新。
   const { error } = await (supabase.from('order_financials') as any)
-    .update(updates).eq('order_id', orderId);
+    .upsert({ order_id: orderId, ...updates }, { onConflict: 'order_id' });
 
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
