@@ -78,6 +78,27 @@ export function MilestoneActions({
   const [aiQcResult, setAiQcResult] = useState<DefectDetectionResult | null>(null);
   const showAiQc = QC_STEPS.has(milestone.step_key);
 
+  // 多方确认节点:各方在「多方确认」区各自点确认(异步·各自独立)。这里加载确认进度,
+  // 还有没确认的方时,「去处理」面板不显示会被服务端卡住的「确认完成」——改显引导。
+  // 全部确认后:免凭证节点已自动完成(面板消失);需凭证节点才显示完成按钮上传凭证。
+  const [isMultiPartyNode, setIsMultiPartyNode] = useState(false);
+  const [pendingPartyLabels, setPendingPartyLabels] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { requiredPartiesFor, pendingParties } = await import('@/lib/domain/confirmationParties');
+      if (requiredPartiesFor(milestone.step_key).length === 0) { setIsMultiPartyNode(false); return; }
+      setIsMultiPartyNode(true);
+      const { listMilestoneConfirmations } = await import('@/app/actions/milestone-confirmations');
+      const res = await listMilestoneConfirmations(milestone.id);
+      if (cancelled) return;
+      const confirmedKeys = new Set(((res.parties || []) as any[]).filter(p => p.status === 'confirmed').map(p => p.party_key));
+      setPendingPartyLabels(pendingParties(milestone.step_key, confirmedKeys).map(p => p.label));
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [milestone.id, milestone.step_key]);
+  const multiPartyPending = isMultiPartyNode && !!pendingPartyLabels && pendingPartyLabels.length > 0;
+
   // 多角色匹配：用户任一角色匹配节点 owner_role 即可操作
   // 管理员不在此列（管理员监督不替代执行，与服务端权限一致）
   const allRoles = currentRoles.length > 0 ? currentRoles : (currentRole ? [currentRole] : []);
@@ -964,10 +985,16 @@ export function MilestoneActions({
           <BackfillDatePicker value={backfillDate} onChange={setBackfillDate} dueAt={milestone.due_at} />
 
           <div className="flex flex-col sm:flex-row gap-2">
-            <button type="submit" disabled={loading}
-              className="rounded-lg bg-indigo-600 px-4 py-3 sm:py-2 text-base sm:text-sm text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
-              {loading ? '提交中...' : '✅ 确认完成'}
-            </button>
+            {multiPartyPending ? (
+              <div className="flex-1 rounded-lg bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-700">
+                🤝 本节点由各方在上方「多方确认」区<b>各自点确认</b>(各自独立·无需同时,谁确认谁的)。还差:<b>{pendingPartyLabels!.join('、')}</b>。全部确认后自动完成——<b>无需在此点「确认完成」</b>。清单可点上方「保存清单」留痕。
+              </div>
+            ) : (
+              <button type="submit" disabled={loading}
+                className="rounded-lg bg-indigo-600 px-4 py-3 sm:py-2 text-base sm:text-sm text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+                {loading ? '提交中...' : '✅ 确认完成'}
+              </button>
+            )}
             <button type="button"
               onClick={() => { setShowSubmitForm(false); setSubmitError(''); setBackfillDate(''); }}
               className="rounded-lg border border-gray-300 px-4 py-3 sm:py-2 text-base sm:text-sm text-gray-600 hover:bg-gray-50">
