@@ -883,13 +883,26 @@ export async function getProcurementItemSources(itemId: string) {
     for (const b of (bs || [])) { bomMaster.set(b.id, b.material_master_id); bomStyle.set(b.id, b.style_no || null); }
   }
 
+  // 人工合并映射(与 consolidateOrderProcurementItems 同源):两条同物料不同键被采购手动并成一条时,
+  // 归并把「源键」重映射到「目标键」。来源明细必须用同一张表重映射,否则被并进来的那个款(源键≠目标键)
+  // 会被下面的 key 过滤掉 → 合并后只显示一个款(2026-07-11 用户实测:两个主标合并后款号只剩一个)。
+  const mergeMap = new Map<string, string>();
+  {
+    const { data: cbM } = await (supabase.from('order_cost_baseline') as any)
+      .select('consolidation_merges').eq('order_id', (item as any).order_id).maybeSingle();
+    for (const m of (((cbM as any)?.consolidation_merges) || [])) {
+      if (m?.from && m?.to) mergeMap.set(String(m.from), String(m.to));
+    }
+  }
+
   const sources = (reqs || []).map((r: any) => {
     const sl = r.snapshot_line_id ? slMap.get(r.snapshot_line_id) : null;
     const master_id = sl?.bom_id ? (bomMaster.get(sl.bom_id) || null) : null;
-    const key = consolidationKey({
+    const rawKey = consolidationKey({
       material_master_id: master_id, material_name: r.material_name || sl?.material_name,
       specification: sl?.specification, category: r.category, color: sl?.color, unit: r.unit,
     });
+    const key = mergeMap.get(rawKey) || rawKey;   // 人工合并:源键 → 目标键(与归并同口径)
     return { key, material_name: r.material_name || sl?.material_name, color: sl?.color || null,
       style_no: sl?.bom_id ? (bomStyle.get(sl.bom_id) || null) : null,   // 款号(整单通用辅料为 null)
       development_consumption: sl?.qty_per_piece ?? null, net_demand: r.net_purchase_qty ?? null };
