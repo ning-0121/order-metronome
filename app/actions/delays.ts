@@ -1309,7 +1309,7 @@ export async function createOrderLevelDelayRequest(
   // 2026-07-11:整单延期原来只通知 admin,业务经理(order_manager/sales_manager)收不到 → 补通知管理审批人
   try {
     const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-    await notifyUsersByRole(supabase, ['order_manager', 'sales_manager'], {
+    await notifyUsersByRole(supabase, ['admin', 'order_manager', 'sales_manager'], {
       type: 'delay_request',
       title: `🕒 整单延期待审批:${orderCheck.order_no}`,
       message: `${requesterName} 申请整单延期,新出厂日 ${newFactoryDate}(延期 ${delayDays} 天);原因:${reasonDetail.slice(0, 100)}。请到该订单「延期」处审批。`,

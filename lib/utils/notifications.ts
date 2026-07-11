@@ -124,7 +124,14 @@ export async function notifyUsersByRole(
   n: { type: string; title: string; message: string; relatedOrderId?: string | null },
 ): Promise<number> {
   try {
-    const { data: users } = await (supabase.from('profiles') as any).select('user_id, role, roles');
+    // ⚠️ 审批扇出必须用 service-role:notifications 的 INSERT RLS 是 `with check(auth.uid()=user_id)`
+    //   —— 只能给自己建通知。用提交人 session 给审批人(别的 user_id)建通知会被 RLS 静默拒
+    //   (2026-07-11 事故:高洁/所有经理/连 admin 都收不到任何审批通知的根因)。故此处强制 service-role。
+    let db: any = supabase;
+    try { const { createServiceRoleClient } = await import('../supabase/server'); db = createServiceRoleClient(); }
+    catch { db = supabase; /* service-role 不可用(开发环境)→ 退回,至少给自己那类能建 */ }
+
+    const { data: users } = await (db.from('profiles') as any).select('user_id, role, roles');
     const seen = new Set<string>();
     const targets = (users || []).filter((p: any) => {
       const rs: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
@@ -134,7 +141,7 @@ export async function notifyUsersByRole(
       return true;
     });
     if (targets.length === 0) return 0;
-    const { error } = await (supabase.from('notifications') as any).insert(
+    const { error } = await (db.from('notifications') as any).insert(
       targets.map((t: any) => ({
         user_id: t.user_id, type: n.type, title: n.title, message: n.message,
         related_order_id: n.relatedOrderId || null, status: 'unread', email_sent: false,
