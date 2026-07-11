@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { GoodsReceiptRow } from '@/app/actions/goods-receipts-ledger';
+import { exportGoodsReceiptRecords, type GoodsReceiptRow } from '@/app/actions/goods-receipts-ledger';
 
 const INSPECT_CN: Record<string, { label: string; cls: string }> = {
   pending: { label: '待检', cls: 'bg-gray-100 text-gray-600' },
@@ -21,6 +21,8 @@ export function GoodsReceiptsPanel({ rows }: { rows: GoodsReceiptRow[] }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [q, setQ] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
 
   const suppliers = useMemo(() => {
     const s = new Set<string>();
@@ -56,6 +58,26 @@ export function GoodsReceiptsPanel({ rows }: { rows: GoodsReceiptRow[] }) {
 
   const fmtD = (v: string | null) => (v ? String(v).slice(0, 10) : '—');
 
+  // 导出当前筛选结果(所见即所得);筛选口径写进表头和文件名
+  async function handleExport() {
+    setExporting(true); setExportMsg('');
+    const parts: string[] = [];
+    if (supplier !== 'all') parts.push(supplier);
+    if (dateFrom || dateTo) parts.push(`${dateFrom || '起'}~${dateTo || '今'}`);
+    if (q.trim()) parts.push(`搜「${q.trim()}」`);
+    const res = await exportGoodsReceiptRecords(filtered, parts.join(' '));
+    setExporting(false);
+    if (res.error) { setExportMsg('❌ ' + res.error); return; }
+    if (res.base64 && res.fileName) {
+      const bin = atob(res.base64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const a = document.createElement('a'); a.href = url; a.download = res.fileName;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+  }
+
   return (
     <div className="mt-8">
       <div className="flex items-baseline gap-2 mb-3">
@@ -84,6 +106,12 @@ export function GoodsReceiptsPanel({ rows }: { rows: GoodsReceiptRow[] }) {
           <button onClick={() => { setSupplier('all'); setDateFrom(''); setDateTo(''); setQ(''); }}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">清空筛选</button>
         )}
+        <button onClick={handleExport} disabled={exporting || filtered.length === 0}
+          title="导出当前筛选出的收货记录(Excel)"
+          className="text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-medium disabled:opacity-50">
+          {exporting ? '导出中…' : '📥 导出 Excel'}
+        </button>
+        {exportMsg && <span className="text-xs text-rose-600">{exportMsg}</span>}
       </div>
 
       <div className="text-xs text-gray-400 mb-2">
