@@ -359,12 +359,26 @@ export async function cancelPurchaseOrderApproval(payload: {
   return sendToFinanceSystem('purchase_order.approval_cancelled', payload as any)
 }
 
+/** PO 附件(2026-07-11 PO审批预算链契约):随 PO 推给财务,财务识别内部核算单→预填预算草稿。
+ *  doc_hint 必给:'po'=采购单据 / 'internal_quote'=内部报价单(成本核算单,财务会跑 AI 识别)。
+ *  file_url 必须财务服务端可直接 GET(order-docs 等公开桶 publicUrl,或签名 URL)。 */
+export interface PoAttachment {
+  id?: string                    // 节拍器文件 id(幂等键;不给则财务按 采购单+file_url 去重)
+  file_name: string
+  file_type?: string             // 财务 CHECK 仅收 excel/pdf/image/word
+  file_size?: number | null
+  file_url: string
+  doc_hint: 'po' | 'internal_quote' | string
+  order_id?: string | null       // 该附件对应的订单(orders.id;多订单 PO 时报价单挂到对应订单)
+}
+
 /** 采购单同步 payload（纯，可测）。placed 时推金额/账期供财务建应付+付款计划;lines=原辅料明细(财务预算+核销源)。 */
 export function buildPurchaseOrderSyncPayload(
   po: Record<string, unknown>,
   orderRefs?: unknown[],
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
   lines?: unknown[],
+  attachments?: PoAttachment[],
 ): Record<string, unknown> {
   // 无底价采购单(无价版)total_amount 汇总为 0 → 发 null + amount_pending,
   // 避免财务建一笔 ¥0 应付污染台账(审计 2026-07-04);真实金额待补价后由 resync 补。
@@ -395,6 +409,8 @@ export function buildPurchaseOrderSyncPayload(
     // 原辅料明细(P1-2 修 2026-07-06):此前从不发 lines → 财务 fin_po_lines 恒空、收货按 line_id 100% 匹配不上、
     // 预算原辅料成本建不出。lines[].line_id 严格 = procurement_line_items.id(与收货同源)。
     lines: (lines ?? []).map((l) => mapPoLineForFinance(l as Record<string, any>)),
+    // PO 审批附件(2026-07-11 契约):PO单据+内部报价单 → 财务识别→预算草稿→预算闸门放行。可空(财务兼容无附件)。
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
   }
 }
 
@@ -409,8 +425,9 @@ export async function syncPurchaseOrderToFinance(
   orderRefs?: unknown[],
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
   lines?: unknown[],
+  attachments?: PoAttachment[],
 ) {
-  return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs, supplements, lines))
+  return sendToFinanceSystem('purchase_order.placed', buildPurchaseOrderSyncPayload(po, orderRefs, supplements, lines, attachments))
 }
 
 /**
@@ -423,8 +440,9 @@ export async function requestPurchaseOrderApproval(
   supplements?: Array<{ item_no?: string | null; material_name?: string | null; qty?: number | null; reason?: string | null }>,
   internalRiskFlags?: Record<string, unknown>, // 复审:内部风险信号(超预算/付重/偏离基线/新供应商)结构化带给财务审批
   lines?: unknown[],
+  attachments?: PoAttachment[],   // PO单据+内部报价单(财务识别→预算草稿→预算闸门;不带则财务无法在审批页生成预算,只能人工去建)
 ) {
-  const data = buildPurchaseOrderSyncPayload(po, orderRefs, supplements, lines)
+  const data = buildPurchaseOrderSyncPayload(po, orderRefs, supplements, lines, attachments)
   if (internalRiskFlags) (data as Record<string, unknown>).internal_risk_flags = internalRiskFlags
   return sendToFinanceSystem('purchase_order.approval_requested', data)
 }
@@ -587,6 +605,10 @@ export async function syncFileToFinance(payload: {
   id: string; file_name: string; file_type?: string; file_size?: number | null;
   file_url: string; matched_customer?: string | null;
   extracted_fields?: Record<string, unknown>;
+  // PO 审批附件契约(2026-07-11):补发/独立发 PO 附件时带上,财务据此挂到采购审批页
+  purchase_order_id?: string | null;   // 该文件属于哪张采购单(purchase_orders.id)
+  order_id?: string | null;            // 该文件属于哪个订单(orders.id)
+  doc_hint?: 'po' | 'internal_quote' | string | null;  // 'internal_quote' → 财务会跑 AI 识别→预算草稿
 }) {
   return sendToFinanceSystem('file.uploaded', payload as unknown as Record<string, unknown>)
 }

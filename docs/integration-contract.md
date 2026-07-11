@@ -382,3 +382,66 @@ adjusted      —— 扣款/手续费/短付协议（非未收，金额口径调
 # 三、QuoteMate 集成契约（待写 · Priority 4）
 
 > Quote → Baseline Cost → Order 的边界与数据流。占位，后续补。
+
+---
+
+# 四、PO 审批附件契约（2026-07-11 · 财务侧已上线，OM 发起端待接线）
+
+> 老板需求：财务审 PO 前，必须看到 **PO 单据 + 内部报价单（成本核算单）**；
+> 财务系统 AI 识别核算单 → 预填预算草稿 → 财务调价生成预算单 → **有预算单才能批准放行 PO**（预算闸门）。
+> 财务侧全链路已上线（commit 5b98e9e/feb3e98，识别已用真实核算单实测 4 款全对）。OM 侧只差把附件带上。
+
+## 1. 两条发送路径（二选一或并用，财务侧都已支持）
+
+### 路径 A：随 PO 审批推送内联（推荐）
+`purchase_order.approval_requested` / `purchase_order.placed` 的 data 增加 `attachments[]`：
+
+```jsonc
+{
+  // …原有 po_no / purchase_order_id / lines / order_refs 等不变…
+  "attachments": [
+    {
+      "id": "om-file-uuid",            // 可选：OM 文件 id（幂等键；不给则财务按 采购单+file_url 去重）
+      "file_name": "日本CLMB内部成本核算单.xlsx",
+      "file_type": "excel",            // 财务 CHECK 仅收 excel/pdf/image/word
+      "file_size": 38400,              // 可选
+      "file_url": "https://…publicUrl…", // 必须财务服务端可直接 GET（公开桶 publicUrl 或签名 URL）
+      "doc_hint": "internal_quote",    // 必给：'po'=采购单据 | 'internal_quote'=内部报价单(财务跑AI识别)
+      "order_id": "orders.id"          // 可选：多订单 PO 时，报价单挂到对应订单
+    }
+  ]
+}
+```
+
+代码已就位：`buildPurchaseOrderSyncPayload(..., attachments)` / `requestPurchaseOrderApproval(..., attachments)`
+（`lib/integration/finance-sync.ts`，`PoAttachment` 类型）。
+
+### 路径 B：独立 `file.uploaded` 事件补发
+`syncFileToFinance({...})` 新增三个可选字段：`purchase_order_id`、`order_id`、`doc_hint`。
+适合"PO 先推、核算单后补"的场景；带 `purchase_order_id` 即挂到该采购单的审批页。
+
+## 2. 文件要求
+
+- `file_url` 财务服务端 30s 内可 GET（沿用 shipping-docs 的 `order-docs` 公开桶 publicUrl 模式即可）；
+- 内部核算单支持 xlsx/xls/csv/pdf/jpg/png/webp；绮陌真实格式（单件成本口径、一款一行、
+  含税价/面料A·B/加工价/辅料备注算式）已按真实样例校准，识别实测逐行金额与表格一致；
+- `doc_hint` 决定财务侧行为：`internal_quote` → 审批页出现「识别报价单」→ 预填预算草稿；`po` → 仅供查看。
+
+## 3. 财务侧行为（已上线，OM 无需做）
+
+识别是按需触发（财务点按钮）、结果只做建议；预算落库由财务调价确认（记真实审批人）。
+**预算闸门**：PO 关联订单（order_refs → synced_orders）没有预算单时，「批准放行」禁用 +
+decide API 409 `BUDGET_REQUIRED`；驳回不受限；历史非 UUID order_refs 不拦截。
+
+## 4. OM 侧待接线（唯一 TODO）
+
+在提交 PO 审批的动作里（`app/actions/purchase-orders.ts` 两处 `requestPurchaseOrderApproval` 调用点，
+L~501 / L~763），把该订单的内部成本核算单文件（业务上传处/报价冻结产物）上传到 `order-docs` 桶取
+publicUrl，组装 `attachments[]` 传入。若 OM 当前没有存核算单原件，需在 PO 提交界面加"附核算单"上传。
+
+## 5. 验收标准
+
+1. OM 推一张带 `attachments`（含 internal_quote）的 PO → 财务「采购审批」页该单出现"附件与内部报价单"卡；
+2. 财务点「识别报价单」→ 成本行逐行显示、与 PO 行单价差红绿对照；
+3. 「生成预算草稿」→ 调价保存 → 预算闸门解锁 → 批准放行回传 OM 正常；
+4. 同一 PO 重推附件不重复（幂等）。
