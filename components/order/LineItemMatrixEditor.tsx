@@ -24,6 +24,7 @@ type Style = {
   fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
   set_multiplier?: number | string;   // 套装每套件数(1/空=非套装);算料按 件数×每套件数
   po_unit_price?: string | number;    // 客户 PO 成交单价(款级,给客户的价);仅 showPrice 时渲染,server 端按财务口径剥离
+  purchase_unit_cost?: string | number;  // 经销/采购成品单逐款采购价(成本面,¥/件);仅 showPurchaseCost 时渲染
   source_po_number?: string;          // 多PO合单:本款来自哪张客户PO(只读溯源徽标;server 端解析成 source_order_po_id)
 };
 
@@ -46,9 +47,10 @@ const appendSizes = (prev: string[], incoming: Iterable<string>): string[] => {
   return extra.length ? [...prev, ...sortSizeKeys(extra)] : prev;
 };
 
-export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false, onParsed }: {
+export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false, showPurchaseCost = false, onParsed }: {
   orderId?: string; canEdit?: boolean; value?: Style[]; onChange?: (styles: Style[]) => void;
   showPrice?: boolean;   // 是否渲染客户 PO 成交价列(仅建单/售价可见场景传 true;生产任务单等不传)
+  showPurchaseCost?: boolean;   // 是否渲染逐款采购价列(经销/采购成品单建单传 true)
   /** AI 解析成功时把完整解析结果(POParsedData:含交期/包装/质量要求/辅料/尺寸表)交给父组件——
    *  建单表单拿它随 createOrder 冻结进 orders.po_parse_snapshot(别处提取用);不传则忽略 */
   onParsed?: (data: any) => void;
@@ -194,7 +196,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   };
 
   // ── 款 ──
-  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabrics: [emptyFabric()], fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', po_unit_price: '', set_multiplier: 1, colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
+  const addStyle = () => setStyles([...styles, { style_no: '', product_name: '', image_url: '', fabrics: [emptyFabric()], fabric_name: '', fabric_width: '', fabric_consumption: '', fabric_unit: 'kg', po_unit_price: '', purchase_unit_cost: '', set_multiplier: 1, colors: [{ color_cn: '', color_en: '', sizes: {} }] }]);
   const removeStyle = (i: number) => setStyles(styles.filter((_, x) => x !== i));
   // 复制款:深拷贝(颜色/尺码件数/图片全带上),插在原款正下方,款号加「-副本」提示改;再改数量/图片即可
   const copyStyle = (i: number) => {
@@ -205,7 +207,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       image_url: src.image_url,
       fabrics: styleFabrics(src).map((f) => ({ ...f })),   // 多布料整组深拷贝
       fabric_name: src.fabric_name || '', fabric_width: src.fabric_width || '',
-      fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg', po_unit_price: src.po_unit_price ?? '',
+      fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg', po_unit_price: src.po_unit_price ?? '', purchase_unit_cost: src.purchase_unit_cost ?? '',
       set_multiplier: src.set_multiplier ?? 1,
       source_po_number: src.source_po_number,   // 多PO合单:复制款保留来源PO溯源
       colors: src.colors.map((c) => ({ ...c, sizes: { ...c.sizes } })),
@@ -426,11 +428,26 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
             })}
             {canEdit && <button onClick={() => addFabric(si)} className="ml-14 text-xs text-indigo-600 hover:underline">+ 加布料</button>}
             <p className="ml-14 text-[11px] text-gray-400">选物料库自动带出单价/单位(可改);录了会自动进该款 BOM 和生产任务单用料</p>
-            {showPrice && (
-              <div className="flex items-center gap-2 ml-14">
-                <span className="text-xs text-gray-400">💰 PO单价</span>
-                <input type="number" min="0" step="0.01" value={st.po_unit_price ?? ''} onChange={(e) => setStyleField(si, 'po_unit_price', e.target.value)}
-                  placeholder="给客户价/件" disabled={!canEdit} className={`${inp} w-24 text-right`} title="客户 PO 成交单价(给客户的价,非我们报价);AI 解析预填,请核对后保存冻结" />
+            {(showPrice || showPurchaseCost) && (
+              <div className="flex flex-wrap items-center gap-3 ml-14">
+                {showPrice && (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="text-xs text-gray-400">💰 客户报价/件</span>
+                    <input type="number" min="0" step="0.01" value={st.po_unit_price ?? ''} onChange={(e) => setStyleField(si, 'po_unit_price', e.target.value)}
+                      placeholder="给客户价" disabled={!canEdit} className={`${inp} w-24 text-right`} title="客户成交单价(给客户的价,非我们报价);AI 解析预填,请核对后保存冻结" />
+                  </span>
+                )}
+                {showPurchaseCost && (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="text-xs text-gray-400">🏭 采购价/件</span>
+                    <input type="number" min="0" step="0.01" value={st.purchase_unit_cost ?? ''} onChange={(e) => setStyleField(si, 'purchase_unit_cost', e.target.value)}
+                      placeholder="采购成本" disabled={!canEdit} className={`${inp} w-24 text-right`} title="我们采购该款的成本价(¥/件)" />
+                    {canEdit && styles.length > 1 && (st.purchase_unit_cost ?? '') !== '' && (
+                      <button type="button" onClick={() => setStyles(styles.map((x) => ({ ...x, purchase_unit_cost: st.purchase_unit_cost })))}
+                        className="text-[11px] text-indigo-600 hover:underline" title="把此采购价套用到所有款(同价快填)">套用全部</button>
+                    )}
+                  </span>
+                )}
               </div>
             )}
           </div>

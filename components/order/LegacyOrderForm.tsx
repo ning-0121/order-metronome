@@ -689,12 +689,16 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     if (poMode === 'no_po') {
       if (!hasManualLines) { showError('无 PO 模式:请在下方「逐款明细」手工录入款色码'); return; }
     } else if (orderPurpose === 'trade') {
-      // 经销/采购成品:必传客户PO + 填 采购价/客户报价(不传报价单文件;两价推财务生成预算单)
+      // 经销/采购成品:必传客户PO + 逐款填 客户报价+采购价(不传报价单文件;两价推财务生成预算单)
       if (!poFile) { showError('请上传客户 PO 附件(建单必传)'); return; }
-      const purch = Number(rawFormData.get('purchase_unit_cost'));
-      const cust = Number(rawFormData.get('unit_price'));
-      if (!(purch > 0)) { showError('经销/采购成品单:请填采购单价'); return; }
-      if (!(cust > 0)) { showError('经销/采购成品单:请填客户报价单价'); return; }
+      const priced = lineStyles.length > 0 ? lineStyles : (poParseResult?.styles || []);
+      if (priced.length === 0) { showError('经销/采购成品单:请在下方「逐款明细」录入款式并逐款填价'); return; }
+      const unpriced = priced.filter((s: any) => !(Number(s.po_unit_price) > 0) || !(Number(s.purchase_unit_cost) > 0));
+      if (unpriced.length > 0) {
+        const names = unpriced.slice(0, 3).map((s: any) => s.style_no || s.product_name || '未命名款').join('、');
+        showError(`经销/采购成品单:每款都要填「客户报价 + 采购价」。缺价:${names}${unpriced.length > 3 ? ` 等${unpriced.length}款` : ''}`);
+        return;
+      }
     } else {
       if (!poFile) { showError('请上传客户 PO 附件(建单必传)'); return; }
       if (!quoteFile) { showError('请上传内部报价单附件(建单必传;将即时共享给财务)'); return; }
@@ -1312,25 +1316,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                       <option value="trade">采购成品/贸易订单</option>
                     </select>
                     {orderPurpose === 'trade' && (
-                      <>
-                        <p className="text-xs text-amber-600 mt-1">采购成品/贸易订单:只走 采购→验收→出运→回款,不生成开裁/中查/尾查/工厂生产等节点。</p>
-                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-2">
-                          <p className="text-xs font-medium text-amber-800">💰 报价(不用传报价单文件,直接生成财务预算单)</p>
-                          <div className="flex flex-wrap gap-3">
-                            <label className="text-xs text-gray-600">
-                              采购单价(¥/件)<span className="text-red-500">*</span>
-                              <input type="number" name="purchase_unit_cost" min="0" step="0.01" placeholder="我们采购成本价"
-                                className="mt-0.5 block w-40 rounded border border-gray-300 px-2 py-1 text-sm focus:border-amber-400 focus:outline-none" />
-                            </label>
-                            <label className="text-xs text-gray-600">
-                              客户报价单价<span className="text-red-500">*</span>
-                              <input type="number" name="unit_price" min="0" step="0.01" placeholder="给客户的价"
-                                className="mt-0.5 block w-40 rounded border border-gray-300 px-2 py-1 text-sm focus:border-amber-400 focus:outline-none" />
-                            </label>
-                          </div>
-                          <p className="text-[11px] text-amber-600">采购价→财务预算成本面;客户报价→应收面;财务据此生成预算单算毛利。</p>
-                        </div>
-                      </>
+                      <p className="text-xs text-amber-600 mt-1">采购成品/贸易订单:只走 采购→验收→出运→回款,不生成开裁/中查/尾查等节点。<b>不用传报价单文件</b>——在下方「逐款明细」每款填 客户报价 + 采购价(同价可「套用全部」),建单直接生成财务预算单。</p>
                     )}
                     {orderPurpose === 'consign' && (
                       <p className="text-xs text-amber-600 mt-1">委托加工/外发单:照常做生产单·原辅料单给工厂,料由工厂自采(不走采购核料)。保留产前样/中查/尾查/CI报关/出运/回款。</p>
@@ -1421,7 +1407,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 <p className="text-[11px] text-gray-500 mb-3">手工录逐款明细 → 上面的总量/款数/颜色数自动算,且喂生产任务单和客户 PI。不录也能建单(上面三个数字手填)。</p>
                 {/* onParsed:富录入表里做的 AI 解析也把完整结果(交期/包装/质量要求/辅料)带回来,
                     随建单冻结进 orders.po_parse_snapshot;主 PO 上传已解析过则不覆盖(首解析优先) */}
-                <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit showPrice={showPrice}
+                <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit
+                  showPrice={showPrice || orderPurpose === 'trade'}
+                  showPurchaseCost={orderPurpose === 'trade'}
                   onParsed={(data) => setPoParseResult((prev: any) => prev ?? data)} />
               </div>
             </div>
