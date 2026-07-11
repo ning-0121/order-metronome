@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { loadShippingDocModel } from '@/lib/services/shipping-docs';
-import { buildCommercialInvoiceWorkbook, buildCustomsWorkbook } from '@/lib/services/shipping-doc-builders';
+import { buildCommercialInvoiceWorkbook, buildCustomsWorkbook, buildStatementWorkbook } from '@/lib/services/shipping-doc-builders';
 
 async function canSeeFinOf(supabase: any, userId: string): Promise<boolean> {
   const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', userId).single();
@@ -64,10 +64,37 @@ export async function generateCustomsDocs(
   const { data: m, error } = await loadShippingDocModel(supabase, orderId, true, batchId);
   if (error || !m) return { error: error || '数据不足' };
   const { order } = m;
+  // 报关资料仅出口单适用;送仓/内销单不报关(改走对账单)。防御性拦截,避免误生成。
+  if (order.delivery_type !== 'export') return { error: '本单为送仓/内销,不需要出口报关。请改用「对账单」。' };
 
   const wb = await buildCustomsWorkbook(m);
   const xlsxBuffer = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(xlsxBuffer).toString('base64');
   const fileName = `报关资料 - ${order.internal_order_no || order.order_no || order.po_number || orderId}.xlsx`;
+  return { ok: true, base64, fileName };
+}
+
+/**
+ * 对账单生成(送仓/内销用,一张中文单:款/颜色/数量/单价/金额/合计,币种跟单)。
+ * 含成交价 → 仅财务口径(CAN_SEE_FINANCIALS)可生成。
+ */
+export async function generateStatement(
+  orderId: string, batchId?: string | null,
+): Promise<{ ok?: boolean; base64?: string; fileName?: string; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!user.email?.endsWith('@qimoclothing.com')) return { error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
+  const canSeeFin = await canSeeFinOf(supabase, user.id);
+  if (!canSeeFin) return { error: '对账单含成交价,仅财务/业务/管理员可生成' };
+
+  const { data: m, error } = await loadShippingDocModel(supabase, orderId, true, batchId);
+  if (error || !m) return { error: error || '数据不足' };
+  const { order } = m;
+
+  const wb = await buildStatementWorkbook(m);
+  const xlsxBuffer = await wb.xlsx.writeBuffer();
+  const base64 = Buffer.from(xlsxBuffer).toString('base64');
+  const fileName = `对账单 - ${order.internal_order_no || order.order_no || order.po_number || orderId}.xlsx`;
   return { ok: true, base64, fileName };
 }

@@ -88,7 +88,7 @@ export async function getShippingDraft(orderId: string, batchId?: string | null)
   if (!user) return { error: '请先登录' };
 
   const { data: order, error: oe } = await (supabase.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, customer_name, style_no, etd, incoterm, currency, quantity')
+    .select('id, order_no, internal_order_no, po_number, customer_name, style_no, etd, incoterm, currency, quantity, delivery_type')
     .eq('id', orderId).maybeSingle();
   if (oe) return { error: oe.message };
   if (!order) return { error: '订单不存在' };

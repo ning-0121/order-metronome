@@ -39,7 +39,7 @@ export async function loadShippingDocModel(
   supabase: any, orderId: string, canSeeFin: boolean, batchId?: string | null,
 ): Promise<{ data?: ShippingDocModel; error?: string }> {
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, customer_name, style_no, currency, etd, factory_date')
+    .select('id, order_no, internal_order_no, po_number, customer_name, style_no, currency, etd, factory_date, delivery_type')
     .eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
 

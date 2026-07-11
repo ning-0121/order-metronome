@@ -292,6 +292,68 @@ export async function buildCustomsWorkbook(m: ShippingDocModel): Promise<Workboo
   return wb;
 }
 
+/**
+ * 对账单(送仓/内销用,一张中文单)。款号/颜色/数量/单价/金额/合计,币种跟单。
+ * 与 CI 同源(ciStyles),但去掉抬头银行/海关/英文,给国内客户对账结算用。
+ * 含成交价 → 调用方须以 canSeeFin=true 装载 model。
+ */
+export async function buildStatementWorkbook(m: ShippingDocModel): Promise<Workbook> {
+  const { order, seller, currency, docMeta, plNumber, ciStyles, ciTotals, poNumbers } = m;
+  const fmtCn = (d: any) => (d ? String(d).slice(0, 10).replace(/-/g, '.') : '');
+  const dateStr = fmtCn(docMeta.issue_date || order.etd) || '';
+  const poText = (Array.isArray(poNumbers) && poNumbers.length ? poNumbers.join('、') : (order.po_number || ''));
+
+  const ExcelJS = await import('exceljs');
+  const wb = new ExcelJS.default.Workbook();
+  const ws = wb.addWorksheet('对账单');
+  const thin = { style: 'thin' as const };
+  const B4: any = { top: thin, left: thin, bottom: thin, right: thin };
+  ws.pageSetup = { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+    margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.4, header: 0, footer: 0 } };
+  const COLW = [6, 16, 26, 18, 10, 8, 12, 14, 14];
+  COLW.forEach((w, i) => (ws.getColumn(i + 1).width = w));
+  const N = 9;
+
+  const cell = (r: number, c: number, v: any, o: { size?: number; bold?: boolean; align?: 'left' | 'center' | 'right'; wrap?: boolean; fill?: string; border?: boolean } = {}) => {
+    const x = ws.getCell(r, c); x.value = v ?? '';
+    x.font = { name: '宋体', size: o.size ?? 10, bold: o.bold ?? false };
+    x.alignment = { horizontal: o.align ?? 'center', vertical: 'middle', wrapText: o.wrap ?? true };
+    if (o.fill) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: o.fill } };
+    if (o.border) x.border = { ...B4 };
+  };
+  const mrg = (a: number, b: number, c: number, d: number) => ws.mergeCells(a, b, c, d);
+
+  mrg(1, 1, 1, N); cell(1, 1, seller.name_cn, { size: 15, bold: true });
+  mrg(2, 1, 2, N); cell(2, 1, '对 账 单', { size: 14, bold: true });
+  mrg(3, 1, 3, 5); cell(3, 1, `客户：${order.customer_name || ''}`, { align: 'left' });
+  mrg(3, 6, 3, N); cell(3, 6, `日期：${dateStr}`, { align: 'right' });
+  mrg(4, 1, 4, 5); cell(4, 1, `PO#：${poText}`, { align: 'left' });
+  mrg(4, 6, 4, N); cell(4, 6, `单号：${order.internal_order_no || order.order_no || plNumber || ''}`, { align: 'right' });
+
+  const HR = 5;
+  ['序号', '款号', '品名', '颜色分布', '数量', '单位', `单价(${currency.label})`, `金额(${currency.label})`, '备注']
+    .forEach((h, i) => cell(HR, i + 1, h, { bold: true, fill: 'FFF2F2F2', size: 9.5, border: true }));
+
+  let r = HR + 1;
+  for (const [i, s] of ciStyles.entries()) {
+    const unit = s.unitWord === 'SETS' ? '套' : 'PCS';
+    const vals = [i + 1, s.style_no, s.description, s.colorBreakdown, s.qty || '', unit,
+      s.unitPrice != null ? s.unitPrice : '', s.amount != null ? s.amount : '', ''];
+    vals.forEach((v, c) => cell(r, c + 1, v, { size: 9.5, align: [2, 3].includes(c) ? 'left' : 'center', border: true }));
+    r++;
+  }
+  cell(r, 1, '合计', { bold: true, border: true });
+  for (let c = 2; c <= N; c++) cell(r, c, '', { border: true });
+  cell(r, 5, ciTotals.qty || '', { bold: true, border: true });
+  cell(r, 8, ciTotals.amount != null ? ciTotals.amount : '', { bold: true, border: true });
+  r += 2;
+
+  mrg(r, 1, r, N); cell(r, 1, '备注：本对账单为送仓/内销结算凭据,金额以双方确认为准。', { align: 'left', size: 9 }); r += 2;
+  mrg(r, 1, r, 4); cell(r, 1, `供货方(盖章)：${seller.name_cn}`, { align: 'left', size: 10 });
+  mrg(r, 6, r, N); cell(r, 6, '客户(确认签字)：', { align: 'left', size: 10 });
+  return wb;
+}
+
 /** PI 形式发票(14 列 A–N,Jojo/绮陌抬头 + 合计 + DEPOSIT)。pi=已保存或现算的 PIData。 */
 export async function buildPIWorkbook(pi: PIData, orderNoForName?: string | null): Promise<Workbook> {
   const ExcelJS = await import('exceljs');

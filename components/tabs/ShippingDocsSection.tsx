@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { getShippingDraft, saveShippingLines, saveShippingDocMeta } from '@/app/actions/packing';
 import { generatePackingList } from '@/app/actions/generate-packing-list';
-import { generateCommercialInvoice, generateCustomsDocs, previewShippingDocs } from '@/app/actions/shipping-docs';
+import { generateCommercialInvoice, generateCustomsDocs, generateStatement, previewShippingDocs } from '@/app/actions/shipping-docs';
 import { getShipmentBatches } from '@/app/actions/shipment-batches';
 
 function downloadBase64(base64: string, fileName: string) {
@@ -115,17 +115,19 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
     if ((mm as any).error) { setErr((mm as any).error); return; }
     setMsg('✅ 单据信息(CI/报关表头)已保存');
   }
-  async function doGen(kind: 'pl' | 'ci' | 'customs') {
+  async function doGen(kind: 'pl' | 'ci' | 'customs' | 'statement') {
     setGen(kind); setErr(''); setMsg('');
     const e = await persist();
     if (e) { setErr(e); setGen(''); return; }
     const res = kind === 'pl' ? await generatePackingList(orderId, batchId)
       : kind === 'ci' ? await generateCommercialInvoice(orderId, batchId)
+      : kind === 'statement' ? await generateStatement(orderId, batchId)
       : await generateCustomsDocs(orderId, batchId);
     setGen('');
     if ((res as any).error || !(res as any).base64) { setErr((res as any).error || '生成失败'); return; }
     downloadBase64((res as any).base64, (res as any).fileName);
-    setMsg(`✅ ${kind === 'pl' ? 'Packing List' : kind === 'ci' ? 'CI' : '报关资料'} 已生成下载`);
+    const label = kind === 'pl' ? 'Packing List' : kind === 'ci' ? 'CI' : kind === 'statement' ? '对账单' : '报关资料';
+    setMsg(`✅ ${label} 已生成下载`);
   }
   async function doPreview() {
     setGen('preview'); setErr(''); setMsg('');
@@ -140,6 +142,8 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
   const inp = 'w-full rounded border border-gray-300 px-1.5 py-1 text-xs text-center';
   const finp = 'rounded border border-gray-300 px-2 py-1 text-xs';
   const cur = meta.currency === 'CNY' ? 'RMB' : 'USD';
+  // 出口单才报关;送仓/内销(delivery_type≠export)不出报关,改出对账单。
+  const isExport = order?.delivery_type === 'export';
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -254,7 +258,8 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
               )}
             </div>
 
-            {/* 报关信息(业务填,存 doc_meta.customs) */}
+            {/* 报关信息 —— 仅出口单(delivery_type=export)显示;送仓/内销回避报关,改出对账单 */}
+            {isExport && (
             <div className="rounded-lg border border-gray-200">
               <button onClick={() => setCzOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                 <span>🛃 报关信息(海关字段 + 每款 HS 编码/报关品名 —— 生成报关资料用)</span><span className="text-xs text-gray-400">{czOpen ? '收起 ▲' : '展开 ▼'}</span>
@@ -293,6 +298,7 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
                 </div>
               )}
             </div>
+            )}
 
             {/* 操作 */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
@@ -302,7 +308,11 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
               <span className="text-xs text-gray-400">按顺序生成 →</span>
               <button onClick={() => doGen('pl')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{gen === 'pl' ? '生成中…' : '② 📦 Packing List'}</button>
               <button onClick={() => doGen('ci')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">{gen === 'ci' ? '生成中…' : '③ 💰 CI'}</button>
-              <button onClick={() => doGen('customs')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">{gen === 'customs' ? '生成中…' : '④ 🛃 报关资料'}</button>
+              {isExport ? (
+                <button onClick={() => doGen('customs')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">{gen === 'customs' ? '生成中…' : '④ 🛃 报关资料'}</button>
+              ) : (
+                <button onClick={() => doGen('statement')} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg bg-violet-600 text-white font-medium hover:bg-violet-700 disabled:opacity-50" title="送仓/内销结算单(中文:款/颜色/数量/单价/金额/合计)">{gen === 'statement' ? '生成中…' : '④ 🧾 对账单'}</button>
+              )}
             </div>
 
             {/* 预览 */}
