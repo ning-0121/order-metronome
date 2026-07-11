@@ -9,6 +9,7 @@ import { DashboardAIAdvice } from '@/components/DashboardAIAdvice';
 import { ExpandableList } from '@/components/ExpandableList';
 import { MyProcurementTrackingCard } from '@/components/MyProcurementTrackingCard';
 import { ExportOrderSummaryButton } from '@/components/ExportOrderSummaryButton';
+import { getPendingApprovals, CATEGORY_META } from '@/lib/services/pending-approvals.service';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -273,6 +274,11 @@ export default async function DashboardPage() {
     (filteredTodayDue.length || 0) +
     (blockedMilestones?.length || 0);
 
+  // 审批中心:业务经理(order_manager/sales_manager)等审批人在自己工作台也要看到待审批延期/改单
+  //   (原来只有 admin 的 /ceo 首页有;高洁落 /dashboard 从来看不到 → 2026-07-11 补)
+  const approvalsRes = await getPendingApprovals(supabase, { userId: user.id, roles: userRoles }).catch(() => null);
+  const myApprovals = (approvalsRes && (approvalsRes as any).ok ? (approvalsRes as any).data.items : []).filter((i: any) => i.actionable);
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
@@ -304,6 +310,28 @@ export default async function DashboardPage() {
         </div>
         </div>
       </div>
+
+      {/* ⏳ 审批中心 — 待我处理的延期/改单等审批(审批人角色才有;0 项不显示) */}
+      {myApprovals.length > 0 && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold text-amber-900">⏳ 审批中心（{myApprovals.length} 项待你处理）</h2>
+            <Link href="/admin/pending-approvals" className="text-xs text-amber-700 hover:underline">全部 →</Link>
+          </div>
+          <div className="space-y-2">
+            {myApprovals.slice(0, 6).map((item: any) => (
+              <Link key={`${item.category}-${item.id}`} href={item.sourceUrl}
+                className="flex items-center gap-3 bg-white rounded-lg border border-amber-100 p-3 hover:border-amber-300 transition-all">
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap bg-amber-100 text-amber-700">
+                  {CATEGORY_META[item.category as keyof typeof CATEGORY_META]?.icon} {CATEGORY_META[item.category as keyof typeof CATEGORY_META]?.label}
+                </span>
+                <span className="text-sm text-gray-800 truncate flex-1">{item.title}</span>
+                <span className={`text-xs whitespace-nowrap ${item.ageDays >= 3 ? 'text-red-500 font-medium' : 'text-gray-400'}`}>已等待 {item.ageDays} 天</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 🛒 我的采购追踪 — 我负责订单的采购进度 + 到期提醒(无采购活动时自动隐藏) */}
       <div className="mb-6"><MyProcurementTrackingCard /></div>
