@@ -13,6 +13,7 @@ import {
   type QueueLine,
 } from '@/app/actions/procurement';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
+import { compressImageForUpload, friendlyUploadError } from '@/lib/utils/image-compress';
 import { useDialogs } from '@/components/ui/useDialogs';
 
 const LAMP: Record<string, string> = {
@@ -546,11 +547,17 @@ function ReceiptRegisterForm({ line, onDone, canFinanceOver = false }: { line: Q
       const supabase = createBrowserClient();
       const paths: string[] = [];
       for (const f of Array.from(files)) {
-        const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
-        const path = `receipts/${line.order_id}/${line.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-        const { error } = await supabase.storage.from('order-docs').upload(path, f, { contentType: f.type, upsert: false });
-        if (error) { setErr('码单上传失败:' + error.message); continue; }
-        paths.push(path);
+        try {
+          // 手机拍的码单动辄 5-10MB,直传被网关 413 拒收(返回 HTML → "not valid JSON" 报错)。
+          // 上传前浏览器压图(≤2200px JPEG,对账足够清晰);PDF/小图原样。
+          const { blob, ext, type } = await compressImageForUpload(f);
+          const path = `receipts/${line.order_id}/${line.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+          const { error } = await supabase.storage.from('order-docs').upload(path, blob, { contentType: type, upsert: false });
+          if (error) { setErr('码单上传失败:' + friendlyUploadError(error.message, f.name)); continue; }
+          paths.push(path);
+        } catch (e: any) {
+          setErr('码单上传失败:' + friendlyUploadError(e?.message || String(e), f.name));
+        }
       }
       setSlipPaths(p => [...p, ...paths]);
     } finally { setUploading(false); }

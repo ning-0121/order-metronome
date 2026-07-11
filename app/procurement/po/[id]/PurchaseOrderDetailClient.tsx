@@ -8,6 +8,7 @@ import { submitPurchaseDeposit } from '@/app/actions/procurement-payment';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
+import { compressImageForUpload, friendlyUploadError } from '@/lib/utils/image-compress';
 
 const REASON_LABELS: Record<string, string> = {
   large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
@@ -79,10 +80,11 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
       const supabase = createBrowserClient();
       const added: string[] = [];
       for (const f of Array.from(files)) {
-        const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
+        // 大图先在浏览器压(≤2200px JPEG),防网关 413 拒收报「not valid JSON」(与码单上传同修)
+        const { blob, ext, type } = await compressImageForUpload(f);
         const path = `po-proof/${po.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-        const { error } = await supabase.storage.from('order-docs').upload(path, f, { contentType: f.type, upsert: false });
-        if (error) { await confirm({ title: '上传失败:' + error.message, confirmText: '知道了' }); continue; }
+        const { error } = await supabase.storage.from('order-docs').upload(path, blob, { contentType: type, upsert: false });
+        if (error) { await confirm({ title: '上传失败:' + friendlyUploadError(error.message, f.name), confirmText: '知道了' }); continue; }
         added.push(path);
       }
       if (added.length === 0) { setProofUploading(false); return; }
