@@ -920,11 +920,13 @@ export async function createOrder(
         }
         if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);
         assessment = assessSmallBatchFromLineItems(rows);
-        // S1.2:每款布料 → 同步该款 BOM 第一行(失败不阻断建单)
-        try {
-          const { syncStyleFabricsToBom } = await import('@/lib/services/style-fabric-sync');
-          await syncStyleFabricsToBom(supabase, orderData.id, user.id, parsedStyles);
-        } catch (e: any) { console.warn('[createOrder] 布料同步 BOM 失败(不阻断):', e?.message); }
+        // S1.2:每款布料 → 同步该款 BOM 第一行(失败不阻断建单)。trade(买成品)无原辅料 → 跳过,不产生 BOM
+        if (order_purpose !== 'trade') {
+          try {
+            const { syncStyleFabricsToBom } = await import('@/lib/services/style-fabric-sync');
+            await syncStyleFabricsToBom(supabase, orderData.id, user.id, parsedStyles);
+          } catch (e: any) { console.warn('[createOrder] 布料同步 BOM 失败(不阻断):', e?.message); }
+        }
       }
     }
 

@@ -47,10 +47,11 @@ const appendSizes = (prev: string[], incoming: Iterable<string>): string[] => {
   return extra.length ? [...prev, ...sortSizeKeys(extra)] : prev;
 };
 
-export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false, showPurchaseCost = false, onParsed }: {
+export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false, showPurchaseCost = false, hideFabrics = false, onParsed }: {
   orderId?: string; canEdit?: boolean; value?: Style[]; onChange?: (styles: Style[]) => void;
   showPrice?: boolean;   // 是否渲染客户 PO 成交价列(仅建单/售价可见场景传 true;生产任务单等不传)
   showPurchaseCost?: boolean;   // 是否渲染逐款采购价列(经销/采购成品单建单传 true)
+  hideFabrics?: boolean;   // 隐藏每款布料/原辅料录入(经销/采购成品单 trade:买成品无原辅料)
   /** AI 解析成功时把完整解析结果(POParsedData:含交期/包装/质量要求/辅料/尺寸表)交给父组件——
    *  建单表单拿它随 createOrder 冻结进 orders.po_parse_snapshot(别处提取用);不传则忽略 */
   onParsed?: (data: any) => void;
@@ -385,8 +386,9 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
             {canEdit && <button onClick={() => removeStyle(si)} className="text-xs text-red-500 hover:underline">删款</button>}
           </div>
 
-          {/* 每款布料(S1.2,可多种):自动同步成该款 BOM + 生产任务单用料 */}
+          {/* 每款布料(S1.2,可多种):自动同步成该款 BOM + 生产任务单用料。trade(买成品)隐藏,无原辅料 */}
           <div className="space-y-1.5">
+            {!hideFabrics && (<>
             {styleFabrics(st).map((fb, fi) => {
               const pkKey = `${si}-${fi}`;
               return (
@@ -428,6 +430,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
             })}
             {canEdit && <button onClick={() => addFabric(si)} className="ml-14 text-xs text-indigo-600 hover:underline">+ 加布料</button>}
             <p className="ml-14 text-[11px] text-gray-400">选物料库自动带出单价/单位(可改);录了会自动进该款 BOM 和生产任务单用料</p>
+            </>)}
             {(showPrice || showPurchaseCost) && (
               <div className="flex flex-wrap items-center gap-3 ml-14">
                 {showPrice && (

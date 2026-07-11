@@ -475,7 +475,8 @@ export default async function OrderDetailPage({
               { key: 'production', label: '生产进度' },
               { key: 'shipment', label: '🚢 出货单据' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
-            ].map(t => (
+            // 经销/采购成品单(trade)买成品无原辅料 → 隐藏「采购核料」tab(生产任务单/原辅料和包装(含包装方式)/PI 等保留)
+            ].filter(t => !((orderData as any).order_purpose === 'trade' && t.key === 'procurement_items')).map(t => (
               <Link
                 key={t.key}
                 href={`/orders/${id}?tab=${t.key}${fromUrl !== '/orders' ? `&from=${encodeURIComponent(fromUrl)}` : ''}`}

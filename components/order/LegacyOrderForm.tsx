@@ -1410,6 +1410,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit
                   showPrice={showPrice || orderPurpose === 'trade'}
                   showPurchaseCost={orderPurpose === 'trade'}
+                  hideFabrics={orderPurpose === 'trade'}
                   onParsed={(data) => setPoParseResult((prev: any) => prev ?? data)} />
               </div>
             </div>
