@@ -491,3 +491,118 @@ export async function clearAllLedger(): Promise<{ ok: boolean; error?: string }>
     return { ok: true };
   } catch (e: any) { return { ok: false, error: e?.message || '清空失败' }; }
 }
+
+// ============================================================
+// 台账导出:整本 / 单家供应商 → Excel(版式贴原《面料采购明细表汇总》)
+// ============================================================
+export async function exportSupplierLedgerExcel(params?: { supplierNameRaw?: string }): Promise<{ data?: { filename: string; base64: string }; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: '未登录' };
+
+    let q = (supabase.from('supplier_fabric_ledger') as any)
+      .select('*')
+      .order('supplier_name_raw', { ascending: true })
+      .order('order_no_raw', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (params?.supplierNameRaw) q = q.eq('supplier_name_raw', params.supplierNameRaw);
+    const { data, error } = await q;
+    if (error) return { error: friendlyError(error) };
+    const rows = (data || []) as LedgerLine[];
+    if (!rows.length) return { error: '没有台账数据可导出' };
+
+    // 按供应商分 sheet
+    const bySup = new Map<string, LedgerLine[]>();
+    for (const r of rows) {
+      if (!bySup.has(r.supplier_name_raw)) bySup.set(r.supplier_name_raw, []);
+      bySup.get(r.supplier_name_raw)!.push(r);
+    }
+
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.default.Workbook();
+    wb.creator = 'QIMO OS · 义乌市绮陌服饰有限公司';
+    const used = new Set<string>();
+    const safeName = (raw: string) => {
+      let n = (raw || '台账').replace(/[\\/\?\*\[\]:]/g, ' ').slice(0, 28) || '台账';
+      let i = 2; const base = n;
+      while (used.has(n)) n = `${base.slice(0, 25)}(${i++})`;
+      used.add(n); return n;
+    };
+    const thin = { top: { style: 'thin' as const }, bottom: { style: 'thin' as const }, left: { style: 'thin' as const }, right: { style: 'thin' as const } };
+
+    for (const [supplier, list] of bySup) {
+      const ws = wb.addWorksheet(safeName(supplier));
+      const anyTax = list.some((l) => l.tax_rate != null);
+      const HDR = ['订单号', '面料', '颜色', '采购数量(KG)', '实到数量(KG)', '差(采购-实到)', '单价(不含税)', '金额(不含税)', ...(anyTax ? ['税率', '含税金额'] : []), '发票', '备注', '客户'];
+      const widths = [14, 22, 14, 13, 13, 13, 12, 14, ...(anyTax ? [8, 14] : []), 10, 26, 12];
+      widths.forEach((w, i) => (ws.getColumn(i + 1).width = w));
+      const last = HDR.length;
+      // 抬头
+      ws.mergeCells(1, 1, 1, last);
+      const h = ws.getCell(1, 1);
+      h.value = `${supplier} 面料采购对账台账`;
+      h.font = { name: '宋体', size: 16, bold: true };
+      h.alignment = { horizontal: 'center', vertical: 'middle' };
+      h.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC000' } };
+      ws.getRow(1).height = 32;
+      ws.mergeCells(2, 1, 2, last);
+      const sub = ws.getCell(2, 1);
+      sub.value = `义乌市绮陌服饰有限公司 · 导出日期 ${new Date().toISOString().slice(0, 10)} · 共 ${list.length} 行 · 金额为不含税${anyTax ? '(含税列按行税率折算)' : ''}`;
+      sub.font = { name: '宋体', size: 10, color: { argb: 'FF888888' } };
+      sub.alignment = { horizontal: 'center' };
+      // 表头
+      HDR.forEach((t, i) => {
+        const c = ws.getCell(3, i + 1);
+        c.value = t;
+        c.font = { name: '宋体', size: 11, bold: true, color: { argb: 'FFFF0000' } };
+        c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8CBAD' } };
+        c.border = thin;
+      });
+      ws.getRow(3).height = 26;
+
+      let tr = 4, totEx = 0, totIncl = 0, totOrd = 0, totRecv = 0;
+      for (const l of list) {
+        const vals: any[] = [
+          l.order_no_raw || '', l.fabric_name || '', l.color || '',
+          l.ordered_kg ?? '', l.received_kg ?? '', l.diff_kg ?? '',
+          l.unit_price_ex_tax ?? '', l.amount_ex_tax ?? '',
+          ...(anyTax ? [l.tax_rate != null ? `${Math.round(Number(l.tax_rate) * 100)}%` : '', l.amount_incl_tax ?? ''] : []),
+          l.invoice_status || '', [l.delivery_note, l.payable_bill_no ? `已推财务${l.payable_bill_no}` : ''].filter(Boolean).join(' · '), l.customer_name || '',
+        ];
+        vals.forEach((v, i) => {
+          const c = ws.getCell(tr, i + 1);
+          c.value = v;
+          c.font = { name: '宋体', size: 10 };
+          c.alignment = { horizontal: [1, HDR.indexOf('备注')].includes(i) ? 'left' : 'center', vertical: 'middle', wrapText: true };
+          c.border = thin;
+        });
+        totEx += Number(l.amount_ex_tax) || 0; totIncl += Number(l.amount_incl_tax) || 0;
+        totOrd += Number(l.ordered_kg) || 0; totRecv += Number(l.received_kg) || 0;
+        tr++;
+      }
+      // 合计
+      ws.mergeCells(tr, 1, tr, 3);
+      const setTot = (col: number, v: any) => {
+        const c = ws.getCell(tr, col); c.value = v;
+        c.font = { name: '宋体', size: 11, bold: true, color: { argb: 'FFFF0000' } };
+        c.alignment = { horizontal: 'center' };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+        c.border = thin;
+      };
+      setTot(1, '合计');
+      setTot(4, round2(totOrd)); setTot(5, round2(totRecv)); setTot(6, round2(totOrd - totRecv));
+      setTot(7, ''); setTot(8, round2(totEx));
+      if (anyTax) { setTot(9, ''); setTot(10, round2(totIncl)); }
+      for (let c = (anyTax ? 11 : 9); c <= last; c++) setTot(c, '');
+      ws.getRow(tr).height = 24;
+    }
+
+    const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
+    const filename = params?.supplierNameRaw
+      ? `${params.supplierNameRaw}_对账台账.xlsx`
+      : `供应商对账台账_${bySup.size}家.xlsx`;
+    return { data: { filename, base64 } };
+  } catch (e: any) { return { error: e?.message || '导出失败' }; }
+}

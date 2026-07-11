@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   importSupplierLedger, getSupplierLedger, setLedgerTaxRate, linkLedgerSupplier,
   linkLedgerOrder, searchOrdersForLink, pushLedgerGroupToFinance,
-  getLedgerImports, deleteLedgerImport, clearAllLedger,
+  getLedgerImports, deleteLedgerImport, clearAllLedger, exportSupplierLedgerExcel,
   type SupplierGroup, type OrderGroup, type ImportResult, type LedgerImportBatch,
 } from '@/app/actions/supplier-ledger';
 import { listSuppliers } from '@/app/actions/suppliers';
@@ -62,6 +62,21 @@ export function SupplierLedgerClient({
     setBusy(null);
     if (!r.ok) { await confirm({ title: '删除失败', message: r.error || '', confirmText: '知道了' }); return; }
     await reload();
+  }
+
+  async function doExportLedger(supplierNameRaw?: string) {
+    setBusy(supplierNameRaw ? `exp:${supplierNameRaw}` : 'exp:all');
+    const r = await exportSupplierLedgerExcel(supplierNameRaw ? { supplierNameRaw } : undefined);
+    setBusy(null);
+    if (r.error || !r.data) { await confirm({ title: '导出失败', message: r.error || '', confirmText: '知道了' }); return; }
+    const bin = atob(r.data.base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = r.data.filename; a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function onClearAll() {
@@ -197,6 +212,10 @@ export function SupplierLedgerClient({
         <span>不含税合计:<b>{yuan(totalEx)}</b></span>
         <span>含税合计:<b className="text-indigo-700">{yuan(totalIncl)}</b></span>
         {totalUnbilled > 0 && <span className="text-amber-700">未见票:<b>{totalUnbilled}</b> 行</span>}
+        <button onClick={() => doExportLedger()} disabled={busy === 'exp:all' || groups.length === 0}
+          className="ml-auto rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+          {busy === 'exp:all' ? '导出中…' : '📥 导出台账 Excel'}
+        </button>
       </div>
 
       {groups.length === 0 ? (
@@ -229,7 +248,12 @@ export function SupplierLedgerClient({
                       </span>
                     )}
                   {g.unbilledCount > 0 && <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs text-orange-700">未见票 {g.unbilledCount}</span>}
-                  <span className="ml-auto text-sm text-gray-400">{g.lineCount} 行</span>
+                  <button onClick={() => doExportLedger(g.supplier_name_raw)} disabled={busy === `exp:${g.supplier_name_raw}`}
+                    className="ml-auto rounded border border-emerald-300 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                    title="导出这家供应商的对账台账 Excel">
+                    {busy === `exp:${g.supplier_name_raw}` ? '…' : '📥 导出'}
+                  </button>
+                  <span className="text-sm text-gray-400">{g.lineCount} 行</span>
                   <span className="w-28 text-right text-sm text-gray-500">不含税 {yuan(g.totalExTax)}</span>
                   <span className="w-32 text-right font-semibold text-indigo-700">含税 {yuan(g.totalInclTax)}</span>
                 </div>
