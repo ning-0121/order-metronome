@@ -525,6 +525,8 @@ function ReceiptRegisterForm({ line, onDone, canFinanceOver = false }: { line: Q
   const [qty, setQty] = useState('');
   const [date, setDate] = useState(today);
   const [note, setNote] = useState('');
+  const [addr, setAddr] = useState('');   // 收货地址(记住上次,采购常同址收货)
+  useEffect(() => { try { setAddr(localStorage.getItem('gr_last_address') || ''); } catch { /* ignore */ } }, []);
   const [complete, setComplete] = useState(false);
   const [allowOver, setAllowOver] = useState(false);   // 财务超收放行
   const [slipPaths, setSlipPaths] = useState<string[]>([]);
@@ -558,8 +560,10 @@ function ReceiptRegisterForm({ line, onDone, canFinanceOver = false }: { line: Q
     const q = parseFloat(qty);
     if (!(q > 0)) { setErr('请填本批实收数量'); return; }
     setSaving(true); setErr('');
+    try { if (addr.trim()) localStorage.setItem('gr_last_address', addr.trim()); } catch { /* ignore */ }
     const res = await recordReceiptBatch(line.id, {
       received_qty: q, received_date: date, note: note || undefined,
+      received_address: addr.trim() || undefined,
       slip_paths: slipPaths.length ? slipPaths : undefined, mark_complete: complete,
       allow_over: allowOver,
     });
@@ -596,6 +600,7 @@ function ReceiptRegisterForm({ line, onDone, canFinanceOver = false }: { line: Q
         <input className="rounded border border-gray-300 px-2 py-1 text-xs w-24" placeholder={`本批实收`} type="number" step="0.01" value={qty} onChange={e => setQty(e.target.value)} />
         <input className="rounded border border-gray-300 px-2 py-1 text-xs" type="date" value={date} onChange={e => setDate(e.target.value)} title="收货日期" />
         <input className="rounded border border-gray-300 px-2 py-1 text-xs flex-1 min-w-[120px]" placeholder="备注(可选)" value={note} onChange={e => setNote(e.target.value)} />
+        <input className="rounded border border-gray-300 px-2 py-1 text-xs flex-1 min-w-[120px]" placeholder="收货地址(对账用)" value={addr} onChange={e => setAddr(e.target.value)} title="本批收货地址,导出收货对账单会显示" />
         <label className="text-xs px-2 py-1 rounded bg-white border border-gray-300 cursor-pointer hover:bg-gray-50 whitespace-nowrap">
           {uploading ? '上传中…' : `📎 码单${slipPaths.length ? `(${slipPaths.length})` : ''}`}
           <input type="file" accept="image/*,.pdf" multiple className="hidden" disabled={uploading}

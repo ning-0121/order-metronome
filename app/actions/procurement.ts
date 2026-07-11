@@ -1091,7 +1091,7 @@ export async function recordGoodsReceipt(
  */
 export async function recordReceiptBatch(
   lineItemId: string,
-  payload: { received_qty: number; received_date?: string; slip_paths?: string[]; note?: string; mark_complete?: boolean; allow_over?: boolean },
+  payload: { received_qty: number; received_date?: string; slip_paths?: string[]; note?: string; received_address?: string; mark_complete?: boolean; allow_over?: boolean },
 ): Promise<{ error?: string; ok?: boolean; total_received?: number; ordered?: number; complete?: boolean; needsApproval?: boolean; cap?: number }> {
   const access = await checkOperator();
   if (!access.ok || !access.userId) return { error: access.error };
@@ -1130,9 +1130,22 @@ export async function recordReceiptBatch(
     received_at: receivedAt, received_by: access.userId,
     inspection_result: 'pass',
     defect_notes: payload.note || null,
+    received_address: payload.received_address || null,
     photos: (payload.slip_paths && payload.slip_paths.length) ? payload.slip_paths : null,
   });
-  if (grErr) return { error: grErr.message };
+  if (grErr) {
+    // received_address 列(20260711 迁移)未跑 → 降级去掉该列重试,收货不阻断
+    if (/received_address|column .* does not exist|schema cache/i.test(grErr.message || '')) {
+      const { error: grErr2 } = await (supabase.from('goods_receipts') as any).insert({
+        line_item_id: lineItemId, order_id: line.order_id,
+        received_qty: payload.received_qty, received_unit: line.ordered_unit || null,
+        received_at: receivedAt, received_by: access.userId, inspection_result: 'pass',
+        defect_notes: payload.note || null,
+        photos: (payload.slip_paths && payload.slip_paths.length) ? payload.slip_paths : null,
+      });
+      if (grErr2) return { error: grErr2.message };
+    } else return { error: grErr.message };
+  }
 
   // 2. 汇总实收 → 回写
   const { data: receipts } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');

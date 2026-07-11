@@ -74,6 +74,9 @@ export default async function ProcurementCenterPage() {
           <Link href="/procurement/ledger" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50" title="导入《面料采购明细表汇总》→ 按供应商×订单归集应付,对接财务">
             📒 供应商对账台账
           </Link>
+          <Link href="/procurement/receipts" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50" title="按供应商/物料筛选 → 导出收货对账单 Excel(日期/物料/规格/数量/收货地址/码单)发供应商对账">
+            📥 收货对账单
+          </Link>
           <Link href="/procurement/po" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50" title="全部采购单(含已入库历史单),按订单号/供应商调回">
             🧾 采购单档案
           </Link>
