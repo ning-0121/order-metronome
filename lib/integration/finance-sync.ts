@@ -479,6 +479,8 @@ export async function emitProcurementPayableToFinance(payload: {
   amount: number; currency?: string | null; description?: string | null;
   reconciliation_id?: string | null; purchase_order_id?: string | null; po_no?: string | null;
   order_refs?: unknown[]; due_date?: string | null;
+  // 对账明细行:采购订单数量/单价/金额 + 供应商对账数量/金额,供财务核对实际付款(2026-07-11)
+  lines?: unknown[];
 }) {
   return sendToFinanceSystem('payable.created', payload as unknown as Record<string, unknown>)
 }

@@ -89,13 +89,36 @@ export async function submitPaymentRequest(reconId: string, amount: any, opts?: 
     const { emitProcurementPayableToFinance, fetchOrderRefs } = await import('@/lib/integration/finance-sync');
     let orderRefs: unknown[] = [];
     try { orderRefs = (await fetchOrderRefs(((po as any)?.order_ids || []) as string[])) as unknown[]; } catch { /* ignore */ }
+
+    // 对账明细:采购订单数量/单价/金额 + 采购录入的供应商对账数量/金额,给财务核对实际付款(用户 2026-07-11)
+    let lines: unknown[] = [];
+    try {
+      const { data: rl } = await (supabase.from('procurement_reconciliation_lines') as any)
+        .select('material_name, size, ordered_qty, received_qty, unit_price, supplier_qty, supplier_amount, net_amount')
+        .eq('reconciliation_id', reconId);
+      lines = ((rl || []) as any[]).map((l) => {
+        const oq = num(l.ordered_qty), up = num(l.unit_price);
+        return {
+          material_name: l.material_name ?? null,
+          specification: l.size ?? null,
+          ordered_qty: oq,                                   // 采购订单数量
+          unit_price: up,                                    // 采购订单单价
+          po_amount: round2(oq * up),                        // 采购订单金额 = 数量×单价
+          received_qty: num(l.received_qty),                 // 系统实收
+          supplier_qty: l.supplier_qty != null ? num(l.supplier_qty) : null,      // 供应商对账数量(采购录)
+          supplier_amount: l.supplier_amount != null ? num(l.supplier_amount) : null, // 供应商对账金额(采购录)
+          net_amount: l.net_amount != null ? num(l.net_amount) : null,            // 本行净应付
+        };
+      });
+    } catch { /* 明细取失败不阻断,退回只有总额 */ }
+
     await emitProcurementPayableToFinance({
       source_ref: (pr as any).id, bill_no: requestNo,
       supplier_name: (recon as any).supplier_name, supplier_id: (recon as any).supplier_id,
       amount: amt, currency: ((recon as any).currency === 'RMB' ? 'CNY' : (recon as any).currency) || 'CNY',
       description: `采购对账付款 ${(po as any)?.po_no || ''} · ${requestNo}`,
       reconciliation_id: reconId, purchase_order_id: poId, po_no: (po as any)?.po_no || null,
-      order_refs: orderRefs, due_date: null,
+      order_refs: orderRefs, due_date: null, lines,
     });
   } catch (e: any) { console.warn('[submitPaymentRequest] emit payable.created 失败(不阻断):', e?.message); }
 

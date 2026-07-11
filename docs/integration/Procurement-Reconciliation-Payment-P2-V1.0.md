@@ -31,14 +31,33 @@
 ```
 采购对账确认(net_payable 锁定)
   → 采购提付款申请(自定义金额)
-    → 节拍器 emit payable.created { source_ref=付款申请id, bill_no=PR单号, supplier_name, amount, currency, description, po_no, order_refs }
-      → 财务 handlePayableCreated → 建 payable_records(payment_status=unpaid, source_ref, bill_no)
-        → 财务周排款/审批/出纳付款
+    → 节拍器 emit payable.created { source_ref=付款申请id, bill_no=PR单号, supplier_name, amount, currency,
+                                     description, po_no, order_refs, lines[] }
+      → 财务 handlePayableCreated → 建 payable_records(payment_status=unpaid, source_ref, bill_no, detail.lines)
+        → 财务周排款/审批/出纳付款(审批页展示 lines:采购订单数量/单价/金额 ↔ 供应商对账数量/金额,供核对)
           → payment.completed 回带 source_ref
             → 节拍器 finance-callback: 累加对账 paid_amount、标付款申请 paid;付满 → 对账 status=paid
 ```
 
 出站事件 `payable.created`;回传复用现有 `payment.completed`(加一个 `source_ref` 字段透传)。
+
+### `payable.created.lines[]`(2026-07-11 新增:付款核对明细)
+每笔付款申请随载荷带对账明细行,财务付款审批页展示、核对实际付款 vs 采购订单:
+```
+lines: [{
+  material_name,        // 物料
+  specification,        // 规格(=对账行 size)
+  ordered_qty,          // 采购订单数量
+  unit_price,           // 采购订单单价
+  po_amount,            // 采购订单金额 = ordered_qty × unit_price
+  received_qty,         // 系统实收
+  supplier_qty,         // 供应商对账单数量(采购录,可空)
+  supplier_amount,      // 供应商对账单金额(采购录,可空)
+  net_amount            // 本行净应付 =(收货−退货)×价 − 折扣
+}]
+```
+财务侧建议:`payable_records.detail.lines` 存整包(detail 已是 jsonb);付款审批/应付明细页按行展示
+「采购订单(数量/单价/金额) ↔ 供应商对账(数量/金额)」两栏对照,差异高亮。
 
 ## 节拍器侧改动(已上线)
 - `lib/integration/finance-sync.ts`:WebhookEventType 加 `payable.created` + `emitProcurementPayableToFinance`。
