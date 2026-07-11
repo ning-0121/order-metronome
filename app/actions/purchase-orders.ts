@@ -1074,11 +1074,11 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const piMap = new Map<string, any>();
   if (piIds.length > 0) {
     const _svc = createServiceRoleClient();
-    const _piSel = 'id, material_name, color, production_consumption, development_consumption, sku_breakdown, purchase_spec, image_urls, attachment_files';
+    const _piSel = 'id, material_name, material_master_id, color, production_consumption, development_consumption, sku_breakdown, purchase_spec, image_urls, attachment_files';
     let { data: pis, error: piErr } = await (_svc.from('procurement_items') as any).select(_piSel).in('id', piIds);
     // sku_breakdown / purchase_spec / attachment_files 列(2026-07-10)未建 → 降级去这些新列,采购单照样导(无相应附页)
     if (piErr && /sku_breakdown|purchase_spec|attachment_files|schema cache|column|does not exist/i.test(piErr.message || '')) {
-      const _piSelSafe = 'id, material_name, color, production_consumption, development_consumption, image_urls';
+      const _piSelSafe = 'id, material_name, material_master_id, color, production_consumption, development_consumption, image_urls';
       ({ data: pis } = await (_svc.from('procurement_items') as any).select(_piSelSafe).in('id', piIds));
     }
     for (const p of (pis || [])) piMap.set(p.id, p);
@@ -1088,6 +1088,28 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     (l as any).color = pi?.color ?? null;
     (l as any).consumption = pi?.production_consumption ?? pi?.development_consumption ?? null;
     (l as any).purchase_spec = pi?.purchase_spec ?? null;
+  }
+
+  // 辅料图示 BOM 兜底:业务可能在 PO 建好【后】才把排版稿/参考图传到 materials_bom(procurement_items 快照
+  // 没带上,要重跑归并才带),详情页靠 BOM 兜底才看得到图,导出同样从 BOM 按物料补齐 → 图示不因归并时机而丢。
+  const bomImgByMaster = new Map<string, string[]>();
+  const bomImgByName = new Map<string, string[]>();
+  const _poOrderIds = (((po as any).order_ids || []) as string[]);
+  if (piMap.size > 0 && _poOrderIds.length > 0) {
+    const IMG_EXT2 = /\.(png|jpe?g|gif)(\?|$)/i;
+    const { data: bomRows } = await (createServiceRoleClient().from('materials_bom') as any)
+      .select('material_name, material_master_id, image_urls, attachment_files').in('order_id', _poOrderIds);
+    for (const b of (bomRows || []) as any[]) {
+      const urls: string[] = [];
+      for (const u of (Array.isArray(b.image_urls) ? b.image_urls : [])) if (typeof u === 'string' && /^https?:\/\//.test(u)) urls.push(u);
+      for (const f of (Array.isArray(b.attachment_files) ? b.attachment_files : [])) {
+        const u = typeof f === 'string' ? f : f?.url;
+        if (typeof u === 'string' && /^https?:\/\//.test(u) && IMG_EXT2.test(u)) urls.push(u);
+      }
+      if (!urls.length) continue;
+      if (b.material_master_id) bomImgByMaster.set(b.material_master_id, [...(bomImgByMaster.get(b.material_master_id) || []), ...urls]);
+      if (b.material_name) { const k = String(b.material_name).trim().toLowerCase(); bomImgByName.set(k, [...(bomImgByName.get(k) || []), ...urls]); }
+    }
   }
 
   const { data: ords } = await (supabase.from('orders') as any)
@@ -1158,7 +1180,10 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     const imgFromAtt = (Array.isArray(pi.attachment_files) ? pi.attachment_files : [])
       .map((f: any) => (typeof f === 'string' ? f : f?.url))
       .find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u) && IMG_EXT.test(u));
-    const img = imgFromUrls || imgFromAtt || '';
+    // BOM 兜底(晚传排版稿场景):按物料主数据 id / 物料名匹配 materials_bom 的图
+    const imgFromBom = (pi.material_master_id ? bomImgByMaster.get(pi.material_master_id)?.[0] : undefined)
+      || bomImgByName.get(String(pi.material_name || '').trim().toLowerCase())?.[0];
+    const img = imgFromUrls || imgFromAtt || imgFromBom || '';
     const rowsR: ReqRow[] = bd.length > 0
       ? bd.map((c: any) => ({ style: c?.style_no || c?.product_name || '', size: c?.size || '', qty: Number(c.qty) || 0 }))
       : [{ style: '-', size: '-', qty: qtyByPi.get(pi.id) || 0 }];
