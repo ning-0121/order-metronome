@@ -1221,8 +1221,18 @@ export async function updateProcurementItem(itemId: string, orderId: string, fie
         .eq('procurement_item_id', itemId);
     } catch { /* 不阻断 */ }
   }
-  // 采购填/改了单价 → 重算「实际辅料总价」并即时推财务(2026-07-08 用户拍板 A;幂等,改了才推)
+  // 采购填/改了单价 →
+  //  ① 回写所有执行行 unit_price:执行行的 unit_price 是「生成执行行那一刻」的核料快照,
+  //     采购之后才在核料层填/改单价 → 执行行仍为空 → 采购单/对账「金额」「底价」一直显示「—」。
+  //     ordered_amount 是 GENERATED 列(=ordered_qty×unit_price),回填 unit_price 后 DB 自动算金额。
+  //     底价列走 service_role 写(20260704 底价列级封锁:authenticated 读不到价列,写也统一走 service_role)。
+  //  ② 重算「实际辅料总价」并即时推财务(2026-07-08 用户拍板 A;幂等,改了才推)
   if ('unit_price' in fields) {
+    try {
+      await (createServiceRoleClient().from('procurement_line_items') as any)
+        .update({ unit_price: upd.unit_price ?? null, updated_at: new Date().toISOString() })
+        .eq('procurement_item_id', itemId);
+    } catch { /* 不阻断 */ }
     try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
   }
   revalidatePath(`/orders/${orderId}`);
