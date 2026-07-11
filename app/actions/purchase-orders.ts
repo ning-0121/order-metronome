@@ -691,6 +691,41 @@ export async function changePurchaseOrderSupplier(poId: string, supplierId: stri
 }
 
 /**
+ * 删除整张草稿采购单(仅采购、仅草稿):清理建错/重复的草稿单,避免重复下单。
+ * 采购行【释放回待归单池】(purchase_order_id=null),不销毁核料需求 → 可重新归单,误删不丢货。
+ * 审批中(approval_status=pending,财务已收到审批请求)的挡下,避免财务队列留悬空;草稿从不进财务应付,删除无财务影响。
+ */
+export async function deletePurchaseOrder(poId: string): Promise<{ ok?: boolean; releasedLines?: number; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可删除采购单' };
+
+  const { data: po } = await (supabase.from('purchase_orders') as any)
+    .select('id, status, approval_status').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') {
+    return { error: '仅「草稿」采购单可删除;已下单的请走取消/退货流程。' };
+  }
+  if ((po as any).approval_status === 'pending') {
+    return { error: '该采购单正在审批中(财务/采购已收到审批请求),不能直接删除;请先等审批结果或驳回后再删。' };
+  }
+
+  const svc = createServiceRoleClient();
+  // 释放采购行回待归单池(只清 purchase_order_id;supplier_name 作提示留着无害)。核料需求保留,可重新归单。
+  const { data: relLines, error: relErr } = await (svc.from('procurement_line_items') as any)
+    .update({ purchase_order_id: null }).eq('purchase_order_id', poId).select('id');
+  if (relErr) return { error: '释放采购行失败:' + relErr.message };
+
+  const { error: delErr } = await (svc.from('purchase_orders') as any)
+    .delete().eq('id', poId).eq('status', 'draft');
+  if (delErr) return { error: '删除采购单失败:' + delErr.message };
+
+  revalidatePath('/procurement');
+  revalidatePath('/procurement/po');
+  return { ok: true, releasedLines: (relLines || []).length };
+}
+
+/**
  * 删除采购行(仅采购、仅草稿):删掉核料输错/多出的面辅料行。
  * 硬删(loader 不过滤 cancelled,软删会残留「已取消」行);删后按剩余行 ordered_amount 重算单头 total_amount。
  * 挡住已收货的行(received_qty>0)——已到货的不许删。行须属于本单。

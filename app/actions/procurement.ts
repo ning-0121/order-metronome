@@ -1198,6 +1198,8 @@ export interface PendingApprovalPO {
   reasons: string[];
   required_by: string[];
   orders: { order_no: string | null; internal_order_no: string | null; customer_name: string | null }[];
+  // 疑重复下单:同订单+同物料被别的活动采购单也覆盖(只读警示,交采购判断删哪张)
+  dupWith?: { po_no: string | null; status: string | null; materials: string[] }[];
 }
 
 export interface QueueLine {
@@ -1426,6 +1428,7 @@ export async function getProcurementQueues(): Promise<{
 
   // 待审批采购单:已建、撞风险闸卡在 pending 的采购单(下单没走完的真相在这)。
   const pendingApprovalPOs: PendingApprovalPO[] = [];
+  const draftOrderIdsByPo = new Map<string, string[]>();   // 草稿 PO → 关联订单(疑重复检测用)
   try {
     // 审计修(2026-07-04):放宽到所有草稿采购单(不只待审批)——归单后未 place 的草稿单
     // (approval_status=not_required/approved)本来会从所有队列消失(已挂 PO→不在待下单;未 place→不在待催货),
@@ -1446,6 +1449,7 @@ export async function getProcurementQueues(): Promise<{
       // 隐藏"为已取消订单建的采购单"(2026-07-05):该 PO 所有关联订单都已取消/归档 → 跳过,别在待审批堆里占位
       const oids: string[] = p.order_ids || [];
       if (oids.length > 0 && oids.every((oid: string) => ORD_DEAD.includes(poOrderMap.get(oid)?.lifecycle_status))) continue;
+      draftOrderIdsByPo.set(p.id, oids);
       pendingApprovalPOs.push({
         id: p.id, po_no: p.po_no, approval_status: p.approval_status ?? null,
         total_amount: canSeeFloor ? (p.total_amount ?? null) : null,
@@ -1459,6 +1463,57 @@ export async function getProcurementQueues(): Promise<{
       });
     }
   } catch (e: any) { console.warn('[getProcurementQueues] 待审批采购单查询失败:', e?.message); }
+
+  // ── 疑重复下单检测(只读警示)────────────────────────────────────────
+  // 同一订单 + 同一物料被多张【活动】采购单覆盖 = 疑重复(把同批料建了两张单/忘了已下过)。
+  // 结构上一条核料行只能归一张单,故按 (order_id|物料名) 跨单比对;命中就在草稿箱标警,交采购判断删哪张。
+  try {
+    const allDraftOrderIds = [...new Set([...draftOrderIdsByPo.values()].flat())] as string[];
+    if (pendingApprovalPOs.length > 0 && allDraftOrderIds.length > 0) {
+      const { data: covLines } = await (supabase.from('procurement_line_items') as any)
+        .select('purchase_order_id, order_id, material_name, line_status')
+        .in('order_id', allDraftOrderIds).not('purchase_order_id', 'is', null);
+      const rows = (covLines || []) as any[];
+      const poIds = [...new Set(rows.map((l) => l.purchase_order_id).filter(Boolean))] as string[];
+      const poMeta = new Map<string, { po_no: string | null; status: string | null }>();
+      if (poIds.length > 0) {
+        const { data: poRows } = await (supabase.from('purchase_orders') as any)
+          .select('id, po_no, status').in('id', poIds);
+        for (const p of (poRows || [])) poMeta.set(p.id, { po_no: p.po_no ?? null, status: p.status ?? null });
+      }
+      const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+      // 覆盖键 (order_id||物料) → 覆盖它的活动 PO 集合(排除已取消行/已取消单)
+      const keyToPos = new Map<string, Set<string>>();
+      const poKeys = new Map<string, Set<string>>();
+      const keyToName = new Map<string, string>();   // 覆盖键 → 原始物料名(展示用,不用小写键)
+      for (const l of rows) {
+        if (l.line_status === 'cancelled') continue;
+        const meta = poMeta.get(l.purchase_order_id);
+        if (!meta || meta.status === 'cancelled') continue;
+        const mat = norm(l.material_name); if (!mat) continue;
+        const key = `${l.order_id}||${mat}`;
+        if (!keyToName.has(key)) keyToName.set(key, String(l.material_name || '').trim());
+        (keyToPos.get(key) || keyToPos.set(key, new Set()).get(key)!).add(l.purchase_order_id);
+        (poKeys.get(l.purchase_order_id) || poKeys.set(l.purchase_order_id, new Set()).get(l.purchase_order_id)!).add(key);
+      }
+      for (const p of pendingApprovalPOs) {
+        const myKeys = poKeys.get(p.id); if (!myKeys) continue;
+        const byOther = new Map<string, { po_no: string | null; status: string | null; materials: Set<string> }>();
+        for (const key of myKeys) {
+          const mat = keyToName.get(key) || key.split('||')[1];
+          for (const otherId of (keyToPos.get(key) || [])) {
+            if (otherId === p.id) continue;
+            const om = poMeta.get(otherId); if (!om) continue;
+            const agg = byOther.get(otherId) || { po_no: om.po_no, status: om.status, materials: new Set<string>() };
+            agg.materials.add(mat); byOther.set(otherId, agg);
+          }
+        }
+        if (byOther.size > 0) {
+          p.dupWith = [...byOther.values()].map((v) => ({ po_no: v.po_no, status: v.status, materials: [...v.materials] }));
+        }
+      }
+    }
+  } catch (e: any) { console.warn('[getProcurementQueues] 疑重复检测失败(不阻断):', e?.message); }
 
   return {
     data: {

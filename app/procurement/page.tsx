@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getProcurementQueues, getProcurementMatters, type RiskMatter } from '@/app/actions/procurement';
 import { ProcurementQueueClient } from '@/components/ProcurementQueueClient';
 import { RiskEtaFill } from './RiskEtaFill';
+import { DraftPOBanner } from './DraftPOBanner';
 
 /**
  * 采购中心（Procurement Center）V1 — 工作队列页 + 风险中心。
@@ -41,58 +42,14 @@ export default async function ProcurementCenterPage() {
   }
 
   const { pendingRequests, pendingOrder, chase, readyShip, receive, counts, pendingApprovalPOs } = result.data!;
-  const REASON_CN: Record<string, string> = {
-    large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
-    over_budget: '超预算', over_budget_total: '整单超预算', over_budget_material: '单料超预算(疑重复下单)',
-    non_standard_terms: '非标账期',
-  };
   const matters = mattersResult.data?.matters ?? [];
   const matterCounts = mattersResult.data?.counts ?? { total: 0, high: 0, medium: 0 };
+  const canProcure = pageRoles.some(r => ['admin', 'procurement', 'procurement_manager'].includes(r));   // 采购可删草稿单
 
-  // ⏳ 待审批采购单横幅:传入客户端,渲染在「计数卡 → 队列」之间(计数/队列需随操作即时刷新,横幅是静态服务端数据)
-  const banner = pendingApprovalPOs.length > 0 ? (
-    <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-sm font-bold text-orange-800">🧾 草稿采购单（{pendingApprovalPOs.length}）待下单/待审批</span>
-        <span className="text-xs text-orange-600">这些单已建但还没真正下单;待审批的需先审批,可下单的进 PO 页传凭证后下单。不处理,订单会一直显示"待采购"。</span>
-      </div>
-      <div className="space-y-2">
-        {pendingApprovalPOs.map((p) => {
-          const isPending = p.approval_status === 'pending';
-          const tbd = !isPending && p.price_tbd === true;   // 价格待定:允许无价下单
-          // ¥0/未填价且非"价格待定"的单不是"可下单",而是"待填价"(2026-07-09 用户:没填价格不该到下单这步)
-          const noPrice = !isPending && !tbd && (p.total_amount == null || Number(p.total_amount) <= 0);
-          return (
-          <div key={p.id} className="flex items-center gap-3 flex-wrap bg-white rounded-lg border border-orange-200 px-3 py-2">
-            <Link href={`/procurement/po/${p.id}`} className="text-sm font-semibold text-indigo-600 hover:underline">{p.po_no}</Link>
-            <span className={`text-[11px] px-1.5 py-0.5 rounded ${isPending ? 'bg-amber-100 text-amber-700' : noPrice ? 'bg-rose-100 text-rose-700' : tbd ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'}`}>
-              {isPending ? '待审批' : noPrice ? '待填价' : tbd ? '价格待定·可下单' : '可下单(未下单)'}
-            </span>
-            <span className="text-xs text-gray-500">{p.supplier_name || '—'}</span>
-            {p.total_amount != null && <span className="text-xs text-gray-700">¥{p.total_amount}</span>}
-            <span className="text-xs text-gray-400">
-              {(p.orders || []).map(o => o.internal_order_no || o.order_no).filter(Boolean).join(' / ')}
-            </span>
-            {isPending && (
-              <>
-                <div className="flex items-center gap-1 flex-wrap">
-                  {(p.reasons || []).map(r => (
-                    <span key={r} className="text-[11px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">{REASON_CN[r] || r}</span>
-                  ))}
-                </div>
-                <span className="text-[11px] text-gray-500">
-                  需{(p.required_by || []).map(s => s === 'finance' ? '财务' : '采购经理').join('+')}审批
-                </span>
-              </>
-            )}
-            <Link href={`/procurement/po/${p.id}`} className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-orange-600 text-white font-medium hover:bg-orange-700">
-              {isPending ? '去审批 →' : noPrice ? '去填价 →' : '去下单 →'}{/* tbd 也走去下单 */}
-            </Link>
-          </div>
-        );})}
-      </div>
-    </div>
-  ) : null;
+  // ⏳ 草稿采购单箱:客户端组件(删除草稿/疑重复警示需交互),渲染在「计数卡 → 队列」之间
+  const banner = pendingApprovalPOs.length > 0
+    ? <DraftPOBanner pos={pendingApprovalPOs} canDelete={canProcure} />
+    : null;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
