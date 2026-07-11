@@ -299,6 +299,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   if (loading) return <div className="text-sm text-gray-400 py-6">加载明细…</div>;
 
   const inp = 'rounded border border-gray-300 px-2 py-1 text-xs';
+  // 尺码/箱数数量格:够宽显全 4-6 位数 + 隐藏数字微调箭头(箭头会挤掉右侧数字导致「1160」显示成「116C」)
+  const numCell = 'rounded border border-gray-300 px-1 py-1 text-xs text-center w-16 min-w-16 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
   return (
     <div className="space-y-3">
       {/* 顶部:尺码集 + 汇总 + 保存 */}
@@ -440,7 +442,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
                 <tr className="text-gray-400 text-left">
                   <th className="px-1 py-1 font-medium">颜色(中)</th>
                   <th className="px-1 py-1 font-medium">颜色(英)</th>
-                  {sizeLabels.map((s) => <th key={s} className="px-1 py-1 font-medium text-center w-14">{s}</th>)}
+                  {sizeLabels.map((s) => <th key={s} className="px-1 py-1 font-medium text-center w-16">{s}</th>)}
                   <th className="px-1 py-1 font-medium text-center">小计</th>
                   <th className="px-1 py-1 font-medium text-center">箱数</th>
                   {canEdit && <th></th>}
@@ -453,12 +455,12 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
                     <td className="px-1 py-1"><input value={c.color_en} onChange={(e) => setColorField(si, ci, 'color_en', e.target.value)} placeholder="WHT" disabled={!canEdit} className={`${inp} w-16`} /></td>
                     {sizeLabels.map((s) => (
                       <td key={s} className="px-1 py-1 text-center">
-                        <input type="number" min="0" value={c.sizes[s] ?? ''} onChange={(e) => setColorSize(si, ci, s, e.target.value)} disabled={!canEdit} className={`${inp} w-14 text-center`} />
+                        <input type="number" min="0" value={c.sizes[s] ?? ''} onChange={(e) => setColorSize(si, ci, s, e.target.value)} disabled={!canEdit} className={numCell} />
                       </td>
                     ))}
                     <td className="px-1 py-1 text-center font-mono font-semibold text-gray-900">{sumSizes(c.sizes)}</td>
                     <td className="px-1 py-1 text-center">
-                      <input type="number" min="0" value={c.carton_count ?? ''} onChange={(e) => setColorField(si, ci, 'carton_count', e.target.value)} placeholder="箱" disabled={!canEdit} className={`${inp} w-14 text-center`} />
+                      <input type="number" min="0" value={c.carton_count ?? ''} onChange={(e) => setColorField(si, ci, 'carton_count', e.target.value)} placeholder="箱" disabled={!canEdit} className={numCell} />
                     </td>
                     {canEdit && <td className="px-1 py-1"><button onClick={() => removeColor(si, ci)} className="text-red-500">×</button></td>}
                   </tr>
