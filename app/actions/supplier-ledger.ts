@@ -413,3 +413,81 @@ export async function pushLedgerGroupToFinance(params: { supplierNameRaw: string
     return { ok: true, billNo, amount: amountInclTax };
   } catch (e: any) { return { ok: false, error: e?.message || '推财务失败' }; }
 }
+
+// ============================================================
+// 导入记录:查看批次 / 删除重传(表格传错时删掉整批重来)
+// ============================================================
+export interface LedgerImportBatch {
+  id: string;
+  file_name: string | null;
+  sheet_count: number;
+  row_count: number;
+  total_amount_ex_tax: number;
+  created_at: string;
+  pushed_count: number;   // 该批已推财务的行数(>0 则禁删)
+}
+
+/** 列出导入批次(最近在前),带该批已推财务的行数。 */
+export async function getLedgerImports(): Promise<LedgerImportBatch[]> {
+  const supabase = await createClient();
+  const { data: imports } = await (supabase.from('supplier_ledger_imports') as any)
+    .select('id, file_name, sheet_count, row_count, total_amount_ex_tax, created_at')
+    .order('created_at', { ascending: false });
+  if (!imports || !imports.length) return [];
+  // 每批已推财务行数
+  const { data: pushed } = await (supabase.from('supplier_fabric_ledger') as any)
+    .select('import_batch_id').not('payable_pushed_at', 'is', null);
+  const pushedByBatch = new Map<string, number>();
+  for (const r of (pushed || []) as any[]) {
+    if (r.import_batch_id) pushedByBatch.set(r.import_batch_id, (pushedByBatch.get(r.import_batch_id) || 0) + 1);
+  }
+  return (imports as any[]).map((b) => ({
+    id: b.id, file_name: b.file_name, sheet_count: b.sheet_count, row_count: b.row_count,
+    total_amount_ex_tax: Number(b.total_amount_ex_tax) || 0, created_at: b.created_at,
+    pushed_count: pushedByBatch.get(b.id) || 0,
+  }));
+}
+
+/** 删除一批导入(级联删该批所有明细行)。已推财务的批禁删。 */
+export async function deleteLedgerImport(batchId: string): Promise<{ ok: boolean; error?: string; deleted?: number }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: '未登录' };
+    const gate = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_PROCUREMENT_EXEC', WRITE_MSG);
+    if (gate) return { ok: false, error: gate };
+    const svc = createServiceRoleClient();
+    // 护栏:该批有已推财务的行 → 禁删(否则和财务应付脱节)
+    const { count: pushedCount } = await (svc.from('supplier_fabric_ledger') as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('import_batch_id', batchId).not('payable_pushed_at', 'is', null);
+    if ((pushedCount || 0) > 0) return { ok: false, error: `该批有 ${pushedCount} 行已推财务,不能删除(请先在财务作废对应应付)` };
+    const { count: rowCount } = await (svc.from('supplier_fabric_ledger') as any)
+      .select('id', { count: 'exact', head: true }).eq('import_batch_id', batchId);
+    // 删批次头 → 明细行 ON DELETE CASCADE 一并删
+    const { error } = await (svc.from('supplier_ledger_imports') as any).delete().eq('id', batchId);
+    if (error) return { ok: false, error: friendlyError(error) };
+    revalidatePath('/procurement/ledger');
+    return { ok: true, deleted: rowCount || 0 };
+  } catch (e: any) { return { ok: false, error: e?.message || '删除失败' }; }
+}
+
+/** 清空整个台账(所有批次+明细)。任一已推财务 → 拒绝,改为逐批删。 */
+export async function clearAllLedger(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: '未登录' };
+    const gate = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_PROCUREMENT_EXEC', WRITE_MSG);
+    if (gate) return { ok: false, error: gate };
+    const svc = createServiceRoleClient();
+    const { count: pushedCount } = await (svc.from('supplier_fabric_ledger') as any)
+      .select('id', { count: 'exact', head: true }).not('payable_pushed_at', 'is', null);
+    if ((pushedCount || 0) > 0) return { ok: false, error: `台账有 ${pushedCount} 行已推财务,不能整体清空(请逐批删未推的批次)` };
+    // 删所有批次头(明细 CASCADE);再兜底删无批次的散行
+    await (svc.from('supplier_ledger_imports') as any).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await (svc.from('supplier_fabric_ledger') as any).delete().is('payable_pushed_at', null);
+    revalidatePath('/procurement/ledger');
+    return { ok: true };
+  } catch (e: any) { return { ok: false, error: e?.message || '清空失败' }; }
+}

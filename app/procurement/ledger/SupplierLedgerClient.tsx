@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import {
   importSupplierLedger, getSupplierLedger, setLedgerTaxRate, linkLedgerSupplier,
   linkLedgerOrder, searchOrdersForLink, pushLedgerGroupToFinance,
-  type SupplierGroup, type OrderGroup, type ImportResult,
+  getLedgerImports, deleteLedgerImport, clearAllLedger,
+  type SupplierGroup, type OrderGroup, type ImportResult, type LedgerImportBatch,
 } from '@/app/actions/supplier-ledger';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -26,13 +27,16 @@ export function SupplierLedgerClient({
   const [result, setResult] = useState<ImportResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [batches, setBatches] = useState<LedgerImportBatch[]>([]);
+  const [showBatches, setShowBatches] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { listSuppliers().then((r) => setSuppliers((r.data || []).map((s: any) => ({ id: s.id, name: s.name })))); }, []);
+  useEffect(() => { getLedgerImports().then(setBatches); }, []);
 
   async function reload() {
-    const { groups: g, grandTotalExTax, grandTotalInclTax } = await getSupplierLedger();
-    setGroups(g); setTotalEx(grandTotalExTax); setTotalIncl(grandTotalInclTax);
+    const [{ groups: g, grandTotalExTax, grandTotalInclTax }, b] = await Promise.all([getSupplierLedger(), getLedgerImports()]);
+    setGroups(g); setTotalEx(grandTotalExTax); setTotalIncl(grandTotalInclTax); setBatches(b);
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -44,6 +48,34 @@ export function SupplierLedgerClient({
     setResult(r); setImporting(false);
     if (fileRef.current) fileRef.current.value = '';
     if (r.ok) await reload();
+  }
+
+  async function onDeleteBatch(b: LedgerImportBatch) {
+    const ok = await confirm({
+      title: '删除这批导入?',
+      message: `${b.file_name || '(未命名)'}\n${b.row_count} 行 · ${yuan(b.total_amount_ex_tax)}\n删除后该批所有明细一并移除,可重新上传更正后的表格。`,
+      confirmText: '删除', danger: true,
+    });
+    if (!ok) return;
+    setBusy(`delbatch:${b.id}`);
+    const r = await deleteLedgerImport(b.id);
+    setBusy(null);
+    if (!r.ok) { await confirm({ title: '删除失败', message: r.error || '', confirmText: '知道了' }); return; }
+    await reload();
+  }
+
+  async function onClearAll() {
+    const ok = await confirm({
+      title: '清空整个台账?',
+      message: '所有导入批次和明细将全部删除(已推财务的行不允许清空)。此操作不可撤销。',
+      confirmText: '清空', danger: true,
+    });
+    if (!ok) return;
+    setBusy('clearall');
+    const r = await clearAllLedger();
+    setBusy(null);
+    if (!r.ok) { await confirm({ title: '清空失败', message: r.error || '', confirmText: '知道了' }); return; }
+    await reload();
   }
 
   const toggle = (set: Set<string>, key: string, setter: (s: Set<string>) => void) => {
@@ -100,6 +132,43 @@ export function SupplierLedgerClient({
           className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-white hover:file:bg-indigo-700 disabled:opacity-50" />
         {importing && <span className="text-sm text-indigo-600">导入中…</span>}
       </div>
+
+      {/* 导入记录 / 删除重传 */}
+      {batches.length > 0 && (
+        <div className="mb-6 rounded-lg border border-gray-200">
+          <div className="flex items-center gap-2 px-4 py-2">
+            <button onClick={() => setShowBatches((v) => !v)} className="flex items-center gap-1.5 text-sm text-gray-600">
+              <span className="text-gray-400">{showBatches ? '▾' : '▸'}</span>
+              导入记录 <span className="text-gray-400">({batches.length} 批)</span>
+            </button>
+            <span className="ml-auto text-xs text-gray-400">传错了?删掉整批,重新上传更正后的表格</span>
+            <button onClick={onClearAll} disabled={busy === 'clearall'}
+              className="rounded border border-red-200 px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50">
+              {busy === 'clearall' ? '清空中…' : '清空台账'}
+            </button>
+          </div>
+          {showBatches && (
+            <div className="divide-y divide-gray-100 border-t border-gray-100">
+              {batches.map((b) => (
+                <div key={b.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs">
+                  <span className="font-medium text-gray-700">{b.file_name || '(未命名)'}</span>
+                  <span className="text-gray-400">{new Date(b.created_at).toLocaleString('zh-CN', { hour12: false })}</span>
+                  <span className="text-gray-500">{b.sheet_count} 供应商 · {b.row_count} 行 · {yuan(b.total_amount_ex_tax)}</span>
+                  {b.pushed_count > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">已推财务 {b.pushed_count} 行</span>}
+                  <span className="ml-auto">
+                    {b.pushed_count > 0
+                      ? <span className="text-gray-300" title="有已推财务的行,不能删">🔒 不可删</span>
+                      : <button onClick={() => onDeleteBatch(b)} disabled={busy === `delbatch:${b.id}`}
+                          className="text-red-600 hover:underline disabled:opacity-50">
+                          {busy === `delbatch:${b.id}` ? '删除中…' : '删除本批'}
+                        </button>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {result && (
         <div className={`mb-6 rounded-lg border p-4 text-sm ${result.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-red-200 bg-red-50 text-red-900'}`}>
