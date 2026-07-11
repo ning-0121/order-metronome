@@ -103,7 +103,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       for (const ps of parsed) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) incoming.push(k);
       setSizeLabels(prev => appendSizes(prev, incoming));
       const nColors = parsed.reduce((a, s) => a + s.colors.length, 0);
-      setMsg(`✅ 已解析 ${parsed.length} 款 / ${nColors} 颜色行,请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}`);
+      const note = (res as any).note ? ` ⚠ ${(res as any).note}` : '';
+      setMsg(`✅ 已解析 ${parsed.length} 款 / ${nColors} 颜色行,请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}${note}`);
     } catch (err: any) {
       setMsg('❌ 读取失败:' + (err?.message || String(err)));
     }

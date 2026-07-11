@@ -18,6 +18,7 @@ export interface ParsedOrderSheet {
   lines: ParsedOrderLine[];
   sizeNames: string[];             // 识别到的尺码列名(有序)
   headerRow: number;               // 1-based;-1=未找到
+  note?: string;                   // 解析提示(如 RAG PO 逐码均分,需业务核对)
 }
 
 /** 单元格取文本:兼容 exceljs 的富文本 {richText}、公式 {result}、超链接 {text}。 */
@@ -58,9 +59,88 @@ function findCol(header: unknown[], ...keywords: string[]): number {
   return -1;
 }
 
+/**
+ * RAG(RIVIERA APPAREL GROUP / ragapparel.net)客户专属 PO 模板解析。
+ * 特点(与通用表不同,通用解析读不出尺码/件数):
+ *   - 尺码不在表格列里,而在表头单元格「SIZES: 1X - 2X - 3X」一次性声明;
+ *   - 明细行(表头 Style # / Description / Color / Size Range / Qty (PCS) / Unit Price / Total)
+ *     只给**整款总件数** Qty(PCS),无逐码明细。
+ * 策略:取表头声明的尺码集,把每行总件数**按尺码均分**(RAG 按 48/箱整比装箱,均分与箱数吻合:
+ *   1440 件 /3 码 = 480,恰好 10 箱/码)。均分是推断,业务在富录入表可改。
+ * ⚠️ 只对 RAG 生效(表头含 riviera/ragapparel),不影响其它客户。
+ */
+function parseRagPO(rows: unknown[][]): ParsedOrderSheet | null {
+  const head8 = rows.slice(0, 8).map((r) => (r || []).map(cellText).join(' ')).join(' ').toLowerCase();
+  if (!/riviera\s*apparel|ragapparel/.test(head8)) return null;
+
+  // 1) 全局尺码:找「SIZES:」标签,取其右侧首个非空单元格,按 - / , 、拆分
+  let sizeNames: string[] = [];
+  for (let r = 0; r < Math.min(rows.length, 12) && sizeNames.length === 0; r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (/^sizes?:?$/.test(norm(row[c]))) {
+        for (let cc = c + 1; cc < row.length; cc++) {
+          const v = cellText(row[cc]).trim();
+          if (v) { sizeNames = v.split(/\s*[-–—,/、]\s*/).map((s) => s.trim()).filter(Boolean); break; }
+        }
+      }
+    }
+  }
+
+  // 2) 明细表头行:含 style 且含 qty
+  let hIdx = -1;
+  for (let r = 0; r < rows.length; r++) {
+    const row = (rows[r] || []).map(norm);
+    if (row.some((x) => x.includes('style')) && row.some((x) => x.includes('qty'))) { hIdx = r; break; }
+  }
+  if (hIdx === -1) return null;
+  const header = rows[hIdx] || [];
+  const cStyle = findCol(header, 'style');
+  const cColor = findCol(header, 'color');
+  const cQty = findCol(header, 'qty');
+  const cPrice = findCol(header, 'unit price', 'price');
+  const cAmount = findCol(header, 'total', 'amount');
+
+  const lines: ParsedOrderLine[] = [];
+  for (let r = hIdx + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const style = cStyle >= 0 ? strOrNull(row[cStyle]) : null;
+    if (!style) continue;
+    if (/^(totals?|合计|总计|subtotal)$/.test(norm(style))) continue;
+    const qty = cQty >= 0 ? (numOrNull(row[cQty]) ?? 0) : 0;
+    if (!(qty > 0)) continue;
+
+    // 按尺码均分,余数依次分给前面的码(保证总和 = qty)
+    const sizes: Record<string, number> = {};
+    if (sizeNames.length > 0) {
+      const base = Math.floor(qty / sizeNames.length);
+      let rem = qty - base * sizeNames.length;
+      for (const s of sizeNames) { sizes[s] = base + (rem > 0 ? 1 : 0); if (rem > 0) rem--; }
+    }
+    lines.push({
+      style_no: style,
+      color: cColor >= 0 ? strOrNull(row[cColor]) : null,
+      color_ref: null,
+      sizes,
+      qty_total: qty,
+      unit_price: cPrice >= 0 ? numOrNull(row[cPrice]) : null,
+      amount: cAmount >= 0 ? numOrNull(row[cAmount]) : null,
+    });
+  }
+  if (lines.length === 0) return null;
+  const note = sizeNames.length > 0
+    ? `RAG PO:尺码 ${sizeNames.join('/')} 已按总件数均分到各码(PO 未给逐码明细),请核对实际配比后再保存。`
+    : 'RAG PO:表头未识别到 SIZES 尺码集,件数未拆码,请手动补尺码。';
+  return { lines, sizeNames, headerRow: hIdx + 1, note };
+}
+
 export function parseOrderSheet(rows: unknown[][]): ParsedOrderSheet {
   const empty: ParsedOrderSheet = { lines: [], sizeNames: [], headerRow: -1 };
   if (!Array.isArray(rows) || rows.length === 0) return empty;
+
+  // 客户专属模板优先(读不出就回落通用解析):RAG(RIVIERA)尺码在表头声明、明细只给总件数
+  const rag = parseRagPO(rows);
+  if (rag) return rag;
 
   // 1) 表头行:含 "款号" 或 "style"
   let hIdx = -1;

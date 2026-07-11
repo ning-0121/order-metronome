@@ -115,7 +115,7 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
  * 权限:业务/理单/跟单/管理员(生产/QC 不解析客户订单)。
  */
 export async function parseOrderFile(base64: string): Promise<{
-  styles?: any[]; sizeNames?: string[]; headerRow?: number; error?: string;
+  styles?: any[]; sizeNames?: string[]; headerRow?: number; note?: string; error?: string;
 }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -151,7 +151,7 @@ export async function parseOrderFile(base64: string): Promise<{
       if (canSeeFin && (st.po_unit_price === '' || st.po_unit_price == null) && l.unit_price != null) st.po_unit_price = l.unit_price;
       st.colors.push({ color_cn: l.color || '', color_en: l.color_ref || '', sizes: l.sizes || {}, qty: l.qty_total || 0, remark: '' });
     }
-    return { styles: [...map.values()], sizeNames: res.sizeNames, headerRow: res.headerRow };
+    return { styles: [...map.values()], sizeNames: res.sizeNames, headerRow: res.headerRow, note: res.note };
   } catch (e) {
     return { error: '解析失败:' + (e instanceof Error ? e.message : String(e)) + '。可手工录入兜底。' };
   }
