@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
+import { submitPurchaseDeposit } from '@/app/actions/procurement-payment';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
 import { ProcurementReconciliationPanel } from '@/components/procurement/ProcurementReconciliationPanel';
@@ -122,6 +123,25 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     await confirm({ title: '✅ 审批通过', confirmText: '知道了' }); router.refresh();
   }
 
+  async function handleDeposit() {
+    const v = await prompt({
+      title: '申请定金 / 预付',
+      message: '货没到就先付供应商一笔(定金/预付)。走财务同一条付款通道审批出款;货到对账时自动从净应付里冲抵。',
+      fields: [
+        { name: 'amount', label: '金额', type: 'number', required: true, suffix: po.currency || 'RMB' },
+        { name: 'note', label: '用途/备注(可选,如「30%定金,开工前付」)', type: 'text' },
+      ],
+      confirmText: '提交财务',
+    });
+    if (!v) return;
+    setBusy('deposit');
+    const res = await submitPurchaseDeposit(po.id, v.amount, { note: v.note || undefined });
+    setBusy('');
+    if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
+    await confirm({ title: '✅ 定金申请已提交财务', message: `单号 ${(res as any).request_no || ''}。财务审批后经周排款出款;货到对账时自动冲抵。`, confirmText: '知道了' });
+    router.refresh();
+  }
+
   async function handleResync() {
     if (!(await confirm({ title: '重发财务同步?', message: '把本采购单的完整数据(供应商/明细/内部订单号)重推给财务系统,用于订正旧事件。', confirmText: '重发', cancelText: '取消' }))) return;
     setBusy('resync');
@@ -178,6 +198,13 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
             className="text-xs px-3 py-2 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-medium disabled:opacity-50">
             {exporting ? '导出中…' : '📤 导出无价版(发内部)'}
           </button>
+          {canProcure && !['draft', 'cancelled'].includes(po.status) && (
+            <button onClick={handleDeposit} disabled={busy === 'deposit'}
+              title="货没到先付供应商一笔(定金/预付);走财务付款通道,货到对账自动冲抵"
+              className="text-xs px-3 py-2 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 font-medium disabled:opacity-50">
+              {busy === 'deposit' ? '提交中…' : '💰 申请定金/预付'}
+            </button>
+          )}
           {isAdmin && (
             <button onClick={handleResync} disabled={busy === 'resync'}
               title="把完整数据重推财务系统,订正旧事件(无供应商/无明细)"
