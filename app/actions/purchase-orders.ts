@@ -972,7 +972,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
       r.consumption ?? '', '',                          // 单件用量kg · 订单数量(空)
       Math.round(r.qty * 1000) / 1000, r.unit || '',    // 总用量 · 单位
       ...(withPrice ? [r.unit_price ?? '', r.amount ? Math.round(r.amount * 100) / 100 : ''] : []),
-      r.purchase_spec || '', r.notes || '',              // 规格(采购填) · 备注
+      r.purchase_spec || r.specification || '', r.notes || '',  // 规格(采购填优先,回落物料规格) · 备注
     ];
     if (withPrice && r.amount) totalAmount += r.amount;
     const row = ws.addRow(cells);
