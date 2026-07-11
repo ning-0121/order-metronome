@@ -842,7 +842,7 @@ export default async function OrderDetailPage({
 
         {/* Tab: 延期申请 */}
         {activeTab === 'delays' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div id="delay-approve" className="bg-white rounded-xl border border-amber-300 ring-2 ring-amber-100 p-6 scroll-mt-24">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">延期申请记录</h2>
             {delayRequests && delayRequests.length > 0 ? (
               <DelayRequestsList

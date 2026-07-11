@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { isApprovalPending } from '@/lib/domain/types';
 import { approveDelayRequest, rejectDelayRequest } from '@/app/actions/delays';
 import { useRouter } from 'next/navigation';
@@ -38,6 +38,11 @@ export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isO
   const router = useRouter();
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState<Record<string, string>>({});
+  // 从顶部横幅「去审批」进入 tab=delays 时,确保滚动到审批面板(delays 不在可见 tab 栏,不滚会以为「没反应」)
+  useEffect(() => {
+    const el = document.getElementById('delay-approve');
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, []);
   const [showDecisionForm, setShowDecisionForm] = useState<Record<string, boolean>>({});
 
   async function handleApprove(requestId: string) {

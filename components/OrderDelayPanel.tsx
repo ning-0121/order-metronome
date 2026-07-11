@@ -201,7 +201,8 @@ export function OrderDelayPanel({
               {/* 有待审批的延期 → 直达审批页(delays 标签不在导航栏,靠此按钮进入;审批权限由该页把关)*/}
               {pendingCount > 0 && (
                 <Link
-                  href={`/orders/${orderId}?tab=delays`}
+                  href={`/orders/${orderId}?tab=delays#delay-approve`}
+                  scroll
                   className="text-xs px-2 py-1 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 shrink-0"
                 >
                   ✅ 去审批
