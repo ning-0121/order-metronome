@@ -84,6 +84,23 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
 
   useEffect(() => { load(); }, [load]);
 
+  // 撤回/财务驳回退回 pending → 预填上次申请数据,业务改后重报(只填空字段,不覆盖正在编辑的值)
+  useEffect(() => {
+    if (conf?.status !== 'pending') return;
+    setApplyForm(f => ({
+      shipment_qty: f.shipment_qty || (conf.shipment_qty != null ? String(conf.shipment_qty) : ''),
+      carton_count: f.carton_count || (conf.carton_count != null ? String(conf.carton_count) : ''),
+      customer_name: f.customer_name || conf.customer_name || '',
+      product_name: f.product_name || conf.product_name || '',
+      delivery_address: f.delivery_address || conf.delivery_address || '',
+      delivery_method: f.delivery_method || conf.delivery_method || '',
+      shipping_port: f.shipping_port || conf.shipping_port || '',
+      destination_port: f.destination_port || conf.destination_port || '',
+      ci_number: f.ci_number || conf.ci_number || '',
+      requested_ship_date: f.requested_ship_date || conf.requested_ship_date || '',
+    }));
+  }, [conf]);
+
   // 当前步骤判断
   function getCurrentStep(): number {
     if (!conf) return 0; // 未创建 → Step 1 (QC)
@@ -98,7 +115,8 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
   const currentStep = getCurrentStep();
 
   // 角色权限
-  const canApply = currentRole === 'sales' || isAdmin;
+  // 业务执行(merchandiser)是出货申请的主责岗(2026-07 派单归位),与 sales/admin 同可申请
+  const canApply = currentRole === 'sales' || currentRole === 'merchandiser' || isAdmin;
   const canApproveFinance = currentRole === 'finance' || isAdmin;
   const canExecute = currentRole === 'logistics' || isAdmin;
 
@@ -261,10 +279,15 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
         </div>
       )}
 
-      {/* ===== Step 2: 申请出货（业务） ===== */}
-      {currentStep <= 1 && !conf && canApply && (
+      {/* ===== Step 2: 申请出货（业务） =====
+          !conf=首次申请;conf.status==='pending'=撤回/财务驳回退回 → 必须重新显示表单(预填旧值改后重报)。
+          此前条件只有 !conf → 撤回后业务永远没表单可填(2026-07-11)。 */}
+      {currentStep <= 1 && (!conf || conf.status === 'pending') && canApply && (
         <div className="bg-white rounded-xl border border-indigo-200 p-6">
-          <h3 className="font-bold text-gray-900 mb-4">📤 申请出货</h3>
+          <h3 className="font-bold text-gray-900 mb-4">📤 {conf?.status === 'pending' ? '重新申请出货(已预填上次数据,改后提交)' : '申请出货'}</h3>
+          {conf?.status === 'pending' && conf.finance_note && (
+            <div className="mb-3 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">上次申请:{conf.finance_note}</div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">出货数量(件) <span className="text-red-500">*</span></label>
