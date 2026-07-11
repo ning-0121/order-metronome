@@ -12,6 +12,7 @@ import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
 import { getNamingHint, getAcceptString, validateFileExt, getFileTypeForStep } from '@/lib/domain/fileNaming';
 import { FileNameCheck } from '@/components/FileNameCheck';
+import { isInspectionStep } from '@/lib/domain/inspectionWaiver';
 
 const QC_STEPS = new Set([
   'pre_production_sample_ready', 'materials_received_inspected', 'production_kickoff',
@@ -22,6 +23,10 @@ const QC_STEPS = new Set([
 // 制品在其他模块产出的节点(PI/生产单/装箱单):不硬要求前端选文件,由服务端判定制品是否已产出
 // (2026-07-10 用户拍板:做好了自动带过来,人仍点「完成」,免重传)。
 const AUTO_ARTIFACT_STEPS = new Set(['pi_confirmed', 'production_order_upload', 'ci_made']);
+
+// PO确认已定为「免凭证」(多方确认/关键信息核对即可完成),但老订单(V1)DB 里 evidence_required 仍可能为 true。
+// 代码层面对这些节点一律免凭证,覆盖 DB 旧值,避免"要凭证但上传框已隐藏"的死锁(2026-07-11)。
+const POLICY_NO_EVIDENCE_STEPS = new Set(['po_confirmed']);
 
 interface MilestoneActionsProps {
   milestone: any;
@@ -36,6 +41,8 @@ interface MilestoneActionsProps {
   orderId?: string;
   /** 订单号（用于文件命名提示） */
   orderNo?: string;
+  /** 本单「免验货」:出货前验货节点免验货报告即可放行(由 QC/生产主管 操作) */
+  inspectionWaived?: boolean;
 }
 
 export function MilestoneActions({
@@ -47,6 +54,7 @@ export function MilestoneActions({
   isAdmin = false,
   orderId,
   orderNo,
+  inspectionWaived = false,
 }: MilestoneActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -147,7 +155,9 @@ export function MilestoneActions({
     }
 
     // 必须上传证据(制品在其他模块产出的节点除外 —— 交服务端判定,没产出时服务端会提示补传)
-    if (milestone.evidence_required && !evidenceFile && !AUTO_ARTIFACT_STEPS.has(milestone.step_key)) {
+    // 本单「免验货」时,出货前验货节点免报告放行(交服务端做角色门禁:仅 QC/生产主管/admin)
+    const waiveInspectionEvidence = inspectionWaived && isInspectionStep(milestone.step_key);
+    if (milestone.evidence_required && !evidenceFile && !AUTO_ARTIFACT_STEPS.has(milestone.step_key) && !waiveInspectionEvidence && !POLICY_NO_EVIDENCE_STEPS.has(milestone.step_key)) {
       setSubmitError('⚠️ 此节点需要上传凭证才能完成，请选择文件');
       return;
     }
@@ -508,6 +518,14 @@ export function MilestoneActions({
         <form onSubmit={handleSubmitEvidence}
           className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 space-y-4">
           <p className="text-sm font-semibold text-indigo-900">提交处理凭证</p>
+
+          {/* 本单免验货:出货前验货节点可免报告放行 */}
+          {inspectionWaived && isInspectionStep(milestone.step_key) && (
+            <div className="text-xs text-emerald-800 bg-emerald-50 rounded-lg p-2 border border-emerald-200">
+              🏷️ 本单已标「免验货」——无需验货报告即可直接点下方「确认完成」放行。
+              (放行仅限 QC / 生产主管 / 管理员;有报告的话也可照常上传)
+            </div>
+          )}
 
           {/* AI 操作建议 */}
           <AIAdviceBox

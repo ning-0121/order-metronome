@@ -14,6 +14,7 @@ import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { milestoneOwnerRoleMatches } from '@/lib/domain/milestonePerm';
+import { isInspectionStep, isInspectionWaived, roleAllowed, CAN_RELEASE_WITHOUT_INSPECTION } from '@/lib/domain/inspectionWaiver';
 // TODO(Sprint-1): merchGroup (~L180) 应迁移到 ROLE_GROUPS.EXECUTION，但 EXECUTION 含 production_manager
 //                 而原 merchGroup 不含，直接迁移会改变权限（属 P0 候选 bug），等 P0 评估后再动
 
@@ -494,9 +495,13 @@ export async function markMilestoneDone(
     }
   }
 
+  // 免验放行标记(出货前验货节点在「本单免验货」下免报告放行)——在 evidence 块内赋值,完成后写审计日志
+  let inspectionWaived = false;
+
   // Check if evidence is required and exists（多重检查 — 用 service-role 绕过 RLS，
   // 否则非 admin 用户的 RLS 会过滤掉附件，导致明明有文件却卡住"需要凭证"）
-  if (milestone.evidence_required) {
+  // po_confirmed 已定为「免凭证」(多方确认/信息核对即完成),老订单 DB evidence_required 可能仍为 true → 代码层覆盖免掉。
+  if (milestone.evidence_required && milestone.step_key !== 'po_confirmed') {
     const sysClient = (() => {
       try { return createServiceRoleClient(); } catch { return supabase; }
     })();
@@ -519,6 +524,22 @@ export async function markMilestoneDone(
         producedElsewhere = !!(data && data.length);
       }
     } catch { /* 表未建/查询失败 → 当作没产出,回退原有凭证校验 */ }
+
+    // 本单免验货:出货前验货节点(成品验货/放行、跟单尾查)免验货报告即可放行。
+    //   免验意图来自订单 special_tags(业务/QC 用「免验货」标签设置),服务端为准;
+    //   但放行动作必须由 QC/生产主管/admin 操作 —— 业务不能自己免验自己催的货。
+    if (isInspectionStep(milestone.step_key)) {
+      try {
+        const { data: ord } = await (sysClient.from('orders') as any)
+          .select('special_tags').eq('id', milestone.order_id).single();
+        if (isInspectionWaived(ord)) {
+          if (!roleAllowed(userRoles, CAN_RELEASE_WITHOUT_INSPECTION)) {
+            return { error: '本单已标「免验货」,但免验放行需由 生产主管 / QC / 管理员操作' };
+          }
+          inspectionWaived = true;
+        }
+      } catch { /* 查订单失败 → 当作未免验,回退正常验货报告校验 */ }
+    }
 
     // 检查1: milestone_id 关联的附件（attachments 表）
     const { data: att1 } = await (sysClient.from('attachments') as any)
@@ -612,7 +633,7 @@ export async function markMilestoneDone(
       }
     } else {
       const hasEvidence = (att1 && att1.length > 0) || (att2 && att2.length > 0) || att3.length > 0 || att4.length > 0 || att5.length > 0;
-      if (!hasEvidence && !producedElsewhere) {
+      if (!hasEvidence && !producedElsewhere && !inspectionWaived) {
         const typeHint = expectedTypes ? `（需要：${expectedTypes.join(' 或 ')}）` : '';
         return { error: `此节点需要上传凭证后才能标记完成${typeHint}，请先上传对应文件` };
       }
@@ -669,6 +690,19 @@ export async function markMilestoneDone(
 
   if (directErr || !directUpdate) {
     return { error: directErr?.message || '节点状态更新失败，请重试' };
+  }
+
+  // 免验放行审计:本单免验货下无验货报告完成出货前验货节点 → 显式留痕(谁、哪个节点)
+  if (inspectionWaived) {
+    try {
+      await (supabase.from('order_logs') as any).insert({
+        order_id: milestone.order_id,
+        actor_user_id: user.id,
+        action: 'inspection_waiver',
+        note: `免验放行:「${milestone.name || milestone.step_key}」无验货报告完成(本单已标「免验货」)`,
+        created_at: new Date().toISOString(),
+      });
+    } catch { /* 审计日志失败不阻断完成 */ }
   }
 
   // ── Runtime Hook: 节点完成 → 异步重算 confidence。markMilestoneDone 走独立 update，
