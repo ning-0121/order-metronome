@@ -3,27 +3,17 @@
  * 数据源:orders + packing_lists(doc_meta)+ packing_list_lines(出货事实)+ order_line_items(主数据/价)。
  */
 import { EXPORT_SELLER } from '@/lib/domain/document-templates';
+import { compareSizeKeys } from '@/lib/utils/size-sort';
 
 const CURRENCY = { USD: { code: 'USD', symbol: '$', label: 'USD' }, CNY: { code: 'CNY', symbol: '¥', label: 'RMB' } } as const;
 
 function gcd(a: number, b: number): number { return b ? gcd(b, a % b) : a; }
 
-// 服装标准码序:小 → 大。未识别的码按原始顺序排在末尾,保持稳定。
-const SIZE_ORDER = ['XXXS', '3XS', 'XXS', '2XS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'XXXL', '3XL', 'XXXXL', '4XL', '5XL'];
-function sizeRank(k: string): number {
-  const u = String(k).trim().toUpperCase();
-  const i = SIZE_ORDER.indexOf(u);
-  if (i >= 0) return i;
-  const n = Number(u);            // 纯数字码(如 34/36/38)按数值排
-  if (Number.isFinite(n)) return 1000 + n;
-  return 2000;                     // 未识别:排末尾,靠 stable sort 保原始序
-}
-
 /** 各码数量 → 约分比例文本,如 {S:300,M:600,L:600,XL:300} → "S-M-L-XL / 1-2-2-1"(模板 Size 列样式)。 */
 export function sizeRatioText(sizes: any): string {
   if (!sizes || typeof sizes !== 'object') return '';
   const keys = Object.keys(sizes).filter(k => Number(sizes[k]) > 0)
-    .sort((a, b) => sizeRank(a) - sizeRank(b));
+    .sort(compareSizeKeys);   // 全链统一码序(小→大),别自造 SIZE_ORDER
   if (keys.length === 0) return '';
   const vals = keys.map(k => Number(sizes[k]));
   const g = vals.reduce((a, b) => gcd(a, b)) || 1;

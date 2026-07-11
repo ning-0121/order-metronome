@@ -37,6 +37,7 @@ async function notifyFinanceOverReceipt(supabase: any, line: any, gate: { ordere
 }
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
+import { sortSizeKeys } from '@/lib/utils/size-sort';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 
@@ -148,8 +149,6 @@ export async function getProcurementItems(orderId: string): Promise<{
     if (l.size) g._sizes.add(l.size);
     g._n++;
   }
-  const SIZE_ORDER = ['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', '2xl', 'xxxl', '3xl', '4xl', '5xl'];
-  const sizeRank = (s: any) => { const i = SIZE_ORDER.indexOf(String(s).toLowerCase()); return i < 0 ? 99 : i; };
   const rawItems = [...grouped.values()].map((g) => {
     const ordered = Number(g.ordered_qty) || 0;
     const recv = g.received_qty ?? null;
@@ -160,7 +159,7 @@ export async function getProcurementItems(orderId: string): Promise<{
       received_qty: recv,
       difference_qty: diffQty,
       difference_pct: diffPct,
-      sizes: [...(g._sizes || [])].sort((a: any, b: any) => sizeRank(a) - sizeRank(b)),
+      sizes: sortSizeKeys([...(g._sizes || [])] as string[]),
       size_count: g._n, line_ids: g._line_ids,
     };
   }) as ProcurementLineItem[];

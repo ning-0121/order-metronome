@@ -14,6 +14,7 @@ import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup, isAdminRole } from '@/lib/domain/roles';
 import { maskFloorForLines, maskSupplierFinance } from '@/lib/procurement/purchaseOrder';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
+import { compareSizeKeys } from '@/lib/utils/size-sort';
 import { evaluateProcurementApproval, evaluateBudgetGate, reasonsCn, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
 import { placePurchaseOrderCore } from '@/lib/procurement/placeCore';
@@ -1031,7 +1032,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     });
     // 排序:原辅料 → 款号 → 颜色 → 尺码,便于供应商看
     skuRows.sort((a, b) => (a.material || '').localeCompare(b.material || '') || (a.style_no || '').localeCompare(b.style_no || '')
-      || (a.color || '').localeCompare(b.color || '') || (a.size || '').localeCompare(b.size || ''));
+      || (a.color || '').localeCompare(b.color || '') || compareSizeKeys(a.size || '', b.size || ''));
     let skuTotal = 0;
     for (const r of skuRows) {
       skuTotal += r.qty;

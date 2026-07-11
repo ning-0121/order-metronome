@@ -18,6 +18,7 @@ import { listSuppliers } from '@/app/actions/suppliers';
 import { recordLeftoverStocktake, getAvailableStockByKeys } from '@/app/actions/inventory';
 import { computeSuggestedPurchaseQty } from '@/lib/services/procurement-consolidation';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { sortSizeKeys } from '@/lib/utils/size-sort';
 
 /** 补采购财务审批状态 → 显示 */
 const SUPP_STATUS: Record<string, { label: string; cls: string }> = {
@@ -1386,12 +1387,13 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
             if (!skuOpen) return null;
             // 由可编辑列表构建矩阵:行=款号+颜色,列=尺码
             const rowsMap = new Map<string, { style_no: string; product_name: string; color_cn: string; color_en: string }>();
-            const sizes: string[] = [];
+            const sizeSet: string[] = [];
             for (const c of skuList) {
               const rk = `${c.style_no}§${c.color_cn}§${c.color_en}`;
               if (!rowsMap.has(rk)) rowsMap.set(rk, c);
-              if (c.size && !sizes.includes(c.size)) sizes.push(c.size);
+              if (c.size && !sizeSet.includes(c.size)) sizeSet.push(c.size);
             }
+            const sizes = sortSizeKeys(sizeSet);   // 尺码列走全链统一排序(XS→S→M→L→XL…),别按录入先后
             const rows = [...rowsMap.values()];
             const cellOf = (r: any, size: string) => skuList.find(c => c.style_no === r.style_no && c.color_cn === r.color_cn && c.color_en === r.color_en && c.size === size);
             const setQty = (r: any, size: string, val: string) => setSkuList(prev => prev.map(c => (c.style_no === r.style_no && c.color_cn === r.color_cn && c.color_en === r.color_en && c.size === size) ? { ...c, qty: val } : c));
