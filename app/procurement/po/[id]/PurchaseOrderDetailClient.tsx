@@ -7,7 +7,6 @@ import { listSuppliers } from '@/app/actions/suppliers';
 import { submitPurchaseDeposit } from '@/app/actions/procurement-payment';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
-import { ProcurementReconciliationPanel } from '@/components/procurement/ProcurementReconciliationPanel';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 
 const REASON_LABELS: Record<string, string> = {
@@ -379,8 +378,8 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
       {/* 自定义追踪提醒(采购设节点+日期,到点提醒采购/业务/跟单) */}
       <PoRemindersPanel poId={po.id} />
 
-      {/* 采购对账(供应商×PO):收货实况+退货+折扣→净应付,采购先和供应商对好(P2 再推财务付款) */}
-      <ProcurementReconciliationPanel poId={po.id} canProcure={canProcure} />
+      {/* 采购对账面板已撤(老板 2026-07-11「没用」):对账走「供应商对账台账/收货对账单」页;
+          组件 ProcurementReconciliationPanel 保留未删,要恢复加回一行即可 */}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700 flex items-center gap-2">
