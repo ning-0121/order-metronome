@@ -438,8 +438,10 @@ export async function approveDeferralStep(delayRequestId: string, note?: string,
   if (chain.length === 0) return { error: '该申请无审批链(旧单请走原审批入口)' };
   const step = Number((dr as any).current_step) || 0;
   const needRole = chain[step];
-  if (!roles.includes('admin') && !roles.includes(needRole)) {
-    return { error: `本步需「${roleCn(needRole)}」确认,你的角色不匹配` };
+  // 2026-07-11:CAN_APPROVE_DELAY 经理(admin/order_manager/sales_manager)可代任一步确认(与 admin 同权)。
+  //   否则业务执行(merchandiser)的延期链首是 sales,高洁(order_manager)角色不匹配 → 审批不了。
+  if (!hasRoleInGroup(roles, 'CAN_APPROVE_DELAY') && !roles.includes(needRole)) {
+    return { error: `本步需「${roleCn(needRole)}」或业务经理确认,你的角色不匹配` };
   }
 
   const approvals = Array.isArray((dr as any).approvals) ? (dr as any).approvals : [];
@@ -566,7 +568,9 @@ async function approveDelayRequestCore(
   // 否则绕过采购/生产下游压缩逐级确认,留下 status=approved 但 current_step 未走满的矛盾态。
   const _dChain = Array.isArray(delayRequestData.approval_chain) ? delayRequestData.approval_chain : [];
   const _dStep = Number(delayRequestData.current_step) || 0;
-  if (_dChain.length > 0 && _dStep < _dChain.length && !isAdmin) {
+  // 2026-07-11:CAN_APPROVE_DELAY 经理与 admin 同权,可对未走满的链单人直批(否则高洁 order_manager 卡在 CHAIN_INCOMPLETE)
+  const _canApproveDelay = isAdmin || hasRoleInGroup(userRoles, 'CAN_APPROVE_DELAY');
+  if (_dChain.length > 0 && _dStep < _dChain.length && !_canApproveDelay) {
     return failure('此改期有多级审批链未走满,请逐级确认(不能单人直批)', 'CHAIN_INCOMPLETE');
   }
 
