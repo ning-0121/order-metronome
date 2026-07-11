@@ -41,6 +41,7 @@ type WebhookEventType =
   | 'goods_receipt.recorded'
   | 'file.uploaded'
   | 'shipping_invoice.issued'
+  | 'payable.created'
 
 interface WebhookPayload {
   event: WebhookEventType
@@ -457,6 +458,20 @@ export async function syncGoodsReceiptToFinance(payload: {
   received_qty_total?: number | null; inspection_result?: string | null; line_status?: string | null;
 }) {
   return sendToFinanceSystem('goods_receipt.recorded', payload as unknown as Record<string, unknown>)
+}
+
+/**
+ * 采购付款申请 → 财务应付(P2,2026-07-11)。采购对账确认后分批(自定义金额)提交,财务按
+ * payable.created 建 payable_records(=付款申请)。source_ref=节拍器付款申请 id(入站幂等 +
+ * 付款完成回带);bill_no=PR 单号((supplier_name,bill_no) 防重付)。财务侧需在 webhook 加分支。
+ */
+export async function emitProcurementPayableToFinance(payload: {
+  source_ref: string; bill_no: string; supplier_name?: string | null; supplier_id?: string | null;
+  amount: number; currency?: string | null; description?: string | null;
+  reconciliation_id?: string | null; purchase_order_id?: string | null; po_no?: string | null;
+  order_refs?: unknown[]; due_date?: string | null;
+}) {
+  return sendToFinanceSystem('payable.created', payload as unknown as Record<string, unknown>)
 }
 
 /** 内部成本核算单冻结 → 财务预算(单件单价,财务 ×订单数量 换算)。纯函数,可测。 */

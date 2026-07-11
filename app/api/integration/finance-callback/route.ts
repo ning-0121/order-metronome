@@ -11,6 +11,29 @@ import { createClient } from '@/lib/supabase/server'
 const INTEGRATION_API_KEY = process.env.INTEGRATION_API_KEY || ''
 const INTEGRATION_WEBHOOK_SECRET = process.env.INTEGRATION_WEBHOOK_SECRET || ''
 
+/**
+ * 采购付款申请回传(P2):财务付完某笔 payable(source_ref=付款申请 id)→ 标付款申请已付 +
+ * 累加对账单 paid_amount;付满净应付则对账 status=paid。service-role 写(绕 RLS)。幂等由上层
+ * request_id 去重保证(重放不会重复进来)。
+ */
+async function applyProcurementPayment(svc: any, prId: string, amount: number) {
+  const { data: pr } = await svc.from('procurement_payment_requests')
+    .select('id, reconciliation_id, paid_amount, amount').eq('id', prId).maybeSingle()
+  if (!pr) return   // 非采购付款申请(可能是别的应付),忽略
+  const now = new Date().toISOString()
+  await svc.from('procurement_payment_requests')
+    .update({ status: 'paid', paid_amount: (Number(pr.paid_amount) || 0) + amount, paid_at: now, updated_at: now })
+    .eq('id', prId)
+  const { data: recon } = await svc.from('procurement_reconciliations')
+    .select('id, paid_amount, net_payable, status').eq('id', pr.reconciliation_id).maybeSingle()
+  if (!recon) return
+  const newPaid = (Number(recon.paid_amount) || 0) + amount
+  const fullyPaid = newPaid + 0.01 >= (Number(recon.net_payable) || 0) && (Number(recon.net_payable) || 0) > 0
+  await svc.from('procurement_reconciliations').update({
+    paid_amount: newPaid, ...(fullyPaid ? { status: 'paid', paid_at: now } : {}), updated_at: now,
+  }).eq('id', pr.reconciliation_id)
+}
+
 interface ApprovalCallback {
   event: string
   timestamp: string
@@ -66,25 +89,35 @@ export async function POST(request: Request) {
   // 财务进度事件（结算/收款/付款完成）——append-only 记进 order_finance_events，
   // 让节拍器看到资金进度(此前财务进度对节拍器全黑盒)。按 qimo_order_id=orders.id 精确关联。
   const FINANCE_PROGRESS = new Set(['settlement.closed', 'collection.received', 'payment.completed', 'budget.confirmed'])
-  if (FINANCE_PROGRESS.has((payload as unknown as { event?: string }).event || '')) {
-    const d = payload.data as unknown as { qimo_order_id?: string; order_no?: string; amount?: number; currency?: string; note?: string; at?: string }
+  const evt = (payload as unknown as { event?: string }).event || ''
+  if (FINANCE_PROGRESS.has(evt)) {
+    const d = payload.data as unknown as { qimo_order_id?: string; order_no?: string; amount?: number; currency?: string; note?: string; at?: string; source_ref?: string }
     try {
       // 审计 A4:改用 service-role 写(绕过 RLS,配合去掉 anon INSERT 策略);
       // 幂等键 request_id + onConflict DO NOTHING → 5 分钟窗口内重放同一回调不重复记账。
       const { createServiceRoleClient } = await import('@/lib/supabase/server')
       const svc = createServiceRoleClient()
+      // 幂等(P2):该 request_id 已记过 → 已处理,直接 ok(付款回传重放不重复累加对账已付)。
+      if (payload.request_id) {
+        const { data: seen } = await (svc.from('order_finance_events') as any).select('id').eq('request_id', payload.request_id).maybeSingle()
+        if (seen) return NextResponse.json({ status: 'ok', recorded: evt, dedup: true })
+      }
       const { error } = await (svc.from('order_finance_events') as unknown as { upsert: (v: unknown, o: unknown) => Promise<{ error: { message: string } | null }> }).upsert({
         request_id: payload.request_id || null,
         order_id: d.qimo_order_id || null,
         order_no: d.order_no || null,
-        event_type: (payload as unknown as { event: string }).event,
+        event_type: evt,
         amount: d.amount ?? null,
         currency: d.currency || null,
         note: d.note || null,
         occurred_at: d.at || new Date().toISOString(),
       }, { onConflict: 'request_id', ignoreDuplicates: true })
       if (error) throw new Error(error.message)
-      return NextResponse.json({ status: 'ok', recorded: (payload as unknown as { event: string }).event })
+      // 采购付款申请回传(P2):payment.completed 带 source_ref → 累加对账已付、标付款申请已付。
+      if (evt === 'payment.completed' && d.source_ref) {
+        await applyProcurementPayment(svc, String(d.source_ref), Number(d.amount) || 0)
+      }
+      return NextResponse.json({ status: 'ok', recorded: evt })
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : 'record failed' }, { status: 500 })
     }

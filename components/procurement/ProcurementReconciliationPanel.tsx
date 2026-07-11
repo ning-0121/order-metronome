@@ -5,6 +5,7 @@ import {
   getOrCreateReconciliation, saveReconciliationLine, saveReconciliationHeader,
   confirmReconciliation, listPoReceiptBatches, createProcurementReturn, confirmProcurementReturn,
 } from '@/app/actions/procurement-reconciliation';
+import { listPaymentRequests, submitPaymentRequest } from '@/app/actions/procurement-payment';
 
 const n2 = (v: any) => (v == null ? '' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
 const RET_TYPE: Record<string, string> = { return: '退货', replace: '换货', rework: '返修' };
@@ -140,6 +141,11 @@ export function ProcurementReconciliationPanel({ poId, canProcure = false }: { p
 
           {showReturn && editable && <ReturnForm poId={poId} onDone={() => { setShowReturn(false); load(); }} />}
 
+          {/* 付款申请(分批·每周·自定义金额)——对账确认后可提 */}
+          {['confirmed', 'submitted', 'paid'].includes(recon.status) && (
+            <PaymentRequests reconId={recon.id} canProcure={canProcure} onChanged={load} />
+          )}
+
           {/* 退货/返修列表 */}
           {returns.length > 0 && (
             <div className="mt-3">
@@ -245,6 +251,72 @@ function ReturnForm({ poId, onDone }: { poId: string; onDone: () => void }) {
         <button onClick={submit} disabled={busy} className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">{busy ? '提交中…' : '建退货单(草稿)'}</button>
         <button onClick={onDone} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500">取消</button>
       </div>
+    </div>
+  );
+}
+
+const PR_STATUS: Record<string, [string, string]> = {
+  draft: ['草稿', 'bg-gray-100 text-gray-600'], submitted: ['已提交财务', 'bg-indigo-100 text-indigo-700'],
+  approved: ['财务已批', 'bg-teal-100 text-teal-700'], paid: ['已付', 'bg-emerald-100 text-emerald-700'],
+  rejected: ['已驳回', 'bg-rose-100 text-rose-700'], cancelled: ['已取消', 'bg-gray-100 text-gray-500'],
+};
+
+function PaymentRequests({ reconId, canProcure, onChanged }: { reconId: string; canProcure: boolean; onChanged: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [amount, setAmount] = useState('');
+  const [week, setWeek] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => { const r = await listPaymentRequests(reconId); if ((r as any).data) setData((r as any).data); }, [reconId]);
+  useEffect(() => { load(); }, [load]);
+
+  async function submit() {
+    const amt = Number(amount);
+    if (!(amt > 0)) { setErr('请输入付款金额'); return; }
+    setBusy(true); setErr('');
+    const r = await submitPaymentRequest(reconId, amt, { week_label: week || undefined });
+    setBusy(false);
+    if ((r as any).error) { setErr((r as any).error); return; }
+    setAmount(''); setWeek('');
+    await load(); onChanged();
+  }
+
+  if (!data) return null;
+  return (
+    <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 space-y-2">
+      <div className="text-xs font-semibold text-indigo-800">💸 付款申请（分批·每周·自定义金额）</div>
+      <div className="grid grid-cols-4 gap-2 text-xs">
+        <div><span className="text-gray-500">净应付</span><div className="font-semibold text-gray-800">¥{n2(data.net_payable)}</div></div>
+        <div><span className="text-gray-500">已申请</span><div className="font-semibold text-indigo-700">¥{n2(data.requested)}</div></div>
+        <div><span className="text-gray-500">剩余可申请</span><div className="font-bold text-indigo-900">¥{n2(data.remaining)}</div></div>
+        <div><span className="text-gray-500">已付</span><div className="font-semibold text-emerald-700">¥{n2(data.paid_amount)}</div></div>
+      </div>
+      {data.requests.length > 0 && (
+        <ul className="space-y-1">
+          {data.requests.map((r: any) => {
+            const [label, cls] = PR_STATUS[r.status] || [r.status, 'bg-gray-100 text-gray-600'];
+            return (
+              <li key={r.id} className="flex items-center gap-2 text-xs bg-white rounded border border-gray-100 px-2 py-1">
+                <span className="font-mono text-gray-600">{r.request_no}</span>
+                <span className="font-semibold text-gray-800">¥{n2(r.amount)}</span>
+                {r.week_label && <span className="text-gray-400">{r.week_label}</span>}
+                <span className={`ml-auto text-[11px] px-1.5 py-0.5 rounded-full ${cls}`}>{label}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {canProcure && data.remaining > 0.01 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="number" step="any" value={amount} onChange={e => setAmount(e.target.value)} placeholder={`本笔金额(≤${n2(data.remaining)})`}
+            className="w-40 rounded border border-gray-300 px-2 py-1 text-xs text-right" />
+          <input value={week} onChange={e => setWeek(e.target.value)} placeholder="周次/备注(可选)" className="w-40 rounded border border-gray-300 px-2 py-1 text-xs" />
+          <button onClick={submit} disabled={busy} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">{busy ? '提交中…' : '提交付款申请'}</button>
+          {err && <span className="text-[11px] text-rose-600">{err}</span>}
+        </div>
+      )}
+      {data.remaining <= 0.01 && <div className="text-[11px] text-gray-400">净应付已全部提交付款申请。</div>}
     </div>
   );
 }
