@@ -13,6 +13,7 @@ import { isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
+import { milestoneOwnerRoleMatches } from '@/lib/domain/milestonePerm';
 // TODO(Sprint-1): merchGroup (~L180) 应迁移到 ROLE_GROUPS.EXECUTION，但 EXECUTION 含 production_manager
 //                 而原 merchGroup 不含，直接迁移会改变权限（属 P0 候选 bug），等 P0 评估后再动
 
@@ -185,20 +186,8 @@ export async function markMilestoneDone(
 
   // 管理员可以代标完成（用于一线人员离职/休假的应急场景），但日志会标注「管理员代操作」
   const isAssignedUser = milestone.owner_user_id === user.id;
-  // 角色合并：production/qc/quality 都归入 merchandiser
-  const merchGroup = ['merchandiser', 'production', 'qc', 'quality'];
-  const roleMatches = milestone.owner_role && userRoles.some(
-    (r: string) => {
-      const nr = r.toLowerCase();
-      const or = (milestone.owner_role as string).toLowerCase();
-      if (nr === or) return true;
-      if ((or === 'sales' && nr === 'merchandiser') || (or === 'merchandiser' && nr === 'sales')) return true;
-      if (merchGroup.includes(or) && merchGroup.includes(nr)) return true;
-      // 行政督察可操作需要双签的节点（评审会等）
-      if (nr === 'admin_assistant' && or === 'sales') return true;
-      return false;
-    }
-  );
+  // 角色合并(单一真相):production/qc/quality/merchandiser 互通(见 milestonePerm)
+  const roleMatches = milestoneOwnerRoleMatches(userRoles, milestone.owner_role);
   if (!isAssignedUser && !roleMatches && !isAdmin) {
     return { error: '无权操作：只有对应角色的负责人或管理员可以标记完成' };
   }
@@ -1019,10 +1008,8 @@ export async function markMilestoneBlocked(milestoneId: string, blockedReason: s
   if (lifecycleErr) return { error: lifecycleErr };
 
   const isAssignedUser = milestone.owner_user_id === user.id;
-  const roleMatches = milestone.owner_role && userRoles.some(
-    (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
-      || (milestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
-  );
+  // 与 done 同口径:生产/QC 能完成的跟单节点,也能标卡住/申请延期(修 P2 权限不自洽)
+  const roleMatches = milestoneOwnerRoleMatches(userRoles, milestone.owner_role);
   if (!isAdminUser && !isAssignedUser && !roleMatches) {
     return { error: '无权操作：只有管理员或负责人可以标记卡住' };
   }

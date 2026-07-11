@@ -14,6 +14,7 @@ import { createClient } from '@/lib/supabase/server';
 import { canModifyMilestones, getStatusTransitionError, isBlockedStatus, isDoneStatus, isValidStatusTransition, normalizeMilestoneStatus, type MilestoneStatus, type OrderLifecycleStatus } from '@/lib/domain/types';
 import { formatBlockedReasonToNotes, appendToNotes } from '@/lib/domain/milestone-helpers';
 import { normalizeRoleToDb } from '@/lib/domain/roles';
+import { milestoneOwnerRoleMatches } from '@/lib/domain/milestonePerm';
 // DB profile-based role check is done inline (multi-role aware)
 
 /**
@@ -418,10 +419,8 @@ export async function transitionMilestoneStatus(
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdminUser = userRoles.includes('admin');
   const isAssignedUser = milestone.owner_user_id === user.id;
-  const roleMatches = milestone.owner_role && userRoles.some(
-    (r: string) => r.toLowerCase() === (milestone.owner_role as string).toLowerCase()
-      || (milestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
-  );
+  // 与 markMilestoneDone 同口径(生产/QC/跟单互通),修 P2 权限不自洽
+  const roleMatches = milestoneOwnerRoleMatches(userRoles, milestone.owner_role);
   if (!isAdminUser && !isAssignedUser && !roleMatches) {
     return { error: '无权操作：只有管理员、负责人或对应角色可以修改此节点' };
   }
@@ -584,10 +583,8 @@ export async function updateMilestone(
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
   const isAdminUser = userRoles.includes('admin');
   const isAssignedUser = currentMilestone.owner_user_id === user.id;
-  const roleMatches = currentMilestone.owner_role && userRoles.some(
-    (r: string) => r.toLowerCase() === (currentMilestone.owner_role as string).toLowerCase()
-      || (currentMilestone.owner_role === 'qc' && (r === 'qc' || r === 'quality'))
-  );
+  // 与 markMilestoneDone 同口径(生产/QC/跟单互通),修 P2 权限不自洽
+  const roleMatches = milestoneOwnerRoleMatches(userRoles, currentMilestone.owner_role);
   if (!isAdminUser && !isAssignedUser && !roleMatches) {
     return { error: '无权操作：只有管理员、负责人或对应角色可以修改此节点' };
   }

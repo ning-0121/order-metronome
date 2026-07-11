@@ -495,25 +495,9 @@ export async function recordReceipt(
       received_qty_total: receivedQty, line_status: lineStatus });
   } catch (e: any) { console.warn('[recordReceipt] 收货回财务失败(不阻断):', e?.message); }
 
-  // 到货校验：实收 vs 预算（如果有预算的话）
-  const { data: fullItem } = await (supabase.from('procurement_line_items') as any)
-    .select('budget_qty, material_name, ordered_unit, order_id')
-    .eq('id', itemId)
-    .single();
-  if (fullItem?.budget_qty && Math.abs(receivedQty - fullItem.budget_qty) / fullItem.budget_qty > 0.05) {
-    try {
-      const { sendCostAlert } = await import('@/app/actions/cost-control');
-      const { data: order } = await (supabase.from('orders') as any)
-        .select('order_no').eq('id', orderId).single();
-      const pct = (((receivedQty - fullItem.budget_qty) / fullItem.budget_qty) * 100).toFixed(1);
-      await sendCostAlert(
-        orderId,
-        'procurement_over_budget',
-        `${order?.order_no || '?'}: ${fullItem.material_name} 实收 ${receivedQty} ${fullItem.ordered_unit || ''} vs 预算 ${fullItem.budget_qty}（偏差 ${pct}%）`,
-        auth.userId,
-      );
-    } catch (e: any) { console.warn(`[procurement] 采购次要操作 372:`, e?.message); }
-  }
+  // 到货 vs 预算校验:原读 procurement_line_items.budget_qty —— 该列在新流程恒空(见 memory
+  // budget-model-field-map),故此告警从不触发,是给「有到货超预算监控」的假象。移除死码。
+  // 真要做需改读真实预算源(materials_bom.budget_unit_price × 单耗 或 order_cost_baseline),另立项。
 
   revalidatePath(`/orders/${orderId}`);
   return {};

@@ -145,6 +145,7 @@ async function emitShippingInvoiceToFinance(svc: any, orderId: string): Promise<
     const scopes: Array<{ scope: string; amount: number | null; qty: number | null }> = [];
     let currency = 'USD';
     let orderRef: any = null;
+    let missingPriceCount = 0;   // 有量却缺客户成交价的款数 → invoice_amount 偏低,须告知财务别当足额入账
 
     const { data: shipped } = await (svc.from('shipment_batches') as any)
       .select('id, batch_no').eq('order_id', orderId).eq('status', 'shipped');
@@ -157,6 +158,7 @@ async function emitShippingInvoiceToFinance(svc: any, orderId: string): Promise<
         orderRef = orderRef || m.order;
         currency = m.currency?.label === 'RMB' ? 'CNY' : (m.currency?.code || currency);
         scopes.push({ scope: `batch-${b.batch_no ?? b.id}`, amount: m.ciTotals?.amount ?? null, qty: m.ciTotals?.qty ?? null });
+        missingPriceCount += Number((m.ciTotals as any)?.missingPrice) || 0;
       }
     } else {
       const { data: m } = await loadShippingDocModel(svc, orderId, true, null);
@@ -164,6 +166,7 @@ async function emitShippingInvoiceToFinance(svc: any, orderId: string): Promise<
         orderRef = m.order;
         currency = m.currency?.label === 'RMB' ? 'CNY' : (m.currency?.code || currency);
         scopes.push({ scope: 'whole', amount: m.ciTotals?.amount ?? null, qty: m.ciTotals?.qty ?? null });
+        missingPriceCount += Number((m.ciTotals as any)?.missingPrice) || 0;
       }
     }
 
@@ -188,6 +191,9 @@ async function emitShippingInvoiceToFinance(svc: any, orderId: string): Promise<
       invoice_qty: invoiceQty,
       deposit_raw: depositRaw,
       scopes,
+      // P2 修:有款缺成交价 → invoice_amount 只含有价款、偏低。告知财务别当足额入账。
+      has_missing_price: missingPriceCount > 0,
+      missing_price_count: missingPriceCount,
     });
   } catch (e: any) {
     console.warn('[shipdoc-sync] 出货发票金额入账失败(不阻断):', e?.message);

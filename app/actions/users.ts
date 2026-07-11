@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 import { friendlyError } from '@/lib/utils/db-error';
 
 export interface User {
@@ -29,6 +30,13 @@ export async function getAllUsers(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { data: null, error: 'Unauthorized' };
+  }
+  // P2 修:原任意登录用户可拉全员名册(邮箱/角色)。收紧到管理层/可派单角色——
+  // 唯一外部调用方 OwnerAssignment 只在 canAssign(admin/生产主管/可派单)时才调,故不影响。
+  const { data: _prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const _roles: string[] = (_prof as any)?.roles?.length > 0 ? (_prof as any).roles : [(_prof as any)?.role].filter(Boolean);
+  if (!hasRoleInGroup(_roles, 'MANAGEMENT') && !hasRoleInGroup(_roles, 'CAN_REASSIGN_OWNER')) {
+    return { data: null, error: '无权查看用户列表' };
   }
 
   let { data: profiles, error } = await (supabase.from('profiles') as any)
