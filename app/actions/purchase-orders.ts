@@ -1150,7 +1150,15 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     if (!qtyByPi.has(pi.id)) continue;
     const bd = Array.isArray(pi.sku_breakdown) ? pi.sku_breakdown.filter((c: any) => Number(c?.qty) > 0) : [];
     const spec = (pi.purchase_spec && String(pi.purchase_spec).trim()) || specByPi.get(pi.id) || '';
-    const img = (Array.isArray(pi.image_urls) ? pi.image_urls : []).find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u)) || '';
+    // 辅料图示:优先原辅料参考图(image_urls);没有则回落到业务传的排版稿里的**位图文件**
+    // (烫标/吊卡 png/jpg 等 —— 走 attachment_files;PDF/AI/CDR 不能内嵌,只进附件清单页)。
+    const IMG_EXT = /\.(png|jpe?g|gif)(\?|$)/i;   // ExcelJS 只能嵌 png/jpeg/gif(webp 不支持)
+    const imgFromUrls = (Array.isArray(pi.image_urls) ? pi.image_urls : [])
+      .find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u));
+    const imgFromAtt = (Array.isArray(pi.attachment_files) ? pi.attachment_files : [])
+      .map((f: any) => (typeof f === 'string' ? f : f?.url))
+      .find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u) && IMG_EXT.test(u));
+    const img = imgFromUrls || imgFromAtt || '';
     const rowsR: ReqRow[] = bd.length > 0
       ? bd.map((c: any) => ({ style: c?.style_no || c?.product_name || '', size: c?.size || '', qty: Number(c.qty) || 0 }))
       : [{ style: '-', size: '-', qty: qtyByPi.get(pi.id) || 0 }];
