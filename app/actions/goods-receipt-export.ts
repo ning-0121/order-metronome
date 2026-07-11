@@ -20,6 +20,7 @@ interface ReceiptRow {
   material: string;
   spec: string;
   color: string;        // 颜色(核料主数据 procurement_items.color;同料不同色分行对账)
+  orderNo: string;      // 订单号(内部订单号优先;对账/财务锚点)
   qty: number;
   unit: string;
   price: number | null; // 单价(采购单底价 unit_price;列级封锁,仅导出时 service-role 填)
@@ -31,7 +32,7 @@ interface ReceiptRow {
 /** 装配收货行:goods_receipts → 采购行 → 采购单 → 供应商。排除拒收(退货不计)。 */
 async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
   const { data: grs } = await supabase.from('goods_receipts')
-    .select('id, line_item_id, received_qty, received_unit, received_at, received_address, photos, inspection_result')
+    .select('id, line_item_id, order_id, received_qty, received_unit, received_at, received_address, photos, inspection_result')
     .neq('inspection_result', 'reject')
     .order('received_at', { ascending: true });
   const receipts = (grs || []) as any[];
@@ -64,6 +65,14 @@ async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
     for (const s of (sups || [])) supMap.set(s.id, s.name);
   }
 
+  // 订单号(2026-07-11 老板:对账单要带订单号):收货行挂订单,内部订单号优先(对账/财务锚点)
+  const orderIds = [...new Set(receipts.map((r) => r.order_id).filter(Boolean))];
+  const orderNoMap = new Map<string, string>();
+  if (orderIds.length) {
+    const { data: ords } = await supabase.from('orders').select('id, order_no, internal_order_no').in('id', orderIds);
+    for (const o of (ords || [])) orderNoMap.set(o.id, o.internal_order_no || o.order_no || '');
+  }
+
   const rows: ReceiptRow[] = [];
   for (const r of receipts) {
     const l: any = lineMap.get(r.line_item_id);
@@ -78,6 +87,7 @@ async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
       material: l.material_name || '',
       spec: l.specification || l.size || '',
       color: (l.procurement_item_id && colorMap.get(l.procurement_item_id)) || '',
+      orderNo: (r.order_id && orderNoMap.get(r.order_id)) || '',
       qty: round3(Number(r.received_qty) || 0),
       unit: r.received_unit || l.ordered_unit || '',
       price: null,   // 筛选项装配不带价;导出时经 service-role 回填
@@ -168,21 +178,21 @@ export async function exportGoodsReceiptStatement(filters: {
 
   for (const [supplier, list] of bySupplier) {
     const ws = wb.addWorksheet(safeName(supplier));
-    [14, 26, 16, 12, 12, 10, 12, 14, 30, 14].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+    [14, 13, 26, 16, 12, 12, 10, 12, 14, 30, 14].forEach((w, i) => (ws.getColumn(i + 1).width = w));
     // 抬头
-    ws.mergeCells('A1:J1');
+    ws.mergeCells('A1:K1');
     const h = ws.getCell('A1');
     h.value = `${supplier} 收货对账单`;
     h.font = { name: '宋体', size: 16, bold: true };
     h.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 32;
-    ws.mergeCells('A2:J2');
+    ws.mergeCells('A2:K2');
     const sub = ws.getCell('A2');
     sub.value = `义乌市绮陌服饰有限公司 · 导出日期 ${new Date().toISOString().slice(0, 10)} · 共 ${list.length} 批`;
     sub.font = { name: '宋体', size: 10, color: { argb: 'FF888888' } };
     sub.alignment = { horizontal: 'center' };
-    // 表头(2026-07-11 老板:加 单价/金额/颜色)
-    const hdr = ['日期', '物料名', '规格', '颜色', '数量', '单位', '单价', '金额', '收货地址', '码单'];
+    // 表头(2026-07-11 老板:加 单价/金额/颜色/订单号)
+    const hdr = ['日期', '订单号', '物料名', '规格', '颜色', '数量', '单位', '单价', '金额', '收货地址', '码单'];
     hdr.forEach((t, i) => {
       const c = ws.getCell(4, i + 1);
       c.value = t;
@@ -198,17 +208,17 @@ export async function exportGoodsReceiptStatement(filters: {
       const slipUrls: string[] = [];
       for (const p of r.photos) { const u = await sign(p); if (u) slipUrls.push(u); }
       const amount = r.price != null ? round2(r.qty * r.price) : null;   // 金额 = 收货数量 × 单价
-      const cells: any[] = [r.date, r.material, r.spec, r.color, r.qty, r.unit, r.price ?? '', amount ?? '', r.address, slipUrls.length ? `码单(${slipUrls.length})` : ''];
+      const cells: any[] = [r.date, r.orderNo, r.material, r.spec, r.color, r.qty, r.unit, r.price ?? '', amount ?? '', r.address, slipUrls.length ? `码单(${slipUrls.length})` : ''];
       cells.forEach((v, i) => {
         const c = ws.getCell(tr, i + 1);
         c.value = v;
         c.font = { name: '宋体', size: 11 };
-        c.alignment = { horizontal: i === 1 || i === 8 ? 'left' : 'center', vertical: 'middle', wrapText: true };
+        c.alignment = { horizontal: i === 2 || i === 9 ? 'left' : 'center', vertical: 'middle', wrapText: true };
         c.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
       });
       // 码单超链接(第一张)
       if (slipUrls.length) {
-        const c = ws.getCell(tr, 10);
+        const c = ws.getCell(tr, 11);
         c.value = { text: `码单(${slipUrls.length})`, hyperlink: slipUrls[0] } as any;
         c.font = { name: '宋体', size: 11, color: { argb: 'FF0563C1' }, underline: true };
       }
@@ -218,14 +228,14 @@ export async function exportGoodsReceiptStatement(filters: {
       tr++;
     }
     // 合计(数量 + 金额)
-    ws.mergeCells(tr, 1, tr, 4);
+    ws.mergeCells(tr, 1, tr, 5);
     const tl = ws.getCell(tr, 1); tl.value = '合计'; tl.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
     tl.alignment = { horizontal: 'center' }; tl.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
-    const tq = ws.getCell(tr, 5); tq.value = round3(totalQty); tq.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
+    const tq = ws.getCell(tr, 6); tq.value = round3(totalQty); tq.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
     tq.alignment = { horizontal: 'center' }; tq.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
-    const ta = ws.getCell(tr, 8); ta.value = round2(totalAmount); ta.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
+    const ta = ws.getCell(tr, 9); ta.value = round2(totalAmount); ta.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
     ta.alignment = { horizontal: 'center' }; ta.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
-    for (const c of [6, 7, 9, 10]) ws.getCell(tr, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+    for (const c of [7, 8, 10, 11]) ws.getCell(tr, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
   }
 
   const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
