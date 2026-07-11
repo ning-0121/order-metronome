@@ -326,6 +326,30 @@ export async function parsePO(
       };
     }
 
+    // 确定性兜底(2026-07-11):prompt 已强约束不许臆造尺寸,这里再补一道确定性网 ——
+    // 若「品类/款名是下装(裤/短裤/legging)」却给了只属上衣的测量部位(胸围/肩宽/袖长/领围…),
+    // 判定为 AI 臆造,自动丢弃这些行(零误伤:下装本就没有这些部位),防假尺寸印进生产单。
+    try {
+      const UPPER_ONLY = /胸围|胸宽|前胸|后胸|肩宽|全肩|落肩|袖长|袖口|袖笼|袖窿|夹圈|领围|领宽|领深|chest|bust|shoulder|sleeve|armhole|collar|cuff/i;
+      const BOTTOM_NAME = /裤|短裤|长裤|legging|pants|shorts|trouser/i;
+      const catBottom = /pants|shorts|bottom|trouser/i.test(String((parsed as any)?.garment_category || ''));
+      let dropped = 0;
+      for (const st of ((parsed as any)?.styles || [])) {
+        if (!Array.isArray(st?.measurements) || st.measurements.length === 0) continue;
+        const isBottom = catBottom || BOTTOM_NAME.test(`${st?.product_name || ''} ${st?.style_no || ''}`);
+        if (!isBottom) continue;
+        const kept = st.measurements.filter((m: any) => !UPPER_ONLY.test(String(m?.label || '')));
+        dropped += st.measurements.length - kept.length;
+        st.measurements = kept;
+      }
+      if (dropped > 0) {
+        (parsed as any).confidence_notes = [
+          ...(Array.isArray((parsed as any).confidence_notes) ? (parsed as any).confidence_notes : []),
+          `已自动丢弃 ${dropped} 条与品类不符的测量行(下装却出现胸围/肩宽/袖长等上衣部位,疑似AI臆造),请核对尺寸表`,
+        ];
+      }
+    } catch { /* 兜底本身绝不阻断解析 */ }
+
     logAICall('po_parse', orderId || null, 'success', Date.now() - startedAt).catch(() => {});
 
     // P0-1: 解析成功后落库，防关闭/刷新丢数据
