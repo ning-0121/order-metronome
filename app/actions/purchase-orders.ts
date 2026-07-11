@@ -969,75 +969,115 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
   wb.creator = 'QIMO OS · 义乌市绮陌服饰有限公司';
-  const ws = wb.addWorksheet('采购单');
+  // ── 采购申请单(主表;版式对齐用户模板:辅料图示/尺寸/STYLE/SIZE/订单数量/单价/金额,款×码拆行,图片内嵌)──
+  const customerName = (ords || []).map((o: any) => o.customer_name).filter(Boolean)[0] || '';
+  // 业务员名(订单负责人):首张订单 owner/created_by → profiles.name(取不到不阻断)
+  let salesName = '';
+  try {
+    const firstOid = (((po as any).order_ids || []) as string[])[0];
+    if (firstOid) {
+      const { data: o0 } = await (supabase.from('orders') as any).select('created_by, owner_user_id').eq('id', firstOid).maybeSingle();
+      const uid = (o0 as any)?.owner_user_id || (o0 as any)?.created_by;
+      if (uid) { const { data: p0 } = await (createServiceRoleClient().from('profiles') as any).select('name').eq('user_id', uid).maybeSingle(); salesName = (p0 as any)?.name || ''; }
+    }
+  } catch { /* 业务员名取不到不阻断 */ }
 
-  // 列定义(按你上传的模板);无价版去掉 单价/金额
-  const COLS: Array<{ h: string; w: number; price?: boolean }> = [
-    ...(multiMaterial ? [{ h: '原辅料名', w: 20 }] : []),
-    { h: '颜色代码', w: 16 }, { h: '尺码', w: 8 }, { h: 'PATTON色号', w: 12 }, { h: '工厂色号', w: 12 },
-    { h: '单件平方用量', w: 12 }, { h: '单件用量(kg)', w: 12 }, { h: '订单数量', w: 10 },
-    { h: '总用量', w: 12 }, { h: '单位', w: 8 },
-    ...(withPrice ? [{ h: '单价', w: 10, price: true }, { h: '金额', w: 14, price: true }] : []),
-    { h: '规格', w: 24 }, { h: '备注', w: 20 },
-  ];
-  const NC = COLS.length;
-  const colLetter = (i: number) => String.fromCharCode(65 + i);
-  const lastCol = colLetter(NC - 1);
-
-  // 抬头:公司名 + 采购单
-  ws.mergeCells(`A1:${lastCol}1`);
-  ws.getCell('A1').value = '义乌市绮陌服饰有限公司  ·  采购单 PURCHASE ORDER' + (withPrice ? '' : '(内部流转·无价)');
-  ws.getCell('A1').font = { bold: true, size: 14 };
-  ws.getCell('A1').alignment = { horizontal: 'center' };
-  ws.getRow(1).height = 24;
-  // 抬头信息块
-  ws.addRow([]);
-  // 采购单发供应商,不暴露客户名(2026-07-04 用户拍板)
-  ws.addRow(['订单号', orderNos, '原辅料名', multiMaterial ? materials.join('、') : (materials[0] || '')]);
-  ws.addRow(['供应商', sup.name || '—', '联系人/电话', `${sup.contact_name || ''} ${sup.phone || ''}`.trim() || '—', '预计到货', (po as any).delivery_date || '—']);
-  if (withPrice) ws.addRow(['付款方式/账期', `${sup.payment_method || '—'} / ${sup.net_days != null ? sup.net_days + '天' : '—'}`]);
-  ws.addRow([]);
-
-  // 表头
-  const headerRow = ws.addRow(COLS.map((c) => c.h));
-  headerRow.eachCell((cell) => {
-    cell.font = { bold: true };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-  });
-
-  // 明细行(每颜色一行;PATTON色号/工厂色号/单件平方用量/订单数量 无数据留空给采购员手填)
-  let totalAmount = 0;
-  for (const r of rows) {
-    const cells: any[] = [
-      ...(multiMaterial ? [r.material_name] : []),
-      r.color || '', r.size || '', '', '', '',         // 颜色 · 尺码 · PATTON · 工厂色号 · 单件平方用量(空)
-      r.consumption ?? '', '',                          // 单件用量kg · 订单数量(空)
-      Math.round(r.qty * 1000) / 1000, r.unit || '',    // 总用量 · 单位
-      ...(withPrice ? [r.unit_price ?? '', r.amount ? Math.round(r.amount * 100) / 100 : ''] : []),
-      r.purchase_spec || r.specification || '', r.notes || '',  // 规格(采购填优先,回落物料规格) · 备注
-    ];
-    if (withPrice && r.amount) totalAmount += r.amount;
-    const row = ws.addRow(cells);
-    row.eachCell((cell) => { cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
+  // 每物料:总量 / 单价 / 规格(采购 purchase_spec 优先,回落物料规格)
+  const qtyByPi = new Map<string, number>();
+  const priceByPi = new Map<string, number>();
+  const specByPi = new Map<string, string>();
+  for (const l of (lines || []) as any[]) {
+    const k = l.procurement_item_id; if (!k) continue;
+    qtyByPi.set(k, (qtyByPi.get(k) || 0) + (Number(l.ordered_qty) || 0));
+    if (l.unit_price != null && !priceByPi.has(k)) priceByPi.set(k, Number(l.unit_price));
+    if (!specByPi.has(k) && l.specification) specByPi.set(k, String(l.specification));
+  }
+  // 申请单条目:每物料 → 有 sku_breakdown 按【款号×尺码】逐行,否则整单一行(STYLE/SIZE='-')
+  type ReqRow = { style: string; size: string; qty: number };
+  const reqItems: Array<{ pi: any; spec: string; img: string; rows: ReqRow[] }> = [];
+  for (const pi of piMap.values() as any) {
+    if (!qtyByPi.has(pi.id)) continue;
+    const bd = Array.isArray(pi.sku_breakdown) ? pi.sku_breakdown.filter((c: any) => Number(c?.qty) > 0) : [];
+    const spec = (pi.purchase_spec && String(pi.purchase_spec).trim()) || specByPi.get(pi.id) || '';
+    const img = (Array.isArray(pi.image_urls) ? pi.image_urls : []).find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u)) || '';
+    const rowsR: ReqRow[] = bd.length > 0
+      ? bd.map((c: any) => ({ style: c?.style_no || c?.product_name || '', size: c?.size || '', qty: Number(c.qty) || 0 }))
+      : [{ style: '-', size: '-', qty: qtyByPi.get(pi.id) || 0 }];
+    reqItems.push({ pi, spec, img, rows: rowsR });
   }
 
-  // 合计(含价版)
-  if (withPrice) {
-    const totalRow = ws.addRow([]);
-    const amtColIdx = COLS.findIndex((c) => c.h === '金额');
-    ws.getCell(`${colLetter(amtColIdx - 1)}${totalRow.number}`).value = '合计';
-    ws.getCell(`${colLetter(amtColIdx - 1)}${totalRow.number}`).font = { bold: true };
-    ws.getCell(`${colLetter(amtColIdx)}${totalRow.number}`).value = Math.round(totalAmount * 100) / 100;
-    ws.getCell(`${colLetter(amtColIdx)}${totalRow.number}`).font = { bold: true };
-  }
+  const ws = wb.addWorksheet('采购申请单');
+  const RED = 'FFFF0000', PEACH = 'FFFCE4D6', PINK = 'FFF8CBAD';
+  const box = { top: { style: 'thin' as const }, bottom: { style: 'thin' as const }, left: { style: 'thin' as const }, right: { style: 'thin' as const } };
+  [26, 18, 18, 16, 14, 12, 14].forEach((w, i) => (ws.getColumn(i + 1).width = w));   // A–G
+  const set = (r: number, c: number, v: any, o: { size?: number; bold?: boolean; red?: boolean; fill?: string; align?: 'left' | 'center' } = {}) => {
+    const x = ws.getCell(r, c); x.value = v ?? '';
+    x.font = { name: '宋体', size: o.size ?? 12, bold: o.bold ?? false, color: o.red ? { argb: RED } : undefined };
+    x.alignment = { horizontal: o.align ?? 'center', vertical: 'middle', wrapText: true };
+    if (o.fill) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: o.fill } };
+    x.border = { ...box };
+  };
+  // 抬头
+  ws.mergeCells('A1:G1'); set(1, 1, '采购申请单', { size: 18, bold: true, fill: 'FFFFC000' }); ws.getRow(1).height = 40;
+  set(2, 1, '订单号', { bold: true, red: true, fill: PEACH }); set(2, 2, orderNos, { bold: true, red: true, fill: PEACH });
+  set(2, 3, '客户', { bold: true, red: true, fill: PEACH }); set(2, 4, customerName, { bold: true, red: true, fill: PEACH });
+  set(2, 5, '原材料', { bold: true, red: true, fill: PEACH }); ws.mergeCells('F2:G2'); set(2, 6, '按品质样', { bold: true, red: true, fill: PEACH });
+  ws.getRow(2).height = 30;
+  set(3, 1, '供应商', { bold: true, red: true, fill: PEACH }); ws.mergeCells('B3:C3'); set(3, 2, sup.name || '—', { bold: true, red: true, fill: PEACH });
+  ws.mergeCells('D3:E3'); set(3, 4, '预计到货时间', { bold: true, red: true, fill: PEACH }); ws.mergeCells('F3:G3'); set(3, 6, (po as any).delivery_date || '—', { bold: true, red: true, fill: PEACH });
+  ws.getRow(3).height = 28;
+  ['辅料图示', '尺寸', 'STYLE', 'SIZE', '订单数量', '单价', '金额'].forEach((h, i) => set(4, i + 1, h, { size: 14, red: true, bold: true, fill: PINK }));
+  ws.getRow(4).height = 28;
 
+  // 明细:每物料一块;图片/尺寸整块合并,STYLE 按款合并,SIZE/数量逐行
+  let tr = 5, grandQty = 0, grandAmt = 0;
+  const imgJobs: Array<{ url: string; row: number; span: number }> = [];
+  for (const it of reqItems) {
+    const startRow = tr;
+    const price = withPrice ? (priceByPi.get(it.pi.id) ?? null) : null;
+    const styleGroups: Array<{ style: string; rows: ReqRow[] }> = [];
+    for (const rw of it.rows) {
+      let g = styleGroups.find(x => x.style === rw.style);
+      if (!g) { g = { style: rw.style, rows: [] }; styleGroups.push(g); }
+      g.rows.push(rw);
+    }
+    for (const g of styleGroups) {
+      g.rows.sort((a, b) => compareSizeKeys(a.size || '', b.size || ''));   // 尺码走全链统一码序(S→M→L…)
+      const gStart = tr;
+      for (const rw of g.rows) {
+        set(tr, 1, ''); set(tr, 2, it.spec || ''); set(tr, 3, g.style || '-'); set(tr, 4, rw.size || '-');
+        set(tr, 5, rw.qty || 0); set(tr, 6, price != null ? price : ''); set(tr, 7, price != null ? Math.round(price * rw.qty * 100) / 100 : '');
+        grandQty += rw.qty; if (price != null) grandAmt += price * rw.qty;
+        ws.getRow(tr).height = 44; tr++;
+      }
+      if (g.rows.length > 1) ws.mergeCells(gStart, 3, tr - 1, 3);   // STYLE 按款合并
+    }
+    const span = tr - startRow;
+    if (span > 1) { ws.mergeCells(startRow, 1, tr - 1, 1); ws.mergeCells(startRow, 2, tr - 1, 2); }   // 图片/尺寸整块合并
+    if (span === 1) ws.getRow(startRow).height = 72;   // 单行留高给图
+    if (it.img) imgJobs.push({ url: it.img, row: startRow, span });
+  }
+  // 合计
+  ws.mergeCells(tr, 1, tr, 4); set(tr, 1, '合计', { bold: true, red: true, fill: PEACH });
+  set(tr, 5, Math.round(grandQty * 1000) / 1000, { bold: true, red: true, fill: PEACH });
+  set(tr, 6, '', { fill: PEACH }); set(tr, 7, withPrice ? Math.round(grandAmt * 100) / 100 : '', { bold: true, red: true, fill: PEACH });
+  ws.getRow(tr).height = 26; tr++;
   // 页脚
-  ws.addRow([]);
-  ws.addRow(['业务员：', '', '采购员：', '', '下单日期：', new Date().toLocaleDateString('zh-CN')]);
-
-  COLS.forEach((c, i) => { ws.getColumn(i + 1).width = c.w; });
+  set(tr, 1, '业务员：', { bold: true }); set(tr, 2, salesName, { bold: true });
+  set(tr, 3, '采购员：', { bold: true }); set(tr, 4, ''); set(tr, 5, '下单日期：', { bold: true }); set(tr, 6, ''); set(tr, 7, '');
+  ws.getRow(tr).height = 26;
+  // 贴图(A列;取不到/超时/超大跳过,不阻断导出)
+  for (const j of imgJobs) {
+    try {
+      const resp = await fetch(j.url, { signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) continue;
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (buf.length === 0 || buf.length > 5_000_000) continue;
+      const ext = /\.png(\?|$)/i.test(j.url) ? 'png' : (/\.gif(\?|$)/i.test(j.url) ? 'gif' : 'jpeg');
+      const imgId = wb.addImage({ buffer: buf as any, extension: ext as any });
+      ws.addImage(imgId, { tl: { col: 0.12, row: (j.row - 1) + 0.12 }, ext: { width: 150, height: j.span > 1 ? Math.min(150, j.span * 48) : 64 } } as any);
+    } catch { /* 跳过 */ }
+  }
 
   // ── 产品明细附页(款号×颜色×尺码)——吊牌/洗唛等印 SKU 信息的辅料,供应商按此分色分码印 ──
   // 数据来自 procurement_items.sku_breakdown(采购在核料确认时拆);主表仍按尺码汇总,附页给细分。
