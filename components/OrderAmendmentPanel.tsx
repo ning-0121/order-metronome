@@ -17,11 +17,14 @@ interface Props {
   orderId: string;
   order: any;
   isAdmin: boolean;
+  /** 可审批改单(admin + 业务经理 order_manager/sales_manager);不传则退回 isAdmin */
+  canApprove?: boolean;
   /** 该订单已完成的 step_key 列表（由父组件传入） */
   doneStepKeys?: string[];
 }
 
-export function OrderAmendmentPanel({ orderId, order, isAdmin, doneStepKeys = [] }: Props) {
+export function OrderAmendmentPanel({ orderId, order, isAdmin, canApprove, doneStepKeys = [] }: Props) {
+  const mayApprove = canApprove ?? isAdmin;
   const [showForm, setShowForm] = useState(false);
   const [amendments, setAmendments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -253,7 +256,7 @@ export function OrderAmendmentPanel({ orderId, order, isAdmin, doneStepKeys = []
                   <span className="text-gray-500">{a.requester?.name || a.requester?.email || '—'}</span>
                   <span className="text-gray-400">{new Date(a.created_at).toLocaleDateString('zh-CN')}</span>
                 </div>
-                {isAdmin && isApprovalPending(a.status) && (
+                {mayApprove && isApprovalPending(a.status) && (
                   <div className="flex gap-2">
                     <button onClick={() => handleApprove(a.id, true)} className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700">批准</button>
                     <button onClick={() => handleApprove(a.id, false)} className="px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700">驳回</button>

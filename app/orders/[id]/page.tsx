@@ -800,6 +800,7 @@ export default async function OrderDetailPage({
               orderId={orderData.id}
               order={orderData}
               isAdmin={isAdmin}
+              canApprove={isAdmin || currentRoles.some((r) => ['order_manager', 'sales_manager'].includes(r))}
               doneStepKeys={(milestones || []).filter((m: any) => isDoneStatus(m.status)).map((m: any) => m.step_key)}
             />
           </div>
@@ -847,7 +848,7 @@ export default async function OrderDetailPage({
                 delayRequests={delayRequests}
                 orderId={id}
                 // 业务部经理与 admin 同样可审批延期（按钮显隐；服务端 delays.ts 已按 CAN_APPROVE_DELAY 兜底校验）
-                isAdmin={isAdmin || currentRoles.includes('sales_manager')}
+                isAdmin={isAdmin || currentRoles.some((r) => ['sales_manager', 'order_manager'].includes(r))}
                 isOrderOwner={isOrderOwner}
               />
             ) : (

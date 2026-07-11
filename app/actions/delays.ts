@@ -233,19 +233,21 @@ export async function createDelayRequest(
     { delay_request_id: (delayRequest as any).id }
   );
 
-  // P1(2026-07-05):通知审批链首个角色"有改期待你确认"(逐级链首)
+  // 通知待审批(2026-07-11 修:原来只通知审批链首角色,业务执行的延期链首是 sales,经理 order_manager/
+  //   sales_manager 收不到 → 打不通。改为链首 + 管理审批人(CAN_APPROVE_DELAY=admin/order_manager/sales_manager)全通知)
   try {
-    if (approvalChain.length > 0) {
-      const { roleCn } = await import('@/lib/domain/deferral-routing');
-      const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-      await notifyUsersByRole(supabase, [approvalChain[0]], {
-        type: 'deferral_approval',
-        title: `🕒 改期待审批:${(milestoneData.name || '')}（${orderData.internal_order_no || orderData.order_no || ''}）`,
-        message: `${milestoneData.name || '节点'}申请改期到 ${proposedNewDueAt || proposedNewAnchorDate || '新日期'}；原因：${reasonDetail}。请到该订单确认(你是本步「${roleCn(approvalChain[0])}」审批)。`,
-        relatedOrderId: orderData.id,
-      });
-    }
-  } catch (e: any) { console.warn('[createDelayRequest] 链首通知失败(不阻断):', e?.message); }
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    const targetRoles = Array.from(new Set([
+      ...(approvalChain.length > 0 ? [approvalChain[0]] : []),
+      'admin', 'order_manager', 'sales_manager',
+    ]));
+    await notifyUsersByRole(supabase, targetRoles, {
+      type: 'deferral_approval',
+      title: `🕒 改期待审批:${(milestoneData.name || '')}（${orderData.internal_order_no || orderData.order_no || ''}）`,
+      message: `${milestoneData.name || '节点'}申请改期到 ${proposedNewDueAt || proposedNewAnchorDate || '新日期'}；原因：${reasonDetail}。请到该订单「延期」处审批。`,
+      relatedOrderId: orderData.id,
+    });
+  } catch (e: any) { console.warn('[createDelayRequest] 待审批通知失败(不阻断):', e?.message); }
 
   // Customer Memory V1: auto-create on delay request
   const customerName = (orderData.customer_name as string) || '';
@@ -1300,6 +1302,16 @@ export async function createOrderLevelDelayRequest(
     });
     adminUserIds.push(admin.user_id);
   }
+  // 2026-07-11:整单延期原来只通知 admin,业务经理(order_manager/sales_manager)收不到 → 补通知管理审批人
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(supabase, ['order_manager', 'sales_manager'], {
+      type: 'delay_request',
+      title: `🕒 整单延期待审批:${orderCheck.order_no}`,
+      message: `${requesterName} 申请整单延期,新出厂日 ${newFactoryDate}(延期 ${delayDays} 天);原因:${reasonDetail.slice(0, 100)}。请到该订单「延期」处审批。`,
+      relatedOrderId: orderId,
+    });
+  } catch (e: any) { console.warn('[createOrderLevelDelayRequest] 经理待审批通知失败(不阻断):', e?.message); }
   const ccEmails = MANAGER_CC_EMAILS;
   await sendEmailNotification(ccEmails, subject, body).catch(() => {});
 

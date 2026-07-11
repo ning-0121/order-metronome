@@ -42,7 +42,7 @@ export default async function PendingApprovalsPage({ searchParams }: PageProps) 
   const isFinance = roles.includes('finance');
 
   // 准入：admin / finance / production_manager / sales 都能看（看到的 actionable 不同）
-  const allowedRoles = ['admin', 'finance', 'production_manager', 'sales', 'sales_manager', 'admin_assistant'];
+  const allowedRoles = ['admin', 'finance', 'production_manager', 'sales', 'sales_manager', 'order_manager', 'admin_assistant'];
   if (!roles.some(r => allowedRoles.includes(r))) {
     return (
       <main className="min-h-screen bg-gray-50">

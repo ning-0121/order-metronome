@@ -91,7 +91,7 @@ export async function submitOrderAmendment(
   try {
     const changed = Object.keys(fields).map((k) => AMENDMENT_RULES.find((r) => r.field === k)?.label || k).join('、');
     const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-    await notifyUsersByRole(supabase, ['admin'], {
+    await notifyUsersByRole(supabase, ['admin', 'order_manager', 'sales_manager'], {
       type: 'amendment_approval',
       title: `🟣 订单修改待审批：${(order as any).internal_order_no || (order as any).order_no || ''}`,
       message: `订单 ${(order as any).internal_order_no || (order as any).order_no || orderId}（${(order as any).customer_name || ''}）申请修改「${changed}」；原因：${reason.trim()}。请到该订单页审批。`,
@@ -163,7 +163,7 @@ export async function submitCustomerAddOrder(
   }
   try {
     const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-    await notifyUsersByRole(supabase, ['admin'], {
+    await notifyUsersByRole(supabase, ['admin', 'order_manager', 'sales_manager'], {
       type: 'amendment_approval',
       title: `🟣 客户加单待审批：${(order as any).internal_order_no || (order as any).order_no || ''}`,
       message: `订单 ${(order as any).internal_order_no || (order as any).order_no || orderId}（${(order as any).customer_name || ''}）客户加单 +${totalAdd}件（${clean.length}行）；原因：${reason.trim()}。请到该订单页审批。`,
@@ -183,8 +183,10 @@ export async function approveOrderAmendment(
   adminNote?: string
 ): Promise<{ error?: string; success?: boolean }> {
   const supabase = await createClient();
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) return { error: '仅管理员可审批' };
+  // 2026-07-11:改单审批原来仅 admin,业务经理(order_manager/sales_manager)审批不了业务执行的改单 → 放开给管理审批人
+  const { isAdmin, roles } = await getCurrentUserRole(supabase);
+  const canApproveAmendment = isAdmin || (roles || []).some(r => ['order_manager', 'sales_manager'].includes(r));
+  if (!canApproveAmendment) return { error: '仅管理员/业务经理可审批订单修改' };
 
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -491,7 +493,7 @@ export async function submitPoOperation(
 
   try {
     const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-    await notifyUsersByRole(supabase, ['admin'], {
+    await notifyUsersByRole(supabase, ['admin', 'order_manager', 'sales_manager'], {
       type: 'amendment_approval',
       title: `🟣 ${tag} 待审批：${(order as any).internal_order_no || (order as any).order_no || ''}`,
       message: `订单 ${(order as any).internal_order_no || (order as any).order_no || orderId}（${(order as any).customer_name || ''}）申请「${tag}」；原因：${reason.trim()}。请到该订单页审批。`,

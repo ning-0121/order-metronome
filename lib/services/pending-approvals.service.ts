@@ -39,6 +39,7 @@ function clientFor(ctx: UserContext, fallback: any): any {
 
 export type ApprovalCategory =
   | 'delay'           // 延期申请
+  | 'amendment'       // 订单修改/改单申请
   | 'order_cancel'    // 取消订单申请
   | 'ceo_import'      // CEO 待批进行中导入订单
   | 'price'           // 预订单价格审批
@@ -124,7 +125,8 @@ async function collectDelayRequests(
     }
   }
 
-  const canApprove = hasAnyRole(ctx.roles, ['admin', 'production_manager', 'production']);
+  // 2026-07-11:补 order_manager/sales_manager(CAN_APPROVE_DELAY 的经理),否则经理在待审批中心看不到可处理的延期
+  const canApprove = hasAnyRole(ctx.roles, ['admin', 'production_manager', 'production', 'order_manager', 'sales_manager']);
 
   return (delays as any[]).map((r) => {
     const order = orderMap.get(r.order_id);
@@ -137,6 +139,48 @@ async function collectDelayRequests(
       orderNo: order?.order_no,
       customerName: order?.customer_name,
       sourceUrl: `/orders/${r.order_id}#delay-${r.id}`,
+      createdAt: r.created_at,
+      ageDays: ageDaysFrom(r.created_at),
+      actionable: canApprove,
+    };
+  });
+}
+
+// 订单修改/改单申请(2026-07-11 补:原来待审批中心根本没采集改单 → 经理在此看不到任何改单)
+async function collectAmendments(
+  supabase: any,
+  ctx: UserContext,
+): Promise<PendingApprovalItem[]> {
+  const client = clientFor(ctx, supabase);
+  const { data: rows, error } = await (client.from('order_amendments') as any)
+    .select('id, order_id, reason, fields_to_change, status, created_at')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(100);
+  if (error) { console.warn('[collectAmendments] query failed:', error.message); return []; }
+  if (!rows || rows.length === 0) return [];
+
+  const orderIds = Array.from(new Set((rows as any[]).map(r => r.order_id).filter(Boolean)));
+  const orderMap = new Map<string, { order_no: string; customer_name: string }>();
+  if (orderIds.length > 0) {
+    const { data: orders } = await (client.from('orders') as any).select('id, order_no, customer_name').in('id', orderIds);
+    for (const o of (orders || []) as any[]) orderMap.set(o.id, { order_no: o.order_no, customer_name: o.customer_name });
+  }
+  // 与 approveOrderAmendment 的权限一致:admin/order_manager/sales_manager 可审批改单
+  const canApprove = hasAnyRole(ctx.roles, ['admin', 'order_manager', 'sales_manager']);
+
+  return (rows as any[]).map((r) => {
+    const order = orderMap.get(r.order_id);
+    const changed = r.fields_to_change && typeof r.fields_to_change === 'object' ? Object.keys(r.fields_to_change).join('、') : '';
+    return {
+      id: r.id,
+      category: 'amendment' as ApprovalCategory,
+      title: `${order?.order_no || '?'} 订单修改申请${changed ? `（${changed}）` : ''}`,
+      subtitle: r.reason ? String(r.reason).slice(0, 50) : undefined,
+      orderId: r.order_id,
+      orderNo: order?.order_no,
+      customerName: order?.customer_name,
+      sourceUrl: `/orders/${r.order_id}`,
       createdAt: r.created_at,
       ageDays: ageDaysFrom(r.created_at),
       actionable: canApprove,
@@ -380,6 +424,7 @@ export async function getPendingApprovals(
     // 7 个数据源并行
     const [
       delays,
+      amendments,
       cancels,
       ceoImports,
       prices,
@@ -388,6 +433,7 @@ export async function getPendingApprovals(
       confirmations,
     ] = await Promise.all([
       collectDelayRequests(supabase, ctx).catch(e => { console.warn('[pending-approvals] delays failed:', e?.message); return []; }),
+      collectAmendments(supabase, ctx).catch(e => { console.warn('[pending-approvals] amendments failed:', e?.message); return []; }),
       collectCancelRequests(supabase, ctx).catch(e => { console.warn('[pending-approvals] cancels failed:', e?.message); return []; }),
       collectCeoImportApprovals(supabase, ctx).catch(e => { console.warn('[pending-approvals] ceo failed:', e?.message); return []; }),
       collectPriceApprovals(supabase, ctx).catch(e => { console.warn('[pending-approvals] price failed:', e?.message); return []; }),
@@ -397,7 +443,7 @@ export async function getPendingApprovals(
     ]);
 
     const allItems = [
-      ...delays, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations,
+      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations,
     ];
 
     // 按 ageDays 倒序（卡得越久越靠前）
@@ -405,6 +451,7 @@ export async function getPendingApprovals(
 
     const byCategory: Record<ApprovalCategory, number> = {
       delay:         delays.length,
+      amendment:     amendments.length,
       order_cancel:  cancels.length,
       ceo_import:    ceoImports.length,
       price:         prices.length,
@@ -446,6 +493,7 @@ export async function getPendingApprovalsCount(
 
 export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: string; color: string }> = {
   delay:         { icon: '⏳',  label: '延期申请',           color: 'bg-amber-50 text-amber-700 border-amber-200' },
+  amendment:     { icon: '🟣',  label: '订单修改申请',       color: 'bg-violet-50 text-violet-700 border-violet-200' },
   order_cancel:  { icon: '🛑',  label: '取消订单申请',       color: 'bg-red-50 text-red-700 border-red-200' },
   ceo_import:    { icon: '👨‍💼', label: 'CEO 批进行中订单',    color: 'bg-purple-50 text-purple-700 border-purple-200' },
   price:         { icon: '💰',  label: '价格审批',           color: 'bg-green-50 text-green-700 border-green-200' },
