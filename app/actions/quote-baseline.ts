@@ -350,7 +350,7 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
   let budgetFabricAmount = 0; let budgetFabricKg = 0; let consPerPiece = 0;
   for (const b of (bom || [])) {
     if ((b as any).material_type !== 'fabric' && (b as any).material_type !== 'lining') continue;
-    if ((b as any).customer_supplied === true) continue;   // 客供面料:绮陌不出钱买,不计入面料成本
+    if ((b as any).customer_supplied === true || (b as any).factory_supplied === true) continue;   // 客供/加工厂承担面料:绮陌不出钱,不计入成本
     const cons = Number((b as any).production_consumption) || 0;
     const price = Number((b as any).budget_unit_price) || 0;
     const pcs = piecesForBom(b);

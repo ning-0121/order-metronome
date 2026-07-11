@@ -333,38 +333,44 @@ export async function listBomConsumptionLines(orderId: string) {
     production_consumption: b.production_consumption ?? null,  // 大货单耗(业务/技术填,采购核实)
     over_purchase_pct: b.over_purchase_pct ?? null,            // 抛量%(采购填)
     required: b.material_type === 'fabric' || b.material_type === 'lining',  // 布料必核
-    customer_supplied: b.customer_supplied === true,           // 客供料(来料加工):绮陌不采购
+    // 供料方式:self=绮陌自购 / customer=客供 / factory=加工厂承担。后两者绮陌都不采购、不计成本。
+    supply_mode: b.factory_supplied === true ? 'factory' : (b.customer_supplied === true ? 'customer' : 'self'),
   }));
   return { data: rows };
 }
 
 /**
- * 保存物料「客供」标记(来料加工:客户供料、绮陌不采购)。批量 {bom_id: boolean}。
- * 勾了客供的物料:归并/执行跳过(不进采购/应付)、财务面料成本不计,仅保留规格用量给生产。
- * 业务/理单/采购/管理员可改。存 materials_bom.customer_supplied。
+ * 保存物料「供料方式」(三选一):self=绮陌自购 / customer=客供 / factory=加工厂承担。批量 {bom_id: mode}。
+ * customer/factory 两者绮陌都【不采购、不计成本】(归并跳过 + 财务面料成本不计),仅保留规格用量给生产;
+ * 区别只在生产任务单辅料明细的标注(客供 / 加工厂承担,后者供财务监督加工厂付款)。互斥:两布尔最多一个 true。
+ * 业务/理单/采购/管理员可改。存 materials_bom.customer_supplied + factory_supplied。
  */
-export async function saveBomCustomerSupplied(orderId: string, entries: Record<string, boolean>) {
+export async function saveBomSupplyMode(orderId: string, entries: Record<string, 'self' | 'customer' | 'factory'>) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const uRoles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
   if (!uRoles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
-    return { error: '仅业务/理单/采购/管理员可标记客供料' };
+    return { error: '仅业务/理单/采购/管理员可改供料方式' };
   }
   let saved = 0;
-  for (const [bomId, val] of Object.entries(entries || {})) {
+  for (const [bomId, mode] of Object.entries(entries || {})) {
     const { error } = await (supabase.from('materials_bom') as any)
-      .update({ customer_supplied: val === true }).eq('id', bomId).eq('order_id', orderId);
+      .update({ customer_supplied: mode === 'customer', factory_supplied: mode === 'factory' })
+      .eq('id', bomId).eq('order_id', orderId);
     if (error) {
-      if (/customer_supplied|column .* does not exist/i.test(error.message || '')) {
+      if (/factory_supplied|column .* does not exist/i.test(error.message || '')) {
+        return { error: '加工厂承担列尚未建立:请先在 Supabase 执行 20260711_bom_factory_supplied.sql' };
+      }
+      if (/customer_supplied/i.test(error.message || '')) {
         return { error: '客供列尚未建立:请先在 Supabase 执行 20260710_bom_customer_supplied.sql' };
       }
       return { error: friendlyError(error) };
     }
     saved++;
   }
-  // 客供变动 → 重算财务成本兜底缓存(客供面料不计入面料预算)
+  // 供料方式变动 → 重算财务成本兜底缓存(客供/加工厂承担 面料不计入面料预算)
   try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, saved };
@@ -591,7 +597,7 @@ export async function consolidateOrderProcurementItems(
   const bomMaster = new Map<string, string | null>();
   const bomImages = new Map<string, string[]>();
   const bomAttach = new Map<string, Array<{ name: string; url: string }>>();   // 辅料排版稿/文件附件
-  const bomExtra = new Map<string, { prod: number | null; style_no: string | null; overPct: number; customerSupplied: boolean }>();
+  const bomExtra = new Map<string, { prod: number | null; style_no: string | null; overPct: number; notSelfSupplied: boolean }>();
   if (bomIds.length) {
     const { data: bs } = await (supabase.from('materials_bom') as any).select('*').in('id', bomIds);
     for (const b of (bs || [])) {
@@ -602,7 +608,7 @@ export async function consolidateOrderProcurementItems(
         prod: b.production_consumption != null && Number(b.production_consumption) > 0 ? Number(b.production_consumption) : null,
         style_no: b.style_no || null,
         overPct: Number(b.over_purchase_pct) > 0 ? Number(b.over_purchase_pct) : 0,   // 抛量%(采购填)
-        customerSupplied: b.customer_supplied === true,   // 客供料:绮陌不采购
+        notSelfSupplied: b.customer_supplied === true || b.factory_supplied === true,   // 客供/加工厂承担:绮陌都不采购
       });
     }
   }
@@ -628,8 +634,8 @@ export async function consolidateOrderProcurementItems(
     const dev = sl?.qty_per_piece != null ? Number(sl.qty_per_piece) : null;
     const loss = sl?.loss_rate != null ? Number(sl.loss_rate) : null;
     const extra = sl?.bom_id ? bomExtra.get(sl.bom_id) : null;
-    // 客供料(来料加工):客户供、绮陌不采购 → 跳过归并,不进采购项/执行行/应付,也不算缺大货单耗。
-    if (extra?.customerSupplied) continue;
+    // 客供/加工厂承担:绮陌不采购 → 跳过归并,不进采购项/执行行/应付,也不算缺大货单耗。
+    if (extra?.notSelfSupplied) continue;
     // 件数基数:优先需求行存的 pieces_qty;老行(迁移前)按 net/开发单耗 反推(单行反推=精确)
     const pieces = r.pieces_qty != null && Number(r.pieces_qty) > 0
       ? Number(r.pieces_qty)

@@ -50,7 +50,7 @@ export async function getManufacturingOrder(orderId: string) {
     .select('*').eq('order_id', orderId).order('line_no');
 
   const { data: bom } = await (supabase.from('materials_bom') as any)
-    .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec')
+    .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec, customer_supplied, factory_supplied')
     .eq('order_id', orderId).order('material_type');
 
   // 多客户PO合单:来源PO容器(生产单按PO批次拆用)。表未建时静默返回空,不影响生产单生成。
@@ -581,7 +581,9 @@ async function buildMoWorkbook(
       g.rows.forEach((b: any, idx: number) => {
         // 备注:特殊要求 + 备注 + 颜色(规格已独立成列,不再并入)
         const remark = joinTxt(b.special_requirements, b.notes, b.color ? `颜色：${b.color}` : '');
-        tbox(tr, 1, b.material_name || '');                     // 物料
+        // 供料方式:加工厂承担/客供 标在物料名后,给生产照做 + 财务监督(加工厂承担=费用工厂出,绮陌不采购)
+        const supplyTag = b.factory_supplied === true ? '【加工厂承担】' : (b.customer_supplied === true ? '【客供】' : '');
+        tbox(tr, 1, `${b.material_name || ''}${supplyTag}`);    // 物料(带供料方式标注)
         tbox(tr, 2, '');                                        // 示例画稿(下方贴图)
         tbox(tr, 3, '');                                        // 位置说明及示意图(下方贴图)
         tbox(tr, 4, b.placement || '', { align: 'left' });      // 位置说明(文字)
