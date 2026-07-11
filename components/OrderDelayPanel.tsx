@@ -15,6 +15,7 @@
  */
 
 import { useState, useRef } from 'react';
+import Link from 'next/link';
 import { isApprovalPending } from '@/lib/domain/types';
 import { useRouter } from 'next/navigation';
 import { createOrderLevelDelayRequest } from '@/app/actions/delays';
@@ -197,6 +198,15 @@ export function OrderDelayPanel({
               >
                 {expanded ? '收起历史' : '查看延期历史'}
               </button>
+              {/* 有待审批的延期 → 直达审批页(delays 标签不在导航栏,靠此按钮进入;审批权限由该页把关)*/}
+              {pendingCount > 0 && (
+                <Link
+                  href={`/orders/${orderId}?tab=delays`}
+                  className="text-xs px-2 py-1 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 shrink-0"
+                >
+                  ✅ 去审批
+                </Link>
+              )}
             </>
           )}
         </div>
