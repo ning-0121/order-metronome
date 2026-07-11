@@ -189,6 +189,29 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     setMsg('✅ 已合并'); setMergeSrc(''); await reload();
   }
 
+  // 列表层「合并选中」:勾中的多条同物料草稿项 → 合并成一条(保留第一条)
+  const normName = (s: any) => String(s ?? '').trim().toLowerCase();
+  const checkedList = items.filter(i => checked.has(i.id));
+  const mergeReady = checkedList.length >= 2
+    && checkedList.every(i => i.status === 'draft')
+    && new Set(checkedList.map(i => normName(i.material_name))).size === 1;
+  async function doMergeSelected() {
+    if (checkedList.length < 2) return;
+    if (new Set(checkedList.map(i => normName(i.material_name))).size > 1) { setMsg('❌ 只能合并同一种物料(选中的物料名不一致)'); return; }
+    if (!checkedList.every(i => i.status === 'draft')) { setMsg('❌ 仅草稿状态的采购项可合并'); return; }
+    const target = checkedList[0]; const srcs = checkedList.slice(1);
+    const total = checkedList.reduce((s, i) => s + (Number(i.total_required_qty) || 0), 0);
+    if (!(await confirm({
+      title: `合并 ${checkedList.length} 项「${target.material_name}」为 1 条?`,
+      message: `保留「${target.item_no} · ${target.unit || ''}」,其余 ${srcs.length} 项并入并删除。\n合并后总需求 = ${Math.round(total * 10) / 10} ${target.unit || ''}(单位取保留项)。重新核料归并也会保持合并。`,
+      confirmText: '确认合并',
+    }))) return;
+    let ok = 0; const fails: string[] = [];
+    for (const s of srcs) { const r = await mergeProcurementItems(orderId, s.id, target.id); if ((r as any).error) fails.push((r as any).error); else ok++; }
+    setChecked(new Set()); await reload();
+    setMsg(fails.length ? `⚠️ 合并 ${ok}/${srcs.length} 项;首个失败:${fails[0]}` : `✅ 已把 ${checkedList.length} 项合并为 1 条`);
+  }
+
   const confirmedCount = items.filter(i => i.status === 'confirmed').length;
   const [linesReady, setLinesReady] = useState(false);   // 生成执行行后亮"去归采购单"通路
   // 大货单耗核定表折叠:核定完(或已下单锁定)默认收起,留一行;还有缺的默认展开催填。null=跟随默认,布尔=手动。
@@ -961,6 +984,14 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                 </button>
               </>
             )}
+            {/* 合并选中:勾中 ≥2 条同物料草稿项 → 合并成一条(如主标 米/个 拆成两条)*/}
+            {checkedList.length >= 2 && (
+              <button onClick={doMergeSelected} disabled={!mergeReady}
+                title={mergeReady ? '把勾选的同物料多条合并成一条(单位/数量以第一条为准,求和)' : '合并要求:勾中的都是草稿、且同一种物料名'}
+                className="text-xs px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">
+                🔀 合并选中({checkedList.length}){!mergeReady ? ' · 需同物料草稿' : ''}
+              </button>
+            )}
           </div>
           {pendingItems.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap text-xs">
@@ -994,10 +1025,10 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
               {visibleItems.map(it => (
                 <tr key={it.id} className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${selId === it.id ? 'bg-indigo-50/40' : ''}`} onClick={() => select(it)}>
                   <td className="py-2 px-2" onClick={e => e.stopPropagation()}>
-                    {canBulkConfirm(it) ? (
+                    {(canBulkConfirm(it) || it.status === 'draft') ? (
                       <input type="checkbox" checked={checked.has(it.id)}
                         onChange={e => setChecked(prev => { const n = new Set(prev); e.target.checked ? n.add(it.id) : n.delete(it.id); return n; })}
-                        className="w-3.5 h-3.5 accent-emerald-600" title="可批量确认" />
+                        className="w-3.5 h-3.5 accent-emerald-600" title="选中(可批量确认 / 同物料可合并)" />
                     ) : <span className="text-gray-200">·</span>}
                   </td>
                   <td className="py-2 px-2 font-mono text-xs text-indigo-600 whitespace-nowrap">
