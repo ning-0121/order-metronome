@@ -69,7 +69,9 @@ export async function buildPackingListWorkbook(m: ShippingDocModel): Promise<Wor
 
 /** CI 商业发票(按款汇总,含客户成交价;调用方须确保 model 以 canSeeFin=true 装载)。 */
 export async function buildCommercialInvoiceWorkbook(m: ShippingDocModel): Promise<Workbook> {
-  const { order, seller, currency, docMeta, plNumber, ciStyles, ciTotals } = m;
+  const { order, seller, currency, docMeta, plNumber, ciStyles, ciTotals, poNumbers } = m;
+  // 多客户PO合单:表头列出全部PO号(第6行,原空行),明细行不再逐行堆PO号(用户口径)。单PO/老单照旧逐行显示。
+  const multiPO = Array.isArray(poNumbers) && poNumbers.length >= 2;
   const bank = docMeta.bank || {};
   const fmt = (d: any) => (d ? String(d).slice(0, 10) : '');
 
@@ -103,6 +105,9 @@ export async function buildCommercialInvoiceWorkbook(m: ShippingDocModel): Promi
   mrg(5, 1, 5, 8); cell(5, 1, `SHIP VIA: ${docMeta.ship_via || ''}    DESTINATION: ${docMeta.destination || ''}`, { size: 10, align: 'left' });
   mrg(5, 9, 5, N); cell(5, 9, `HBL#: ${docMeta.hbl || ''}   CONTAINER#: ${docMeta.container_no || ''}   ETD ${fmt(docMeta.etd) || fmt(order.etd)}  ETA ${fmt(docMeta.eta)}`, { size: 9, align: 'right' });
 
+  // 多PO合单:第6行(原空行)列出全部客户PO号,供客户 AP/清关按PO对账。
+  if (multiPO) { mrg(6, 1, 6, N); cell(6, 1, `PO NOs.: ${poNumbers.join(', ')}`, { size: 10, bold: true, align: 'left' }); }
+
   const HR = 7;
   const heads = ['PO NO.', 'STYLE NO.', 'STYLE', 'SIZE', 'COLOR', 'DESCRIPTION', 'COMPOSITION', 'FABRIC WEIGHT',
     'TOTAL CARTON', 'UNIT PER CARTON', `QTY(${'SETS/PCS'})`, `UNIT PRICE(${currency.label})`, `AMOUNT(${currency.label})`, 'NOTES'];
@@ -110,7 +115,7 @@ export async function buildCommercialInvoiceWorkbook(m: ShippingDocModel): Promi
 
   let r = HR + 1;
   for (const s of ciStyles) {
-    const vals = [order.po_number || '', s.style_no, '', s.sizeRatio, s.colorBreakdown, s.description, s.composition, '',
+    const vals = [multiPO ? '' : (order.po_number || ''), s.style_no, '', s.sizeRatio, s.colorBreakdown, s.description, s.composition, '',
       s.cartons || '', s.per || '', s.qty || '', s.unitPrice != null ? s.unitPrice : '', s.amount != null ? s.amount : '', ''];
     vals.forEach((v, i) => cell(r, i + 1, v, { size: 8.5, align: [4, 5, 6].includes(i) ? 'left' : 'center', border: true }));
     r++;

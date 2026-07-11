@@ -41,6 +41,7 @@ export interface ShippingDocModel {
   plTotals: { cartons: number; qty: number; gross: number; net: number; vol: number };
   ciStyles: Array<any>;
   ciTotals: { cartons: number; qty: number; amount: number };
+  poNumbers: string[];   // 多客户PO合单:全部来源PO号(按 seq);单PO/老单为空 → 单据用 order.po_number
 }
 
 /** 装载出货单据模型(canSeeFin 由调用方按角色决定,决定是否带客户成交价)。 */
@@ -51,6 +52,14 @@ export async function loadShippingDocModel(
     .select('id, order_no, internal_order_no, po_number, customer_name, style_no, currency, etd, factory_date')
     .eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
+
+  // 多客户PO合单:全部来源PO号(按 seq 稳定去重)。表未建/查空 → 空数组,单据回退用 order.po_number。
+  let poNumbers: string[] = [];
+  try {
+    const { data: pos } = await (supabase.from('order_customer_pos') as any)
+      .select('customer_po_number, seq').eq('order_id', orderId).order('seq');
+    poNumbers = Array.from(new Set(((pos || []) as any[]).map(p => String(p.customer_po_number || '').trim()).filter(Boolean)));
+  } catch { /* 表未建:降级为空,用 order.po_number */ }
 
   // 分批:batchId 有值取该批装箱单;否则取整单(batch_id IS NULL)装箱单
   let plQ = (supabase.from('packing_lists') as any)
@@ -144,5 +153,5 @@ export async function loadShippingDocModel(
   }
   ciTotals.amount = Math.round(ciTotals.amount * 100) / 100;
 
-  return { data: { order, seller: EXPORT_SELLER, currency: cur, docMeta, plNumber: pl.pl_number, canSeeFin, plRows, plTotals, ciStyles, ciTotals } };
+  return { data: { order, seller: EXPORT_SELLER, currency: cur, docMeta, plNumber: pl.pl_number, canSeeFin, plRows, plTotals, ciStyles, ciTotals, poNumbers } };
 }

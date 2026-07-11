@@ -1238,12 +1238,19 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   {customerPos.length >= 2 && (
                     <div className="mt-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-800">
                       <span className="font-medium">📄 多PO合单</span>:检测到 {customerPos.length} 张客户PO,合并为本内部订单统一生产。
-                      <div className="mt-0.5 flex flex-wrap gap-1">
+                      <div className="mt-1 space-y-1">
                         {customerPos.map((p, i) => (
-                          <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-white border border-amber-200 font-medium">PO{i + 1} · {p.po_number}</span>
+                          <div key={i} className="flex items-center gap-1.5">
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-white border border-amber-200 font-medium whitespace-nowrap">PO{i + 1} · {p.po_number}</span>
+                            <input
+                              type="number" min="0" step="0.01" value={p.po_amount ?? ''}
+                              onChange={(e) => setCustomerPos(prev => prev.map((x, j) => j === i ? { ...x, po_amount: e.target.value } : x))}
+                              placeholder="金额(选填)"
+                              className="w-28 rounded border border-amber-200 bg-white px-1.5 py-0.5 text-[11px] text-gray-700 focus:border-amber-400 focus:outline-none" />
+                          </div>
                         ))}
                       </div>
-                      <p className="mt-0.5 text-amber-600">下方明细每款已标来源PO;生产单将按PO批次拆。如识别有误可在明细区调整。</p>
+                      <p className="mt-0.5 text-amber-600">金额选填,仅给财务留存(应收仍按内部订单号汇总)。下方明细每款已标来源PO;生产单按PO批次拆。</p>
                     </div>
                   )}
                 </div>
