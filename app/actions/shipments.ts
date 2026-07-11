@@ -145,9 +145,11 @@ export async function withdrawShipmentApplication(id: string, orderId: string, r
     return { error: '仅申请人、业务、财务或管理员可撤回出货申请' };
   }
 
-  // 状态闸并发保护:仅 sales_signed → pending;财务恰好同时批了则 0 行,明确报错而非假装成功
+  // 状态闸并发保护:仅 sales_signed → pending;财务恰好同时批了则 0 行,明确报错而非假装成功。
+  // sales_sign_id 必须一并清空:trg_update_shipment_status 按签名字段推导状态,不清的话
+  // pending 行日后任何一次 update 都会被推导回 sales_signed(迁移 20260711_..._respect_explicit 配套)。
   const { data: upd, error } = await (supabase.from('shipment_confirmations') as any)
-    .update({ status: 'pending', sales_signed_at: null, finance_note: `[撤回] ${reason || '业务撤回重报'}` })
+    .update({ status: 'pending', sales_sign_id: null, sales_signed_at: null, finance_note: `[撤回] ${reason || '业务撤回重报'}` })
     .eq('id', id).eq('status', 'sales_signed').select('id');
   if (error) return { error: error.message };
   if (!upd || upd.length === 0) return { error: '撤回失败:状态已变化(可能财务刚审批),请刷新查看' };
