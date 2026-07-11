@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, addBomItemsBatch, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
+import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
 import { BulkConsumptionEditor } from '@/components/BulkConsumptionEditor';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
 import { uploadSizeChart, listSizeCharts, deleteSizeChart } from '@/app/actions/size-chart';
+import { uploadOrderShareDoc, listOrderShareDocs, deleteOrderShareDoc } from '@/app/actions/order-share-docs';
 import { generateTrimSheet } from '@/app/actions/manufacturing-order';
 import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
 
@@ -153,14 +154,6 @@ export function BomTab({ orderId }: { orderId: string }) {
   const removeFormAttachment = (url: string) =>
     setForm(f => ({ ...f, attachment_files: (f.attachment_files || []).filter((a) => a.url !== url) }));
 
-  // 原辅料单批量识别(上传文件 → AI 读行 → 检查修改 → 批量入库)
-  const [parsing, setParsing] = useState(false);
-  const [parseRows, setParseRows] = useState<any[] | null>(null);
-  const [parseNotes, setParseNotes] = useState<string[]>([]);
-  const [parseFileName, setParseFileName] = useState('');
-  const [parseErr, setParseErr] = useState('');
-  const [batchSaving, setBatchSaving] = useState(false);
-
   const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
 
@@ -174,41 +167,6 @@ export function BomTab({ orderId }: { orderId: string }) {
     const chk = checkOverBaseline(base, it.qty_per_piece != null ? Number(it.qty_per_piece) : null, null);
     return chk.over_consumption ? chk : null;
   };
-
-  // ── 原辅料单批量识别 ──
-  async function handleParseFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setParsing(true); setParseErr(''); setParseRows(null);
-    try {
-      const { parseBomFile } = await import('@/app/actions/bom-parser');
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await parseBomFile(fd);
-      if (!res.ok || !res.data) { setParseErr(res.error || '解析失败'); return; }
-      setParseRows(res.data.items.map(i => ({ ...i })));
-      setParseNotes(res.data.confidence_notes || []);
-      setParseFileName(file.name);
-    } catch (err: any) {
-      setParseErr(err?.message || '解析异常');
-    } finally { setParsing(false); }
-  }
-  const setParseField = (i: number, k: string, v: string) =>
-    setParseRows(rows => (rows || []).map((r, x) => x === i ? { ...r, [k]: v } : r));
-  const removeParseRow = (i: number) => setParseRows(rows => (rows || []).filter((_, x) => x !== i));
-
-  async function confirmBatchInsert() {
-    if (!parseRows || parseRows.length === 0) return;
-    setBatchSaving(true); setParseErr('');
-    const res = await addBomItemsBatch(orderId, parseRows.map(r => ({
-      ...r, qty_per_piece: r.qty_per_piece === '' || r.qty_per_piece == null ? null : Number(r.qty_per_piece),
-    })));
-    setBatchSaving(false);
-    if (res.error) { setParseErr(res.error); return; }
-    setParseRows(null); setParseNotes([]); setParseFileName('');
-    await reload();
-  }
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -431,6 +389,34 @@ export function BomTab({ orderId }: { orderId: string }) {
     await reloadSizeCharts();
   }
 
+  // 订单共享文件:辅料采购清单 + 包装方式(整个 PO 上传一份,共享给采购/生产/财务)
+  const [shareDocs, setShareDocs] = useState<Record<string, Array<{ id: string; file_name: string; url: string | null }>>>({});
+  const [shareUploading, setShareUploading] = useState<string | null>(null);   // 正在上传的 file_type
+  const [shareMsg, setShareMsg] = useState<Record<string, string>>({});
+  const SHARE_KINDS: Array<{ type: string; label: string; icon: string }> = [
+    { type: 'accessory_purchase_list', label: '辅料采购清单', icon: '📋' },
+    { type: 'packing_method', label: '包装方式', icon: '📦' },
+  ];
+  async function reloadShare(type: string) { const r = await listOrderShareDocs(orderId, type); setShareDocs(p => ({ ...p, [type]: (r as any).data || [] })); }
+  useEffect(() => { SHARE_KINDS.forEach(k => reloadShare(k.type)); /* eslint-disable-next-line */ }, [orderId]);
+  async function handleUploadShare(type: string, files: FileList) {
+    setShareUploading(type); setShareMsg(p => ({ ...p, [type]: '' }));
+    let ok = 0; const errs: string[] = [];
+    for (const file of Array.from(files)) {
+      const fd = new FormData(); fd.set('file', file);
+      const r = await uploadOrderShareDoc(orderId, type, fd);
+      if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else ok++;
+    }
+    setShareUploading(null);
+    setShareMsg(p => ({ ...p, [type]: errs.length ? `已上传 ${ok} 个,失败 ${errs.length} 个 — ${errs[0]}` : '' }));
+    await reloadShare(type);
+  }
+  async function handleDeleteShare(type: string, id: string) {
+    if (!confirm('删除这份文件？')) return;
+    await deleteOrderShareDoc(id, orderId, type);
+    await reloadShare(type);
+  }
+
   // 生成「辅料单」(第二张:辅料明细,读最新 BOM;自动同步到「生产任务单」页)
   const [trimBusy, setTrimBusy] = useState(false);
   const [trimMsg, setTrimMsg] = useState('');
@@ -457,32 +443,42 @@ export function BomTab({ orderId }: { orderId: string }) {
   const submitted = items.some(i => i.submit_status === 'submitted');
   const submittedAt = items.find(i => i.submitted_at)?.submitted_at || null;
 
+  // 面料(含里料)= 完整表维持现状;辅料 = 精简为 款号/辅料名/单件数/总数(2026-07-11 用户拍板)
+  const FULL_FORM_TYPES = ['fabric', 'lining'];
+  const isFabricForm = FULL_FORM_TYPES.includes(form.material_type);
   const formRow = (
     <div className="bg-indigo-50 rounded-xl p-4 mb-4 space-y-3">
+      {!isFabricForm && (
+        <p className="text-xs text-gray-500">辅料只需填:归属款号 · 辅料名 · 单件数量 · 总数量(单位默认「个」);面料才需规格/颜色/图片等。</p>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <input placeholder="归属款号(空=整单通用)" value={form.style_no} onChange={e => set('style_no', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="物料名称 *" value={form.material_name} onChange={e => set('material_name', e.target.value)}
+        <input placeholder={isFabricForm ? '物料名称 *' : '辅料名 *'} value={form.material_name} onChange={e => set('material_name', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <select value={form.material_type} onChange={e => set('material_type', e.target.value)}
+        <select value={form.material_type}
+          onChange={e => { const t = e.target.value; setForm(f => ({ ...f, material_type: t, unit: FULL_FORM_TYPES.includes(t) ? (f.unit || 'meter') : '个' })); }}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
           {Object.entries(CAT_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
-        <input placeholder="物料代码" value={form.material_code} onChange={e => set('material_code', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="供应商" value={form.supplier} onChange={e => set('supplier', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="位置说明(进辅料单)" title="辅料单「位置说明」列。如:左胸/后领中/侧缝" value={form.placement} onChange={e => set('placement', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="颜色 color" value={form.color} onChange={e => set('color', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="规格 spec" value={form.spec} onChange={e => set('spec', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
-        <input placeholder="备注 notes" value={form.notes} onChange={e => set('notes', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
-        <input placeholder="特殊要求" value={form.special_requirements} onChange={e => set('special_requirements', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
+        {isFabricForm && <>
+          <input placeholder="物料代码" value={form.material_code} onChange={e => set('material_code', e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <input placeholder="供应商" value={form.supplier} onChange={e => set('supplier', e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <input placeholder="位置说明(进辅料单)" title="辅料单「位置说明」列。如:左胸/后领中/侧缝" value={form.placement} onChange={e => set('placement', e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <input placeholder="颜色 color" value={form.color} onChange={e => set('color', e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <input placeholder="规格 spec" value={form.spec} onChange={e => set('spec', e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
+          <input placeholder="备注 notes" value={form.notes} onChange={e => set('notes', e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
+          <input placeholder="特殊要求" value={form.special_requirements} onChange={e => set('special_requirements', e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
+        </>}
       </div>
+      {isFabricForm && <>
       {/* 辅料单图:两个槽按位置直传,保存随行入库;「生成辅料单」直接读进对应列 */}
       <div>
         <p className="text-xs text-gray-500 mb-1.5">🖼 辅料单图片（可选，上传后「生成辅料单」自动填入对应列）</p>
@@ -536,13 +532,14 @@ export function BomTab({ orderId }: { orderId: string }) {
           </ul>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-3">
-        <input placeholder="单件用量" type="number" step="0.01" value={form.qty_per_piece} onChange={e => set('qty_per_piece', e.target.value)}
+      </>}
+      <div className={`grid gap-3 ${isFabricForm ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        <input placeholder={isFabricForm ? '单件用量' : '单件数量(个数)'} type="number" step="0.01" value={form.qty_per_piece} onChange={e => set('qty_per_piece', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="总需用量" type="number" step="0.01" value={form.total_qty} onChange={e => set('total_qty', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        {isFabricForm && <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />}
       </div>
       {editId && editingTemplate && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">
@@ -853,6 +850,43 @@ export function BomTab({ orderId }: { orderId: string }) {
           </div>
         ) : <p className="text-xs text-gray-400 mt-1">暂无尺码表,点右上「上传尺码表」。</p>}
       </div>
+      {/* 订单共享文件:整个 PO 上传辅料采购清单 + 包装方式,共享给采购/生产/财务(2026-07-11:取代 AI 识别) */}
+      <div className="mb-4 p-3 rounded-xl border border-violet-200 bg-violet-50/40">
+        <p className="text-sm font-semibold text-gray-800 mb-1">📎 订单共享文件(业务对整个 PO 上传)</p>
+        <p className="text-xs text-gray-500 mb-2">业务做好后在此上传,<b>共享给采购部 / 生产部 / 财务部</b>(采购核料页、生产任务单页也会显示下载)· 可选多个 · PDF/Excel/图片</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {SHARE_KINDS.map(k => {
+            const list = shareDocs[k.type] || [];
+            const busy = shareUploading === k.type;
+            return (
+              <div key={k.type} className="rounded-lg border border-violet-100 bg-white p-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-800">{k.icon} {k.label}</span>
+                  <label className={`ml-auto text-xs px-2.5 py-1 rounded-lg bg-violet-600 text-white font-medium hover:bg-violet-700 cursor-pointer ${busy ? 'opacity-50 pointer-events-none' : ''}`}>
+                    {busy ? '上传中…' : '📤 上传'}
+                    <input type="file" multiple accept=".xlsx,.xls,.csv,.pdf,.doc,.docx,.png,.jpg,.jpeg,image/*" className="hidden" disabled={busy}
+                      onChange={e => { const fs = e.target.files; if (fs && fs.length) handleUploadShare(k.type, fs); e.currentTarget.value = ''; }} />
+                  </label>
+                </div>
+                {shareMsg[k.type] && <p className="text-xs text-rose-600 mt-1">{shareMsg[k.type]}</p>}
+                {list.length > 0 ? (
+                  <div className="mt-1.5 space-y-1">
+                    {list.map(d => (
+                      <div key={d.id} className="flex items-center gap-2 text-sm">
+                        <span className="text-gray-400">📄</span>
+                        {d.url
+                          ? <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-violet-700 hover:underline truncate">{d.file_name}</a>
+                          : <span className="text-gray-600 truncate">{d.file_name}</span>}
+                        <button onClick={() => handleDeleteShare(k.type, d.id)} className="ml-auto text-gray-300 hover:text-rose-500 text-xs" title="删除">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="text-xs text-gray-400 mt-1">暂无,点右上「上传」。</p>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
       {/* 辅料单(第二张):原辅料填完后在此生成,读最新 BOM;同一按钮也在「生产任务单」页 */}
       <div className="mb-4 p-3 rounded-xl border border-teal-200 bg-teal-50/40">
         <div className="flex items-center gap-2 flex-wrap">
@@ -868,12 +902,11 @@ export function BomTab({ orderId }: { orderId: string }) {
       </div>
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm text-gray-500">{items.length} 条物料记录</span>
-        {!showAdd && !showImport && !showMaster && !showCopy && !parseRows && (
+        {!showAdd && !showImport && !showMaster && !showCopy && (
           <div className="flex flex-wrap gap-2 justify-end">
-            <label className={`text-sm px-3 py-1.5 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`}>
-              {parsing ? '识别中…' : '📄 上传原辅料单识别'}
-              <input type="file" accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" disabled={parsing} onChange={handleParseFile} />
-            </label>
+            {/* 2026-07-11 用户拍板:取消「原辅料单识别」(AI 识别不准),辅料改人工录入 + 上传辅料单文档 */}
+            <button onClick={() => { setShowAdd(true); setEditId(null); setEditingTemplate(false); setForm(emptyForm); }}
+              className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700">➕ 手动录入辅料</button>
             <button onClick={doInstantiate} disabled={instantiating}
               className="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50">{instantiating ? '实例化中…' : '🧬 从产品款实例化'}</button>
             <button onClick={openMaster}
@@ -882,8 +915,6 @@ export function BomTab({ orderId }: { orderId: string }) {
               className="text-sm px-3 py-1.5 rounded-lg border border-violet-300 text-violet-700 font-medium hover:bg-violet-50">📋 复制上一单</button>
             <button onClick={openImport}
               className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">📥 从客户标准库带入</button>
-            <button onClick={() => { setShowAdd(true); setEditId(null); setEditingTemplate(false); setForm(emptyForm); }}
-              className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-50">手动新增</button>
           </div>
         )}
       </div>
@@ -909,60 +940,11 @@ export function BomTab({ orderId }: { orderId: string }) {
           </button>
         </div>
       )}
-      {parseErr && !parseRows && <p className="text-xs text-red-600 mb-2">❌ {parseErr}</p>}
-      {/* 原辅料单识别结果:检查/修改/删行后批量入库 */}
-      {parseRows && (
-        <div className="mb-4 p-4 rounded-xl border border-amber-200 bg-amber-50/40">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">📄 识别结果:{parseFileName} · {parseRows.length} 行(可改可删,确认后入库)</span>
-            <button onClick={() => { setParseRows(null); setParseErr(''); }} className="text-xs text-gray-400 hover:text-gray-600">关闭</button>
-          </div>
-          {parseNotes.length > 0 && (
-            <p className="text-xs text-amber-700 mb-2">⚠ 需确认:{parseNotes.join('；')}</p>
-          )}
-          <div className="overflow-x-auto bg-white rounded-lg border border-amber-100 mb-3">
-            <table className="w-full text-xs">
-              <thead><tr className="border-b border-gray-100 text-gray-500">
-                {['物料名称 *', '类别', '颜色', '规格', '单耗/件', '单位', '位置', '特殊要求', ''].map((h, i) => (
-                  <th key={i} className="py-1.5 px-2 text-left font-medium whitespace-nowrap">{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {parseRows.map((r, i) => (
-                  <tr key={i} className="border-b border-gray-50">
-                    <td className="py-1 px-2"><input value={r.material_name || ''} onChange={e => setParseField(i, 'material_name', e.target.value)} className="w-36 rounded border border-gray-200 px-1.5 py-1" /></td>
-                    <td className="py-1 px-2">
-                      <select value={r.material_type || 'other'} onChange={e => setParseField(i, 'material_type', e.target.value)} className="rounded border border-gray-200 px-1 py-1 bg-white">
-                        {Object.entries(CAT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
-                    </td>
-                    <td className="py-1 px-2"><input value={r.color || ''} onChange={e => setParseField(i, 'color', e.target.value)} className="w-16 rounded border border-gray-200 px-1.5 py-1" /></td>
-                    <td className="py-1 px-2"><input value={r.spec || ''} onChange={e => setParseField(i, 'spec', e.target.value)} className="w-20 rounded border border-gray-200 px-1.5 py-1" /></td>
-                    <td className="py-1 px-2"><input value={r.qty_per_piece ?? ''} onChange={e => setParseField(i, 'qty_per_piece', e.target.value)} className="w-16 rounded border border-gray-200 px-1.5 py-1 text-right" /></td>
-                    <td className="py-1 px-2"><input value={r.unit || ''} onChange={e => setParseField(i, 'unit', e.target.value)} className="w-12 rounded border border-gray-200 px-1.5 py-1" /></td>
-                    <td className="py-1 px-2"><input value={r.placement || ''} onChange={e => setParseField(i, 'placement', e.target.value)} className="w-24 rounded border border-gray-200 px-1.5 py-1" /></td>
-                    <td className="py-1 px-2"><input value={r.special_requirements || ''} onChange={e => setParseField(i, 'special_requirements', e.target.value)} className="w-40 rounded border border-gray-200 px-1.5 py-1" /></td>
-                    <td className="py-1 px-2"><button onClick={() => removeParseRow(i)} className="text-red-500 hover:text-red-700">×</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {parseErr && <p className="text-xs text-red-600 mb-2">❌ {parseErr}</p>}
-          <div className="flex gap-2">
-            <button onClick={confirmBatchInsert} disabled={batchSaving || parseRows.length === 0}
-              className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50">
-              {batchSaving ? '入库中…' : `✅ 确认入库 ${parseRows.length} 行`}</button>
-            <button onClick={() => { setParseRows(null); setParseErr(''); }}
-              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500 hover:bg-gray-50">取消</button>
-          </div>
-        </div>
-      )}
       {showMaster && masterPanel}
       {showCopy && copyPanel}
       {showImport && importPanel}
       {showAdd && formRow}
-      {items.length === 0 && !showAdd && !showMaster && !showCopy && !parseRows ? (
+      {items.length === 0 && !showAdd && !showMaster && !showCopy ? (
         <div className="text-center py-12 text-gray-400">
           <p className="mb-2">暂无原辅料数据</p>
           <button onClick={openMaster} className="text-indigo-600 text-sm font-medium hover:underline">+ 从物料库选择录入</button>

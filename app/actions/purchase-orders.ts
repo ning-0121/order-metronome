@@ -1139,6 +1139,18 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
       if (f?.url && /^https?:\/\//.test(String(f.url))) attachRows.push({ material: (pi as any).material_name || '', name: String(f.name || f.url), url: String(f.url) });
     }
   }
+  // 业务上传的「辅料采购清单」(order_attachments.accessory_purchase_list,公开桶永久 URL)—— 随采购单发供应商
+  {
+    const orderIds = ((po as any).order_ids || []) as string[];
+    if (orderIds.length > 0) {
+      const { data: accDocs } = await (createServiceRoleClient().from('order_attachments') as any)
+        .select('file_name, file_url').in('order_id', orderIds).eq('file_type', 'accessory_purchase_list');
+      for (const d of (accDocs || [])) {
+        if ((d as any).file_url && /^https?:\/\//.test(String((d as any).file_url)))
+          attachRows.push({ material: '(辅料采购清单)', name: String((d as any).file_name || (d as any).file_url), url: String((d as any).file_url) });
+      }
+    }
+  }
   if (attachRows.length > 0) {
     const ws4 = wb.addWorksheet('辅料附件清单');
     [22, 40, 70].forEach((w, i) => { ws4.getColumn(i + 1).width = w; });

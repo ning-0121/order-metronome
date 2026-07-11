@@ -20,6 +20,7 @@ import { computeSuggestedPurchaseQty } from '@/lib/services/procurement-consolid
 import { useDialogs } from '@/components/ui/useDialogs';
 import { orderSizeKeys } from '@/lib/utils/size-sort';
 import { getOrderSizeOrder } from '@/app/actions/order-line-items';
+import { OrderShareDocsLinks } from '@/components/OrderShareDocsLinks';
 
 /** 补采购财务审批状态 → 显示 */
 const SUPP_STATUS: Record<string, { label: string; cls: string }> = {
@@ -629,6 +630,8 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
 
   return (
     <div className="space-y-4">
+      {/* 订单共享文件(辅料采购清单/包装方式,业务在「原辅料和包装」上传)*/}
+      <OrderShareDocsLinks orderId={orderId} />
       {/* 步骤条 + 下一步高亮 */}
       <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
         <div className="flex items-center gap-1.5 flex-wrap mb-2">

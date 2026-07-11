@@ -128,63 +128,6 @@ export async function addBomItem(orderId: string, item: {
   return {};
 }
 
-/** 批量新增(原辅料单 AI 识别后确认入库)。逐行校验,空名跳过。 */
-export async function addBomItemsBatch(orderId: string, items: Array<{
-  material_name: string; material_type?: string;
-  qty_per_piece?: number | null; unit?: string; supplier?: string;
-  placement?: string; color?: string; spec?: string;
-  notes?: string; special_requirements?: string;
-}>): Promise<{ inserted?: number; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-  { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
-
-  const VALID_TYPES = ['fabric', 'trim', 'lining', 'label', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
-  const valid = (items || []).filter(i => i?.material_name?.trim());
-  if (valid.length === 0) return { error: '没有可入库的行' };
-
-  // 自动赋码:同 名+类别+规格 只 ensure 一次(同名不同规格=不同变体行,各自成码)
-  const { ensureMaterialMaster } = await import('@/lib/services/material-autocode');
-  const codeCache = new Map<string, { id: string; code: string } | null>();
-  const ensureFor = async (i: any) => {
-    const type = VALID_TYPES.includes(i.material_type || '') ? i.material_type : 'other';
-    const key = `${i.material_name.trim().toLowerCase()}¦${type}¦${String(i.spec ?? '').trim().toLowerCase()}`;
-    if (!codeCache.has(key)) {
-      codeCache.set(key, await ensureMaterialMaster(supabase, user.id, {
-        name: i.material_name, category: type, spec: i.spec, unit: i.unit, supplier: i.supplier,
-      }));
-    }
-    return codeCache.get(key) || null;
-  };
-
-  const rows: any[] = [];
-  for (const i of valid) {
-    const auto = await ensureFor(i);
-    rows.push({
-      order_id: orderId, created_by: user.id,
-      material_name: i.material_name.trim(),
-      material_type: VALID_TYPES.includes(i.material_type || '') ? i.material_type : 'other',
-      material_code: auto?.code || null,
-      material_master_id: auto?.id || null,
-      qty_per_piece: (i.qty_per_piece != null && !isNaN(Number(i.qty_per_piece))) ? Number(i.qty_per_piece) : null,
-      unit: i.unit?.trim() || null,
-      supplier: i.supplier?.trim() || null,
-      placement: i.placement?.trim() || null,
-      color: i.color?.trim() || null,
-      spec: i.spec?.trim() || null,
-      notes: i.notes?.trim() || null,
-      special_requirements: i.special_requirements?.trim() || null,
-      source: 'file_parse',                  // 原辅料单 AI 识别入库
-    });
-  }
-
-  const { error } = await (supabase.from('materials_bom') as any).insert(rows);
-  if (error) return { error: error.message };
-  revalidatePath(`/orders/${orderId}`);
-  return { inserted: rows.length };
-}
-
 /**
  * O1b:从 Material Master「选料」录入。
  * 服务端按 masterId 取正式主数据(防客户端伪造物料定义)→ 快照式写入 materials_bom:

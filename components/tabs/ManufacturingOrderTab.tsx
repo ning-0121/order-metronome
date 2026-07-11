@@ -5,6 +5,7 @@ import {
   generateProductionOrderSheet, generateTrimSheet,
 } from '@/app/actions/manufacturing-order';
 import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
+import { OrderShareDocsLinks } from '@/components/OrderShareDocsLinks';
 import { orderSizeKeys, sizeComparator } from '@/lib/utils/size-sort';
 import { useDialogs } from '@/components/ui/useDialogs';
 
@@ -173,6 +174,9 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         <p className="text-[11px] text-gray-400 mb-3">这里录/改逐款明细,是生产任务单和客户 PI 的数据源。手工录,或修正 AI 解析 PO 的结果。</p>
         <LineItemMatrixEditor orderId={orderId} />
       </div>
+
+      {/* 订单共享文件(辅料采购清单/包装方式,业务在「原辅料和包装」上传)*/}
+      <OrderShareDocsLinks orderId={orderId} />
 
       {/* AI 原始识别冻结底档(建单时 PO 解析原文,纠错追溯用) */}
       <PoParseSnapshotPanel orderId={orderId} />
