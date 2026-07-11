@@ -140,6 +140,22 @@ export async function createPurchaseOrder(input: {
   const total = keepIds.reduce((s, id) => s + (amountById.get(id) || 0), 0);
   const orderIds = [...new Set(rows.filter((r) => keepIds.includes(r.id)).map((r) => r.order_id).filter(Boolean))];
 
+  // ── 预算确认硬闸门(2026-07-11 老板拍板) ──────────────────────────
+  // 财务完成 PO 审批(预算审批通过)回传 budget.confirmed 落 order_finance_events;
+  // 没收到确认的订单不得下采购(业务执行第一节点先过财务)。
+  // 紧急放行:环境变量 BUDGET_GATE_ENFORCE=false(默认开闸门)。
+  if (process.env.BUDGET_GATE_ENFORCE !== 'false' && orderIds.length > 0) {
+    const { data: evts } = await (svc.from('order_finance_events') as any)
+      .select('order_id').eq('event_type', 'budget.confirmed').in('order_id', orderIds);
+    const confirmed = new Set(((evts || []) as any[]).map((e) => e.order_id));
+    const missingBudget = orderIds.filter((id) => !confirmed.has(id));
+    if (missingBudget.length > 0) {
+      const { data: ords } = await (svc.from('orders') as any).select('id, order_no, internal_order_no').in('id', missingBudget);
+      const names = ((ords || []) as any[]).map((o) => o.internal_order_no || o.order_no || String(o.id).slice(0, 8)).join('、');
+      return { error: `财务未完成 PO 审批(预算未确认):${names || missingBudget.length + ' 个订单'} —— 请先在财务系统提交预算并审批通过,再下采购` };
+    }
+  }
+
   // 生成 po_no PO-YYYYMMDD-NNN。
   // 修(2026-07-11):原按「当天已建数量+1」算序号——删草稿单会让数量缩水→下一号撞现存号
   //   (purchase_orders_po_no_key 唯一键冲突)。改为【取当天已存在最大序号+1】(删单不影响),
