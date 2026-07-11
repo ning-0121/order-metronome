@@ -548,14 +548,16 @@ export function MilestoneActions({
             </div>
           )}
 
-          {/* AI 操作建议 */}
-          <AIAdviceBox
-            scene="milestone_action"
-            orderId={orderId}
-            milestoneStepKey={milestone.step_key}
-            contextData={`正在处理节点「${milestone.name}」(${milestone.step_key})，负责角色：${milestone.owner_role}，截止日期：${milestone.due_at || '未设'}，当前状态：${milestone.status}`}
-            compact
-          />
+          {/* AI 操作建议(PO确认不需要 AI 识别/分析 —— 2026-07-11 用户拍板关掉,避免干扰确认) */}
+          {milestone.step_key !== 'po_confirmed' && (
+            <AIAdviceBox
+              scene="milestone_action"
+              orderId={orderId}
+              milestoneStepKey={milestone.step_key}
+              contextData={`正在处理节点「${milestone.name}」(${milestone.step_key})，负责角色：${milestone.owner_role}，截止日期：${milestone.due_at || '未设'}，当前状态：${milestone.status}`}
+              compact
+            />
+          )}
 
           {milestone.evidence_note && (
             <div className="text-xs text-indigo-700 bg-white rounded-lg p-2 border border-indigo-200">
@@ -985,7 +987,7 @@ export function MilestoneActions({
           <BackfillDatePicker value={backfillDate} onChange={setBackfillDate} dueAt={milestone.due_at} />
 
           <div className="flex flex-col sm:flex-row gap-2">
-            {multiPartyPending ? (
+            {multiPartyPending && milestone.step_key !== 'po_confirmed' ? (
               <div className="flex-1 rounded-lg bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-700">
                 🤝 本节点由各方在上方「多方确认」区<b>各自点确认</b>(各自独立·无需同时,谁确认谁的)。还差:<b>{pendingPartyLabels!.join('、')}</b>。全部确认后自动完成——<b>无需在此点「确认完成」</b>。清单可点上方「保存清单」留痕。
               </div>

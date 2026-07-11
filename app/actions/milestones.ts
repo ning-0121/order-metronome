@@ -465,7 +465,8 @@ export async function markMilestoneDone(
   {
     const { requiredPartiesFor, pendingParties } = await import('@/lib/domain/confirmationParties');
     const requiredParties = requiredPartiesFor(milestone.step_key);
-    if (requiredParties.length > 0 && !isAdmin) {
+    // PO确认:2026-07-11 用户拍板改「业务可直接确认完成」—— 财务/生产部确认变提醒/可选,不再硬卡业务。
+    if (requiredParties.length > 0 && !isAdmin && milestone.step_key !== 'po_confirmed') {
       const { data: confs, error: confErr } = await (supabase.from('milestone_confirmations') as any)
         .select('party_key, status').eq('milestone_id', milestoneId);
       if (!confErr) {
