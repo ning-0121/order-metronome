@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
@@ -53,6 +53,15 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     setBusy('');
     if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
     setSupPicker(false);
+    router.refresh();
+  }
+
+  async function handleDeleteLine(l: any) {
+    if (!(await confirm({ title: `删除采购行「${l.material_name || '该行'}」?`, message: '仅草稿单可删,删除后不可恢复(可重新归料生成)。', confirmText: '删除', cancelText: '取消' }))) return;
+    setBusy('line:' + l.id);
+    const res = await deletePurchaseOrderLine(po.id, l.id);
+    setBusy('');
+    if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
     router.refresh();
   }
 
@@ -123,6 +132,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
   }
 
   const dualNo = `${po.po_no} · 订单 ${(orderRefs || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
+  const canEditLines = canProcure && po.status === 'draft';   // 草稿单采购可删错行
 
   async function handleExport(withPrice: boolean) {
     setExporting(true);
@@ -367,6 +377,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
               <th className="px-3 py-2 text-right">建议价</th>
               {canSeeFloor && <th className="px-3 py-2 text-right">底价</th>}
               {canSeeFloor && <th className="px-3 py-2 text-right">金额</th>}
+              {canEditLines && <th className="px-3 py-2 text-center">操作</th>}
             </tr></thead>
             <tbody className="divide-y divide-gray-100">
               {lines.map((l: any) => {
@@ -391,10 +402,19 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                       <td className="px-3 py-2 text-right">{l.price_baseline ?? '—'}</td>
                       {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.unit_price ?? '—'}</td>}
                       {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.ordered_amount ?? '—'}</td>}
+                      {canEditLines && (
+                        <td className="px-3 py-2 text-center">
+                          <button onClick={() => handleDeleteLine(l)} disabled={busy !== '' || received > 0}
+                            title={received > 0 ? '已有收货,不能删除' : '删除此采购行'}
+                            className="text-[11px] text-red-500 hover:text-red-700 hover:underline disabled:opacity-40 disabled:no-underline">
+                            {busy === 'line:' + l.id ? '删除中…' : '🗑 删除'}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                     {receipts.length > 0 && (
                       <tr key={`${l.id}-receipts`}>
-                        <td colSpan={canSeeFloor ? 11 : 9} className="px-3 pb-2 pt-0">
+                        <td colSpan={(canSeeFloor ? 11 : 9) + (canEditLines ? 1 : 0)} className="px-3 pb-2 pt-0">
                           <div className="ml-4 rounded-lg bg-emerald-50/60 border border-emerald-100 px-3 py-1.5 text-[11px] text-emerald-800">
                             📥 收货批次:
                             {receipts.map((r: any, i: number) => (
@@ -418,7 +438,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
               <td className="px-3 py-2 text-center">{lines.reduce((a: number, l: any) => a + (Number(l.ordered_qty) || 0), 0)}</td>
               <td className="px-3 py-2 text-center text-emerald-700">{lines.reduce((a: number, l: any) => a + (Number(l.received_qty) || 0), 0)}</td>
               <td className="px-3 py-2 text-center text-amber-700">{Math.max(0, Math.round(lines.reduce((a: number, l: any) => a + ((Number(l.ordered_qty) || 0) - (Number(l.received_qty) || 0)), 0) * 1000) / 1000)}</td>
-              <td colSpan={canSeeFloor ? 4 : 2} />
+              <td colSpan={(canSeeFloor ? 4 : 2) + (canEditLines ? 1 : 0)} />
             </tr></tfoot>
           </table>
         </div>

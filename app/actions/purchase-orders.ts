@@ -691,6 +691,49 @@ export async function changePurchaseOrderSupplier(poId: string, supplierId: stri
 }
 
 /**
+ * 删除采购行(仅采购、仅草稿):删掉核料输错/多出的面辅料行。
+ * 硬删(loader 不过滤 cancelled,软删会残留「已取消」行);删后按剩余行 ordered_amount 重算单头 total_amount。
+ * 挡住已收货的行(received_qty>0)——已到货的不许删。行须属于本单。
+ */
+export async function deletePurchaseOrderLine(poId: string, lineId: string): Promise<{ ok?: boolean; total?: number; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可删除采购行' };
+
+  const { data: po } = await (supabase.from('purchase_orders') as any)
+    .select('id, status').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') {
+    return { error: '仅「草稿」采购单可删采购行;已下单/审批中的请先撤回。' };
+  }
+
+  const svc = createServiceRoleClient();
+  // 行须属本单 + 未收货(有收货记录不许删)。ordered_amount/unit_price 列级封锁,经 service-role 读。
+  const { data: line } = await (svc.from('procurement_line_items') as any)
+    .select('id, purchase_order_id, received_qty').eq('id', lineId).maybeSingle();
+  if (!line || (line as any).purchase_order_id !== poId) return { error: '采购行不存在或不属于本单' };
+  if (Number((line as any).received_qty) > 0) return { error: '该行已有收货,不能删除。' };
+
+  const { error: delErr } = await (svc.from('procurement_line_items') as any)
+    .delete().eq('id', lineId).eq('purchase_order_id', poId);
+  if (delErr) return { error: '删除失败:' + delErr.message };
+
+  // 重算单头总额(剩余未取消行 ordered_amount 之和;GENERATED 列,只读求和)
+  const { data: rest } = await (svc.from('procurement_line_items') as any)
+    .select('ordered_amount, line_status').eq('purchase_order_id', poId);
+  const total = ((rest || []) as any[])
+    .filter((l) => l.line_status !== 'cancelled')
+    .reduce((s, l) => s + (Number(l.ordered_amount) || 0), 0);
+  const total2 = Math.round(total * 100) / 100;
+  await (svc.from('purchase_orders') as any)
+    .update({ total_amount: total2, updated_at: new Date().toISOString() }).eq('id', poId);
+
+  revalidatePath(`/procurement/po/${poId}`);
+  revalidatePath('/procurement');
+  return { ok: true, total: total2 };
+}
+
+/**
  * 设置/取消采购单「价格待定」(仅采购、仅草稿)。勾上后允许无底价下单(先下单后议价,单上标注);
  * 价格填好后可取消。列缺失(迁移未跑)→ 提示先执行迁移。
  */
