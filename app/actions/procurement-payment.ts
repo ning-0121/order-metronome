@@ -64,17 +64,38 @@ export async function submitPaymentRequest(reconId: string, amount: any, opts?: 
   const poId = (recon as any).purchase_order_id;
   const { data: po } = await (supabase.from('purchase_orders') as any)
     .select('po_no, order_ids, currency').eq('id', poId).maybeSingle();
+  // 生成 request_no PR-YYYYMMDD-NNN(3 位)。
+  // 修(2026-07-11):原按「全表记录数+1」算序号——删付款申请会让计数缩水→下一号撞现存号
+  //   (同 purchase_orders_po_no_key 一类隐患)。改为【取当天已存在最大序号+1】(删单不复用空缺号),
+  //   并对唯一键冲突自增重试(防并发建单撞号)。
   const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const { count } = await (supabase.from('procurement_payment_requests') as any).select('id', { count: 'exact', head: true });
-  const requestNo = `PR-${dateTag}-${String((count || 0) + 1).padStart(3, '0')}`;
+  const prPrefix = `PR-${dateTag}-`;
+  const nextRequestNo = async (bump: number): Promise<string> => {
+    const { data: existing } = await (supabase.from('procurement_payment_requests') as any)
+      .select('request_no').like('request_no', `${prPrefix}%`);
+    let maxN = 0;
+    for (const r of (existing || []) as any[]) {
+      const m = /-(\d+)$/.exec(String(r.request_no || ''));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    }
+    return `${prPrefix}${String(maxN + 1 + bump).padStart(3, '0')}`;
+  };
 
-  const { data: pr, error } = await (supabase.from('procurement_payment_requests') as any).insert({
-    request_no: requestNo, reconciliation_id: reconId, purchase_order_id: poId,
-    supplier_id: (recon as any).supplier_id, supplier_name: (recon as any).supplier_name,
-    amount: amt, currency: (recon as any).currency || 'RMB',
-    week_label: opts?.week_label || null, note: opts?.note || null,
-    status: 'submitted', submitted_by: user.id,
-  }).select('id, request_no').single();
+  let pr: any = null; let error: any = null; let requestNo = '';
+  for (let attempt = 0; attempt < 6; attempt++) {
+    requestNo = await nextRequestNo(attempt);   // 每次重试重算最大值 + attempt 偏移,跳过并发被抢占的号
+    const res = await (supabase.from('procurement_payment_requests') as any).insert({
+      request_no: requestNo, reconciliation_id: reconId, purchase_order_id: poId,
+      supplier_id: (recon as any).supplier_id, supplier_name: (recon as any).supplier_name,
+      amount: amt, currency: (recon as any).currency || 'RMB',
+      week_label: opts?.week_label || null, note: opts?.note || null,
+      status: 'submitted', submitted_by: user.id,
+    }).select('id, request_no').single();
+    pr = res.data; error = res.error;
+    if (!error) break;
+    // 仅对「单号唯一键冲突」重试;其他错误(权限/外键/列缺失)立即抛出,不空转
+    if (!/request_no_key|duplicate key/i.test(error.message || '')) break;
+  }
   if (error) return { error: friendlyError(error) };
 
   // 首次提交 → 对账单标已推财务
