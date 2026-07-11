@@ -12,7 +12,7 @@ import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 
-const MO_WRITE_MSG = '仅生产/生产主管/跟单/管理员可编辑或推进生产任务单';
+const MO_WRITE_MSG = '仅业务/跟单/生产/生产主管/管理员可编辑或推进生产任务单';
 
 const MO_STATUSES = ['draft', 'reviewing', 'confirmed', 'executing', 'closed'] as const;
 type MoStatus = typeof MO_STATUSES[number];
@@ -68,7 +68,7 @@ export async function upsertManufacturingOrder(orderId: string, fields: MoFields
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', MO_WRITE_MSG); if (err) return { error: err }; }
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_MO', MO_WRITE_MSG); if (err) return { error: err }; }
 
   const patch = {
     print_embroidery_requirements: fields.print_embroidery_requirements || null,
@@ -106,7 +106,7 @@ export async function updateManufacturingOrderStatus(orderId: string, status: Mo
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', MO_WRITE_MSG); if (err) return { error: err }; }
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_MO', MO_WRITE_MSG); if (err) return { error: err }; }
   if (!MO_STATUSES.includes(status)) return { error: '非法状态' };
 
   const { data: existing } = await (supabase.from('manufacturing_orders') as any)

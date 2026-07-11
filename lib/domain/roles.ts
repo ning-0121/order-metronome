@@ -148,6 +148,10 @@ export const ROLE_GROUPS = {
    *  注：订单管理经理 / 采购经理 是【监督】角色 — 看所有订单 + 审批，但不操作执行节点，故不在内 */
   EXECUTION: ['merchandiser', 'production', 'qc', 'quality', 'production_manager'] as const,
 
+  /** 可编辑/推进生产任务单：执行类 + 建单业务(业务在建单时填「工厂执行说明」,生产再细化)。
+   *  2026-07-11:原来用 EXECUTION 门禁,把建单的业务(sales/业务部经理/业务执行经理/行政)挡在门外→创建生产任务单报无权限。*/
+  CAN_EDIT_MO: ['merchandiser', 'production', 'qc', 'quality', 'production_manager', 'sales', 'sales_manager', 'order_manager', 'admin_assistant'] as const,
+
   /** 可看所有订单（跨负责人）：管理类 + 生产主管 + 业务部经理 + 订单管理经理 + 采购经理。
    *  ⚠️ 2026-07 用户拍板:业务员(sales) 只看自己创建/负责的订单,不再全程可见全部(推翻 6-15 的 sales 全程可见设定)。 */
   CAN_SEE_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'] as const,
