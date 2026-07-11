@@ -325,6 +325,44 @@ export function compressRemainingIntoWindow(
   return result;
 }
 
+/**
+ * 单调修复(2026-07-11):把一个订单的全部里程碑按 TIMELINE 顺序拉成「非递减」——前序节点的
+ * 截止日绝不晚于后序节点(中查 ≤ 尾查 ≤ 工厂完成…),兜底防节点日期倒挂。
+ *
+ * 为什么需要:calcDueDates 全量重算内部已单调,但「保交期」延期只压 *下游*、reschedule 只动
+ * *未完成* 节点,都可能把一个上游未完成节点留在过晚的陈旧日期上,造成 中查>尾查 这类低级错乱。
+ * 任何"部分重算"写库后统一跑一遍本函数即可根除。
+ *
+ * 规则:只往前拉「未完成」节点;「已完成」节点视为历史事实、固定不动,并作为其前序节点的天花板。
+ * 返回需要更新的 { id, due_at(ISO) } 列表(只含被拉动的未完成节点),无需改动的不返回。
+ */
+export function monotonicRepairDueDates(
+  milestones: Array<{ id: string; step_key: string; status?: string | null; due_at?: string | null }>,
+): Array<{ id: string; due_at: string }> {
+  const DONE = new Set(['done', '已完成', 'completed']);
+  const items = milestones
+    .filter(m => m.due_at && TIMELINE[m.step_key as keyof typeof TIMELINE] != null && m.step_key !== 'payment_received')
+    .map(m => ({
+      id: m.id,
+      done: DONE.has(String(m.status || '').toLowerCase()),
+      due: new Date(m.due_at as string).getTime(),
+      day: TIMELINE[m.step_key as keyof typeof TIMELINE] as number,
+    }))
+    .sort((a, b) => a.day - b.day);
+  const out: Array<{ id: string; due_at: string }> = [];
+  let ceiling: number | null = null;   // 后一(更晚)节点的有效截止,当前节点不得晚于它
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    let effective = it.due;
+    if (!it.done && ceiling != null && effective > ceiling) {
+      effective = ceiling;   // 未完成且晚于后续节点 → 拉回到天花板
+      out.push({ id: it.id, due_at: new Date(effective).toISOString() });
+    }
+    ceiling = effective;     // 已完成/未完成都成为更前节点的天花板
+  }
+  return out;
+}
+
 export function calcDueDates(params: CalcDueDatesParams) {
   const {
     orderDate, createdAt, incoterm,

@@ -2,7 +2,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { calcDueDates, compressRemainingIntoWindow } from '@/lib/schedule';
+import { calcDueDates, compressRemainingIntoWindow, monotonicRepairDueDates } from '@/lib/schedule';
 import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
 // updateMilestone/updateMilestones 不再在 recalculateSchedule 中使用
 // （系统级联操作直接走 supabase，避免 repo 层权限校验干扰）
@@ -1015,6 +1015,19 @@ async function recalculateSchedule(
       }
     } catch (e: any) {
       console.error('[recalculateSchedule] 保交期压缩下游异常:', e?.message);
+    }
+
+    // 兜底:压缩只动下游,上游未完成节点可能仍停在过晚日期造成节点倒挂(如 中查>尾查)。
+    // 按 TIMELINE 顺序做单调修复,只往前拉未完成节点,保证节点日期永不逆序。
+    try {
+      const { data: allM } = await supabase
+        .from('milestones').select('id, step_key, status, due_at').eq('order_id', orderData.id);
+      for (const r of monotonicRepairDueDates((allM || []) as any[])) {
+        await supabase.from('milestones')
+          .update({ due_at: r.due_at, planned_at: r.due_at }).eq('id', r.id);
+      }
+    } catch (e: any) {
+      console.error('[recalculateSchedule] 单调修复异常:', e?.message);
     }
 
     await logMilestoneAction(

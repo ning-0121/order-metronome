@@ -313,6 +313,40 @@ for (const key of spine) {
   prevIdx = idx;
 }
 
+// 排期日期单调性(2026-07-11 生产部报「中查>尾查」倒挂):calcDueDates 输出必须按节点顺序
+// 非递减,且单调修复函数能把倒挂的输入拉平。多套锚点/工期都验一遍。
+{
+  const { monotonicRepairDueDates } = require('../lib/schedule');
+  const seq = ['production_kickoff', 'mid_qc_check', 'mid_qc_sales_check',
+    'packing_method_confirmed', 'final_qc_check', 'final_qc_sales_check',
+    'factory_completion', 'inspection_release'];
+  for (const etd of ['2026-09-30', '2026-08-15', '2026-07-25']) {   // 宽/中/极紧工期
+    const d: any = calcDueDates({ orderDate: '2026-07-03', incoterm: 'FOB', etd });
+    let ok = true, prev = -Infinity;
+    for (const k of seq) {
+      const t = d[k]?.getTime?.();
+      if (t == null) continue;
+      if (t < prev) ok = false;
+      prev = t;
+    }
+    assert(ok, `calcDueDates 节点日期非递减(中查≤尾查≤工厂完成),etd=${etd}`);
+  }
+  // 单调修复:构造一个「中查(7-13)晚于尾查(7-10)」的倒挂输入,修复后中查必须 ≤ 尾查
+  const repairs = monotonicRepairDueDates([
+    { id: 'a', step_key: 'mid_qc_check', status: 'pending', due_at: '2026-07-13T00:00:00Z' },
+    { id: 'b', step_key: 'final_qc_check', status: 'pending', due_at: '2026-07-10T00:00:00Z' },
+  ]);
+  const fixedMid = repairs.find((r: any) => r.id === 'a');
+  assert(!!fixedMid && new Date(fixedMid.due_at).getTime() <= new Date('2026-07-10T00:00:00Z').getTime(),
+    '单调修复:倒挂的中查被拉回到不晚于尾查');
+  // 已完成节点不被修复函数改动(历史事实)
+  const doneUntouched = monotonicRepairDueDates([
+    { id: 'x', step_key: 'mid_qc_check', status: 'done', due_at: '2026-07-13T00:00:00Z' },
+    { id: 'y', step_key: 'final_qc_check', status: 'pending', due_at: '2026-07-10T00:00:00Z' },
+  ]);
+  assert(!doneUntouched.some((r: any) => r.id === 'x'), '单调修复:已完成节点不被改动');
+}
+
 // ════ 3. Agent 配置完整性 ════
 console.log('\n🤖 Agent 配置');
 assert(CIRCUIT_BREAKER.maxPerOrderPerDay === 5, `单订单限制 ${CIRCUIT_BREAKER.maxPerOrderPerDay}/天`);

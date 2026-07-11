@@ -9,7 +9,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
-import { calcDueDates } from '@/lib/schedule';
+import { calcDueDates, monotonicRepairDueDates } from '@/lib/schedule';
 import { isDoneStatus } from '@/lib/domain/types';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { revalidatePath } from 'next/cache';
@@ -210,6 +210,18 @@ export async function applyReschedule(
       })
       .eq('id', item.milestone_id);
     if (!upErr) updatedCount++;
+  }
+
+  // 2b. 单调修复兜底:只动未完成节点、已完成节点保原样,可能留下上游>下游的逆序 → 统一拉平
+  try {
+    const { data: allM } = await (supabase.from('milestones') as any)
+      .select('id, step_key, status, due_at').eq('order_id', orderId);
+    for (const r of monotonicRepairDueDates((allM || []) as any[])) {
+      await (supabase.from('milestones') as any)
+        .update({ due_at: r.due_at, planned_at: r.due_at }).eq('id', r.id);
+    }
+  } catch (e: any) {
+    console.error('[reschedule] 单调修复异常:', e?.message);
   }
 
   // 3. 写 order_logs（审计链路）

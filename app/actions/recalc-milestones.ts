@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { calcDueDates } from '@/lib/schedule';
+import { calcDueDates, monotonicRepairDueDates } from '@/lib/schedule';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { isDoneStatus } from '@/lib/domain/types';
 import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus';
@@ -66,6 +66,18 @@ export async function recalcOrderMilestones(orderId: string) {
       })
       .eq('id', m.id);
     updated++;
+  }
+
+  // 单调修复兜底:未完成走新排期、已完成保原样,若二者交界仍逆序则统一拉平,保证节点日期非倒挂
+  try {
+    const { data: allM } = await (supabase.from('milestones') as any)
+      .select('id, step_key, status, due_at').eq('order_id', orderId);
+    for (const r of monotonicRepairDueDates((allM || []) as any[])) {
+      await (supabase.from('milestones') as any)
+        .update({ due_at: r.due_at, planned_at: r.due_at }).eq('id', r.id);
+    }
+  } catch (e: any) {
+    console.error('[recalcOrderMilestones] 单调修复异常:', e?.message);
   }
 
   return { data: { order_no: order.order_no, updated } };
