@@ -871,13 +871,17 @@ export async function createOrder(
     if (Array.isArray(parsedStyles) && parsedStyles.length > 0) {
       const rows: any[] = [];
       let lineNo = 0;
+      let kitSeq = 0;                                    // 异色套装组序号
       for (const st of parsedStyles) {
         const colors = Array.isArray(st?.colors) ? st.colors : [];
         const poPrice = st?.po_unit_price === '' || st?.po_unit_price == null ? null : Number(st.po_unit_price);
         const purchaseCost = st?.purchase_unit_cost === '' || st?.purchase_unit_cost == null ? null : Number(st.purchase_unit_cost);  // 逐款采购价(trade)
         const fabrics = normalizeStyleFabrics(st);       // 多布料(优先 fabrics,缺则旧 fabric_* 合成)
         const prim = primaryFabricColumns(fabrics);      // 第一条镜像回旧列做兼容
-        for (const c of colors) {
+        // 异色套装:本款各颜色=一套的组件,同 set_group_no;套价(po_unit_price)只放第一色(主组件),
+        //   其余色为 null → 应收 Σ(单价×件数)=套数×套价,不重复计价。非套装款照旧每色同价。
+        const setGroupNo = st?.kit_set ? `SET-${++kitSeq}` : null;
+        for (const [ci, c] of colors.entries()) {
           lineNo++;
           // qty 优先取 c.qty;富录入表不维护 qty 字段 → 从 sizes 求和兜底
           const sizesSum = Object.values(c?.sizes || {}).reduce((s: number, v: any) => s + (Number(v) || 0), 0);
@@ -904,18 +908,20 @@ export async function createOrder(
             fabric_consumption: prim.fabric_consumption,
             fabric_unit: prim.fabric_unit,
             fabrics: fabrics.length > 0 ? fabrics : null,   // 多布料明细(JSONB);列缺失时降级剔除见下
-            po_unit_price: poPrice != null && !isNaN(poPrice) ? poPrice : null,   // 客户 PO 成交价(款级同值写每行)
+            // 异色套装:套价只写主组件(第一色),其余色为 null,避免应收按色重复计价
+            po_unit_price: (setGroupNo && ci > 0) ? null : (poPrice != null && !isNaN(poPrice) ? poPrice : null),
             purchase_unit_cost: purchaseCost != null && !isNaN(purchaseCost) ? purchaseCost : null,   // 逐款采购价(trade成本面)
             source_order_po_id: poMap.get(String(st?.source_po_number ?? '').trim()) || null,  // 多PO合单:本行来自哪张客户PO
+            set_group_no: setGroupNo,   // 异色套装组(各色同套)
             source: 'po_parse',
           });
         }
       }
       if (rows.length > 0) {
         let { error: liErr } = await (supabase.from('order_line_items') as any).insert(rows);
-        if (liErr && /po_unit_price|carton_count|fabrics|source_order_po_id|purchase_unit_cost|column .* does not exist/i.test(liErr.message || '')) {
-          // po_unit_price/carton_count/多布料/source_order_po_id/purchase_unit_cost(20260711)迁移未执行 → 降级去掉这些列重插,不阻断建单
-          const plain = rows.map(({ po_unit_price, carton_count, fabrics, source_order_po_id, purchase_unit_cost, ...rest }) => rest);
+        if (liErr && /po_unit_price|carton_count|fabrics|source_order_po_id|purchase_unit_cost|set_group_no|column .* does not exist/i.test(liErr.message || '')) {
+          // po_unit_price/carton_count/多布料/source_order_po_id/purchase_unit_cost/set_group_no(20260711)迁移未执行 → 降级去掉这些列重插,不阻断建单
+          const plain = rows.map(({ po_unit_price, carton_count, fabrics, source_order_po_id, purchase_unit_cost, set_group_no, ...rest }) => rest);
           ({ error: liErr } = await (supabase.from('order_line_items') as any).insert(plain));
         }
         if (liErr) console.warn('[createOrder] order_line_items 落库失败(不阻断):', liErr.message);

@@ -23,6 +23,7 @@ type Style = {
   fabrics?: Fabric[];
   fabric_name?: string; fabric_width?: string; fabric_consumption?: string | number; fabric_unit?: string;
   set_multiplier?: number | string;   // 套装每套件数(1/空=非套装);算料按 件数×每套件数
+  kit_set?: boolean;   // 异色套装:本款下各颜色=一套的组件(同码),客户按套计价;落库各色一行同 set_group_no,套价存主组件
   po_unit_price?: string | number;    // 客户 PO 成交单价(款级,给客户的价);仅 showPrice 时渲染,server 端按财务口径剥离
   purchase_unit_cost?: string | number;  // 经销/采购成品单逐款采购价(成本面,¥/件);仅 showPurchaseCost 时渲染
   source_po_number?: string;          // 多PO合单:本款来自哪张客户PO(只读溯源徽标;server 端解析成 source_order_po_id)
@@ -212,6 +213,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       fabric_name: src.fabric_name || '', fabric_width: src.fabric_width || '',
       fabric_consumption: src.fabric_consumption ?? '', fabric_unit: src.fabric_unit || 'kg', po_unit_price: src.po_unit_price ?? '', purchase_unit_cost: src.purchase_unit_cost ?? '',
       set_multiplier: src.set_multiplier ?? 1,
+      kit_set: src.kit_set,   // 异色套装标记随复制款带上
       source_po_number: src.source_po_number,   // 多PO合单:复制款保留来源PO溯源
       colors: src.colors.map((c) => ({ ...c, sizes: { ...c.sizes } })),
     };
@@ -403,6 +405,16 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
                 placeholder="1" disabled={!canEdit} className={`${inp} w-14`} />
               件/套
             </label>
+            {/* 异色套装:各颜色=一套的组件(同码),客户按套计价 */}
+            <label className="inline-flex items-center gap-1 text-xs text-amber-700" title="勾选=异色套装:本款下的各颜色是一套里的不同件(如一黑一藏青,同码)。客户按套计价,套价填一次;落库各色一行,生产/采购看分色件数。">
+              <input type="checkbox" checked={!!st.kit_set} disabled={!canEdit}
+                onChange={(e) => setStyleField(si, 'kit_set', e.target.checked as any)} />
+              异色套装
+            </label>
+            {st.kit_set && canEdit && st.colors.length > 1 && (
+              <button type="button" onClick={() => setStyles(styles.map((x, xi) => xi === si ? { ...x, colors: x.colors.map((c, ci) => ci === 0 ? c : { ...c, sizes: { ...x.colors[0].sizes } }) } : x))}
+                className="text-[11px] text-amber-700 underline" title="把第一色的尺码配比复制到本款所有颜色(套装同码)">配比复制到各色</button>
+            )}
             <input value={st.image_url} onChange={(e) => setStyleField(si, 'image_url', e.target.value)} placeholder="产品图 URL 或点上传" disabled={!canEdit} className={`${inp} flex-1 min-w-[140px]`} />
             {canEdit && (
               <label className="text-xs px-2 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 cursor-pointer hover:bg-indigo-100 whitespace-nowrap">
@@ -466,9 +478,10 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
               <div className="flex flex-wrap items-center gap-3 ml-14">
                 {showPrice && (
                   <span className="inline-flex items-center gap-2">
-                    <span className="text-xs text-gray-400">💰 客户报价/件</span>
+                    <span className="text-xs text-gray-400">💰 {st.kit_set ? '套价/套' : '客户报价/件'}</span>
                     <input type="number" min="0" step="0.01" value={st.po_unit_price ?? ''} onChange={(e) => setStyleField(si, 'po_unit_price', e.target.value)}
-                      placeholder="给客户价" disabled={!canEdit} className={`${inp} w-24 text-right`} title="客户成交单价(给客户的价,非我们报价);AI 解析预填,请核对后保存冻结" />
+                      placeholder={st.kit_set ? '一套一口价' : '给客户价'} disabled={!canEdit} className={`${inp} w-24 text-right`} title={st.kit_set ? '异色套装:客户按套的一口价(一套=各色各一件);应收=套数×套价' : '客户成交单价(给客户的价,非我们报价);AI 解析预填,请核对后保存冻结'} />
+                    {st.kit_set && <span className="text-[11px] text-amber-600">(按套)</span>}
                   </span>
                 )}
                 {showPurchaseCost && (
