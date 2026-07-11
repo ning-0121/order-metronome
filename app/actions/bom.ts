@@ -78,6 +78,7 @@ export async function addBomItem(orderId: string, item: {
   style_no?: string;   // S1.2:归属款号(空 = 整单通用)
   pack_size?: number;  // 每包件数(打包辅料;需求÷每包件数)
   image_urls?: string[];   // [0]→辅料单「示例画稿」, [1]→「位置说明及示意图」(录料时直接上传)
+  attachment_files?: Array<{ name: string; url: string }>;   // 排版稿/文件附件(分款吊卡/箱唛等;录料时直接传)
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -113,11 +114,13 @@ export async function addBomItem(orderId: string, item: {
     style_no: item.style_no?.trim() || null,
     pack_size: item.pack_size != null && item.pack_size > 1 ? item.pack_size : null,   // 每包件数
     image_urls: Array.isArray(item.image_urls) && item.image_urls.some(Boolean) ? item.image_urls : [],  // 辅料单图(示例画稿/示意图);无图给 []——列 NOT NULL,写 null 会违反约束(2026-07-09 修)
+    attachment_files: Array.isArray(item.attachment_files) ? item.attachment_files : [],   // 排版稿/文件附件(录料时随行入库)
     source: 'manual',                      // 手动新增(Phase 2A 来源标记)
   };
   let { error } = await (supabase.from('materials_bom') as any).insert(insertRow);
-  if (error && /pack_size|column .* does not exist/i.test(error.message || '')) {
-    delete insertRow.pack_size;   // 20260707 迁移未跑 → 降级(不 brick 加料)
+  if (error && /pack_size|attachment_files|column .* does not exist/i.test(error.message || '')) {
+    delete insertRow.pack_size;            // 20260707 迁移未跑 → 降级(不 brick 加料)
+    delete insertRow.attachment_files;     // 20260710 迁移未跑 → 降级
     ({ error } = await (supabase.from('materials_bom') as any).insert(insertRow));
   }
   if (error) return { error: error.message };

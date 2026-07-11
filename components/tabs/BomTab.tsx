@@ -17,7 +17,7 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[] };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[], attachment_files: [] as Array<{ name: string; url: string }> };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -134,6 +134,25 @@ export function BomTab({ orderId }: { orderId: string }) {
   const removeFormImage = (slot: 0 | 1) =>
     setForm(f => { const arr = [...(f.image_urls || [])]; arr[slot] = ''; return { ...f, image_urls: arr }; });
 
+  // 录料表单内直接传【文件附件】(排版稿/分款吊卡/箱唛等,PDF/AI/CDR/xlsx…):随行入库 attachment_files。
+  const [formAttUploading, setFormAttUploading] = useState(false);
+  async function uploadFormAttachment(file: File) {
+    if (file.size > 50 * 1024 * 1024) { alert('文件超过 50MB'); return; }
+    setFormAttUploading(true);
+    try {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client');
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+      const path = `materials/attach/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type });
+      if (upErr) { alert('上传失败:' + upErr.message); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      setForm(f => ({ ...f, attachment_files: [...(f.attachment_files || []), { name: file.name, url: data.publicUrl }].slice(0, 12) }));
+    } finally { setFormAttUploading(false); }
+  }
+  const removeFormAttachment = (url: string) =>
+    setForm(f => ({ ...f, attachment_files: (f.attachment_files || []).filter((a) => a.url !== url) }));
+
   // 原辅料单批量识别(上传文件 → AI 读行 → 检查修改 → 批量入库)
   const [parsing, setParsing] = useState(false);
   const [parseRows, setParseRows] = useState<any[] | null>(null);
@@ -206,6 +225,7 @@ export function BomTab({ orderId }: { orderId: string }) {
       style_no: form.style_no?.trim() || undefined,
       pack_size: form.pack_size ? parseFloat(form.pack_size) : undefined,   // 每包件数(打包辅料;需求÷每包件数)
       image_urls: (form.image_urls || []).map(u => u || ''),   // 辅料单图(示例画稿[0]/示意图[1]),按位置随行入库
+      attachment_files: form.attachment_files || [],           // 排版稿/文件附件(录料时随行入库)
       // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
       ...(editId && editingTemplate ? { override_reason: form.override_reason || undefined } : {}),
     };
@@ -251,6 +271,7 @@ export function BomTab({ orderId }: { orderId: string }) {
       total_qty: item.total_qty?.toString() || '', unit: item.unit || 'meter', supplier: item.supplier || '',
       spec: item.spec || '', notes: item.notes || '', special_requirements: item.special_requirements || '',
       image_urls: (Array.isArray(item.image_urls) ? item.image_urls : []).map((u: any) => String(u || '')),
+      attachment_files: Array.isArray(item.attachment_files) ? item.attachment_files : [],
       override_reason: item.override_reason || '', style_no: item.style_no || '',
       pack_size: item.pack_size != null ? String(item.pack_size) : '',
     });
@@ -491,6 +512,29 @@ export function BomTab({ orderId }: { orderId: string }) {
             );
           })}
         </div>
+      </div>
+      {/* 排版稿/文件附件(分款吊卡/箱唛等每款排版不同 → 传做好的稿;随行入库,归并带到采购,进采购单附件清单)*/}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs text-gray-500">📎 排版稿 / 文件附件（可选，PDF/AI/CDR/xlsx…；分款吊卡/箱唛用）</p>
+          <label className={`text-xs px-2.5 py-1 rounded cursor-pointer font-medium ${formAttUploading ? 'bg-gray-100 text-gray-400' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>
+            {formAttUploading ? '上传中…' : '📎 上传附件'}
+            <input type="file" accept=".pdf,.ai,.cdr,.eps,.svg,.psd,.xlsx,.xls,.csv,.doc,.docx,.zip,.rar,.png,.jpg,.jpeg" className="hidden" disabled={formAttUploading}
+              onChange={e => { const f = e.target.files?.[0]; e.currentTarget.value = ''; if (f) uploadFormAttachment(f); }} />
+          </label>
+        </div>
+        {(form.attachment_files || []).length === 0 ? (
+          <p className="text-[11px] text-gray-400">暂无附件 — 有分款吊卡/箱唛排版稿在此上传;保存后随物料入库,采购归并时自动带过去。</p>
+        ) : (
+          <ul className="space-y-1">
+            {(form.attachment_files || []).map((f, i) => (
+              <li key={i} className="flex items-center gap-2 text-xs">
+                <a href={f.url} target="_blank" rel="noreferrer" download className="text-violet-700 hover:underline truncate max-w-[22rem]" title={f.name}>📄 {f.name}</a>
+                <button type="button" onClick={() => removeFormAttachment(f.url)} className="text-gray-300 hover:text-rose-500 leading-none shrink-0" title="移除">×</button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       <div className="grid grid-cols-3 gap-3">
         <input placeholder="单件用量" type="number" step="0.01" value={form.qty_per_piece} onChange={e => set('qty_per_piece', e.target.value)}
