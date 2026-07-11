@@ -38,6 +38,7 @@ type WebhookEventType =
   | 'purchase_order.approval_cancelled'
   | 'cancel.requested'
   | 'milestone.requested'
+  | 'shipment_approval.requested'
   | 'goods_receipt.recorded'
   | 'file.uploaded'
   | 'shipping_invoice.issued'
@@ -445,6 +446,14 @@ export async function syncCancelRequestToFinance(p: ApprovalRequestPayload) {
 }
 export async function syncMilestoneRequestToFinance(p: ApprovalRequestPayload) {
   return sendToFinanceSystem('milestone.requested', p as unknown as Record<string, unknown>)
+}
+/**
+ * 出货财务审批请求 → 财务系统「集成审批」队列。
+ * p.id = shipment_confirmations.id(财务批准/驳回后回传 approval_id=它,approval_type='shipment')。
+ * 财务侧渲染在审批队列,通过→回传 approved(节拍器转 warehouse_signed,放行物流);驳回→pending。
+ */
+export async function syncShipmentApprovalToFinance(p: ApprovalRequestPayload) {
+  return sendToFinanceSystem('shipment_approval.requested', p as unknown as Record<string, unknown>)
 }
 
 /**

@@ -43,7 +43,7 @@ interface ApprovalCallback {
     approval_id: string
     // P0-4 修复：补 'milestone'。L106 实际处理这种类型（财务确认加工费/核准出运/收款等里程碑）
     // 但 union 之前漏写，导致 TS 判类型不重叠、IDE 提示死代码
-    approval_type: 'price' | 'cancel' | 'milestone' | 'purchase'
+    approval_type: 'price' | 'cancel' | 'milestone' | 'purchase' | 'shipment'
     decision: 'approved' | 'rejected'
     decided_by: string
     decider_name: string
@@ -202,6 +202,27 @@ export async function POST(request: Request) {
           }
         } catch (e) { console.warn('[finance-callback] milestone recompute 失败(不阻断):', e instanceof Error ? e.message : e) }
       }
+    }
+
+    // 出货财务审批:approval_id=shipment_confirmations.id。批准 → warehouse_signed(放行物流执行);
+    //   驳回 → pending(退回业务)。状态闸:仅 sales_signed → 命中才改,防重放/已处理二次覆盖。
+    if (approval_type === 'shipment') {
+      const noteTag = decision_note
+        ? `[财务系统-${decider_name}] ${decision_note}`
+        : `[财务系统-${decider_name}] ${decision === 'approved' ? '审批通过' : '审批驳回'}`
+      const patch: Record<string, unknown> = {
+        finance_signed_at: new Date().toISOString(),
+        finance_decision: decision,
+        finance_decision_note: noteTag,
+        status: decision === 'approved' ? 'warehouse_signed' : 'pending',
+      }
+      if (decision === 'rejected') patch.finance_note = `驳回: ${decision_note || ''}`
+      const { data: rows, error } = await supabase
+        .from('shipment_confirmations')
+        .update(patch)
+        .eq('id', approval_id).eq('status', 'sales_signed').select('id')
+      if (error) throw new Error(`Shipment approval update failed: ${error.message}`)
+      if (!rows || rows.length === 0) skipLog('shipment')
     }
 
     // 采购单审批(审计 B):approval_id=采购单 id。批准 → 自动下单(place core,emit purchase_order.placed);

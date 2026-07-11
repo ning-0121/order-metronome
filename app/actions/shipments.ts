@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { isAdminRole } from '@/lib/domain/roles';
+import { syncShipmentApprovalToFinance } from '@/lib/integration/finance-sync';
 
 /** 读取当前用户角色集合（roles[] 优先，回退 role） */
 async function getRoles(supabase: any, userId: string): Promise<string[]> {
@@ -28,6 +29,7 @@ export async function getShipmentConfirmation(orderId: string) {
  */
 export async function createShipmentConfirmation(orderId: string, rec: {
   shipment_qty: number;
+  carton_count?: number;
   order_qty?: number;
   customer_name?: string;
   product_name?: string;
@@ -45,9 +47,10 @@ export async function createShipmentConfirmation(orderId: string, rec: {
   if (!user) return { error: '请先登录' };
   if (!rec.shipment_qty || rec.shipment_qty <= 0) return { error: '出货数量必须大于0' };
 
-  const { error } = await (supabase.from('shipment_confirmations') as any).insert({
+  const row: Record<string, any> = {
     order_id: orderId,
     shipment_qty: rec.shipment_qty,
+    carton_count: rec.carton_count != null && rec.carton_count > 0 ? rec.carton_count : null,   // 出货箱数
     order_qty: rec.order_qty || null,
     customer_name: rec.customer_name || null,
     product_name: rec.product_name || null,
@@ -63,8 +66,52 @@ export async function createShipmentConfirmation(orderId: string, rec: {
     sales_sign_id: user.id,
     sales_signed_at: new Date().toISOString(),
     status: 'sales_signed',
-  });
+  };
+  let { data: inserted, error } = await (supabase.from('shipment_confirmations') as any)
+    .insert(row).select('id').single();
+  // carton_count 列(20260711)未建 → 降级去掉重插,不 brick 出货申请
+  if (error && /carton_count|column .* does not exist/i.test(error.message || '')) {
+    delete row.carton_count;
+    ({ data: inserted, error } = await (supabase.from('shipment_confirmations') as any)
+      .insert(row).select('id').single());
+  }
   if (error) return { error: error.message };
+
+  // 推送出货财务审批请求 → 财务系统「集成审批」队列(fire-and-forget,永不阻塞出货申请;
+  //   未配置 FINANCE_SYSTEM_URL 时 sendToFinanceSystem 内部静默跳过)。
+  //   之前只在节拍器内部由 finance 角色审批,外部财务系统收不到 → 财务永远不知道要批。
+  try {
+    const { data: ord } = await (supabase.from('orders') as any)
+      .select('order_no, internal_order_no, customer_name').eq('id', orderId).single();
+    const { data: prof } = await (supabase.from('profiles') as any)
+      .select('name, full_name').eq('user_id', user.id).maybeSingle();
+    const requesterName = (prof as any)?.name || (prof as any)?.full_name || null;
+    if (inserted?.id) {
+      void syncShipmentApprovalToFinance({
+        id: inserted.id,
+        order_no: (ord as any)?.order_no || null,
+        customer_name: rec.customer_name || (ord as any)?.customer_name || null,
+        requester_name: requesterName,
+        summary: `申请出货 ${rec.shipment_qty} 件${rec.carton_count ? ` / ${rec.carton_count} 箱` : ''}`,
+        detail: {
+          internal_order_no: (ord as any)?.internal_order_no || null,
+          shipment_qty: rec.shipment_qty,
+          carton_count: rec.carton_count ?? null,
+          order_qty: rec.order_qty ?? null,
+          product_name: rec.product_name || null,
+          delivery_method: rec.delivery_method || null,
+          shipping_port: rec.shipping_port || null,
+          destination_port: rec.destination_port || null,
+          requested_ship_date: rec.requested_ship_date || null,
+          ci_number: rec.ci_number || null,
+        },
+        created_at: new Date().toISOString(),
+      }).catch((e: any) => console.error('[shipment→finance] 推送审批失败(不阻断):', e?.message));
+    }
+  } catch (e: any) {
+    console.error('[shipment→finance] 组装审批载荷异常(不阻断):', e?.message);
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return {};
 }

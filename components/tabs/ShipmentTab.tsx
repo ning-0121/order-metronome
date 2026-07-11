@@ -49,7 +49,7 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
 
   // 出货申请表单
   const [applyForm, setApplyForm] = useState({
-    shipment_qty: '', customer_name: '', product_name: '',
+    shipment_qty: '', carton_count: '', customer_name: '', product_name: '',
     delivery_address: '', delivery_method: '', shipping_port: '', destination_port: '',
     ci_number: '', requested_ship_date: '',
   });
@@ -109,6 +109,7 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
     if (!qty || qty <= 0) { setError('出货数量必须大于0'); setSaving(false); return; }
     const result = await createShipmentConfirmation(orderId, {
       shipment_qty: qty, order_qty: orderQty,
+      carton_count: applyForm.carton_count ? parseInt(applyForm.carton_count) : undefined,
       customer_name: applyForm.customer_name || orderContext?.customerName,
       product_name: applyForm.product_name || undefined,
       delivery_address: applyForm.delivery_address || undefined,
@@ -256,9 +257,14 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
           <h3 className="font-bold text-gray-900 mb-4">📤 申请出货</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">出货数量 <span className="text-red-500">*</span></label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">出货数量(件) <span className="text-red-500">*</span></label>
               <input type="number" value={applyForm.shipment_qty} onChange={e => setApplyForm(f => ({ ...f, shipment_qty: e.target.value }))}
                 placeholder={orderQty ? `订单数量: ${orderQty}` : ''} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">出货箱数(箱)</label>
+              <input type="number" value={applyForm.carton_count} onChange={e => setApplyForm(f => ({ ...f, carton_count: e.target.value }))}
+                placeholder="总箱数" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             </div>
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">客户名称</label>
