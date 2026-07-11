@@ -1345,8 +1345,15 @@ export async function getDelayRequestsByOrder(orderId: string) {
     return { error: 'Unauthorized' };
   }
 
+  // 2026-07-11:订单可见性交给 orders RLS 把关(now 含 order_manager);延期+里程碑用 service-role 读全量。
+  //   原来 user-session + milestones!inner:业务执行经理(高洁)能看订单,但 milestones RLS(严:owner/canSeeAll)
+  //   让 inner join 空 → 延期面板「订单暂无延期记录」、没有「去审批」按钮。与 getMilestonesByOrder 同款修法。
+  const { data: ord } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
+  if (!ord) return { error: '无权查看该订单' };   // orders RLS 挡住 = 没权限
+  const svc = createServiceRoleClient();
+
   // 用 milestone 别名（单数）便于 UI 读取
-  const { data: requests, error } = await (supabase
+  const { data: requests, error } = await (svc
     .from('delay_requests') as any)
     .select(`
       *,
