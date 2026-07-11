@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
 import { getUserRoleFromEmail } from '@/lib/utils/user-role';
 import { BulkApproveDelaysButton } from '@/components/BulkApproveDelaysButton';
+import { BulkApproveAmendmentsButton } from '@/components/BulkApproveAmendmentsButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,7 @@ export default async function PendingApprovalsPage({ searchParams }: PageProps) 
 
   const isAdmin = roles.includes('admin');
   const isFinance = roles.includes('finance');
+  const canApproveAmendment = isAdmin || roles.some(r => ['order_manager', 'sales_manager'].includes(r));
 
   // 准入：admin / finance / production_manager / sales 都能看（看到的 actionable 不同）
   const allowedRoles = ['admin', 'finance', 'production_manager', 'sales', 'sales_manager', 'order_manager', 'admin_assistant'];
@@ -132,6 +134,11 @@ export default async function PendingApprovalsPage({ searchParams }: PageProps) 
         {/* 延期申请专用：一键全部批准（仅 admin 可见且当前筛选是延期或全部时显示） */}
         {isAdmin && (filter === 'delay' || filter === 'all') && (data.byCategory.delay || 0) > 0 && (
           <BulkApproveDelaysButton pendingCount={data.byCategory.delay || 0} />
+        )}
+
+        {/* 订单修改申请专用：一键全部批准（admin/业务经理可见，筛选是改单或全部时显示） */}
+        {canApproveAmendment && (filter === 'amendment' || filter === 'all') && (data.byCategory.amendment || 0) > 0 && (
+          <BulkApproveAmendmentsButton pendingCount={data.byCategory.amendment || 0} />
         )}
 
         {/* 列表 */}

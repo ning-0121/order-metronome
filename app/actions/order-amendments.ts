@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { revalidatePath } from 'next/cache';
 import { isDoneStatus, isApprovalPending } from '@/lib/domain/types';
@@ -316,6 +316,45 @@ export async function approveOrderAmendment(
 
   revalidatePath(`/orders/${amendment.order_id}`);
   return { success: true };
+}
+
+/**
+ * 批量批准所有待审批的订单修改申请(清理积压)。2026-07-11 用户拍板:全同意让抓紧录入订单。
+ * 逐条复用 approveOrderAmendment(含窗口重校验/落库/财务同步/通知);窗口已关等的自动驳回计入 failed。
+ * 权限同单条:admin / order_manager / sales_manager。
+ */
+export async function bulkApproveAllPendingAmendments(
+  decisionNote?: string,
+): Promise<{ ok: boolean; approved: number; failed: number; total: number; message: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, approved: 0, failed: 0, total: 0, message: '未登录' };
+  const { isAdmin, roles } = await getCurrentUserRole(supabase);
+  const canApprove = isAdmin || (roles || []).some((r) => ['order_manager', 'sales_manager'].includes(r));
+  if (!canApprove) return { ok: false, approved: 0, failed: 0, total: 0, message: '仅管理员/业务经理可审批订单修改' };
+
+  let queryClient: any = supabase;
+  try { queryClient = createServiceRoleClient(); } catch { /* 降级 user session */ }
+  const { data: pendingRows, error: qErr } = await (queryClient.from('order_amendments') as any)
+    .select('id').eq('status', 'pending').order('created_at', { ascending: true }).limit(200);
+  if (qErr) return { ok: false, approved: 0, failed: 0, total: 0, message: `查询失败: ${qErr.message}` };
+  const rows = (pendingRows || []) as any[];
+  if (rows.length === 0) return { ok: true, approved: 0, failed: 0, total: 0, message: '没有待批准的订单修改申请' };
+
+  const note = decisionNote || '批量批准(清理积压)';
+  const errors: Array<{ id: string; reason: string }> = [];
+  let approved = 0;
+  // 串行:每条都有落库 + 副作用(改单应用/财务同步/通知),并行易竞态
+  for (const row of rows) {
+    const res = await approveOrderAmendment(row.id, true, note);
+    if ((res as any).error) errors.push({ id: row.id, reason: (res as any).error });
+    else approved++;
+  }
+  if (errors.length) console.warn('[bulkApproveAmendments] 部分未通过:', errors);
+  return {
+    ok: true, approved, failed: errors.length, total: rows.length,
+    message: `已批准 ${approved} 条${errors.length ? `,${errors.length} 条未通过(窗口已关/已处理等,详见日志)` : ''}`,
+  };
 }
 
 /**
