@@ -94,7 +94,8 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   const [supplyEdit, setSupplyEdit] = useState<Record<string, 'self' | 'customer' | 'factory'>>({}); // 供料方式:自购/客供/加工厂承担
   const notSelf = (id: string) => (supplyEdit[id] || 'self') !== 'self';   // 客供/加工厂承担 → 绮陌不采购
   const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/件)
-  const [accessoryTotal, setAccessoryTotal] = useState('');   // 整单辅料总价一口价
+  const [accessoryPerPiece, setAccessoryPerPiece] = useState('')   // 辅料预算【元/件】(2026-07-11 改口径:×订单件数存总额)
+  const [budgetOrderQty, setBudgetOrderQty] = useState(0)
   const [accCost, setAccCost] = useState<{ budget: number | null; actual: number; over: number | null; itemsPriced: number; itemsTotal: number } | null>(null);  // 辅料 预算vs实际(采购填价)
   const [consSaving, setConsSaving] = useState(false);
   const loadCons = async () => {
@@ -107,7 +108,8 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
       setSupplyEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.supply_mode || 'self'])));
     }
     if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
-    setAccessoryTotal((sb as any)?.accessoryTotal != null ? String((sb as any).accessoryTotal) : '');
+    setAccessoryPerPiece((sb as any)?.accessoryPerPiece != null ? String((sb as any).accessoryPerPiece) : '');
+    setBudgetOrderQty(Number((sb as any)?.orderQty) || 0);
   };
   useEffect(() => { loadCons(); /* eslint-disable-next-line */ }, [orderId]);
   // 布料大货单耗必须由业务填好(BOM 页),否则不许归并
@@ -118,10 +120,10 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     const over = Object.fromEntries(Object.entries(overEdit).map(([id, v]) => [id, v === '' ? 0 : Number(v)]));
     const prices = Object.fromEntries(Object.entries(priceEdit).map(([id, v]) => [id, v === '' ? null : Number(v)]));
     const sbPayload = styleBudgets.map(b => ({ style_no: b.style_no, cmt: b.cmt === '' ? null : Number(b.cmt) }));
-    const accTotal = accessoryTotal === '' ? null : Number(accessoryTotal);
+    const accPer = accessoryPerPiece === '' ? null : Number(accessoryPerPiece);
     const tasks: Promise<any>[] = [
       saveBomBudgetUnitPrice(orderId, prices as any),          // 预算单价(业务,任何阶段可填)
-      saveOrderStyleBudgets(orderId, sbPayload as any, accTotal), // 逐款加工费 + 整单辅料总价(业务)
+      saveOrderStyleBudgets(orderId, sbPayload as any, accPer, 'per_piece'), // 逐款加工费 + 辅料元/件×件数(服务端换算总额)
       saveBomSupplyMode(orderId, supplyEdit),                  // 供料方式(自购/客供/加工厂承担)
     ];
     if (!trackingPhase) tasks.push(saveBomOverPurchasePct(orderId, over as any));  // 抛量:已下单锁定,不重存
@@ -915,13 +917,17 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                 </table>
               </div>
               <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-indigo-100">
-                <span className="text-xs font-semibold text-indigo-800">🧷 整单辅料总价(业务预算)</span>
+                <span className="text-xs font-semibold text-indigo-800">🧷 辅料预算(元/件·业务)</span>
                 <span className="text-gray-400 text-sm">¥</span>
-                <input type="number" step="any" min="0" value={accessoryTotal}
-                  placeholder="全单辅料合并一口价" disabled={trackingPhase}
-                  onChange={e => setAccessoryTotal(e.target.value)}
-                  className="w-40 rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
-                <span className="text-[11px] text-gray-400">业务给的辅料预算一口价(不按款/件数)</span>
+                <input type="number" step="any" min="0" value={accessoryPerPiece}
+                  placeholder="单件辅料(拉链/标/袋…)" disabled={trackingPhase}
+                  onChange={e => setAccessoryPerPiece(e.target.value)}
+                  className="w-28 rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
+                <span className="text-xs text-gray-500">/件 × {budgetOrderQty > 0 ? budgetOrderQty.toLocaleString() : '?'} 件</span>
+                {Number(accessoryPerPiece) > 0 && budgetOrderQty > 0 && (
+                  <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * budgetOrderQty * 100) / 100).toLocaleString()}</span>
+                )}
+                <span className="text-[11px] text-gray-400">与加工费同口径(元/件),保存时按订单件数换算成总额</span>
               </div>
               {/* 实际辅料总价(采购填的单价×数量,填了即算;2026-07-08 用户拍板 A)*/}
               {accCost && (accCost.itemsTotal > 0) && (
@@ -1656,6 +1662,12 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
             {(sel.status === 'draft' || sel.status === 'reviewing') && (
               <button onClick={() => advance('confirmed')} disabled={saving}
                 className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">✅ 确认采购</button>
+            )}
+            {/* 已确认但来源需求变了(needs_reconfirm)→ 补「重新确认」键:再核一遍、清标记(不降级、重记来源快照)。
+                draft/reviewing 用上面「✅确认采购」即可清标记;已下单/在收的来源变了应走补/退,不在此重确认。 */}
+            {sel.status === 'confirmed' && sel.needs_reconfirm && (
+              <button onClick={() => advance('confirmed')} disabled={saving}
+                className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50">🔄 重新确认(清除变更标记)</button>
             )}
             {sel.status === 'draft' && (
               <button onClick={() => advance('reviewing')} disabled={saving}

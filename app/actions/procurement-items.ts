@@ -490,15 +490,27 @@ export async function getOrderStyleBudgets(orderId: string) {
     const b = byStyle.get(st) || {};
     return { style_no: st, cmt: (b as any).cmt ?? null };
   });
-  const accessoryTotal = (cb as any)?.accessory_budget_total ?? null;   // 整单辅料一口价
-  return { data: rows, accessoryTotal };
+  const accessoryTotal = (cb as any)?.accessory_budget_total ?? null;   // 库里永远存【总额】(下游财务同步/对账口径不变)
+  // 2026-07-11 老板拍板:辅料录入改【元/件】×订单件数(此前一口价被业务当元/件填,财务收到 ¥1 总额)。
+  // 回显单件价 = 总额 ÷ 订单件数;订单件数一并给 UI 显示换算。
+  const { data: ordRow } = await (svc.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+  const orderQty = Number((ordRow as any)?.quantity) || 0;
+  const accessoryPerPiece = accessoryTotal != null && orderQty > 0
+    ? Math.round((Number(accessoryTotal) / orderQty) * 10000) / 10000 : null;
+  return { data: rows, accessoryTotal, accessoryPerPiece, orderQty };
 }
 
-/** 逐款加工费(cmt,元/件)+ 整单辅料总价(一口价)保存。业务/采购/管理员可填。 */
+/**
+ * 逐款加工费(cmt,元/件)+ 辅料预算保存。业务/采购/管理员可填。
+ * accessoryMode(2026-07-11 老板拍板):'per_piece' = 传入值是【元/件】,服务端按 orders.quantity 换算成
+ * 总额落库(与加工费同口径,业务不再误把单件价当一口价);'total' = 旧口径直接存总额(兼容)。
+ * 库列 accessory_budget_total 永远是【总额】,下游(财务同步/采购对账)口径不变。
+ */
 export async function saveOrderStyleBudgets(
   orderId: string,
   budgets: Array<{ style_no: string; cmt: number | null }>,
-  accessoryTotal?: number | null,
+  accessoryValue?: number | null,
+  accessoryMode: 'total' | 'per_piece' = 'total',
 ) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -509,10 +521,17 @@ export async function saveOrderStyleBudgets(
     return { error: '仅业务/理单/采购/财务/管理员可填加工费/辅料预算' };
   }
   const num = (v: any) => { const n = Number(v); return isFinite(n) && n > 0 ? n : null; };
-  // 逐款只存加工费 cmt;辅料改整单一口价(清掉历史逐款 trim_budget,避免和一口价重复计)
+  // 逐款只存加工费 cmt;辅料整单(清掉历史逐款 trim_budget,避免重复计)
   const clean = (budgets || []).filter((b) => String(b.style_no || '').trim())
     .map((b) => ({ style_no: String(b.style_no).trim(), cmt: num(b.cmt), trim_budget: null }));
-  const accTotal = accessoryTotal === undefined ? undefined : num(accessoryTotal);
+  let accTotal = accessoryValue === undefined ? undefined : num(accessoryValue);
+  if (accTotal != null && accessoryMode === 'per_piece') {
+    const svcQty = createServiceRoleClient();
+    const { data: ordRow } = await (svcQty.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+    const qty = Number((ordRow as any)?.quantity) || 0;
+    if (qty <= 0) return { error: '订单数量缺失,无法按【元/件】换算辅料预算 —— 请先补订单件数,或改填总额' };
+    accTotal = Math.round(accTotal * qty * 100) / 100;
+  }
   // 写走 service-role:order_cost_baseline 的 INSERT/UPDATE RLS 只放行 owner/canSeeAll,
   // 非订单负责人的业务/采购用 user session 写会静默 0 行(RLS)—— 授权已由上面角色门把关。
   const svc = createServiceRoleClient();

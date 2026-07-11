@@ -16,7 +16,8 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
   const [lines, setLines] = useState<any[]>([]);
   const [priceEdit, setPriceEdit] = useState<Record<string, string>>({});
   const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]);
-  const [accessoryTotal, setAccessoryTotal] = useState('');   // 整单辅料总价一口价
+  const [accessoryPerPiece, setAccessoryPerPiece] = useState('');   // 辅料预算【元/件】(2026-07-11 老板拍板:×订单件数存总额,与加工费同口径)
+  const [orderQty, setOrderQty] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -34,7 +35,8 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         cmt: b.cmt != null ? String(b.cmt) : '',
       })));
     }
-    setAccessoryTotal((sb as any)?.accessoryTotal != null ? String((sb as any).accessoryTotal) : '');
+    setAccessoryPerPiece((sb as any)?.accessoryPerPiece != null ? String((sb as any).accessoryPerPiece) : '');
+    setOrderQty(Number((sb as any)?.orderQty) || 0);
     setLoading(false);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -46,15 +48,15 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
       style_no: b.style_no,
       cmt: b.cmt === '' ? null : Number(b.cmt),
     }));
-    const accTotal = accessoryTotal === '' ? null : Number(accessoryTotal);
+    const accPer = accessoryPerPiece === '' ? null : Number(accessoryPerPiece);
     const [r1, r2] = await Promise.all([
       saveBomBudgetUnitPrice(orderId, prices as any),
-      saveOrderStyleBudgets(orderId, sbPayload as any, accTotal),
+      saveOrderStyleBudgets(orderId, sbPayload as any, accPer, 'per_piece'),
     ]);
     setSaving(false);
     const err = (r1 as any).error || (r2 as any).error;
     if (err) { setMsg('❌ ' + err); return; }
-    setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料总价)');
+    setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料元/件×件数)');
     await load();
   }
 
@@ -147,15 +149,19 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         </div>
       )}
 
-      {/* 整单辅料总价(一口价:业务把琐碎辅料合并成一个总价,不逐款不逐个) */}
+      {/* 辅料预算(元/件 × 订单件数;2026-07-11 老板拍板改口径 —— 此前一口价被当元/件填,财务收到 ¥1) */}
       <div className="rounded-lg border border-indigo-100 bg-white p-3 flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-semibold text-gray-700">🧷 整单辅料总价</span>
+        <span className="text-xs font-semibold text-gray-700">🧷 辅料预算(元/件)</span>
         <span className="text-gray-400 text-sm">¥</span>
-        <input type="number" step="any" min="0" value={accessoryTotal}
-          placeholder="全单辅料合并一口价"
-          onChange={e => setAccessoryTotal(e.target.value)}
-          className="w-40 rounded border border-gray-300 px-2 py-1 text-sm" />
-        <span className="text-[11px] text-gray-400">整单辅料(标/袋/吊牌…)合并一个总价,辅料预算 = 本值(不按款、不按件数)</span>
+        <input type="number" step="any" min="0" value={accessoryPerPiece}
+          placeholder="单件辅料(拉链/标/袋…)"
+          onChange={e => setAccessoryPerPiece(e.target.value)}
+          className="w-28 rounded border border-gray-300 px-2 py-1 text-sm" />
+        <span className="text-xs text-gray-500">/件 × {orderQty > 0 ? orderQty.toLocaleString() : '?'} 件</span>
+        {Number(accessoryPerPiece) > 0 && orderQty > 0 && (
+          <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * orderQty * 100) / 100).toLocaleString()}</span>
+        )}
+        <span className="text-[11px] text-gray-400">与加工费同口径(元/件);保存时按订单件数换算成辅料预算总额</span>
       </div>
 
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
