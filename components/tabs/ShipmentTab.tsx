@@ -337,6 +337,7 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
           {/* 出货信息只读展示 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4 p-4 bg-gray-50 rounded-lg">
             <div><span className="text-gray-500">出货数量：</span><span className="font-medium">{conf.shipment_qty}</span></div>
+            <div><span className="text-gray-500">出货箱数：</span><span className="font-medium">{conf.carton_count ?? '-'}</span></div>
             <div><span className="text-gray-500">客户：</span><span className="font-medium">{conf.customer_name || '-'}</span></div>
             <div><span className="text-gray-500">品名：</span><span className="font-medium">{conf.product_name || '-'}</span></div>
             <div><span className="text-gray-500">送货方式：</span><span className="font-medium">{conf.delivery_method || '-'}</span></div>
@@ -397,6 +398,7 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
           {/* 出货信息+财务审批只读 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-2 p-4 bg-gray-50 rounded-lg">
             <div><span className="text-gray-500">出货数量：</span><span className="font-medium">{conf.shipment_qty}</span></div>
+            <div><span className="text-gray-500">出货箱数：</span><span className="font-medium">{conf.carton_count ?? '-'}</span></div>
             <div><span className="text-gray-500">客户：</span><span className="font-medium">{conf.customer_name || '-'}</span></div>
             <div><span className="text-gray-500">送货方式：</span><span className="font-medium">{conf.delivery_method || '-'}</span></div>
             <div><span className="text-gray-500">送货地址：</span><span className="font-medium">{conf.delivery_address || '-'}</span></div>
@@ -452,6 +454,7 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm p-4 bg-green-50 rounded-lg">
             <div><span className="text-gray-500">出货数量：</span><span className="font-medium">{conf.shipment_qty}</span></div>
+            <div><span className="text-gray-500">出货箱数：</span><span className="font-medium">{conf.carton_count ?? '-'}</span></div>
             <div><span className="text-gray-500">客户：</span><span className="font-medium">{conf.customer_name || '-'}</span></div>
             <div><span className="text-gray-500">送货方式：</span><span className="font-medium">{conf.delivery_method || '-'}</span></div>
             <div><span className="text-gray-500">实际出货：</span><span className="font-medium">{conf.actual_ship_date || '-'}</span></div>
