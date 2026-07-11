@@ -381,6 +381,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   // 展开产品拆分:首次展开用系统建议预填(款×色×码矩阵)
   function openSku() {
     setSkuOpen(true);
+    setSizeOpen(false);   // 切到产品拆分(款×色×码)时收起平铺尺码面板(两者互斥)
     if (skuList.length === 0 && skuSuggest.length > 0) setSkuList(toSkuList(skuSuggest));
   }
   // 保存产品明细拆分(款×色×码)——各码合计自动同步尺码,最终采购量=各格之和
@@ -546,6 +547,11 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   // 聚焦单料:物料表只渲染这一款(进度/归并/核料对照等全局统计仍按整单,口径不变)
   const focusItem = focus ? items.find(i => i.id === focus) : null;
   const visibleItems = focusItem ? [focusItem] : items;
+
+  // 该辅料涉及几个款(来源明细的 distinct 款号)。多款时:平铺「尺码拆分」分不清哪个款、且会少算
+  //  → 必须走「产品明细拆分(款×色×码)」逐款分。2026-07-11 用户实测(单包袋跨 PY80EB/PY81RB)。
+  const sourceStyleNos = [...new Set((sources || []).map((s: any) => String(s?.style_no ?? '').trim()).filter(Boolean))];
+  const multiStyleAccessory = sourceStyleNos.length > 1;
 
   // ── 阶段判定(2026-07-03 用户拍板:下完单核料转入追踪模式,不再摆工作台) ──
   const ORDERED_PLUS = ['ordered', 'partially_received', 'completed', 'closed'];
@@ -1288,10 +1294,16 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
 
           {/* 尺码 opt-in(2026-07-08:辅料默认整单一个数量;点此打开逐码录入。系统有建议则预填,没建议也能手动加码)*/}
           {!sizeOpen && !skuOpen && !skuActive && splittable && sel && !['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status) && (
-            <button onClick={() => { setSizeOpen(true); if (Object.keys(sizeEdit).length === 0 && suggestedSplit.length > 0) setSizeEdit(Object.fromEntries(suggestedSplit.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)]))); }}
-              className="text-xs px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 hover:bg-teal-50 font-medium">
-              ➕ 按尺码录入（默认整单一个数量·不分尺码；点此逐码填量）
-            </button>
+            multiStyleAccessory ? (
+              <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-2">
+                ⚠ 此辅料涉及 <b>{sourceStyleNos.length}</b> 个款(<b>{sourceStyleNos.join('、')}</b>),按尺码要<b>逐款</b>分 —— 请用下方「🏷 按产品拆分（款×色×码）」。平铺尺码拆分分不清哪个款、还会少算(应 = 各款×各码之和)。
+              </div>
+            ) : (
+              <button onClick={() => { setSizeOpen(true); if (Object.keys(sizeEdit).length === 0 && suggestedSplit.length > 0) setSizeEdit(Object.fromEntries(suggestedSplit.filter(s => s.size != null).map(s => [s.size as string, String(s.qty)]))); }}
+                className="text-xs px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 hover:bg-teal-50 font-medium">
+                ➕ 按尺码录入（默认整单一个数量·不分尺码；点此逐码填量）
+              </button>
+            )
           )}
 
           {/* 尺码拆分:可直接改比例/每码数量(2026-07-08 用户拍板)——生成执行行按此逐码出量 */}
@@ -1300,6 +1312,11 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
             const sizeSum = Object.values(sizeEdit).reduce((a, v) => a + (Number(v) || 0), 0);
             return (
             <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-3 space-y-2">
+              {multiStyleAccessory && (
+                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                  ⚠ 此辅料涉及 <b>{sourceStyleNos.join('、')}</b> 共 {sourceStyleNos.length} 个款。平铺尺码拆分<b>分不清各款、且会少算</b>(此处合计 {sizeSum} —— 只是一个款的量,应是各款×各码之和)。请改用下方「🏷 按产品拆分（款×色×码）」逐款分尺码。
+                </div>
+              )}
               <div className="text-xs font-semibold text-teal-800 flex items-center gap-2 flex-wrap">
                 <span>📐 尺码拆分 · 最终采购量 <b>{sizeSum || '—'}</b> {sel.unit || ''}</span>
                 {sizeOverrideActive
@@ -1351,9 +1368,11 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
           {/* 产品明细拆分:款号×颜色×尺码(吊牌/洗唛等印 SKU 信息的辅料;2026-07-10)*/}
           {splittable && sel && (() => {
             const locked = ['ordered', 'partially_received', 'completed', 'closed'].includes(sel.status);
-            // 入口按钮:未按产品、未展开、未按尺码(与尺码互斥)、未锁定时显示
+            // 入口按钮:未按产品、未展开、未锁定时显示。
+            // 与平铺尺码互斥 —— 但多款辅料必须走产品拆分,所以即便已存/已开尺码拆分也照样给入口(好切过来纠正)。
             if (!skuOpen && !skuActive) {
-              if (sizeOverrideActive || sizeOpen || locked) return null;
+              if (locked) return null;
+              if (!multiStyleAccessory && (sizeOverrideActive || sizeOpen)) return null;
               return (
                 <button onClick={openSku}
                   className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 font-medium">
