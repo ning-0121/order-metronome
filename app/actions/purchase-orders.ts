@@ -140,21 +140,39 @@ export async function createPurchaseOrder(input: {
   const total = keepIds.reduce((s, id) => s + (amountById.get(id) || 0), 0);
   const orderIds = [...new Set(rows.filter((r) => keepIds.includes(r.id)).map((r) => r.order_id).filter(Boolean))];
 
-  // 生成 po_no PO-YYYYMMDD-NNN
+  // 生成 po_no PO-YYYYMMDD-NNN。
+  // 修(2026-07-11):原按「当天已建数量+1」算序号——删草稿单会让数量缩水→下一号撞现存号
+  //   (purchase_orders_po_no_key 唯一键冲突)。改为【取当天已存在最大序号+1】(删单不影响),
+  //   并对唯一键冲突自增重试(防并发建单撞号)。
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const { count } = await (supabase.from('purchase_orders') as any)
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
-  const poNo = `PO-${today}-${String((count || 0) + 1).padStart(3, '0')}`;
+  const poPrefix = `PO-${today}-`;
+  const nextSeq = async (bump: number): Promise<string> => {
+    const { data: existing } = await (supabase.from('purchase_orders') as any)
+      .select('po_no').like('po_no', `${poPrefix}%`);
+    let maxN = 0;
+    for (const r of (existing || []) as any[]) {
+      const m = /-(\d+)$/.exec(String(r.po_no || ''));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    }
+    return `${poPrefix}${String(maxN + 1 + bump).padStart(3, '0')}`;
+  };
 
-  const { data: po, error: poErr } = await (supabase.from('purchase_orders') as any)
-    .insert({
-      po_no: poNo, supplier_id: input.supplierId, order_ids: orderIds, status: 'draft',
-      total_amount: total, payment_terms: input.paymentTerms || null,
-      delivery_date: input.deliveryDate || null, notes: input.notes || null, created_by: userId,
-      merge_same_materials: input.mergeSameMaterials === true,
-    })
-    .select('id').single();
+  let po: any = null; let poErr: any = null; let poNo = '';
+  for (let attempt = 0; attempt < 6; attempt++) {
+    poNo = await nextSeq(attempt);   // 每次重试重算最大值 + attempt 偏移,跳过并发被抢占的号
+    const res = await (supabase.from('purchase_orders') as any)
+      .insert({
+        po_no: poNo, supplier_id: input.supplierId, order_ids: orderIds, status: 'draft',
+        total_amount: total, payment_terms: input.paymentTerms || null,
+        delivery_date: input.deliveryDate || null, notes: input.notes || null, created_by: userId,
+        merge_same_materials: input.mergeSameMaterials === true,
+      })
+      .select('id').single();
+    po = res.data; poErr = res.error;
+    if (!poErr) break;
+    // 仅对「单号唯一键冲突」重试;其他错误(权限/外键/列缺失)立即抛出,不空转
+    if (!/po_no_key|duplicate key/i.test(poErr.message || '')) break;
+  }
   if (poErr) return { error: '创建采购单失败：' + poErr.message };
 
   const poId = (po as any).id;
