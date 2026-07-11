@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { BatchAllocationEditor } from '@/components/BatchAllocationEditor';
 import { ShippingDocsSection } from '@/components/tabs/ShippingDocsSection';
-import { getShipmentConfirmation, createShipmentConfirmation, approveShipment, executeShipment } from '@/app/actions/shipments';
+import { getShipmentConfirmation, createShipmentConfirmation, approveShipment, executeShipment, withdrawShipmentApplication } from '@/app/actions/shipments';
 import { getShipmentBatches, enableSplitShipment, updateShipmentBatch } from '@/app/actions/shipment-batches';
 import { createClient } from '@/lib/supabase/client';
 
@@ -119,6 +119,16 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
       ci_number: applyForm.ci_number || undefined,
       requested_ship_date: applyForm.requested_ship_date || undefined,
     });
+    if (result.error) setError(result.error); else load();
+    setSaving(false);
+  }
+
+  // 撤回出货申请(仅待财务审批时;撤回→退回待申请,可改数量重报,财务队列同步撤销)
+  async function handleWithdraw() {
+    if (!conf) return;
+    if (!window.confirm('撤回本次出货申请?\n撤回后退回「待申请」状态,可修改数量后重新提交;财务审批队列中的这条会同步撤销。')) return;
+    setSaving(true); setError('');
+    const result = await withdrawShipmentApplication(conf.id, orderId);
     if (result.error) setError(result.error); else load();
     setSaving(false);
   }
@@ -366,7 +376,16 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
               </div>
             </div>
           ) : (
-            <div className="p-3 bg-amber-50 rounded-lg text-sm text-amber-800">等待财务审批中...</div>
+            <div className="p-3 bg-amber-50 rounded-lg text-sm text-amber-800 flex items-center justify-between gap-3 flex-wrap">
+              <span>等待财务审批中...</span>
+              {(canApply || isAdmin) && conf && (
+                <button onClick={handleWithdraw} disabled={saving}
+                  className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-700 text-xs font-medium hover:bg-amber-100 disabled:opacity-50"
+                  title="撤回后退回「待申请」,可改数量后重新提交;财务队列里这条会同步撤销">
+                  {saving ? '处理中…' : '↩ 撤回申请(改后重报)'}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

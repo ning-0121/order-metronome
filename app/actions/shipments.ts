@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { isAdminRole } from '@/lib/domain/roles';
-import { syncShipmentApprovalToFinance } from '@/lib/integration/finance-sync';
+import { syncShipmentApprovalToFinance, syncShipmentApprovalCancelledToFinance } from '@/lib/integration/finance-sync';
 
 /** 读取当前用户角色集合（roles[] 优先，回退 role） */
 async function getRoles(supabase: any, userId: string): Promise<string[]> {
@@ -113,6 +113,54 @@ export async function createShipmentConfirmation(orderId: string, rec: {
     }
   } catch (e: any) {
     console.error('[shipment→finance] 组装审批载荷异常(不阻断):', e?.message);
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  return {};
+}
+
+/**
+ * Step 2.5: 撤回出货申请(2026-07-11 用户:提交后发现数量错等,之前无法回退只能等财务批/驳)。
+ * 仅「待财务审批(sales_signed)」可撤;财务已批(warehouse_signed)后不可撤,走正常流程。
+ * 撤回 = 退回 pending(与财务驳回同语义,UI 已支持重新申请)+ 同步财务把队列那条置 expired。
+ * 权限:申请人本人 / 业务 / 财务 / 管理员。
+ */
+export async function withdrawShipmentApplication(id: string, orderId: string, reason?: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: cur } = await (supabase.from('shipment_confirmations') as any)
+    .select('status, requested_by').eq('id', id).single();
+  if (!cur) return { error: '出货申请不存在' };
+  if (cur.status !== 'sales_signed') {
+    return { error: cur.status === 'warehouse_signed' || cur.status === 'fully_signed'
+      ? '财务已审批通过,不可撤回;如需变更请联系财务/管理员处理'
+      : `当前状态(${cur.status})无需撤回` };
+  }
+
+  const roles = await getRoles(supabase, user.id);
+  const isRequester = cur.requested_by === user.id;
+  if (!isRequester && !isAdminRole(roles) && !roles.some((r: string) => ['sales', 'merchandiser', 'order_manager', 'finance'].includes(r))) {
+    return { error: '仅申请人、业务、财务或管理员可撤回出货申请' };
+  }
+
+  // 状态闸并发保护:仅 sales_signed → pending;财务恰好同时批了则 0 行,明确报错而非假装成功
+  const { data: upd, error } = await (supabase.from('shipment_confirmations') as any)
+    .update({ status: 'pending', sales_signed_at: null, finance_note: `[撤回] ${reason || '业务撤回重报'}` })
+    .eq('id', id).eq('status', 'sales_signed').select('id');
+  if (error) return { error: error.message };
+  if (!upd || upd.length === 0) return { error: '撤回失败:状态已变化(可能财务刚审批),请刷新查看' };
+
+  // 同步财务撤队列(必须 await —— Vercel 上 fire-and-forget 会被冻结丢掉,2026-07-11 教训)
+  try {
+    const { data: ord } = await (supabase.from('orders') as any)
+      .select('order_no').eq('id', orderId).maybeSingle();
+    await syncShipmentApprovalCancelledToFinance({
+      id, order_no: (ord as any)?.order_no || null, reason: reason || '业务撤回重报',
+    });
+  } catch (e: any) {
+    console.error('[shipment→finance] 撤回同步失败(节拍器已撤,财务队列可能残留):', e?.message);
   }
 
   revalidatePath(`/orders/${orderId}`);

@@ -39,6 +39,7 @@ type WebhookEventType =
   | 'cancel.requested'
   | 'milestone.requested'
   | 'shipment_approval.requested'
+  | 'shipment_approval.cancelled'
   | 'goods_receipt.recorded'
   | 'file.uploaded'
   | 'shipping_invoice.issued'
@@ -483,6 +484,14 @@ export async function syncMilestoneRequestToFinance(p: ApprovalRequestPayload) {
  */
 export async function syncShipmentApprovalToFinance(p: ApprovalRequestPayload) {
   return sendToFinanceSystem('shipment_approval.requested', p as unknown as Record<string, unknown>)
+}
+/**
+ * 出货申请撤回 → 财务把队列里那条未决审批置 expired(pending_approvals CHECK 无 'cancelled',
+ * 财务侧合法终态用 'expired',2026-07-09 实测)。id=shipment_confirmations.id(与 requested 同键)。
+ * 已决(财务已批/驳)的行财务侧不动 —— 撤回闸在节拍器(仅 sales_signed 可撤)已挡住这种竞态。
+ */
+export async function syncShipmentApprovalCancelledToFinance(p: { id: string; order_no?: string | null; reason?: string | null }) {
+  return sendToFinanceSystem('shipment_approval.cancelled', p as unknown as Record<string, unknown>)
 }
 
 /**
