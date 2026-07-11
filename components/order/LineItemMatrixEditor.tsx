@@ -69,6 +69,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   const [dragIdx, setDragIdx] = useState<number | null>(null);   // 尺码列拖拽排序
   const [uploading, setUploading] = useState<number | null>(null);
   const [parsing, setParsing] = useState(false);
+  const [ratios, setRatios] = useState<Record<number, Record<string, number>>>({});   // 每款尺码配比(UI 助手,不入库)
+  const [colorTotals, setColorTotals] = useState<Record<string, string>>({});          // 每色总量输入,key=`si-ci`
 
   // 步骤2b:上传客户订单 Excel → 零 token 解析 → 归组追加进富录入表(预览可改,再保存)
   async function handleParseOrderFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -284,6 +286,35 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   const setColorSize = (si: number, ci: number, size: string, v: string) =>
     setStyles(styles.map((st, x) => x === si ? { ...st, colors: st.colors.map((c, y) => y === ci ? { ...c, sizes: { ...c.sizes, [size]: Number(v) || 0 } } : c) } : st));
 
+  // ── 尺码配比分摊(输入配比 + 每色总量 → 按比例摊到各码;向下取整后余数按小数从大到小 +1,总和精确=总量)──
+  const setRatio = (si: number, size: string, v: string) =>
+    setRatios((prev) => ({ ...prev, [si]: { ...(prev[si] || {}), [size]: Number(v) || 0 } }));
+  function distributeByRatio(total: number, ratio: Record<string, number> | undefined, sizes: string[]): Record<string, number> {
+    if (sizes.length === 0 || total <= 0) return {};
+    let r = sizes.map((s) => Math.max(0, Number(ratio?.[s]) || 0));
+    if (r.reduce((a, b) => a + b, 0) === 0) r = sizes.map(() => 1);   // 没填配比 → 平均分
+    const sumR = r.reduce((a, b) => a + b, 0);
+    const raw = r.map((x) => (total * x) / sumR);
+    const floored = raw.map(Math.floor);
+    const rem = total - floored.reduce((a, b) => a + b, 0);
+    const byFrac = raw.map((x, i) => ({ i, frac: x - Math.floor(x) })).sort((a, b) => b.frac - a.frac);
+    for (let k = 0; k < rem && byFrac.length; k++) floored[byFrac[k % byFrac.length].i]++;
+    const out: Record<string, number> = {};
+    sizes.forEach((s, i) => { out[s] = floored[i]; });
+    return out;
+  }
+  const applyRatio = (si: number, ci: number) => {
+    const total = Number(colorTotals[`${si}-${ci}`]) || 0;
+    if (total <= 0) { setMsg('⚠ 先填该颜色的「总量」再点分摊'); return; }
+    const dist = distributeByRatio(total, ratios[si], sizeLabels);
+    setStyles(styles.map((st, x) => x === si ? { ...st, colors: st.colors.map((c, y) => y === ci ? { ...c, sizes: dist } : c) } : st));
+  };
+  const applyRatioAll = (si: number) =>
+    setStyles(styles.map((st, x) => x !== si ? st : { ...st, colors: st.colors.map((c, ci) => {
+      const total = Number(colorTotals[`${si}-${ci}`]) || 0;
+      return total > 0 ? { ...c, sizes: distributeByRatio(total, ratios[si], sizeLabels) } : c;
+    }) }));
+
   // ── 汇总 ──
   const styleTotal = (st: Style) => st.colors.reduce((a, c) => a + sumSizes(c.sizes), 0);
   const orderTotal = styles.reduce((a, st) => a + styleTotal(st), 0);
@@ -455,6 +486,22 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
             )}
           </div>
 
+          {/* 尺码配比:填比例(如 1:2:2:1),每色填总量点「⚖」按此摊到各码 */}
+          {canEdit && sizeLabels.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap mb-1.5 text-xs bg-amber-50/60 border border-amber-200 rounded-lg px-2 py-1.5">
+              <span className="font-medium text-amber-800 whitespace-nowrap">⚖ 尺码配比</span>
+              {sizeLabels.map((s) => (
+                <label key={s} className="inline-flex items-center gap-1">
+                  <span className="text-gray-500">{s}</span>
+                  <input type="number" min="0" value={ratios[si]?.[s] ?? ''} onChange={(e) => setRatio(si, s, e.target.value)} placeholder="1"
+                    className="w-11 rounded border border-amber-200 px-1 py-0.5 text-center" />
+                </label>
+              ))}
+              <button onClick={() => applyRatioAll(si)} className="ml-auto text-[11px] px-2 py-1 rounded bg-amber-600 text-white font-medium hover:bg-amber-700 whitespace-nowrap">全部按总量分摊</button>
+              <span className="w-full text-[11px] text-gray-400">填比例(如 S:M:L:XL=1:2:2:1);下面每色填「总量」→ 点行末「⚖」或右上「全部分摊」,按比例摊到各码,合计精确=总量。不填=平均分。</span>
+            </div>
+          )}
+
           {/* 颜色 × 尺码 矩阵 */}
           <div className="overflow-x-auto">
             <table className="text-xs">
@@ -465,6 +512,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
                   {sizeLabels.map((s) => <th key={s} className="px-1 py-1 font-medium text-center w-16">{s}</th>)}
                   <th className="px-1 py-1 font-medium text-center">小计</th>
                   <th className="px-1 py-1 font-medium text-center">箱数</th>
+                  {canEdit && <th className="px-1 py-1 font-medium text-center whitespace-nowrap text-amber-700">总量→分摊</th>}
                   {canEdit && <th></th>}
                 </tr>
               </thead>
@@ -482,6 +530,12 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
                     <td className="px-1 py-1 text-center">
                       <input type="number" min="0" value={c.carton_count ?? ''} onChange={(e) => setColorField(si, ci, 'carton_count', e.target.value)} placeholder="箱" disabled={!canEdit} className={numCell} />
                     </td>
+                    {canEdit && (
+                      <td className="px-1 py-1 text-center whitespace-nowrap">
+                        <input type="number" min="0" value={colorTotals[`${si}-${ci}`] ?? ''} onChange={(e) => setColorTotals((p) => ({ ...p, [`${si}-${ci}`]: e.target.value }))} placeholder="总量" className={numCell} />
+                        <button onClick={() => applyRatio(si, ci)} title="按上方配比把总量摊到各尺码" className="ml-1 text-amber-600 hover:text-amber-800 font-bold">⚖</button>
+                      </td>
+                    )}
                     {canEdit && <td className="px-1 py-1"><button onClick={() => removeColor(si, ci)} className="text-red-500">×</button></td>}
                   </tr>
                 ))}
