@@ -13,7 +13,7 @@ export default async function SupplierLedgerPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { groups, grandTotal } = await getSupplierLedger();
+  const { groups, grandTotalExTax, grandTotalInclTax } = await getSupplierLedger();
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -25,7 +25,7 @@ export default async function SupplierLedgerPage() {
         导入《面料采购明细表汇总》(每个 sheet = 一家供应商)→ 按<b>供应商 × 订单</b>归集应付(<b className="text-indigo-700">不含税</b>)。
         每行带<b>内部订单号</b>锚点,将来申请付款 / 推财务可直接对接。
       </p>
-      <SupplierLedgerClient initialGroups={groups} initialGrandTotal={grandTotal} />
+      <SupplierLedgerClient initialGroups={groups} initialGrandTotalExTax={grandTotalExTax} initialGrandTotalInclTax={grandTotalInclTax} />
     </div>
   );
 }
