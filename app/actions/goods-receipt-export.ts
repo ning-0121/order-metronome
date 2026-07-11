@@ -7,18 +7,21 @@
  * 发供应商对账。权限:可见采购的角色可导出(只读 + 生成)。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 interface ReceiptRow {
+  lineItemId: string;   // 采购执行行 id(导出时经 service-role 回查单价)
   supplierId: string | null;
   supplierName: string;
   material: string;
   spec: string;
   qty: number;
   unit: string;
+  price: number | null; // 单价(采购单底价 unit_price;列级封锁,仅导出时 service-role 填)
   date: string;         // YYYY-MM-DD
   address: string;
   photos: string[];     // order-docs 路径
@@ -60,12 +63,14 @@ async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
     const supplierId = po?.supplier_id || null;
     const supplierName = (supplierId && supMap.get(supplierId)) || l.supplier_name || '(未关联供应商)';
     rows.push({
+      lineItemId: r.line_item_id,
       supplierId,
       supplierName,
       material: l.material_name || '',
       spec: l.specification || l.size || '',
       qty: round3(Number(r.received_qty) || 0),
       unit: r.received_unit || l.ordered_unit || '',
+      price: null,   // 筛选项装配不带价;导出时经 service-role 回填
       date: (r.received_at || '').slice(0, 10),
       address: r.received_address || '',
       photos: Array.isArray(r.photos) ? r.photos : [],
@@ -108,6 +113,20 @@ export async function exportGoodsReceiptStatement(filters: {
   if (matSet) rows = rows.filter((r) => matSet.has(r.material));
   if (!rows.length) return { error: '没有符合条件的收货记录' };
 
+  // 回填单价(2026-07-11 老板:对账单要带单价):unit_price 是列级封锁的底价,经 service-role 读
+  // (本函数已过 CAN_EDIT_PROCUREMENT_EXEC 门禁——能编采购执行的角色本就可见底价)。
+  try {
+    const svc = createServiceRoleClient();
+    const ids = [...new Set(rows.map((r) => r.lineItemId).filter(Boolean))];
+    if (ids.length) {
+      const { data: priceLines } = await (svc.from('procurement_line_items') as any)
+        .select('id, unit_price').in('id', ids);
+      const priceMap = new Map<string, number | null>(((priceLines || []) as any[])
+        .map((l) => [l.id, l.unit_price != null ? Number(l.unit_price) : null]));
+      for (const r of rows) r.price = priceMap.get(r.lineItemId) ?? null;
+    }
+  } catch { /* 取价失败 → 单价列留空,导出不阻断 */ }
+
   // 码单签名 URL(7 天,发供应商够用)
   const signCache = new Map<string, string>();
   async function sign(path: string): Promise<string> {
@@ -139,21 +158,21 @@ export async function exportGoodsReceiptStatement(filters: {
 
   for (const [supplier, list] of bySupplier) {
     const ws = wb.addWorksheet(safeName(supplier));
-    [14, 26, 16, 12, 10, 30, 14].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+    [14, 26, 16, 12, 10, 12, 14, 30, 14].forEach((w, i) => (ws.getColumn(i + 1).width = w));
     // 抬头
-    ws.mergeCells('A1:G1');
+    ws.mergeCells('A1:I1');
     const h = ws.getCell('A1');
     h.value = `${supplier} 收货对账单`;
     h.font = { name: '宋体', size: 16, bold: true };
     h.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 32;
-    ws.mergeCells('A2:G2');
+    ws.mergeCells('A2:I2');
     const sub = ws.getCell('A2');
     sub.value = `义乌市绮陌服饰有限公司 · 导出日期 ${new Date().toISOString().slice(0, 10)} · 共 ${list.length} 批`;
     sub.font = { name: '宋体', size: 10, color: { argb: 'FF888888' } };
     sub.alignment = { horizontal: 'center' };
-    // 表头
-    const hdr = ['日期', '物料名', '规格', '数量', '单位', '收货地址', '码单'];
+    // 表头(2026-07-11 老板:加 单价/金额)
+    const hdr = ['日期', '物料名', '规格', '数量', '单位', '单价', '金额', '收货地址', '码单'];
     hdr.forEach((t, i) => {
       const c = ws.getCell(4, i + 1);
       c.value = t;
@@ -164,35 +183,39 @@ export async function exportGoodsReceiptStatement(filters: {
     });
     ws.getRow(4).height = 24;
 
-    let tr = 5, totalQty = 0;
+    let tr = 5, totalQty = 0, totalAmount = 0;
     for (const r of list) {
       const slipUrls: string[] = [];
       for (const p of r.photos) { const u = await sign(p); if (u) slipUrls.push(u); }
-      const cells: any[] = [r.date, r.material, r.spec, r.qty, r.unit, r.address, slipUrls.length ? `码单(${slipUrls.length})` : ''];
+      const amount = r.price != null ? round2(r.qty * r.price) : null;   // 金额 = 收货数量 × 单价
+      const cells: any[] = [r.date, r.material, r.spec, r.qty, r.unit, r.price ?? '', amount ?? '', r.address, slipUrls.length ? `码单(${slipUrls.length})` : ''];
       cells.forEach((v, i) => {
         const c = ws.getCell(tr, i + 1);
         c.value = v;
         c.font = { name: '宋体', size: 11 };
-        c.alignment = { horizontal: i === 1 || i === 5 ? 'left' : 'center', vertical: 'middle', wrapText: true };
+        c.alignment = { horizontal: i === 1 || i === 7 ? 'left' : 'center', vertical: 'middle', wrapText: true };
         c.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
       });
       // 码单超链接(第一张)
       if (slipUrls.length) {
-        const c = ws.getCell(tr, 7);
+        const c = ws.getCell(tr, 9);
         c.value = { text: `码单(${slipUrls.length})`, hyperlink: slipUrls[0] } as any;
         c.font = { name: '宋体', size: 11, color: { argb: 'FF0563C1' }, underline: true };
       }
       totalQty += r.qty;
+      if (amount != null) totalAmount += amount;
       ws.getRow(tr).height = 20;
       tr++;
     }
-    // 合计
+    // 合计(数量 + 金额)
     ws.mergeCells(tr, 1, tr, 3);
     const tl = ws.getCell(tr, 1); tl.value = '合计'; tl.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
     tl.alignment = { horizontal: 'center' }; tl.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
     const tq = ws.getCell(tr, 4); tq.value = round3(totalQty); tq.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
     tq.alignment = { horizontal: 'center' }; tq.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
-    for (let c = 5; c <= 7; c++) ws.getCell(tr, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+    const ta = ws.getCell(tr, 7); ta.value = round2(totalAmount); ta.font = { name: '宋体', size: 12, bold: true, color: { argb: 'FFFF0000' } };
+    ta.alignment = { horizontal: 'center' }; ta.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+    for (const c of [5, 6, 8, 9]) ws.getCell(tr, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
   }
 
   const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
