@@ -37,6 +37,7 @@ import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { CustomerAddOrderPanel } from '@/components/order/CustomerAddOrderPanel';
 import { PerPoOperationsPanel } from '@/components/order/PerPoOperationsPanel';
+import { BuildDocsSupplement } from '@/components/order/BuildDocsSupplement';
 import { CancelRequestPanel } from '@/components/CancelRequestPanel';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { SplitShipmentTag } from '@/components/SplitShipmentTag';
@@ -419,6 +420,22 @@ export default async function OrderDetailPage({
               )}
             </div>
           </div>
+
+          {/* 建单必传附件补传条:缺 客户PO/内部报价单 且授权人(创建者/负责人/业务经理/管理员)可见;补传即时共享财务 */}
+          {(() => {
+            const canManage = isAdmin
+              || (userId && (orderData.created_by === userId || orderData.owner_user_id === userId))
+              || currentRoles.includes('sales_manager');
+            if (!canManage) return null;
+            const present = new Set(attachments.map((a) => a.file_type));
+            const missing = ['customer_po', 'internal_quote'].filter((t) => !present.has(t));
+            if (missing.length === 0) return null;
+            return (
+              <div className="mt-4">
+                <BuildDocsSupplement orderId={orderData.id} missing={missing} />
+              </div>
+            );
+          })()}
 
           {/* 超期订单强制确认 — 只显示给负责业务或管理员 */}
           {(() => {
