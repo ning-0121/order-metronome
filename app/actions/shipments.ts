@@ -87,7 +87,10 @@ export async function createShipmentConfirmation(orderId: string, rec: {
       .select('name, full_name').eq('user_id', user.id).maybeSingle();
     const requesterName = (prof as any)?.name || (prof as any)?.full_name || null;
     if (inserted?.id) {
-      void syncShipmentApprovalToFinance({
+      // 必须 await:Vercel serverless 下,Server Action 一返回就冻结 lambda,不 await 的 fetch 会被杀,
+      // 财务收不到、连 outbox 都不落(2026-07-11 排障:cancel/milestone 都 await 能通,唯独出货 void 丢单)。
+      // sendToFinanceSystem 内部已吞错+失败落 outbox,await 它不会阻断出货申请。
+      await syncShipmentApprovalToFinance({
         id: inserted.id,
         order_no: (ord as any)?.order_no || null,
         customer_name: rec.customer_name || (ord as any)?.customer_name || null,
