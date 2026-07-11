@@ -36,6 +36,7 @@ import { OrderDelayPanel } from '@/components/OrderDelayPanel';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
 import { CustomerAddOrderPanel } from '@/components/order/CustomerAddOrderPanel';
+import { PerPoOperationsPanel } from '@/components/order/PerPoOperationsPanel';
 import { CancelRequestPanel } from '@/components/CancelRequestPanel';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { SplitShipmentTag } from '@/components/SplitShipmentTag';
@@ -743,8 +744,10 @@ export default async function OrderDetailPage({
           </div>
 
           {/* 客户加单(增量明细,走改单审批,批准后同步采购/财务/生产) */}
-          <div className="mt-6">
+          <div className="mt-6 flex flex-wrap items-start gap-3">
             <CustomerAddOrderPanel orderId={orderData.id} canSeeFin={canSeeFinancials} />
+            {/* 多PO合单:按来源PO取消/减量(仅多PO单渲染) */}
+            <PerPoOperationsPanel orderId={orderData.id} />
           </div>
 
           {/* 订单修改申请 */}
