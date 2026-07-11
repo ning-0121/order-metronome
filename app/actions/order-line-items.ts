@@ -61,11 +61,14 @@ export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: b
 }
 
 /** 读订单明细 → 按款分组返回。 */
-export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]; error?: string }> {
+export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]; sizeOrder?: string[] | null; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+  // 尺码列手排顺序(业务在富录入表拖排);为空则前端回落标准自动排序
+  const { data: ord } = await (supabase.from('orders') as any).select('size_order').eq('id', orderId).maybeSingle();
+  const sizeOrder: string[] | null = Array.isArray((ord as any)?.size_order) ? (ord as any).size_order : null;
   // 客户成交价(po_unit_price)红线:仅 CAN_SEE_FINANCIALS 可读,server 端剥离(生产/QC/物流看生产任务单不含此列)
   const { canSeeFin } = await financialsVisibility(supabase, user.id);
   // select * :双语/箱数列(20260703 迁移)未执行时也不报缺列
@@ -103,7 +106,7 @@ export async function getOrderLineItems(orderId: string): Promise<{ data?: any[]
     }
     st.colors.push({ color_cn: r.color_cn || '', color_en: r.color_en || '', sizes: r.sizes || {}, qty: Number(r.qty_pcs) || 0, remark: r.remark || '', carton_count: r.carton_count ?? '' });
   }
-  return { data: [...map.values()] };
+  return { data: [...map.values()], sizeOrder };
 }
 
 /**
@@ -154,8 +157,18 @@ export async function parseOrderFile(base64: string): Promise<{
   }
 }
 
+/** 轻量取订单尺码列手排顺序(供下游客户端组件排序用;无值/列缺失返回 null)。 */
+export async function getOrderSizeOrder(orderId: string): Promise<{ sizeOrder?: string[] | null; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+  const { data } = await (supabase.from('orders') as any).select('size_order').eq('id', orderId).maybeSingle();
+  return { sizeOrder: Array.isArray((data as any)?.size_order) ? (data as any).size_order : null };
+}
+
 /** 整单替换订单明细(删旧插新)。权限:管理员/理单类角色/该单创建者·负责人。 */
-export async function saveOrderLineItems(orderId: string, styles: any[]): Promise<{ ok?: boolean; styles?: number; lines?: number; total?: number; error?: string }> {
+export async function saveOrderLineItems(orderId: string, styles: any[], sizeOrder?: string[] | null): Promise<{ ok?: boolean; styles?: number; lines?: number; total?: number; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -241,6 +254,15 @@ export async function saveOrderLineItems(orderId: string, styles: any[]): Promis
       ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(plain));
     }
     if (insErr) return { error: '写明细失败:' + insErr.message };
+  }
+
+  // 尺码列手排顺序 → 持久化订单级(orders.size_order);列缺失(迁移未执行)则静默跳过不阻断保存
+  if (Array.isArray(sizeOrder)) {
+    const cleaned = sizeOrder.map((s) => String(s).trim()).filter(Boolean);
+    const { error: soErr } = await (supabase.from('orders') as any).update({ size_order: cleaned.length > 0 ? cleaned : null }).eq('id', orderId);
+    if (soErr && !/size_order|column .* does not exist/i.test(soErr.message || '')) {
+      console.warn('[saveOrderLineItems] 写 size_order 失败(不阻断):', soErr.message);
+    }
   }
 
   // S1.2:每款布料 → 同步 materials_bom(fire-and-forget,失败不阻断保存)

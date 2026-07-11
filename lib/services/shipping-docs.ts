@@ -3,17 +3,18 @@
  * 数据源:orders + packing_lists(doc_meta)+ packing_list_lines(出货事实)+ order_line_items(主数据/价)。
  */
 import { EXPORT_SELLER } from '@/lib/domain/document-templates';
-import { compareSizeKeys } from '@/lib/utils/size-sort';
+import { sizeComparator } from '@/lib/utils/size-sort';
 
 const CURRENCY = { USD: { code: 'USD', symbol: '$', label: 'USD' }, CNY: { code: 'CNY', symbol: '¥', label: 'RMB' } } as const;
 
 function gcd(a: number, b: number): number { return b ? gcd(b, a % b) : a; }
 
-/** 各码数量 → 约分比例文本,如 {S:300,M:600,L:600,XL:300} → "S-M-L-XL / 1-2-2-1"(模板 Size 列样式)。 */
-export function sizeRatioText(sizes: any): string {
+/** 各码数量 → 约分比例文本,如 {S:300,M:600,L:600,XL:300} → "S-M-L-XL / 1-2-2-1"(模板 Size 列样式)。
+ *  sizeOrder:订单级业务手排顺序(优先);无则标准自动排序。*/
+export function sizeRatioText(sizes: any, sizeOrder?: string[] | null): string {
   if (!sizes || typeof sizes !== 'object') return '';
   const keys = Object.keys(sizes).filter(k => Number(sizes[k]) > 0)
-    .sort(compareSizeKeys);   // 全链统一码序(小→大),别自造 SIZE_ORDER
+    .sort(sizeComparator(sizeOrder));   // 业务手排优先,回落标准码序;别自造 SIZE_ORDER
   if (keys.length === 0) return '';
   const vals = keys.map(k => Number(sizes[k]));
   const g = vals.reduce((a, b) => gcd(a, b)) || 1;
@@ -42,6 +43,11 @@ export async function loadShippingDocModel(
     .select('id, order_no, internal_order_no, po_number, customer_name, style_no, currency, etd, factory_date, delivery_type')
     .eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
+
+  // 尺码列手排顺序(容错读:列未建/迁移未执行时静默 null → 回落标准码序)
+  let sizeOrder: string[] | null = null;
+  const { data: soRow } = await (supabase.from('orders') as any).select('size_order').eq('id', orderId).maybeSingle();
+  if (Array.isArray((soRow as any)?.size_order)) sizeOrder = (soRow as any).size_order;
 
   // 多客户PO合单:全部来源PO号(按 seq 稳定去重)。表未建/查空 → 空数组,单据回退用 order.po_number。
   let poNumbers: string[] = [];
@@ -96,7 +102,7 @@ export async function loadShippingDocModel(
     plTotals.cartons += cartons; plTotals.qty += qty; plTotals.gross += grossTotal; plTotals.net += netTotal; plTotals.vol += vol;
     plRows.push({
       style_no: l.style_no || '', composition: styleMeta.get(l.style_no)?.composition || '',
-      sizeText: sizeRatioText(l.size_breakdown), color: l.color || '',
+      sizeText: sizeRatioText(l.size_breakdown, sizeOrder), color: l.color || '',
       cartons, per, qty, dl, dw, dh, grossTotal, vol,
     });
   }
@@ -134,7 +140,7 @@ export async function loadShippingDocModel(
     else if (canSeeFin && g.qty > 0) ciTotals.missingPrice += 1;
     ciStyles.push({
       style_no: g.style_no, description: m.description || '', composition: m.composition || '',
-      sizeRatio: sizeRatioText(g.sizes),
+      sizeRatio: sizeRatioText(g.sizes, sizeOrder),
       colorBreakdown: g.colors.map((c: any) => `${c.color}(${c.qty}${uw})`).join('\n'),
       cartons: g.cartons, per: g.per, qty: g.qty, unitWord: uw,
       gross: Math.round(g.gross * 10) / 10, net: Math.round(g.net * 10) / 10, vol: Math.round(g.vol * 1000) / 1000,

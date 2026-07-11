@@ -11,7 +11,7 @@ import { getOrderLineItems, saveOrderLineItems, parseOrderFile } from '@/app/act
 import { parsePO } from '@/app/actions/po-parser';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
-import { sortSizeKeys } from '@/lib/utils/size-sort';
+import { sortSizeKeys, orderSizeKeys } from '@/lib/utils/size-sort';
 
 type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string; carton_count?: number | string };
 // S1.2 每款布料(可多种)——名/门幅/单耗/单位/单价;单价=采购参考价(¥,只登记不自动进成本)
@@ -38,6 +38,13 @@ const styleFabrics = (st: Style): Fabric[] => {
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
 const sumSizes = (s: Record<string, number>) => Object.values(s || {}).reduce((a, v) => a + (Number(v) || 0), 0);
+// 并入新尺码到已有顺序末尾(保住业务手排的顺序不被打乱;新码之间按标准序)
+const appendSizes = (prev: string[], incoming: Iterable<string>): string[] => {
+  const seen = new Set(prev);
+  const extra: string[] = [];
+  for (const k of incoming) { if (k && !seen.has(k)) { seen.add(k); extra.push(k); } }
+  return extra.length ? [...prev, ...sortSizeKeys(extra)] : prev;
+};
 
 export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange, showPrice = false, onParsed }: {
   orderId?: string; canEdit?: boolean; value?: Style[]; onChange?: (styles: Style[]) => void;
@@ -56,6 +63,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [newSize, setNewSize] = useState('');
+  const [dragIdx, setDragIdx] = useState<number | null>(null);   // 尺码列拖拽排序
   const [uploading, setUploading] = useState<number | null>(null);
   const [parsing, setParsing] = useState(false);
 
@@ -84,11 +92,10 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
         else merged.push(ps);
       }
       setStyles(merged);
-      // 尺码列并集
-      const labelSet = new Set(sizeLabels);
-      for (const s of ((res as any).sizeNames || [])) labelSet.add(s);
-      for (const ps of parsed) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) labelSet.add(k);
-      setSizeLabels(sortSizeKeys([...labelSet]));
+      // 尺码列并入(追加到末尾,保住已有手排顺序)
+      const incoming: string[] = [...((res as any).sizeNames || [])];
+      for (const ps of parsed) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) incoming.push(k);
+      setSizeLabels(prev => appendSizes(prev, incoming));
       const nColors = parsed.reduce((a, s) => a + s.colors.length, 0);
       setMsg(`✅ 已解析 ${parsed.length} 款 / ${nColors} 颜色行,请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}`);
     } catch (err: any) {
@@ -135,9 +142,9 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
         if (hit) hit.colors.push(...ps.colors); else merged.push(ps);
       }
       setStyles(merged);
-      const labelSet = new Set(sizeLabels);
-      for (const ps of aiStyles) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) labelSet.add(k);
-      setSizeLabels(sortSizeKeys([...labelSet]));
+      const incoming: string[] = [];
+      for (const ps of aiStyles) for (const c of ps.colors) for (const k of Object.keys(c.sizes || {})) incoming.push(k);
+      setSizeLabels(prev => appendSizes(prev, incoming));
       const nColors = aiStyles.reduce((a, s) => a + s.colors.length, 0);
       const sizeWarn = noSizeStyles > 0 ? ` ⚠ 有 ${noSizeStyles} 款没摊出尺码(配比没读到),请手动补尺码或截图当图片重传` : '';
       setMsg(`✅ AI 解析 ${aiStyles.length} 款 / ${nColors} 颜色行(配比已按比例摊成每码件数),请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}${sizeWarn}`);
@@ -153,30 +160,34 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
     if ((res as any).data) {
       const data = (res as any).data as Style[];
       setInternalStyles(data);
-      // 尺码集 = 已有 sizes 键的并集,按标准序 XS→S→M→L→XL→…;空则默认
-      const labels = new Set<string>();
-      for (const st of data) for (const c of st.colors) for (const k of Object.keys(c.sizes || {})) labels.add(k);
-      setSizeLabels(labels.size > 0 ? sortSizeKeys([...labels]) : DEFAULT_SIZES);
+      // 尺码列 = 明细里出现过的码 ∪ 手排顺序里登记的码(含空列);
+      // 有手排顺序(orders.size_order)按它排,未列出的码标准序附末尾;都无则默认
+      const stored = ((res as any).sizeOrder as string[] | null) || null;
+      const union = new Set<string>();
+      for (const st of data) for (const c of st.colors) for (const k of Object.keys(c.sizes || {})) union.add(k);
+      if (stored) for (const s of stored) if (s) union.add(s);
+      setSizeLabels(union.size > 0 ? orderSizeKeys([...union], stored) : DEFAULT_SIZES);
     }
     setLoading(false);
   }, [orderId, controlled]);
   useEffect(() => { load(); }, [load]);
 
-  // 受控模式(建单页):外部塞进来的明细(AI 解析/复制款)可能带新尺码 → 并入尺码列并保持标准序
+  // 受控模式(建单页):外部塞进来的明细(AI 解析/复制款)可能带新尺码 → 并入尺码列末尾(保住手排顺序)
   useEffect(() => {
     if (!controlled) return;
     setSizeLabels(prev => {
-      const set = new Set(prev);
-      let changed = false;
-      for (const st of (value || [])) for (const c of (st.colors || [])) for (const k of Object.keys(c.sizes || {})) {
-        if (!set.has(k)) { set.add(k); changed = true; }
-      }
-      return changed ? sortSizeKeys([...set]) : prev;
+      const incoming: string[] = [];
+      for (const st of (value || [])) for (const c of (st.colors || [])) for (const k of Object.keys(c.sizes || {})) incoming.push(k);
+      return appendSizes(prev, incoming);
     });
   }, [controlled, value]);
 
-  // ── 尺码列 ──
-  const addSize = () => { const s = newSize.trim(); if (s && !sizeLabels.includes(s)) setSizeLabels(sortSizeKeys([...sizeLabels, s])); setNewSize(''); };
+  // ── 尺码列(顺序即业务手排真相;新增码追加到末尾,拖拽调整)──
+  const addSize = () => { const s = newSize.trim(); if (s && !sizeLabels.includes(s)) setSizeLabels([...sizeLabels, s]); setNewSize(''); };
+  const moveSize = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= sizeLabels.length || to >= sizeLabels.length) return;
+    setSizeLabels(prev => { const a = [...prev]; const [m] = a.splice(from, 1); a.splice(to, 0, m); return a; });
+  };
   const removeSize = (s: string) => {
     setSizeLabels(sizeLabels.filter((x) => x !== s));
     setStyles(styles.map((st) => ({ ...st, colors: st.colors.map((c) => { const { [s]: _, ...rest } = c.sizes; return { ...c, sizes: rest }; }) })));
@@ -278,7 +289,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   async function save() {
     if (!orderId) return;
     setSaving(true); setMsg('');
-    const res = await saveOrderLineItems(orderId, styles);
+    const res = await saveOrderLineItems(orderId, styles, sizeLabels);   // 尺码列手排顺序一并持久化
     setSaving(false);
     if ((res as any).error) { setMsg('❌ ' + (res as any).error); return; }
     setMsg(`✅ 已保存 ${(res as any).styles} 款 / ${(res as any).lines} 行 / 共 ${(res as any).total} 件`);
@@ -293,9 +304,19 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       {/* 顶部:尺码集 + 汇总 + 保存 */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-xl border border-gray-200 p-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-gray-500">尺码列:</span>
-          {sizeLabels.map((s) => (
-            <span key={s} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 text-xs text-gray-700">
+          <span className="text-xs text-gray-500">尺码列{canEdit && <span className="text-gray-400">(可拖动排序)</span>}:</span>
+          {sizeLabels.map((s, i) => (
+            <span
+              key={s}
+              draggable={canEdit}
+              onDragStart={() => setDragIdx(i)}
+              onDragOver={(e) => { if (dragIdx !== null) e.preventDefault(); }}
+              onDrop={(e) => { e.preventDefault(); if (dragIdx !== null) moveSize(dragIdx, i); setDragIdx(null); }}
+              onDragEnd={() => setDragIdx(null)}
+              title={canEdit ? '拖动调整尺码顺序(下游生产任务单/PI/采购/出货全按此序)' : undefined}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 text-xs text-gray-700 ${canEdit ? 'cursor-grab active:cursor-grabbing' : ''} ${dragIdx === i ? 'opacity-40 ring-1 ring-indigo-300' : ''}`}
+            >
+              {canEdit && <span className="text-gray-300 select-none leading-none" aria-hidden>⋮⋮</span>}
               {s}{canEdit && <button onClick={() => removeSize(s)} className="text-gray-400 hover:text-red-500">×</button>}
             </span>
           ))}

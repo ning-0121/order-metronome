@@ -41,6 +41,9 @@ export async function getManufacturingOrder(orderId: string) {
     .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, po_parse_snapshot')
     .eq('id', orderId).single();
   if (oErr) return { error: friendlyError(oErr) };
+  // 尺码列手排顺序(容错读:列未建/迁移未执行时静默为 null,不 brick 生产任务单)
+  const { data: soRow } = await (supabase.from('orders') as any).select('size_order').eq('id', orderId).maybeSingle();
+  (order as any).size_order = Array.isArray((soRow as any)?.size_order) ? (soRow as any).size_order : null;
 
   const { data: mo } = await (supabase.from('manufacturing_orders') as any)
     .select('*').eq('order_id', orderId).maybeSingle();
@@ -237,7 +240,8 @@ async function buildMoWorkbook(
   // ══ 生产任务单模板(1:1 复刻绮陌标准生产单;固定 A–J 十列,竖版 A4 单页)══
   // 全表宋体(公司名 22 加粗,正文 14);每款一个 sheet(结构完全一致,只换数据)+ 一张辅料明细。
   // 版式来源:用户提供的《1022955订单生产任务单》。尺码默认 S/M/L,可自适应 1–7 个尺码。
-  const { sortSizeKeys: sortSizes } = await import('@/lib/utils/size-sort');
+  const { orderSizeKeys } = await import('@/lib/utils/size-sort');
+  const sizeOrderPref = (order as any).size_order as string[] | null;   // 业务手排的尺码顺序(优先)
 
   // 按款分组(无明细则单 sheet 用订单头字段)
   const styleGroups: { style_no: string; product_name: string; image_url: string; items: any[] }[] = [];
@@ -345,7 +349,7 @@ async function buildMoWorkbook(
     // 尺码集(默认 S/M/L,最多 7 个)
     const sizeSet = new Set<string>();
     for (const li of g.items) if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) if (Number(li.sizes[k]) > 0) sizeSet.add(k);
-    let sizeKeys = sortSizes([...sizeSet]);
+    let sizeKeys = orderSizeKeys([...sizeSet], sizeOrderPref);
     if (sizeKeys.length === 0) sizeKeys = ['S', 'M', 'L'];
     sizeKeys = sizeKeys.slice(0, 7);
     const ns = sizeKeys.length;

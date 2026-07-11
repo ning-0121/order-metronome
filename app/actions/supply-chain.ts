@@ -10,7 +10,8 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { getUserRoles } from '@/lib/utils/user-role';
-import { sortSizeKeys } from '@/lib/utils/size-sort';
+import { orderSizeKeys } from '@/lib/utils/size-sort';
+import { fetchOrderSizeOrder } from '@/lib/services/orderSizeOrder';
 
 
 // 审计修(2026-07-04):补齐全部 line_status,避免 ready_to_ship/rejected/cancelled 的行
@@ -111,7 +112,8 @@ export async function getOrderSupplyChainOverview(
     if (l.size) g._sizes.add(l.size);
     g.size_lines++;
   }
-  const mergedLines = [...grouped.values()].map((g) => ({ ...g, sizes: sortSizeKeys([...(g._sizes || [])] as string[]) }));
+  const sizeOrder = await fetchOrderSizeOrder(supabase, orderId);   // 业务手排的尺码顺序(优先)
+  const mergedLines = [...grouped.values()].map((g) => ({ ...g, sizes: orderSizeKeys([...(g._sizes || [])] as string[], sizeOrder) }));
 
   const today = new Date().toISOString().slice(0, 10);
   let pending = 0, inTransit = 0, arrived = 0, done = 0, attention = 0;

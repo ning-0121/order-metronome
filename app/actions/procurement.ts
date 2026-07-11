@@ -37,7 +37,8 @@ async function notifyFinanceOverReceipt(supabase: any, line: any, gate: { ordere
 }
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { maskFloorForLines } from '@/lib/procurement/purchaseOrder';
-import { sortSizeKeys } from '@/lib/utils/size-sort';
+import { orderSizeKeys } from '@/lib/utils/size-sort';
+import { fetchOrderSizeOrder } from '@/lib/services/orderSizeOrder';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 
@@ -149,6 +150,7 @@ export async function getProcurementItems(orderId: string): Promise<{
     if (l.size) g._sizes.add(l.size);
     g._n++;
   }
+  const sizeOrder = await fetchOrderSizeOrder(supabase, orderId);   // 业务手排的尺码顺序(优先);无则标准自动排
   const rawItems = [...grouped.values()].map((g) => {
     const ordered = Number(g.ordered_qty) || 0;
     const recv = g.received_qty ?? null;
@@ -159,7 +161,7 @@ export async function getProcurementItems(orderId: string): Promise<{
       received_qty: recv,
       difference_qty: diffQty,
       difference_pct: diffPct,
-      sizes: sortSizeKeys([...(g._sizes || [])] as string[]),
+      sizes: orderSizeKeys([...(g._sizes || [])] as string[], sizeOrder),
       size_count: g._n, line_ids: g._line_ids,
     };
   }) as ProcurementLineItem[];

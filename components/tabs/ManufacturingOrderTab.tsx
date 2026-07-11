@@ -5,7 +5,7 @@ import {
   generateProductionOrderSheet, generateTrimSheet,
 } from '@/app/actions/manufacturing-order';
 import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
-import { sortSizeKeys, compareSizeKeys } from '@/lib/utils/size-sort';
+import { orderSizeKeys, sizeComparator } from '@/lib/utils/size-sort';
 import { useDialogs } from '@/components/ui/useDialogs';
 
 const CAT_LABEL: Record<string, string> = {
@@ -237,7 +237,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
               {lineItems.map((li: any, i: number) => (
                 <div key={i} className="flex gap-2">
                   <span className="text-gray-700 shrink-0">{[li.color_cn, li.color_en].filter(Boolean).join('/') || '—'}</span>
-                  <span className="text-gray-400 truncate">{li.sizes && typeof li.sizes === 'object' ? Object.entries(li.sizes).sort((a, b) => compareSizeKeys(a[0], b[0])).map(([k, v]) => `${k}:${v}`).join(' ') : ''}</span>
+                  <span className="text-gray-400 truncate">{li.sizes && typeof li.sizes === 'object' ? Object.entries(li.sizes).sort((a, b) => sizeComparator(order?.size_order)(a[0], b[0])).map(([k, v]) => `${k}:${v}`).join(' ') : ''}</span>
                   <span className="ml-auto text-gray-600 shrink-0">{li.qty_pcs ?? '—'} {li.unit || ''}</span>
                 </div>
               ))}
@@ -326,7 +326,7 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
           {groups.map((g, gi) => {
             const sizeSet = new Set<string>();
             for (const li of g.items) if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) sizeSet.add(k);
-            const sizeKeys = sortSizeKeys([...sizeSet]).slice(0, 8);
+            const sizeKeys = orderSizeKeys([...sizeSet], order?.size_order).slice(0, 8);
             const styleTotal = g.items.reduce((a, li) => a + (Number(li.qty_pcs) || 0), 0) || (groups.length === 1 ? order.quantity : 0);
             const colTotals = sizeKeys.map(s => g.items.reduce((a, li) => a + ((li.sizes && Number(li.sizes[s])) || 0), 0));
             // 与下载 Excel 逐行同源(manufacturing-order.ts 生成行);此前 preview 用了不同映射,导致预览≠成品单

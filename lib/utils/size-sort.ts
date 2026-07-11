@@ -42,3 +42,27 @@ export function compareSizeKeys(a: string, b: string): number {
 export function sortSizeKeys(keys: string[]): string[] {
   return [...keys].sort(compareSizeKeys);
 }
+
+/**
+ * 带「显式顺序」的比较器工厂 —— 业务在富录入表手排的顺序(orders.size_order)优先;
+ * 显式列出的按其下标排在最前,未列出的码退回标准自动序(compareSizeKeys)排在其后。
+ * explicit 为空/未传时 === compareSizeKeys(纯自动排)。全链下游共用,保证到处跟手排一致。
+ */
+export function sizeComparator(explicit?: string[] | null): (a: string, b: string) => number {
+  if (!explicit || explicit.length === 0) return compareSizeKeys;
+  const idx = new Map<string, number>();
+  explicit.forEach((s, i) => { const k = String(s).trim().toUpperCase(); if (!idx.has(k)) idx.set(k, i); });
+  const rank = (s: string) => { const r = idx.get(String(s).trim().toUpperCase()); return r === undefined ? -1 : r; };
+  return (a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== -1 && rb !== -1) return ra - rb;
+    if (ra !== -1) return -1;   // 手排列出的排前
+    if (rb !== -1) return 1;
+    return compareSizeKeys(a, b);   // 都没列出:标准自动序
+  };
+}
+
+/** 有显式顺序按它排(未列出的码标准序附末尾);无则回落标准自动排序。 */
+export function orderSizeKeys(keys: string[], explicit?: string[] | null): string[] {
+  return [...keys].sort(sizeComparator(explicit));
+}
