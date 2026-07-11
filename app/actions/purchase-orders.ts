@@ -412,12 +412,31 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
     ({ data: lines } = await (supabase.from('procurement_line_items') as any).select(_detSel).eq('purchase_order_id', id).order('created_at', { ascending: true }));
   }
 
-  // 颜色:执行行无 color 列,经 procurement_item_id 回查主数据(采购单按颜色分行,显示必须带色)
+  // 颜色 + 业务上传的排版稿/参考图:执行行无这些列,经 procurement_item_id 回查主数据。
+  //  - color:采购单按颜色分行,显示必须带色
+  //  - attachment_files / image_urls:业务在原辅料上传的排版稿(分款吊卡/箱唛…)+ 色卡参考图,
+  //    归并时带进 procurement_items → 采购在 PO 详情页要能看/下载/预览(2026-07-11)
   const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];
+  const poMasterIds = new Set<string>();      // 本 PO 涉及的物料主数据 id(用于把 BOM 附件圈到本单相关物料)
+  const poMatNames = new Set<string>();        // 无 master_id 时退回按物料名圈定
+  const attachByUrl = new Map<string, { name: string; url: string }>();   // 排版稿/文件附件(按 url 去重)
+  const imgSet = new Set<string>();            // 色卡/辅料参考图(按 url 去重)
   if (piIds.length > 0) {
-    const { data: pis } = await (supabase.from('procurement_items') as any).select('id, color').in('id', piIds);
+    // select * :attachment_files/image_urls 新列迁移未跑时不报缺列(拿到什么用什么)
+    const { data: pis } = await (supabase.from('procurement_items') as any)
+      .select('id, color, material_name, material_master_id, attachment_files, image_urls').in('id', piIds);
     const colorMap = new Map((pis || []).map((p: any) => [p.id, p.color]));
     for (const l of (lines || [])) (l as any).color = l.procurement_item_id ? (colorMap.get(l.procurement_item_id) ?? null) : null;
+    for (const p of (pis || []) as any[]) {
+      if (p.material_master_id) poMasterIds.add(p.material_master_id);
+      if (p.material_name) poMatNames.add(String(p.material_name).trim().toLowerCase());
+      for (const f of (Array.isArray(p.attachment_files) ? p.attachment_files : [])) {
+        if (f?.url && /^https?:\/\//.test(String(f.url))) attachByUrl.set(String(f.url), { name: String(f.name || f.url), url: String(f.url) });
+      }
+      for (const u of (Array.isArray(p.image_urls) ? p.image_urls : [])) {
+        if (typeof u === 'string' && /^https?:\/\//.test(u)) imgSet.add(u);
+      }
+    }
   }
 
   // 进度档案(2026-07-03 用户拍板:分批收货后要能追整单全貌)——每行的收货批次历史
@@ -443,6 +462,30 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
     orderRefs = ords || [];
   }
 
+  // 排版稿/参考图兜底:直接从来源 materials_bom 再读一遍(union 进上面归并带来的)。
+  // 为什么:业务在 PO 建好【之后】才上传排版稿时,procurement_items 的快照还没带上(要重跑归并),
+  // 采购在 PO 详情页就看不到 → 直接读 BOM 活数据补齐,免手动归并。按本单涉及的物料(master_id 优先、
+  // 退回物料名)圈定,不把无关物料的附件混进来。select * 防新列未迁移报错。
+  if (orderIds.length > 0 && (poMasterIds.size > 0 || poMatNames.size > 0)) {
+    const { data: bomRows } = await (supabase.from('materials_bom') as any)
+      .select('material_name, material_master_id, attachment_files, image_urls').in('order_id', orderIds);
+    for (const b of (bomRows || []) as any[]) {
+      const hit = (b.material_master_id && poMasterIds.has(b.material_master_id))
+        || (b.material_name && poMatNames.has(String(b.material_name).trim().toLowerCase()));
+      if (!hit) continue;
+      for (const f of (Array.isArray(b.attachment_files) ? b.attachment_files : [])) {
+        if (f?.url && /^https?:\/\//.test(String(f.url)) && !attachByUrl.has(String(f.url))) {
+          attachByUrl.set(String(f.url), { name: String(f.name || f.url), url: String(f.url) });
+        }
+      }
+      for (const u of (Array.isArray(b.image_urls) ? b.image_urls : [])) {
+        if (typeof u === 'string' && /^https?:\/\//.test(u)) imgSet.add(u);
+      }
+    }
+  }
+  const attachments = [...attachByUrl.values()].slice(0, 24);       // 排版稿/文件附件(供采购下载+预览)
+  const referenceImages = [...imgSet].slice(0, 24);                 // 色卡/辅料参考图(缩略图+点开大图)
+
   const canSeeFloor = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   // floor 角色 → 经 service-role 把底价/金额补回(基础读已剥离);非 floor 不补
   if (canSeeFloor) {
@@ -461,7 +504,7 @@ export async function getPurchaseOrder(id: string): Promise<{ data?: any; error?
   // 供应商财务字段(银行/税号/账期)按角色剥离(审计 P0:join 出的 suppliers(*) 此前对全员可读)
   (po as any).suppliers = maskSupplierFinance((po as any).suppliers, hasRoleInGroup(roles, 'CAN_EDIT_SUPPLIER_FINANCE'));
 
-  return { data: { po, lines: maskedLines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance, isAdmin: isAdminRole(roles) } };
+  return { data: { po, lines: maskedLines, orderRefs, attachments, referenceImages, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance, isAdmin: isAdminRole(roles) } };
 }
 
 /**

@@ -17,7 +17,9 @@ const REASON_LABELS: Record<string, string> = {
 export function PurchaseOrderDetailClient({ view }: { view: any }) {
   const router = useRouter();
   const { confirm, prompt, dialog } = useDialogs();
-  const { po, lines, orderRefs, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance, isAdmin } = view;
+  const { po, lines, orderRefs, attachments, referenceImages, canSeeFloor, canProcure, canApproveProcurement, canApproveFinance, isAdmin } = view;
+  const attachFiles: Array<{ name: string; url: string }> = Array.isArray(attachments) ? attachments : [];
+  const refImages: string[] = Array.isArray(referenceImages) ? referenceImages : [];
   const sup = po.suppliers || {};
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState('');
@@ -171,6 +173,45 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                 </li>
               ))}
             </ul>
+          )}
+        </div>
+      )}
+
+      {/* 辅料附件 / 排版稿(业务在原辅料上传的分款吊卡/箱唛/PDF/AI… + 色卡参考图)——
+          采购在此下载 / 预览,连同采购单一起发供应商(2026-07-11)。归并带来的 + BOM 活数据兜底,免手动刷新。 */}
+      {(attachFiles.length > 0 || refImages.length > 0) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-sm font-semibold text-gray-800">📎 辅料附件 / 排版稿</h3>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-medium border border-indigo-200">业务上传</span>
+          </div>
+          <p className="text-[11px] text-gray-500 mt-1">分款吊卡 / 箱唛 / 排版稿(PDF/AI/CDR/xlsx…)与色卡参考图 —— 点「预览」在线看,点「下载」存本地,连同采购单一起发供应商。</p>
+
+          {attachFiles.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {attachFiles.map((f, i) => (
+                <li key={f.url} className="flex items-center gap-2 text-xs">
+                  <span className="truncate flex-1 text-gray-700" title={f.name}>📄 {f.name || `附件 ${i + 1}`}</span>
+                  <a href={f.url} target="_blank" rel="noreferrer" className="px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 shrink-0">预览</a>
+                  <a href={f.url} download className="px-2 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 shrink-0">下载</a>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {refImages.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[11px] text-gray-400 mb-1">色卡 / 辅料参考图(点击看大图):</p>
+              <div className="flex flex-wrap gap-2">
+                {refImages.map((u, i) => (
+                  <a key={u} href={u} target="_blank" rel="noreferrer" title={`参考图 ${i + 1}`}
+                    className="block w-16 h-16 rounded-lg border border-gray-200 overflow-hidden hover:ring-2 hover:ring-indigo-300">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={u} alt={`参考图 ${i + 1}`} className="w-full h-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
