@@ -93,6 +93,16 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
     if (e) { setErr(e); return; }
     setMsg('✅ 出货数据 + 单据信息已保存'); await load();
   }
+  // 只存单据信息(CI/报关表头 doc_meta)——不碰实发数量行,故没录实发数量也能保存表头(修:原来只有
+  // 「保存实发数量」按钮,且它 rows=0 时禁用 → 手工填的 CI/报关表头存不下)。
+  async function saveMeta() {
+    if (!plId) return;
+    setSaving(true); setErr(''); setMsg('');
+    const mm = await saveShippingDocMeta(orderId, plId, meta);
+    setSaving(false);
+    if ((mm as any).error) { setErr((mm as any).error); return; }
+    setMsg('✅ 单据信息(CI/报关表头)已保存');
+  }
   async function doGen(kind: 'pl' | 'ci' | 'customs') {
     setGen(kind); setErr(''); setMsg('');
     const e = await persist();
@@ -274,6 +284,7 @@ export function ShippingDocsSection({ orderId }: { orderId: string }) {
 
             {/* 操作 */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
+              <button onClick={saveMeta} disabled={saving || !plId} className="text-sm px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 font-medium hover:bg-teal-50 disabled:opacity-50" title="保存上方 CI/报关 表头(开票/银行/海关字段);没录实发数量也能存">{saving ? '保存中…' : '💾 保存单据信息'}</button>
               <button onClick={save} disabled={saving || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50">{saving ? '保存中…' : '① 💾 保存实发数量'}</button>
               <button onClick={doPreview} disabled={!!gen || rows.length === 0} className="text-sm px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-50">{gen === 'preview' ? '生成中…' : '👁 预览'}</button>
               <span className="text-xs text-gray-400">按顺序生成 →</span>
