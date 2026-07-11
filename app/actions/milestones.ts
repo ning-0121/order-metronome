@@ -91,19 +91,30 @@ async function logMilestoneAction(
 
 export async function getMilestonesByOrder(orderId: string) {
   const supabase = await createClient();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return { error: '请先登录' };
   }
-  
-  // Get milestones
-  const { data: milestones, error } = await (supabase
+
+  // 能看到订单 = 能看整条时间线(节点是协作信息)。订单可见性交给 orders RLS 把关;
+  // 里程碑本身用 service-role 读全量 —— 否则 milestones RLS(只 owner/canSeeAll)会让
+  // 非订单负责人的生产/跟单只看到自己名下 1-2 个节点,看不到上下游、不知为何卡住
+  // (2026-07-11 生产部实测:584 单 9 节点,跟单只看到 2 个)。
+  const { data: ord } = await (supabase.from('orders') as any)
+    .select('id').eq('id', orderId).maybeSingle();
+  if (!ord) {
+    return { error: '无权查看该订单' };   // orders RLS 挡住 = 没权限,不泄露里程碑
+  }
+  const svc = createServiceRoleClient();
+
+  // Get milestones(service-role 读全量,订单可见性上面已把关)
+  const { data: milestones, error } = await (svc
     .from('milestones') as any)
     .select('*')
     .eq('order_id', orderId)
     .order('due_at', { ascending: true });
-  
+
   if (error) {
     return { error: error.message };
   }
