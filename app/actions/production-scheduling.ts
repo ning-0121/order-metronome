@@ -231,15 +231,18 @@ export async function getProgressBoard(): Promise<{ data?: any; error?: string }
   const om = new Map((ords || []).map((o: any) => [o.id, o]));
   const doneBy = new Map<string, number>();
   const recentBy = new Map<string, any[]>();
+  const firstDateBy = new Map<string, string>();   // 首日录产(logs 按 log_date desc,末次覆盖=最早)
   for (const l of (logs || [])) {
     doneBy.set(l.dispatch_id, (doneBy.get(l.dispatch_id) || 0) + (Number(l.qty_done) || 0));
     const arr = recentBy.get(l.dispatch_id) || [];
     if (arr.length < 3) arr.push(l);
     recentBy.set(l.dispatch_id, arr);
+    firstDateBy.set(l.dispatch_id, l.log_date);     // 遍历到该 dispatch 最早的一条时最后写入
   }
   const items = dispatches.map((d) => ({
     ...d, order: om.get(d.order_id) || null,
     done_qty: doneBy.get(d.id) || 0,
+    first_log_date: firstDateBy.get(d.id) || null,
     recent_logs: recentBy.get(d.id) || [],
   }));
   return { data: { items } };

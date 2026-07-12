@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { getProgressBoard, logDispatchProgress, updateDispatchStatus } from '@/app/actions/production-scheduling';
+import { projectFinish } from '@/lib/production/deliveryForecast';
 
 function todayStr() {
   const d = new Date();
@@ -37,31 +38,46 @@ export function ProductionProgressBoard({ canManage }: { canManage: boolean }) {
 
   if (loading) return <div className="text-sm text-gray-400 py-6">加载生产进度…</div>;
 
+  const today = todayStr();
+  // 每条算交期预测 + 排序:预计晚交的排最前(晚得越多越前),其次落后,再其次在产
+  const rows = items.map((it: any) => {
+    const planned = Number(it.planned_qty) || 0;
+    const done = Number(it.done_qty) || 0;
+    const fc = projectFinish({ planned, done, firstLogDate: it.first_log_date, factoryDate: it.order?.factory_date, today });
+    const { expected } = schedule(planned, it.planned_start, it.planned_end);
+    const behind = expected != null && done < expected * 0.9 && done < planned;
+    return { it, planned, done, fc, behind, finished: fc.status === 'done', rank: fc.status === 'late' ? (fc.lateDays || 0) : behind ? 0.5 : 0 };
+  }).sort((a, b) => b.rank - a.rank);
+  const lateCount = rows.filter((r) => r.fc.status === 'late').length;
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-bold text-gray-800">📈 生产进度录入</h2>
-        <span className="text-xs text-gray-500">跟单/QC 每天录当日产出,对照派工计划看进度。录错补负数修正。</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        <h2 className="text-sm font-bold text-gray-800">📈 生产进度录入 · 交期预警</h2>
+        <span className="text-xs text-gray-500">跟单/QC 每天录当日产出;按实绩速度预测完工,赶不上交期就预警。录错补负数修正。</span>
         {msg && <span className="text-xs text-rose-600">{msg}</span>}
       </div>
-      {items.length === 0 ? <p className="text-sm text-gray-400">暂无在产派工。派工投产后出现在这里。</p> : (
+      {lateCount > 0 && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700">
+          ⚠️ <b>{lateCount}</b> 条派工按当前日产速度<b>预计赶不上交期</b>,已排在最前。加人/加班/改期尽快处置。
+        </div>
+      )}
+      {rows.length === 0 ? <p className="text-sm text-gray-400">暂无在产派工。派工投产后出现在这里。</p> : (
         <div className="space-y-1.5">
-          {items.map((it: any) => {
-            const planned = Number(it.planned_qty) || 0;
-            const done = Number(it.done_qty) || 0;
+          {rows.map(({ it, planned, done, fc, behind, finished }) => {
             const pct = planned ? Math.min(100, Math.round((done / planned) * 100)) : 0;
             const { expected } = schedule(planned, it.planned_start, it.planned_end);
-            const behind = expected != null && done < expected * 0.9 && done < planned;
-            const finished = planned > 0 && done >= planned;
+            const late = fc.status === 'late';
             return (
-              <div key={it.id} className={`rounded-lg border bg-white p-2.5 ${behind ? 'border-amber-200' : finished ? 'border-emerald-200' : 'border-gray-100'}`}>
+              <div key={it.id} className={`rounded-lg border bg-white p-2.5 ${late ? 'border-rose-300 ring-1 ring-rose-100' : behind ? 'border-amber-200' : finished ? 'border-emerald-200' : 'border-gray-100'}`}>
                 <div className="flex items-center gap-2 flex-wrap text-sm">
                   <span className="font-mono text-gray-800">{it.order?.internal_order_no || it.order?.order_no || '—'}</span>
                   <span className="font-mono text-gray-700">{it.style_no || '(整单)'}</span>
                   {it.color && <span className="text-xs text-gray-500">{it.color}</span>}
                   <span className="text-xs text-gray-400">{it.factory_name || '?'}</span>
                   <span className="text-xs text-gray-400">交期 {it.order?.factory_date ? String(it.order.factory_date).slice(5, 10) : '—'}</span>
-                  {behind && <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">落后</span>}
+                  {late && <span className="text-xs px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">预计晚交 {fc.lateDays} 天</span>}
+                  {!late && behind && <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">落后</span>}
                   {finished && <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">已达量</span>}
                   <button onClick={() => setOpenId(openId === it.id ? '' : it.id)} className="ml-auto text-xs text-indigo-600 hover:underline">{openId === it.id ? '收起' : '录产出'}</button>
                 </div>
@@ -75,6 +91,19 @@ export function ProductionProgressBoard({ canManage }: { canManage: boolean }) {
                   </div>
                   <span className="text-xs text-gray-600 whitespace-nowrap"><b className={finished ? 'text-emerald-600' : behind ? 'text-amber-600' : 'text-indigo-600'}>{done}</b>/{planned || '—'} 件 {planned ? `(${pct}%)` : ''}</span>
                 </div>
+                {/* 交期预测:速度 / 还差 / 预计完工 */}
+                {!finished && (
+                  <div className="mt-1 text-[11px] flex flex-wrap gap-x-3 gap-y-0.5">
+                    {fc.status === 'nostart' ? <span className="text-gray-400">未录实绩,暂无法预测(录一天产出即可)</span> : (
+                      <>
+                        {fc.velocity != null && <span className="text-gray-500">日产 ≈ <b className="text-gray-700">{fc.velocity.toFixed(0)}</b> 件</span>}
+                        <span className="text-gray-500">还差 <b className="text-gray-700">{fc.remaining}</b> 件</span>
+                        {fc.etaDate && <span className={late ? 'text-rose-600' : 'text-gray-500'}>预计完工 <b>{fc.etaDate.slice(5)}</b></span>}
+                        {fc.lateDays != null && fc.lateDays <= 0 && fc.status === 'onTrack' && <span className="text-emerald-600">可按时(早 {-fc.lateDays} 天)</span>}
+                      </>
+                    )}
+                  </div>
+                )}
                 {it.recent_logs?.length > 0 && (
                   <div className="mt-1 text-[11px] text-gray-400 flex flex-wrap gap-x-3">
                     {it.recent_logs.map((l: any, i: number) => (
