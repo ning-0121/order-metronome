@@ -6,6 +6,7 @@ import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
 import { uploadSizeChart, listSizeCharts, deleteSizeChart } from '@/app/actions/size-chart';
 import { uploadOrderShareDoc, listOrderShareDocs, deleteOrderShareDoc } from '@/app/actions/order-share-docs';
+import { CartonSpecEditor } from '@/components/order/CartonSpecEditor';
 import { generateTrimSheet } from '@/app/actions/manufacturing-order';
 import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
 
@@ -904,6 +905,8 @@ export function BomTab({ orderId }: { orderId: string }) {
           })}
         </div>
       </div>
+      {/* 纸箱规格 + 箱唛(#3:一套默认 + 个别款/色例外 + 箱唛模板,按款×色自动派生) */}
+      <CartonSpecEditor orderId={orderId} />
       {/* 辅料单(第二张):原辅料填完后在此生成,读最新 BOM;同一按钮也在「生产任务单」页 */}
       <div className="mb-4 p-3 rounded-xl border border-teal-200 bg-teal-50/40">
         <div className="flex items-center gap-2 flex-wrap">
