@@ -885,9 +885,11 @@ export async function placePurchaseOrder(poId: string): Promise<{
     return { error: '该采购单已被驳回,请修改后重新提交审批,通过后才能下单。' };
   }
 
-  // 采购单 ≥ ¥5000 → 走外部财务系统审批(审计 B):置待审批 + emit approval_requested,不真下单。
-  // 财务系统审批后回调 finance-callback(approval_type='purchase')→ 批准自动下单/驳回拦下。
-  const FINANCE_EXT_APPROVAL_THRESHOLD = 5000;
+  // 财务前置审批(老板 2026-07-12 铁令:取消 ¥5000 门槛,**所有采购单一律须财务前置审批后才下单**)。
+  // 阈值置 0 → 任何单都走下面这条:置待审批 + emit approval_requested(带内部风险信号给财务),不真下单;
+  // 财务系统审批后回调 finance-callback(approval_type='purchase')→ 批准自动下单 / 驳回拦下。
+  // 下方原「< 门槛 → 内部风险闸 / not_required 直接下单」分支自此不可达(保留仅供风险信号计算参考)。
+  const FINANCE_EXT_APPROVAL_THRESHOLD = 0;
   // 修 P2(2026-07-09 审计):「价格待定」单 total_amount=0 会绕过 ≥¥5000 审批闸。改用【预估额】评审——
   //   有下单额用下单额;否则按 price_baseline(建议价)×数量 估;连建议价都估不出 → 保守视为达阈值、强制进审批,
   //   不让"价格待定"成为任意金额绕过审批的口子。
@@ -964,7 +966,7 @@ export async function placePurchaseOrder(poId: string): Promise<{
       await notifyUsersByRole(supabase, ['procurement', 'procurement_manager'], {
         type: 'po_finance_approval',
         title: `🟠 采购单已提交财务审批：${(po as any).po_no || ''}`,
-        message: `采购单金额 ¥${(Number((po as any).total_amount) || 0).toLocaleString()} ≥ ¥5000,已提交财务系统审批(风险信号已随单送财务),批准后自动下单。${budgetWarn}`,
+        message: `采购单已提交财务系统前置审批(所有采购单一律须财务审批后下单;风险信号已随单送财务),批准后自动下单。${budgetWarn}`,
       });
     } catch { /* 通知失败不阻断 */ }
     revalidatePath(`/procurement/po/${poId}`);
