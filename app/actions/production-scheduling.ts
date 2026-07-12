@@ -153,6 +153,22 @@ export async function dispatchStyle(input: { orderId: string; styleNo: string; c
 }
 
 /** 改派工状态 / 删派工。派工→生产中 联动点亮该单「生产启动/开裁」里程碑。 */
+/** 派工投产 → 点亮该订单「生产启动/开裁」里程碑(pending→进行中)。已 gate 的调用方内部复用,不再校验。失败不阻断。 */
+async function lightKickoffMilestone(svc: any, orderId: string): Promise<void> {
+  try {
+    const { REPORT_STEP_ALIASES } = await import('@/lib/production/stage');
+    const cands = REPORT_STEP_ALIASES['production_kickoff'] || ['production_kickoff'];
+    const { data: ms } = await (svc.from('milestones') as any)
+      .select('id, status').eq('order_id', orderId).in('step_key', cands).limit(1).maybeSingle();
+    const st = String((ms as any)?.status || '').toLowerCase();
+    if ((ms as any)?.id && !['in_progress', '进行中', 'done', '已完成', 'completed', 'blocked', '阻塞'].includes(st)) {
+      const { transitionMilestoneStatus } = await import('@/lib/repositories/milestonesRepo');
+      await transitionMilestoneStatus((ms as any).id, '进行中', '生产排单:已派工投产,生产启动节点自动进行中');
+    }
+    revalidatePath(`/orders/${orderId}`);
+  } catch (e: any) { console.warn('[dispatch] 里程碑联动失败(不阻断):', e?.message); }
+}
+
 export async function updateDispatchStatus(dispatchId: string, status: 'scheduled' | 'in_production' | 'done' | 'cancelled'): Promise<{ ok?: boolean; error?: string }> {
   const g = await gate(false);
   if ('error' in g) return { error: g.error };
@@ -162,23 +178,71 @@ export async function updateDispatchStatus(dispatchId: string, status: 'schedule
   if (error) return { error: error.message };
 
   // P2 联动:派工→生产中 → 该订单「生产启动/开裁」里程碑 pending→进行中(经 stage 引擎带动生产中心阶段 + 风险卡重算)。
-  //   只点亮不判完成(DP-4);失败不阻断。V2 已砍 production_kickoff → 按别名回落到承载节点。
-  if (status === 'in_production' && (d as any)?.order_id) {
-    try {
-      const { REPORT_STEP_ALIASES } = await import('@/lib/production/stage');
-      const cands = REPORT_STEP_ALIASES['production_kickoff'] || ['production_kickoff'];
-      const { data: ms } = await (svc.from('milestones') as any)
-        .select('id, status').eq('order_id', (d as any).order_id).in('step_key', cands).limit(1).maybeSingle();
-      const st = String((ms as any)?.status || '').toLowerCase();
-      if ((ms as any)?.id && !['in_progress', '进行中', 'done', '已完成', 'completed', 'blocked', '阻塞'].includes(st)) {
-        const { transitionMilestoneStatus } = await import('@/lib/repositories/milestonesRepo');
-        await transitionMilestoneStatus((ms as any).id, '进行中', '生产排单:已派工投产,生产启动节点自动进行中');
-      }
-      revalidatePath(`/orders/${(d as any).order_id}`);
-    } catch (e: any) { console.warn('[dispatch] 里程碑联动失败(不阻断):', e?.message); }
-  }
+  if (status === 'in_production' && (d as any)?.order_id) await lightKickoffMilestone(svc, (d as any).order_id);
   revalidatePath('/production');
   return { ok: true };
+}
+
+/** P4 跟单/QC 每天录当日完成件数(增量,可负=修正)。首次录且还是「已排」→ 顺带投产联动里程碑。 */
+export async function logDispatchProgress(input: { dispatchId: string; logDate: string; qtyDone: number; note?: string | null }): Promise<{ ok?: boolean; cumulative?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!roles.some((r) => ['production', 'production_manager', 'admin'].includes(r))) return { error: '仅生产/跟单/QC/主管可录生产数据' };
+  if (!input.logDate) return { error: '请选日期' };
+  const svc = createServiceRoleClient();
+  const { data: d } = await (svc.from('production_dispatch') as any).select('id, order_id, status').eq('id', input.dispatchId).maybeSingle();
+  if (!(d as any)?.id) return { error: '派工不存在' };
+  const { error } = await (svc.from('production_dispatch_logs') as any).insert({
+    dispatch_id: input.dispatchId, order_id: (d as any).order_id, log_date: input.logDate,
+    qty_done: Math.trunc(Number(input.qtyDone) || 0), note: input.note || null, created_by: user.id,
+  });
+  if (error) return { error: /production_dispatch_logs|does not exist/i.test(error.message || '') ? '进度日志表未建:请先执行 20260713_production_dispatch_logs.sql' : error.message };
+  // 首次录产出且还在「已排」→ 自动投产 + 点亮开裁里程碑(跟单也能触发,不再走 PM-gated 的 updateDispatchStatus)
+  if ((d as any).status === 'scheduled') {
+    await (svc.from('production_dispatch') as any).update({ status: 'in_production', updated_at: new Date().toISOString() }).eq('id', input.dispatchId);
+    if ((d as any).order_id) await lightKickoffMilestone(svc, (d as any).order_id);
+  }
+  const { data: logs } = await (svc.from('production_dispatch_logs') as any).select('qty_done').eq('dispatch_id', input.dispatchId);
+  const cumulative = (logs || []).reduce((s: number, l: any) => s + (Number(l.qty_done) || 0), 0);
+  revalidatePath('/production');
+  return { ok: true, cumulative };
+}
+
+/** P4 进度看板:在排/在产派工的计划 vs 实绩(累计完成),供跟单/QC 录数据、主管看进度。 */
+export async function getProgressBoard(): Promise<{ data?: any; error?: string }> {
+  const g = await gate(true);
+  if ('error' in g) return { error: g.error };
+  const { svc } = g;
+  const { data: disp } = await (svc.from('production_dispatch') as any)
+    .select('id, order_id, style_no, color, factory_name, planned_qty, planned_start, planned_end, status')
+    .in('status', ['scheduled', 'in_production'])
+    .order('planned_end', { ascending: true });
+  const dispatches = (disp || []) as any[];
+  if (dispatches.length === 0) return { data: { items: [] } };
+  const ids = dispatches.map((d) => d.id);
+  const orderIds = [...new Set(dispatches.map((d) => d.order_id))];
+  const [{ data: logs }, { data: ords }] = await Promise.all([
+    (svc.from('production_dispatch_logs') as any).select('dispatch_id, log_date, qty_done, note').in('dispatch_id', ids).order('log_date', { ascending: false }),
+    (svc.from('orders') as any).select('id, order_no, internal_order_no, customer_name, factory_date').in('id', orderIds),
+  ]);
+  const om = new Map((ords || []).map((o: any) => [o.id, o]));
+  const doneBy = new Map<string, number>();
+  const recentBy = new Map<string, any[]>();
+  for (const l of (logs || [])) {
+    doneBy.set(l.dispatch_id, (doneBy.get(l.dispatch_id) || 0) + (Number(l.qty_done) || 0));
+    const arr = recentBy.get(l.dispatch_id) || [];
+    if (arr.length < 3) arr.push(l);
+    recentBy.set(l.dispatch_id, arr);
+  }
+  const items = dispatches.map((d) => ({
+    ...d, order: om.get(d.order_id) || null,
+    done_qty: doneBy.get(d.id) || 0,
+    recent_logs: recentBy.get(d.id) || [],
+  }));
+  return { data: { items } };
 }
 
 /** P3 工厂排产看板:按工厂看负荷账 + 名下派工(跨订单),排产冲突/大单拆多厂一眼看清。 */
@@ -195,15 +259,21 @@ export async function getFactoryScheduleBoard(): Promise<{ data?: any; error?: s
     .in('status', ['scheduled', 'in_production']);
   const dispatches = (disp || []) as any[];
   const orderIds = [...new Set(dispatches.map((d) => d.order_id))];
-  const { data: ords } = orderIds.length ? await (svc.from('orders') as any).select('id, order_no, internal_order_no, customer_name, factory_date').in('id', orderIds) : { data: [] };
+  const dispIds = dispatches.map((d) => d.id);
+  const [{ data: ords }, { data: logs }] = await Promise.all([
+    orderIds.length ? (svc.from('orders') as any).select('id, order_no, internal_order_no, customer_name, factory_date').in('id', orderIds) : Promise.resolve({ data: [] }),
+    dispIds.length ? (svc.from('production_dispatch_logs') as any).select('dispatch_id, qty_done').in('dispatch_id', dispIds) : Promise.resolve({ data: [] }),
+  ]);
   const orderMap = new Map((ords || []).map((o: any) => [o.id, o]));
+  const doneBy = new Map<string, number>();
+  for (const l of (logs || [])) doneBy.set(l.dispatch_id, (doneBy.get(l.dispatch_id) || 0) + (Number(l.qty_done) || 0));
   const now = new Date();
   const fromMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const byFactory = new Map<string, any[]>();
   for (const d of dispatches) if (d.factory_id) byFactory.set(d.factory_id, [...(byFactory.get(d.factory_id) || []), d]);
 
   const out = factories.map((f) => {
-    const ds = (byFactory.get(f.id) || []).map((d) => ({ ...d, order: orderMap.get(d.order_id) || null }))
+    const ds = (byFactory.get(f.id) || []).map((d) => ({ ...d, order: orderMap.get(d.order_id) || null, done_qty: doneBy.get(d.id) || 0 }))
       .sort((a, b) => String(a.planned_start || '').localeCompare(String(b.planned_start || '')));
     const load = factoryMonthlyLoad(ds);
     return {

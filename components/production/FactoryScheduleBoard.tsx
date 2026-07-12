@@ -102,7 +102,7 @@ export function FactoryScheduleBoard() {
                 {f.dispatches.length === 0 ? <p className="text-xs text-gray-400">该工厂暂无在排派工。</p> : (
                   <table className="text-[11px] w-full">
                     <thead><tr className="text-gray-400 text-left border-b border-gray-100">
-                      {['订单', '客户', '款号', '颜色', '件数', '排产窗口', '交期', '状态'].map((h) => <th key={h} className="px-1.5 py-1 whitespace-nowrap font-medium">{h}</th>)}
+                      {['订单', '客户', '款号', '颜色', '件数', '完成', '排产窗口', '交期', '状态'].map((h) => <th key={h} className="px-1.5 py-1 whitespace-nowrap font-medium">{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {f.dispatches.map((d: any) => (
@@ -112,6 +112,7 @@ export function FactoryScheduleBoard() {
                           <td className="px-1.5 py-1 font-mono text-gray-800">{d.style_no || '(整单)'}</td>
                           <td className="px-1.5 py-1 text-gray-600">{d.color || '整款'}</td>
                           <td className="px-1.5 py-1 text-right text-gray-800">{d.planned_qty ?? '—'}</td>
+                          <td className={`px-1.5 py-1 text-right font-medium ${d.planned_qty && d.done_qty >= d.planned_qty ? 'text-emerald-600' : d.done_qty > 0 ? 'text-indigo-600' : 'text-gray-400'}`}>{d.done_qty || 0}</td>
                           <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{d.planned_start ? `${String(d.planned_start).slice(5, 10)}~${String(d.planned_end || '').slice(5, 10)}` : '—'}</td>
                           <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{d.order?.factory_date ? String(d.order.factory_date).slice(5, 10) : '—'}</td>
                           <td className="px-1.5 py-1"><span className={d.status === 'in_production' ? 'text-emerald-700' : 'text-gray-600'}>{stCn[d.status] || d.status}</span></td>

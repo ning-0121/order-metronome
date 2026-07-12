@@ -6,6 +6,7 @@ import { ProductionCenterClient } from './ProductionCenterClient';
 import { ReconcileExportButton } from './ReconcileExportButton';
 import { SchedulingBoard } from '@/components/production/SchedulingBoard';
 import { FactoryScheduleBoard } from '@/components/production/FactoryScheduleBoard';
+import { ProductionProgressBoard } from '@/components/production/ProductionProgressBoard';
 
 /**
  * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
@@ -21,6 +22,8 @@ export default async function ProductionCenterPage() {
   const result = await getProductionCenter();
   // 一次性进度初始化入口:仅生产主管/管理员、且入口未关闭时显示
   const canInit = roles.includes('admin') || roles.includes('production_manager');
+  // 生产进度录入:生产/跟单/QC/主管/管理员都能录(P4)
+  const canLogProgress = canInit || roles.includes('production');
   const showInit = canInit && (await isStageInitOpen());
 
   if (result.error) {
@@ -69,6 +72,13 @@ export default async function ProductionCenterPage() {
       {canInit && (
         <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
           <FactoryScheduleBoard />
+        </div>
+      )}
+
+      {/* 生产进度录入(P4):跟单/QC 每天录实际产出,对照派工计划看进度 */}
+      {canLogProgress && (
+        <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
+          <ProductionProgressBoard canManage={canInit} />
         </div>
       )}
 
