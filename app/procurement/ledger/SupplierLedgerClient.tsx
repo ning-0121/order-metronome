@@ -131,6 +131,58 @@ export function SupplierLedgerClient({
     await reload();
   }
 
+  // ── 批量推财务:勾选订单组(仅未推的可选)→ 一键批量推(2026-07-11 用户:每单前加可选 + 全选) ──
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const ordKeyOf = (supRaw: string, ordRaw: string) => `${supRaw}|${ordRaw}`;
+  const selectableKeys = (g: SupplierGroup) => g.orders.filter((o) => !o.pushed).map((o) => ordKeyOf(g.supplier_name_raw, o.order_no_raw));
+  const allSelectable = groups.flatMap(selectableKeys);
+  const toggleSel = (key: string) => setSelected((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  const toggleSupSel = (g: SupplierGroup) => setSelected((s) => {
+    const keys = selectableKeys(g); const n = new Set(s);
+    const allOn = keys.length > 0 && keys.every((k) => n.has(k));
+    for (const k of keys) { if (allOn) n.delete(k); else n.add(k); }
+    return n;
+  });
+  const selCount = selected.size;
+  const selAmount = groups.reduce((sum, g) => sum + g.orders.reduce((a, o) =>
+    a + (selected.has(ordKeyOf(g.supplier_name_raw, o.order_no_raw)) ? (o.amountInclTax || o.amountExTax || 0) : 0), 0), 0);
+
+  async function doBatchPush() {
+    // 组装选中项;供应商未关联的挡下来(单推同样规则)
+    const items: { sup: SupplierGroup; o: OrderGroup }[] = [];
+    const unmatchedSups = new Set<string>();
+    for (const g of groups) for (const o of g.orders) {
+      if (!selected.has(ordKeyOf(g.supplier_name_raw, o.order_no_raw)) || o.pushed) continue;
+      if (!g.matched) { unmatchedSups.add(g.supplier_name_raw); continue; }
+      items.push({ sup: g, o });
+    }
+    if (unmatchedSups.size > 0) {
+      await confirm({ title: '有供应商未关联', message: `以下供应商还没关联主数据,其选中订单本次不能推:\n${[...unmatchedSups].join('、')}\n请先在供应商名旁关联,或取消勾选后继续。`, confirmText: '知道了' });
+      if (items.length === 0) return;
+    }
+    if (items.length === 0) return;
+    const ok = await confirm({
+      title: `批量推财务(${items.length} 单)?`,
+      message: `将逐单生成付款申请并推送财务应付:\n${items.slice(0, 8).map(({ sup, o }) => `· ${sup.supplier_name_raw} ${o.order_no_raw} ${yuan(o.amountInclTax || o.amountExTax)}`).join('\n')}${items.length > 8 ? `\n…等共 ${items.length} 单` : ''}\n合计 ${yuan(items.reduce((a, { o }) => a + (o.amountInclTax || o.amountExTax || 0), 0))}`,
+      confirmText: '批量推送',
+    });
+    if (!ok) return;
+    setBusy('batchpush');
+    const fails: string[] = []; let okCount = 0;
+    for (const { sup, o } of items) {   // 逐单串行:每单独立建应付,失败不影响其余
+      const r = await pushLedgerGroupToFinance({ supplierNameRaw: sup.supplier_name_raw, orderNoRaw: o.order_no_raw });
+      if (r.ok) okCount++; else fails.push(`${sup.supplier_name_raw} ${o.order_no_raw}: ${r.error || '失败'}`);
+    }
+    setBusy(null);
+    setSelected(new Set());
+    await reload();
+    await confirm({
+      title: `批量推送完成:成功 ${okCount} / 失败 ${fails.length}`,
+      message: fails.length ? `失败明细:\n${fails.join('\n')}\n(成功的已建应付;失败的修正后可重推)` : '全部付款申请已推送财务应付。',
+      confirmText: '知道了',
+    });
+  }
+
   const totalLines = groups.reduce((s, g) => s + g.lineCount, 0);
   const totalUnbilled = groups.reduce((s, g) => s + g.unbilledCount, 0);
 
@@ -224,12 +276,45 @@ export function SupplierLedgerClient({
         </div>
       ) : (
         <div className="space-y-3">
+          {/* 批量推财务操作条:有可推订单时常显;勾选后显示合计并可一键批量推 */}
+          {allSelectable.length > 0 && (
+            <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50/90 px-4 py-2.5 backdrop-blur">
+              <label className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
+                <input type="checkbox"
+                  checked={selCount > 0 && selCount === allSelectable.length}
+                  ref={(el) => { if (el) el.indeterminate = selCount > 0 && selCount < allSelectable.length; }}
+                  onChange={() => setSelected(selCount === allSelectable.length ? new Set() : new Set(allSelectable))} />
+                全选(未推 {allSelectable.length} 单)
+              </label>
+              {selCount > 0 ? (
+                <>
+                  <span className="text-sm text-indigo-800">已选 <b>{selCount}</b> 单 · 含税合计 <b>{yuan(selAmount)}</b></span>
+                  <button onClick={doBatchPush} disabled={busy === 'batchpush'}
+                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                    {busy === 'batchpush' ? '批量推送中…' : `🚀 批量推财务(${selCount})`}
+                  </button>
+                  <button onClick={() => setSelected(new Set())} className="text-xs text-gray-500 hover:text-gray-700">清除勾选</button>
+                </>
+              ) : (
+                <span className="text-xs text-gray-500">勾选订单组后可一键批量推财务(已推/未关联供应商的不可选)</span>
+              )}
+            </div>
+          )}
           {groups.map((g) => {
             const supOpen = openSup.has(g.supplier_name_raw);
+            const supSelectable = selectableKeys(g);
+            const supAllOn = supSelectable.length > 0 && supSelectable.every((k) => selected.has(k));
+            const supSomeOn = supSelectable.some((k) => selected.has(k));
             return (
               <div key={g.supplier_name_raw} className="overflow-hidden rounded-lg border border-gray-200">
                 {/* 供应商头 */}
                 <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+                  {supSelectable.length > 0 && (
+                    <input type="checkbox" checked={supAllOn}
+                      ref={(el) => { if (el) el.indeterminate = !supAllOn && supSomeOn; }}
+                      onChange={() => toggleSupSel(g)}
+                      title="全选该供应商未推财务的订单" className="cursor-pointer" />
+                  )}
                   <button onClick={() => toggle(openSup, g.supplier_name_raw, setOpenSup)} className="flex items-center gap-2 text-left">
                     <span className="text-gray-400">{supOpen ? '▾' : '▸'}</span>
                     <span className="font-semibold text-gray-900">{g.supplier_name_raw}</span>
@@ -271,6 +356,10 @@ export function SupplierLedgerClient({
                         return (
                           <div key={ordKey} className="rounded-md border border-gray-200 bg-white">
                             <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                              {!o.pushed && (
+                                <input type="checkbox" checked={selected.has(ordKey)} onChange={() => toggleSel(ordKey)}
+                                  title="勾选后可在顶部批量推财务" className="cursor-pointer" />
+                              )}
                               <button onClick={() => toggle(openOrd, ordKey, setOpenOrd)} className="flex items-center gap-1.5 text-left">
                                 <span className="text-gray-400 text-xs">{ordOpen ? '▾' : '▸'}</span>
                                 <span className="text-sm font-medium text-gray-800">{o.order_no_raw}</span>
