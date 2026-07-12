@@ -308,12 +308,15 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
             {priceTbd && <span className="inline-block mt-1 text-[11px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-medium">🕓 价格待定 · 已允许无价下单</span>}
           </div>
           <div className="flex gap-2 shrink-0">
-            {po.approval_status === 'pending' && (canApproveProcurement || canApproveFinance) && (
+            {/* 角色审计:finance-scope 单走外部财务系统审批,不显内部审批死按钮;procurement-scope 才留内部审批 */}
+            {po.approval_status === 'pending' && (po.approval_required_by || []).includes('finance') ? (
+              <span className="text-xs text-amber-600 self-center max-w-[220px]">须在外部财务系统审批(含预算),批准后自动回传下单</span>
+            ) : po.approval_status === 'pending' && canApproveProcurement ? (
               <button onClick={handleApprove} disabled={busy !== ''}
                 className="text-xs px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium disabled:opacity-50">
                 {busy === 'approve' ? '审批中…' : '✅ 审批通过'}
               </button>
-            )}
+            ) : null}
             {canProcure && po.approval_status !== 'pending' && (
               <button onClick={handlePlace} disabled={busy !== '' || proofPaths.length === 0}
                 title={proofPaths.length === 0 ? '请先上传下单凭证' : ''}

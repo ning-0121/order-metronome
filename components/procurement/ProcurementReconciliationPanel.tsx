@@ -72,6 +72,9 @@ export function ProcurementReconciliationPanel({ poId, canProcure = false }: { p
         </div>
         <button onClick={() => setOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">收起</button>
       </div>
+      <div className="mb-2 rounded-md bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs text-amber-800">
+        ℹ️ 此对账只含<b>辅料 / 加工</b>;<b>面料应付</b>走「采购中心 · 📒 供应商对账台账」——避免同批面料两处重复付款。
+      </div>
       {msg && <div className={`text-xs mb-2 ${msg.startsWith('✅') ? 'text-emerald-700' : 'text-rose-600'}`}>{msg}</div>}
       {loading && <p className="text-xs text-gray-400">加载中…</p>}
 

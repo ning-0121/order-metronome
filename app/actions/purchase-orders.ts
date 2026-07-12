@@ -617,10 +617,13 @@ export async function approvePurchaseOrder(poId: string, note?: string): Promise
   }
 
   const scope = topRequiredScope(((po as any).approval_required_by || []) as ApprovalScope[]);
-  const authorized = scope === 'finance'
-    ? hasRoleInGroup(roles, 'CAN_APPROVE_PROC_FINANCE')
-    : hasRoleInGroup(roles, 'CAN_APPROVE_PROCUREMENT');
-  if (!authorized) return { error: scope === 'finance' ? '需财务审批权限' : '需采购经理审批权限' };
+  // 角色审计根治:finance-scope 采购单必须走【外部财务系统】前置审批(它做预算单/预算审批,批准后回传
+  //   approval.callback → 节拍器落地下单)。此内部通道会架空外部审批、绕过「预算单必须已生成」硬闸、
+  //   还让外部 fin_purchase_orders 成孤儿(事后驳回命中 0 行无法回滚)→ finance-scope 单禁走内部审批。
+  if (scope === 'finance') {
+    return { error: '该采购单需在【外部财务系统】审批(含预算审批),不能在此内部批准。请到财务系统处理,批准后会自动回传并下单。' };
+  }
+  if (!hasRoleInGroup(roles, 'CAN_APPROVE_PROCUREMENT')) return { error: '需采购经理审批权限' };
 
   const { error } = await (supabase.from('purchase_orders') as any).update({
     approval_status: 'approved', approved_by: userId, approved_at: new Date().toISOString(),
