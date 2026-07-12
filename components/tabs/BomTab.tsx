@@ -446,14 +446,31 @@ export function BomTab({ orderId }: { orderId: string }) {
   // 面料(含里料)= 完整表维持现状;辅料 = 精简为 款号/辅料名/单件数/总数(2026-07-11 用户拍板)
   const FULL_FORM_TYPES = ['fabric', 'lining'];
   const isFabricForm = FULL_FORM_TYPES.includes(form.material_type);
+  // 范围:整单通用(款号空,如主吊牌一次录)vs 按款(填款号)。表单打开时按已有款号初始化,输入中不重置
+  const [byStyle, setByStyle] = useState(false);
+  useEffect(() => { setByStyle(!!(form.style_no || '').trim()); /* eslint-disable-next-line */ }, [editId, showAdd]);
   const formRow = (
     <div className="bg-indigo-50 rounded-xl p-4 mb-4 space-y-3">
       {!isFabricForm && (
-        <p className="text-xs text-gray-500">辅料只需填:归属款号 · 辅料名 · 单件数量 · 总数量(单位默认「个」);面料才需规格/颜色/图片等。</p>
+        <p className="text-xs text-gray-500">辅料只需填:辅料名 · 单件数量 · 总数量(单位默认「个」);面料才需规格/颜色/图片等。</p>
       )}
+      {/* 范围切换:整单通用(主吊牌等所有款共用,录一次)/ 按款(每款不同) */}
+      <div className="flex items-center gap-2 text-xs flex-wrap">
+        <span className="text-gray-500">范围:</span>
+        <button type="button" onClick={() => { setByStyle(false); set('style_no', ''); }}
+          className={`px-3 py-1 rounded-full border font-medium ${!byStyle ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+          🏷 整单通用（所有款共用，如主吊牌）
+        </button>
+        <button type="button" onClick={() => setByStyle(true)}
+          className={`px-3 py-1 rounded-full border font-medium ${byStyle ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+          📎 按款填（此款专属）
+        </button>
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <input placeholder="归属款号(空=整单通用)" value={form.style_no} onChange={e => set('style_no', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        {byStyle
+          ? <input placeholder="归属款号 *" value={form.style_no} onChange={e => set('style_no', e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          : <div className="rounded-lg border border-dashed border-indigo-300 bg-white px-3 py-2 text-sm text-indigo-600 flex items-center">🏷 整单通用（不分款）</div>}
         <input placeholder={isFabricForm ? '物料名称 *' : '辅料名 *'} value={form.material_name} onChange={e => set('material_name', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <select value={form.material_type}

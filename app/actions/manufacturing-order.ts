@@ -377,7 +377,11 @@ async function buildMoWorkbook(
       .filter((b: any) => { const k = fabKey(b); if (seenFab.has(k)) return false; seenFab.add(k); return true; });
     const fbDesc = (f: any) => [f?.material_name, f?.spec].filter(Boolean).join(' ');
     const fbUse = (f: any) => (f && f.qty_per_piece != null) ? `${f.qty_per_piece} ${f.unit || 'kg'}/件` : '';
-    const f0 = styleFabrics[0], f1 = styleFabrics[1];
+    const f0 = styleFabrics[0];
+    // 主面料=第一种;第二种起全部列进「第二面料」格(原来只取 f1,3 种以上被丢 → 2026-07-11 改为全列出)
+    const moreFabs = styleFabrics.slice(1);
+    const moreDesc = moreFabs.map(fbDesc).filter(Boolean).join('；');
+    const moreUse = moreFabs.map((f: any) => `${f?.material_name || ''} ${fbUse(f)}`.trim()).filter(Boolean).join('；');
 
     // 尺码明细表(PO 冻结底档 measurements;固定 9 行,不足留白,多则截断 → 右侧产品图块高度统一)
     const snapStyles: any[] = Array.isArray((order as any).po_parse_snapshot?.styles) ? (order as any).po_parse_snapshot.styles : [];
@@ -411,10 +415,10 @@ async function buildMoWorkbook(
     // R4 款号 / 品名
     box(4, 1, 4, 1, '款    号'); box(4, 2, 4, 4, g.style_no || '', { bold: true });
     box(4, 5, 4, 5, '品    名'); box(4, 6, 4, 10, [g.product_name, (g.items[0] as any)?.product_name_en].filter(Boolean).join(' '), { bold: true });
-    // R5 主面料 / 第二面料
-    box(5, 1, 5, 1, '主 面 料'); box(5, 2, 5, 4, fbDesc(f0)); box(5, 5, 5, 5, f1 ? (f1.material_name || '') : ''); box(5, 6, 5, 10, f1 ? fbDesc(f1) : '');
+    // R5 主面料 / 第二面料(含第 3 种起的其余面料,全列出不丢)
+    box(5, 1, 5, 1, '主 面 料'); box(5, 2, 5, 4, fbDesc(f0)); box(5, 5, 5, 5, moreFabs.length ? '第二面料' : ''); box(5, 6, 5, 10, moreDesc);
     // R6 主面料用料 / 第二面料用料
-    box(6, 1, 6, 1, '主面料用料'); box(6, 2, 6, 4, fbUse(f0)); box(6, 5, 6, 5, f1 ? `${f1.material_name || ''}用料` : ''); box(6, 6, 6, 10, fbUse(f1));
+    box(6, 1, 6, 1, '主面料用料'); box(6, 2, 6, 4, fbUse(f0)); box(6, 5, 6, 5, moreFabs.length ? '第二面料用料' : ''); box(6, 6, 6, 10, moreUse);
 
     // R7 分类 / 尺码明细表 / 产品图片(标签)
     box(7, 1, 7, 1, '分    类'); box(7, 2, 7, cTol, '尺码明细表单位：英寸'); box(7, cImg1, 7, 10, '产品图片');
