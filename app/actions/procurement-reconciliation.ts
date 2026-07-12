@@ -304,6 +304,16 @@ export async function confirmProcurementReturn(returnId: string) {
     }
   }
 
+  // 原子认领(防并发/重试双确认 → 双回填 return_qty / 双扣库存):draft→doneStatus 只成功一次,
+  //   放在所有 mutation 之前,只有抢到翻转的调用继续。additive 的 adjust 冲减没有 receipt 幂等键兜底,
+  //   全靠这层原子性防重(复核残留项)。
+  const doneStatus = (ret as any).type === 'replace' ? 'replaced' : (ret as any).type === 'rework' ? 'reworked' : 'returned';
+  const { data: claimed, error: claimErr } = await (supabase.from('procurement_returns') as any)
+    .update({ status: doneStatus, updated_at: new Date().toISOString() })
+    .eq('id', returnId).eq('status', 'draft').select('id');
+  if (claimErr) return { error: friendlyError(claimErr) };
+  if (!claimed || (claimed as any[]).length === 0) return { error: '该退货单已被确认(请勿重复提交)' };
+
   for (const rl of (rlines || [])) {
     // refund 退货 → 累加对账行 return_qty
     if (recon && (rl as any).disposition === 'refund' && (rl as any).line_item_id) {
@@ -324,12 +334,7 @@ export async function confirmProcurementReturn(returnId: string) {
   }
   if (recon) await recompute(supabase, (recon as any).id);
 
-  // 先标退货单确认 —— P2-8 的 received_qty 重算依赖父单已是 returned/replaced(helper 只减已确认退货)。
-  const doneStatus = (ret as any).type === 'replace' ? 'replaced' : (ret as any).type === 'rework' ? 'reworked' : 'returned';
-  const { error } = await (supabase.from('procurement_returns') as any)
-    .update({ status: doneStatus, updated_at: new Date().toISOString() }).eq('id', returnId);
-  if (error) return { error: friendlyError(error) };
-
+  // (退货单已在上方原子认领为 doneStatus;helper 的 received_qty 重算依赖父单已确认。)
   // P2-8 审计:退货/换货(货已离库)→ 重算实收(helper 已减已确认退货,支持部分退)+ 冲减库存。
   //   ⚠️ 库存冲减走独立 adjust 负流水(recordSupplierReturnDeduction),不复用 recordInventoryReceipt 的
   //   负 delta —— 后者幂等键假设 received 单调递增,退货拉低会撞历史 cumulative 被静默吞掉(审计 P2-1)。
