@@ -110,6 +110,17 @@ export function isBulkMaterial(category?: string | null, unit?: string | null): 
 }
 
 /**
+ * 面料类别判定(2026-07-12 角色审计·Phase2 根治重复付款)。
+ * 决策:**面料应付归「供应商对账台账 LG」独占;系统PO对账(PR/DP)排除面料行**——面料两条渠道都推会双付,
+ * 且财务只按 source_ref 防重、识别不出同批货,只能节拍器侧从口径上分开。
+ * 只按类别(不看单位)——避免把「按 kg 买的辅料」误判成面料而错误排出对账、变得两条渠道都收不到款。
+ */
+export function isFabricCategory(category?: string | null): boolean {
+  const cat = String(category ?? '').trim().toLowerCase();
+  return BULK_MATERIAL_CATEGORIES.has(cat);
+}
+
+/**
  * 布料被历史(旧 generateExecutionLines / 手工)按尺码拆成多行时,还原真实总量:
  * - 各行数量相等 → 「整量复制」老 bug(每码都记了整量)→ 取其中一行的值;
  * - 各行数量不等 → 按各码分摊 → 求和还原总量。

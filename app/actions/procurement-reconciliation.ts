@@ -12,6 +12,7 @@ import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 import { sumLineReceivedQty, sumGrossReceived } from '@/lib/procurement/receivedQty';
+import { isFabricCategory } from '@/lib/services/procurement-execution';
 
 const WRITE_MSG = '仅采购/采购经理/管理员可做采购对账/退货';
 const num = (v: any) => (v == null || v === '' ? 0 : Number(v) || 0);
@@ -20,7 +21,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /** 该 PO 的采购执行行(对账明细来源)。 */
 async function fetchPoLines(supabase: any, poId: string) {
   const { data } = await (supabase.from('procurement_line_items') as any)
-    .select('id, material_name, size, ordered_qty, ordered_unit, unit_price, received_qty, line_status, purchase_order_id')
+    .select('id, material_name, size, category, ordered_qty, ordered_unit, unit_price, received_qty, line_status, purchase_order_id')
     .eq('purchase_order_id', poId).order('created_at', { ascending: true });
   return (data || []) as any[];
 }
@@ -81,9 +82,17 @@ export async function getOrCreateReconciliation(poId: string) {
 
   // 明细:确认前刷新系统字段(upsert by line_item_id);已锁定则只读现有明细
   if (!locked) {
-    const poLines = await fetchPoLines(supabase, poId);
+    // Phase2 根治重复付款(角色审计):**面料行不进系统PO对账**——面料应付归台账 LG 独占,
+    //   避免同批面料在「对账PR」和「台账LG」两条渠道各推一次 payable、财务双付。辅料/加工照常入对账。
+    const poLines = (await fetchPoLines(supabase, poId)).filter((pl: any) => !isFabricCategory(pl.category));
+    const keepPliIds = new Set(poLines.map((pl: any) => pl.id));
     const { data: existLines } = await (supabase.from('procurement_reconciliation_lines') as any)
       .select('id, line_item_id').eq('reconciliation_id', (recon as any).id);
+    // 清掉历史遗留的面料对账行(本次已从 poLines 排除)+ 已不在 PO 的行 —— 否则 recompute 仍把它们计入净应付
+    const orphanIds = ((existLines || []) as any[]).filter((l) => !keepPliIds.has(l.line_item_id)).map((l) => l.id);
+    if (orphanIds.length) {
+      await (supabase.from('procurement_reconciliation_lines') as any).delete().in('id', orphanIds);
+    }
     const byPli = new Map<string, string>(((existLines || []) as any[]).map((l) => [l.line_item_id, l.id]));
     for (const pl of poLines) {
       // 角色审计修:对账行 received_qty 用【毛量】(Σ收货非拒收),对账再按 gross − return_qty 算净应付。
