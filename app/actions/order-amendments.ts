@@ -252,6 +252,26 @@ export async function approveOrderAmendment(
     const updates: Record<string, any> = {};
     const sideEffects = new Set<AmendmentSideEffect>();
 
+    // P2-10 审计:含 finance 审批人的字段(改价/改量/账期)必须由 finance 或 admin 批准。
+    //   per-field approvers 此前从未被运行时读取 → 分级审批形同虚设,业务经理可单方批准财务字段。
+    const needsFinance = Object.keys(fieldsObj).some(
+      (f) => (AMENDMENT_RULES.find((r) => r.field === f)?.approvers as string[] | undefined)?.includes('finance'));
+    if (needsFinance && !isAdmin && !(roles || []).includes('finance')) {
+      return { error: '该修改涉及价格/数量/账期等财务字段,须财务(或管理员)审批' };
+    }
+
+    // P2-11 审计:富录入表订单(有 order_line_items)的普通数量改单只改 orders.quantity、不下沉明细
+    //   → 生产/采购按旧量备料、财务按新量计费,静默错配。强制走「客户加单」/子订单通道(它才追加明细)。
+    const hasQtyChange = Object.keys(fieldsObj).some((f) => f === 'quantity_increase' || f === 'quantity_decrease');
+    const isAddOrder = Array.isArray((amendment as any).line_items_delta) && (amendment as any).line_items_delta.length > 0;
+    if (hasQtyChange && !isAddOrder) {
+      const { count: liCount } = await (supabase.from('order_line_items') as any)
+        .select('id', { count: 'exact', head: true }).eq('order_id', amendment.order_id);
+      if ((liCount || 0) > 0) {
+        return { error: '该订单已有款×色×码明细行,数量变更请走「客户加单」或子订单(会同步追加明细),不能走普通数量改单——否则生产采购按旧量、财务按新量。' };
+      }
+    }
+
     for (const [field, change] of Object.entries(fieldsObj)) {
       const rule = AMENDMENT_RULES.find(r => r.field === field);
       // quantity_increase / quantity_decrease 都要写到 quantity 字段

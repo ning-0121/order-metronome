@@ -254,6 +254,11 @@ export function SupplierLedgerClient({
               ) : null}
             </div>
           ) : (<div><span className="font-semibold">✗ 导入失败:</span> {result.error}</div>)}
+          {result.warnings && result.warnings.length > 0 && (
+            <ul className="mt-2 space-y-1 border-t border-amber-200 pt-2 text-xs text-amber-800">
+              {result.warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          )}
         </div>
       )}
 

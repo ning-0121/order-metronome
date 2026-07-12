@@ -12,6 +12,7 @@ import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
+import { makeDailyBillNo } from '@/lib/utils/dailyBillNo';
 import { parseFabricLedger, type FabricLedgerRow } from '@/lib/services/fabric-ledger-parser';
 
 const WRITE_MSG = '仅采购/采购经理/管理员可导入供应商账目';
@@ -68,6 +69,17 @@ export async function importSupplierLedger(formData: FormData): Promise<ImportRe
         if (o.internal_order_no) orderMap.set(String(o.internal_order_no), o.id);
       }
     }
+
+    // --- P2-9 审计:重复导入无去重 → 数据翻倍(推财务加总重复行)。检测与已有台账的供应商重叠并告警,
+    //     提示更正重传前先删旧批(UI「导入记录」有删除本批/清空)。此处只告警不阻断(首次导入/真新增合法)。---
+    const overlapWarnings: string[] = [];
+    try {
+      const { data: existing } = await (svc.from('supplier_fabric_ledger') as any)
+        .select('supplier_name_raw').in('supplier_name_raw', supplierNames);
+      const existSet = new Set((existing || []).map((e: any) => e.supplier_name_raw));
+      const dup = supplierNames.filter((n) => existSet.has(n));
+      if (dup.length) overlapWarnings.push(`⚠ 台账里已有这些供应商的数据:${dup.slice(0, 6).join('、')}${dup.length > 6 ? ` 等 ${dup.length} 家` : ''}。若本次是更正重传,请先到「导入记录」删掉旧批——否则重复计入、推财务会翻倍。`);
+    } catch { /* 重叠检测失败不阻断导入 */ }
 
     // --- 建批次 ---
     const totalAmount = round2(parsed.totalAmount);
@@ -131,7 +143,7 @@ export async function importSupplierLedger(formData: FormData): Promise<ImportRe
       matchedOrder,
       unmatchedSupplier: parsed.rows.length - matchedSupplier,
       unmatchedOrder: parsed.rows.length - matchedOrder,
-      warnings: parsed.warnings,
+      warnings: [...overlapWarnings, ...(parsed.warnings || [])],
     };
   } catch (e: any) {
     return { ok: false, error: e?.message || '导入失败' };
@@ -170,7 +182,8 @@ export interface OrderGroup {
   amountExTax: number;
   amountInclTax: number;
   taxRate: number | null;           // 组内统一税率;混合/未设→null
-  pushed: boolean;                  // 已推财务
+  pushed: boolean;                  // 全部行已推财务(部分已推仍可补推剩余,pushed=false)
+  pushedCount: number;              // 已推行数(P3-2:部分推过时 UI 既显已推又留补推按钮)
   payableBillNo: string | null;
   lines: LedgerLine[];
 }
@@ -223,7 +236,7 @@ export async function getSupplierLedger(): Promise<{ groups: SupplierGroup[]; gr
       const og: OrderGroup = {
         order_no_raw: ORDER_KEY(l), internal_order_no: l.internal_order_no, order_id: l.order_id,
         lineCount: 0, amountExTax: 0, amountInclTax: 0, taxRate: undefined as any,
-        pushed: false, payableBillNo: null, lines: [],
+        pushed: false, pushedCount: 0, payableBillNo: null, lines: [],
       };
       ordMap.set(oKey, og);
       sg.orders.push(og);
@@ -235,7 +248,7 @@ export async function getSupplierLedger(): Promise<{ groups: SupplierGroup[]; gr
     // 组内统一税率判定
     if (og.taxRate === (undefined as any)) og.taxRate = l.tax_rate ?? null;
     else if (og.taxRate !== (l.tax_rate ?? null)) og.taxRate = null;
-    if (l.payable_pushed_at) { og.pushed = true; og.payableBillNo = l.payable_bill_no; }
+    if (l.payable_pushed_at) { og.pushedCount += 1; og.payableBillNo = l.payable_bill_no; }
 
     sg.lineCount += 1; sg.totalExTax += ex; sg.totalInclTax += incl;
     grandEx += ex; grandIncl += incl;
@@ -247,6 +260,7 @@ export async function getSupplierLedger(): Promise<{ groups: SupplierGroup[]; gr
     orders: g.orders.map((o) => ({
       ...o, amountExTax: round2(o.amountExTax), amountInclTax: round2(o.amountInclTax),
       taxRate: (o.taxRate === (undefined as any) ? null : o.taxRate),
+      pushed: o.lineCount > 0 && o.pushedCount === o.lineCount,   // 全推过才算 pushed(部分→留补推按钮)
     })),
   })).sort((a, b) => b.totalExTax - a.totalExTax);
   return { groups, grandTotalExTax: round2(grandEx), grandTotalInclTax: round2(grandIncl) };
@@ -357,57 +371,65 @@ export async function pushLedgerGroupToFinance(params: { supplierNameRaw: string
     const { data: rows } = await sel;
     const lines = (rows || []) as any[];
     if (!lines.length) return { ok: false, error: '该组没有明细行' };
-    if (lines.some((l) => l.payable_pushed_at)) return { ok: false, error: '该组已推过财务,不重复推' };
+    // P3-2 审计:只推「未推财务」的行 → 同组后补导入的新行可增量补推,不再因组内已有推过的行而整组锁死。
+    const unpushed = lines.filter((l) => !l.payable_pushed_at);
+    if (!unpushed.length) return { ok: false, error: '该组已全部推过财务,无新行可推' };
 
-    const supplierId = lines.find((l) => l.supplier_id)?.supplier_id || null;
+    const supplierId = unpushed.find((l) => l.supplier_id)?.supplier_id || null;
     if (!supplierId) return { ok: false, error: '请先关联供应商主数据,再推财务' };
     // 取供应商正式名
     const { data: sup } = await (svc.from('suppliers') as any).select('name').eq('id', supplierId).maybeSingle();
     const supplierName = (sup as any)?.name || params.supplierNameRaw;
 
-    const amountExTax = round2(lines.reduce((s, l) => s + (Number(l.amount_ex_tax) || 0), 0));
-    const amountInclTax = round2(lines.reduce((s, l) => s + (Number(l.amount_incl_tax) || 0), 0));
+    const amountExTax = round2(unpushed.reduce((s, l) => s + (Number(l.amount_ex_tax) || 0), 0));
+    const amountInclTax = round2(unpushed.reduce((s, l) => s + (Number(l.amount_incl_tax) || 0), 0));
     if (amountInclTax <= 0) return { ok: false, error: '金额为 0,无法推财务' };
-    const rateSet = new Set(lines.map((l) => (l.tax_rate == null ? 'null' : String(l.tax_rate))));
+    const rateSet = new Set(unpushed.map((l) => (l.tax_rate == null ? 'null' : String(l.tax_rate))));
     const taxRate = rateSet.size === 1 && !rateSet.has('null') ? Number([...rateSet][0]) : null;
-    const internalNo = lines.find((l) => l.internal_order_no)?.internal_order_no || null;
-    const orderId = lines.find((l) => l.order_id)?.order_id || null;
+    const internalNo = unpushed.find((l) => l.internal_order_no)?.internal_order_no || null;
+    const orderId = unpushed.find((l) => l.order_id)?.order_id || null;
 
-    // 单号 LG-YYYYMMDD-NNN(P2-5:count+1 非原子仍待收敛为共享编号工具;此处靠下方原子认领防重推)
-    const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const { count } = await (svc.from('supplier_ledger_payables') as any).select('id', { count: 'exact', head: true });
-    const billNo = `LG-${dateTag}-${String((count || 0) + 1).padStart(3, '0')}`;
     const payableId = randomUUID();
+    const ids = unpushed.map((l) => l.id);
+    const nowIso = new Date().toISOString();
 
-    // ── 原子认领(P1-4 防 TOCTOU 重复推)：条件回写 payable_pushed_at,只认领仍未推的行 ──
+    // ── 原子认领(P1-4 防 TOCTOU 重复推)：只认领仍未推的行(payable_id + 时间戳;bill_no 待建单后回填)──
     // 两个并发推同一组:同一 id 集,IS NULL 条件让先提交者一次认领全部行、后者认领 0 行 → 后者回滚退出,
     // 绝不会双双建 payable / 双双 emit → 杜绝重复应付。
-    const ids = lines.map((l) => l.id);
-    const nowIso = new Date().toISOString();
     const { data: claimed, error: claimErr } = await (svc.from('supplier_fabric_ledger') as any)
-      .update({ payable_id: payableId, payable_bill_no: billNo, payable_pushed_at: nowIso, updated_at: nowIso })
+      .update({ payable_id: payableId, payable_pushed_at: nowIso, updated_at: nowIso })
       .in('id', ids).is('payable_pushed_at', null).select('id');
     if (claimErr) return { ok: false, error: friendlyError(claimErr) || '认领失败' };
     if ((claimed || []).length !== ids.length) {
-      // 并发/部分已推 → 回滚本次认领,让用户刷新重试(只回滚自己盖的戳)
       await (svc.from('supplier_fabric_ledger') as any)
-        .update({ payable_id: null, payable_bill_no: null, payable_pushed_at: null }).eq('payable_id', payableId);
+        .update({ payable_id: null, payable_pushed_at: null }).eq('payable_id', payableId);
       return { ok: false, error: '该组正在被并发推送(或部分已推),请刷新后重试' };
     }
 
-    // 认领成功 → 建付款申请(用预生成 id;失败则回滚认领,避免行被锁死却无对应付款申请)
-    const { error: pErr } = await (svc.from('supplier_ledger_payables') as any).insert({
-      id: payableId,
-      bill_no: billNo, supplier_id: supplierId, supplier_name: supplierName,
-      order_no_raw: isUnlabeled ? null : params.orderNoRaw, internal_order_no: internalNo, order_id: orderId,
-      line_count: lines.length, amount_ex_tax: amountExTax, tax_rate: taxRate, amount_incl_tax: amountInclTax,
-      currency: 'CNY', status: 'submitted', pushed_by: user.id,
-    });
+    // ── 建付款申请:共享单号工具(P2-5:当天最大号+1 + 唯一键冲突自增重试;删记录不复用空缺号)──
+    const nextBillNo = makeDailyBillNo(svc, 'supplier_ledger_payables', 'bill_no', 'LG');
+    let billNo = ''; let pErr: any = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      billNo = await nextBillNo(attempt);
+      const res = await (svc.from('supplier_ledger_payables') as any).insert({
+        id: payableId, bill_no: billNo, supplier_id: supplierId, supplier_name: supplierName,
+        order_no_raw: isUnlabeled ? null : params.orderNoRaw, internal_order_no: internalNo, order_id: orderId,
+        line_count: unpushed.length, amount_ex_tax: amountExTax, tax_rate: taxRate, amount_incl_tax: amountInclTax,
+        currency: 'CNY', status: 'submitted', pushed_by: user.id,
+      });
+      pErr = res.error;
+      if (!pErr) break;
+      if (!/duplicate key|_key|bill_no/i.test(pErr.message || '')) break; // 非撞号错误立即退出
+    }
     if (pErr) {
+      // 建单失败 → 回滚认领,避免行被锁死却无对应付款申请
       await (svc.from('supplier_fabric_ledger') as any)
-        .update({ payable_id: null, payable_bill_no: null, payable_pushed_at: null }).eq('payable_id', payableId);
+        .update({ payable_id: null, payable_pushed_at: null }).eq('payable_id', payableId);
       return { ok: false, error: friendlyError(pErr) || '建付款申请失败' };
     }
+    // 建单成功 → 回填 bill_no 到认领行
+    await (svc.from('supplier_fabric_ledger') as any)
+      .update({ payable_bill_no: billNo }).eq('payable_id', payableId);
 
     // emit payable.created(fire-and-forget;失败落 outbox,不阻断)
     try {
@@ -415,7 +437,7 @@ export async function pushLedgerGroupToFinance(params: { supplierNameRaw: string
       let orderRefs: unknown[] = [];
       // P2-6:fetchOrderRefs(db, ids) 首参须是 client;原写成 fetchOrderRefs([orderId]) → order_refs 恒空
       if (orderId) { try { orderRefs = (await fetchOrderRefs(svc, [orderId])) as unknown[]; } catch { /* ignore */ } }
-      const financeLines = lines.map((l) => ({
+      const financeLines = unpushed.map((l) => ({
         material_name: l.fabric_name ?? null,
         specification: l.color ?? null,
         ordered_qty: Number(l.ordered_kg) || 0,
