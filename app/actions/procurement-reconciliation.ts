@@ -11,6 +11,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
+import { sumLineReceivedQty } from '@/lib/procurement/receivedQty';
 
 const WRITE_MSG = '仅采购/采购经理/管理员可做采购对账/退货';
 const num = (v: any) => (v == null || v === '' ? 0 : Number(v) || 0);
@@ -262,7 +263,8 @@ export async function createProcurementReturn(poId: string, payload: {
 
 /**
  * 确认退货/返修单:refund 类 → 回填对账明细 return_qty(冲减净应付)+ 回写 goods_receipts.return_status。
- * 换货/返修不冲应付(货会回来)。inventory 反映(退回=出库)P2 再接,此处只动对账与收货状态。
+ * 换货/返修不冲应付(货会回来)。退货/换货(货离库)同步重算 received_qty + 冲减库存(P2-8);
+ * 退货量不得超已收(P3-3);返修(rework)不冲(货会回来)。
  */
 export async function confirmProcurementReturn(returnId: string) {
   const supabase = await createClient();
@@ -285,6 +287,23 @@ export async function confirmProcurementReturn(returnId: string) {
     return { error: '该 PO 对账已确认,退货请先撤回对账确认再处理' };
   }
 
+  // 本退货单每行的「离库」退货量(refund/replace = 货退回供应商;rework 货会回来,不算离库)
+  const outQtyByLine = new Map<string, number>();
+  if ((ret as any).type !== 'rework') {
+    for (const rl of (rlines || [])) {
+      if (!(rl as any).line_item_id) continue;
+      outQtyByLine.set((rl as any).line_item_id, (outQtyByLine.get((rl as any).line_item_id) || 0) + num((rl as any).qty));
+    }
+  }
+  // P3-3/P3-1 审计:退货量上限 —— 本次退货不得超「已收净额」(sumLineReceivedQty 已减之前已确认退货)。
+  //   无对账单(recon=null)也校验,防 received_qty/库存被打成负数。
+  for (const [lid, retQty] of outQtyByLine) {
+    const netReceived = await sumLineReceivedQty(supabase, lid);
+    if (retQty > netReceived + 0.001) {
+      return { error: `退货量超过可退:该料当前已收净额 ${netReceived},本次退 ${retQty} 超出。请核对退货数量。` };
+    }
+  }
+
   for (const rl of (rlines || [])) {
     // refund 退货 → 累加对账行 return_qty
     if (recon && (rl as any).disposition === 'refund' && (rl as any).line_item_id) {
@@ -305,10 +324,26 @@ export async function confirmProcurementReturn(returnId: string) {
   }
   if (recon) await recompute(supabase, (recon as any).id);
 
+  // 先标退货单确认 —— P2-8 的 received_qty 重算依赖父单已是 returned/replaced(helper 只减已确认退货)。
   const doneStatus = (ret as any).type === 'replace' ? 'replaced' : (ret as any).type === 'rework' ? 'reworked' : 'returned';
   const { error } = await (supabase.from('procurement_returns') as any)
     .update({ status: doneStatus, updated_at: new Date().toISOString() }).eq('id', returnId);
   if (error) return { error: friendlyError(error) };
+
+  // P2-8 审计:退货/换货(货已离库)→ 重算实收(helper 已减已确认退货,支持部分退)+ 冲减库存。
+  //   ⚠️ 库存冲减走独立 adjust 负流水(recordSupplierReturnDeduction),不复用 recordInventoryReceipt 的
+  //   负 delta —— 后者幂等键假设 received 单调递增,退货拉低会撞历史 cumulative 被静默吞掉(审计 P2-1)。
+  //   退货单只确认一次(status 已 draft→doneStatus),故按本次退货量一次性冲减,天然防重。
+  for (const [lid, retQty] of outQtyByLine) {
+    try {
+      const newReceived = await sumLineReceivedQty(supabase, lid);   // 父单已确认→已含本次退货
+      await (supabase.from('procurement_line_items') as any)
+        .update({ received_qty: newReceived, updated_at: new Date().toISOString() }).eq('id', lid);
+      const { recordSupplierReturnDeduction } = await import('@/app/actions/inventory');
+      await recordSupplierReturnDeduction(lid, retQty, `退货单确认冲减(${returnId.slice(0, 8)})`);
+    } catch (e: any) { console.warn('[confirmProcurementReturn] 退货冲减实收/库存失败(不阻断):', e?.message); }
+  }
+
   revalidatePath(`/procurement/po/${(ret as any).purchase_order_id}`);
   return { ok: true };
 }

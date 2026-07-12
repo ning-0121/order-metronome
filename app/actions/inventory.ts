@@ -177,6 +177,38 @@ async function writeInvOut(txnType: 'issue' | 'return', input: IssueInput): Prom
 export async function recordInventoryIssue(input: IssueInput) { return writeInvOut('issue', input); }
 export async function recordInventoryReturn(input: IssueInput) { return writeInvOut('return', input); }
 
+/**
+ * 供应商退货冲减库存(2026-07-12 审计 P2-8/P2-1)。货退回供应商 → 库存出账。
+ * ⚠️ 不复用 recordInventoryReceipt 的负 delta:它的幂等键 (source_ref,'receipt',receipt_cumulative_qty)
+ *    假设 received 单调递增;退货把 received 拉低,cumulative 会撞历史 receipt 行 → ignoreDuplicates 静默吞掉冲减。
+ * 故走独立 txn_type='adjust' 负流水(不参与 receipt 唯一键)。退货单只能确认一次(status draft→returned),
+ * 天然防重,直接 insert。材料 key 与收货入库同口径(consolidation_key 优先)。
+ */
+export async function recordSupplierReturnDeduction(lineItemId: string, qty: number, note?: string): Promise<{ ok?: boolean; error?: string }> {
+  const { supabase, userId, roles } = await authIssueRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!hasRoleInGroup(roles, 'CAN_ISSUE_MATERIAL')) return { error: '无冲减库存权限' };
+  const q = Number(qty);
+  if (!(q > 0)) return { ok: true };   // 无量不写
+  const { data: line } = await (supabase.from('procurement_line_items') as any)
+    .select('id, order_id, material_name, specification, category, ordered_unit, procurement_item_id').eq('id', lineItemId).maybeSingle();
+  if (!line) return { error: '采购行不存在' };
+  let materialKey = materialKeyForLine(line as any);
+  if ((line as any).procurement_item_id) {
+    const { data: pi } = await (supabase.from('procurement_items') as any)
+      .select('consolidation_key').eq('id', (line as any).procurement_item_id).maybeSingle();
+    if ((pi as any)?.consolidation_key) materialKey = (pi as any).consolidation_key;
+  }
+  const { error } = await (supabase.from('inventory_transactions') as any).insert({
+    material_key: materialKey, material_name: (line as any).material_name, unit: (line as any).ordered_unit,
+    txn_type: 'adjust', qty: -q, order_id: (line as any).order_id, source_ref: lineItemId,
+    created_by: userId, note: note || '供应商退货冲减',
+  });
+  if (error) return { error: error.message };
+  revalidatePath('/procurement/inventory');
+  return { ok: true };
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // 尾料清点归库(出货后)—— 采购清点每物料实际尾料,系统把该订单账面盘到清点数。
 // 账面高于清点 → 写 issue 核减(视作已消耗);账面低于清点 → 写 adjust 盘盈。

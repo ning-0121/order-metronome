@@ -31,10 +31,15 @@ interface ReceiptRow {
 
 /** 装配收货行:goods_receipts → 采购行 → 采购单 → 供应商。排除拒收(退货不计)。 */
 async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
-  const { data: grs } = await supabase.from('goods_receipts')
-    .select('id, line_item_id, order_id, received_qty, received_unit, received_at, received_address, photos, inspection_result')
-    .neq('inspection_result', 'reject')
-    .order('received_at', { ascending: true });
+  const SEL = 'id, line_item_id, order_id, received_qty, received_unit, received_at, received_address, photos, inspection_result';
+  let { data: grs, error } = await supabase.from('goods_receipts')
+    .select(SEL).neq('inspection_result', 'reject').order('received_at', { ascending: true });
+  // P3-4 审计:received_address 列(20260711 迁移)未跑时,硬 select 会报错→整表返回空(误导「无记录」)。
+  //   与写入路径同款降级:缺列则去掉该列重查(address 置空)。
+  if (error && /received_address|column .* does not exist|schema cache/i.test(error.message || '')) {
+    ({ data: grs } = await supabase.from('goods_receipts')
+      .select(SEL.replace(', received_address', '')).neq('inspection_result', 'reject').order('received_at', { ascending: true }));
+  }
   const receipts = (grs || []) as any[];
   if (!receipts.length) return [];
 

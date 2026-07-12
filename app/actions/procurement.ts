@@ -12,6 +12,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { sumLineReceivedQty, seedCoveringReceipt } from '@/lib/procurement/receivedQty';
 import {
   isValidLineTransition,
   LINE_STATUS_LABELS,
@@ -1012,11 +1013,12 @@ export async function recordGoodsReceipt(
   }
   if (!(payload.received_qty >= 0)) return { error: '实收数量无效' };
 
-  // 收货 ±10% 硬闸(与批次收货同口径;拒收 result=reject 不计超收——本就是不入账退货)
+  // 注:此入口是 QC「验收判定」,其数量权威 refine 已到货 → 不 seed 覆盖写(否则与验收批次双计);
+  //   汇总仅取 goods_receipts 实际批次。对账页覆盖写→分批录入的续接由 recordReceiptBatch 的 seed 负责。
+
+  // 收货 ±10% 硬闸(统一口径 sumLineReceivedQty:排除 拒收/已退回/已换货;拒收本次不计超收)
   if (payload.result !== 'reject') {
-    const { data: prev } = await (supabase.from('goods_receipts') as any)
-      .select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
-    const prevTotal = ((prev || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
+    const prevTotal = await sumLineReceivedQty(supabase, lineItemId);
     const gate = overReceiptCheck(line.ordered_qty, prevTotal, payload.received_qty);
     if (gate.over) {
       const isFinance = access.roles?.some(r => ['finance', 'admin'].includes(r));
@@ -1043,11 +1045,8 @@ export async function recordGoodsReceipt(
   });
   if (grErr) return { error: grErr.message };
 
-  // 汇总该行【合格】已验收数量，回写 received_qty —— 与上方超收闸同口径排除拒收(reject 是退货、不入实收)。
-  // 修 P1(2026-07-09 审计):此前含拒收批次 → 拒收料被当良品入库 + 按拒收量核销应付 + 顶到订购量误判「料齐」。
-  const { data: receipts } = await (supabase.from('goods_receipts') as any)
-    .select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
-  const totalReceived = (receipts || []).reduce((s: number, r: any) => s + (Number(r.received_qty) || 0), 0);
+  // 汇总该行实收,回写 received_qty —— 统一口径(排除 拒收 + 已退回/已换货,退货料不入实收)。
+  const totalReceived = await sumLineReceivedQty(supabase, lineItemId);
 
   // P2-3 审计:合格但【未收够】(部分验收)不锁死为 accepted —— accepted 只能→closed,剩余量无法再验收入账、
   //   还从待验收队列消失。保持 arrived 让剩余量继续验收累加;累计达标(≥订购量,0.5% 容差)才真 accepted。
@@ -1110,10 +1109,13 @@ export async function recordReceiptBatch(
 
   const now = new Date().toISOString();
 
-  // ── 收货 ±10% 硬闸(统一纯函数 overReceiptCheck)──
+  // P2-4:该行 received_qty 若是对账页覆盖写来的(无批次)→ 先补种子行,避免下面汇总把它抹掉。
+  try { await seedCoveringReceipt(supabase, lineItemId, line.order_id, line.ordered_unit || null, access.userId); }
+  catch (e: any) { console.warn('[recordReceiptBatch] 覆盖写种子失败(不阻断):', e?.message); }
+
+  // ── 收货 ±10% 硬闸(统一口径 sumLineReceivedQty:排除 拒收/已退回/已换货)──
   {
-    const { data: prev } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
-    const prevTotal = ((prev || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
+    const prevTotal = await sumLineReceivedQty(supabase, lineItemId);
     const gate = overReceiptCheck(line.ordered_qty, prevTotal, payload.received_qty);
     if (gate.over) {
       const isFinance = access.roles?.some(r => ['finance', 'admin'].includes(r));
@@ -1153,9 +1155,8 @@ export async function recordReceiptBatch(
     } else return { error: grErr.message };
   }
 
-  // 2. 汇总实收 → 回写
-  const { data: receipts } = await (supabase.from('goods_receipts') as any).select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
-  const total = ((receipts || []) as any[]).reduce((s, r) => s + (Number(r.received_qty) || 0), 0);
+  // 2. 汇总实收 → 回写(统一口径:排除 拒收 + 已退回/已换货)
+  const total = await sumLineReceivedQty(supabase, lineItemId);
   const ordered = Number(line.ordered_qty) || 0;
   const complete = payload.mark_complete === true || (ordered > 0 && total >= ordered);
   const nextStatus = complete ? 'accepted' : 'arrived';   // 收齐→离队;未齐→留待验收继续录
