@@ -218,6 +218,18 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
         });
       } catch { /* 忽略 */ }
     })();
+
+    // 角色审计修:出运节点经三方确认自动完成时,也要推出货单据+应收到财务 ——
+    //   否则非分批出口单走此分支 100% 漏发 4 张单据 + shipping_invoice.issued(应收),静默漏账无告警。
+    //   正常/分批路径在 batch-milestones 已 fire,唯独三方确认自动完成分支漏了。
+    if (stepKey === 'shipment_execute') {
+      void (async () => {
+        try {
+          const { syncShippingDocsToFinance } = await import('@/app/actions/shipping-docs-sync');
+          await syncShippingDocsToFinance((ms as any).order_id);   // 全单路径(无 batchId);内部已吞错,永不阻塞
+        } catch { /* fire-and-forget */ }
+      })();
+    }
   }
 
   revalidatePath(`/orders/${(ms as any).order_id}`);

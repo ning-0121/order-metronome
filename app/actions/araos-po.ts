@@ -7,20 +7,25 @@
  * 管线建单（正确打里程碑）。建成后回写 inbox.converted_order_id。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createOrder, preGenerateOrderNo } from '@/app/actions/orders';
 
 const CAN_CREATE_ORDER = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'];
 
+// 角色审计修:araos_handoffs_inbox 的迁移 ENABLE RLS 但**无任何策略**(设计本意「只 service-role 读写」),
+//   而本文件用 user-session 读 → 默认全拒、列表恒空、一键建单整条死掉。改:角色门禁仍用 user-session 校验,
+//   inbox 的读写走 service-role(svc)绕过无策略 RLS。
 async function authed() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { supabase, ok: false as const };
+  if (!user) return { supabase, svc: supabase, ok: false as const };
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
-  return { supabase, ok: roles.some((r) => CAN_CREATE_ORDER.includes(r)) };
+  let svc: any = supabase;
+  try { svc = createServiceRoleClient(); } catch { /* 降级 user-session */ }
+  return { supabase, svc, ok: roles.some((r) => CAN_CREATE_ORDER.includes(r)) };
 }
 
 export interface AraosPO {
@@ -58,15 +63,15 @@ function extract(row: any): AraosPO {
 
 /** 待建单：未转成订单、且为订单型的 araos PO。 */
 export async function listPendingAraosPOs(): Promise<AraosPO[]> {
-  const { supabase, ok } = await authed();
+  const { svc, ok } = await authed();
   if (!ok) return [];
   // 优先按 converted_order_id 过滤；列未迁移时降级为按 status 过滤，避免报错。
   let data: any[] | null = null;
-  const q = await (supabase.from('araos_handoffs_inbox') as any)
+  const q = await (svc.from('araos_handoffs_inbox') as any)
     .select('*').is('converted_order_id', null).neq('status', 'error')
     .order('received_at', { ascending: false }).limit(50);
   if (q.error) {
-    const q2 = await (supabase.from('araos_handoffs_inbox') as any)
+    const q2 = await (svc.from('araos_handoffs_inbox') as any)
       .select('*').neq('status', 'error').neq('status', 'converted')
       .order('received_at', { ascending: false }).limit(50);
     data = q2.data;
@@ -83,13 +88,13 @@ export async function listPendingAraosPOs(): Promise<AraosPO[]> {
 
 /** 一键建单：映射 araos PO + 业务补运营字段 → createOrder。 */
 export async function buildOrderFromAraosPO(formData: FormData): Promise<void> {
-  const { supabase, ok } = await authed();
+  const { svc, ok } = await authed();
   const back = (err: string) => redirect(`/orders/from-araos?error=${encodeURIComponent(err)}`);
   if (!ok) return back('无建单权限');
 
   const inboxId = formData.get('inboxId') as string;
   if (!inboxId) return back('缺少 inboxId');
-  const { data: row } = await (supabase.from('araos_handoffs_inbox') as any).select('*').eq('id', inboxId).maybeSingle();
+  const { data: row } = await (svc.from('araos_handoffs_inbox') as any).select('*').eq('id', inboxId).maybeSingle();
   if (!row) return back('PO 不存在');
   if (row.converted_order_id) return back('该 PO 已建单');
   const po = extract(row);
@@ -123,7 +128,7 @@ export async function buildOrderFromAraosPO(formData: FormData): Promise<void> {
   const res = await createOrder(fd, pre.orderNo);
   if (!res.ok || !res.orderId) return back(res.error || '建单失败');
 
-  await (supabase.from('araos_handoffs_inbox') as any)
+  await (svc.from('araos_handoffs_inbox') as any)
     .update({ converted_order_id: res.orderId, status: 'converted', processed_at: new Date().toISOString() })
     .eq('id', inboxId);
   revalidatePath('/orders/from-araos');
