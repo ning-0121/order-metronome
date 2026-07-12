@@ -181,6 +181,80 @@ export async function updateDispatchStatus(dispatchId: string, status: 'schedule
   return { ok: true };
 }
 
+/** P3 工厂排产看板:按工厂看负荷账 + 名下派工(跨订单),排产冲突/大单拆多厂一眼看清。 */
+export async function getFactoryScheduleBoard(): Promise<{ data?: any; error?: string }> {
+  const g = await gate(true);
+  if ('error' in g) return { error: g.error };
+  const { svc } = g;
+  const { data: facs } = await (svc.from('factories') as any)
+    .select('id, factory_name, product_categories, quality_grades, weave_types, can_package, order_capabilities, monthly_capacity')
+    .is('deleted_at', null).in('cooperation_status', ['active', 'trial']);
+  const factories = (facs || []) as any[];
+  const { data: disp } = await (svc.from('production_dispatch') as any)
+    .select('id, order_id, style_no, color, factory_id, factory_name, planned_qty, planned_start, planned_end, status')
+    .in('status', ['scheduled', 'in_production']);
+  const dispatches = (disp || []) as any[];
+  const orderIds = [...new Set(dispatches.map((d) => d.order_id))];
+  const { data: ords } = orderIds.length ? await (svc.from('orders') as any).select('id, order_no, internal_order_no, customer_name, factory_date').in('id', orderIds) : { data: [] };
+  const orderMap = new Map((ords || []).map((o: any) => [o.id, o]));
+  const now = new Date();
+  const fromMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const byFactory = new Map<string, any[]>();
+  for (const d of dispatches) if (d.factory_id) byFactory.set(d.factory_id, [...(byFactory.get(d.factory_id) || []), d]);
+
+  const out = factories.map((f) => {
+    const ds = (byFactory.get(f.id) || []).map((d) => ({ ...d, order: orderMap.get(d.order_id) || null }))
+      .sort((a, b) => String(a.planned_start || '').localeCompare(String(b.planned_start || '')));
+    const load = factoryMonthlyLoad(ds);
+    return {
+      id: f.id, factory_name: f.factory_name, monthly_capacity: f.monthly_capacity ?? null,
+      product_categories: f.product_categories || [], quality_grades: f.quality_grades || [], weave_types: f.weave_types || [],
+      can_package: f.can_package, order_capabilities: f.order_capabilities || [],
+      dispatches: ds, ledger: monthlyLedger(load, f.monthly_capacity, fromMonth, 6),
+      total_committed: ds.reduce((s: number, d: any) => s + (Number(d.planned_qty) || 0), 0),
+    };
+  }).sort((a, b) => b.dispatches.length - a.dispatches.length);
+  return { data: { factories: out } };
+}
+
+/** P3 派工单:导出某工厂名下全部派工(跨订单)为 Excel,下发工厂。 */
+export async function exportFactoryDispatchSheet(factoryId: string): Promise<{ base64?: string; fileName?: string; error?: string }> {
+  const g = await gate(true);
+  if ('error' in g) return { error: g.error };
+  const { svc } = g;
+  const { data: fac } = await (svc.from('factories') as any).select('factory_name').eq('id', factoryId).maybeSingle();
+  const { data: disp } = await (svc.from('production_dispatch') as any)
+    .select('order_id, style_no, color, planned_qty, planned_start, planned_end, status')
+    .eq('factory_id', factoryId).in('status', ['scheduled', 'in_production'])
+    .order('planned_start', { ascending: true });
+  const rows = (disp || []) as any[];
+  if (rows.length === 0) return { error: '该工厂暂无在排派工' };
+  const orderIds = [...new Set(rows.map((r) => r.order_id))];
+  const { data: ords } = await (svc.from('orders') as any).select('id, order_no, internal_order_no, customer_name').in('id', orderIds);
+  const om = new Map((ords || []).map((o: any) => [o.id, o]));
+
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('派工单');
+  ws.mergeCells('A1:H1');
+  ws.getCell('A1').value = `派工单 —— ${(fac as any)?.factory_name || ''}`;
+  ws.getCell('A1').font = { bold: true, size: 14 };
+  const head = ws.addRow(['订单号', '客户', '款号', '颜色', '件数', '排产开始', '排产结束', '状态']);
+  head.eachCell((c) => { c.font = { bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } }; c.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
+  const stCn: any = { scheduled: '已排', in_production: '生产中' };
+  let total = 0;
+  for (const r of rows) {
+    const o = om.get(r.order_id) as any;
+    total += Number(r.planned_qty) || 0;
+    const row = ws.addRow([o?.internal_order_no || o?.order_no || '', o?.customer_name || '', r.style_no || '', r.color || '(整款)', r.planned_qty ?? '', r.planned_start || '', r.planned_end || '', stCn[r.status] || r.status]);
+    row.eachCell((c) => { c.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
+  }
+  ws.addRow(['合计', '', '', '', total, '', '', '']);
+  [16, 14, 16, 12, 8, 12, 12, 8].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  const buf = await wb.xlsx.writeBuffer();
+  return { base64: Buffer.from(buf).toString('base64'), fileName: `派工单_${(fac as any)?.factory_name || factoryId}.xlsx` };
+}
+
 /** 业务/主管手填订单排产要求(品质/织造/是否包装)。 */
 export async function setOrderProductionAttrs(orderId: string, attrs: { quality_grade?: string | null; weave_type?: string | null; needs_package?: boolean | null }): Promise<{ ok?: boolean; error?: string }> {
   const g = await gate(true);   // view 权限即可填(生产/理单/主管/管理员)

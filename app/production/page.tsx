@@ -5,6 +5,7 @@ import { isStageInitOpen } from '@/app/actions/production-stage-init';
 import { ProductionCenterClient } from './ProductionCenterClient';
 import { ReconcileExportButton } from './ReconcileExportButton';
 import { SchedulingBoard } from '@/components/production/SchedulingBoard';
+import { FactoryScheduleBoard } from '@/components/production/FactoryScheduleBoard';
 
 /**
  * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
@@ -61,6 +62,13 @@ export default async function ProductionCenterPage() {
       {canInit && (
         <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
           <SchedulingBoard />
+        </div>
+      )}
+
+      {/* 工厂排产看板(P3):按工厂看负荷 + 名下派工(跨订单)+ 导派工单 */}
+      {canInit && (
+        <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
+          <FactoryScheduleBoard />
         </div>
       )}
 
