@@ -12,6 +12,24 @@
  */
 function round3(n: number): number { return Math.round((Number(n) || 0) * 1000) / 1000; }
 
+/**
+ * 毛收货量(2026-07-12 角色审计修正):Σ goods_receipts.received_qty(排除拒收),**不减退货**。
+ * 用途:①对账行 received_qty(对账表自己有 return_qty 列,按 gross − return_qty 算净应付,不能再喂净额否则双减);
+ *      ②库存入库累计目标(退货由独立 adjust 流水表达,不能用净额否则再收货 delta 算错、退货被扣两次)。
+ * 无 goods_receipts(对账页 recordReceipt 纯覆盖写)→ 回退 received_qty 列(它就是覆盖写的毛量)。
+ * 与 sumLineReceivedQty(净额,给 pl.received_qty 供料齐/追踪)分工明确:毛量给对账/库存,净额给料齐。
+ */
+export async function sumGrossReceived(client: any, lineItemId: string): Promise<number> {
+  const { data: grs } = await (client.from('goods_receipts') as any)
+    .select('received_qty, inspection_result').eq('line_item_id', lineItemId);
+  const rows = ((grs || []) as any[]).filter((r) => r.inspection_result !== 'reject');
+  if (rows.length) return round3(rows.reduce((s, r) => s + (Number(r.received_qty) || 0), 0));
+  // 无收货批次 → 对账页覆盖写口径:received_qty 列即毛量
+  const { data: line } = await (client.from('procurement_line_items') as any)
+    .select('received_qty').eq('id', lineItemId).maybeSingle();
+  return round3(Number((line as any)?.received_qty) || 0);
+}
+
 /** 该行实收汇总(单一真相口径:Σ收货 − Σ已确认退货)。 */
 export async function sumLineReceivedQty(client: any, lineItemId: string): Promise<number> {
   const { data: grs } = await (client.from('goods_receipts') as any)

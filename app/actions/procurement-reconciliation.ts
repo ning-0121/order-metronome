@@ -11,7 +11,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
-import { sumLineReceivedQty } from '@/lib/procurement/receivedQty';
+import { sumLineReceivedQty, sumGrossReceived } from '@/lib/procurement/receivedQty';
 
 const WRITE_MSG = '仅采购/采购经理/管理员可做采购对账/退货';
 const num = (v: any) => (v == null || v === '' ? 0 : Number(v) || 0);
@@ -86,7 +86,10 @@ export async function getOrCreateReconciliation(poId: string) {
       .select('id, line_item_id').eq('reconciliation_id', (recon as any).id);
     const byPli = new Map<string, string>(((existLines || []) as any[]).map((l) => [l.line_item_id, l.id]));
     for (const pl of poLines) {
-      const sys = { material_name: pl.material_name, size: pl.size, ordered_qty: pl.ordered_qty, received_qty: pl.received_qty, unit_price: pl.unit_price };
+      // 角色审计修:对账行 received_qty 用【毛量】(Σ收货非拒收),对账再按 gross − return_qty 算净应付。
+      //   之前误用 pl.received_qty(批4改成了净额)→ recompute 的 (净−ret) 双减退货 → 供应商少付。
+      const grossRecv = await sumGrossReceived(supabase, pl.id);
+      const sys = { material_name: pl.material_name, size: pl.size, ordered_qty: pl.ordered_qty, received_qty: grossRecv, unit_price: pl.unit_price };
       const hit = byPli.get(pl.id);
       if (hit) {
         await (supabase.from('procurement_reconciliation_lines') as any).update({ ...sys, updated_at: new Date().toISOString() }).eq('id', hit);

@@ -10,6 +10,7 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { aggregateInventoryBalance, computeReceiptDelta, computeOrderLeftover, materialKeyForLine, availableToPromise, computeAvailability, type ReservationRow } from '@/lib/services/inventory';
+import { sumGrossReceived } from '@/lib/procurement/receivedQty';
 
 async function authIssueRoles() {
   const supabase = await createClient();
@@ -34,9 +35,11 @@ export async function recordInventoryReceipt(lineId: string): Promise<{ ok?: boo
     .eq('id', lineId).maybeSingle();
   if (!line) return { error: '采购行不存在' };
 
-  const received = Number((line as any).received_qty) || 0;
+  // 角色审计修:入库累计目标用【毛收货量】(Σ收货非拒收),不用 line.received_qty(批4改成净额了)。
+  //   净额会让「退货后再收货」delta 算错(退货被扣两次)——退货只由 recordSupplierReturnDeduction 的 adjust 表达一次。
+  const received = await sumGrossReceived(supabase, lineId);
 
-  // 已入库(该行 receipt 流水 Σ)
+  // 已入库(该行 receipt 流水 Σ;退货的 adjust 流水不在此列,故累计目标必须是毛量)
   const { data: prior } = await (supabase.from('inventory_transactions') as any)
     .select('qty').eq('source_ref', lineId).eq('txn_type', 'receipt');
   const priorSum = ((prior || []) as any[]).reduce((s, t) => s + (Number(t.qty) || 0), 0);
