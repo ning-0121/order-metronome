@@ -114,6 +114,19 @@ export async function createPurchaseOrder(input: {
   const rows = (lines || []) as any[];
   if (rows.some((r) => r.purchase_order_id)) return { error: '有采购行已在别的采购单里，请刷新重选' };
 
+  // P2-2 审计:采购项被重归并标「需重确认」(needs_reconfirm，如尺码拆分项总需求变了但执行行没同步为新量)
+  //   → 禁止入采购单，否则按陈旧量下单少采/多采。采购须先重新核料确认(清标记 + 重生成执行行)再下单。
+  const piIdsForRecheck = [...new Set(rows.map((r) => r.procurement_item_id).filter(Boolean))];
+  if (piIdsForRecheck.length) {
+    const { data: recheckItems } = await (svc.from('procurement_items') as any)
+      .select('id, item_no, material_name, needs_reconfirm').in('id', piIdsForRecheck);
+    const stale = ((recheckItems || []) as any[]).filter((p) => p.needs_reconfirm);
+    if (stale.length) {
+      const names = stale.map((p) => p.item_no || p.material_name || p.id).slice(0, 3).join('、');
+      return { error: `以下采购项的需求已变动、待重新核料确认,不能下单(执行行还是旧量):${names}${stale.length > 3 ? ` 等 ${stale.length} 项` : ''}。请到「采购核料」重新确认后再下单。` };
+    }
+  }
+
   // 布料/散装「不分尺码」折叠:同一采购项被历史按尺码拆成多行 → 只保留一行(还原真实总量)入单,
   // 其余作废(cancelled,离开待归单),避免布料按尺码重复下单/超采。非散装/无采购项 → 原样入单。
   const { isBulkMaterial, reconcileBulkQty } = await import('@/lib/services/procurement-execution');

@@ -99,6 +99,19 @@ export async function submitPaymentRequest(reconId: string, amount: any, opts?: 
   }
   if (error) return { error: friendlyError(error) };
 
+  // P3-1 审计:上面的额度校验与 insert 非原子 → 并发可双双过 cap 后同时插入超额。
+  //   insert 后复核:活跃申请总额若已超净应付,说明本笔造成超额 → 作废本笔并报错。
+  //   delete 让并发自解(先复核者撤销自己,另一笔复核时就落回预算内存活);同时超则都撤、用户重试。
+  {
+    const { data: after } = await (supabase.from('procurement_payment_requests') as any)
+      .select('amount, status').eq('reconciliation_id', reconId);
+    const activeTotal = ((after || []) as any[]).filter((r) => ACTIVE.includes(r.status)).reduce((s, r) => s + num(r.amount), 0);
+    if (round2(activeTotal) > round2(netPayable) + 0.01) {
+      await (supabase.from('procurement_payment_requests') as any).delete().eq('id', (pr as any).id);
+      return { error: `并发提交导致超出净应付(¥${round2(netPayable)}),本笔已撤销,请刷新后重试。` };
+    }
+  }
+
   // 首次提交 → 对账单标已推财务
   if ((recon as any).status === 'confirmed') {
     await (supabase.from('procurement_reconciliations') as any)

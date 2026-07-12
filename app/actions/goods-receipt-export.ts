@@ -29,53 +29,77 @@ interface ReceiptRow {
   photos: string[];     // order-docs 路径
 }
 
+/** P3-5:分页取全量(规避 PostgREST 默认 max-rows 静默截断)。按 received_at + id 稳定排序。 */
+async function fetchAllReceipts(supabase: any, sel: string): Promise<{ data: any[] | null; error: any }> {
+  const PAGE = 1000;
+  const out: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from('goods_receipts')
+      .select(sel).neq('inspection_result', 'reject')
+      .order('received_at', { ascending: true }).order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return { data: null, error };
+    const batch = (data || []) as any[];
+    out.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return { data: out, error: null };
+}
+
+/** P3-5:按 id 分块 .in 查询(规避 max-rows 与 in 列表长度上限)。 */
+async function fetchInChunks(supabase: any, table: string, sel: string, ids: string[], chunk = 500): Promise<any[]> {
+  const out: any[] = [];
+  for (let i = 0; i < ids.length; i += chunk) {
+    const { data } = await supabase.from(table).select(sel).in('id', ids.slice(i, i + chunk));
+    out.push(...((data || []) as any[]));
+  }
+  return out;
+}
+
 /** 装配收货行:goods_receipts → 采购行 → 采购单 → 供应商。排除拒收(退货不计)。 */
 async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
   const SEL = 'id, line_item_id, order_id, received_qty, received_unit, received_at, received_address, photos, inspection_result';
-  let { data: grs, error } = await supabase.from('goods_receipts')
-    .select(SEL).neq('inspection_result', 'reject').order('received_at', { ascending: true });
+  let { data: grs, error } = await fetchAllReceipts(supabase, SEL);
   // P3-4 审计:received_address 列(20260711 迁移)未跑时,硬 select 会报错→整表返回空(误导「无记录」)。
   //   与写入路径同款降级:缺列则去掉该列重查(address 置空)。
   if (error && /received_address|column .* does not exist|schema cache/i.test(error.message || '')) {
-    ({ data: grs } = await supabase.from('goods_receipts')
-      .select(SEL.replace(', received_address', '')).neq('inspection_result', 'reject').order('received_at', { ascending: true }));
+    ({ data: grs } = await fetchAllReceipts(supabase, SEL.replace(', received_address', '')));
   }
   const receipts = (grs || []) as any[];
   if (!receipts.length) return [];
 
-  const lineIds = [...new Set(receipts.map((r) => r.line_item_id).filter(Boolean))];
-  const { data: lines } = await supabase.from('procurement_line_items')
-    .select('id, material_name, specification, size, ordered_unit, supplier_name, purchase_order_id, procurement_item_id')
-    .in('id', lineIds);
+  const lineIds = [...new Set(receipts.map((r) => r.line_item_id).filter(Boolean))] as string[];
+  const lines = await fetchInChunks(supabase, 'procurement_line_items',
+    'id, material_name, specification, size, ordered_unit, supplier_name, purchase_order_id, procurement_item_id', lineIds);
   const lineMap = new Map((lines || []).map((l: any) => [l.id, l]));
 
   // 颜色在核料主数据上(执行行无颜色列;采购按颜色分行,对账单必须带色)
-  const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))];
+  const piIds = [...new Set((lines || []).map((l: any) => l.procurement_item_id).filter(Boolean))] as string[];
   const colorMap = new Map<string, string>();
   if (piIds.length) {
-    const { data: pis } = await supabase.from('procurement_items').select('id, color').in('id', piIds);
-    for (const p of (pis || [])) if (p.color) colorMap.set(p.id, p.color);
+    const pis = await fetchInChunks(supabase, 'procurement_items', 'id, color', piIds);
+    for (const p of pis) if (p.color) colorMap.set(p.id, p.color);
   }
 
-  const poIds = [...new Set((lines || []).map((l: any) => l.purchase_order_id).filter(Boolean))];
+  const poIds = [...new Set((lines || []).map((l: any) => l.purchase_order_id).filter(Boolean))] as string[];
   const poMap = new Map<string, any>();
   if (poIds.length) {
-    const { data: pos } = await supabase.from('purchase_orders').select('id, supplier_id').in('id', poIds);
-    for (const p of (pos || [])) poMap.set(p.id, p);
+    const pos = await fetchInChunks(supabase, 'purchase_orders', 'id, supplier_id', poIds);
+    for (const p of pos) poMap.set(p.id, p);
   }
-  const supIds = [...new Set([...poMap.values()].map((p) => p.supplier_id).filter(Boolean))];
+  const supIds = [...new Set([...poMap.values()].map((p) => p.supplier_id).filter(Boolean))] as string[];
   const supMap = new Map<string, string>();
   if (supIds.length) {
-    const { data: sups } = await supabase.from('suppliers').select('id, name').in('id', supIds);
-    for (const s of (sups || [])) supMap.set(s.id, s.name);
+    const sups = await fetchInChunks(supabase, 'suppliers', 'id, name', supIds);
+    for (const s of sups) supMap.set(s.id, s.name);
   }
 
   // 订单号(2026-07-11 老板:对账单要带订单号):收货行挂订单,内部订单号优先(对账/财务锚点)
-  const orderIds = [...new Set(receipts.map((r) => r.order_id).filter(Boolean))];
+  const orderIds = [...new Set(receipts.map((r) => r.order_id).filter(Boolean))] as string[];
   const orderNoMap = new Map<string, string>();
   if (orderIds.length) {
-    const { data: ords } = await supabase.from('orders').select('id, order_no, internal_order_no').in('id', orderIds);
-    for (const o of (ords || [])) orderNoMap.set(o.id, o.internal_order_no || o.order_no || '');
+    const ords = await fetchInChunks(supabase, 'orders', 'id, order_no, internal_order_no', orderIds);
+    for (const o of ords) orderNoMap.set(o.id, o.internal_order_no || o.order_no || '');
   }
 
   const rows: ReceiptRow[] = [];
