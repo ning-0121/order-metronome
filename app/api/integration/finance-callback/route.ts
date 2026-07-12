@@ -111,7 +111,10 @@ export async function POST(request: Request) {
           .select('id').or(`order_no.eq.${on},internal_order_no.eq.${on}`).limit(1).maybeSingle()
         if (ord?.id) resolvedOrderId = ord.id as string
       }
-      const { error } = await (svc.from('order_finance_events') as unknown as { upsert: (v: unknown, o: unknown) => Promise<{ error: { message: string } | null }> }).upsert({
+      // 用 insert(不是 upsert):order_finance_events 没有 request_id 唯一约束,
+      // onConflict:'request_id' 会 500「no unique or exclusion constraint」——这正是财务进度回传
+      // 一直全军覆没(order_finance_events 恒 0 行)的第二重根因。幂等已由上面 seen-check 保证。
+      const { error } = await (svc.from('order_finance_events') as unknown as { insert: (v: unknown) => Promise<{ error: { message: string } | null }> }).insert({
         request_id: payload.request_id || null,
         order_id: resolvedOrderId,
         order_no: d.order_no || null,
@@ -120,7 +123,7 @@ export async function POST(request: Request) {
         currency: d.currency || null,
         note: d.note || null,
         occurred_at: d.at || new Date().toISOString(),
-      }, { onConflict: 'request_id', ignoreDuplicates: true })
+      })
       if (error) throw new Error(error.message)
       // 采购付款申请回传(P2):payment.completed 带 source_ref → 累加对账已付、标付款申请已付。
       if (evt === 'payment.completed' && d.source_ref) {
