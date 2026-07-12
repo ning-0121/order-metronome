@@ -10,6 +10,7 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { RECEIVED } from '@/lib/production/stage';
 import { deriveOrderCapability, matchFactory, rankScore, type FactoryCaps, type OrderReq } from '@/lib/production/scheduling';
+import { factoryMonthlyLoad, checkOverbook, monthlyLedger } from '@/lib/production/capacityLedger';
 
 async function gate(view: boolean): Promise<{ svc: any; roles: string[]; userId: string } | { error: string }> {
   const supabase = await createClient();
@@ -39,12 +40,21 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     .select('id, order_id, style_no, color, factory_id, factory_name, planned_qty, planned_start, planned_end, status')
     .in('status', ['scheduled', 'in_production']);
   const committedByFactory = new Map<string, { qty: number; count: number }>();
+  const dispatchesByFactory = new Map<string, any[]>();   // 算按月产能账
   const dispatchByStyle = new Map<string, any[]>();   // key = order_id¦style_no¦color
   for (const d of (disp || [])) {
-    if (d.factory_id) { const c = committedByFactory.get(d.factory_id) || { qty: 0, count: 0 }; c.qty += Number(d.planned_qty) || 0; c.count++; committedByFactory.set(d.factory_id, c); }
+    if (d.factory_id) {
+      const c = committedByFactory.get(d.factory_id) || { qty: 0, count: 0 }; c.qty += Number(d.planned_qty) || 0; c.count++; committedByFactory.set(d.factory_id, c);
+      dispatchesByFactory.set(d.factory_id, [...(dispatchesByFactory.get(d.factory_id) || []), d]);
+    }
     const k = `${d.order_id}¦${String(d.style_no || '')}¦${String(d.color || '')}`;
     dispatchByStyle.set(k, [...(dispatchByStyle.get(k) || []), d]);
   }
+  // 每厂按月产能账(近 4 个月),给工作台展示 + 派工超卖预览
+  const now = new Date();
+  const fromMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const loadByFactory = new Map<string, Record<string, number>>();
+  for (const f of factories) loadByFactory.set(f.id, factoryMonthlyLoad(dispatchesByFactory.get(f.id) || []));
 
   // 待排产订单:活跃(未完成/取消)、非经销(经销=买成品不排产)
   const { data: orders } = await (svc.from('orders') as any)
@@ -71,7 +81,8 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     const m = matchFactory(f, req);
     const committed = committedByFactory.get(f.id)?.qty || 0;
     const remaining = f.monthly_capacity != null ? (Number(f.monthly_capacity) - committed) : null;
-    return { factory_id: f.id, factory_name: f.factory_name, match: m, monthly_capacity: f.monthly_capacity ?? null, remaining, active_count: committedByFactory.get(f.id)?.count || 0, product_categories: f.product_categories || [], score: rankScore(m, remaining, null) };
+    const load = loadByFactory.get(f.id) || {};
+    return { factory_id: f.id, factory_name: f.factory_name, match: m, monthly_capacity: f.monthly_capacity ?? null, remaining, active_count: committedByFactory.get(f.id)?.count || 0, product_categories: f.product_categories || [], monthly_load: load, ledger: monthlyLedger(load, f.monthly_capacity, fromMonth, 4), score: rankScore(m, remaining, null) };
   }).sort((a, b) => b.score - a.score);
 
   const out = orderList.map((o: any) => {
@@ -105,11 +116,11 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 }
 
 /** 派工:款(或色)→ 工厂 + 排产窗口。upsert 同款同色。 */
-export async function dispatchStyle(input: { orderId: string; styleNo: string; color?: string | null; factoryId: string; plannedQty?: number | null; start?: string | null; end?: string | null; notes?: string | null }): Promise<{ ok?: boolean; error?: string }> {
+export async function dispatchStyle(input: { orderId: string; styleNo: string; color?: string | null; factoryId: string; plannedQty?: number | null; start?: string | null; end?: string | null; notes?: string | null; force?: boolean }): Promise<{ ok?: boolean; error?: string; overbook?: any[] }> {
   const g = await gate(false);
   if ('error' in g) return { error: g.error };
   const { svc, userId } = g;
-  const { data: fac } = await (svc.from('factories') as any).select('factory_name').eq('id', input.factoryId).maybeSingle();
+  const { data: fac } = await (svc.from('factories') as any).select('factory_name, monthly_capacity').eq('id', input.factoryId).maybeSingle();
   const row = {
     order_id: input.orderId, style_no: input.styleNo || null, color: input.color?.trim() || null,
     factory_id: input.factoryId, factory_name: (fac as any)?.factory_name || null,
@@ -121,6 +132,18 @@ export async function dispatchStyle(input: { orderId: string; styleNo: string; c
   let existQ = (svc.from('production_dispatch') as any).select('id').eq('order_id', input.orderId).eq('style_no', row.style_no);
   existQ = row.color === null ? existQ.is('color', null) : existQ.eq('color', row.color);
   const { data: exist } = await existQ.maybeSingle();
+
+  // P2 超卖拦截:该厂现有活跃派工(排除本条)按月分摊 + 本次 vs 月产能;超卖且未强制 → 挡
+  if (row.planned_qty && row.planned_start && row.planned_end) {
+    const { data: others } = await (svc.from('production_dispatch') as any)
+      .select('id, planned_qty, planned_start, planned_end').eq('factory_id', input.factoryId).in('status', ['scheduled', 'in_production']);
+    const otherRows = (others || []).filter((o: any) => o.id !== (exist as any)?.id);
+    const ob = checkOverbook(factoryMonthlyLoad(otherRows), (fac as any)?.monthly_capacity, row.planned_qty, row.planned_start, row.planned_end);
+    if (ob.over && !input.force) {
+      const msg = ob.details.filter((d) => d.over).map((d) => `${d.month} 已派${d.committed}+本单${d.add}=${d.after} > 月产能${d.capacity}`).join('；');
+      return { error: `该厂产能超卖:${msg}。请改期/换厂,或勾「仍派工」强制。`, overbook: ob.details };
+    }
+  }
   let error;
   if ((exist as any)?.id) ({ error } = await (svc.from('production_dispatch') as any).update(row).eq('id', (exist as any).id));
   else ({ error } = await (svc.from('production_dispatch') as any).insert({ ...row, status: 'scheduled', created_by: userId }));
@@ -129,12 +152,31 @@ export async function dispatchStyle(input: { orderId: string; styleNo: string; c
   return { ok: true };
 }
 
-/** 改派工状态 / 删派工。 */
+/** 改派工状态 / 删派工。派工→生产中 联动点亮该单「生产启动/开裁」里程碑。 */
 export async function updateDispatchStatus(dispatchId: string, status: 'scheduled' | 'in_production' | 'done' | 'cancelled'): Promise<{ ok?: boolean; error?: string }> {
   const g = await gate(false);
   if ('error' in g) return { error: g.error };
-  const { error } = await (g.svc.from('production_dispatch') as any).update({ status, updated_at: new Date().toISOString() }).eq('id', dispatchId);
+  const { svc } = g;
+  const { data: d } = await (svc.from('production_dispatch') as any).select('order_id').eq('id', dispatchId).maybeSingle();
+  const { error } = await (svc.from('production_dispatch') as any).update({ status, updated_at: new Date().toISOString() }).eq('id', dispatchId);
   if (error) return { error: error.message };
+
+  // P2 联动:派工→生产中 → 该订单「生产启动/开裁」里程碑 pending→进行中(经 stage 引擎带动生产中心阶段 + 风险卡重算)。
+  //   只点亮不判完成(DP-4);失败不阻断。V2 已砍 production_kickoff → 按别名回落到承载节点。
+  if (status === 'in_production' && (d as any)?.order_id) {
+    try {
+      const { REPORT_STEP_ALIASES } = await import('@/lib/production/stage');
+      const cands = REPORT_STEP_ALIASES['production_kickoff'] || ['production_kickoff'];
+      const { data: ms } = await (svc.from('milestones') as any)
+        .select('id, status').eq('order_id', (d as any).order_id).in('step_key', cands).limit(1).maybeSingle();
+      const st = String((ms as any)?.status || '').toLowerCase();
+      if ((ms as any)?.id && !['in_progress', '进行中', 'done', '已完成', 'completed', 'blocked', '阻塞'].includes(st)) {
+        const { transitionMilestoneStatus } = await import('@/lib/repositories/milestonesRepo');
+        await transitionMilestoneStatus((ms as any).id, '进行中', '生产排单:已派工投产,生产启动节点自动进行中');
+      }
+      revalidatePath(`/orders/${(d as any).order_id}`);
+    } catch (e: any) { console.warn('[dispatch] 里程碑联动失败(不阻断):', e?.message); }
+  }
   revalidatePath('/production');
   return { ok: true };
 }

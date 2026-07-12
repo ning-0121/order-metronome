@@ -102,12 +102,15 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
   const [end, setEnd] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [overbook, setOverbook] = useState<any[] | null>(null);   // 超卖详情,非空=需强制确认
+  const selected = candidates.find((c: any) => c.factory_id === factoryId);
 
-  async function submit() {
+  async function submit(force = false) {
     if (!factoryId) { setErr('请选工厂'); return; }
-    setBusy(true); setErr('');
-    const r = await dispatchStyle({ orderId: order.id, styleNo: style.style_no, color: color || null, factoryId, plannedQty: qty ? Number(qty) : null, start: start || null, end: end || null });
+    setBusy(true); setErr(''); if (force) setOverbook(null);
+    const r = await dispatchStyle({ orderId: order.id, styleNo: style.style_no, color: color || null, factoryId, plannedQty: qty ? Number(qty) : null, start: start || null, end: end || null, force });
     setBusy(false);
+    if ((r as any).overbook && !force) { setOverbook((r as any).overbook); setErr((r as any).error || ''); return; }
     if ((r as any).error) setErr((r as any).error); else onDone();
   }
 
@@ -147,9 +150,35 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
         <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="rounded border border-gray-300 px-1.5 py-1" />
         <span className="text-gray-400">至</span>
         <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="rounded border border-gray-300 px-1.5 py-1" />
-        <button onClick={submit} disabled={busy} className="px-3 py-1 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">{busy ? '派工中…' : '✅ 派工'}</button>
-        {err && <span className="text-rose-600">{err}</span>}
+        <button onClick={() => submit(false)} disabled={busy} className="px-3 py-1 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">{busy ? '派工中…' : '✅ 派工'}</button>
+        {err && !overbook && <span className="text-rose-600">{err}</span>}
       </div>
+
+      {/* 选中工厂的按月产能账 */}
+      {selected?.ledger?.length > 0 && (
+        <div className="flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
+          <span className="text-gray-400">{selected.factory_name} 产能账:</span>
+          {selected.ledger.map((m: any) => (
+            <span key={m.month} className={m.remaining != null && m.remaining < 0 ? 'text-rose-600 font-medium' : ''}>
+              {m.month.slice(5)}月 {m.committed}/{m.capacity ?? '—'}{m.remaining != null && <span className="text-gray-400">(剩{m.remaining})</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* 超卖拦截:显示详情 + 强制派工 */}
+      {overbook && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-[11px] space-y-1">
+          <p className="text-rose-700 font-medium">⚠️ 产能超卖,拦下了:</p>
+          {overbook.filter((d: any) => d.over).map((d: any) => (
+            <p key={d.month} className="text-rose-600">{d.month}:已派 {d.committed} + 本单 {d.add} = {d.after} &gt; 月产能 {d.capacity}</p>
+          ))}
+          <div className="flex items-center gap-2 pt-1">
+            <button onClick={() => submit(true)} disabled={busy} className="px-2.5 py-1 rounded bg-rose-600 text-white font-medium hover:bg-rose-700 disabled:opacity-50">仍派工(强制)</button>
+            <span className="text-gray-500">或改期/换厂</span>
+          </div>
+        </div>
+      )}
       {/* 已派的可改状态 */}
       {(style.dispatches || []).length > 0 && (
         <div className="text-[11px] text-gray-500 space-y-1">
