@@ -102,9 +102,18 @@ export async function POST(request: Request) {
         const { data: seen } = await (svc.from('order_finance_events') as any).select('id').eq('request_id', payload.request_id).maybeSingle()
         if (seen) return NextResponse.json({ status: 'ok', recorded: evt, dedup: true })
       }
+      // order_id 兜底(审计P1修复):财务发的 qimo_order_id 可能为空(旧映射丢字段),
+      // 按 order_no/internal_order_no 反查 orders.id —— 否则 budget.confirmed 挂不上订单,硬闸门永不放行。
+      let resolvedOrderId = d.qimo_order_id || null
+      if (!resolvedOrderId && d.order_no) {
+        const on = String(d.order_no)
+        const { data: ord } = await (svc.from('orders') as any)
+          .select('id').or(`order_no.eq.${on},internal_order_no.eq.${on}`).limit(1).maybeSingle()
+        if (ord?.id) resolvedOrderId = ord.id as string
+      }
       const { error } = await (svc.from('order_finance_events') as unknown as { upsert: (v: unknown, o: unknown) => Promise<{ error: { message: string } | null }> }).upsert({
         request_id: payload.request_id || null,
-        order_id: d.qimo_order_id || null,
+        order_id: resolvedOrderId,
         order_no: d.order_no || null,
         event_type: evt,
         amount: d.amount ?? null,
