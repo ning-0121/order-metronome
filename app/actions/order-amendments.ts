@@ -342,6 +342,22 @@ export async function approveOrderAmendment(
       .eq('id', amendmentId);
   }
 
+  // 角色审计修:改单批准/驳回通知提交人(业务执行)——与延期链对称。此前提交人零感知,驳回诉求石沉大海。
+  try {
+    const requesterId = (amendment as any).requested_by;
+    if (requesterId && requesterId !== user!.id) {
+      await (supabase.from('notifications') as any).insert({
+        user_id: requesterId,
+        type: approved ? 'amendment_approved' : 'amendment_rejected',
+        title: approved ? '✅ 你的改单已批准' : '❌ 你的改单被驳回',
+        message: approved
+          ? `改单已批准并应用${reminders.length ? ':\n' + reminders.join('\n') : ''}`
+          : `改单被驳回${adminNote ? ':' + adminNote : ',请查看原因或调整后重新提交'}`,
+        related_order_id: amendment.order_id,
+      });
+    }
+  } catch (e: any) { console.warn('[approveOrderAmendment] 通知提交人失败(不阻断):', e?.message); }
+
   revalidatePath(`/orders/${amendment.order_id}`);
   return { success: true };
 }

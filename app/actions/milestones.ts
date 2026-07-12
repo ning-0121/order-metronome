@@ -1610,6 +1610,15 @@ export async function updateMilestoneActualDate(
     }
   }
 
+  // 角色审计修:填实际到货/开裁/工厂完成日期会顺移下游节点 due_at,但此入口不经 repo.updateMilestone,
+  //   之前不触发重算 → 交付风险卡长期显示旧排期。显式补 fireRuntimeRecompute(fire-and-forget)。
+  fireRuntimeRecompute(milestone.order_id, {
+    type: 'anchor_changed',
+    source: `milestone:${milestoneId}:actual_date`,
+    severity: 'info',
+    payload: { milestone_id: milestoneId, actual_at: actualAt },
+  });
+
   revalidatePath(`/orders/${milestone.order_id}`);
   revalidatePath('/orders');
   revalidatePath('/dashboard');
