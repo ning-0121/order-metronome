@@ -128,6 +128,21 @@ export async function buildOrderFromAraosPO(formData: FormData): Promise<void> {
   const res = await createOrder(fd, pre.orderNo);
   if (!res.ok || !res.orderId) return back(res.error || '建单失败');
 
+  // 角色审计修:araos PO 原件落成 order_attachment(customer_po)——否则建出的订单缺客户 PO 原件,
+  //   PO 确认节点无展示、shareBuildDocsToFinance 无 PO 可推,与「建单必传客户 PO」纪律冲突。fire-and-forget。
+  if (po.poFileUrl) {
+    try {
+      const fname = decodeURIComponent(po.poFileUrl.split('/').pop()?.split('?')[0] || '') || `客户PO_${po.poNumber || ''}`;
+      await (svc.from('order_attachments') as any).insert({
+        order_id: res.orderId, file_type: 'customer_po', file_url: po.poFileUrl,
+        file_name: fname, mime_type: /\.pdf(\?|$)/i.test(po.poFileUrl) ? 'application/pdf' : null,
+      });
+      // 推外部财务(与手动建单同款:file.uploaded webhook)
+      const { shareBuildDocsToFinance } = await import('@/app/actions/order-build-docs');
+      void shareBuildDocsToFinance(res.orderId);
+    } catch (e: any) { console.warn('[buildOrderFromAraosPO] 落 PO 附件/推财务失败(不阻断):', e?.message); }
+  }
+
   await (svc.from('araos_handoffs_inbox') as any)
     .update({ converted_order_id: res.orderId, status: 'converted', processed_at: new Date().toISOString() })
     .eq('id', inboxId);

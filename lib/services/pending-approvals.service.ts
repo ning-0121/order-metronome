@@ -296,8 +296,10 @@ async function collectPriceApprovals(
     .order('created_at', { ascending: true })
     .limit(100);
 
-  // 仅 finance / admin 可批
-  const canApprove = hasAnyRole(ctx.roles, ['admin', 'finance']);
+  // 角色审计修:报价审批真实门禁是 CAN_APPROVE_PRICE=['admin','sales_manager'](见 price-approvals.ts:19),
+  //   之前写成 ['admin','finance'] → finance 被标「可处理」点进 /admin/price-approvals 被拒(死链),
+  //   sales_manager(真审批人)被标「不归我处理」漏批。对齐真实权限。
+  const canApprove = hasAnyRole(ctx.roles, ['admin', 'sales_manager']);
 
   return ((data || []) as any[]).map(r => ({
     id: r.id,

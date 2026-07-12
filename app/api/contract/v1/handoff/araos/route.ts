@@ -119,10 +119,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   const svc = createServiceRoleClient();
 
   try {
-    // 3) 幂等:已处理过 → 直接返回已存结果(不重复建客户/不重复通知)
+    // 3) 幂等:已处理/已转单过 → 直接返回已存结果(不重复建客户/不重复通知)
+    //    角色审计修:补 'converted' —— 订单已建后 inbox 是 converted,之前只认 'processed' → 重发 deal_won
+    //    穿透幂等闸,重复通知业务「赢单」+ 把 status 从 converted 翻回 processed。
     const { data: existing } = await (svc.from('araos_handoffs_inbox') as any)
       .select('status, qimo_customer_id, customer_matched, match_path').eq('araos_order_id', araosOrderId).maybeSingle();
-    if (existing?.status === 'processed' && existing.qimo_customer_id) {
+    if (existing && ['processed', 'converted'].includes(existing.status) && existing.qimo_customer_id) {
       return NextResponse.json({
         schema_version: 'v1', idempotent: true,
         qimo_customer_id: existing.qimo_customer_id, customer_matched: existing.customer_matched, match_path: existing.match_path,
@@ -175,7 +177,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       d.quantity ? `${d.quantity} 件` : null,
       d.target_delivery ? `交期 ${String(d.target_delivery).slice(0, 10)}` : null,
     ].filter(Boolean).join(' · ');
-    await notifyUsersByRole(svc, ['sales', 'sales_manager', 'order_manager', 'admin'], {
+    await notifyUsersByRole(svc, ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'admin'], {
+      // 角色审计修:补 merchandiser(业务执行=真正接手一键建单的角色,含在 CAN_CREATE_ORDER),之前漏发
       type: isSample ? 'araos_sample_request' : 'araos_deal_won',
       title: `${isSample ? '🧵 araos 打样/寄样' : '🎉 araos 赢单'}:${customerName}`,
       message: `${dealBits || (isSample ? '新样单' : '新赢单')} —— 客户已${matchPath === 'created' ? '新建' : '匹配'}到系统。${isSample ? '请在报价/样单流程处理。' : '到「订单中心 · araos 待建单」一键建单(客户/款色/数量/PO原件已预填,补运营字段即可;生产链不自动建单)。'}${d.note ? ' 备注:' + d.note : ''}`,
