@@ -133,10 +133,6 @@ export function parseFabricLedger(buffer: Buffer): FabricLedgerParseResult {
       const row = rows[r] || [];
       const get = (k: string): unknown => (col[k] != null ? row[col[k]] : undefined);
 
-      // 小计/合计/总金额/标题行/重复表头 → 跳过(否则金额重复计入 / 表头当数据)
-      const rowText = row.map(s).join('');
-      if (/总金额|合计|小计|总计|明细表汇总|采购数量|实到数量/.test(rowText)) continue;
-
       const rawOrder = s(get('orderNoRaw'));
       const rawFabric = s(get('fabricName'));
       const color = s(get('color'));
@@ -144,6 +140,12 @@ export function parseFabricLedger(buffer: Buffer): FabricLedgerParseResult {
       const unitPriceExTax = num(get('unitPriceExTax'));
       const orderedKg = num(get('orderedKg'));
       const receivedKg = num(get('receivedKg'));
+
+      // 跳过 标题/重复表头/小计合计行。P2-14:关键词只在结构列(订单号/面料/颜色)判,
+      // 不再对整行拼接做子串匹配 —— 否则备注/客户含「合计/小计」会误伤真数据行、金额漏计。
+      const structText = `${rawOrder} ${rawFabric} ${color}`;
+      if (rawOrder === '订单号' || /明细表汇总|采购数量|实到数量/.test(structText)) continue;  // 重复表头/标题
+      if (/总金额|合计|小计|总计/.test(structText)) continue;                                    // 小计/合计
 
       // 纯空行(本行自身所有关键格都空)→ 跳过,不做填充
       if (!rawOrder && !rawFabric && !color && amountExTax == null && unitPriceExTax == null

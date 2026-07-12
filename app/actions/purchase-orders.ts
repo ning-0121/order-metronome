@@ -1177,8 +1177,9 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     // 辅料图示:优先原辅料参考图(image_urls);没有则回落到业务传的排版稿里的**位图文件**
     // (烫标/吊卡 png/jpg 等 —— 走 attachment_files;PDF/AI/CDR 不能内嵌,只进附件清单页)。
     const IMG_EXT = /\.(png|jpe?g|gif)(\?|$)/i;   // ExcelJS 只能嵌 png/jpeg/gif(webp 不支持)
+    // P2-13 审计:image_urls 若是 .webp,内嵌循环默认按 jpeg 塞 → Excel 破图。排除 webp,让 fallback 接手。
     const imgFromUrls = (Array.isArray(pi.image_urls) ? pi.image_urls : [])
-      .find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u));
+      .find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u) && !/\.webp(\?|$)/i.test(u));
     const imgFromAtt = (Array.isArray(pi.attachment_files) ? pi.attachment_files : [])
       .map((f: any) => (typeof f === 'string' ? f : f?.url))
       .find((u: any) => typeof u === 'string' && /^https?:\/\//.test(u) && IMG_EXT.test(u));
@@ -1341,7 +1342,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
       row.getCell(2).alignment = { vertical: 'top', wrapText: true };
       row.eachCell((cell) => { cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
       const urls = (Array.isArray(pi.image_urls) ? pi.image_urls : [])
-        .filter((u: any) => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 3);
+        .filter((u: any) => typeof u === 'string' && /^https?:\/\//.test(u) && !/\.webp(\?|$)/i.test(u)).slice(0, 3);   // P2-13:排除 webp(ExcelJS 不支持,会破图)
       for (let i = 0; i < urls.length; i++) {
         try {
           const resp = await fetch(urls[i], { signal: AbortSignal.timeout(8000) });

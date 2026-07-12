@@ -431,9 +431,14 @@ export async function approveDeferralStep(delayRequestId: string, note?: string,
   const { roleCn } = await import('@/lib/domain/deferral-routing');
   let svc: any; try { svc = createServiceRoleClient(); } catch { svc = userClient; }
   const { data: dr } = await (svc.from('delay_requests') as any)
-    .select('id, order_id, status, approval_chain, approvals, current_step, reschedule_mode, impacts_final_delivery').eq('id', delayRequestId).maybeSingle();
+    .select('id, order_id, status, approval_chain, approvals, current_step, reschedule_mode, impacts_final_delivery, requested_by').eq('id', delayRequestId).maybeSingle();
   if (!dr) return { error: '改期申请不存在' };
   if ((dr as any).status !== 'pending') return { error: '该申请已处理' };
+  // 自批门禁 P2-12(2026-07-12):不能审批自己提交的改期(与 approveDelayRequestCore:564 同口径;admin 例外)。
+  //   放在最前 → 也避免了"末位先写 current_step 再调 core、core 拒自批却不回滚"的脏态。
+  if ((dr as any).requested_by === user.id && !roles.includes('admin')) {
+    return { error: '不能审批自己提交的改期申请,请由他人(下游团队/管理员)确认' };
+  }
   const chain: string[] = Array.isArray((dr as any).approval_chain) ? (dr as any).approval_chain : [];
   if (chain.length === 0) return { error: '该申请无审批链(旧单请走原审批入口)' };
   const step = Number((dr as any).current_step) || 0;

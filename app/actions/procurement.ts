@@ -1049,8 +1049,14 @@ export async function recordGoodsReceipt(
     .select('received_qty').eq('line_item_id', lineItemId).neq('inspection_result', 'reject');
   const totalReceived = (receipts || []).reduce((s: number, r: any) => s + (Number(r.received_qty) || 0), 0);
 
+  // P2-3 审计:合格但【未收够】(部分验收)不锁死为 accepted —— accepted 只能→closed,剩余量无法再验收入账、
+  //   还从待验收队列消失。保持 arrived 让剩余量继续验收累加;累计达标(≥订购量,0.5% 容差)才真 accepted。
+  const orderedQty = Number((line as any).ordered_qty) || 0;
+  const reachedFull = orderedQty <= 0 || totalReceived >= orderedQty * 0.995;
+  const finalStatus = (payload.result === 'pass' && !reachedFull) ? (line as any).line_status : nextStatus;
+
   const { error: upErr } = await (supabase.from('procurement_line_items') as any)
-    .update({ line_status: nextStatus, received_qty: totalReceived, received_at: now, received_by: access.userId, updated_at: now })
+    .update({ line_status: finalStatus, received_qty: totalReceived, received_at: now, received_by: access.userId, updated_at: now })
     .eq('id', lineItemId);
   if (upErr) return { error: upErr.message };
 
@@ -1071,11 +1077,11 @@ export async function recordGoodsReceipt(
     const { syncGoodsReceiptToFinance } = await import('@/lib/integration/finance-sync');
     await syncGoodsReceiptToFinance({ po_no: (line as any).po_no ?? null, line_id: lineItemId, order_id: line.order_id,
       material_name: (line as any).material_name ?? null, ordered_qty: (line as any).ordered_qty ?? null,
-      received_qty_total: totalReceived, inspection_result: payload.result, line_status: nextStatus });
+      received_qty_total: totalReceived, inspection_result: payload.result, line_status: finalStatus });
   } catch (e: any) { console.warn('[recordGoodsReceipt] 收货回财务失败(不阻断):', e?.message); }
 
   await logProcurement(supabase, lineItemId, line.order_id, 'inspect',
-    line.line_status, nextStatus,
+    line.line_status, finalStatus,
     `验收 ${payload.result === 'pass' ? '通过' : payload.result === 'concession' ? '让步接收' : '拒收'}：实收 ${payload.received_qty}${payload.defect_notes ? '，' + payload.defect_notes : ''}`,
     { result: payload.result, received_qty: payload.received_qty, aql: payload.aql_level });
 
