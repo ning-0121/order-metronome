@@ -4,6 +4,7 @@ import { getProductionCenter } from '@/app/actions/production-center';
 import { isStageInitOpen } from '@/app/actions/production-stage-init';
 import { ProductionCenterClient } from './ProductionCenterClient';
 import { ReconcileExportButton } from './ReconcileExportButton';
+import { SchedulingBoard } from '@/components/production/SchedulingBoard';
 
 /**
  * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
@@ -55,6 +56,13 @@ export default async function ProductionCenterPage() {
       </div>
 
       <ProductionCenterClient rows={rows} summary={summary} />
+
+      {/* 排产工作台(生产主管/管理员):把待排产的款派给工厂 */}
+      {canInit && (
+        <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
+          <SchedulingBoard />
+        </div>
+      )}
 
       <p className="mt-4 text-xs text-gray-400">
         阶段口径:新订单待采购=有料未下单/未起料 · 物料在途=已下单未到齐 · 开生产待排单=料齐未开裁 · 生产中=已开裁未完工 · 待发货=尾查/工厂完成、未出运。出运后离开本中心。风险单=开裁/工厂完成节点逾期且未处置(可在订单里申请改期)。

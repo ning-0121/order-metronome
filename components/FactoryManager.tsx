@@ -47,10 +47,18 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
       address: f.address || '',
       cooperation_status: f.cooperation_status || 'active',
       product_categories: Array.isArray(f.product_categories) ? f.product_categories : [],
+      quality_grades: Array.isArray((f as any).quality_grades) ? (f as any).quality_grades : [],
+      weave_types: Array.isArray((f as any).weave_types) ? (f as any).weave_types : [],
+      can_package: (f as any).can_package ?? false,
+      order_capabilities: Array.isArray((f as any).order_capabilities) ? (f as any).order_capabilities : [],
       worker_count: f.worker_count || '',
       monthly_capacity: f.monthly_capacity || '',
       notes: f.notes || '',
     });
+  }
+  // 多选切换(品质/织造/订单类型)
+  function toggleArr(field: string, v: string) {
+    setForm(f => { const arr = Array.isArray(f[field]) ? f[field] : []; return { ...f, [field]: arr.includes(v) ? arr.filter((x: string) => x !== v) : [...arr, v] }; });
   }
 
   function toggleCategory(cat: string) {
@@ -73,6 +81,10 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
       address: form.address || null,
       cooperation_status: form.cooperation_status || 'active',
       product_categories: form.product_categories,
+      quality_grades: form.quality_grades || [],
+      weave_types: form.weave_types || [],
+      can_package: form.can_package ?? null,
+      order_capabilities: form.order_capabilities || [],
       worker_count: form.worker_count ? parseInt(form.worker_count) : null,
       monthly_capacity: form.monthly_capacity ? parseInt(form.monthly_capacity) : null,
       notes: form.notes || null,
@@ -150,6 +162,27 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
                           (Array.isArray(form.product_categories) && form.product_categories.includes(cat)) ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-white border-gray-200 text-gray-600'
                         }`}>{cat}</button>
                     ))}
+                  </div>
+                </div>
+                {/* 排产能力(P1):品质 / 织造 / 能否包装 / 能接订单类型 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">擅长品质</label>
+                    <div className="flex flex-wrap gap-1.5">{['高', '中', '跑量'].map((v) => (
+                      <button key={v} type="button" onClick={() => toggleArr('quality_grades', v)} className={`px-2.5 py-1 rounded-md text-xs font-medium border ${(form.quality_grades || []).includes(v) ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-white border-gray-200 text-gray-600'}`}>{v}</button>))}</div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">织造</label>
+                    <div className="flex flex-wrap gap-1.5">{['针织', '梭织'].map((v) => (
+                      <button key={v} type="button" onClick={() => toggleArr('weave_types', v)} className={`px-2.5 py-1 rounded-md text-xs font-medium border ${(form.weave_types || []).includes(v) ? 'bg-sky-100 border-sky-300 text-sky-700' : 'bg-white border-gray-200 text-gray-600'}`}>{v}</button>))}</div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">能接订单类型</label>
+                    <div className="flex flex-wrap gap-1.5">{['清加工', '经销单', '委托加工'].map((v) => (
+                      <button key={v} type="button" onClick={() => toggleArr('order_capabilities', v)} className={`px-2.5 py-1 rounded-md text-xs font-medium border ${(form.order_capabilities || []).includes(v) ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-gray-200 text-gray-600'}`}>{v}</button>))}</div>
+                  </div>
+                  <div className="flex items-end">
+                    <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={!!form.can_package} onChange={(e) => setForm((f) => ({ ...f, can_package: e.target.checked }))} className="rounded border-gray-300" />能否包装</label>
                   </div>
                 </div>
                 <div>
