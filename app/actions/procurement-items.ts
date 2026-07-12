@@ -1438,6 +1438,42 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
   return { ok: true };
 }
 
+/**
+ * 退回采购项:已确认/复核/完成的核料项 → 退回「草稿」,让业务补排版稿 / 改料后重核。
+ * 护栏:已归入采购单(purchase_order_id 非空)的执行行 → 禁退(改走采购单删行 / 退货);
+ * 未下单的执行行连带清掉(退回后重核会重新生成,不留孤儿)。
+ */
+export async function revertProcurementItemToDraft(itemId: string, orderId: string): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
+
+  const svc = createServiceRoleClient();
+  const { data: item } = await (svc.from('procurement_items') as any)
+    .select('id, order_id, status, item_no, material_name').eq('id', itemId).maybeSingle();
+  if (!item) return { error: '采购项不存在(可能已删)' };
+  if ((item as any).status === 'draft') return { error: '已是草稿,无需退回' };
+
+  // 护栏:已归采购单的执行行 → 禁退(否则冲乱 PO 合计 / 已下单量)
+  const { data: placed } = await (svc.from('procurement_line_items') as any)
+    .select('id').eq('procurement_item_id', itemId).not('purchase_order_id', 'is', null).limit(1);
+  if ((placed || []).length > 0) return { error: '该采购项已下单(执行行已归入采购单),不能退回。请走采购单删行 / 退货' };
+
+  // 清未下单执行行(退回草稿后重核重生成)
+  await (svc.from('procurement_line_items') as any).delete().eq('procurement_item_id', itemId).is('purchase_order_id', null);
+
+  const { error } = await (svc.from('procurement_items') as any).update({
+    status: 'draft', confirmed_by: null, confirmed_at: null, confirmed_source_snapshot: null,
+    needs_reconfirm: false, updated_at: new Date().toISOString(),
+  }).eq('id', itemId);
+  if (error) return { error: friendlyError(error) };
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // B3a 执行链打通:采购项(确认)→ 执行行 · 收货状态联动 · 领料核销派生
 // ADR-004 第3层→第4层。本阶段起本 action 可写 procurement_line_items(桥),

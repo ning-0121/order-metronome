@@ -6,7 +6,7 @@ import {
   listProcurementItems, consolidateOrderProcurementItems, getProcurementItemSources,
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages, updateProcurementItemAttachments,
   generateExecutionLines, getOrderProcurementFulfillment,
-  listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow,
+  listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow, revertProcurementItemToDraft,
   saveBomBudgetUnitPrice, saveBomSupplyMode, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
   mergeProcurementItems,
 } from '@/app/actions/procurement-items';
@@ -179,6 +179,14 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     const r = await deleteProcurementItemRow(it.id);
     if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
     setMsg('✅ 已删除采购项'); if (selId === it.id) setSelId(null); await reload();
+  }
+
+  // 退回采购项:已确认/复核/完成 → 退回草稿(补排版稿/改料后重核);已下单的禁退
+  async function revertItem(it: any) {
+    if (!(await confirm({ title: `退回采购项「${it.item_no || it.material_name || ''}」？`, message: '退回到「草稿」,可补排版稿 / 改料后重新核料确认。未下单的执行行会一并清掉(重核会重生成);已下单的不能退回。', danger: true, confirmText: '退回' }))) return;
+    const r = await revertProcurementItemToDraft(it.id, orderId);
+    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
+    setMsg('↩ 已退回草稿'); await reload();
   }
 
   // 人工合并:把选中的同物料另一条(mergeSrc)合并进本项(sel 保留、源删除)
@@ -1090,9 +1098,12 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                   <td className="py-2 px-2"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{statusLabel(it.status)}</span></td>
                   <td className="py-2 px-2 whitespace-nowrap">
                     <span className="text-xs text-indigo-600">{selId === it.id ? '收起' : '展开'}</span>
-                    {it.status === 'draft' && (
+                    {it.status === 'draft' ? (
                       <button onClick={e => { e.stopPropagation(); delItem(it); }}
                         title="删除整条(仅草稿可删)" className="ml-2 text-xs text-red-500 hover:text-red-700 hover:underline">删除</button>
+                    ) : (
+                      <button onClick={e => { e.stopPropagation(); revertItem(it); }}
+                        title="退回草稿(补排版稿/改料后重核;已下单不可退)" className="ml-2 text-xs text-amber-600 hover:text-amber-800 hover:underline">退回</button>
                     )}
                   </td>
                 </tr>
