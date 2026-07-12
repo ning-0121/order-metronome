@@ -9,6 +9,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { randomUUID } from 'crypto';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 import { parseFabricLedger, type FabricLedgerRow } from '@/lib/services/fabric-ledger-parser';
@@ -187,9 +188,15 @@ export interface SupplierGroup {
 
 const ORDER_KEY = (l: LedgerLine) => (l.order_no_raw || '(未标订单)');
 
-/** 读台账:供应商 → 订单 → 明细行(推财务按订单粒度)。 */
+const EMPTY_LEDGER = { groups: [] as SupplierGroup[], grandTotalExTax: 0, grandTotalInclTax: 0 };
+
+/** 读台账:供应商 → 订单 → 明细行(推财务按订单粒度)。含供应商底价 → 仅采购侧/财务可读(P1-1 审计)。 */
 export async function getSupplierLedger(): Promise<{ groups: SupplierGroup[]; grandTotalExTax: number; grandTotalInclTax: number }> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return EMPTY_LEDGER;
+  // 底价门禁:Server Action 是独立端点,不能只靠页面门禁(审计 P1-1)
+  if (await requireRoleGroup(supabase, user.id, 'CAN_SEE_PROCUREMENT_FLOOR')) return EMPTY_LEDGER;
   const { data, error } = await (supabase.from('supplier_fabric_ledger') as any)
     .select('*')
     .order('supplier_name_raw', { ascending: true })
@@ -366,29 +373,48 @@ export async function pushLedgerGroupToFinance(params: { supplierNameRaw: string
     const internalNo = lines.find((l) => l.internal_order_no)?.internal_order_no || null;
     const orderId = lines.find((l) => l.order_id)?.order_id || null;
 
-    // 单号 LG-YYYYMMDD-NNN
+    // 单号 LG-YYYYMMDD-NNN(P2-5:count+1 非原子仍待收敛为共享编号工具;此处靠下方原子认领防重推)
     const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const { count } = await (svc.from('supplier_ledger_payables') as any).select('id', { count: 'exact', head: true });
     const billNo = `LG-${dateTag}-${String((count || 0) + 1).padStart(3, '0')}`;
+    const payableId = randomUUID();
 
-    const { data: payable, error: pErr } = await (svc.from('supplier_ledger_payables') as any).insert({
+    // ── 原子认领(P1-4 防 TOCTOU 重复推)：条件回写 payable_pushed_at,只认领仍未推的行 ──
+    // 两个并发推同一组:同一 id 集,IS NULL 条件让先提交者一次认领全部行、后者认领 0 行 → 后者回滚退出,
+    // 绝不会双双建 payable / 双双 emit → 杜绝重复应付。
+    const ids = lines.map((l) => l.id);
+    const nowIso = new Date().toISOString();
+    const { data: claimed, error: claimErr } = await (svc.from('supplier_fabric_ledger') as any)
+      .update({ payable_id: payableId, payable_bill_no: billNo, payable_pushed_at: nowIso, updated_at: nowIso })
+      .in('id', ids).is('payable_pushed_at', null).select('id');
+    if (claimErr) return { ok: false, error: friendlyError(claimErr) || '认领失败' };
+    if ((claimed || []).length !== ids.length) {
+      // 并发/部分已推 → 回滚本次认领,让用户刷新重试(只回滚自己盖的戳)
+      await (svc.from('supplier_fabric_ledger') as any)
+        .update({ payable_id: null, payable_bill_no: null, payable_pushed_at: null }).eq('payable_id', payableId);
+      return { ok: false, error: '该组正在被并发推送(或部分已推),请刷新后重试' };
+    }
+
+    // 认领成功 → 建付款申请(用预生成 id;失败则回滚认领,避免行被锁死却无对应付款申请)
+    const { error: pErr } = await (svc.from('supplier_ledger_payables') as any).insert({
+      id: payableId,
       bill_no: billNo, supplier_id: supplierId, supplier_name: supplierName,
       order_no_raw: isUnlabeled ? null : params.orderNoRaw, internal_order_no: internalNo, order_id: orderId,
       line_count: lines.length, amount_ex_tax: amountExTax, tax_rate: taxRate, amount_incl_tax: amountInclTax,
       currency: 'CNY', status: 'submitted', pushed_by: user.id,
-    }).select('id, bill_no').single();
-    if (pErr || !payable) return { ok: false, error: friendlyError(pErr) || '建付款申请失败' };
-
-    // 回写行状态(防重推)
-    await (svc.from('supplier_fabric_ledger') as any)
-      .update({ payable_id: (payable as any).id, payable_bill_no: billNo, payable_pushed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .in('id', lines.map((l) => l.id));
+    });
+    if (pErr) {
+      await (svc.from('supplier_fabric_ledger') as any)
+        .update({ payable_id: null, payable_bill_no: null, payable_pushed_at: null }).eq('payable_id', payableId);
+      return { ok: false, error: friendlyError(pErr) || '建付款申请失败' };
+    }
 
     // emit payable.created(fire-and-forget;失败落 outbox,不阻断)
     try {
       const { emitProcurementPayableToFinance, fetchOrderRefs } = await import('@/lib/integration/finance-sync');
       let orderRefs: unknown[] = [];
-      if (orderId) { try { orderRefs = (await fetchOrderRefs([orderId])) as unknown[]; } catch { /* ignore */ } }
+      // P2-6:fetchOrderRefs(db, ids) 首参须是 client;原写成 fetchOrderRefs([orderId]) → order_refs 恒空
+      if (orderId) { try { orderRefs = (await fetchOrderRefs(svc, [orderId])) as unknown[]; } catch { /* ignore */ } }
       const financeLines = lines.map((l) => ({
         material_name: l.fabric_name ?? null,
         specification: l.color ?? null,
@@ -400,7 +426,7 @@ export async function pushLedgerGroupToFinance(params: { supplierNameRaw: string
         net_amount: round2(Number(l.amount_incl_tax) || 0), // 含税(推给财务的口径)
       }));
       await emitProcurementPayableToFinance({
-        source_ref: (payable as any).id, bill_no: billNo,
+        source_ref: payableId, bill_no: billNo,
         supplier_name: supplierName, supplier_id: supplierId,
         amount: amountInclTax, currency: 'CNY',
         description: `面料台账应付 · ${supplierName} · ${isUnlabeled ? '未标订单' : params.orderNoRaw}${taxRate != null ? ` · 税率${Math.round(taxRate * 100)}%` : ' · 不含税'}`,
@@ -430,6 +456,9 @@ export interface LedgerImportBatch {
 /** 列出导入批次(最近在前),带该批已推财务的行数。 */
 export async function getLedgerImports(): Promise<LedgerImportBatch[]> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  if (await requireRoleGroup(supabase, user.id, 'CAN_SEE_PROCUREMENT_FLOOR')) return []; // 批次带金额,底价门禁(P1-1)
   const { data: imports } = await (supabase.from('supplier_ledger_imports') as any)
     .select('id, file_name, sheet_count, row_count, total_amount_ex_tax, created_at')
     .order('created_at', { ascending: false });
@@ -500,6 +529,9 @@ export async function exportSupplierLedgerExcel(params?: { supplierNameRaw?: str
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { error: '未登录' };
+    // 导出含供应商底价 → 仅采购侧/财务(P1-1 审计:导出 action 是独立端点,必须显式门禁)
+    const gate = await requireRoleGroup(supabase, user.id, 'CAN_SEE_PROCUREMENT_FLOOR', '无权导出供应商台账(含底价)');
+    if (gate) return { error: gate };
 
     let q = (supabase.from('supplier_fabric_ledger') as any)
       .select('*')

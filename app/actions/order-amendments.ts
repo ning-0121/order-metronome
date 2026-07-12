@@ -198,6 +198,12 @@ export async function approveOrderAmendment(
   if (fetchErr || !amendment) return { error: '申请不存在' };
   if (!isApprovalPending(amendment.status)) return { error: '此申请已处理' };
 
+  // 自批门禁 P1-5(2026-07-12):不能审批自己提交的改单(改价/改量会打穿财务应收,须他人复核;
+  // 与 delays.ts approveDelayRequestCore 同口径;admin 例外)。
+  if (approved && !isAdmin && (amendment as any).requested_by === user?.id) {
+    return { error: '不能审批自己提交的改单,请由他人复核' };
+  }
+
   // 复审 P1(TOCTOU):窗口期只在提交时校验;审批常隔数天,此时订单可能已推进关键节点(如已开裁)。
   // 批准前用「当前」完成节点重校验每个待改字段,窗口已关则自动驳回,防已裁片后仍改小数量致静默错配。
   if (approved && amendment.fields_to_change) {

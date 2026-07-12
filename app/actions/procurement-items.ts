@@ -179,15 +179,28 @@ export async function deductFromStock(itemId: string, orderId: string): Promise<
   // 否则执行行仍是抵扣前全量 → 归单/导出/下单发给供应商的量把已抵扣的库存重复采购。
   // 已归采购单的行(purchase_order_id 非空)不静默改,标 needs_reconfirm 让采购走补/退。
   try {
-    await (supabase.from('procurement_line_items') as any)
+    // 审计修 P1-3(2026-07-12):只同步【整量行 size 为空】,与 consolidate 同口径(:799 N1)。
+    // 原来漏了 .is('size',null) → 已按尺码拆的每条执行行都被写成同一标量 remaining,Σ 成行数倍 → 成倍超采多付。
+    let sync = (supabase.from('procurement_line_items') as any)
       .update({ ordered_qty: remaining, updated_at: new Date().toISOString() })
       .eq('procurement_item_id', itemId)
       .in('line_status', ['draft', 'pending_order'])
       .is('purchase_order_id', null);
+    try { sync = sync.is('size', null); } catch { /* size 列未迁移:退回老口径整行覆盖 */ }
+    await sync;
+    // 已下单行 或 尺码拆分的未下单行(size 非空,标量覆盖会各码变总量=超采)→ 标 needs_reconfirm 让采购重生成
     const { count: placedCount } = await (supabase.from('procurement_line_items') as any)
       .select('id', { count: 'exact', head: true })
       .eq('procurement_item_id', itemId).not('purchase_order_id', 'is', null);
-    if ((placedCount || 0) > 0) {
+    let splitCount = 0;
+    try {
+      const { count } = await (supabase.from('procurement_line_items') as any)
+        .select('id', { count: 'exact', head: true })
+        .eq('procurement_item_id', itemId).not('size', 'is', null)
+        .in('line_status', ['draft', 'pending_order']).is('purchase_order_id', null);
+      splitCount = count || 0;
+    } catch { /* size 列未迁移:无拆分行概念 */ }
+    if ((placedCount || 0) > 0 || splitCount > 0) {
       await (supabase.from('procurement_items') as any).update({ needs_reconfirm: true }).eq('id', itemId);
     }
   } catch (e: any) { console.warn('[deductFromStock] 执行行数量同步失败(不阻断):', e?.message); }
