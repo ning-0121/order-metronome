@@ -642,6 +642,7 @@ export async function syncFileToFinance(payload: {
 export function buildShippingInvoicePayload(input: {
   qimo_order_id: string; order_no?: string | null; internal_order_no?: string | null;
   currency: string; invoice_amount: number | null; invoice_qty?: number | null;
+  exchange_rate?: number | null;
   deposit_raw?: string | null;
   scopes?: Array<{ scope: string; amount: number | null; qty: number | null }>;
 }): Record<string, unknown> {
@@ -653,6 +654,9 @@ export function buildShippingInvoicePayload(input: {
     currency: input.currency || 'USD',
     invoice_amount: r2(input.invoice_amount),
     invoice_qty: input.invoice_qty != null ? Number(input.invoice_qty) : null,
+    // 角色审计修:带订单锁汇率 → 财务折 RMB 应收用真实汇率,不再取兜底~7(USD出口单差价可上万)
+    exchange_rate: (input.exchange_rate != null && Number.isFinite(Number(input.exchange_rate)) && Number(input.exchange_rate) > 0)
+      ? Number(input.exchange_rate) : null,
     deposit_raw: input.deposit_raw ?? null,
     scopes: (input.scopes ?? []).map((s) => ({ scope: s.scope, amount: r2(s.amount), qty: s.qty != null ? Number(s.qty) : null })),
     source: 'qimo_shipping_ci',

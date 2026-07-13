@@ -182,6 +182,18 @@ async function emitShippingInvoiceToFinance(svc: any, orderId: string): Promise<
     const { data: piRow } = await (svc.from('order_pi') as any).select('data').eq('order_id', orderId).maybeSingle();
     const depositRaw = ((piRow as any)?.data as PIData | undefined)?.deposit ?? null;
 
+    // 角色审计修:取订单锁汇率(order_cost_baseline.exchange_rate,报价时锁的 RMB/USD)传给财务折应收。
+    //   仅非 CNY(USD 出口)需要;取不到留 null(财务侧仍走兜底并告警,但正常都有)。
+    let exchangeRate: number | null = null;
+    if (String(currency).toUpperCase() !== 'CNY' && String(currency).toUpperCase() !== 'RMB') {
+      try {
+        const { data: base } = await (svc.from('order_cost_baseline') as any)
+          .select('exchange_rate').eq('order_id', orderId).maybeSingle();
+        const r = Number((base as any)?.exchange_rate);
+        if (Number.isFinite(r) && r > 0) exchangeRate = r;
+      } catch { /* 取不到不阻断,财务侧兜底 */ }
+    }
+
     await syncShippingInvoiceToFinance({
       qimo_order_id: orderId,
       order_no: orderRef?.order_no ?? null,
@@ -189,6 +201,7 @@ async function emitShippingInvoiceToFinance(svc: any, orderId: string): Promise<
       currency,
       invoice_amount: invoiceAmount,
       invoice_qty: invoiceQty,
+      exchange_rate: exchangeRate,
       deposit_raw: depositRaw,
       scopes,
       // P2 修:有款缺成交价 → invoice_amount 只含有价款、偏低。告知财务别当足额入账。
