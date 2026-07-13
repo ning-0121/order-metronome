@@ -71,6 +71,10 @@ export const REPORT_STEP_ALIASES: Record<string, string[]> = {
   mid_qc_check: ['mid_qc_check', 'mid_qc_sales_check'],
   final_qc_check: ['final_qc_check', 'final_qc_sales_check'],
   inspection_release: ['inspection_release', 'final_qc_sales_check'],
+  // 角色审计补:封样交付报告在 V2 承载于「产前样寄出/确认」节点(V2 无独立封样节点)
+  pre_production_sample_ready: ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
+  // 注:面料验收报告(materials_received_inspected)在 V2 模板无对应节点 —— 属真·缺节点,别名救不了,
+  //     附件仍存 order_attachments 但不联动里程碑;需产品决定是否给 V2 加「面料/原料检验」节点。
 };
 
 /**

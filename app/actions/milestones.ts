@@ -561,7 +561,9 @@ export async function markMilestoneDone(
       processing_fee_confirmed: ['internal_quote'],
       procurement_order_placed: ['procurement_order'],
       mid_qc_check: ['qc_report', 'mid_qc_report'],
+      mid_qc_sales_check: ['qc_report', 'mid_qc_report'],       // 角色审计补:V2「中期验货」节点 key
       final_qc_check: ['qc_report', 'final_qc_report'],
+      final_qc_sales_check: ['qc_report', 'final_qc_report'],   // 角色审计补:V2「尾期验货」节点 key
       inspection_release: ['qc_report', 'inspection_report'],
       packing_method_confirmed: ['packing_requirement', 'packing_photo'],
       booking_done: ['packing_list'],
@@ -601,7 +603,9 @@ export async function markMilestoneDone(
       // 最宽松：该订单下有任意文件，文件名包含节点关键字（如"中查"）
       const stepNameMap: Record<string, string> = {
         mid_qc_check: '中查',
+        mid_qc_sales_check: '中查',       // 角色审计补:V2 节点 key
         final_qc_check: '尾查',
+        final_qc_sales_check: '尾查',     // 角色审计补:V2 节点 key
         inspection_release: '验货',
         booking_done: '订舱',
       };

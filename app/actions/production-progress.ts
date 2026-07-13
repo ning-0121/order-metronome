@@ -298,14 +298,17 @@ export async function getMilestoneIdForStep(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
+  // 角色审计修:走 REPORT_STEP_ALIASES(V1报告key → V1原样+V2承载节点),否则 V2 订单里
+  //   报告key(如 mid_qc_check)与实际节点(mid_qc_sales_check)对不上 → 附件关联不到节点、UI「自动同步进度条」是假的。
+  const candidates = REPORT_STEP_ALIASES[stepKey] || [stepKey];
   const { data } = await (supabase.from('milestones') as any)
-    .select('id')
+    .select('id, step_key')
     .eq('order_id', orderId)
-    .eq('step_key', stepKey)
-    .limit(1)
-    .single();
-
-  return { data: data?.id };
+    .in('step_key', candidates);
+  // 按候选顺序取第一个命中的节点(V1 优先,回落 V2)
+  const rows = (data || []) as any[];
+  const hit = candidates.map((k) => rows.find((r) => r.step_key === k)).find(Boolean);
+  return { data: hit?.id };
 }
 
 /**

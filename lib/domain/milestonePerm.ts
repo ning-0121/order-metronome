@@ -10,7 +10,11 @@
  *  - sales ↔ merchandiser 互通;
  *  - merchGroup(merchandiser/production/qc/quality)内部互通;
  *  - admin_assistant 可操作 sales 的双签节点(评审会等)。
- *  注意:不含 production_manager(与原 merchGroup 一致,避免扩权)。
+ *  - 生产主管(production_manager)可操作生产圈(merchGroup)+ 自己的节点。
+ *
+ * 角色审计修(2026-07-12):原不含 production_manager,但客户端 MilestoneActions.canModify 含它
+ * → 生产部经理看到「完成/进行中/阻塞」按钮点了被服务端拒(UI 与服务端口径打架)。生产主管管生产,
+ * 操作生产/QC 节点本在其职责内 → 服务端对齐授予(镜像客户端),而非砍掉 UI 功能。
  */
 const MERCH_GROUP = ['merchandiser', 'production', 'qc', 'quality'];
 
@@ -23,6 +27,9 @@ export function milestoneOwnerRoleMatches(userRoles: string[] | null | undefined
     if ((or === 'sales' && nr === 'merchandiser') || (or === 'merchandiser' && nr === 'sales')) return true;
     if (MERCH_GROUP.includes(or) && MERCH_GROUP.includes(nr)) return true;
     if (nr === 'admin_assistant' && or === 'sales') return true;
+    // 生产主管 ↔ 生产圈/生产主管(与客户端 canModify 对齐)
+    if ((or === 'production_manager' && (MERCH_GROUP.includes(nr) || nr === 'production_manager'))
+      || (nr === 'production_manager' && (MERCH_GROUP.includes(or) || or === 'production_manager'))) return true;
     return false;
   });
 }
