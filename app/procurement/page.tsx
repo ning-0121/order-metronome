@@ -53,12 +53,12 @@ export default async function ProcurementCenterPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-6 flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">🛒 采购中心</h1>
-          <p className="mt-1 text-sm text-gray-500">订单是主线 · 待下单 / 待催货 / 待验收 · 风险中心</p>
+      <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
+        <div className="shrink-0">
+          <h1 className="text-2xl font-bold text-gray-900 whitespace-nowrap">🛒 采购中心</h1>
+          <p className="mt-1 text-sm text-gray-500 whitespace-nowrap">订单是主线 · 待下单 / 待催货 / 待验收 · 风险中心</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <Link href="/suppliers" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-gray-700 border border-gray-200 text-sm font-medium hover:bg-gray-50">
             🏢 供应商
           </Link>
