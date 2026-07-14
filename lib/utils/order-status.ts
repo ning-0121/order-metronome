@@ -12,6 +12,23 @@ export interface OrderStatus {
   riskFactors: string[];
 }
 
+export interface RedCulprit { name: string; daysOverdue: number; kind: 'blocked' | 'overdue' }
+
+/**
+ * 揪出把订单拖红的节点:阻塞 + 超期的「进行中」节点(带逾期天数)。
+ * 与 computeOrderStatus 的 RED 条件 1/2 同口径,供列表红牌提示 + 红单体检面板共用。
+ */
+export function getRedCulprits(milestones: Milestone[], now: Date = new Date()): RedCulprit[] {
+  const out: RedCulprit[] = [];
+  for (const m of milestones || []) {
+    if (isBlockedStatus(m.status)) { out.push({ name: m.name, daysOverdue: 0, kind: 'blocked' }); continue; }
+    if (isActiveStatus(m.status) && m.due_at && isAfter(startOfDay(now), startOfDay(new Date(m.due_at)))) {
+      out.push({ name: m.name, daysOverdue: differenceInCalendarDays(startOfDay(now), startOfDay(new Date(m.due_at))), kind: 'overdue' });
+    }
+  }
+  return out;
+}
+
 /**
  * 订单风险预判算法（三色灯）
  *

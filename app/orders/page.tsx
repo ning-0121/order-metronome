@@ -1,7 +1,8 @@
 import { getOrders } from '@/app/actions/orders';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
-import { computeOrderStatus } from '@/lib/utils/order-status';
+import { computeOrderStatus, getRedCulprits } from '@/lib/utils/order-status';
+import { RedOrderHealthPanel } from '@/components/RedOrderHealthPanel';
 import { OrderSearchBar } from '@/components/OrderSearchBar';
 import { ExportProductionSheetButton } from '@/components/ExportProductionSheetButton';
 import { LeftoverExportButton } from '@/components/LeftoverExportButton';
@@ -279,6 +280,26 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const trueOverdue = overdueOrders.filter(x => !x.pendingDelay);
   const pendingDelayOrders = overdueOrders.filter(x => x.pendingDelay);
 
+  // 红单体检（方案 C·B）：把红单按「元凶节点 + 交期远近」归类，挑出「疑似没回填」给跟单补录
+  const overdueIds = new Set(overdueOrders.map(x => x.order.id));
+  const nowDate = new Date(now);
+  const redItems = (orders as any[]).reduce((acc: any[], o: any) => {
+    if (DONE_LIFECYCLE.has(o.lifecycle_status || '')) return acc;
+    if (computeOrderStatus(o.milestones || []).color !== 'RED') return acc;
+    const culprits = getRedCulprits(o.milestones || [], nowDate);
+    const { date: deliveryDate } = getEffectiveDeliveryDate(o);
+    const daysToDelivery = deliveryDate ? Math.ceil((new Date(deliveryDate + 'T23:59:59').getTime() - now) / 86400000) : null;
+    const category: 'overdue' | 'near' | 'unfilled' =
+      overdueIds.has(o.id) ? 'overdue'
+        : (daysToDelivery != null && daysToDelivery <= 7) ? 'near'
+          : 'unfilled';
+    acc.push({
+      id: o.id, orderNo: o.order_no, internalNo: o.internal_order_no, customer: o.customer_name,
+      deliveryDate: deliveryDate || null, daysToDelivery, category, culprits,
+    });
+    return acc;
+  }, []);
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* 超期订单警告已下线（2026-04-28）— 用户反馈"重复信息"，超期订单在 /ceo 待办区已聚合 */}
@@ -306,6 +327,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </Link>
         </div>
       </div>
+
+      {/* 红单体检（方案 C·B）：一次看清每个红单被哪个节点拖红 + 疑似没回填给跟单补录 */}
+      <RedOrderHealthPanel items={redItems} />
 
       {/* 用途切换：订单 vs 样品单 */}
       <div className="flex gap-2 mb-4">
@@ -540,7 +564,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     <div className="text-xs text-gray-500 mt-0.5">{order.customer_name}{(order as any).factory_name ? ` · ${(order as any).factory_name}` : ''}</div>
                     {(order as any).po_number && <div className="text-xs text-gray-400 mt-0.5">PO: {(order as any).po_number}</div>}
                   </div>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusConfig.class}`}>{statusConfig.label}</span>
+                  <span title={status.riskFactors.join('；') || undefined} className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusConfig.class}`}>{statusConfig.label}</span>
                 </div>
                 {(mobHold || mobStale) && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
@@ -688,7 +712,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                           <div className="leading-tight space-y-0.5">
                             {/* 状态徽章 + 下单 同一行 */}
                             <div className="flex items-center gap-2 whitespace-nowrap">
-                              <span className={`badge ${statusConfig.class} text-[10px]`}>{statusConfig.label}</span>
+                              <span title={status.riskFactors.join('；') || undefined} className={`badge ${statusConfig.class} text-[10px]`}>{statusConfig.label}</span>
                               <span className="text-xs text-gray-500">
                                 下单 <span className="text-gray-700">{dateStr || '—'}</span>
                                 {timeStr && <span className="text-gray-400 ml-1">{timeStr}</span>}
