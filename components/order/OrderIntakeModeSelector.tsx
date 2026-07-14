@@ -36,6 +36,12 @@ export function OrderIntakeModeSelector({ showPrice = false }: { showPrice?: boo
         本订单系统以 <b>PO 驱动</b>为主路径（订单从已审批报价快照派生）。手工录入为 <b>legacy 回退</b>模式，仍可用。
       </div>
 
+      {/* 套装提醒(2026-07-14):防「1800套读成1800件」再发生 */}
+      <div className="mb-4 rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+        📦 <b>套装提醒</b>：客户按「套」下单的（如 1 套 = 2 件），数量务必<b>按总件数</b>录，或在手工录入里把单位选「<b>套（2件）</b>」。
+        系统一律按<b>件数</b>驱动采购/生产/装箱，<b>选错会少备一半料</b>。PO 解析读到的是件数，遇套装请手动核对总件数再提交。
+      </div>
+
       {/* 模式切换 */}
       <div className="mb-6 inline-flex rounded-xl border border-gray-200 bg-white p-1">
         <button

@@ -1377,6 +1377,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                       <option value="三件套">套（3件）</option>
                     </select>
                   </div>
+                  <p className="mt-1 text-xs text-amber-600">
+                    📦 客户按「套」下单的务必选「套」——如 1800 套选「套（2件）」系统会自动算成 3600 件。选「件」会按件数少备一半料。
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
