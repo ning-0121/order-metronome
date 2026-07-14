@@ -51,6 +51,19 @@ async function userAndRoles(supabase: any): Promise<{ userId?: string; roles: st
   return { userId: user.id, roles };
 }
 
+/**
+ * 该用户是否为订单业务负责人(owner_user_id 或 created_by)。
+ * 用于「订单业务负责人本人放行」(2026-07-13 用户拍板):有些单由业务开发的人一手跟到底,
+ * 其本人应能代表「业务执行」方确认自己的订单,不看 开发/执行 角色标签。
+ */
+async function isOrderBizOwner(supabase: any, orderId?: string, userId?: string): Promise<boolean> {
+  if (!orderId || !userId) return false;
+  const { data: o } = await (supabase.from('orders') as any)
+    .select('owner_user_id, created_by').eq('id', orderId).maybeSingle();
+  if (!o) return false;
+  return (o as any).owner_user_id === userId || (o as any).created_by === userId;
+}
+
 /** 按配置懒建缺失的确认行(幂等;insert 冲突静默忽略)。 */
 async function ensureConfirmationRows(supabase: any, milestone: { id: string; order_id: string; step_key: string; name?: string | null }) {
   const parties = requiredPartiesFor(milestone.step_key);
@@ -111,6 +124,10 @@ export async function listMilestoneConfirmations(milestoneId: string): Promise<{
     for (const p of (profs || [])) nameMap[(p as any).user_id] = (p as any).name;
   }
 
+  // 订单业务负责人本人可代表「业务执行」方确认自己的订单(仅当该节点含 sales_exec 方时才查)
+  const bizOwner = config.some(p => p.key === 'sales_exec')
+    ? await isOrderBizOwner(supabase, (ms as any).order_id, auth.userId) : false;
+
   const byKey = new Map<string, any>((rows || []).map((r: any) => [r.party_key, r]));
   return {
     parties: config.map(p => {
@@ -121,7 +138,7 @@ export async function listMilestoneConfirmations(milestoneId: string): Promise<{
         confirmed_at: row?.confirmed_at || null,
         confirmed_by_name: row?.confirmed_by ? (nameMap[row.confirmed_by] || '已确认') : null,
         note: row?.note || null,
-        canConfirm: canConfirmParty(auth.roles, p),
+        canConfirm: canConfirmParty(auth.roles, p) || (p.key === 'sales_exec' && bizOwner),
       };
     }),
   };
@@ -145,15 +162,20 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
   const stepKey = (ms as any).step_key;
   const party = requiredPartiesFor(stepKey).find(p => p.key === partyKey);
   if (!party) return { error: '该节点没有这个确认方' };
-  if (!canConfirmParty(auth.roles, party)) {
-    return { error: `需要「${party.label}」相关角色(${party.roles.join('/')})才能代表该方确认` };
+  // 订单业务负责人本人可代表「业务执行」方确认自己的订单(不看开发/执行标签)
+  const bizOwner = party.key === 'sales_exec'
+    ? await isOrderBizOwner(supabase, (ms as any).order_id, auth.userId) : false;
+  if (!canConfirmParty(auth.roles, party) && !bizOwner) {
+    return { error: `需要「${party.label}」相关角色(${party.roles.join('/')})或本单业务负责人才能代表该方确认` };
   }
   const msStatus = String((ms as any).status || '').toLowerCase();
   if (msStatus === 'done' || msStatus === '已完成') return { ok: true, allConfirmed: true };
 
   await ensureConfirmationRows(supabase, ms as any);
 
-  const isAdminProxy = !party.roles.some(r => auth.roles.map(x => x.toLowerCase()).includes(r));
+  const roleMatched = party.roles.some(r => auth.roles.map(x => x.toLowerCase()).includes(r));
+  const isAdminProxy = !roleMatched && !bizOwner;   // 真·admin 代确认;订单负责人本人不算代确认
+  const proxyTag = isAdminProxy ? '(管理员代确认)' : (bizOwner && !roleMatched ? '(订单负责人确认)' : '');
   const { error: upErr } = await (supabase.from('milestone_confirmations') as any)
     .update({
       status: 'confirmed', confirmed_by: auth.userId,
@@ -172,8 +194,8 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
     milestone_id: milestoneId,
     order_id: (ms as any).order_id,
     action: 'party_confirmed',
-    note: `「${party.label}」确认${isAdminProxy ? '(管理员代确认)' : ''}${note?.trim() ? ':' + note.trim() : ''}`,
-    payload: { party_key: partyKey, by: auth.userId, admin_proxy: isAdminProxy },
+    note: `「${party.label}」确认${proxyTag}${note?.trim() ? ':' + note.trim() : ''}`,
+    payload: { party_key: partyKey, by: auth.userId, admin_proxy: isAdminProxy, biz_owner: bizOwner && !roleMatched },
   });
 
   // 全齐了吗?
