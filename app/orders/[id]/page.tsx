@@ -35,6 +35,7 @@ import { RescheduleBanner } from '@/components/RescheduleBanner';
 import { OrderDelayPanel } from '@/components/OrderDelayPanel';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { OrderAmendmentPanel } from '@/components/OrderAmendmentPanel';
+import { QuantityCorrectionButton } from '@/components/QuantityCorrectionButton';
 import { CustomerAddOrderPanel } from '@/components/order/CustomerAddOrderPanel';
 import { PerPoOperationsPanel } from '@/components/order/PerPoOperationsPanel';
 import { BuildDocsSupplement } from '@/components/order/BuildDocsSupplement';
@@ -804,6 +805,12 @@ export default async function OrderDetailPage({
               canApprove={isAdmin || currentRoles.some((r) => ['order_manager', 'sales_manager'].includes(r))}
               doneStepKeys={(milestones || []).filter((m: any) => isDoneStatus(m.status)).map((m: any) => m.step_key)}
             />
+            {/* 受控数量修正(方案 C):读错/套装漏算就地改,仅经理级 */}
+            {(isAdmin || currentRoles.some((r) => ['order_manager', 'sales_manager'].includes(r))) && (
+              <div className="mt-3">
+                <QuantityCorrectionButton orderId={orderData.id} currentQty={orderData.quantity} />
+              </div>
+            )}
           </div>
 
           {/* 决策评审面板（仅 admin + 引擎启用） */}
