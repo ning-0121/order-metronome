@@ -8,10 +8,11 @@
  *  - markMilestoneDone 用 requiredPartiesFor() 做完成门禁(缺确认 → 不允许完成);
  *  - 全部确认齐 + 节点不要证据 → 自动完成;要证据 → 提示上传后照常走完成。
  *
- * 部门口径(2026-07-03 用户拍板):
- *  - 业务开发部在客户开发系统(araos)工作到「下 PO」,不进节拍器;
- *  - 节拍器里的「业务」= 业务执行部(sales/sales_manager 账号);
- *  - 跟单(merchandiser)已并入生产部 QC(决策①)。
+ * 部门口径(2026-07-10 归位,取代 2026-07-03 旧口径):
+ *  - sales = 业务开发部;merchandiser = 业务执行部(PO确认后接手到出货);
+ *  - order_manager = 业务执行经理;sales_manager = 开发业务经理;
+ *  - 「业务执行」确认方 = merchandiser(执行) + order_manager(执行经理) + sales_manager(业务经理,跨链)。
+ *    ⚠️ 不含 sales(业务开发):产前样/尾查/出运的业务确认应由业务执行侧完成(2026-07-13 用户拍板)。
  *
  * 纯配置+纯函数,无 DB 依赖 → 进 pre-deploy-check 断言。
  */
@@ -27,7 +28,7 @@ export interface ConfirmationParty {
   hint?: string;
 }
 
-const SALES_EXEC = ['sales', 'sales_manager', 'order_manager'];
+const BIZ_EXEC = ['merchandiser', 'order_manager', 'sales_manager'];   // 业务执行侧(执行+两经理);不含 sales 业务开发
 const FINANCE = ['finance'];
 const PROCUREMENT = ['procurement', 'procurement_manager'];
 /** 生产部(含 QC;跟单 merchandiser 已并入生产部 QC —— 决策①) */
@@ -46,16 +47,16 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
   // 产前样确认 = 采购(原辅料大货品质) + 业务执行(客户/自确认) 双确认
   pre_production_sample_approved: [
     { key: 'procurement', label: '采购部', roles: PROCUREMENT, hint: '大货原辅料品质与样一致' },
-    { key: 'sales_exec', label: '业务执行', roles: SALES_EXEC, hint: '客户确认/自确认通过' },
+    { key: 'sales_exec', label: '业务执行', roles: BIZ_EXEC, hint: '客户确认/自确认通过' },
   ],
   // 尾期验货业务确认 = 业务执行 + QC 双确认(14 节点模板:业务对尾查结果确认放行)
   final_qc_sales_check: [
     { key: 'qc', label: '生产部QC', roles: PRODUCTION_QC, hint: '尾查合格,问题已闭环' },
-    { key: 'sales_exec', label: '业务执行', roles: SALES_EXEC, hint: '验货结果可对客户交付' },
+    { key: 'sales_exec', label: '业务执行', roles: BIZ_EXEC, hint: '验货结果可对客户交付' },
   ],
   // 8. 发货出运 = 业务执行 + 采购(尾料清点归库) + 财务 三方
   shipment_execute: [
-    { key: 'sales_exec', label: '业务执行', roles: SALES_EXEC, hint: '出运安排/单据齐' },
+    { key: 'sales_exec', label: '业务执行', roles: BIZ_EXEC, hint: '出运安排/单据齐' },
     { key: 'procurement', label: '采购部', roles: PROCUREMENT, hint: '尾货尾料清点完成并归库' },
     { key: 'finance', label: '财务', roles: FINANCE, hint: '出货前款项条件满足' },
   ],
