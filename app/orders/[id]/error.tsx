@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { maybeSelfHealChunkError } from '@/lib/utils/chunkReload';
 
 export default function OrderDetailError({
   error,
@@ -11,6 +12,8 @@ export default function OrderDetailError({
 }) {
   useEffect(() => {
     console.error('[OrderDetail Error]', error?.message, error?.digest);
+    // 部署后旧 chunk 失效 → 自动整页重载一次自愈
+    maybeSelfHealChunkError(error);
   }, [error]);
 
   return (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { maybeSelfHealChunkError } from '@/lib/utils/chunkReload';
 
 /**
  * 根级错误边界 — 所有页面的通用 fallback
@@ -15,6 +16,8 @@ export default function RootError({
 }) {
   useEffect(() => {
     console.error('[RootError]', error?.message, error?.digest);
+    // 部署后旧 chunk 失效导致的加载错误 → 自动整页重载一次自愈(带会话内防循环护栏)
+    maybeSelfHealChunkError(error);
   }, [error]);
 
   return (

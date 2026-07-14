@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { PWARegister } from "@/components/PWARegister";
+import { ChunkErrorReloader } from "@/components/ChunkErrorReloader";
 import { WorkbenchAnchor } from "@/components/WorkbenchAnchor";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRoleFromEmail } from "@/lib/utils/user-role";
@@ -56,6 +57,7 @@ export default async function RootLayout({
       <body
         className="bg-white text-gray-900 antialiased font-sans min-h-screen"
       >
+        <ChunkErrorReloader />
         <Navbar isAdmin={isAdmin} isProcurement={isProcurement} isProduction={isProduction} isFinance={isFinance} />
         <PWARegister />
         {/* 打开系统/闲置2小时后再打开 → 回角色工作台;工作中刷新不打扰;单据深链不劫持 */}

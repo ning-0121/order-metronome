@@ -1,5 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
+import { maybeSelfHealChunkError } from '@/lib/utils/chunkReload';
+
 /**
  * 全局错误边界 — layout.tsx 级别崩溃时触发
  * 这是最后一道防线，必须极简，不依赖任何项目组件
@@ -11,6 +14,11 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    // 部署后旧 chunk 失效 → 自动整页重载一次自愈
+    maybeSelfHealChunkError(error);
+  }, [error]);
+
   return (
     <html lang="zh-CN">
       <body style={{ fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', margin: 0, padding: 0, background: '#fafbfc' }}>
