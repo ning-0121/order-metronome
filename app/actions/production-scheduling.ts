@@ -103,6 +103,13 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
       dispatches: (dispatchByStyle.get(`${o.id}¦${s.style_no}¦`) || []).concat(
         s.colors.flatMap((c) => dispatchByStyle.get(`${o.id}¦${s.style_no}¦${c}`) || [])),
     }));
+    // 兜底:没有逐款明细(order_line_items)的订单,合成一条「整单」让主管仍能整单派工
+    if (styles.length === 0) {
+      styles.push({
+        style_no: '', product_name: o.product_description || '整单', qty: o.quantity || 0, colors: [] as string[],
+        dispatches: dispatchByStyle.get(`${o.id}¦¦`) || [],
+      });
+    }
     const mat = matByOrder.get(o.id);
     return {
       id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, customer_name: o.customer_name,
@@ -128,8 +135,9 @@ export async function dispatchStyle(input: { orderId: string; styleNo: string; c
     planned_start: input.start || null, planned_end: input.end || null, notes: input.notes?.trim() || null,
     updated_at: new Date().toISOString(),
   };
-  // 同 order+style+color 已有则更新,否则插入(color 为空要用 .is(null),不能 .eq(''))
-  let existQ = (svc.from('production_dispatch') as any).select('id').eq('order_id', input.orderId).eq('style_no', row.style_no);
+  // 同 order+style+color 已有则更新,否则插入(style_no/color 为空要用 .is(null),不能 .eq(''):整单派工 style_no=null)
+  let existQ = (svc.from('production_dispatch') as any).select('id').eq('order_id', input.orderId);
+  existQ = row.style_no === null ? existQ.is('style_no', null) : existQ.eq('style_no', row.style_no);
   existQ = row.color === null ? existQ.is('color', null) : existQ.eq('color', row.color);
   const { data: exist } = await existQ.maybeSingle();
 

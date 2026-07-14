@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { PRODUCT_CATEGORIES } from '@/lib/constants/factory';
+import { createFactory } from '@/app/actions/factories';
+
+const NEW = '__new__';   // 新增工厂哨兵 id
 
 interface Factory {
   id: string;
@@ -37,6 +40,35 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const [createErr, setCreateErr] = useState('');
+
+  function startCreate() {
+    setCreateErr('');
+    setEditingId(NEW);
+    setForm({
+      factory_name: '', contact_name: '', phone: '', city: '', address: '',
+      cooperation_status: 'active', product_categories: [], quality_grades: [], weave_types: [],
+      can_package: false, order_capabilities: [], worker_count: '', monthly_capacity: '', notes: '',
+    });
+  }
+
+  async function handleCreate() {
+    const name = String(form.factory_name || '').trim();
+    if (!name) { setCreateErr('工厂名称必填'); return; }
+    setSaving(true); setCreateErr('');
+    const { error } = await createFactory(name, {
+      contact_name: form.contact_name || null, phone: form.phone || null, city: form.city || null, address: form.address || null,
+      cooperation_status: form.cooperation_status || 'active', notes: form.notes || null,
+      product_categories: form.product_categories, quality_grades: form.quality_grades, weave_types: form.weave_types,
+      can_package: form.can_package ?? false, order_capabilities: form.order_capabilities,
+      worker_count: form.worker_count ? parseInt(form.worker_count) : undefined,
+      monthly_capacity: form.monthly_capacity ? parseInt(form.monthly_capacity) : undefined,
+    });
+    setSaving(false);
+    if (error) { setCreateErr(error); return; }
+    setEditingId(null);
+    router.refresh();
+  }
 
   function startEdit(f: Factory) {
     setEditingId(f.id);
@@ -100,8 +132,85 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
 
   return (
     <div className="space-y-4">
-      <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="搜索工厂..." className="w-full md:w-80 rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="搜索工厂..." className="w-full md:w-80 rounded-lg border border-gray-300 px-4 py-2 text-sm" />
+        {canEdit && editingId !== NEW && (
+          <button onClick={startCreate} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 shrink-0">➕ 新增工厂</button>
+        )}
+      </div>
+
+      {/* 新增工厂表单(必填名称;品质/织造/包装/订单类型等排产能力创建后点「编辑」补) */}
+      {editingId === NEW && (
+        <div className="bg-white rounded-xl border-2 border-indigo-200 p-5 space-y-4">
+          <h3 className="font-bold text-gray-900 text-lg">➕ 新增工厂</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label className="text-xs text-gray-500">工厂名称 <span className="text-rose-500">*</span></label>
+              <input value={form.factory_name} onChange={e => setForm(f => ({ ...f, factory_name: e.target.value }))} autoFocus
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" placeholder="必填" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">联系人</label>
+              <input value={form.contact_name} onChange={e => setForm(f => ({ ...f, contact_name: e.target.value }))}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">电话</label>
+              <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">城市</label>
+              <input value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">合作状态</label>
+              <select value={form.cooperation_status} onChange={e => setForm(f => ({ ...f, cooperation_status: e.target.value }))}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm">
+                {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">工人数</label>
+              <input type="number" value={form.worker_count} onChange={e => setForm(f => ({ ...f, worker_count: e.target.value }))}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">月产能（件）</label>
+              <input type="number" value={form.monthly_capacity} onChange={e => setForm(f => ({ ...f, monthly_capacity: e.target.value }))}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+            </div>
+            <div className="col-span-2 md:col-span-4">
+              <label className="text-xs text-gray-500">地址</label>
+              <input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
+                className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1.5 block">生产品类</label>
+            <div className="flex flex-wrap gap-1.5">
+              {PRODUCT_CATEGORIES.map(cat => (
+                <button key={cat} type="button" onClick={() => toggleCategory(cat)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all ${(Array.isArray(form.product_categories) && form.product_categories.includes(cat)) ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-white border-gray-200 text-gray-600'}`}>{cat}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">备注</label>
+            <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              rows={2} className="w-full mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+          </div>
+          <div className="flex items-center gap-2 pt-2 border-t">
+            <button onClick={handleCreate} disabled={saving}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium disabled:opacity-50">{saving ? '创建中...' : '创建工厂'}</button>
+            <button onClick={() => setEditingId(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600">取消</button>
+            {createErr && <span className="text-sm text-rose-600">{createErr}</span>}
+            <span className="text-xs text-gray-400 ml-auto">品质/织造/包装/订单类型创建后点「编辑」补</span>
+          </div>
+        </div>
+      )}
 
       {filtered.map(f => {
         const stats = statsMap[f.factory_name] || { active: 0, completed: 0 };

@@ -80,7 +80,12 @@ export async function getFactories(): Promise<{ data: Factory[] | null; error: s
  */
 export async function createFactory(
   factoryName: string,
-  extra?: { product_categories?: string[]; worker_count?: number; monthly_capacity?: number }
+  extra?: {
+    product_categories?: string[]; worker_count?: number; monthly_capacity?: number;
+    contact_name?: string | null; phone?: string | null; city?: string | null; address?: string | null;
+    cooperation_status?: string | null; notes?: string | null;
+    quality_grades?: string[]; weave_types?: string[]; can_package?: boolean | null; order_capabilities?: string[];
+  }
 ): Promise<{ data: Factory | null; error: string | null }> {
   const trimmed = factoryName?.trim();
   if (!trimmed) return { data: null, error: '工厂名称不能为空' };
@@ -93,6 +98,16 @@ export async function createFactory(
   if (extra?.product_categories?.length) insertPayload.product_categories = extra.product_categories;
   if (extra?.worker_count) insertPayload.worker_count = extra.worker_count;
   if (extra?.monthly_capacity) insertPayload.monthly_capacity = extra.monthly_capacity;
+  if (extra?.contact_name) insertPayload.contact_name = extra.contact_name.trim();
+  if (extra?.phone) insertPayload.phone = extra.phone.trim();
+  if (extra?.city) insertPayload.city = extra.city.trim();
+  if (extra?.address) insertPayload.address = extra.address.trim();
+  if (extra?.cooperation_status) insertPayload.cooperation_status = extra.cooperation_status;
+  if (extra?.notes) insertPayload.notes = extra.notes.trim();
+  if (extra?.quality_grades?.length) insertPayload.quality_grades = extra.quality_grades;
+  if (extra?.weave_types?.length) insertPayload.weave_types = extra.weave_types;
+  if (typeof extra?.can_package === 'boolean') insertPayload.can_package = extra.can_package;
+  if (extra?.order_capabilities?.length) insertPayload.order_capabilities = extra.order_capabilities;
 
   const { data, error } = await (supabase.from('factories') as any)
     .insert(insertPayload)
