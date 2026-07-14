@@ -272,6 +272,37 @@ export async function autoCompleteProcurementPlacedForPO(poId: string, client?: 
 }
 
 /**
+ * 采购标记「线下已下单/已处理」(2026-07-12 用户):对线下已经下过单、无需在系统里核料下单的订单,
+ * 手动完成「采购下单」节点 → 该单从「待采购订单」队列出队。留痕(记真实操作人+原因),可撤销(节点回退)。
+ * 仅采购角色可操作。区别于 autoComplete(要求全部采购项已下单);本手动版不要求,由采购确认线下已处理。
+ */
+export async function markProcurementPlacedOffline(orderId: string, reason?: string): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roleErr = await requireProcurementRole(supabase, user.id);
+  if (roleErr) return { error: roleErr };
+
+  const { data: ms } = await (supabase.from('milestones') as any)
+    .select('id, status').eq('order_id', orderId).eq('step_key', 'procurement_order_placed').maybeSingle();
+  if (!ms) return { error: '该订单没有「采购下单」节点,无法标记' };
+  const st = String((ms as any).status || '').toLowerCase();
+  if (st === 'done' || st === '已完成') { revalidatePath('/procurement'); return { ok: true }; }
+
+  const now = new Date().toISOString();
+  const { error } = await (supabase.from('milestones') as any)
+    .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now }).eq('id', (ms as any).id);
+  if (error) return { error: error.message };
+  await (supabase.from('milestone_logs') as any).insert({
+    milestone_id: (ms as any).id, order_id: orderId, action: 'status_transition',
+    note: `采购标记「线下已下单/已处理」→ 完成「采购下单」节点(该单已在线下下单,不走系统核料下单)${reason ? `:${reason}` : ''}`,
+    payload: { manual: true, source: 'procurement_offline', by: user.id },
+  }).then(() => {}, () => {});
+  revalidatePath('/procurement');
+  return { ok: true };
+}
+
+/**
  * 按款核定大货单耗(2026-07-03 用户拍板:不填好每个单款的大货单耗,不许归并)。
  * 列出该订单 BOM 的用料行(布料必核;辅料/包装可选核),含开发单耗对照。
  */

@@ -12,6 +12,7 @@ import {
   listReceiptBatches,
   type QueueLine,
 } from '@/app/actions/procurement';
+import { markProcurementPlacedOffline } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { compressImageForUpload, friendlyUploadError } from '@/lib/utils/image-compress';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -125,6 +126,16 @@ export function ProcurementQueueClient({
 }) {
   const router = useRouter();
   const { confirm, prompt, dialog } = useDialogs();
+  const [offlineBusy, setOfflineBusy] = useState('');
+  // 采购标记「线下已下单/已处理」→ 该单从待采购订单出队(线下订过、无需系统核料下单)
+  async function handleMarkOffline(orderId: string, label: string) {
+    if (!(await confirm({ title: `「${label}」标记线下已处理?`, message: '该订单已在线下下单,完成「采购下单」节点后从待采购队列移除(留痕,可在订单节点撤销)。', confirmText: '确认移除', cancelText: '取消' }))) return;
+    setOfflineBusy(orderId);
+    const res = await markProcurementPlacedOffline(orderId, '线下已下单');
+    setOfflineBusy('');
+    if ((res as any).error) { await confirm({ title: (res as any).error, confirmText: '知道了' }); return; }
+    router.refresh();
+  }
   const [busy, setBusy] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<string | null>(null); // `${rowId}:${kind}`
   const [err, setErr] = useState('');
@@ -316,17 +327,23 @@ export function ProcurementQueueClient({
           📨 待采购订单（{pendingRequests.length}）<span className="font-normal text-emerald-700">— 业务执行已提交采购申请</span>
         </div>
         {pendingRequests.length === 0 ? <Empty /> : pendingRequests.map(o => (
-          <Link key={o.order_id} href={`/procurement/verify/${o.order_id}`}
-            className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 hover:bg-emerald-50/50">
+          <div key={o.order_id} className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 hover:bg-emerald-50/50">
             {o.late_count > 0
-              ? <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title={`${o.late_count} 项已过最晚下单日`} />
-              : <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" />}
+              ? <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" title={`${o.late_count} 项已过最晚下单日`} />
+              : <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />}
             <span className="text-sm font-semibold text-gray-900">{o.internal_order_no ? `${o.internal_order_no} | ` : ''}{o.order_no || '—'}</span>
             <span className="text-sm text-gray-600">{o.customer_name || ''}</span>
             <span className="text-xs text-gray-400">{o.req_count} 项物料需求 · 提交于 {fmt(o.submitted_at)}</span>
             {o.late_count > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">🔥 {o.late_count} 项超最晚下单日</span>}
-            <span className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium">去核料下单 →</span>
-          </Link>
+            <div className="ml-auto flex items-center gap-2 shrink-0">
+              <button onClick={() => handleMarkOffline(o.order_id, `${o.internal_order_no || o.order_no || ''}`)} disabled={offlineBusy !== ''}
+                title="该订单已在线下下单/无需系统下单 → 从待采购队列移除(留痕,可撤销)"
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-50 disabled:opacity-50">
+                {offlineBusy === o.order_id ? '处理中…' : '✓ 线下已处理'}
+              </button>
+              <Link href={`/procurement/verify/${o.order_id}`} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">去核料下单 →</Link>
+            </div>
+          </div>
         ))}
       </section>
 
