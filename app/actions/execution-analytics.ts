@@ -16,6 +16,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { assessmentBaseline, ASSESSMENT_BASELINE_DATE } from '@/lib/config/assessment';
+import { getRoleLabel } from '@/lib/utils/i18n';
 
 export interface ExecutionScore {
   userId: string;
@@ -60,12 +61,10 @@ export interface ExecutionSummary {
   viewerCanSeeAwards: boolean;
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  sales: '业务', merchandiser: '跟单', finance: '财务',
-  procurement: '采购', production_manager: '生产主管',
-  admin_assistant: '行政督办', logistics: '物流',
-};
+// 参与个人考核的执行角色(生产跟单/QC 也录节点,纳入;各经理走部门视图不重复计个人榜)
+const EXEC_ROLES = ['sales', 'merchandiser', 'finance', 'procurement', 'production', 'qc', 'quality', 'logistics'];
 
+/** 公开 action:带鉴权 + 奖励可见性(仅 admin/各经理看金额)。 */
 export async function getExecutionAnalytics(
   period: 'week' | 'month' | 'quarter' = 'month',
 ): Promise<{ data?: ExecutionSummary; error?: string }> {
@@ -73,12 +72,21 @@ export async function getExecutionAnalytics(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  // 查看者角色:奖励结算(涉及钱)仅 admin / 各经理可见
   const { data: viewerProf } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const viewerRoles: string[] = (viewerProf as any)?.roles?.length > 0 ? (viewerProf as any).roles : [(viewerProf as any)?.role].filter(Boolean);
   const viewerCanSeeAwards = viewerRoles.some((r) => r === 'admin' || String(r).endsWith('_manager'));
 
-  const now = new Date();
+  const summary = await buildExecutionSummary(supabase, period);
+  return { data: { ...summary, viewerCanSeeAwards } };
+}
+
+/** 核心计算(可注入 service-role client,给 cron/周报复用)。无鉴权;viewerCanSeeAwards 由调用方覆盖。 */
+export async function buildExecutionSummary(
+  supabase: any,
+  period: 'week' | 'month' | 'quarter' = 'month',
+  nowInput?: Date,
+): Promise<ExecutionSummary> {
+  const now = nowInput || new Date();
   let since: Date;
   let periodLabel: string;
   if (period === 'week') {
@@ -107,13 +115,11 @@ export async function getExecutionAnalytics(
   for (const p of (profiles || []) as any[]) {
     const roles: string[] = Array.isArray(p.roles) && p.roles.length > 0
       ? p.roles : [p.role].filter(Boolean);
-    // 只统计执行角色（admin 不执行节点）
-    const execRoles = roles.filter(r =>
-      ['sales', 'merchandiser', 'finance', 'procurement', 'production_manager', 'logistics'].includes(r),
-    );
+    // 只统计执行角色(admin/经理不进个人榜,经理走部门视图)
+    const execRoles = roles.filter(r => EXEC_ROLES.includes(r));
     if (execRoles.length === 0) continue;
 
-    const roleLabel = execRoles.map(r => ROLE_LABELS[r] || r).join('/');
+    const roleLabel = execRoles.map(r => getRoleLabel(r)).join('/');
     const name = p.name || p.email?.split('@')[0] || '未知';
 
     // 1. 该时间段内完成的节点
@@ -256,13 +262,11 @@ export async function getExecutionAnalytics(
   };
 
   return {
-    data: {
-      rankings,
-      teamAvg,
-      period: periodLabel,
-      generatedAt: now.toISOString(),
-      baselineDate: ASSESSMENT_BASELINE_DATE,
-      viewerCanSeeAwards,
-    },
+    rankings,
+    teamAvg,
+    period: periodLabel,
+    generatedAt: now.toISOString(),
+    baselineDate: ASSESSMENT_BASELINE_DATE,
+    viewerCanSeeAwards: false,
   };
 }

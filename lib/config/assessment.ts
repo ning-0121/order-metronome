@@ -26,3 +26,13 @@ export const ASSESSMENT_AWARDS = {
   rank: [300, 200, 100] as number[],
   fullAttendance: 100,
 };
+
+/** 部门分组(主管视图):角色 → 部门 + 该部门主管角色。部门平均分算进主管头上。 */
+export const DEPARTMENTS: { key: string; label: string; roles: string[]; managerRole: string }[] = [
+  { key: 'exec', label: '业务执行部', roles: ['merchandiser', 'order_manager'], managerRole: 'order_manager' },
+  { key: 'dev', label: '业务开发部', roles: ['sales', 'sales_manager'], managerRole: 'sales_manager' },
+  { key: 'procurement', label: '采购部', roles: ['procurement', 'procurement_manager'], managerRole: 'procurement_manager' },
+  { key: 'production', label: '生产部', roles: ['production', 'qc', 'quality', 'production_manager'], managerRole: 'production_manager' },
+  { key: 'finance', label: '财务', roles: ['finance'], managerRole: 'finance' },
+  { key: 'logistics', label: '物流', roles: ['logistics'], managerRole: 'logistics' },
+];

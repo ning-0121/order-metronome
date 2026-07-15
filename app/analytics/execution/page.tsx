@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { getExecutionAnalytics, type ExecutionSummary, type ExecutionScore } from '@/app/actions/execution-analytics';
-import { ASSESSMENT_AWARDS } from '@/lib/config/assessment';
+import { ASSESSMENT_AWARDS, DEPARTMENTS } from '@/lib/config/assessment';
+import { getRoleLabel } from '@/lib/utils/i18n';
 import Link from 'next/link';
 
 const GRADE_STYLES: Record<string, { bg: string; text: string; ring: string }> = {
@@ -102,6 +103,41 @@ export default function ExecutionAnalyticsPage() {
                 {data.teamAvg.overdueRate}%
               </div>
               <div className="text-xs text-gray-500 mt-1">团队逾期率</div>
+            </div>
+          </div>
+
+          {/* 部门(主管)视图:部门均分算进主管头上 */}
+          <div className="mb-6">
+            <div className="text-sm font-semibold text-gray-700 mb-2">🏢 部门视图 <span className="text-xs font-normal text-gray-400">(部门平均分 = 主管的考核)</span></div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {DEPARTMENTS.map((dep) => {
+                const members = data.rankings.filter((r) => r.roles.some((role) => dep.roles.includes(role)));
+                const active = members.filter((m) => m.completedCount > 0);
+                if (members.length === 0) return null;
+                const avg = active.length > 0 ? Math.round(active.reduce((s, m) => s + m.executionScore, 0) / active.length) : 0;
+                const qN = members.filter((m) => m.qualified).length;
+                const laggards = members.filter((m) => m.redLine || m.grade === 'D');
+                const avgCls = avg >= 75 ? 'text-emerald-600' : avg >= 60 ? 'text-amber-600' : 'text-rose-600';
+                return (
+                  <div key={dep.key} className="rounded-xl border border-gray-200 bg-white p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-gray-800">{dep.label}</span>
+                      <span className={`text-2xl font-bold ${avgCls}`}>{avg}</span>
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">主管:{getRoleLabel(dep.managerRole)} · {active.length}/{members.length} 人有产出</div>
+                    <div className="mt-1.5 flex items-center gap-2 text-xs">
+                      <span className="text-emerald-600">达标 {qN}</span>
+                      <span className="text-gray-300">·</span>
+                      <span className={laggards.length > 0 ? 'text-rose-600' : 'text-gray-400'}>落后 {laggards.length}</span>
+                    </div>
+                    {laggards.length > 0 && (
+                      <div className="mt-1 text-[11px] text-rose-500 truncate" title={laggards.map((m) => m.name).join('、')}>
+                        ⚠️ {laggards.map((m) => m.name).join('、')}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

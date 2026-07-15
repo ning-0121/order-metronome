@@ -40,6 +40,10 @@
     {
       "path": "/api/cron/order-audit",
       "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-assessment",
+      "schedule": "0 1 * * 1"
     }
   ]
 }
