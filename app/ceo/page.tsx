@@ -378,8 +378,8 @@ export default async function CEOWarRoom() {
   const allTodos = Array.from(orderMap.values()).sort((a, b) => b.priority - a.priority);
   const warningAll = allTodos.filter(t => t.bucket === 'warning');
   const todosByBucket = {
-    urgent:        allTodos.filter(t => t.bucket === 'urgent').slice(0, 10),
-    warningSelf:   warningAll.filter(t => ownOrderIds.has(t.orderId) && !handoffOrderIds.has(t.orderId)).slice(0, 10),
+    urgent:        allTodos.filter(t => t.bucket === 'urgent').slice(0, 40),      // 按客户折叠后可多显
+    warningSelf:   warningAll.filter(t => ownOrderIds.has(t.orderId) && !handoffOrderIds.has(t.orderId)).slice(0, 40),
     warningCollab: warningAll.filter(t => !ownOrderIds.has(t.orderId) || handoffOrderIds.has(t.orderId)).slice(0, 40),   // 按客户折叠后可多显
     collab:        allTodos.filter(t => t.bucket === 'collab').slice(0, 10),
   };
@@ -692,44 +692,14 @@ export default async function CEOWarRoom() {
                   <h3 className="text-sm font-bold text-red-900">紧急事项（{todosByBucket.urgent.length}）</h3>
                   <span className="text-xs text-red-600/70">超期 ≥3 天 / 关键节点卡住 / 高危订单</span>
                 </div>
-                <div className="divide-y divide-gray-100">
-                  {todosByBucket.urgent.map((item: any, i: number) => (
-                    <div key={item.orderId} className="px-5 py-3 hover:bg-red-50/30 transition-colors">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <span className="text-sm font-bold text-red-600 w-5 text-center flex-shrink-0">{i + 1}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
-                                {item.orderNo}
-                              </Link>
-                              <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
-                                {item.issueCount} 个问题
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                              {item.issues.slice(0, 2).map((issue: string, j: number) => (
-                                <div key={j}>• {issue}</div>
-                              ))}
-                              {item.issueCount > 2 && (
-                                <div className="text-gray-400">还有 {item.issueCount - 2} 个...</div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <Link
-                          href={orderFocusMs[item.orderId]
-                            ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
-                            : `/orders/${item.orderId}?tab=progress&from=/ceo`}
-                          className="flex-shrink-0 bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-red-700"
-                        >
-                          去处理
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {/* 同一客户折叠成一组、可展开 */}
+                <CollabRiskGroups tone="red" ctaLabel="去处理" items={todosByBucket.urgent.map((item: any) => ({
+                  orderId: item.orderId, orderNo: item.orderNo, customerName: item.customerName || '',
+                  issueCount: item.issueCount, issues: item.issues,
+                  viewHref: orderFocusMs[item.orderId]
+                    ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
+                    : `/orders/${item.orderId}?tab=progress&from=/ceo`,
+                }))} />
               </div>
             )}
 
@@ -741,44 +711,14 @@ export default async function CEOWarRoom() {
                   <h3 className="text-sm font-bold text-amber-900">自己订单风险（{todosByBucket.warningSelf.length}）</h3>
                   <span className="text-xs text-amber-600/70">你创建/负责的订单</span>
                 </div>
-                <div className="divide-y divide-gray-100">
-                  {todosByBucket.warningSelf.map((item: any, i: number) => (
-                    <div key={item.orderId} className="px-5 py-3 hover:bg-amber-50/30 transition-colors">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <span className="text-sm font-bold text-amber-600 w-5 text-center flex-shrink-0">{i + 1}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
-                                {item.orderNo}
-                              </Link>
-                              <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
-                                {item.issueCount} 项
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                              {item.issues.slice(0, 2).map((issue: string, j: number) => (
-                                <div key={j}>• {issue}</div>
-                              ))}
-                              {item.issueCount > 2 && (
-                                <div className="text-gray-400">还有 {item.issueCount - 2} 个...</div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <Link
-                          href={orderFocusMs[item.orderId]
-                            ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
-                            : `/orders/${item.orderId}?tab=progress&from=/ceo`}
-                          className="flex-shrink-0 bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-amber-600"
-                        >
-                          查看
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {/* 同一客户折叠成一组、可展开 */}
+                <CollabRiskGroups tone="amber" items={todosByBucket.warningSelf.map((item: any) => ({
+                  orderId: item.orderId, orderNo: item.orderNo, customerName: item.customerName || '',
+                  issueCount: item.issueCount, issues: item.issues,
+                  viewHref: orderFocusMs[item.orderId]
+                    ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
+                    : `/orders/${item.orderId}?tab=progress&from=/ceo`,
+                }))} />
               </div>
             )}
 
