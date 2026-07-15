@@ -476,9 +476,14 @@ export default async function DashboardPage() {
 
           {/* 物流 */}
           {userRoles.includes('logistics') && (
-            <Link href="/warehouse" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-sky-50 text-sm text-gray-700 hover:text-sky-700 transition-colors">
-              <span>🚚</span> 仓库/出货
-            </Link>
+            <>
+              <Link href="/logistics" className="flex items-center gap-2 p-3 rounded-lg bg-sky-50 hover:bg-sky-100 text-sm text-sky-700 font-medium transition-colors">
+                <span>🚚</span> 物流工作台(待发货)
+              </Link>
+              <Link href="/warehouse" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-sky-50 text-sm text-gray-700 hover:text-sky-700 transition-colors">
+                <span>📦</span> 仓库/出货单据
+              </Link>
+            </>
           )}
 
           {/* 通用 */}

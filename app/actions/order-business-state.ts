@@ -152,6 +152,24 @@ export async function overrideBusinessControl(
     note: `[经营控制覆盖] ${fieldLabels[field]} → ${value ? '是' : '否'}。原因：${reason}`,
   });
 
+  // 放货 → 通知物流部安排出运/送仓(2026-07-13:补「财务发货通知→物流」这一环)
+  if (field === 'allow_shipment' && value === true) {
+    try {
+      const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+      const { data: ord } = await (supabase.from('orders') as any)
+        .select('order_no, internal_order_no, customer_name, delivery_type').eq('id', orderId).maybeSingle();
+      const no = (ord as any)?.internal_order_no || (ord as any)?.order_no || '';
+      const way = (ord as any)?.delivery_type === 'domestic' ? '国内送仓' : '出口出运';
+      await notifyUsersByRole(supabase, ['logistics'], {
+        type: 'shipment_released',
+        title: `🚚 财务已放货:${no}`,
+        message: `${(ord as any)?.customer_name || ''} · ${way} —— 财务已放货,请到「物流工作台」安排出运/送仓。`,
+        relatedOrderId: orderId,
+      });
+    } catch { /* 通知失败不阻断放货 */ }
+  }
+
   revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/logistics');
   return {};
 }
