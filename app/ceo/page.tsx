@@ -17,6 +17,7 @@ import { CustomerMattersPanel } from '@/components/CustomerMattersPanel';
 // RecalcButton removed from global — now per-order only
 
 import { isDoneStatus, isActiveStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
+import { isTerminalLifecycle } from '@/lib/domain/lifecycleStatus';
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
 const _isBlocked = (s: string) => isBlockedStatus(s);
@@ -94,6 +95,17 @@ export default async function CEOWarRoom() {
     milestones: milestonesByOrder.get(o.id) || [],
   }));
 
+  // 用户反馈修:已收尾的订单不该再在 CEO 风险里报早期节点超期/卡住。
+  //   「已收尾」= lifecycle 终态(completed/cancelled/archived) 或 出运节点(shipment_execute/domestic_delivery)已 done。
+  //   出货了却在报「采购下单/原辅料验收」超期 = 早期节点没点完成的僵尸提醒,过滤掉。
+  const SHIPPED_STEP_KEYS = new Set(['shipment_execute', 'domestic_delivery']);
+  const doneOrShippedOrderIds = new Set<string>();
+  for (const o of (orders || []) as any[]) {
+    if (isTerminalLifecycle(o.lifecycle_status)) { doneOrShippedOrderIds.add(o.id); continue; }
+    const ms = milestonesByOrder.get(o.id) || [];
+    if (ms.some((m: any) => SHIPPED_STEP_KEYS.has(m.step_key) && isDoneStatus(m.status))) doneOrShippedOrderIds.add(o.id);
+  }
+
   // 自己订单 vs 协作订单：自己 = 创建者或 owner 为当前用户
   const ownOrderIds = new Set<string>(
     (orders || [])
@@ -106,20 +118,28 @@ export default async function CEOWarRoom() {
   for (const o of ordersWithMilestones) {
     orderStatusMap.set(o.id, computeOrderStatus(o.milestones || []));
   }
-  const riskRed = ordersWithMilestones.filter(o => orderStatusMap.get(o.id)?.color === 'RED');
-  const riskYellow = ordersWithMilestones.filter(o => orderStatusMap.get(o.id)?.color === 'YELLOW');
+  const riskRed = ordersWithMilestones.filter(o => !doneOrShippedOrderIds.has(o.id) && orderStatusMap.get(o.id)?.color === 'RED');
+  const riskYellow = ordersWithMilestones.filter(o => !doneOrShippedOrderIds.has(o.id) && orderStatusMap.get(o.id)?.color === 'YELLOW');
   const riskGreen = ordersWithMilestones.filter(o => orderStatusMap.get(o.id)?.color === 'GREEN');
 
   // 所有超期/卡住里程碑
   const { data: allMilestonesWithOrders } = await (supabase.from('milestones') as any)
-    .select(`id, order_id, name, step_key, owner_role, owner_user_id, due_at, status, orders!inner(id, order_no, customer_name, internal_order_no)`)
+    .select(`id, order_id, name, step_key, is_critical, owner_role, owner_user_id, due_at, status, orders!inner(id, order_no, customer_name, internal_order_no)`)
     .order('due_at', { ascending: true });
 
-  const overdueMilestones = (allMilestonesWithOrders || []).filter((m: any) =>
-    _isActive(m.status) && m.due_at && isOverdue(m.due_at)
-  );
+  const overdueMilestones = (allMilestonesWithOrders || [])
+    .filter((m: any) =>
+      !doneOrShippedOrderIds.has(m.order_id) && _isActive(m.status) && m.due_at && isOverdue(m.due_at)
+    )
+    // 用户反馈修:原按 due_at 最老取前 30 → 关键节点/新超期被百天僵尸挤掉「该提醒的没提醒」。
+    //   改按【关键节点优先 + 超期天数降序】排,slice(0,30) 才是「最该管的 30 条」。
+    .sort((a: any, b: any) => {
+      const ca = a.is_critical ? 1 : 0, cb = b.is_critical ? 1 : 0;
+      if (ca !== cb) return cb - ca;
+      return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();   // 同级别老的在前
+    });
   const blockedMilestones = (allMilestonesWithOrders || []).filter((m: any) =>
-    _isBlocked(m.status)
+    !doneOrShippedOrderIds.has(m.order_id) && _isBlocked(m.status)
   );
   const overdueCount = overdueMilestones.length;
   const blockedCount = blockedMilestones.length;
@@ -218,7 +238,7 @@ export default async function CEOWarRoom() {
   });
 
   // 即将到期（48h 内 → 风险预警）
-  ((tomorrowRisk as any[]) || []).slice(0, 20).forEach((m: any) => {
+  ((tomorrowRisk as any[]) || []).filter((m: any) => !doneOrShippedOrderIds.has(m.order_id)).slice(0, 20).forEach((m: any) => {
     if (!orderFocusMs[m.order_id]) orderFocusMs[m.order_id] = m.id;
     const dueAt = new Date(m.due_at);
     const hoursLeft = Math.max(1, Math.ceil((dueAt.getTime() - now.getTime()) / 3600000));
@@ -265,6 +285,7 @@ export default async function CEOWarRoom() {
     const DONE_S = new Set(['done', '已完成', 'completed']);
     const PENDING_S = new Set(['pending', '未开始', 'not_started']);
     for (const order of ordersWithMilestones) {
+      if (doneOrShippedOrderIds.has(order.id)) continue;   // 已收尾/已出货订单不报交接卡顿(如出货后剩余物料回收→成品入库僵尸卡顿)
       const ms = [...(order.milestones || [])].sort(
         (a: any, b: any) => (a.sequence_number || 0) - (b.sequence_number || 0)
       );
