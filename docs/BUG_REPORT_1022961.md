@@ -39,7 +39,7 @@ This change does not modify production data and does not deploy Production. Data
 
 - Current equivalents already exist: code, name, type, placement, color, spec, unit, unit consumption, total quantity, supplier, remarks, special requirements, two image slots and multiple file attachments. The generated accessory sheet already contains artwork, position image/text, specification, remarks, factory price and purchase price columns.
 - Gap: durable `consumption_basis`, `sample_reference`, `position_description`, `supplier_quote`, `factory_quote` and `purchase_price` fields are absent.
-- Prepared fix: `20260715_accessory_workflow_fields.sql` adds the missing optional fields without invalidating existing rows. It is not applied and UI persistence is intentionally not enabled before schema approval.
+- Prepared fix: `20260715_accessory_workflow_fields.sql` adds nullable basis/sample/position fields without invalidating or reinterpreting existing rows. Supplier/factory/purchase prices deliberately remain in the existing cost-baseline and procurement-line sources of truth instead of being duplicated onto BOM. It is not applied and UI persistence is intentionally not enabled before schema approval.
 - Residual risk: current client-side accessory uploads use generated ASCII keys and retain the display name, but the public storage bucket policy should receive a separate security review.
 
 ## 6. Procurement/accessory document import
