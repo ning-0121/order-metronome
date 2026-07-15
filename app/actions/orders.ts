@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 // 动态导入：避免模块初始化顺序问题（修复 Cannot access '_' before initialization）
 // import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
@@ -1884,45 +1884,37 @@ export async function getRetrospective(orderId: string) {
   return { data: retrospective || null };
 }
 
+const PURPOSE_CHANGEABLE = ['production', 'trade', 'consign'];
+
+async function getActorRoles(supabase: any, userId: string): Promise<string[]> {
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', userId).single();
+  return (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+}
+
 /**
- * 修改已建订单的「订单用途」(order_purpose),并温和重算里程碑。
+ * 订单用途变更的核心重算(service-role 执行,记真实 actor)。仅供已鉴权的入口调用:
+ *  - changeOrderPurpose(财务/管理员直接改)
+ *  - decideOrderPurposeChange(审批通过后执行,actor = 审批人)
  *
- * 背景:order_purpose 原来只在建单时能设,选错/历史遗留(如 consign 2026-07-10 才上线,更早的经销单
- * 只能将就选 production)就永久卡住,没有修正入口。此函数补上入口。
- *
- * 仅在真实生产类用途间改:production / trade(经销·采购成品)/ consign(委托加工·料工厂自采)。
  * 温和 diff(不走 rebuildOrderMilestones 的删光重建,保留已完成进度与日志):
- *   - 删:新模板不含、且「未完成」的里程碑(已完成的保留作历史);
- *   - 加:新模板有、当前缺的里程碑(pending)。
- * 例:production → consign 只会删掉未完成的「采购下单」节点,其余原样。
- *
- * 铁律合规:人(财务/管理员)在 UI 操作,记真实 auth.uid();非 AI 自主写。
+ *   删:新模板不含、且「未完成」的里程碑(已完成的保留作历史);加:新模板有、当前缺的(pending)。
+ * 例:production → consign 只删掉未完成的「采购下单」节点。
  */
-export async function changeOrderPurpose(
-  orderId: string,
-  newPurpose: string,
-  reason?: string,
-): Promise<{ ok?: boolean; error?: string; added?: number; removed?: number }> {
-  const ALLOWED = ['production', 'trade', 'consign'];
-  if (!ALLOWED.includes(newPurpose)) return { error: '不支持的订单用途(仅 自产/经销/委托加工 之间可改)' };
+async function applyOrderPurposeChange(
+  orderId: string, newPurpose: string, reason: string | undefined, actorUserId: string,
+): Promise<{ ok?: boolean; error?: string; added?: number; removed?: number; from?: string }> {
+  if (!PURPOSE_CHANGEABLE.includes(newPurpose)) return { error: '不支持的订单用途(仅 自产/经销/委托加工 之间可改)' };
+  const svc = createServiceRoleClient();
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-  // 权限:财务 / 管理员(真实 auth.uid 留痕)
-  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
-  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  if (!roles.includes('admin') && !roles.includes('finance')) return { error: '仅财务或管理员可修改订单用途' };
-
-  const { data: order, error: oErr } = await (supabase.from('orders') as any)
+  const { data: order, error: oErr } = await (svc.from('orders') as any)
     .select('id, order_no, order_purpose, order_type, incoterm, delivery_type, order_date, created_at, etd, warehouse_due_date, eta, sample_phase, sample_confirm_days_override, factory_date')
     .eq('id', orderId).maybeSingle();
   if (oErr) return { error: `读取订单失败:${oErr.message}` };
   if (!order) return { error: '订单不存在' };
   const o = order as any;
   const oldPurpose = o.order_purpose || 'production';
-  if (oldPurpose === newPurpose) return { ok: true, added: 0, removed: 0 };
-  if (!ALLOWED.includes(oldPurpose)) return { error: `当前用途「${oldPurpose}」不在可改范围(样品/询价单请走建单流程)` };
+  if (oldPurpose === newPurpose) return { ok: true, added: 0, removed: 0, from: oldPurpose };
+  if (!PURPOSE_CHANGEABLE.includes(oldPurpose)) return { error: `当前用途「${oldPurpose}」不在可改范围(样品/询价单请走建单流程)` };
 
   const incoterm: string = o.incoterm || 'FOB';
   const deliveryType: string = o.delivery_type || (['RMB_EX_TAX', 'RMB_INC_TAX'].includes(incoterm) ? 'domestic' : 'export');
@@ -1932,28 +1924,25 @@ export async function changeOrderPurpose(
   const templates = getApplicableMilestones(o.order_type, deliveryType === 'export', deliveryType, newPurpose, false, o.sample_phase || undefined);
   const newStepKeys = new Set(templates.map((t: any) => t.step_key));
 
-  const { data: existing } = await (supabase.from('milestones') as any)
+  const { data: existing } = await (svc.from('milestones') as any)
     .select('id, step_key, status, sequence_number').eq('order_id', orderId);
   const cur = (existing || []) as any[];
   const curStepKeys = new Set(cur.map(m => m.step_key));
   const isDone = (s: string) => ['done', '已完成'].includes(String(s || '').toLowerCase());
 
-  // ① 改用途
   const now = new Date().toISOString();
-  const { error: upErr } = await (supabase.from('orders') as any)
+  const { error: upErr } = await (svc.from('orders') as any)
     .update({ order_purpose: newPurpose, updated_at: now }).eq('id', orderId);
   if (upErr) return { error: `更新用途失败:${upErr.message}` };
 
-  // ② 删:新模板不含、且未完成的节点(保留已完成的作历史)
   const toRemove = cur.filter(m => !newStepKeys.has(m.step_key) && !isDone(m.status));
   let removed = 0;
   if (toRemove.length > 0) {
-    const { error: delErr } = await (supabase.from('milestones') as any).delete().in('id', toRemove.map(m => m.id));
+    const { error: delErr } = await (svc.from('milestones') as any).delete().in('id', toRemove.map(m => m.id));
     if (delErr) return { error: `清理旧节点失败:${delErr.message}(用途已改,请重试或联系管理员)` };
     removed = toRemove.length;
   }
 
-  // ③ 加:新模板有、当前缺的节点(pending)
   const toAdd = templates.filter((t: any) => !curStepKeys.has(t.step_key));
   let added = 0;
   if (toAdd.length > 0) {
@@ -1981,18 +1970,17 @@ export async function changeOrderPurpose(
         blocks: t.blocks || [], sequence_number: maxSeq + i + 1,
       };
     });
-    const { error: insErr } = await (supabase.from('milestones') as any).insert(rows);
+    const { error: insErr } = await (svc.from('milestones') as any).insert(rows);
     if (insErr) return { error: `新增节点失败:${insErr.message}(用途已改,可用「重建里程碑」补齐)` };
     added = rows.length;
   }
 
-  // ④ 留痕(attach 到该单一个仍存在的里程碑;真实 actor)
   const anchorMs = cur.find(m => !toRemove.some(r => r.id === m.id)) || cur[0];
   if (anchorMs) {
-    await (supabase.from('milestone_logs') as any).insert({
-      milestone_id: anchorMs.id, order_id: orderId, action: 'order_purpose_changed', actor_user_id: user.id,
+    await (svc.from('milestone_logs') as any).insert({
+      milestone_id: anchorMs.id, order_id: orderId, action: 'order_purpose_changed', actor_user_id: actorUserId,
       note: `订单用途 ${oldPurpose} → ${newPurpose}(删 ${removed} 加 ${added} 节点)${reason ? `:${reason}` : ''}`,
-      payload: { from: oldPurpose, to: newPurpose, removed, added, by: user.id },
+      payload: { from: oldPurpose, to: newPurpose, removed, added, by: actorUserId },
     }).then(() => {}, () => {});
   }
 
@@ -2003,5 +1991,112 @@ export async function changeOrderPurpose(
 
   revalidatePath(`/orders/${orderId}`);
   revalidatePath('/procurement');
-  return { ok: true, added, removed };
+  return { ok: true, added, removed, from: oldPurpose };
+}
+
+/**
+ * 财务/管理员「直接改」订单用途 —— 他们本身是审批人,无需自己给自己提请。
+ * 铁律合规:人在 UI 操作,记真实 auth.uid()。
+ */
+export async function changeOrderPurpose(
+  orderId: string, newPurpose: string, reason?: string,
+): Promise<{ ok?: boolean; error?: string; added?: number; removed?: number }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roles = await getActorRoles(supabase, user.id);
+  if (!roles.includes('admin') && !roles.includes('finance')) {
+    return { error: '仅财务或管理员可直接修改;业务执行请用「申请改用途」提交审批' };
+  }
+  return applyOrderPurposeChange(orderId, newPurpose, reason, user.id);
+}
+
+/**
+ * 业务执行「申请改用途」—— 提交待审批申请(不落库变更),由财务/管理员审批后才真正改。
+ * 合铁律:提请只记诉求,真正的写(改用途+重算里程碑)在审批通过时以审批人身份执行。
+ */
+export async function requestOrderPurposeChange(
+  orderId: string, toPurpose: string, reason?: string,
+): Promise<{ ok?: boolean; error?: string }> {
+  if (!PURPOSE_CHANGEABLE.includes(toPurpose)) return { error: '不支持的目标用途' };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roles = await getActorRoles(supabase, user.id);
+  const canPropose = roles.some(r => ['sales', 'sales_manager', 'merchandiser', 'order_manager', 'admin', 'finance'].includes(r));
+  if (!canPropose) return { error: '无权申请修改订单用途' };
+
+  const svc = createServiceRoleClient();
+  const { data: order } = await (svc.from('orders') as any).select('id, order_purpose').eq('id', orderId).maybeSingle();
+  if (!order) return { error: '订单不存在' };
+  const from = (order as any).order_purpose || 'production';
+  if (from === toPurpose) return { error: '目标用途与当前一致,无需申请' };
+
+  const { data: dup } = await (svc.from('order_purpose_change_requests') as any)
+    .select('id').eq('order_id', orderId).eq('status', 'pending').limit(1);
+  if (dup && dup.length > 0) return { error: '该订单已有待审批的改用途申请,请等财务/管理员处理' };
+
+  const { error } = await (svc.from('order_purpose_change_requests') as any).insert({
+    order_id: orderId, from_purpose: from, to_purpose: toPurpose, reason: reason || null,
+    status: 'pending', requested_by: user.id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
+/**
+ * 财务/管理员审批「改用途申请」。通过 → 以审批人身份执行变更;驳回 → 记原因。
+ */
+export async function decideOrderPurposeChange(
+  requestId: string, approve: boolean, note?: string,
+): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const roles = await getActorRoles(supabase, user.id);
+  if (!roles.includes('admin') && !roles.includes('finance')) return { error: '仅财务或管理员可审批改用途申请' };
+
+  const svc = createServiceRoleClient();
+  const { data: req } = await (svc.from('order_purpose_change_requests') as any).select('*').eq('id', requestId).maybeSingle();
+  if (!req) return { error: '申请不存在' };
+  const r = req as any;
+  if (r.status !== 'pending') return { error: '该申请已处理' };
+
+  const now = new Date().toISOString();
+  if (!approve) {
+    const { error } = await (svc.from('order_purpose_change_requests') as any)
+      .update({ status: 'rejected', decided_by: user.id, decided_at: now, decision_note: note || null, updated_at: now })
+      .eq('id', requestId).eq('status', 'pending');
+    if (error) return { error: error.message };
+    revalidatePath(`/orders/${r.order_id}`);
+    return { ok: true };
+  }
+
+  const applied = await applyOrderPurposeChange(r.order_id, r.to_purpose, r.reason || note, user.id);
+  if (applied.error) return { error: `执行变更失败:${applied.error}` };
+  const { error } = await (svc.from('order_purpose_change_requests') as any)
+    .update({ status: 'approved', decided_by: user.id, decided_at: now, decision_note: note || null, updated_at: now })
+    .eq('id', requestId).eq('status', 'pending');
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${r.order_id}`);
+  revalidatePath('/procurement');
+  return { ok: true };
+}
+
+/** 读该订单待审批的改用途申请(带申请人名),供订单页横幅渲染。 */
+export async function getPurposeChangeRequests(orderId: string): Promise<{ data: any[] }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: [] };
+  const svc = createServiceRoleClient();
+  const { data } = await (svc.from('order_purpose_change_requests') as any)
+    .select('id, order_id, from_purpose, to_purpose, reason, status, requested_by, created_at')
+    .eq('order_id', orderId).eq('status', 'pending').order('created_at', { ascending: false });
+  const reqs = (data || []) as any[];
+  if (reqs.length === 0) return { data: [] };
+  const ids = [...new Set(reqs.map(r => r.requested_by))];
+  const { data: profs } = await (svc.from('profiles') as any).select('user_id, full_name, name, email').in('user_id', ids);
+  const nameById = new Map((profs || []).map((p: any) => [p.user_id, p.full_name || p.name || p.email || '业务']));
+  return { data: reqs.map(r => ({ ...r, requester_name: nameById.get(r.requested_by) || '业务' })) };
 }

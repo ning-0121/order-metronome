@@ -559,7 +559,8 @@ export default async function OrderDetailPage({
                     <OrderPurposeChanger
                       orderId={id}
                       currentPurpose={(orderData as any).order_purpose || 'production'}
-                      canEdit={isAdmin || currentRoles.includes('finance')}
+                      canApprove={isAdmin || currentRoles.includes('finance')}
+                      canRequest={currentRoles.some(r => ['sales', 'sales_manager', 'merchandiser', 'order_manager'].includes(r))}
                     />
                   </dd>
                 </div>
