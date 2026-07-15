@@ -39,7 +39,8 @@ export function CollabRiskGroups({ items, tone = 'orange', ctaLabel = '查看' }
   const toggle = (k: string) =>
     setOpen((prev) => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
-  const Row = ({ it, idx }: { it: CollabRiskItem; idx: number }) => (
+  // showCustomer:单单客户组无折叠头 → 行内显示客户名(否则丢名);多单组的行由头显示客户,行内不重复。
+  const Row = ({ it, idx, showCustomer }: { it: CollabRiskItem; idx: number; showCustomer?: boolean }) => (
     <div className={`px-5 py-3 ${t.rowHover} transition-colors`}>
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -47,6 +48,7 @@ export function CollabRiskGroups({ items, tone = 'orange', ctaLabel = '查看' }
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <Link href={`/orders/${it.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">{it.orderNo}</Link>
+              {showCustomer && <span className="text-gray-500 text-sm truncate">{it.customerName?.trim() || '(未命名客户)'}</span>}
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${t.badge}`}>{it.issueCount} 项</span>
             </div>
             <div className="text-xs text-gray-600 mt-1 space-y-0.5">
@@ -65,7 +67,7 @@ export function CollabRiskGroups({ items, tone = 'orange', ctaLabel = '查看' }
       {groups.map(([customer, list]) => {
         const isOpen = open.has(customer);
         const totalIssues = list.reduce((s, x) => s + (x.issueCount || 0), 0);
-        if (list.length === 1) return <Row key={customer} it={list[0]} idx={1} />;
+        if (list.length === 1) return <Row key={customer} it={list[0]} idx={1} showCustomer />;
         return (
           <div key={customer}>
             <button onClick={() => toggle(customer)} className={`w-full flex items-center gap-2 px-5 py-2.5 text-left ${t.headHover} transition-colors`}>
