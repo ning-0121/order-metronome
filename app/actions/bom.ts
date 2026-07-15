@@ -80,6 +80,7 @@ export async function addBomItem(orderId: string, item: {
   pack_size?: number;  // 每包件数(打包辅料;需求÷每包件数)
   image_urls?: string[];   // [0]→辅料单「示例画稿」, [1]→「位置说明及示意图」(录料时直接上传)
   attachment_files?: Array<{ name: string; url: string }>;   // 排版稿/文件附件(分款吊卡/箱唛等;录料时直接传)
+  consumption_basis?: string; sample_reference?: string; position_description?: string;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -116,6 +117,9 @@ export async function addBomItem(orderId: string, item: {
     pack_size: item.pack_size != null && item.pack_size > 1 ? item.pack_size : null,   // 每包件数
     image_urls: Array.isArray(item.image_urls) && item.image_urls.some(Boolean) ? item.image_urls : [],  // 辅料单图(示例画稿/示意图);无图给 []——列 NOT NULL,写 null 会违反约束(2026-07-09 修)
     attachment_files: Array.isArray(item.attachment_files) ? item.attachment_files : [],   // 排版稿/文件附件(录料时随行入库)
+    consumption_basis: item.consumption_basis || null,
+    sample_reference: item.sample_reference || null,
+    position_description: item.position_description || null,
     source: 'manual',                      // 手动新增(Phase 2A 来源标记)
   };
   let { error } = await (supabase.from('materials_bom') as any).insert(insertRow);

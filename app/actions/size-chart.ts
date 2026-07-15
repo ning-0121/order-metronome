@@ -30,11 +30,6 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
     .eq('checksum_sha256', checksum).limit(1).maybeSingle();
   if (duplicate) return { error: '重复文件：相同尺码表已上传，请使用现有记录' };
 
-  let parsed: Awaited<ReturnType<typeof parseSizeChartWorkbook>> | null = null;
-  let failureReason: string | null = null;
-  try { parsed = await parseSizeChartWorkbook(bytes); }
-  catch (error: any) { failureReason = String(error?.message || '无法识别尺码表布局').slice(0, 300); }
-
   // ⚠ Supabase Storage 的 key 只允许 ASCII;中文文件名(如「PY70EB尺寸表.xlsx」)会报 Invalid key。
   //   → key 用 UUID;原始文件名(含中文)仅存 order_attachments.file_name 供显示/下载。
   const ext = (String(file.name || '').match(/\.[a-zA-Z0-9]{1,8}$/)?.[0] || '').toLowerCase();
@@ -62,12 +57,8 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
     source_filename: file.name,
     checksum_sha256: checksum,
     parser_version: SIZE_CHART_PARSER_VERSION,
-    worksheet_name: parsed?.sheetName || null,
-    parse_status: parsed ? 'NEEDS_REVIEW' : 'FAILED',
-    parsed_row_count: parsed?.rows.length || 0,
-    parsed_json: parsed,
-    error_code: parsed ? null : 'UNSUPPORTED_LAYOUT',
-    safe_error_message: failureReason,
+    worksheet_name: null, parse_status: 'UPLOADED', parsed_row_count: 0, parsed_json: null,
+    error_code: null, safe_error_message: null,
     created_by: user.id,
   });
   if (statusErr) {
@@ -76,6 +67,18 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
     return { error: /size_chart_imports|does not exist/i.test(statusErr.message || '')
       ? '尺码识别数据表尚未启用，请管理员执行待审批迁移'
       : `尺码解析状态保存失败:${statusErr.message}` };
+  }
+  await (supabase.from('size_chart_imports') as any).update({ parse_status: 'PARSING', updated_by: user.id }).eq('attachment_id', (attachment as any).id);
+  try {
+    const parsed = await parseSizeChartWorkbook(bytes);
+    const { error: parseSaveErr } = await (supabase.from('size_chart_imports') as any).update({ worksheet_name: parsed.sheetName,
+      parse_status: 'NEEDS_REVIEW', parsed_row_count: parsed.rows.length, parsed_json: parsed, error_code: null,
+      safe_error_message: null, updated_by: user.id }).eq('attachment_id', (attachment as any).id);
+    if (parseSaveErr) return { error: `解析结果保存失败:${parseSaveErr.message}` };
+  } catch (error: any) {
+    const safe = String(error?.message || '无法识别尺码表布局').slice(0, 300);
+    await (supabase.from('size_chart_imports') as any).update({ parse_status: 'FAILED', error_code: 'UNSUPPORTED_LAYOUT',
+      safe_error_message: safe, updated_by: user.id }).eq('attachment_id', (attachment as any).id);
   }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
@@ -103,6 +106,25 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
       row_count: Number(status?.parsed_row_count) || 0 });
   }
   return { data: out };
+}
+
+export async function getSizeChartImport(attachmentId: string, orderId: string) {
+  const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); if (!user) return { error: '请先登录' };
+  const { data, error } = await (supabase.from('size_chart_imports') as any)
+    .select('id,parse_status,worksheet_name,parsed_row_count,parsed_json,error_code,safe_error_message,reviewed_at')
+    .eq('attachment_id', attachmentId).eq('order_id', orderId).single();
+  return error ? { error: error.message } : { data };
+}
+
+export async function reviewSizeChart(attachmentId: string, orderId: string, decision: 'approve' | 'reject') {
+  const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); if (!user) return { error: '请先登录' };
+  const { data: current } = await (supabase.from('size_chart_imports') as any).select('parse_status').eq('attachment_id', attachmentId).eq('order_id', orderId).single();
+  if (!current || !['NEEDS_REVIEW','PARSED'].includes(current.parse_status)) return { error: '仅待复核的尺码表可以审核' };
+  const update = decision === 'approve'
+    ? { parse_status: 'APPROVED', reviewed_by: user.id, updated_by: user.id, reviewed_at: new Date().toISOString() }
+    : { parse_status: 'FAILED', error_code: 'REJECTED_BY_REVIEWER', safe_error_message: '人工复核未通过', reviewed_by: user.id, updated_by: user.id, reviewed_at: new Date().toISOString() };
+  const { error } = await (supabase.from('size_chart_imports') as any).update(update).eq('attachment_id', attachmentId).eq('order_id', orderId);
+  revalidatePath(`/orders/${orderId}`); return error ? { error: error.message } : { ok: true };
 }
 
 /** 删除一张尺码表。 */

@@ -53,7 +53,7 @@ export async function getManufacturingOrder(orderId: string) {
     .select('*').eq('order_id', orderId).order('line_no');
 
   const { data: bom } = await (supabase.from('materials_bom') as any)
-    .select('material_name, material_type, material_code, color, placement, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec, customer_supplied, factory_supplied')
+    .select('material_name, material_type, material_code, color, placement, position_description, sample_reference, consumption_basis, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec, customer_supplied, factory_supplied')
     .eq('order_id', orderId).order('material_type');
 
   // 多客户PO合单:来源PO容器(生产单按PO批次拆用)。表未建时静默返回空,不影响生产单生成。
@@ -588,13 +588,14 @@ async function buildMoWorkbook(
       let tr = 3;
       g.rows.forEach((b: any, idx: number) => {
         // 备注:特殊要求 + 备注 + 颜色(规格已独立成列,不再并入)
-        const remark = joinTxt(b.special_requirements, b.notes, b.color ? `颜色：${b.color}` : '');
+        const basisLabel: Record<string,string> = { PER_SET:'每套', PER_COMPONENT:'每部件', PER_PIECE:'每件', PER_ORDER:'整单', PER_KG:'每公斤', PER_METER:'每米', PER_PACK:'每包', MANUAL_TOTAL:'手工总量' };
+        const remark = joinTxt(b.special_requirements, b.notes, b.color ? `颜色：${b.color}` : '', b.sample_reference ? `样品参考：${b.sample_reference}` : '', b.consumption_basis ? `用量基准：${basisLabel[b.consumption_basis] || b.consumption_basis}` : '');
         // 供料方式:加工厂承担/客供 标在物料名后,给生产照做 + 财务监督(加工厂承担=费用工厂出,绮陌不采购)
         const supplyTag = b.factory_supplied === true ? '【加工厂承担】' : (b.customer_supplied === true ? '【客供】' : '');
         tbox(tr, 1, `${b.material_name || ''}${supplyTag}`);    // 物料(带供料方式标注)
         tbox(tr, 2, '');                                        // 示例画稿(下方贴图)
         tbox(tr, 3, '');                                        // 位置说明及示意图(下方贴图)
-        tbox(tr, 4, b.placement || '', { align: 'left' });      // 位置说明(文字)
+        tbox(tr, 4, joinTxt(b.placement, b.position_description), { align: 'left' });
         tbox(tr, 5, b.spec || '');                              // 规格(独立列)
         tbox(tr, 6, remark, { align: 'left' });                 // 备注
         tbox(tr, 7, '');                                        // 工厂价格(采购填,不带底价)
