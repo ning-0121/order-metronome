@@ -12,6 +12,7 @@ import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
 import { CeoInsightButton } from '@/components/CeoInsightButton';
 import { CustomerMattersPanel } from '@/components/CustomerMattersPanel';
+import { CollabRiskGroups } from '@/components/CollabRiskGroups';
 // 邮件晨报（briefing.service / MorningBriefingCard）已下线 — 用户反馈"太费钱用处不大"
 // 服务代码保留在 lib/services/briefing.service.ts，仅移除 UI 入口
 // RecalcButton removed from global — now per-order only
@@ -379,7 +380,7 @@ export default async function CEOWarRoom() {
   const todosByBucket = {
     urgent:        allTodos.filter(t => t.bucket === 'urgent').slice(0, 10),
     warningSelf:   warningAll.filter(t => ownOrderIds.has(t.orderId) && !handoffOrderIds.has(t.orderId)).slice(0, 10),
-    warningCollab: warningAll.filter(t => !ownOrderIds.has(t.orderId) || handoffOrderIds.has(t.orderId)).slice(0, 10),
+    warningCollab: warningAll.filter(t => !ownOrderIds.has(t.orderId) || handoffOrderIds.has(t.orderId)).slice(0, 40),   // 按客户折叠后可多显
     collab:        allTodos.filter(t => t.bucket === 'collab').slice(0, 10),
   };
   // 协作提醒（delay 审批）已并入"审批中心"入口，不再计入今日待办总数
@@ -789,44 +790,17 @@ export default async function CEOWarRoom() {
                   <h3 className="text-sm font-bold text-orange-900">协作订单风险（{todosByBucket.warningCollab.length}）</h3>
                   <span className="text-xs text-orange-600/70">他人负责的订单 / 上下游交接卡顿</span>
                 </div>
-                <div className="divide-y divide-gray-100">
-                  {todosByBucket.warningCollab.map((item: any, i: number) => (
-                    <div key={item.orderId} className="px-5 py-3 hover:bg-orange-50/30 transition-colors">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <span className="text-sm font-bold text-orange-600 w-5 text-center flex-shrink-0">{i + 1}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Link href={`/orders/${item.orderId}`} className="font-semibold text-blue-700 hover:underline text-sm">
-                                {item.orderNo}
-                              </Link>
-                              <span className="text-gray-500 text-sm truncate">{item.customerName}</span>
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">
-                                {item.issueCount} 项
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                              {item.issues.slice(0, 2).map((issue: string, j: number) => (
-                                <div key={j}>• {issue}</div>
-                              ))}
-                              {item.issueCount > 2 && (
-                                <div className="text-gray-400">还有 {item.issueCount - 2} 个...</div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <Link
-                          href={orderFocusMs[item.orderId]
-                            ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
-                            : `/orders/${item.orderId}?tab=progress&from=/ceo`}
-                          className="flex-shrink-0 bg-orange-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-orange-600"
-                        >
-                          查看
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {/* 同一客户折叠成一组、可展开(如 EHL 一堆订单) */}
+                <CollabRiskGroups items={todosByBucket.warningCollab.map((item: any) => ({
+                  orderId: item.orderId,
+                  orderNo: item.orderNo,
+                  customerName: item.customerName || '',
+                  issueCount: item.issueCount,
+                  issues: item.issues,
+                  viewHref: orderFocusMs[item.orderId]
+                    ? `/orders/${item.orderId}?tab=progress&focus=${orderFocusMs[item.orderId]}&from=/ceo`
+                    : `/orders/${item.orderId}?tab=progress&from=/ceo`,
+                }))} />
               </div>
             )}
           </div>
