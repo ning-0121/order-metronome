@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { parseSizeChartWorkbook } from '@/lib/parsers/size-chart';
 
 const SIZE_CHART_TYPE = 'size_chart';   // 'use server' 只能 export async 函数,故不导出常量
+const SIZE_CHART_PARSER_VERSION = 'xlsx-deterministic-v1';
 
 /** 上传尺码表(FormData 传 file)。 */
 export async function uploadSizeChart(orderId: string, formData: FormData): Promise<{ ok?: boolean; error?: string }> {
@@ -25,7 +26,8 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
   const bytes = await file.arrayBuffer();
   const checksum = createHash('sha256').update(Buffer.from(bytes)).digest('hex');
   const { data: duplicate } = await (supabase.from('size_chart_imports') as any)
-    .select('attachment_id').eq('order_id', orderId).eq('checksum_sha256', checksum).maybeSingle();
+    .select('attachment_id').eq('order_id', orderId).eq('document_type', SIZE_CHART_TYPE)
+    .eq('checksum_sha256', checksum).limit(1).maybeSingle();
   if (duplicate) return { error: '重复文件：相同尺码表已上传，请使用现有记录' };
 
   let parsed: Awaited<ReturnType<typeof parseSizeChartWorkbook>> | null = null;
@@ -56,10 +58,16 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
   const { error: statusErr } = await (supabase.from('size_chart_imports') as any).insert({
     order_id: orderId,
     attachment_id: (attachment as any).id,
+    document_type: SIZE_CHART_TYPE,
+    source_filename: file.name,
     checksum_sha256: checksum,
+    parser_version: SIZE_CHART_PARSER_VERSION,
+    worksheet_name: parsed?.sheetName || null,
     parse_status: parsed ? 'NEEDS_REVIEW' : 'FAILED',
+    parsed_row_count: parsed?.rows.length || 0,
     parsed_json: parsed,
-    failure_reason: failureReason,
+    error_code: parsed ? null : 'UNSUPPORTED_LAYOUT',
+    safe_error_message: failureReason,
     created_by: user.id,
   });
   if (statusErr) {
@@ -84,15 +92,15 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
   if (error) return { error: error.message };
   const ids = (data || []).map((a: any) => a.id);
   const { data: imports } = ids.length ? await (supabase.from('size_chart_imports') as any)
-    .select('attachment_id, parse_status, failure_reason, parsed_json').in('attachment_id', ids) : { data: [] };
+    .select('attachment_id, parse_status, safe_error_message, parsed_row_count').in('attachment_id', ids) : { data: [] };
   const byAttachment = new Map((imports || []).map((r: any) => [r.attachment_id, r]));
   const out: Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number }> = [];
   for (const a of (data || [])) {
     const { data: signed } = await supabase.storage.from('order-docs').createSignedUrl((a as any).storage_path, 3600);
     const status: any = byAttachment.get((a as any).id);
     out.push({ id: (a as any).id, file_name: (a as any).file_name, url: signed?.signedUrl ?? null,
-      parse_status: status?.parse_status || 'UPLOADED', failure_reason: status?.failure_reason || null,
-      row_count: Array.isArray(status?.parsed_json?.rows) ? status.parsed_json.rows.length : 0 });
+      parse_status: status?.parse_status || 'UPLOADED', failure_reason: status?.safe_error_message || null,
+      row_count: Number(status?.parsed_row_count) || 0 });
   }
   return { data: out };
 }
