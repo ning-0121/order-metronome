@@ -289,10 +289,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     const culprits = getRedCulprits(o.milestones || [], nowDate);
     const { date: deliveryDate } = getEffectiveDeliveryDate(o);
     const daysToDelivery = deliveryDate ? Math.ceil((new Date(deliveryDate + 'T23:59:59').getTime() - now) / 86400000) : null;
+    // 用户反馈修:拖红节点全是「没回填」(后面节点已推进过它)→ 归疑似没回填,别当临期紧张误报。
+    //   如 545B 货已做好待出运,却被早期 PO确认(超期44天)拖红——那是没点完成,不是真临期。
+    const allBackfill = culprits.length > 0 && culprits.every((c: any) => c.isBackfillGap);
     const category: 'overdue' | 'near' | 'unfilled' =
-      overdueIds.has(o.id) ? 'overdue'
-        : (daysToDelivery != null && daysToDelivery <= 7) ? 'near'
-          : 'unfilled';
+      allBackfill ? 'unfilled'
+        : overdueIds.has(o.id) ? 'overdue'
+          : (daysToDelivery != null && daysToDelivery <= 7) ? 'near'
+            : 'unfilled';
     acc.push({
       id: o.id, orderNo: o.order_no, internalNo: o.internal_order_no, customer: o.customer_name,
       deliveryDate: deliveryDate || null, daysToDelivery, category, culprits,

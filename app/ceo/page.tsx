@@ -107,6 +107,23 @@ export default async function CEOWarRoom() {
     if (ms.some((m: any) => SHIPPED_STEP_KEYS.has(m.step_key) && isDoneStatus(m.status))) doneOrShippedOrderIds.add(o.id);
   }
 
+  // 没回填节点:某订单里「后面已有节点完成/在办」时,更早的 pending/超期节点是隐式完成(做了没点)——
+  //   与红单体检 getRedCulprits 同口径,不当真超期报警(如货已做好待出运却被早期 PO确认拖红)。
+  const seqById = new Map<string, number>();
+  const progressedSeqByOrder = new Map<string, number>();
+  for (const [oid, ms] of milestonesByOrder) {
+    let maxSeq = -1;
+    for (const m of ms as any[]) {
+      const seq = typeof m.sequence_number === 'number' ? m.sequence_number : null;
+      if (seq != null) { seqById.set(m.id, seq); if ((isDoneStatus(m.status) || _isActive(m.status)) && seq > maxSeq) maxSeq = seq; }
+    }
+    progressedSeqByOrder.set(oid, maxSeq);
+  }
+  const isBackfillGapMs = (m: any) => {
+    const seq = seqById.get(m.id); const prog = progressedSeqByOrder.get(m.order_id);
+    return seq != null && prog != null && seq < prog;
+  };
+
   // 自己订单 vs 协作订单：自己 = 创建者或 owner 为当前用户
   const ownOrderIds = new Set<string>(
     (orders || [])
@@ -130,7 +147,7 @@ export default async function CEOWarRoom() {
 
   const overdueMilestones = (allMilestonesWithOrders || [])
     .filter((m: any) =>
-      !doneOrShippedOrderIds.has(m.order_id) && _isActive(m.status) && m.due_at && isOverdue(m.due_at)
+      !doneOrShippedOrderIds.has(m.order_id) && !isBackfillGapMs(m) && _isActive(m.status) && m.due_at && isOverdue(m.due_at)
     )
     // 用户反馈修:原按 due_at 最老取前 30 → 关键节点/新超期被百天僵尸挤掉「该提醒的没提醒」。
     //   改按【关键节点优先 + 超期天数降序】排,slice(0,30) 才是「最该管的 30 条」。
@@ -140,7 +157,7 @@ export default async function CEOWarRoom() {
       return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();   // 同级别老的在前
     });
   const blockedMilestones = (allMilestonesWithOrders || []).filter((m: any) =>
-    !doneOrShippedOrderIds.has(m.order_id) && _isBlocked(m.status)
+    !doneOrShippedOrderIds.has(m.order_id) && !isBackfillGapMs(m) && _isBlocked(m.status)
   );
   const overdueCount = overdueMilestones.length;
   const blockedCount = blockedMilestones.length;

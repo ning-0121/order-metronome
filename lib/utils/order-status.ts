@@ -12,18 +12,31 @@ export interface OrderStatus {
   riskFactors: string[];
 }
 
-export interface RedCulprit { name: string; daysOverdue: number; kind: 'blocked' | 'overdue' }
+export interface RedCulprit { name: string; daysOverdue: number; kind: 'blocked' | 'overdue'; isBackfillGap?: boolean }
 
 /**
  * 揪出把订单拖红的节点:阻塞 + 超期的「进行中」节点(带逾期天数)。
  * 与 computeOrderStatus 的 RED 条件 1/2 同口径,供列表红牌提示 + 红单体检面板共用。
  */
 export function getRedCulprits(milestones: Milestone[], now: Date = new Date()): RedCulprit[] {
+  const ms = milestones || [];
+  // 链已推进到的最靠后序号(有 done 或 active 的最大 sequence_number)。
+  //   若某拖红节点的序号 < 它,说明后面的节点都已完成/在办 → 这个早期节点其实做了没点完成(没回填),
+  //   不是真卡住。用户反馈:货已做好待出运的单,被早期 PO确认(超期44天)拖红误报为临期紧张。
+  let progressedSeq = -1;
+  for (const m of ms) {
+    const seq = typeof (m as any).sequence_number === 'number' ? (m as any).sequence_number : null;
+    if (seq != null && (isDoneStatus(m.status) || isActiveStatus(m.status))) {
+      if (seq > progressedSeq) progressedSeq = seq;
+    }
+  }
   const out: RedCulprit[] = [];
-  for (const m of milestones || []) {
-    if (isBlockedStatus(m.status)) { out.push({ name: m.name, daysOverdue: 0, kind: 'blocked' }); continue; }
+  for (const m of ms) {
+    const seq = typeof (m as any).sequence_number === 'number' ? (m as any).sequence_number : null;
+    const isBackfillGap = seq != null && seq < progressedSeq;   // 后面有节点已推进过它 → 隐式完成、没回填
+    if (isBlockedStatus(m.status)) { out.push({ name: m.name, daysOverdue: 0, kind: 'blocked', isBackfillGap }); continue; }
     if (isActiveStatus(m.status) && m.due_at && isAfter(startOfDay(now), startOfDay(new Date(m.due_at)))) {
-      out.push({ name: m.name, daysOverdue: differenceInCalendarDays(startOfDay(now), startOfDay(new Date(m.due_at))), kind: 'overdue' });
+      out.push({ name: m.name, daysOverdue: differenceInCalendarDays(startOfDay(now), startOfDay(new Date(m.due_at))), kind: 'overdue', isBackfillGap });
     }
   }
   return out;
