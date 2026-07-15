@@ -30,6 +30,7 @@ import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
 import { OrderActions } from '@/components/OrderActions';
 import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
 import { BackfillProgressButton } from '@/components/BackfillProgressButton';
+import { OrderPurposeChanger } from '@/components/OrderPurposeChanger';
 import { PITab } from '@/components/tabs/PITab';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
@@ -549,6 +550,17 @@ export default async function OrderDetailPage({
                     ) : (
                       <span className="text-gray-900">{merchandiserName || '未指定'}</span>
                     )}
+                  </dd>
+                </div>
+                {/* 订单用途(自产/经销/委托):选错或历史遗留可由财务/管理员改正,里程碑按新用途重算 */}
+                <div className="flex justify-between items-center gap-2">
+                  <dt className="text-sm text-gray-500">订单用途</dt>
+                  <dd className="text-sm font-medium text-right">
+                    <OrderPurposeChanger
+                      orderId={id}
+                      currentPurpose={(orderData as any).order_purpose || 'production'}
+                      canEdit={isAdmin || currentRoles.includes('finance')}
+                    />
                   </dd>
                 </div>
                 {/* 进度校准(2026-07-09 用户:真实订单之前没人推进→一片风险;admin/生产主管选实际节点,之前标完成清风险)*/}

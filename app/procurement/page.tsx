@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { getProcurementQueues, getProcurementMatters, type RiskMatter } from '@/app/actions/procurement';
+import { getProcurementQueues, getProcurementMatters, getMissingMaterialPlanOrders, type RiskMatter } from '@/app/actions/procurement';
 import { ProcurementQueueClient } from '@/components/ProcurementQueueClient';
 import { RiskEtaFill } from './RiskEtaFill';
 import { DraftPOBanner } from './DraftPOBanner';
@@ -29,8 +29,11 @@ export default async function ProcurementCenterPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // 两个独立调用并行(原串行 → 少一整轮跨区往返;性能优化 2026-07-04)
-  const [result, mattersResult] = await Promise.all([getProcurementQueues(), getProcurementMatters()]);
+  // 独立调用并行(原串行 → 少跨区往返;性能优化 2026-07-04)
+  const [result, mattersResult, missingPlanResult] = await Promise.all([
+    getProcurementQueues(), getProcurementMatters(), getMissingMaterialPlanOrders(),
+  ]);
+  const missingPlanOrders = missingPlanResult.data ?? [];
   if (result.error) {
     // 无权限或查询失败：降级提示，不 crash
     return (
@@ -88,6 +91,39 @@ export default async function ProcurementCenterPage() {
           </Link>
         </div>
       </div>
+
+      {/* ⚠️ 只读预警:自产单已开生产、却没物料计划 → 采购静默看不到(业务没跑 MRP 或用途选错) */}
+      {missingPlanOrders.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-amber-200 font-bold text-amber-900 text-sm flex items-center gap-2">
+            ⚠️ 缺物料计划 · 采购看不到（{missingPlanOrders.length}）
+            <span className="text-xs font-normal text-amber-700">这些自产单已开生产,但业务没录 BOM / 跑 MRP,采购中心看不到、无法核料下单</span>
+          </div>
+          <div className="bg-white/60">
+            {missingPlanOrders.map(o => (
+              <div key={o.order_id} className="border-b border-amber-100 last:border-0 px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0 text-sm">
+                  <span className="font-medium text-gray-900">{o.internal_order_no || '—'}</span>
+                  <span className="text-gray-400 mx-1.5">·</span>
+                  <span className="text-gray-600">{o.order_no}</span>
+                  {o.customer_name && <span className="text-gray-400 ml-1.5">{o.customer_name}</span>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link href={`/orders/${o.order_id}?tab=bom&from=${encodeURIComponent('/procurement')}`}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+                    去录 BOM / 跑 MRP →
+                  </Link>
+                  <Link href={`/orders/${o.order_id}?from=${encodeURIComponent('/procurement')}`}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                    title="若其实是经销/委托单,在订单「基础信息」里改订单用途,即不再要求核料">
+                    是经销/委托?改用途
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <ProcurementQueueClient pendingRequests={pendingRequests} pendingOrder={pendingOrder} chase={chase} readyShip={readyShip} receive={receive} counts={counts} banner={banner} canFinanceOver={canFinanceOver} />
 

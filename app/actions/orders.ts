@@ -1880,6 +1880,128 @@ export async function getRetrospective(orderId: string) {
   if (error && error.code !== 'PGRST116') { // PGRST116 = not found
     return { error: error.message };
   }
-  
+
   return { data: retrospective || null };
+}
+
+/**
+ * 修改已建订单的「订单用途」(order_purpose),并温和重算里程碑。
+ *
+ * 背景:order_purpose 原来只在建单时能设,选错/历史遗留(如 consign 2026-07-10 才上线,更早的经销单
+ * 只能将就选 production)就永久卡住,没有修正入口。此函数补上入口。
+ *
+ * 仅在真实生产类用途间改:production / trade(经销·采购成品)/ consign(委托加工·料工厂自采)。
+ * 温和 diff(不走 rebuildOrderMilestones 的删光重建,保留已完成进度与日志):
+ *   - 删:新模板不含、且「未完成」的里程碑(已完成的保留作历史);
+ *   - 加:新模板有、当前缺的里程碑(pending)。
+ * 例:production → consign 只会删掉未完成的「采购下单」节点,其余原样。
+ *
+ * 铁律合规:人(财务/管理员)在 UI 操作,记真实 auth.uid();非 AI 自主写。
+ */
+export async function changeOrderPurpose(
+  orderId: string,
+  newPurpose: string,
+  reason?: string,
+): Promise<{ ok?: boolean; error?: string; added?: number; removed?: number }> {
+  const ALLOWED = ['production', 'trade', 'consign'];
+  if (!ALLOWED.includes(newPurpose)) return { error: '不支持的订单用途(仅 自产/经销/委托加工 之间可改)' };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  // 权限:财务 / 管理员(真实 auth.uid 留痕)
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!roles.includes('admin') && !roles.includes('finance')) return { error: '仅财务或管理员可修改订单用途' };
+
+  const { data: order, error: oErr } = await (supabase.from('orders') as any)
+    .select('id, order_no, order_purpose, order_type, incoterm, delivery_type, order_date, created_at, etd, warehouse_due_date, eta, sample_phase, sample_confirm_days_override, factory_date')
+    .eq('id', orderId).maybeSingle();
+  if (oErr) return { error: `读取订单失败:${oErr.message}` };
+  if (!order) return { error: '订单不存在' };
+  const o = order as any;
+  const oldPurpose = o.order_purpose || 'production';
+  if (oldPurpose === newPurpose) return { ok: true, added: 0, removed: 0 };
+  if (!ALLOWED.includes(oldPurpose)) return { error: `当前用途「${oldPurpose}」不在可改范围(样品/询价单请走建单流程)` };
+
+  const incoterm: string = o.incoterm || 'FOB';
+  const deliveryType: string = o.delivery_type || (['RMB_EX_TAX', 'RMB_INC_TAX'].includes(incoterm) ? 'domestic' : 'export');
+
+  const { getApplicableMilestones } = await import('@/lib/milestoneTemplate');
+  const { calcDueDates } = await import('@/lib/schedule');
+  const templates = getApplicableMilestones(o.order_type, deliveryType === 'export', deliveryType, newPurpose, false, o.sample_phase || undefined);
+  const newStepKeys = new Set(templates.map((t: any) => t.step_key));
+
+  const { data: existing } = await (supabase.from('milestones') as any)
+    .select('id, step_key, status, sequence_number').eq('order_id', orderId);
+  const cur = (existing || []) as any[];
+  const curStepKeys = new Set(cur.map(m => m.step_key));
+  const isDone = (s: string) => ['done', '已完成'].includes(String(s || '').toLowerCase());
+
+  // ① 改用途
+  const now = new Date().toISOString();
+  const { error: upErr } = await (supabase.from('orders') as any)
+    .update({ order_purpose: newPurpose, updated_at: now }).eq('id', orderId);
+  if (upErr) return { error: `更新用途失败:${upErr.message}` };
+
+  // ② 删:新模板不含、且未完成的节点(保留已完成的作历史)
+  const toRemove = cur.filter(m => !newStepKeys.has(m.step_key) && !isDone(m.status));
+  let removed = 0;
+  if (toRemove.length > 0) {
+    const { error: delErr } = await (supabase.from('milestones') as any).delete().in('id', toRemove.map(m => m.id));
+    if (delErr) return { error: `清理旧节点失败:${delErr.message}(用途已改,请重试或联系管理员)` };
+    removed = toRemove.length;
+  }
+
+  // ③ 加:新模板有、当前缺的节点(pending)
+  const toAdd = templates.filter((t: any) => !curStepKeys.has(t.step_key));
+  let added = 0;
+  if (toAdd.length > 0) {
+    let dueDates: Record<string, any> = {};
+    try {
+      dueDates = calcDueDates({
+        orderDate: o.order_date, createdAt: o.created_at ? new Date(o.created_at) : undefined,
+        incoterm: (incoterm === 'DDP' ? 'DDP' : 'FOB') as 'FOB' | 'DDP',
+        etd: o.etd, warehouseDueDate: o.warehouse_due_date, eta: o.eta,
+        orderType: (o.order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
+        shippingSampleRequired: deliveryType === 'export',
+        sampleConfirmDaysOverride: o.sample_confirm_days_override,
+        skipPreProductionSample: false,
+      }) as any;
+    } catch { dueDates = {}; }
+    const fallbackDue = o.factory_date ? new Date(o.factory_date + 'T00:00:00+08:00').toISOString() : (o.eta ? new Date(o.eta).toISOString() : now);
+    const maxSeq = cur.reduce((mx, m) => Math.max(mx, Number(m.sequence_number) || 0), 0);
+    const rows = toAdd.map((t: any, i: number) => {
+      const raw = dueDates[t.step_key];
+      const dueIso = raw ? (raw instanceof Date ? raw.toISOString() : new Date(raw).toISOString()) : fallbackDue;
+      return {
+        order_id: orderId, step_key: t.step_key, name: t.name, owner_role: t.owner_role, owner_user_id: null,
+        planned_at: dueIso, due_at: dueIso, status: 'pending',
+        is_critical: !!t.is_critical, evidence_required: !!t.evidence_required, evidence_note: t.evidence_note || null,
+        blocks: t.blocks || [], sequence_number: maxSeq + i + 1,
+      };
+    });
+    const { error: insErr } = await (supabase.from('milestones') as any).insert(rows);
+    if (insErr) return { error: `新增节点失败:${insErr.message}(用途已改,可用「重建里程碑」补齐)` };
+    added = rows.length;
+  }
+
+  // ④ 留痕(attach 到该单一个仍存在的里程碑;真实 actor)
+  const anchorMs = cur.find(m => !toRemove.some(r => r.id === m.id)) || cur[0];
+  if (anchorMs) {
+    await (supabase.from('milestone_logs') as any).insert({
+      milestone_id: anchorMs.id, order_id: orderId, action: 'order_purpose_changed', actor_user_id: user.id,
+      note: `订单用途 ${oldPurpose} → ${newPurpose}(删 ${removed} 加 ${added} 节点)${reason ? `:${reason}` : ''}`,
+      payload: { from: oldPurpose, to: newPurpose, removed, added, by: user.id },
+    }).then(() => {}, () => {});
+  }
+
+  try {
+    const { fireRuntimeRecompute } = await import('@/lib/repositories/milestonesRepo');
+    fireRuntimeRecompute(orderId, { type: 'order_purpose_changed', from: oldPurpose, to: newPurpose });
+  } catch { /* 风险重算触发失败不阻断 */ }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/procurement');
+  return { ok: true, added, removed };
 }

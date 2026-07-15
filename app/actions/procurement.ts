@@ -1643,3 +1643,73 @@ export async function setRiskLineEta(input: { orderId: string; materialName: str
   revalidatePath('/procurement');
   return { ok: true, updated: (data || []).length };
 }
+
+export type MissingPlanOrder = {
+  order_id: string;
+  order_no: string | null;
+  internal_order_no: string | null;
+  customer_name: string | null;
+  last_step: string | null;
+};
+
+/**
+ * 只读预警:自产单(order_purpose='production')已开生产、却没有 active 物料计划的订单
+ * —— 业务没录 BOM / 跑 MRP,采购中心「待采购订单」<b>静默看不到</b>它们。
+ *
+ * 口径(与人工诊断 SQL 一致):
+ *   - order_purpose='production'(经销 trade / 委托 consign 本就不核料,排除)
+ *   - 生命周期非完成/取消
+ *   - 已开生产(mo_released 或 po_confirmed 完成)
+ *   - 未深入生产/未出货(排除已过采购窗口的)
+ *   - 采购下单未完成 且 无 active 物料计划
+ * 纯读、不写库(合铁律),供采购中心露出让人去补 BOM 或改用途。
+ */
+export async function getMissingMaterialPlanOrders(): Promise<{ data: MissingPlanOrder[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: [], error: '请先登录' };
+  try {
+    const { data: orders } = await (supabase.from('orders') as any)
+      .select('id, order_no, internal_order_no, customer_name, lifecycle_status')
+      .eq('order_purpose', 'production');
+    const cand = (orders || []).filter((o: any) => !['completed', '已完成', 'cancelled', '已取消'].includes(o.lifecycle_status || ''));
+    if (cand.length === 0) return { data: [] };
+    const ids = cand.map((o: any) => o.id);
+
+    const { data: ms } = await (supabase.from('milestones') as any)
+      .select('order_id, step_key, status, completed_at').in('order_id', ids);
+    const isDone = (s: string) => ['done', '已完成'].includes(String(s || '').toLowerCase());
+    const REACHED = new Set(['mo_released', 'po_confirmed']);
+    const DEEP = new Set(['production_kickoff', 'materials_received_inspected', 'mid_qc_check', 'final_qc_check', 'shipment_execute', 'customs_export']);
+    const reached = new Set<string>(), deep = new Set<string>(), placed = new Set<string>();
+    const lastStep = new Map<string, { step: string; at: string }>();
+    for (const m of (ms || [])) {
+      if (!isDone(m.status)) continue;
+      if (REACHED.has(m.step_key)) reached.add(m.order_id);
+      if (DEEP.has(m.step_key)) deep.add(m.order_id);
+      if (m.step_key === 'procurement_order_placed') placed.add(m.order_id);
+      const prev = lastStep.get(m.order_id);
+      if (!prev || String(m.completed_at || '') > prev.at) lastStep.set(m.order_id, { step: m.step_key, at: String(m.completed_at || '') });
+    }
+
+    const { data: plans } = await (supabase.from('material_plans') as any)
+      .select('order_id').eq('plan_status', 'active').in('order_id', ids);
+    const hasPlan = new Set((plans || []).map((p: any) => p.order_id));
+
+    const out: MissingPlanOrder[] = [];
+    for (const o of cand) {
+      if (!reached.has(o.id)) continue;   // 没开生产
+      if (deep.has(o.id)) continue;       // 已深入生产/出货 → 采购已 moot
+      if (placed.has(o.id)) continue;     // 采购下单已完成
+      if (hasPlan.has(o.id)) continue;    // 采购能看到
+      out.push({
+        order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no,
+        customer_name: o.customer_name, last_step: lastStep.get(o.id)?.step || null,
+      });
+    }
+    out.sort((a, b) => String(a.internal_order_no || '').localeCompare(String(b.internal_order_no || '')));
+    return { data: out };
+  } catch (e: any) {
+    return { data: [], error: e?.message };
+  }
+}
