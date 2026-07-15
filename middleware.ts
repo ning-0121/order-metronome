@@ -1,14 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { shouldBypassForPreviewSmoke } from './middleware-smoke-bypass';
 
 export async function middleware(request: NextRequest) {
-  if (shouldBypassForPreviewSmoke({
-    environment: process.env.VERCEL_ENV,
-    method: request.method,
-    pathname: request.nextUrl.pathname,
-  })) return NextResponse.next();
-
   let response = NextResponse.next({
     request: {
       headers: request.headers,
