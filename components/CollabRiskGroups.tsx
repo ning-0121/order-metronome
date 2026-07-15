@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { backfillMilestonesToCurrent } from '@/app/actions/milestones';
+import { useDialogs } from '@/components/ui/useDialogs';
 
 export interface CollabRiskItem {
   orderId: string;
@@ -24,6 +27,24 @@ const TONE: Record<Tone, { idx: string; badge: string; btn: string; rowHover: st
 /** 风险订单按客户折叠成一组、可展开(同客户多单时最有用,如 EHL 一堆);三栏共用,tone 配色。 */
 export function CollabRiskGroups({ items, tone = 'orange', ctaLabel = '查看' }: { items: CollabRiskItem[]; tone?: Tone; ctaLabel?: string }) {
   const t = TONE[tone];
+  const { confirm, dialog } = useDialogs();
+  const router = useRouter();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function doBackfill(orderId: string, orderNo: string) {
+    const ok = await confirm({
+      title: `补录 ${orderNo} 到当前进度?`,
+      message: '把「当前在办节点之前」还没点完成的历史节点一次性标完成(逐条留痕),清掉早期节点的超期红牌。阻塞/当前在办节点不动;没欠点则不动。',
+      confirmText: '补录',
+    });
+    if (!ok) return;
+    setBusyId(orderId);
+    const r = await backfillMilestonesToCurrent(orderId);
+    setBusyId(null);
+    if (r.error) { await confirm({ title: '补录失败', message: r.error, confirmText: '知道了' }); return; }
+    await confirm({ title: r.filled ? `已补录 ${r.filled} 个节点` : '无需补录', message: r.filled ? '历史欠点已标完成,红牌会随之消除。' : '当前进度之前没有欠点。', confirmText: '好' });
+    router.refresh();
+  }
   const groupMap = new Map<string, CollabRiskItem[]>();
   for (const it of items) {
     const k = it.customerName?.trim() || '(未命名客户)';
@@ -57,13 +78,22 @@ export function CollabRiskGroups({ items, tone = 'orange', ctaLabel = '查看' }
             </div>
           </div>
         </div>
-        <Link href={it.viewHref} className={`flex-shrink-0 text-white px-3 py-1.5 rounded-lg text-xs font-medium ${t.btn}`}>{ctaLabel}</Link>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button onClick={() => doBackfill(it.orderId, it.orderNo)} disabled={busyId === it.orderId}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 whitespace-nowrap"
+            title="把当前进度之前没点完成的历史节点一键标完成(带留痕),清掉早期节点的超期红牌">
+            {busyId === it.orderId ? '补录中…' : '⏱ 补录'}
+          </button>
+          <Link href={it.viewHref} className={`text-white px-3 py-1.5 rounded-lg text-xs font-medium ${t.btn}`}>{ctaLabel}</Link>
+        </div>
       </div>
     </div>
   );
 
   return (
-    <div className="divide-y divide-gray-100">
+    <>
+      {dialog}
+      <div className="divide-y divide-gray-100">
       {groups.map(([customer, list]) => {
         const isOpen = open.has(customer);
         const totalIssues = list.reduce((s, x) => s + (x.issueCount || 0), 0);
@@ -87,6 +117,7 @@ export function CollabRiskGroups({ items, tone = 'orange', ctaLabel = '查看' }
           </div>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }
