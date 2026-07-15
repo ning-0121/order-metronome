@@ -29,6 +29,7 @@ import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
 import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
 import { OrderActions } from '@/components/OrderActions';
 import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
+import { BackfillProgressButton } from '@/components/BackfillProgressButton';
 import { PITab } from '@/components/tabs/PITab';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { RecalcButton } from '@/components/RecalcButton';
@@ -555,6 +556,13 @@ export default async function OrderDetailPage({
                   <div className="flex justify-between items-center gap-2 flex-wrap">
                     <dt className="text-sm text-gray-500">进度校准</dt>
                     <OrderProgressCalibrate orderId={id} steps={(milestones as any[]).map((m: any) => ({ step_key: m.step_key, name: m.name }))} />
+                  </div>
+                )}
+                {/* 一键补录到当前进度:跟单圈可用,清早期没点完成的历史节点(拖红) */}
+                {(isAdmin || currentRoles.some((r: string) => ['merchandiser', 'production', 'qc', 'quality', 'production_manager', 'order_manager', 'sales', 'sales_manager', 'admin_assistant'].includes(r))) && (milestones || []).length > 0 && (
+                  <div className="flex justify-between items-center gap-2 flex-wrap">
+                    <dt className="text-sm text-gray-500">补录进度</dt>
+                    <BackfillProgressButton orderId={id} />
                   </div>
                 )}
                 <div className="flex justify-between items-center">

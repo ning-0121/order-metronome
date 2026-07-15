@@ -1976,3 +1976,67 @@ export async function saveChecklistData(
   revalidatePath(`/orders/${milestone.order_id}`);
   return {};
 }
+
+/**
+ * 一键补录到当前进度(2026-07-13 用户需求):把「当前在办节点之前」还是 pending 的节点一次性标完成,
+ * 带补录留痕(milestone_logs)。用于历史欠点——跟单没把早期节点(PO确认/原辅料验收…)点完成,
+ * 导致 CEO/红单体检一直报早期节点超期。补录后红牌自动消。
+ *
+ * 判定:进度点 = 有 done/在办 的最大 sequence_number;目标 = sequence < 进度点 且 非done非阻塞的节点。
+ *   (阻塞节点不动——那需要人真解阻塞;在办的当前节点也不动——只补它之前的。)
+ * 免证据、免多方确认:这是「回填历史真做过的节点」,跟单以本操作担保;逐条留痕可审计。
+ */
+export async function backfillMilestonesToCurrent(orderId: string): Promise<{ ok?: boolean; error?: string; filled?: number }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  // 能操作里程碑的圈子可补录(跟单/生产/QC/业务/管理)
+  const CAN = ['merchandiser', 'production', 'qc', 'quality', 'production_manager', 'order_manager', 'sales', 'sales_manager', 'admin', 'admin_assistant'];
+  if (!roles.some((r) => CAN.includes(r))) return { error: '无权补录进度' };
+
+  const svc = createServiceRoleClient();
+  const { data: ms } = await (svc.from('milestones') as any)
+    .select('id, name, status, sequence_number, actual_at').eq('order_id', orderId);
+  const list = ((ms || []) as any[]).filter((m) => typeof m.sequence_number === 'number')
+    .sort((a, b) => a.sequence_number - b.sequence_number);
+  if (!list.length) return { error: '该订单无可补录节点' };
+
+  // 进度点 = 有 done 或 在办 的最大 sequence
+  let progressedSeq = -1;
+  for (const m of list) if ((isDoneStatus(m.status) || isActiveStatus(m.status)) && m.sequence_number > progressedSeq) progressedSeq = m.sequence_number;
+  if (progressedSeq < 0) return { error: '该订单还没开始推进,无需补录' };
+
+  // 目标:进度点之前、还没完成、非阻塞的节点
+  const targets = list.filter((m) => m.sequence_number < progressedSeq && !isDoneStatus(m.status) && !isBlockedStatus(m.status));
+  if (!targets.length) return { ok: true, filled: 0 };
+
+  const now = new Date().toISOString();
+  const actorName = (prof as any)?.name || user.email?.split('@')[0] || '跟单';
+  for (const m of targets) {
+    await (svc.from('milestones') as any)
+      .update({ status: 'done', completed_at: now, actual_at: m.actual_at || now, updated_at: now }).eq('id', m.id);
+    try {
+      await (svc.from('milestone_logs') as any).insert({
+        milestone_id: m.id, order_id: orderId, actor_user_id: user.id, action: 'status_transition',
+        note: `一键补录到当前进度(${actorName}):历史欠点、后续节点已推进,视为已完成`,
+        payload: { new_status: 'done', old_status: m.status, backfill: true },
+      });
+    } catch { /* 留痕失败不阻断补录 */ }
+  }
+
+  // 风险卡/交付置信度重算(补录后早期节点不再拖红)
+  try {
+    const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');
+    await recomputeDeliveryConfidence(orderId, {
+      type: 'milestone_status_changed',
+      source: `backfill:${orderId}`,
+      severity: 'info',
+      payload: { backfill: true, filled: targets.length },
+    } as any);
+  } catch { /* 重算失败不阻断 */ }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, filled: targets.length };
+}
