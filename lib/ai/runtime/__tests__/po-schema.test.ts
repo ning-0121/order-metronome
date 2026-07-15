@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { validatePOParsedData } from '@/lib/ai/scenes/po-schema';
 
@@ -11,4 +13,12 @@ const valid = {
 describe('PO parser Runtime regression', () => {
   it('preserves the existing PO action data shape', () => assert.equal(validatePOParsedData(valid).styles[0].colors[0].sizes.M, 10));
   it('rejects unsafe partial output before draft persistence', () => assert.throws(() => validatePOParsedData({ ...valid, styles: [{ style_no: 'S1', total_qty: 'ten', colors: [] }] })));
+  it('routes both submit-time PO verification actions through Runtime', () => {
+    const source = readFileSync(join(process.cwd(), 'app/actions/po-verify.ts'), 'utf8');
+    assert.equal(source.includes("from '@anthropic-ai/sdk'"), false);
+    assert.equal(source.includes('ANTHROPIC_API_KEY'), false);
+    assert.equal(source.includes('qimoAI.generateObject'), true);
+    assert.equal(source.includes("'order.po.verify'"), true);
+    assert.equal(source.includes('order.po.compare.'), true);
+  });
 });

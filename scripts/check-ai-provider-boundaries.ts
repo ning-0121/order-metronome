@@ -10,7 +10,7 @@ const runtimeTestsDirectory = 'lib/ai/runtime/__tests__/';
 const legacyAllowlist = new Set([
   'app/actions/agent-chat.ts', 'app/actions/ai-knowledge.ts', 'app/actions/analytics.ts',
   'app/actions/documents.ts', 'app/actions/photo-parser.ts', 'app/actions/po-extract.ts',
-  'app/actions/po-verify.ts', 'app/actions/smart-insights.ts', 'app/api/agent-chat/route.ts',
+  'app/actions/smart-insights.ts', 'app/api/agent-chat/route.ts',
   'app/api/cron/agent-learn/route.ts', 'lib/agent/anthropicClient.ts',
   'lib/agent/complianceCheck.ts', 'lib/agent/customerEmailMapping.ts', 'lib/agent/dailyBriefing.ts',
   'lib/agent/emailDraft.ts', 'lib/agent/emailLearning.ts', 'lib/agent/emailMatcher.ts',
