@@ -39,6 +39,10 @@ export interface ExecutionScore {
   executionScore: number;          // 0-100
   grade: 'S' | 'A' | 'B' | 'C' | 'D';
   trend: 'up' | 'down' | 'stable'; // 和上期比较
+  // 考核(2026-07-14)
+  redLine: boolean;                // 触发红线(无论总分即预警)
+  redLineReasons: string[];        // 触发原因
+  qualified: boolean;              // 达标(A 以上,月综合分 ≥ 75)
 }
 
 export interface ExecutionSummary {
@@ -196,6 +200,13 @@ export async function getExecutionAnalytics(
       executionScore >= 60 ? 'B' :
       executionScore >= 40 ? 'C' : 'D';
 
+    // 考核红线:当前逾期 ≥ 3 或 逾期率 > 30%(触发即预警,无论总分)
+    const redLineReasons: string[] = [];
+    if (currentOverdueCount >= 3) redLineReasons.push(`当前逾期 ${currentOverdueCount} 项(≥3)`);
+    if (overdueRate > 30) redLineReasons.push(`逾期率 ${overdueRate}%(>30%)`);
+    const redLine = redLineReasons.length > 0;
+    const qualified = executionScore >= 75 && !redLine;
+
     rankings.push({
       userId: p.user_id,
       name,
@@ -214,6 +225,9 @@ export async function getExecutionAnalytics(
       executionScore,
       grade,
       trend: 'stable', // TODO: 对比上期
+      redLine,
+      redLineReasons,
+      qualified,
     });
   }
 

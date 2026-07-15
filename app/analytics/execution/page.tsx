@@ -66,6 +66,26 @@ export default function ExecutionAnalyticsPage() {
         <div className="text-center py-12 text-gray-400">暂无数据</div>
       ) : (
         <>
+          {/* 考核基线横幅 + 概览 */}
+          <div className="mb-4 rounded-xl bg-indigo-50 border border-indigo-200 p-3 text-sm text-indigo-800 flex items-center gap-3 flex-wrap">
+            <span>🎯 <b>考核已启用</b>·自 <b>{data.baselineDate}</b>(本周一)起计,之前不追溯。</span>
+            <span className="text-indigo-500">红线:当前逾期≥3 或 逾期率&gt;30% 即预警。</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center">
+              <div className="text-2xl font-bold text-emerald-600">{data.rankings.filter(r => r.qualified).length}</div>
+              <div className="text-xs text-emerald-700 mt-0.5">达标(A/S · ≥75)</div>
+            </div>
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-center">
+              <div className="text-2xl font-bold text-rose-600">{data.rankings.filter(r => r.redLine).length}</div>
+              <div className="text-xs text-rose-700 mt-0.5">🔴 红线预警</div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center">
+              <div className="text-2xl font-bold text-amber-600">{data.rankings.filter(r => r.grade === 'D').length}</div>
+              <div className="text-xs text-amber-700 mt-0.5">不合格(D)</div>
+            </div>
+          </div>
+
           {/* 团队平均 */}
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-white rounded-xl border border-gray-200 p-5 text-center">
@@ -115,7 +135,11 @@ export default function ExecutionAnalyticsPage() {
 
                       {/* 姓名/角色 */}
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-gray-900 text-sm">{r.name}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-gray-900 text-sm">{r.name}</span>
+                          {r.redLine && <span title={r.redLineReasons.join('；')} className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">🔴 红线</span>}
+                          {!r.redLine && r.qualified && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">✅ 达标</span>}
+                        </div>
                         <div className="text-xs text-gray-500">{r.roleLabel}</div>
                       </div>
 
@@ -207,9 +231,10 @@ export default function ExecutionAnalyticsPage() {
           {/* 说明 */}
           <div className="mt-6 text-xs text-gray-400 space-y-1">
             <p>📐 评分公式：准时率(40%) + 响应速度(30%) + 当前无逾期(20%) + 无升级(10%)</p>
-            <p>🏆 S ≥ 90 · A ≥ 75 · B ≥ 60 · C ≥ 40 · D &lt; 40</p>
+            <p>🏆 S ≥ 90 · A ≥ 75 · B ≥ 60 · C ≥ 40 · D &lt; 40 ｜ ✅ 达标 = ≥75 且无红线</p>
+            <p>🔴 红线(触发即预警,无论总分)：当前逾期 ≥ 3 项，或 逾期率 &gt; 30%</p>
+            <p>🎯 考核自 {data.baselineDate}(本周一)起计，之前到期的节点不追溯（历史「没回填」不砸分）</p>
             <p>⏰ 响应时间 = 节点截止日到实际完成日的差值（提前完成算 0）</p>
-            <p>🔴 被上报 = 逾期超过 2 天被自动升级链触发</p>
           </div>
         </>
       )}
