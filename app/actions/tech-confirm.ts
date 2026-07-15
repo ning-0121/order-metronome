@@ -7,6 +7,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { techConfirmObjectKey } from '@/lib/storage/safe-object-key';
 
 const TECH_CONFIRM_TYPE = 'tech_bulk_confirm';   // 'use server' 文件只能 export async 函数,故不导出
 
@@ -19,14 +20,19 @@ export async function uploadTechConfirm(orderId: string, formData: FormData): Pr
   if (!file || !file.size) return { error: '请选择文件' };
   if (file.size > 20 * 1024 * 1024) return { error: '文件不能超过 20MB' };
 
-  const safeName = String(file.name || 'file').replace(/[^\w.\-一-龥]/g, '_');
-  const path = `${orderId}/tech-confirm/${Date.now()}-${safeName}`;
+  let path: string;
+  try {
+    path = techConfirmObjectKey(orderId, String(file.name || ''));
+  } catch (error: any) {
+    const code = String(error?.message || '');
+    return { error: code === 'UNSUPPORTED_FILE_TYPE' ? '仅支持 JPG、PNG 或 PDF 确认单' : '文件名或订单编号不合法' };
+  }
   const { error: upErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
   if (upErr) return { error: `上传失败:${upErr.message}` };
 
   const { error: insErr } = await (supabase.from('order_attachments') as any).insert({
     order_id: orderId,
-    file_name: file.name || safeName,
+    file_name: file.name,
     file_type: TECH_CONFIRM_TYPE,
     storage_path: path,
     file_url: path,            // 展示兜底;真下载走 getAttachmentDownloadUrl(storage_path 签名)
