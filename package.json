@@ -11,6 +11,9 @@
     "test:runtime": "npx tsx scripts/test-runtime-confidence.ts",
     "test:mrp": "npx tsx scripts/test-mrp.ts",
     "test:inventory": "npx tsx scripts/test-inventory-w3.ts",
+    "test:ai-runtime": "tsx --test lib/ai/runtime/__tests__/*.test.ts",
+    "check:ai-boundaries": "tsx scripts/check-ai-provider-boundaries.ts",
+    "smoke:ai-runtime": "tsx scripts/ai-runtime-smoke.ts",
     "predeploy": "npm run build && npm run check",
     "prepare": "husky"
   },
@@ -23,6 +26,7 @@
     "imapflow": "^1.2.18",
     "next": "^16.2.10",
     "nodemailer": "^9.0.3",
+    "openai": "^6.47.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
@@ -37,6 +41,7 @@
     "eslint-config-next": "16.1.1",
     "husky": "^9.1.7",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "typescript": "^5"
   }
 }
