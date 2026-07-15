@@ -13,7 +13,7 @@ import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDete
 import { getNamingHint, getAcceptString, validateFileExt, getFileTypeForStep } from '@/lib/domain/fileNaming';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { isInspectionStep } from '@/lib/domain/inspectionWaiver';
-import { requiredPartiesFor, pendingParties } from '@/lib/domain/confirmationParties';
+import { requiredPartiesFor, pendingParties, isSoftConfirm } from '@/lib/domain/confirmationParties';
 
 const QC_STEPS = new Set([
   'pre_production_sample_ready', 'materials_received_inspected', 'production_kickoff',
@@ -83,7 +83,8 @@ export function MilestoneActions({
   // 还有没确认的方时,「去处理」面板不显示会被服务端卡住的「确认完成」——改显引导。
   // 全部确认后:免凭证节点已自动完成(面板消失);需凭证节点才显示完成按钮上传凭证。
   // 多方节点判定是纯域函数(同步),无需异步——避免「按钮先出现、加载完才消失」的闪现。
-  const isMultiPartyNode = requiredPartiesFor(milestone.step_key).length > 0;
+  // 软会签节点(PO确认/产前样)不硬卡:视为单责任方,直接显「完成」按钮;多方确认面板仍在(可选会签)
+  const isMultiPartyNode = requiredPartiesFor(milestone.step_key).length > 0 && !isSoftConfirm(milestone.step_key);
   const [pendingPartyLabels, setPendingPartyLabels] = useState<string[] | null>(null);
   // 仅多方节点才需异步拉「谁已确认」;拉到之前不显示活按钮,防闪现误点。
   const [partiesLoaded, setPartiesLoaded] = useState(!isMultiPartyNode);

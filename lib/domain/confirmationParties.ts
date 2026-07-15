@@ -62,6 +62,18 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
   ],
 };
 
+/**
+ * 「软会签」节点(2026-07-14 用户拍板):多方确认改为可选会签(仍可点、仍发提醒),
+ * 但责任人可直接完成、不被硬卡——避免催不动别人时节点卡死逾期。
+ *  - po_confirmed:2026-07-11 已定(业务建单即确认,财务/生产变提醒);
+ *  - pre_production_sample_approved:产前样确认(采购/业务执行会签可选)。
+ * 其余多方节点(尾期验货/发货出运)仍硬卡全确认。
+ */
+export const SOFT_CONFIRM_STEPS = new Set(['po_confirmed', 'pre_production_sample_approved']);
+export function isSoftConfirm(stepKey: string | null | undefined): boolean {
+  return !!stepKey && SOFT_CONFIRM_STEPS.has(stepKey);
+}
+
 /** 该节点要求的确认方(无 = 单责任方节点)。 */
 export function requiredPartiesFor(stepKey: string): ConfirmationParty[] {
   return MILESTONE_CONFIRMATION_PARTIES[stepKey] || [];

@@ -9,7 +9,7 @@ import {
   transitionMilestoneStatus,
   fireRuntimeRecompute,
 } from '@/lib/repositories/milestonesRepo';
-import { isDoneStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
+import { isDoneStatus, isActiveStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
@@ -463,10 +463,10 @@ export async function markMilestoneDone(
   // 配置在 lib/domain/confirmationParties.ts;V1 节点不在配置里,零影响。
   // admin 豁免(应急);确认表还没建(迁移未跑)时放行不阻塞,confirm 侧会提示建表。
   {
-    const { requiredPartiesFor, pendingParties } = await import('@/lib/domain/confirmationParties');
+    const { requiredPartiesFor, pendingParties, isSoftConfirm } = await import('@/lib/domain/confirmationParties');
     const requiredParties = requiredPartiesFor(milestone.step_key);
-    // PO确认:2026-07-11 用户拍板改「业务可直接确认完成」—— 财务/生产部确认变提醒/可选,不再硬卡业务。
-    if (requiredParties.length > 0 && !isAdmin && milestone.step_key !== 'po_confirmed') {
+    // 软会签节点(PO确认 / 产前样确认,2026-07-14):多方确认改可选,责任人可直接完成,不硬卡。
+    if (requiredParties.length > 0 && !isAdmin && !isSoftConfirm(milestone.step_key)) {
       const { data: confs, error: confErr } = await (supabase.from('milestone_confirmations') as any)
         .select('party_key, status').eq('milestone_id', milestoneId);
       if (!confErr) {
