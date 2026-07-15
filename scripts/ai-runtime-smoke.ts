@@ -26,17 +26,31 @@ if (!process.env.OPENAI_API_KEY || !model || model.includes('=')) {
 }
 const verifiedModel = model as string;
 
-const schema: SchemaValidator<{ category: string; count: number }> = {
+interface SmokePO {
+  poNumber: string;
+  customer: string;
+  style: string;
+  quantity: number;
+  currency: string;
+}
+
+const schema: SchemaValidator<SmokePO> = {
   name: 'qimo_runtime_smoke_v1',
   strict: true,
   jsonSchema: {
-    type: 'object', additionalProperties: false, required: ['category', 'count'],
-    properties: { category: { type: 'string' }, count: { type: 'number' } },
+    type: 'object', additionalProperties: false,
+    required: ['poNumber', 'customer', 'style', 'quantity', 'currency'],
+    properties: {
+      poNumber: { type: 'string' }, customer: { type: 'string' }, style: { type: 'string' },
+      quantity: { type: 'number' }, currency: { type: 'string' },
+    },
   },
   parse(value) {
-    const row = value as { category?: unknown; count?: unknown } | null;
-    if (!row || typeof row.category !== 'string' || typeof row.count !== 'number') throw new Error('schema mismatch');
-    return { category: row.category, count: row.count };
+    const row = value as Partial<SmokePO> | null;
+    if (!row || typeof row.poNumber !== 'string' || typeof row.customer !== 'string'
+      || typeof row.style !== 'string' || typeof row.quantity !== 'number'
+      || typeof row.currency !== 'string') throw new Error('schema mismatch');
+    return row as SmokePO;
   },
 };
 
@@ -46,10 +60,10 @@ try {
     scene: 'deployment.smoke.structured-extraction',
     capability: 'structured-extraction',
     logicalModel: 'qimo.structured-extraction',
-    prompt: 'Classify this fixed non-sensitive record: category is sample and count is 2.',
+    prompt: 'PO number TEST-001, customer Demo Customer, style ABC123, quantity 1200, currency USD.',
     schema,
     timeoutMs: 20_000,
-    maxOutputTokens: 64,
+    maxOutputTokens: 128,
     fallback: 'disabled',
   }, verifiedModel);
   console.log(JSON.stringify({
