@@ -1901,7 +1901,7 @@ async function getActorRoles(supabase: any, userId: string): Promise<string[]> {
  * 例:production → consign 只删掉未完成的「采购下单」节点。
  */
 async function applyOrderPurposeChange(
-  orderId: string, newPurpose: string, reason: string | undefined, actorUserId: string,
+  orderId: string, newPurpose: string, reason: string | undefined, actorUserId: string | null,
 ): Promise<{ ok?: boolean; error?: string; added?: number; removed?: number; from?: string }> {
   if (!PURPOSE_CHANGEABLE.includes(newPurpose)) return { error: '不支持的订单用途(仅 自产/经销/委托加工 之间可改)' };
   const svc = createServiceRoleClient();
@@ -2082,6 +2082,16 @@ export async function decideOrderPurposeChange(
   revalidatePath(`/orders/${r.order_id}`);
   revalidatePath('/procurement');
   return { ok: true };
+}
+
+/**
+ * 跨系统入口:财务系统审批通过后,由 finance-callback 调用执行改用途。
+ * actor 记 null(财务审批人非节拍器 auth 用户),审批人名已由调用方并入 reason/留痕。
+ */
+export async function applyOrderPurposeChangeFromCallback(
+  orderId: string, toPurpose: string, reason?: string,
+): Promise<{ ok?: boolean; error?: string; added?: number; removed?: number }> {
+  return applyOrderPurposeChange(orderId, toPurpose, reason, null);
 }
 
 /** 读该订单待审批的改用途申请(带申请人名),供订单页横幅渲染。 */

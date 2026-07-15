@@ -43,7 +43,7 @@ interface ApprovalCallback {
     approval_id: string
     // P0-4 修复：补 'milestone'。L106 实际处理这种类型（财务确认加工费/核准出运/收款等里程碑）
     // 但 union 之前漏写，导致 TS 判类型不重叠、IDE 提示死代码
-    approval_type: 'price' | 'cancel' | 'milestone' | 'purchase' | 'shipment'
+    approval_type: 'price' | 'cancel' | 'milestone' | 'purchase' | 'shipment' | 'order_purpose'
     decision: 'approved' | 'rejected'
     decided_by: string
     decider_name: string
@@ -280,6 +280,41 @@ export async function POST(request: Request) {
               message: `采购单 ${poNo} 被财务驳回:${decision_note || '无原因'}。请调整后重新提交。`,
             })
           } catch { /* 通知失败不阻断 */ }
+        }
+      }
+    }
+
+    // 订单用途变更审批(2026-07-15):approval_id = order_purpose_change_requests.id。
+    // 批准 → 执行改用途+温和重算里程碑(记财务审批人名进 note);驳回 → 标 rejected。
+    // 状态闸 .eq('status','pending') 幂等,防重放二次执行。
+    if (approval_type === 'order_purpose') {
+      const { createServiceRoleClient } = await import('@/lib/supabase/server')
+      const svc = createServiceRoleClient()
+      const { data: req } = await (svc.from('order_purpose_change_requests') as any)
+        .select('id, order_id, to_purpose, reason, status').eq('id', approval_id).maybeSingle()
+      if (!req || (req as any).status !== 'pending') {
+        skipLog('order_purpose')
+      } else {
+        const now = new Date().toISOString()
+        const noteTag = decision_note
+          ? `[财务系统-${decider_name}] ${decision_note}`
+          : `[财务系统-${decider_name}] ${decision === 'approved' ? '已批准改用途' : '驳回改用途'}`
+        if (decision === 'approved') {
+          const { applyOrderPurposeChangeFromCallback } = await import('@/app/actions/orders')
+          const applied = await applyOrderPurposeChangeFromCallback(
+            (req as any).order_id, (req as any).to_purpose,
+            `财务审批·${decider_name}${decision_note ? ':' + decision_note : ''}`,
+          )
+          if (applied.error) throw new Error(`用途变更执行失败: ${applied.error}`)
+          const { data: gate } = await (svc.from('order_purpose_change_requests') as any)
+            .update({ status: 'approved', decided_at: now, decision_note: noteTag, updated_at: now })
+            .eq('id', approval_id).eq('status', 'pending').select('id')
+          if (!gate || gate.length === 0) skipLog('order_purpose')
+        } else {
+          const { data: gate } = await (svc.from('order_purpose_change_requests') as any)
+            .update({ status: 'rejected', decided_at: now, decision_note: noteTag, updated_at: now })
+            .eq('id', approval_id).eq('status', 'pending').select('id')
+          if (!gate || gate.length === 0) skipLog('order_purpose')
         }
       }
     }
