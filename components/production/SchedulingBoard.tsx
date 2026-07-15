@@ -72,6 +72,9 @@ export function SchedulingBoard() {
               return (
                 <div key={key} className="rounded-lg border border-gray-100 bg-gray-50/60 p-2">
                   <div className="flex items-center gap-2 flex-wrap text-sm">
+                    {s.image_url
+                      ? <img src={s.image_url} alt="" loading="lazy" className="w-9 h-9 rounded object-cover border border-gray-200 bg-white shrink-0" />
+                      : <span className="w-9 h-9 rounded border border-dashed border-gray-200 flex items-center justify-center text-gray-300 text-xs shrink-0">图</span>}
                     <span className="font-mono text-gray-800">{s.style_no || '(整单)'}</span>
                     <span className="text-gray-500 truncate">{s.product_name}</span>
                     <span className="text-xs text-gray-500">{s.qty} 件 · {s.colors.length} 色</span>

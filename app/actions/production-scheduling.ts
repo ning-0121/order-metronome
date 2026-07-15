@@ -67,7 +67,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 明细(款×色)/ 客供料(委托加工判定)/ 采购到位
   const [{ data: lines }, { data: bom }, { data: pli }] = await Promise.all([
-    (svc.from('order_line_items') as any).select('order_id, style_no, product_name, color_cn, color_en, qty_pcs').in('order_id', orderIds),
+    (svc.from('order_line_items') as any).select('order_id, style_no, product_name, color_cn, color_en, qty_pcs, image_url').in('order_id', orderIds),
     (svc.from('materials_bom') as any).select('order_id, customer_supplied').in('order_id', orderIds).eq('customer_supplied', true),
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
   ]);
@@ -89,11 +89,12 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     const orderCap = deriveOrderCapability({ orderPurpose: o.order_purpose, hasCustomerSupplied: custSupplied.has(o.id) });
     const req: OrderReq = { quality_grade: o.quality_grade || null, weave_type: o.weave_type || null, needs_package: o.needs_package ?? null, order_capability: orderCap };
     // 款分组
-    const styleMap = new Map<string, { style_no: string; product_name: string; qty: number; colors: string[] }>();
+    const styleMap = new Map<string, { style_no: string; product_name: string; qty: number; colors: string[]; image_url: string | null }>();
     for (const l of (linesByOrder.get(o.id) || [])) {
       const sn = String(l.style_no || '').trim();
-      const s = styleMap.get(sn) || { style_no: sn, product_name: l.product_name || '', qty: 0, colors: [] as string[] };
+      const s = styleMap.get(sn) || { style_no: sn, product_name: l.product_name || '', qty: 0, colors: [] as string[], image_url: null };
       s.qty += Number(l.qty_pcs) || 0;
+      if (!s.image_url && l.image_url) s.image_url = String(l.image_url);   // 同款各色存同一图,取首个非空
       const cc = String(l.color_cn || l.color_en || '').trim(); if (cc && !s.colors.includes(cc)) s.colors.push(cc);
       styleMap.set(sn, s);
     }
