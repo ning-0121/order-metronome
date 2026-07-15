@@ -705,6 +705,7 @@ export function MilestoneActions({
             {AUTO_ARTIFACT_STEPS.has(milestone.step_key) && (
               <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mb-2">
                 ✓ 若{milestone.step_key === 'pi_confirmed' ? ' PI 已在 PI 模块' : milestone.step_key === 'ci_made' ? ' 装箱单已在装箱/出货模块' : ' 生产任务单已在生产模块'}做好,这里<b>无需再传</b>,直接点下方「完成」即可(没做好则按提示补传)。
+                {milestone.step_key === 'pi_confirmed' && <><br /><b>本单不做 PI(如 rag/usa)?</b> 在此上传<b>任意佐证文件</b>(客户确认/邮件/合同均可,PDF/图片/Excel/Word 都收)后点「完成」即可,不必是真 PI。</>}
               </p>
             )}
             {/* 命名建议 — 让业务/采购/跟单按规范命名 */}
