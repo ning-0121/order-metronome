@@ -495,13 +495,13 @@ function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
     if (next && !loaded) await load();
   }
   async function refreeze() {
-    if (!confirm('用当前「逐款明细」覆盖冻结底档?覆盖后底档 = 现在的明细。')) return;
+    if (!confirm('用当前「逐款明细」覆盖冻结底档，并把脱敏结构经验用于该客户后续 PO 识别？不会保存价格、数量或完整 PO。')) return;
     setBusy(true); setMsg('');
     const { refreezePoParseSnapshot } = await import('@/app/actions/order-line-items');
     const res = await refreezePoParseSnapshot(orderId);
     setBusy(false);
     if ((res as any).error) { setMsg('❌ ' + (res as any).error); return; }
-    setMsg('✅ 已重新冻结'); await load();
+    setMsg((res as any).warning ? `✅ 已重新冻结；⚠️ ${(res as any).warning}` : '✅ 已重新冻结并沉淀为该客户的 PO 识别经验'); await load();
   }
 
   const styles = snap?.styles || [];
@@ -517,7 +517,7 @@ function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
             : !snap ? <p className="text-xs text-gray-400">此单无 PO 解析底档(手工录入或从 PO 创建的单没有 AI 原文)。</p>
             : (
             <>
-              <p className="text-[11px] text-gray-500 mb-2">这是建单时 AI 从 PO 读出的原文(只读)。和上方「逐款明细」对比可看当初读错在哪;纠正在上方明细里改,改完点下面「再冻结」把底档更新成现在的明细。</p>
+              <p className="text-[11px] text-gray-500 mb-2">这是建单时 AI 从 PO 读出的原文。纠正上方明细后再冻结，会保存脱敏结构经验供该客户后续识别；不保存价格、数量或完整 PO。</p>
               <div className="overflow-x-auto border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead><tr className="bg-gray-50 text-gray-500 text-left">
@@ -539,7 +539,7 @@ function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
               <div className="flex items-center gap-3 mt-2">
                 <button onClick={refreeze} disabled={busy}
                   className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-50">
-                  {busy ? '处理中…' : '🔒 用当前明细再冻结'}</button>
+                  {busy ? '处理中…' : '🔒 再冻结并学习'}</button>
                 {msg && <span className="text-xs text-gray-600">{msg}</span>}
               </div>
             </>

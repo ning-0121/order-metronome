@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { qimoAI, AIRuntimeError, type FileInput, type ImageInput } from '@/lib/ai/runtime';
 import { poParsedSchema } from '@/lib/ai/scenes/po-schema';
+import { formatPOLearningContext, normalizeCustomerKey, type POLearningProfile } from '@/lib/ai/scenes/po-learning';
 
 /** 上传文件最大字节数：10MB。超过后拒绝读入内存。 */
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -211,6 +212,25 @@ export async function parsePO(
 
   const startedAt = Date.now();
   try {
+    // Customer history is advisory only. Missing migration/history fails closed to the generic prompt.
+    let learningContext = '';
+    try {
+      const supabase = await createClient();
+      let customerName = String(formData.get('customer_name_hint') || '').trim();
+      if (orderId) {
+        const { data: order } = await (supabase.from('orders') as any)
+          .select('customer_name').eq('id', orderId).maybeSingle();
+        customerName = String((order as any)?.customer_name || customerName).trim();
+      }
+      const customerKey = normalizeCustomerKey(customerName);
+      if (customerKey) {
+        const { data } = await (supabase.from('po_learning_examples') as any)
+          .select('learning_profile').eq('customer_key', customerKey).eq('status', 'APPROVED')
+          .order('approved_at', { ascending: false }).limit(5);
+        learningContext = formatPOLearningContext(((data || []) as any[]).map(r => r.learning_profile as POLearningProfile));
+      }
+    } catch { /* migration absent or no access: generic extraction remains available */ }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileType = file.type;
     const fileName = file.name.toLowerCase();
@@ -235,7 +255,7 @@ export async function parsePO(
     const result = await qimoAI.generateObject({
       scene: 'order.po.parse', capability: 'structured-extraction',
       logicalModel: 'qimo.structured-extraction', riskLevel: 'high',
-      system: SYSTEM_PROMPT, prompt, schema: poParsedSchema, image, file: inputFile,
+      system: SYSTEM_PROMPT + learningContext, prompt, schema: poParsedSchema, image, file: inputFile,
       timeoutMs: 45_000, maxOutputTokens: 8192, fallback: 'allowed',
     });
     const parsed = result.data;

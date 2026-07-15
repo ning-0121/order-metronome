@@ -286,6 +286,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
           try {
             const fd = new FormData();
             fd.append('file', file);
+            if (selectedCustomer.trim()) fd.set('customer_name_hint', selectedCustomer.trim());
             const res = await parsePO(fd);
             return res.ok && res.data ? { ok: true as const, data: res.data, fileName: file.name } : { ok: false as const, error: res.error || '解析失败', fileName: file.name };
           } catch (err: any) {

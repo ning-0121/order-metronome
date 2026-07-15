@@ -13,6 +13,7 @@ import { syncStyleFabricsToBom } from '@/lib/services/style-fabric-sync';
 import { normalizeStyleFabrics, primaryFabricColumns } from '@/lib/services/style-fabrics';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { buildPOLearningProfile, normalizeCustomerKey } from '@/lib/ai/scenes/po-learning';
 
 /** 取当前用户角色 + 是否可见客户成交价(CAN_SEE_FINANCIALS)。 */
 async function financialsVisibility(supabase: any, userId: string): Promise<{ roles: string[]; canSeeFin: boolean }> {
@@ -34,11 +35,12 @@ export async function getPoParseSnapshot(orderId: string): Promise<{ snapshot?: 
 }
 
 /** 再冻结:用当前逐款明细覆盖冻结底档(业务纠正后固化)。权限同 saveOrderLineItems。 */
-export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: boolean; error?: string }> {
+export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: boolean; learningCaptured?: boolean; warning?: string; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { data: order } = await (supabase.from('orders') as any).select('created_by, owner_user_id').eq('id', orderId).maybeSingle();
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('created_by, owner_user_id, customer_id, customer_name, po_parse_snapshot').eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
   const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const roles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
@@ -53,11 +55,30 @@ export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: b
   if ((res as any).error) return { error: (res as any).error };
   const styles = (res as any).data || [];
   const snapshot = { styles, _refrozen: true };
+  const learningProfile = buildPOLearningProfile((order as any).po_parse_snapshot, styles);
   const { error } = await (supabase.from('orders') as any)
     .update({ po_parse_snapshot: snapshot, po_parse_snapshot_at: new Date().toISOString() }).eq('id', orderId);
   if (error) return { error: error.message };
+  let learningCaptured = false;
+  let warning: string | undefined;
+  const customerKey = normalizeCustomerKey(String((order as any).customer_name || ''));
+  if (customerKey) {
+    const { error: learningError } = await (supabase.from('po_learning_examples') as any).upsert({
+      source_order_id: orderId,
+      customer_id: (order as any).customer_id || null,
+      customer_key: customerKey,
+      learning_profile: learningProfile,
+      status: 'APPROVED',
+      approved_by: user.id,
+      approved_at: new Date().toISOString(),
+    }, { onConflict: 'source_order_id' });
+    if (learningError) warning = /po_learning_examples|schema cache|does not exist/i.test(learningError.message)
+      ? 'PO 学习表尚未启用；冻结已完成，但本次经验未进入历史学习。'
+      : '冻结已完成，但历史学习保存失败。';
+    else learningCaptured = true;
+  }
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true };
+  return { ok: true, learningCaptured, warning };
 }
 
 /** 读订单明细 → 按款分组返回。 */
