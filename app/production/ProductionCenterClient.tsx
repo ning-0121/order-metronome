@@ -99,6 +99,7 @@ function MoDownload({ orderId, orderNo, hasMo }: { orderId: string; orderNo: str
 
 export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrderRow[]; summary: ProductionCenterSummary }) {
   const [filter, setFilter] = useState<Filter | null>(null);
+  const [listOpen, setListOpen] = useState(true);
 
   const counts: Record<Filter, number> = {
     awaiting_procurement: summary.awaiting_procurement,
@@ -136,11 +137,15 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
       </div>
 
       <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
-        <span>{filter ? `筛选:${filter === 'risk' ? '风险单' : STAGE_LABEL[filter]} · ${shown.length}` : `全部在产 ${rows.length}`}</span>
+        <button onClick={() => setListOpen((v) => !v)} className="flex items-center gap-1 hover:text-gray-700" title="折叠/展开列表">
+          <span className={`text-gray-400 transition-transform ${(filter || listOpen) ? 'rotate-90' : ''}`}>▶</span>
+          <span>{filter ? `筛选:${filter === 'risk' ? '风险单' : STAGE_LABEL[filter]} · ${shown.length}` : `全部在产 ${rows.length}`}</span>
+        </button>
         {filter && <button onClick={() => setFilter(null)} className="text-indigo-600 hover:underline">清除筛选</button>}
+        {!filter && <span className="text-indigo-500 cursor-pointer" onClick={() => setListOpen((v) => !v)}>{listOpen ? '收起' : '展开'}</span>}
       </div>
 
-      {shown.length === 0 ? (
+      {!(filter || listOpen) ? null : shown.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white py-12 text-center text-gray-400">此桶暂无订单</div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">

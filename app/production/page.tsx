@@ -8,6 +8,7 @@ import { SchedulingBoard } from '@/components/production/SchedulingBoard';
 import { FactoryScheduleBoard } from '@/components/production/FactoryScheduleBoard';
 import { ProductionProgressBoard } from '@/components/production/ProductionProgressBoard';
 import { ProductionGanttChart } from '@/components/production/ProductionGanttChart';
+import { CollapsibleSection } from '@/components/CollapsibleSection';
 
 /**
  * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
@@ -62,31 +63,39 @@ export default async function ProductionCenterPage() {
 
       <ProductionCenterClient rows={rows} summary={summary} />
 
-      {/* 排产甘特图(生产进度可视化):每厂一行,派工按窗口画时间条+完成进度+超交期红 */}
+      {/* 排产甘特图(生产进度可视化):吃在产订单,每厂一行按工厂期画时间条+阶段进度+逾期红 */}
       {canLogProgress && (
-        <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
-          <ProductionGanttChart />
+        <div className="mt-6">
+          <CollapsibleSection title="📊 排产甘特图" subtitle="工厂×时间·可视化进度">
+            <ProductionGanttChart rows={rows} />
+          </CollapsibleSection>
         </div>
       )}
 
       {/* 排产工作台(生产主管/管理员):把待排产的款派给工厂 */}
       {canInit && (
-        <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
-          <SchedulingBoard />
+        <div className="mt-4">
+          <CollapsibleSection title="🏭 排产工作台" subtitle="把款派给工厂" defaultOpen={false}>
+            <SchedulingBoard />
+          </CollapsibleSection>
         </div>
       )}
 
       {/* 工厂排产看板(P3):按工厂看负荷 + 名下派工(跨订单)+ 导派工单 */}
       {canInit && (
-        <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
-          <FactoryScheduleBoard />
+        <div className="mt-4">
+          <CollapsibleSection title="🏭 工厂排产看板" subtitle="按工厂看负荷+派工明细" defaultOpen={false}>
+            <FactoryScheduleBoard />
+          </CollapsibleSection>
         </div>
       )}
 
       {/* 生产进度录入(P4):跟单/QC 每天录实际产出,对照派工计划看进度 */}
       {canLogProgress && (
-        <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50/40 p-4">
-          <ProductionProgressBoard canManage={canInit} />
+        <div className="mt-4">
+          <CollapsibleSection title="📈 生产进度录入 · 交期预警" subtitle="跟单/QC 录实绩" defaultOpen={false}>
+            <ProductionProgressBoard canManage={canInit} />
+          </CollapsibleSection>
         </div>
       )}
 
