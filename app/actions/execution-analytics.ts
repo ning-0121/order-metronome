@@ -56,6 +56,8 @@ export interface ExecutionSummary {
   generatedAt: string;
   /** 考核基线日:早于此日到期的节点不追溯 */
   baselineDate: string;
+  /** 当前查看者能否看奖励结算(admin/各经理)——涉及钱,收敛 */
+  viewerCanSeeAwards: boolean;
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -70,6 +72,11 @@ export async function getExecutionAnalytics(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+
+  // 查看者角色:奖励结算(涉及钱)仅 admin / 各经理可见
+  const { data: viewerProf } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const viewerRoles: string[] = (viewerProf as any)?.roles?.length > 0 ? (viewerProf as any).roles : [(viewerProf as any)?.role].filter(Boolean);
+  const viewerCanSeeAwards = viewerRoles.some((r) => r === 'admin' || String(r).endsWith('_manager'));
 
   const now = new Date();
   let since: Date;
@@ -255,6 +262,7 @@ export async function getExecutionAnalytics(
       period: periodLabel,
       generatedAt: now.toISOString(),
       baselineDate: ASSESSMENT_BASELINE_DATE,
+      viewerCanSeeAwards,
     },
   };
 }

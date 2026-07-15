@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getExecutionAnalytics, type ExecutionSummary, type ExecutionScore } from '@/app/actions/execution-analytics';
+import { ASSESSMENT_AWARDS } from '@/lib/config/assessment';
 import Link from 'next/link';
 
 const GRADE_STYLES: Record<string, { bg: string; text: string; ring: string }> = {
@@ -227,6 +228,58 @@ export default function ExecutionAnalyticsPage() {
               })}
             </div>
           </div>
+
+          {/* 月度奖励结算(仅经理/admin;涉及钱) */}
+          {data.viewerCanSeeAwards && (() => {
+            const rows = data.rankings.map((r, idx) => {
+              const active = r.completedCount > 0;
+              const qualifiedPay = active && r.qualified ? ASSESSMENT_AWARDS.qualified : 0;
+              const rankPay = active && idx < ASSESSMENT_AWARDS.rank.length ? ASSESSMENT_AWARDS.rank[idx] : 0;
+              const fullPay = active && !r.redLine && r.currentOverdueCount === 0 ? ASSESSMENT_AWARDS.fullAttendance : 0;
+              return { r, idx, qualifiedPay, rankPay, fullPay, total: qualifiedPay + rankPay + fullPay };
+            }).filter((a) => a.total > 0);
+            const grand = rows.reduce((s, a) => s + a.total, 0);
+            return (
+              <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50/50 overflow-hidden">
+                <div className="px-5 py-3 bg-amber-100/60 border-b border-amber-200 flex items-center justify-between flex-wrap gap-2">
+                  <span className="text-sm font-bold text-amber-900">💰 {data.period}奖励结算</span>
+                  <span className="text-xs text-amber-700">达标 ¥{ASSESSMENT_AWARDS.qualified} · 红榜 ¥{ASSESSMENT_AWARDS.rank.join('/')} · 全勤 ¥{ASSESSMENT_AWARDS.fullAttendance}｜建议按「本月」结算</span>
+                </div>
+                {rows.length === 0 ? (
+                  <div className="px-5 py-6 text-center text-sm text-gray-400">本期暂无人达到奖励条件</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-gray-400 text-left border-b border-amber-100">
+                          {['姓名', '角色', '达标奖', '红榜', '全勤', '合计'].map((h) => <th key={h} className="px-4 py-2 font-medium whitespace-nowrap">{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((a) => (
+                          <tr key={a.r.userId} className="border-b border-amber-100/60">
+                            <td className="px-4 py-2 font-medium text-gray-800 whitespace-nowrap">{a.r.name}{a.idx < 3 && <span className="ml-1">{['🥇', '🥈', '🥉'][a.idx]}</span>}</td>
+                            <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{a.r.roleLabel}</td>
+                            <td className="px-4 py-2 text-gray-700">{a.qualifiedPay ? `¥${a.qualifiedPay}` : '—'}</td>
+                            <td className="px-4 py-2 text-gray-700">{a.rankPay ? `¥${a.rankPay}` : '—'}</td>
+                            <td className="px-4 py-2 text-gray-700">{a.fullPay ? `¥${a.fullPay}` : '—'}</td>
+                            <td className="px-4 py-2 font-bold text-amber-700">¥{a.total}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-amber-100/40">
+                          <td colSpan={5} className="px-4 py-2 text-right font-semibold text-gray-700">本期奖励合计</td>
+                          <td className="px-4 py-2 font-bold text-amber-800">¥{grand}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+                <p className="px-5 py-2 text-[11px] text-gray-400">达标=月分≥75且无红线;红榜=执行分前3;全勤=整月0红线0当前逾期。均需当期有产出。金额在 lib/config/assessment.ts 可调。</p>
+              </div>
+            );
+          })()}
 
           {/* 说明 */}
           <div className="mt-6 text-xs text-gray-400 space-y-1">

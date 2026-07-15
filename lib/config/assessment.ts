@@ -14,3 +14,15 @@ export const ASSESSMENT_BASELINE_DATE = process.env.ASSESSMENT_BASELINE_DATE || 
 export function assessmentBaseline(): Date {
   return new Date(`${ASSESSMENT_BASELINE_DATE}T00:00:00`);
 }
+
+/**
+ * 月度奖励额度(2026-07-14 用户拍板,元)。正向为主、人人够得着;改额度只改这里。
+ *  - qualified:达标奖——月综合分 ≥75(A)且无红线,有产出;
+ *  - rank:红榜 Top3(按执行分),仅有产出者;
+ *  - fullAttendance:零逾期全勤奖——整月 0 红线、0 当前逾期,有产出。
+ */
+export const ASSESSMENT_AWARDS = {
+  qualified: 200,
+  rank: [300, 200, 100] as number[],
+  fullAttendance: 100,
+};
