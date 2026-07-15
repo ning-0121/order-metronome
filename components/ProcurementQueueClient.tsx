@@ -129,7 +129,7 @@ export function ProcurementQueueClient({
   const [offlineBusy, setOfflineBusy] = useState('');
   // 采购标记「线下已下单/已处理」→ 该单从待采购订单出队(线下订过、无需系统核料下单)
   async function handleMarkOffline(orderId: string, label: string) {
-    if (!(await confirm({ title: `「${label}」标记线下已处理?`, message: '该订单已在线下下单,完成「采购下单」节点后从待采购队列移除(留痕,可在订单节点撤销)。', confirmText: '确认移除', cancelText: '取消' }))) return;
+    if (!(await confirm({ title: `「${label}」标记线下已处理?`, message: '该单已在系统外下单、不需在此建采购单 → 关闭其物料计划,从待采购队列移除(有「采购下单」节点的一并标完成)。操作留痕。注:该单在「待下单」里的散料行如也不用系统下,请到下方逐行「取消」。', confirmText: '确认移除', cancelText: '取消' }))) return;
     setOfflineBusy(orderId);
     const res = await markProcurementPlacedOffline(orderId, '线下已下单');
     setOfflineBusy('');
@@ -337,7 +337,7 @@ export function ProcurementQueueClient({
             {o.late_count > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">🔥 {o.late_count} 项超最晚下单日</span>}
             <div className="ml-auto flex items-center gap-2 shrink-0">
               <button onClick={() => handleMarkOffline(o.order_id, `${o.internal_order_no || o.order_no || ''}`)} disabled={offlineBusy !== ''}
-                title="该订单已在线下下单/无需系统下单 → 从待采购队列移除(留痕,可撤销)"
+                title="该订单已在线下下单/无需系统下单 → 关闭物料计划,从待采购队列移除(留痕)"
                 className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-50 disabled:opacity-50">
                 {offlineBusy === o.order_id ? '处理中…' : '✓ 线下已处理'}
               </button>

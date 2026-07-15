@@ -283,21 +283,43 @@ export async function markProcurementPlacedOffline(orderId: string, reason?: str
   const roleErr = await requireProcurementRole(supabase, user.id);
   if (roleErr) return { error: roleErr };
 
+  const now = new Date().toISOString();
+  let didSomething = false;
+
+  // ① 关闭该订单的活跃物料计划 —— 这才是「待采购订单」队列真正的出队开关(队列按 plan_status='active' 过滤)。
+  //    线下已下单 → 计划置 'closed',订单即从待采购队列移除;不依赖是否存在「采购下单」里程碑
+  //    (有的订单模板/建单路径没有该节点,原来会硬报「没有采购下单节点」而无法移除)。
+  const { data: activePlans } = await (supabase.from('material_plans') as any)
+    .select('id').eq('order_id', orderId).eq('plan_status', 'active');
+  if (activePlans && activePlans.length > 0) {
+    const { error: planErr } = await (supabase.from('material_plans') as any)
+      .update({ plan_status: 'closed', updated_at: now })
+      .eq('order_id', orderId).eq('plan_status', 'active');
+    if (planErr) return { error: planErr.message };
+    didSomething = true;
+  }
+
+  // ② 若存在「采购下单」里程碑 → 一并标完成(时间线一致);不存在则跳过,不报错。
   const { data: ms } = await (supabase.from('milestones') as any)
     .select('id, status').eq('order_id', orderId).eq('step_key', 'procurement_order_placed').maybeSingle();
-  if (!ms) return { error: '该订单没有「采购下单」节点,无法标记' };
-  const st = String((ms as any).status || '').toLowerCase();
-  if (st === 'done' || st === '已完成') { revalidatePath('/procurement'); return { ok: true }; }
+  if (ms) {
+    const st = String((ms as any).status || '').toLowerCase();
+    if (st !== 'done' && st !== '已完成') {
+      const { error } = await (supabase.from('milestones') as any)
+        .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now }).eq('id', (ms as any).id);
+      if (error) return { error: error.message };
+      await (supabase.from('milestone_logs') as any).insert({
+        milestone_id: (ms as any).id, order_id: orderId, action: 'status_transition',
+        note: `采购标记「线下已下单/已处理」→ 完成「采购下单」节点(该单已在线下下单,不走系统核料下单)${reason ? `:${reason}` : ''}`,
+        payload: { manual: true, source: 'procurement_offline', by: user.id },
+      }).then(() => {}, () => {});
+    }
+    didSomething = true;
+  }
 
-  const now = new Date().toISOString();
-  const { error } = await (supabase.from('milestones') as any)
-    .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now }).eq('id', (ms as any).id);
-  if (error) return { error: error.message };
-  await (supabase.from('milestone_logs') as any).insert({
-    milestone_id: (ms as any).id, order_id: orderId, action: 'status_transition',
-    note: `采购标记「线下已下单/已处理」→ 完成「采购下单」节点(该单已在线下下单,不走系统核料下单)${reason ? `:${reason}` : ''}`,
-    payload: { manual: true, source: 'procurement_offline', by: user.id },
-  }).then(() => {}, () => {});
+  if (!didSomething) {
+    return { error: '该订单当前不在待采购队列(无活跃物料计划,也无采购下单节点),无需标记。' };
+  }
   revalidatePath('/procurement');
   return { ok: true };
 }
