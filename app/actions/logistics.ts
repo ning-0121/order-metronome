@@ -7,6 +7,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
 import { isDoneStatus } from '@/lib/domain/types';
 import { isTerminalLifecycle } from '@/lib/domain/lifecycleStatus';
 import { hasRoleInGroup } from '@/lib/domain/roles';
@@ -94,4 +95,109 @@ export async function getLogisticsShipQueue(): Promise<{ data?: LogisticsShipIte
   // 交期近的在前
   out.sort((a, b) => (a.daysToDeadline ?? 9999) - (b.daysToDeadline ?? 9999));
   return { data: out };
+}
+
+// ============================================================
+// 出运子任务(装柜/报关/内陆送货/送仓等)—— 物流逐项跟
+// ============================================================
+const EXPORT_SUBTASKS = [
+  { key: 'container_loading', label: '装柜' },
+  { key: 'customs_release', label: '报关放行' },
+  { key: 'haulage_to_port', label: '拖柜送港' },
+  { key: 'vessel_departure', label: '开船出运' },
+];
+const DOMESTIC_SUBTASKS = [
+  { key: 'inland_delivery', label: '内陆送货' },
+  { key: 'warehouse_signed', label: '送仓签收' },
+];
+
+export interface LogisticsSubtask {
+  id: string; task_key: string; label: string; seq: number;
+  status: 'pending' | 'done'; done_at: string | null; note: string | null;
+  attachments: Array<{ name: string; url: string }>;
+}
+const SUBTASK_COLS = 'id, task_key, label, seq, status, done_at, note, attachments';
+
+function canOperateLogistics(roles: string[]): boolean {
+  return roles.includes('logistics') || roles.includes('admin') || roles.includes('production_manager');
+}
+
+/** 取某订单出运子任务;不存在则按出运方式初始化。返回列表。 */
+export async function getLogisticsSubtasks(orderId: string): Promise<{ data?: LogisticsSubtask[]; isDomestic?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const svc = createServiceRoleClient();
+  // 出运方式:有 domestic_delivery 节点 或 delivery_type=domestic → 国内
+  const { data: ord } = await (svc.from('orders') as any).select('delivery_type').eq('id', orderId).maybeSingle();
+  const { data: dm } = await (svc.from('milestones') as any)
+    .select('id').eq('order_id', orderId).eq('step_key', SHIP_STEP_DOMESTIC).limit(1);
+  const isDomestic = ((dm || []).length > 0) || (ord as any)?.delivery_type === 'domestic';
+  const std = isDomestic ? DOMESTIC_SUBTASKS : EXPORT_SUBTASKS;
+
+  let { data: rows } = await (svc.from('logistics_subtasks') as any)
+    .select(SUBTASK_COLS).eq('order_id', orderId).order('seq', { ascending: true });
+  rows = rows || [];
+  // 初始化缺失的标准子任务(幂等)
+  const have = new Set((rows as any[]).map((r) => r.task_key));
+  const toInsert = std.filter((s) => !have.has(s.key)).map((s, i) => ({
+    order_id: orderId, task_key: s.key, label: s.label, seq: std.findIndex((x) => x.key === s.key), status: 'pending',
+  }));
+  if (toInsert.length) {
+    await (svc.from('logistics_subtasks') as any).insert(toInsert);
+    ({ data: rows } = await (svc.from('logistics_subtasks') as any)
+      .select(SUBTASK_COLS).eq('order_id', orderId).order('seq', { ascending: true }));
+  }
+  const norm = ((rows || []) as any[]).map((r) => ({ ...r, attachments: Array.isArray(r.attachments) ? r.attachments : [] }));
+  return { data: norm as LogisticsSubtask[], isDomestic };
+}
+
+/** 标记子任务完成/取消完成。仅物流/管理。 */
+export async function toggleLogisticsSubtask(subtaskId: string, done: boolean, note?: string): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!canOperateLogistics(roles)) return { error: '仅物流/管理可操作出运子任务' };
+
+  const svc = createServiceRoleClient();
+  const { data: st } = await (svc.from('logistics_subtasks') as any).select('id, order_id').eq('id', subtaskId).maybeSingle();
+  if (!st) return { error: '子任务不存在' };
+  const now = new Date().toISOString();
+  const { error } = await (svc.from('logistics_subtasks') as any).update({
+    status: done ? 'done' : 'pending',
+    done_at: done ? now : null,
+    done_by: done ? user.id : null,
+    note: note ?? undefined,
+    updated_at: now,
+  }).eq('id', subtaskId);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${(st as any).order_id}`);
+  revalidatePath('/logistics');
+  return { ok: true };
+}
+
+/** 保存子任务的出货凭证附件(整份替换;客户端管理增删后传入完整列表)。仅物流/管理。 */
+export async function saveLogisticsSubtaskAttachments(subtaskId: string, attachments: Array<{ name: string; url: string }>): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!canOperateLogistics(roles)) return { error: '仅物流/管理可传出货凭证' };
+
+  const clean = (Array.isArray(attachments) ? attachments : [])
+    .filter((a) => a && typeof a.url === 'string' && /^https?:\/\//.test(a.url))
+    .map((a) => ({ name: String(a.name || a.url).slice(0, 120), url: a.url }))
+    .slice(0, 30);
+  const svc = createServiceRoleClient();
+  const { data: st } = await (svc.from('logistics_subtasks') as any).select('id, order_id').eq('id', subtaskId).maybeSingle();
+  if (!st) return { error: '子任务不存在' };
+  const { error } = await (svc.from('logistics_subtasks') as any)
+    .update({ attachments: clean, updated_at: new Date().toISOString() }).eq('id', subtaskId);
+  if (error) return { error: error.message };
+  revalidatePath(`/orders/${(st as any).order_id}`);
+  return { ok: true };
 }

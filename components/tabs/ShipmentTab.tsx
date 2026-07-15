@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { BatchAllocationEditor } from '@/components/BatchAllocationEditor';
 import { ShippingDocsSection } from '@/components/tabs/ShippingDocsSection';
+import { LogisticsSubtaskChecklist } from '@/components/LogisticsSubtaskChecklist';
 import { getShipmentConfirmation, createShipmentConfirmation, approveShipment, executeShipment, withdrawShipmentApplication } from '@/app/actions/shipments';
 import { getShipmentBatches, enableSplitShipment, updateShipmentBatch } from '@/app/actions/shipment-batches';
 import { createClient } from '@/lib/supabase/client';
@@ -205,6 +206,9 @@ export function ShipmentTab({ orderId, currentRole, isAdmin, userId, orderQty, o
           → <b>⑤ 财务审批</b>(核尾款到账放货 · 硬闸,未批不能出运)→ ⑥ 物流出运
         </div>
       </div>
+
+      {/* ===== 出运子任务:物流逐项跟(装柜/报关/内陆送货/送仓)===== */}
+      <LogisticsSubtaskChecklist orderId={orderId} canOperate={isAdmin || ['logistics', 'production_manager'].includes(currentRole)} />
 
       {/* ===== ①–④ 出货单据:录实发装箱 → 生成 Packing List / CI / 报关 ===== */}
       <ShippingDocsSection orderId={orderId} />
