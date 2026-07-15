@@ -7,6 +7,7 @@ import { ReconcileExportButton } from './ReconcileExportButton';
 import { SchedulingBoard } from '@/components/production/SchedulingBoard';
 import { FactoryScheduleBoard } from '@/components/production/FactoryScheduleBoard';
 import { ProductionProgressBoard } from '@/components/production/ProductionProgressBoard';
+import { ProductionGanttChart } from '@/components/production/ProductionGanttChart';
 
 /**
  * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
@@ -60,6 +61,13 @@ export default async function ProductionCenterPage() {
       </div>
 
       <ProductionCenterClient rows={rows} summary={summary} />
+
+      {/* 排产甘特图(生产进度可视化):每厂一行,派工按窗口画时间条+完成进度+超交期红 */}
+      {canLogProgress && (
+        <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
+          <ProductionGanttChart />
+        </div>
+      )}
 
       {/* 排产工作台(生产主管/管理员):把待排产的款派给工厂 */}
       {canInit && (
