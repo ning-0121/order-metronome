@@ -15,6 +15,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { assessmentBaseline, ASSESSMENT_BASELINE_DATE } from '@/lib/config/assessment';
 
 export interface ExecutionScore {
   userId: string;
@@ -49,6 +50,8 @@ export interface ExecutionSummary {
   };
   period: string;
   generatedAt: string;
+  /** 考核基线日:早于此日到期的节点不追溯 */
+  baselineDate: string;
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -77,7 +80,12 @@ export async function getExecutionAnalytics(
     since = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
     periodLabel = '本季';
   }
-  const sinceStr = since.toISOString();
+  // 考核基线:只考核 due_at ≥ 基线日 的节点(本周一起),之前不追溯(见 lib/config/assessment.ts)
+  const baseline = assessmentBaseline();
+  // 完成活动窗口:取「时间段起点」与「基线日」较晚者——保证基线前的逾期不进考核
+  const effectiveSince = since.getTime() > baseline.getTime() ? since : baseline;
+  const sinceStr = effectiveSince.toISOString();
+  const baselineStr = baseline.toISOString();
 
   // 获取所有有角色的用户
   const { data: profiles } = await (supabase.from('profiles') as any)
@@ -111,12 +119,15 @@ export async function getExecutionAnalytics(
     let totalResponseDays = 0;
     let responseCount = 0;
     let overdueCompletedCount = 0;
+    let assessableCount = 0;   // due_at ≥ 基线的已完成节点(逾期率分母;基线前节点不追溯)
     let fastest = Infinity;
     let slowest = 0;
-    const totalOverdueDaysCompleted = 0;
 
     for (const m of completed) {
       if (!m.due_at || !m.actual_at) continue;
+      // 基线前到期的节点(老单补录):算完成活动,但不追溯其迟到/响应
+      if (new Date(m.due_at).getTime() < baseline.getTime()) continue;
+      assessableCount++;
       const dueTs = new Date(m.due_at).getTime();
       const actualTs = new Date(m.actual_at).getTime();
       const diffDays = Math.max(0, (actualTs - dueTs) / 86400000);
@@ -131,11 +142,12 @@ export async function getExecutionAnalytics(
       ? Number((totalResponseDays / responseCount).toFixed(1))
       : 0;
 
-    // 3. 当前逾期数
+    // 3. 当前逾期数(只算基线后到期的节点 —— 历史「没回填」的老逾期不追溯,不砸分)
     const { data: currentOverdue } = await (supabase.from('milestones') as any)
       .select('id, due_at')
       .eq('owner_user_id', p.user_id)
       .in('status', ['in_progress', '进行中'])
+      .gte('due_at', baselineStr)
       .lt('due_at', now.toISOString());
 
     const currentOverdueCount = (currentOverdue || []).length;
@@ -144,9 +156,9 @@ export async function getExecutionAnalytics(
       totalOverdueDays += Math.ceil((now.getTime() - new Date(m.due_at).getTime()) / 86400000);
     }
 
-    // 4. 逾期率
-    const overdueRate = completedCount > 0
-      ? Number(((overdueCompletedCount / completedCount) * 100).toFixed(1))
+    // 4. 逾期率(分母=基线后可考核的已完成节点,不含老单补录)
+    const overdueRate = assessableCount > 0
+      ? Number(((overdueCompletedCount / assessableCount) * 100).toFixed(1))
       : 0;
 
     // 5. 升级次数（被 L2/L3 升级 = notification type 包含 escalation_xxx_L2 或 L3）
@@ -228,6 +240,7 @@ export async function getExecutionAnalytics(
       teamAvg,
       period: periodLabel,
       generatedAt: now.toISOString(),
+      baselineDate: ASSESSMENT_BASELINE_DATE,
     },
   };
 }
