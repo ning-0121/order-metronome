@@ -46,6 +46,11 @@ FOR EACH ROW EXECUTE FUNCTION public.set_size_chart_import_updated_at();
 
 ALTER TABLE public.size_chart_imports ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "size_chart_imports_select" ON public.size_chart_imports;
+DROP POLICY IF EXISTS "size_chart_imports_insert" ON public.size_chart_imports;
+DROP POLICY IF EXISTS "size_chart_imports_update" ON public.size_chart_imports;
+DROP POLICY IF EXISTS "size_chart_imports_delete" ON public.size_chart_imports;
+
 CREATE POLICY "size_chart_imports_select" ON public.size_chart_imports FOR SELECT TO authenticated
   USING (public.user_can_access_order(auth.uid(), order_id));
 CREATE POLICY "size_chart_imports_insert" ON public.size_chart_imports FOR INSERT TO authenticated

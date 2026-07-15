@@ -59,6 +59,11 @@ BEFORE UPDATE ON public.accessory_import_candidates
 FOR EACH ROW EXECUTE FUNCTION public.set_accessory_candidate_updated_at();
 
 ALTER TABLE public.accessory_import_candidates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "accessory_candidates_select" ON public.accessory_import_candidates;
+DROP POLICY IF EXISTS "accessory_candidates_insert" ON public.accessory_import_candidates;
+DROP POLICY IF EXISTS "accessory_candidates_update" ON public.accessory_import_candidates;
+DROP POLICY IF EXISTS "accessory_candidates_delete" ON public.accessory_import_candidates;
+
 CREATE POLICY "accessory_candidates_select" ON public.accessory_import_candidates FOR SELECT TO authenticated
   USING (public.user_can_access_order(auth.uid(), order_id));
 CREATE POLICY "accessory_candidates_insert" ON public.accessory_import_candidates FOR INSERT TO authenticated
