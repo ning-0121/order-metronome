@@ -554,16 +554,16 @@ export async function getOrderStyleBudgets(orderId: string) {
   const byStyle = new Map(existing.map((b: any) => [norm(b.style_no), b]));
   const rows = (styles.length ? styles : existing.map((b: any) => norm(b.style_no))).map((st: string) => {
     const b = byStyle.get(st) || {};
-    return { style_no: st, cmt: (b as any).cmt ?? null };
+    return { style_no: st, cmt: (b as any).cmt ?? null, cmt_basis: (b as any).cmt_basis || 'PER_SET' };
   });
   const accessoryTotal = (cb as any)?.accessory_budget_total ?? null;   // 库里永远存【总额】(下游财务同步/对账口径不变)
   // 2026-07-11 老板拍板:辅料录入改【元/件】×订单件数(此前一口价被业务当元/件填,财务收到 ¥1 总额)。
   // 回显单件价 = 总额 ÷ 订单件数;订单件数一并给 UI 显示换算。
   const { data: ordRow } = await (svc.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
   const orderQty = Number((ordRow as any)?.quantity) || 0;
-  const accessoryPerPiece = accessoryTotal != null && orderQty > 0
+  const accessoryPerSet = accessoryTotal != null && orderQty > 0
     ? Math.round((Number(accessoryTotal) / orderQty) * 10000) / 10000 : null;
-  return { data: rows, accessoryTotal, accessoryPerPiece, orderQty };
+  return { data: rows, accessoryTotal, accessoryPerSet, accessoryBasis: 'PER_SET', orderQty };
 }
 
 /**
@@ -576,7 +576,7 @@ export async function saveOrderStyleBudgets(
   orderId: string,
   budgets: Array<{ style_no: string; cmt: number | null }>,
   accessoryValue?: number | null,
-  accessoryMode: 'total' | 'per_piece' = 'total',
+  accessoryMode: 'total' | 'per_piece' | 'per_set' = 'total',
 ) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -589,13 +589,13 @@ export async function saveOrderStyleBudgets(
   const num = (v: any) => { const n = Number(v); return isFinite(n) && n > 0 ? n : null; };
   // 逐款只存加工费 cmt;辅料整单(清掉历史逐款 trim_budget,避免重复计)
   const clean = (budgets || []).filter((b) => String(b.style_no || '').trim())
-    .map((b) => ({ style_no: String(b.style_no).trim(), cmt: num(b.cmt), trim_budget: null }));
+    .map((b) => ({ style_no: String(b.style_no).trim(), cmt: num(b.cmt), cmt_basis: 'PER_SET', trim_budget: null }));
   let accTotal = accessoryValue === undefined ? undefined : num(accessoryValue);
-  if (accTotal != null && accessoryMode === 'per_piece') {
+  if (accTotal != null && (accessoryMode === 'per_piece' || accessoryMode === 'per_set')) {
     const svcQty = createServiceRoleClient();
     const { data: ordRow } = await (svcQty.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
     const qty = Number((ordRow as any)?.quantity) || 0;
-    if (qty <= 0) return { error: '订单数量缺失,无法按【元/件】换算辅料预算 —— 请先补订单件数,或改填总额' };
+    if (qty <= 0) return { error: `订单数量缺失,无法按【${accessoryMode === 'per_set' ? '元/套' : '元/件'}】换算辅料预算 —— 请先补订单数量,或改填总额` };
     accTotal = Math.round(accTotal * qty * 100) / 100;
   }
   // 写走 service-role:order_cost_baseline 的 INSERT/UPDATE RLS 只放行 owner/canSeeAll,

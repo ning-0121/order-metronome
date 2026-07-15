@@ -367,7 +367,7 @@ export function BomTab({ orderId }: { orderId: string }) {
   // 尺码表(2026-07-08:改在 BOM 页上传,喂生产任务单)。
   // ⚠ Hooks 必须在任何早退(下面的 if (loading) return)之前声明,否则 loading→false 后
   //   本轮多跑几个 hook,React 报「Rendered more hooks than during the previous render」→ 整页崩。
-  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null }>>([]);
+  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number }>>([]);
   const [scUploading, setScUploading] = useState(false);
   const [scMsg, setScMsg] = useState('');
   useEffect(() => { listSizeCharts(orderId).then(r => { if ((r as any).data) setSizeCharts((r as any).data); }); }, [orderId]);
@@ -375,12 +375,15 @@ export function BomTab({ orderId }: { orderId: string }) {
   async function handleUploadSizeCharts(files: FileList) {
     setScUploading(true); setScMsg('');
     let ok = 0; const errs: string[] = [];
-    for (const file of Array.from(files)) {
-      const fd = new FormData(); fd.set('file', file);
-      const r = await uploadSizeChart(orderId, fd);
-      if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else ok++;
+    try {
+      for (const file of Array.from(files)) {
+        const fd = new FormData(); fd.set('file', file);
+        const r = await uploadSizeChart(orderId, fd);
+        if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else ok++;
+      }
+    } finally {
+      setScUploading(false);
     }
-    setScUploading(false);
     setScMsg(errs.length ? `已上传 ${ok} 个,失败 ${errs.length} 个 — ${errs[0]}` : '');
     await reloadSizeCharts();
   }
@@ -849,7 +852,7 @@ export function BomTab({ orderId }: { orderId: string }) {
           <span className="text-xs text-gray-500">在此上传,「生产任务单」直接读取(建单不再传)· 可一次选多个</span>
           <label className={`ml-auto text-sm px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 cursor-pointer ${scUploading ? 'opacity-50 pointer-events-none' : ''}`}>
             {scUploading ? '上传中…' : '📤 上传尺码表'}
-            <input type="file" multiple accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" disabled={scUploading}
+            <input type="file" multiple accept=".xlsx" className="hidden" disabled={scUploading}
               onChange={e => { const fs = e.target.files; if (fs && fs.length) handleUploadSizeCharts(fs); e.currentTarget.value = ''; }} />
           </label>
         </div>
@@ -862,6 +865,9 @@ export function BomTab({ orderId }: { orderId: string }) {
                 {sc.url
                   ? <a href={sc.url} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline truncate">{sc.file_name}</a>
                   : <span className="text-gray-600 truncate">{sc.file_name}</span>}
+                {sc.parse_status === 'NEEDS_REVIEW' && <span className="text-[11px] rounded bg-amber-100 text-amber-700 px-1.5 py-0.5">待复核 · {sc.row_count} 行</span>}
+                {sc.parse_status === 'FAILED' && <span className="text-[11px] rounded bg-rose-100 text-rose-700 px-1.5 py-0.5" title={sc.failure_reason || ''}>解析失败：{sc.failure_reason || '请检查表头'}</span>}
+                {sc.parse_status === 'UPLOADED' && <span className="text-[11px] rounded bg-gray-100 text-gray-600 px-1.5 py-0.5">仅已上传</span>}
                 <button onClick={() => handleDeleteSizeChart(sc.id)} className="ml-auto text-gray-300 hover:text-rose-500 text-xs" title="删除">✕</button>
               </div>
             ))}
@@ -1051,7 +1057,7 @@ export function BomTab({ orderId }: { orderId: string }) {
                       ? item.total_qty
                       : item.computed_total_qty != null
                         ? (
-                          <span title={`自动算:单件用量 ${item.qty_per_piece} × 件数 ${item.computed_pieces}${item.unit ? `（${item.unit}）` : ''}。件数来自订单明细,人工填「总需」可覆盖。`}
+                          <span title={`自动算:每套用量 ${item.qty_per_piece} × 套数 ${item.computed_pieces}${item.unit ? `（${item.unit}）` : ''}。套数来自订单明细,人工填「总需」可覆盖。`}
                             className="text-emerald-700">
                             {item.computed_total_qty}
                             <span className="ml-1 text-[10px] text-emerald-500 font-normal">自动</span>

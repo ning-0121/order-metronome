@@ -93,8 +93,8 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   const [priceEdit, setPriceEdit] = useState<Record<string, string>>({}); // 预算单价(业务填,逐料;2026-07-08 弃报价基线)
   const [supplyEdit, setSupplyEdit] = useState<Record<string, 'self' | 'customer' | 'factory'>>({}); // 供料方式:自购/客供/加工厂承担
   const notSelf = (id: string) => (supplyEdit[id] || 'self') !== 'self';   // 客供/加工厂承担 → 绮陌不采购
-  const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/件)
-  const [accessoryPerPiece, setAccessoryPerPiece] = useState('')   // 辅料预算【元/件】(2026-07-11 改口径:×订单件数存总额)
+  const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/套)
+  const [accessoryPerPiece, setAccessoryPerPiece] = useState('')   // 变量名为兼容旧 UI；业务口径为元/套
   const [budgetOrderQty, setBudgetOrderQty] = useState(0)
   const [accCost, setAccCost] = useState<{ budget: number | null; actual: number; over: number | null; itemsPriced: number; itemsTotal: number } | null>(null);  // 辅料 预算vs实际(采购填价)
   const [consSaving, setConsSaving] = useState(false);
@@ -108,7 +108,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
       setSupplyEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.supply_mode || 'self'])));
     }
     if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
-    setAccessoryPerPiece((sb as any)?.accessoryPerPiece != null ? String((sb as any).accessoryPerPiece) : '');
+    setAccessoryPerPiece((sb as any)?.accessoryPerSet != null ? String((sb as any).accessoryPerSet) : '');
     setBudgetOrderQty(Number((sb as any)?.orderQty) || 0);
   };
   useEffect(() => { loadCons(); /* eslint-disable-next-line */ }, [orderId]);
@@ -123,7 +123,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     const accPer = accessoryPerPiece === '' ? null : Number(accessoryPerPiece);
     const tasks: Promise<any>[] = [
       saveBomBudgetUnitPrice(orderId, prices as any),          // 预算单价(业务,任何阶段可填)
-      saveOrderStyleBudgets(orderId, sbPayload as any, accPer, 'per_piece'), // 逐款加工费 + 辅料元/件×件数(服务端换算总额)
+      saveOrderStyleBudgets(orderId, sbPayload as any, accPer, 'per_set'),
       saveBomSupplyMode(orderId, supplyEdit),                  // 供料方式(自购/客供/加工厂承担)
     ];
     if (!trackingPhase) tasks.push(saveBomOverPurchasePct(orderId, over as any));  // 抛量:已下单锁定,不重存
@@ -905,11 +905,11 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
           {/* 逐款加工费(元/件)+ 整单辅料总价一口价(2026-07-08 用户拍板)*/}
           {styleBudgets.length > 0 && (
             <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 mt-2 space-y-2">
-              <div className="text-xs font-semibold text-indigo-800">🧵 逐款加工费(元/件,业务填)· 加工费预算 = 加工费 × 该款件数</div>
+              <div className="text-xs font-semibold text-indigo-800">🧵 逐款加工费(元/套,业务填)· 加工费预算 = 元/套 × 订单套数</div>
               <div className="overflow-x-auto">
                 <table className="text-xs">
                   <thead><tr className="text-left text-gray-400">
-                    {['款号', '加工费(元/件)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
+                    {['款号', '加工费(元/套)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {styleBudgets.map((b, i) => (
@@ -925,17 +925,17 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                 </table>
               </div>
               <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-indigo-100">
-                <span className="text-xs font-semibold text-indigo-800">🧷 辅料预算(元/件·业务)</span>
+                <span className="text-xs font-semibold text-indigo-800">🧷 辅料预算(元/套·业务)</span>
                 <span className="text-gray-400 text-sm">¥</span>
                 <input type="number" step="any" min="0" value={accessoryPerPiece}
                   placeholder="单件辅料(拉链/标/袋…)" disabled={trackingPhase}
                   onChange={e => setAccessoryPerPiece(e.target.value)}
                   className="w-28 rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
-                <span className="text-xs text-gray-500">/件 × {budgetOrderQty > 0 ? budgetOrderQty.toLocaleString() : '?'} 件</span>
+                <span className="text-xs text-gray-500">元/套 × {budgetOrderQty > 0 ? budgetOrderQty.toLocaleString() : '?'} 套</span>
                 {Number(accessoryPerPiece) > 0 && budgetOrderQty > 0 && (
                   <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * budgetOrderQty * 100) / 100).toLocaleString()}</span>
                 )}
-                <span className="text-[11px] text-gray-400">与加工费同口径(元/件),保存时按订单件数换算成总额</span>
+                <span className="text-[11px] text-gray-400">公式明确按套计算；组件级费用需在辅料明细中单独录入</span>
               </div>
               {/* 实际辅料总价(采购填的单价×数量,填了即算;2026-07-08 用户拍板 A)*/}
               {accCost && (accCost.itemsTotal > 0) && (

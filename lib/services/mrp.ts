@@ -3,6 +3,7 @@
  * 算"买多少 + 最晚什么时候下单 + 为什么"。B1 阶段:库存/余料=0,lead 来源恒为 default。
  */
 import { addWorkingDays, subtractWorkingDays } from '@/lib/utils/date';
+import { calculateRequirement } from '@/lib/domain/quantity-calculation';
 
 /** material_type(BOM)→ category(供应链分类) */
 export const MATERIAL_TYPE_TO_CATEGORY: Record<string, string> = {
@@ -79,7 +80,6 @@ export interface MrpResult {
 
 function isoDate(d: Date): string { return d.toISOString().slice(0, 10); }
 function asDate(ymd: string): Date { return new Date(ymd.slice(0, 10) + 'T00:00:00+08:00'); }
-function round1(n: number): number { return Math.round(n * 10) / 10; }
 
 export function computeMaterialRequirement(input: MrpInput): MrpResult {
   const { material, po_quantity, stageAnchors } = input;
@@ -111,12 +111,13 @@ export function computeMaterialRequirement(input: MrpInput): MrpResult {
   } else {
     // 每包件数(打包辅料,如中包袋6件一中包→6):需求 = 件数×单耗÷每包件数(2026-07-07 用户拍板)。空/≤1 不打包。
     const pack = material.pack_size != null && Number(material.pack_size) > 1 ? Number(material.pack_size) : 1;
-    gross_requirement = round1(po_quantity * consumption / pack);
+    const exact = calculateRequirement({ consumption, orderSets: po_quantity, basis: 'PER_SET', lossRatePct: loss_rate });
+    gross_requirement = exact.gross / pack;
     // 2026-07-03(用户实测「系统多算两匹布」):损耗不再暗算进净需求。
     // 净需求 = 业务口径的裸数(数量×单耗−库存−复用);损耗改为「采购损耗%」在
     // 采购核料层明示可改(建议采购=净需求×(1+损耗%),口径唯一,不再双重叠加)。
     // loss_qty 保留为参考值(核料项创建时预填采购损耗%用)。
-    loss_qty = round1(gross_requirement * (loss_rate / 100));
+    loss_qty = exact.loss / pack;
     const net_raw = gross_requirement - inv - reuse;
     net_purchase_qty = Math.max(0, Math.ceil(net_raw));   // 宁多勿缺,向上取整
     if (net_purchase_qty === 0) status = 'fulfilled';

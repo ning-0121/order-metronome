@@ -7,6 +7,7 @@ import { aggregateInventoryBalance, reservedByKey } from '@/lib/services/invento
 import { consolidationKey } from '@/lib/services/procurement-consolidation';
 import { subtractWorkingDays } from '@/lib/utils/date';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
+import { calculateRequirement } from '@/lib/domain/quantity-calculation';
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -34,8 +35,8 @@ export async function getBomItems(orderId: string) {
     const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
     for (const r of (liRows || []) as any[]) {
       if (!r.style_no) continue;
-      // 套装:总件数 = 件数 × 每套件数(set_multiplier;1=非套装)。算料按真实件数,不按套数。
-      const q = (Number(r.qty_pcs) || 0) * (Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1);
+      // qty_pcs 目前保存的是订单套数。BOM 单耗默认是整套单耗,不可再次乘套装件数。
+      const q = Number(r.qty_pcs) || 0;
       styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
       const canon = normColor(r.color_cn) || normColor(r.color_en);
       if (!canon) continue;
@@ -61,7 +62,7 @@ export async function getBomItems(orderId: string) {
       const qpp = b.qty_per_piece != null ? Number(b.qty_per_piece) : null;
       b.computed_pieces = pieces > 0 ? pieces : null;
       b.computed_total_qty = (qpp != null && qpp > 0 && pieces > 0)
-        ? Math.round(qpp * pieces * 100) / 100
+        ? calculateRequirement({ consumption: qpp, orderSets: pieces, basis: (b.consumption_basis || 'PER_SET') }).gross
         : null;
     }
   } catch (e: any) { console.warn('[getBomItems] 总需派生失败(不阻断):', e?.message); }
@@ -613,8 +614,8 @@ export async function submitBomToProcurement(
   const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
   for (const r of (liRows || []) as any[]) {
     if (!r.style_no) continue;
-    // 套装:真实件数 = 件数 × 每套件数(set_multiplier;1=非套装),与 getBomItems 同口径,否则少采购
-    const q = (Number(r.qty_pcs) || 0) * (Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1);
+    // qty_pcs 是套数;BOM 单耗是每套用量。只有明确 PER_PIECE 的行才允许换算物理件数。
+    const q = Number(r.qty_pcs) || 0;
     styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
     // 2026-07-04 审计修:件数每行只加一次(原来 color_cn/color_en 各加一次,同名色翻倍→多算料)。
     // 规范色=中文优先,英文兜底;中英文两个色名都做别名指向同一桶,BOM 用任一色名可命中。
