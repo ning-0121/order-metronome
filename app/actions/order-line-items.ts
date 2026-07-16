@@ -33,7 +33,10 @@ export async function getPoParseSnapshot(orderId: string): Promise<{ snapshot?: 
   return { snapshot: (data as any)?.po_parse_snapshot ?? null, at: (data as any)?.po_parse_snapshot_at ?? null };
 }
 
-/** 再冻结:用当前逐款明细覆盖冻结底档(业务纠正后固化)。权限同 saveOrderLineItems。 */
+/**
+ * 兼容旧调用：AI 识别快照是审计证据，冻结后不可用业务明细覆盖。
+ * 员工修正值保存在 Order Master / order_line_items。
+ */
 export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: boolean; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -49,15 +52,7 @@ export async function refreezePoParseSnapshot(orderId: string): Promise<{ ok?: b
     || (roles.includes('merchandiser') && await canUserAccessOrder(supabase, user.id, orderId));
   if (!canEdit) return { error: '无权操作(仅创建者/负责人/被指派跟单/理单/管理员)' };
 
-  const res = await getOrderLineItems(orderId);
-  if ((res as any).error) return { error: (res as any).error };
-  const styles = (res as any).data || [];
-  const snapshot = { styles, _refrozen: true };
-  const { error } = await (supabase.from('orders') as any)
-    .update({ po_parse_snapshot: snapshot, po_parse_snapshot_at: new Date().toISOString() }).eq('id', orderId);
-  if (error) return { error: error.message };
-  revalidatePath(`/orders/${orderId}`);
-  return { ok: true };
+  return { error: 'AI 原始识别快照已冻结，不能覆盖。请在逐款明细中保存人工修正，后续业务以订单明细为准。' };
 }
 
 /** 读订单明细 → 按款分组返回。 */
