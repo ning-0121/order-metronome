@@ -13,14 +13,14 @@ class MemoryStorage {
 }
 
 const form = new FormData();
-form.set('customer_name', '测试客户'); form.set('internal_order_no', 'SAFE-001');
+form.set('customer_id', 'customer-1'); form.set('customer_name', '测试客户'); form.set('internal_order_no', 'SAFE-001');
 form.set('customer_po_file', new File(['secret'], 'customer-po.xlsx'));
 form.set('po_parse_snapshot', '{"sensitive":true}');
 assert.equal(isStaleServerActionError(new Error('Failed to find Server Action "abc"')), true);
 assert.equal(isStaleServerActionError(new Error('database unavailable')), false);
 assert.match(STALE_SERVER_ACTION_MESSAGE, /页面版本已过期/);
 const serialized = serializeSafeOrderDraft(form);
-assert.deepEqual(serialized.fields, [['customer_name', '测试客户'], ['internal_order_no', 'SAFE-001']]);
+assert.deepEqual(serialized.fields, [['customer_id', 'customer-1'], ['customer_name', '测试客户'], ['internal_order_no', 'SAFE-001']]);
 const storage = new MemoryStorage(); saveSafeOrderDraft(form, storage as unknown as Storage);
 assert.equal(storage.values.has(CREATE_ORDER_DRAFT_KEY), true);
 assert.deepEqual(loadSafeOrderDraft(storage as unknown as Storage)?.fields, serialized.fields);
