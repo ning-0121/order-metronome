@@ -12,7 +12,7 @@ export default async function LogisticsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
-  const { isAdmin, roles } = await getCurrentUserRole(supabase);
+  const { isAdmin, roles = [] } = await getCurrentUserRole(supabase);
   if (!(isAdmin || roles.includes('logistics') || roles.includes('production_manager'))) {
     redirect('/dashboard');
   }
@@ -62,6 +62,7 @@ export default async function LogisticsPage() {
                         )}
                         <span className={it.docsReady ? 'text-emerald-600' : 'text-gray-400'}>{it.docsReady ? '✓ 单据已出' : '单据未出'}</span>
                       </div>
+                      <div className="mt-1 text-xs text-gray-500">总负责人: {it.businessExecutionOwner || '—'} · 生产主管: {it.productionManagerOwner || '—'} · 跟单/QC: {it.productionFollowUpOwner || '—'} · 物流: {it.logisticsOwner || '待接收'} · 来源: {it.ownershipSource}</div>
                     </div>
                     <Link href={`/orders/${it.orderId}?tab=shipment&from=${encodeURIComponent('/logistics')}`}
                       className="shrink-0 bg-sky-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-sky-700">

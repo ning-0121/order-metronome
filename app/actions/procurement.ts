@@ -1250,6 +1250,8 @@ export interface QueueLine {
   // 内控:所在采购单尚未下单(草稿/待审批/驳回)。即便 line_status 已到 arrived,也是绕过审批闸的脏数据,
   // 前端不给验收/催货按钮,引导先去审批下单(2026-07-06 用户实测发现)。
   po_not_placed?: boolean;
+  procurement_owner_name?: string | null;
+  ownership_source?: 'explicit' | 'legacy_derived' | 'missing';
 }
 
 /** 待采购订单(业务执行已提交采购申请,采购尚未完成下单)—— 订单级卡片 */
@@ -1261,6 +1263,8 @@ export interface PendingProcurementOrder {
   submitted_at: string | null;   // 业务提交采购申请的时间(MRP 生成时间)
   req_count: number;             // 需求条数
   late_count: number;            // 已过最晚下单日的需求数(紧急)
+  procurement_owner_name?: string | null;
+  ownership_source?: 'explicit' | 'legacy_derived' | 'missing';
 }
 
 export async function getProcurementQueues(): Promise<{
@@ -1445,6 +1449,40 @@ export async function getProcurementQueues(): Promise<{
   const chase = rows.filter(r => ['ordered', 'confirmed', 'in_production'].includes(r.line_status)).sort(byLamp);
   const readyShip = rows.filter(r => ['ready_to_ship', 'shipped'].includes(r.line_status)).sort(byLamp);
   const receive = rows.filter(r => r.line_status === 'arrived').sort(byReceive);
+
+  // Responsibility decoration is intentionally read-only. Explicit ownership
+  // wins; historical orders derive from legacy truth without backfill. A
+  // missing procurement owner stays visible as a manager assignment gap and
+  // never falls back to Sales.
+  try {
+    const svc = createServiceRoleClient();
+    const { getEffectiveResponsibilities } = await import('@/lib/responsibility/service');
+    const responsibilityOrderIds = [...new Set([
+      ...pendingRequests.map((r) => r.order_id),
+      ...rows.map((r) => r.order_id),
+    ])];
+    const effective = new Map<string, Awaited<ReturnType<typeof getEffectiveResponsibilities>>>();
+    await Promise.all(responsibilityOrderIds.map(async (orderId) => {
+      effective.set(orderId, await getEffectiveResponsibilities(svc as any, orderId));
+    }));
+    const ownerIds = [...new Set([...effective.values()].flat()
+      .filter((r) => r.type === 'procurement_owner').map((r) => r.userId))];
+    const { data: ownerProfiles } = ownerIds.length
+      ? await (svc.from('profiles') as any).select('user_id,name').in('user_id', ownerIds)
+      : { data: [] };
+    const ownerNames = new Map<string, string>(((ownerProfiles || []) as any[]).map((p) => [p.user_id, p.name]));
+    const decorate = (row: QueueLine | PendingProcurementOrder) => {
+      const owner = effective.get(row.order_id)?.find((r) => r.type === 'procurement_owner');
+      row.procurement_owner_name = owner?.userId ? ownerNames.get(owner.userId) || '已指派' : null;
+      row.ownership_source = owner?.source || 'missing';
+    };
+    pendingRequests.forEach(decorate);
+    rows.forEach(decorate);
+  } catch (e: any) {
+    console.warn('[getProcurementQueues] 有效责任解析失败(队列保留，负责人标缺失):', e?.message);
+    pendingRequests.forEach((r) => { r.procurement_owner_name = null; r.ownership_source = 'missing'; });
+    rows.forEach((r) => { r.procurement_owner_name = null; r.ownership_source = 'missing'; });
+  }
 
   // 待审批采购单:已建、撞风险闸卡在 pending 的采购单(下单没走完的真相在这)。
   const pendingApprovalPOs: PendingApprovalPO[] = [];

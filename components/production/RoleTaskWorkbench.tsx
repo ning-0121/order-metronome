@@ -18,7 +18,7 @@ export function RoleTaskWorkbench({ rows, role }: { rows: ProductionOrderRow[]; 
               <div className="flex justify-between gap-2"><span className="font-medium text-gray-900">{task.label}</span><span className="text-xs text-indigo-600">去处理 →</span></div>
               <div className="mt-1 text-sm text-gray-700">{row.order_no || row.internal_order_no || '—'} · {row.customer_name || '—'}</div>
               <div className="text-xs text-gray-500">内部单号: {row.internal_order_no || '—'} · PO: {row.po_number || '—'} · 款号: {row.style_no || '—'}</div>
-              <div className="text-xs text-gray-500">总负责人: {row.business_execution_owner_name || '—'} · 生产主管: {row.production_manager_owner_name || '—'} · 跟单/QC: {row.follow_up_name || '—'}</div>
+              <div className="text-xs text-gray-500">总负责人: {row.business_execution_owner_name || '—'} · 生产主管: {row.production_manager_owner_name || '—'} · 跟单/QC: {row.production_follow_up_name || '—'}</div>
               <div className="mt-1 text-xs text-gray-500">原因: {task.reason}；下一步: {task.action}</div>
             </Link>
           ))}

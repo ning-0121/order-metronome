@@ -30,6 +30,7 @@ export interface ProductionOrderRow {
   business_execution_owner_name?: string | null;
   production_manager_owner_id?: string | null;
   production_manager_owner_name?: string | null;
+  ownership_source?: 'explicit' | 'legacy_derived' | 'missing';
   pending_delay: boolean;
   customer_name: string | null;
   factory_name: string | null;
@@ -135,15 +136,16 @@ export async function getProductionCenter(): Promise<{
   const pendingDelaySet = new Set<string>((pendingDelays || []).map((r: any) => r.order_id));
   const followUpIdByOrder = new Map<string, string>();
   for (const m of (ms || []) as any[]) if (m.owner_role === 'production' && m.owner_user_id && !followUpIdByOrder.has(m.order_id)) followUpIdByOrder.set(m.order_id, m.owner_user_id);
-  const responsibilityByOrder = new Map<string, Map<string, string>>();
-  const rr = await (svc.from('order_responsibilities') as any).select('order_id,responsibility_type,user_id').in('order_id', orderIds).eq('status', 'active');
-  if (!rr.error) for (const r of (rr.data || []) as any[]) {
-    const map = responsibilityByOrder.get(r.order_id) || new Map<string, string>(); map.set(r.responsibility_type, r.user_id); responsibilityByOrder.set(r.order_id, map);
-    if (r.responsibility_type === 'production_follow_up_owner') followUpIdByOrder.set(r.order_id, r.user_id);
-  }
+  const { getEffectiveResponsibilities } = await import('@/lib/responsibility/service');
+  const effectiveByOrder = new Map<string, Awaited<ReturnType<typeof getEffectiveResponsibilities>>>();
+  await Promise.all(orderIds.map(async (orderId) => {
+    const effective = await getEffectiveResponsibilities(svc as any, orderId);
+    effectiveByOrder.set(orderId, effective);
+    const follow = effective.find((r) => r.type === 'production_follow_up_owner');
+    if (follow?.userId) followUpIdByOrder.set(orderId, follow.userId);
+  }));
   const responsibilityIds = new Set<string>();
-  for (const o of list) responsibilityIds.add(responsibilityByOrder.get(o.id)?.get('business_execution_owner') || o.owner_user_id || o.created_by);
-  for (const m of responsibilityByOrder.values()) for (const id of m.values()) responsibilityIds.add(id);
+  for (const values of effectiveByOrder.values()) for (const r of values) if (r.userId) responsibilityIds.add(r.userId);
   for (const id of followUpIdByOrder.values()) responsibilityIds.add(id);
   responsibilityIds.delete(undefined as any); responsibilityIds.delete(null as any);
   const { data: responsibilityProfiles } = responsibilityIds.size ? await (svc.from('profiles') as any).select('user_id, name').in('user_id', [...responsibilityIds]) : { data: [] };
@@ -168,10 +170,11 @@ export async function getProductionCenter(): Promise<{
       po_number: o.po_number, style_no: o.style_no, customer_name: o.customer_name,
       production_follow_up_id: followUpIdByOrder.get(o.id) || null,
       production_follow_up_name: responsibilityNames.get(followUpIdByOrder.get(o.id) || '') || null,
-      business_execution_owner_id: responsibilityByOrder.get(o.id)?.get('business_execution_owner') || o.owner_user_id || o.created_by || null,
-      business_execution_owner_name: responsibilityNames.get(responsibilityByOrder.get(o.id)?.get('business_execution_owner') || o.owner_user_id || o.created_by || '') || null,
-      production_manager_owner_id: responsibilityByOrder.get(o.id)?.get('production_manager_owner') || null,
-      production_manager_owner_name: responsibilityNames.get(responsibilityByOrder.get(o.id)?.get('production_manager_owner') || '') || null,
+      business_execution_owner_id: effectiveByOrder.get(o.id)?.find((r) => r.type === 'business_execution_owner')?.userId || null,
+      business_execution_owner_name: responsibilityNames.get(effectiveByOrder.get(o.id)?.find((r) => r.type === 'business_execution_owner')?.userId || '') || null,
+      production_manager_owner_id: effectiveByOrder.get(o.id)?.find((r) => r.type === 'production_manager_owner')?.userId || null,
+      production_manager_owner_name: responsibilityNames.get(effectiveByOrder.get(o.id)?.find((r) => r.type === 'production_manager_owner')?.userId || '') || null,
+      ownership_source: effectiveByOrder.get(o.id)?.find((r) => r.type === 'production_manager_owner')?.source || 'missing',
       pending_delay: pendingDelaySet.has(o.id),
       factory_name: o.factory_name, quantity: o.quantity,
       factory_date: o.factory_date ? String(o.factory_date).slice(0, 10) : null,
