@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { assertAssignmentAuthority, assertEligibleAssignee, deriveLegacyResponsibilities, getActiveResponsibilities, replaceResponsibility } from '../service';
 import { recipientsForResponsibilityEvent } from '../notifications';
 import { evaluateOrderClosure } from '../closure';
@@ -31,6 +32,28 @@ describe('responsibility service contracts', () => {
     let writes = 0;
     const db = { from: () => ({ select: () => ({ eq: () => ({ eq: async () => ({ data:null, error:{ code:'PGRST205', message:'order_responsibilities missing' } }) }) }) }), rpc: async () => { writes++; return {data:null,error:null}; } };
     assert.deepEqual(await getActiveResponsibilities(db as any, 'o'), []); assert.equal(writes, 0);
+  });
+  it('keeps an empty migrated table compatible with legacy-derived reads', async () => {
+    let writes = 0;
+    const db = {
+      from(table: string) {
+        if (table === 'order_responsibilities') return { select: () => ({ eq: () => ({ eq: async () => ({ data:[],error:null }) }) }) };
+        if (table === 'orders') return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data:{id:'o',owner_user_id:'exec',created_by:'creator'},error:null }) }) }) };
+        if (table === 'milestones') return { select: () => ({ eq: async () => ({ data:[{owner_role:'production',owner_user_id:'follow'}],error:null }) }) };
+        throw new Error(`unexpected ${table}`);
+      }, rpc: async () => { writes++; return {data:null,error:null}; },
+    };
+    const { getEffectiveResponsibilities } = await import('../service');
+    const rows = await getEffectiveResponsibilities(db as any, 'o');
+    assert.equal(rows.find((r) => r.type === 'business_execution_owner')?.userId, 'exec');
+    assert.equal(rows.find((r) => r.type === 'production_follow_up_owner')?.source, 'legacy_derived');
+    assert.equal(writes, 0);
+  });
+  it('serializes first assignment and centralizes responsibility ending in SQL', () => {
+    const sql = readFileSync('supabase/migrations/20260716_order_responsibilities.sql', 'utf8');
+    assert.match(sql, /FROM public\.orders WHERE id=p_order_id FOR UPDATE/);
+    assert.match(sql, /FUNCTION public\.end_order_responsibility/);
+    assert.match(sql, /trg_order_responsibilities_updated_at/);
   });
   it('derives legacy owners only from explicit role rules without persistence', () => {
     const rows = deriveLegacyResponsibilities({ owner_user_id:'exec' }, [

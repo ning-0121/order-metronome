@@ -77,9 +77,9 @@ export const ensureResponsibility = replaceResponsibility;
 
 export async function endResponsibility(db: Db, actor: ResponsibilityActor, input: { orderId: string; type: CanonicalResponsibility; reason: string }): Promise<void> {
   assertAssignmentAuthority(actor, input.type, input.reason);
-  const current = await getResponsibility(db, input.orderId, input.type);
-  if (!current?.recordId) return;
-  const { error } = await db.from('order_responsibilities').update({ status: 'ended', ends_at: new Date().toISOString(), ended_by: actor.userId, end_reason: input.reason, updated_at: new Date().toISOString() }).eq('id', current.recordId).eq('status', 'active');
+  const { error } = await db.rpc('end_order_responsibility', {
+    p_order_id: input.orderId, p_type: input.type, p_actor_id: actor.userId, p_reason: input.reason.trim(),
+  });
   if (error) throw error;
 }
 
