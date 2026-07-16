@@ -4,8 +4,9 @@ import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBr
 import { BulkConsumptionEditor } from '@/components/BulkConsumptionEditor';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
-import { uploadSizeChart, listSizeCharts, deleteSizeChart } from '@/app/actions/size-chart';
+import { uploadSizeChart, listSizeCharts, deleteSizeChart, getSizeChartImport, reviewSizeChart } from '@/app/actions/size-chart';
 import { uploadOrderShareDoc, listOrderShareDocs, deleteOrderShareDoc } from '@/app/actions/order-share-docs';
+import { bulkApproveExactCandidates, listAccessoryCandidates, reviewAccessoryCandidate } from '@/app/actions/accessory-import';
 import { CartonSpecEditor } from '@/components/order/CartonSpecEditor';
 import { generateTrimSheet } from '@/app/actions/manufacturing-order';
 import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
@@ -19,7 +20,7 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[], attachment_files: [] as Array<{ name: string; url: string }> };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[], attachment_files: [] as Array<{ name: string; url: string }>, consumption_basis: '', sample_reference: '', position_description: '' };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -185,6 +186,9 @@ export function BomTab({ orderId }: { orderId: string }) {
       pack_size: form.pack_size ? parseFloat(form.pack_size) : undefined,   // 每包件数(打包辅料;需求÷每包件数)
       image_urls: (form.image_urls || []).map(u => u || ''),   // 辅料单图(示例画稿[0]/示意图[1]),按位置随行入库
       attachment_files: form.attachment_files || [],           // 排版稿/文件附件(录料时随行入库)
+      consumption_basis: form.consumption_basis || undefined,
+      sample_reference: form.sample_reference || undefined,
+      position_description: form.position_description || undefined,
       // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
       ...(editId && editingTemplate ? { override_reason: form.override_reason || undefined } : {}),
     };
@@ -233,6 +237,8 @@ export function BomTab({ orderId }: { orderId: string }) {
       attachment_files: Array.isArray(item.attachment_files) ? item.attachment_files : [],
       override_reason: item.override_reason || '', style_no: item.style_no || '',
       pack_size: item.pack_size != null ? String(item.pack_size) : '',
+      consumption_basis: item.consumption_basis || '', sample_reference: item.sample_reference || '',
+      position_description: item.position_description || '',
     });
     setShowAdd(true);
   }
@@ -367,20 +373,24 @@ export function BomTab({ orderId }: { orderId: string }) {
   // 尺码表(2026-07-08:改在 BOM 页上传,喂生产任务单)。
   // ⚠ Hooks 必须在任何早退(下面的 if (loading) return)之前声明,否则 loading→false 后
   //   本轮多跑几个 hook,React 报「Rendered more hooks than during the previous render」→ 整页崩。
-  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null }>>([]);
+  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number }>>([]);
   const [scUploading, setScUploading] = useState(false);
   const [scMsg, setScMsg] = useState('');
+  const [scDetail, setScDetail] = useState<any | null>(null);
   useEffect(() => { listSizeCharts(orderId).then(r => { if ((r as any).data) setSizeCharts((r as any).data); }); }, [orderId]);
   async function reloadSizeCharts() { const r = await listSizeCharts(orderId); if ((r as any).data) setSizeCharts((r as any).data); }
   async function handleUploadSizeCharts(files: FileList) {
     setScUploading(true); setScMsg('');
     let ok = 0; const errs: string[] = [];
-    for (const file of Array.from(files)) {
-      const fd = new FormData(); fd.set('file', file);
-      const r = await uploadSizeChart(orderId, fd);
-      if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else ok++;
+    try {
+      for (const file of Array.from(files)) {
+        const fd = new FormData(); fd.set('file', file);
+        const r = await uploadSizeChart(orderId, fd);
+        if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else ok++;
+      }
+    } finally {
+      setScUploading(false);
     }
-    setScUploading(false);
     setScMsg(errs.length ? `已上传 ${ok} 个,失败 ${errs.length} 个 — ${errs[0]}` : '');
     await reloadSizeCharts();
   }
@@ -389,11 +399,17 @@ export function BomTab({ orderId }: { orderId: string }) {
     await deleteSizeChart(id, orderId);
     await reloadSizeCharts();
   }
+  async function openSizeChartReview(id: string) { const r = await getSizeChartImport(id, orderId); setScDetail((r as any).data ? { ...(r as any).data, attachment_id: id } : null); }
+  async function decideSizeChart(id: string, decision: 'approve'|'reject') { const r = await reviewSizeChart(id, orderId, decision); if ((r as any).error) setScMsg((r as any).error); else { setScDetail(null); await reloadSizeCharts(); } }
 
   // 订单共享文件:辅料采购清单 + 包装方式(整个 PO 上传一份,共享给采购/生产/财务)
   const [shareDocs, setShareDocs] = useState<Record<string, Array<{ id: string; file_name: string; url: string | null }>>>({});
   const [shareUploading, setShareUploading] = useState<string | null>(null);   // 正在上传的 file_type
   const [shareMsg, setShareMsg] = useState<Record<string, string>>({});
+  const [candidates, setCandidates] = useState<any[]>([]);
+  const [candidateFilter, setCandidateFilter] = useState('');
+  async function reloadCandidates(status = candidateFilter) { const r = await listAccessoryCandidates(orderId, status || undefined); setCandidates((r as any).data || []); }
+  useEffect(() => { reloadCandidates(); /* eslint-disable-next-line */ }, [orderId]);
   const SHARE_KINDS: Array<{ type: string; label: string; icon: string }> = [
     { type: 'accessory_purchase_list', label: '辅料采购清单', icon: '📋' },
     { type: 'packing_method', label: '包装方式', icon: '📦' },
@@ -406,12 +422,26 @@ export function BomTab({ orderId }: { orderId: string }) {
     for (const file of Array.from(files)) {
       const fd = new FormData(); fd.set('file', file);
       const r = await uploadOrderShareDoc(orderId, type, fd);
-      if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else ok++;
+      if ((r as any).error) errs.push(`${file.name}:${(r as any).error}`); else { ok++; if ((r as any).warning) errs.push((r as any).warning); }
     }
     setShareUploading(null);
     setShareMsg(p => ({ ...p, [type]: errs.length ? `已上传 ${ok} 个,失败 ${errs.length} 个 — ${errs[0]}` : '' }));
     await reloadShare(type);
+    if (type === 'accessory_purchase_list') await reloadCandidates();
   }
+  async function reviewCandidate(c: any, action: 'approve'|'exclude') {
+    const reason = action === 'exclude' ? prompt('排除原因（保留审计记录）') || '' : undefined;
+    const r = await reviewAccessoryCandidate(c.id, orderId, action, c.extracted_value, reason);
+    if ((r as any).error) alert((r as any).error); else { await reloadCandidates(); await reload(); }
+  }
+  async function editCandidate(c: any) {
+    const name = prompt('辅料名称', c.extracted_value?.accessory_name || ''); if (!name) return;
+    const unit = prompt('单位', c.extracted_value?.unit || ''); if (!unit) return;
+    const consumption = prompt('单耗', String(c.extracted_value?.unit_consumption ?? '')); if (!(Number(consumption) > 0)) return;
+    const value = { ...c.extracted_value, accessory_name: name, unit, unit_consumption: Number(consumption) };
+    const r = await reviewAccessoryCandidate(c.id, orderId, 'approve', value); if ((r as any).error) alert((r as any).error); else { await reloadCandidates(); await reload(); }
+  }
+  async function bulkApprove() { const r = await bulkApproveExactCandidates(orderId); if ((r as any).error) alert((r as any).error); else { alert(`已批准 ${(r as any).approved} 条精确完整匹配`); await reloadCandidates(); } }
   async function handleDeleteShare(type: string, id: string) {
     if (!confirm('删除这份文件？')) return;
     await deleteOrderShareDoc(id, orderId, type);
@@ -421,6 +451,9 @@ export function BomTab({ orderId }: { orderId: string }) {
   // 生成「辅料单」(第二张:辅料明细,读最新 BOM;自动同步到「生产任务单」页)
   const [trimBusy, setTrimBusy] = useState(false);
   const [trimMsg, setTrimMsg] = useState('');
+  // Keep form-scope state above the loading early return so Hook order is stable.
+  const [byStyle, setByStyle] = useState(false);
+  useEffect(() => { setByStyle(!!(form.style_no || '').trim()); /* eslint-disable-next-line */ }, [editId, showAdd]);
   async function downloadTrimSheet() {
     setTrimBusy(true); setTrimMsg('');
     try {
@@ -560,6 +593,16 @@ export function BomTab({ orderId }: { orderId: string }) {
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         {isFabricForm && <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+        <select value={form.consumption_basis} onChange={e => set('consumption_basis', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
+          <option value="">用量基准（历史/待确认）</option>
+          <option value="PER_SET">每套</option><option value="PER_COMPONENT">每部件</option><option value="PER_PIECE">每件</option>
+          <option value="PER_ORDER">整单</option><option value="PER_KG">每公斤</option><option value="PER_METER">每米</option>
+          <option value="PER_PACK">每包</option><option value="MANUAL_TOTAL">手工总量</option>
+        </select>
+        <input placeholder="样品/参考编号" value={form.sample_reference} onChange={e => set('sample_reference', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <textarea placeholder="详细位置说明" value={form.position_description} onChange={e => set('position_description', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
       {editId && editingTemplate && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">
@@ -851,7 +894,7 @@ export function BomTab({ orderId }: { orderId: string }) {
           <span className="text-xs text-gray-500">在此上传,「生产任务单」直接读取(建单不再传)· 可一次选多个</span>
           <label className={`ml-auto text-sm px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 cursor-pointer ${scUploading ? 'opacity-50 pointer-events-none' : ''}`}>
             {scUploading ? '上传中…' : '📤 上传尺码表'}
-            <input type="file" multiple accept=".xlsx,.xls,.csv,.pdf,image/*" className="hidden" disabled={scUploading}
+            <input type="file" multiple accept=".xlsx" className="hidden" disabled={scUploading}
               onChange={e => { const fs = e.target.files; if (fs && fs.length) handleUploadSizeCharts(fs); e.currentTarget.value = ''; }} />
           </label>
         </div>
@@ -864,11 +907,22 @@ export function BomTab({ orderId }: { orderId: string }) {
                 {sc.url
                   ? <a href={sc.url} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline truncate">{sc.file_name}</a>
                   : <span className="text-gray-600 truncate">{sc.file_name}</span>}
+                {sc.parse_status === 'NEEDS_REVIEW' && <span className="text-[11px] rounded bg-amber-100 text-amber-700 px-1.5 py-0.5">待复核 · {sc.row_count} 行</span>}
+                {sc.parse_status === 'FAILED' && <span className="text-[11px] rounded bg-rose-100 text-rose-700 px-1.5 py-0.5" title={sc.failure_reason || ''}>解析失败：{sc.failure_reason || '请检查表头'}</span>}
+                {sc.parse_status === 'UPLOADED' && <span className="text-[11px] rounded bg-gray-100 text-gray-600 px-1.5 py-0.5">仅已上传</span>}
+                {sc.parse_status === 'APPROVED' && <span className="text-[11px] rounded bg-emerald-100 text-emerald-700 px-1.5 py-0.5">已审核</span>}
+                {sc.parse_status === 'NEEDS_REVIEW' && <button onClick={() => openSizeChartReview(sc.id)} className="text-xs text-indigo-600 hover:underline">查看并审核</button>}
                 <button onClick={() => handleDeleteSizeChart(sc.id)} className="ml-auto text-gray-300 hover:text-rose-500 text-xs" title="删除">✕</button>
               </div>
             ))}
           </div>
         ) : <p className="text-xs text-gray-400 mt-1">暂无尺码表,点右上「上传尺码表」。</p>}
+        {scDetail && <div className="mt-3 rounded-lg border bg-white p-3 text-xs space-y-2">
+          <p className="font-semibold">工作表：{scDetail.worksheet_name} · {scDetail.parsed_row_count} 行 · 仅供复核，尚未应用</p>
+          <div className="overflow-x-auto"><table className="w-full"><tbody>{(scDetail.parsed_json?.rows || []).map((r: any, i: number) => <tr key={i} className="border-t"><td className="p-1 font-medium">{r.measurement}</td><td className="p-1 font-mono">{JSON.stringify(r.values)}</td></tr>)}</tbody></table></div>
+          <div className="flex gap-2"><button onClick={() => decideSizeChart(scDetail.attachment_id, 'approve')} className="px-2 py-1 bg-emerald-600 text-white rounded">确认通过</button>
+          <button onClick={() => decideSizeChart(scDetail.attachment_id, 'reject')} className="px-2 py-1 border rounded text-rose-600">复核不通过</button><button onClick={() => setScDetail(null)}>关闭</button></div>
+        </div>}
       </div>
       {/* 订单共享文件:整个 PO 上传辅料采购清单 + 包装方式,共享给采购/生产/财务(2026-07-11:取代 AI 识别) */}
       <div className="mb-4 p-3 rounded-xl border border-violet-200 bg-violet-50/40">
@@ -907,6 +961,11 @@ export function BomTab({ orderId }: { orderId: string }) {
           })}
         </div>
       </div>
+      {candidates.length > 0 && <div className="mb-4 p-3 rounded-xl border border-amber-200 bg-amber-50/40">
+        <div className="flex items-center gap-2"><b className="text-sm">辅料导入候选审核</b><button onClick={bulkApprove} className="text-xs border rounded px-2 py-1 text-emerald-700">批量批准精确完整匹配</button><select value={candidateFilter} onChange={e => { setCandidateFilter(e.target.value); reloadCandidates(e.target.value); }} className="ml-auto text-xs border rounded p-1"><option value="">全部状态</option>{['SOURCE_IMPORTED','MATCHED_TO_EXISTING','NEW_ACCESSORY','NEEDS_REVIEW','APPROVED','EXCLUDED'].map(s => <option key={s}>{s}</option>)}</select></div>
+        <div className="mt-2 overflow-x-auto"><table className="w-full text-xs"><thead><tr><th>源行</th><th>名称/规格/颜色/位置</th><th>状态</th><th>缺失</th><th>匹配原因</th><th>操作</th></tr></thead><tbody>{candidates.map(c => <tr key={c.id} className="border-t"><td>{c.source_row_number}{c.order_attachments?.file_url && <a href={c.order_attachments.file_url} target="_blank" rel="noreferrer" className="ml-1 text-indigo-600">源文件</a>}</td><td>{c.extracted_value?.accessory_name} / {c.extracted_value?.specification || '—'} / {c.extracted_value?.color || '—'} / {c.extracted_value?.usage_position || '—'}</td><td>{c.import_status}</td><td className="text-rose-600">{(c.missing_fields || []).join('、') || '—'}</td><td>{c.extracted_value?.match_reason || '新辅料/待判断'}</td><td>{!['APPROVED','EXCLUDED'].includes(c.import_status) && <div className="flex gap-1"><button onClick={() => reviewCandidate(c,'approve')} className="text-emerald-700">批准</button><button onClick={() => editCandidate(c)} className="text-indigo-600">编辑并批准</button><button onClick={() => reviewCandidate(c,'exclude')} className="text-rose-600">排除</button></div>}</td></tr>)}</tbody></table></div>
+        <p className="mt-2 text-[11px] text-amber-700">候选行不会自动生成采购单；批准新辅料只创建最小 BOM 记录。禁止在此点击最终提交采购。</p>
+      </div>}
       {/* 纸箱规格 + 箱唛(#3:一套默认 + 个别款/色例外 + 箱唛模板,按款×色自动派生) */}
       <CartonSpecEditor orderId={orderId} />
       {/* 辅料单(第二张):原辅料填完后在此生成,读最新 BOM;同一按钮也在「生产任务单」页 */}
@@ -1053,7 +1112,7 @@ export function BomTab({ orderId }: { orderId: string }) {
                       ? item.total_qty
                       : item.computed_total_qty != null
                         ? (
-                          <span title={`自动算:单件用量 ${item.qty_per_piece} × 件数 ${item.computed_pieces}${item.unit ? `（${item.unit}）` : ''}。件数来自订单明细,人工填「总需」可覆盖。`}
+                          <span title={`自动算:每套用量 ${item.qty_per_piece} × 套数 ${item.computed_pieces}${item.unit ? `（${item.unit}）` : ''}。套数来自订单明细,人工填「总需」可覆盖。`}
                             className="text-emerald-700">
                             {item.computed_total_qty}
                             <span className="ml-1 text-[10px] text-emerald-500 font-normal">自动</span>

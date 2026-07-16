@@ -1,7 +1,8 @@
 'use server';
 
-import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
+import { qimoAI, AIRuntimeError, type FileInput, type ImageInput } from '@/lib/ai/runtime';
+import { poParsedSchema } from '@/lib/ai/scenes/po-schema';
 
 /** 上传文件最大字节数：10MB。超过后拒绝读入内存。 */
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -52,6 +53,11 @@ export interface POParsedData {
   /** 生产单右上「注意」框文字（业务员可编辑）。
    * 默认："注意：大货数量不能少出，也不能多出。交货期不能晚，延期会扣款。大货尺寸千万不能做小。" */
   warning_notes?: string;
+  unit_price?: number;
+  currency?: string;
+  total_amount?: number;
+  incoterm?: string;
+  payment_terms?: string;
 }
 
 const SYSTEM_PROMPT = `你是绮陌服饰的订单录入专家。你正在为一张【生产单/生产任务单】提取数据。
@@ -85,7 +91,7 @@ confidence_notes,绝不编造、不猜。
 6. 数量必须是纯数字，不要带单位。
 7. 判断服装品类（pants/tops/dress/outerwear/other）。
 8. 尺寸表/测量数据（measurements）——**只在 PO 里真的印着一张"部位×各尺码测量数值"的尺寸表时才提取，且必须逐个数值照抄，不许四舍五入不许补全**：
-   - 表里确有「胸围/腰围/臀围/衣长/袖长…」等部位对应各尺码的实际数值 → 照抄(label=部位名，values={各码:数值})。
+   - 表里确有「胸围/腰围/臀围/衣长/袖长…」等部位对应各尺码的实际数值 → 照抄(label=部位名，values=[{size:尺码,value:数值}])。
    - **PO 里没有尺寸表 → measurements 必须返回空数组 []。绝对禁止根据款式类型/经验/常识臆造、补齐或"帮忙生成"任何测量值。**
      这张表会原样印进生产任务单发给工厂照着裁做，编造的尺寸会直接导致做错货、整批报废——宁可空着让人补，也绝不能编。
    - 测量部位必须与品类吻合(短裤/裤子不会有胸围、肩宽、袖长这类上衣部位)；若发现对不上或拿不准，一律留空 [] 并在 confidence_notes 注明「PO无尺寸表，measurements 未提取」。
@@ -99,7 +105,7 @@ confidence_notes,绝不编造、不猜。
      1/2/2/1)→ 按比例把该色总数量分摊到各尺码,填分摊后的整数件数,必须满足 各尺码之和 = 该色 qty
      (余数补给占比最大的码)。例:qty=3600、配比1:2:2:1 → {"S":600,"M":1200,"L":1200,"XL":600};
      "1X-3X=211" 表示 1X:2X:3X=2:1:1。
-   - 完全没有尺码信息：sizes 留空对象{}，不要编造。
+   - 完全没有尺码信息：sizes 留空数组[]，不要编造。
 
 日期解析规则（重要！）：
 - Excel的日期序列号（如46124）= 从1900-01-01起的天数，请转换为 YYYY.MM.DD
@@ -134,15 +140,16 @@ confidence_notes,绝不编造、不猜。
           "color_cn": "黑色",
           "color_en": "BLACK",
           "qty": 2010,
-          "sizes": { "S": 670, "M": 670, "L": 670 }
+          "sizes": [{ "label": "S", "qty": 670 }, { "label": "M", "qty": 670 }, { "label": "L", "qty": 670 }],
+          "packaging": ""
         }
       ],
       "packaging": "包装要求描述",
       "quality_notes": "质量要求/工艺备注",
       "sample_requirements": "产前样/船样要求",
       "measurements": [
-        { "label": "腰围", "values": { "S": "12.5", "M": "13.5", "L": "14.5", "XL": "15.5" } },
-        { "label": "臀围", "values": { "S": "17.5", "M": "18.5", "L": "19.5", "XL": "20.5" } }
+        { "label": "腰围", "values": [{ "size": "S", "value": "12.5" }, { "size": "M", "value": "13.5" }] },
+        { "label": "臀围", "values": [{ "size": "S", "value": "17.5" }, { "size": "M", "value": "18.5" }] }
       ]
     }
   ],
@@ -202,129 +209,36 @@ export async function parsePO(
     }
   } catch { /* 缓存查询失败不阻断,继续走 AI */ }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { ok: false, error: 'AI 服务未配置，请联系管理员' };
-
   const startedAt = Date.now();
   try {
-    const client = new Anthropic({ apiKey });
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileType = file.type;
     const fileName = file.name.toLowerCase();
-
-    let messages: Anthropic.MessageParam[];
+    let prompt = '';
+    let image: ImageInput | undefined;
+    let inputFile: FileInput | undefined;
 
     if (fileType.startsWith('image/') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png')) {
-      // Image: use vision
-      const base64 = buffer.toString('base64');
       const mediaType = fileType.startsWith('image/') ? fileType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' : 'image/jpeg';
-      messages = [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: '请解析这个客户PO图片，提取订单信息。' }
-        ]
-      }];
+      image = { mediaType, base64: buffer.toString('base64'), detail: 'high' };
+      prompt = '请解析这个客户PO图片，提取订单信息。';
     } else if (fileName.endsWith('.pdf')) {
-      // PDF: use document support
-      const base64 = buffer.toString('base64');
-      messages = [{
-        role: 'user',
-        content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-          { type: 'text', text: '请解析这个客户PO文件，提取订单信息。' }
-        ]
-      }];
+      inputFile = { filename: file.name, mediaType: 'application/pdf', base64: buffer.toString('base64') };
+      prompt = '请解析这个客户PO文件，提取订单信息。';
     } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
-      // Excel: convert to text representation
       const textContent = await excelToText(buffer, fileName);
-      messages = [{
-        role: 'user',
-        content: `请解析以下客户PO内容，提取订单信息：\n\n${textContent}`
-      }];
+      prompt = `请解析以下客户PO内容，提取订单信息：\n\n${textContent}`;
     } else {
       return { ok: false, error: `不支持的文件格式：${file.type}。请上传 Excel、PDF 或图片文件。` };
     }
 
-    let response;
-    try {
-      // 2026-07-03:服务器偶发过载(529)/5xx → SDK 报「unexpected response」。
-      // 彻底解法 = 时间退避 + 模型备胎(不同模型是不同容量池,sonnet-5 过载不代表 4-6/haiku 也过载):
-      //   尝试1-2:claude-sonnet-5(2s 退避) → 尝试3:claude-sonnet-4-6(5s) → 尝试4:claude-haiku-4-5(8s)
-      // 过载错误秒回,总耗时 ~20s 内,留在 Vercel maxDuration=60s 预算里;首次真超时不重试,立即返回。
-      let lastErr: any;
-      let usedModel = '';
-      const MODEL_CHAIN = ['claude-sonnet-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
-      const BACKOFF_MS = [2000, 5000, 8000];
-      for (let attempt = 0; attempt < MODEL_CHAIN.length; attempt++) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), attempt === 0 ? 45000 : 12000);
-        try {
-          response = await client.messages.create({
-            model: MODEL_CHAIN[attempt],
-            max_tokens: 8192,                // 4096→8192:款多的 PO 避免响应截断→JSON解析失败
-            thinking: { type: 'disabled' },  // sonnet-5 默认开思考,吃 max_tokens 会截断 JSON(见 memory ai-model-ids)
-            system: SYSTEM_PROMPT,
-            messages,
-          }, { signal: controller.signal });
-          clearTimeout(timeout);
-          usedModel = MODEL_CHAIN[attempt];
-          if (attempt > 0) console.warn(`[parsePO] 主模型过载,备胎成功:${usedModel}(第 ${attempt + 1} 次尝试)`);
-          break;                             // 成功,跳出重试
-        } catch (e: any) {
-          clearTimeout(timeout);
-          if (e?.name === 'AbortError' || e?.message?.includes('abort')) {
-            if (attempt === 0) return { ok: false, error: 'AI 解析超时,请换更小的文件或拍图上传。' };
-            lastErr = e;                     // 重试轮的短超时也算 transient,继续下一轮
-          } else {
-            const st = e?.status ?? e?.statusCode;
-            const transient = st === 429 || st === 529 || (st >= 500 && st < 600) ||
-              /overload|unexpected response|internal server|timeout/i.test(e?.message || '');
-            lastErr = e;
-            console.warn(`[parsePO] attempt ${attempt + 1} (${MODEL_CHAIN[attempt]}) failed (status=${st ?? '?'}):`, String(e?.message || '').slice(0, 120));
-            if (!transient) throw e;
-          }
-          if (attempt < MODEL_CHAIN.length - 1) {
-            await new Promise(r => setTimeout(r, BACKOFF_MS[attempt] || 8000));
-            continue;
-          }
-          throw lastErr;
-        }
-      }
-      if (!response) throw lastErr || new Error('AI 无响应');
-    } catch (e: any) {
-      if (e?.name === 'AbortError' || e?.message?.includes('abort')) {
-        return { ok: false, error: 'AI 解析超时,请换更小的文件或拍图上传。' };
-      }
-      throw e;
-    }
-
-    const text = response.content
-      .filter(block => block.type === 'text')
-      .map(block => (block as Anthropic.TextBlock).text)
-      .join('');
-
-    // Parse JSON from response (handle potential markdown wrapping)
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-    }
-
-    // P1-4: JSON.parse 单独 try/catch — 否则 Claude 偶尔返回带前导文字的 JSON
-    // 整体被吞进 catch-all，用户看到的是莫名其妙的 "Unexpected token"
-    let parsed: POParsedData;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch (parseErr) {
-      const snippet = jsonStr.slice(0, 300);
-      console.error('[parsePO] JSON parse failed, raw:', snippet);
-      logAICall('po_parse', orderId || null, 'error', Date.now() - startedAt,
-        `JSON parse failed: ${snippet}`).catch(() => {});
-      return {
-        ok: false,
-        error: 'AI 返回格式异常，已记录。请重试或换张更清晰的图片/PDF。',
-      };
-    }
+    const result = await qimoAI.generateObject({
+      scene: 'order.po.parse', capability: 'structured-extraction',
+      logicalModel: 'qimo.structured-extraction', riskLevel: 'high',
+      system: SYSTEM_PROMPT, prompt, schema: poParsedSchema, image, file: inputFile,
+      timeoutMs: 45_000, maxOutputTokens: 8192, fallback: 'allowed',
+    });
+    const parsed = result.data;
 
     // 确定性兜底(2026-07-11):prompt 已强约束不许臆造尺寸,这里再补一道确定性网 ——
     // 若「品类/款名是下装(裤/短裤/legging)」却给了只属上衣的测量部位(胸围/肩宽/袖长/领围…),
@@ -350,7 +264,8 @@ export async function parsePO(
       }
     } catch { /* 兜底本身绝不阻断解析 */ }
 
-    logAICall('po_parse', orderId || null, 'success', Date.now() - startedAt).catch(() => {});
+    logAICall('po_parse', orderId || null, 'success', Date.now() - startedAt,
+      `${result.metadata.provider}/${result.metadata.model}; fallback=${result.metadata.fallbackUsed}; trace=${result.metadata.traceId}`).catch(() => {});
 
     // P0-1: 解析成功后落库，防关闭/刷新丢数据
     const draftId = await savePOParseDraft(orderId, file.name, file.size, parsed).catch((e) => {
@@ -371,16 +286,12 @@ export async function parsePO(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[parsePO] Error:', message);
-    const isTimeout = err instanceof Error && (err.name === 'AbortError' || message.includes('abort'));
+    const runtimeError = err instanceof AIRuntimeError ? err : undefined;
+    const runtimeCause = runtimeError?.cause as { lastError?: AIRuntimeError } | undefined;
+    const isTimeout = runtimeError?.code === 'TIMEOUT' || runtimeCause?.lastError?.code === 'TIMEOUT';
     logAICall('po_parse', orderId || null, isTimeout ? 'timeout' : 'error', Date.now() - startedAt, message.slice(0, 200)).catch(() => {});
-    if (message.includes('credit balance') || message.includes('billing')) {
-      return { ok: false, error: 'AI 服务余额不足，请联系管理员充值 Anthropic API 额度。' };
-    }
-    // 服务器过载/5xx(自动重试4次、退避15s仍失败)= Anthropic 端持续过载,不是文件问题
-    if (/overload|unexpected response|internal server|529|5\d\d/i.test(message)) {
-      return { ok: false, error: 'AI 服务器繁忙(Anthropic 端临时过载),系统已自动重试 4 次仍失败。请等 1-2 分钟再重传同一份 PO;这不是文件问题。' };
-    }
-    return { ok: false, error: `解析失败：${message}` };
+    if (runtimeError?.code === 'ALL_PROVIDERS_FAILED') return { ok: false, error: 'AI 识别服务当前不可用，未保存任何识别数据。请稍后重试或联系管理员检查 Provider 配置。' };
+    return { ok: false, error: `解析失败：${runtimeError?.code ?? message}` };
   }
 }
 

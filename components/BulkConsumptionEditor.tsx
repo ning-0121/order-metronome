@@ -35,10 +35,15 @@ export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: st
     if (!file) return;
     setUploading(true);
     const fd = new FormData(); fd.append('file', file);
-    const r = await uploadTechConfirm(orderId, fd);
-    setUploading(false);
-    if ((r as any).error) { alert((r as any).error); return; }
-    setTechKey(k => k + 1);
+    try {
+      const r = await uploadTechConfirm(orderId, fd);
+      if ((r as any).error) { alert((r as any).error); return; }
+      setTechKey(k => k + 1);
+    } catch {
+      alert('上传失败，请检查网络后重试');
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function load() {
@@ -96,7 +101,7 @@ export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: st
                 className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
                 {uploading ? '上传中…' : '⬆ 上传确认单'}
               </button>
-              <input ref={fileRef} type="file" className="hidden" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" onChange={onPickTech} />
+              <input ref={fileRef} type="file" className="hidden" accept="image/jpeg,image/png,.pdf" onChange={onPickTech} />
             </>
           )}
         </div>
