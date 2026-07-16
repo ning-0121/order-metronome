@@ -24,6 +24,9 @@ export interface ProductionOrderRow {
   internal_order_no: string | null;
   po_number: string | null;
   style_no: string | null;
+  production_follow_up_id: string | null;
+  production_follow_up_name: string | null;
+  pending_delay: boolean;
   customer_name: string | null;
   factory_name: string | null;
   quantity: number | null;
@@ -99,11 +102,12 @@ export async function getProductionCenter(): Promise<{
   const orderIds = list.map((o) => o.id);
 
   // 物料就绪 + 生产节点 + 生产任务单存在性(三查并行)
-  const [{ data: lines }, { data: ms }, { data: mos }] = await Promise.all([
+  const [{ data: lines }, { data: ms }, { data: mos }, { data: pendingDelays }] = await Promise.all([
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
-    (svc.from('milestones') as any).select('order_id, step_key, status, due_at')
+    (svc.from('milestones') as any).select('order_id, step_key, status, due_at, owner_role, owner_user_id')
       .in('order_id', orderIds).in('step_key', STAGE_SIGNAL_STEP_KEYS),
     (svc.from('manufacturing_orders') as any).select('order_id').in('order_id', orderIds),
+    (svc.from('delay_requests') as any).select('order_id').in('order_id', orderIds).eq('status', 'pending'),
   ]);
 
   const matByOrder = new Map<string, ProductionOrderRow['material']>();
@@ -124,6 +128,12 @@ export async function getProductionCenter(): Promise<{
     msByOrder.set(m.order_id, o);
   }
   const moSet = new Set<string>((mos || []).map((r: any) => r.order_id));
+  const pendingDelaySet = new Set<string>((pendingDelays || []).map((r: any) => r.order_id));
+  const followUpIdByOrder = new Map<string, string>();
+  for (const m of (ms || []) as any[]) if (m.owner_role === 'production' && m.owner_user_id && !followUpIdByOrder.has(m.order_id)) followUpIdByOrder.set(m.order_id, m.owner_user_id);
+  const followUpIds = [...new Set(followUpIdByOrder.values())];
+  const { data: followUps } = followUpIds.length ? await (svc.from('profiles') as any).select('user_id, name').in('user_id', followUpIds) : { data: [] };
+  const followUpNames = new Map<string, string>((followUps || []).map((p: any) => [p.user_id, p.name || '—']));
 
   const today = new Date().toISOString().slice(0, 10);
   const rows: ProductionOrderRow[] = [];
@@ -142,6 +152,9 @@ export async function getProductionCenter(): Promise<{
     rows.push({
       order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no,
       po_number: o.po_number, style_no: o.style_no, customer_name: o.customer_name,
+      production_follow_up_id: followUpIdByOrder.get(o.id) || null,
+      production_follow_up_name: followUpNames.get(followUpIdByOrder.get(o.id) || '') || null,
+      pending_delay: pendingDelaySet.has(o.id),
       factory_name: o.factory_name, quantity: o.quantity,
       factory_date: o.factory_date ? String(o.factory_date).slice(0, 10) : null,
       etd: o.etd ? String(o.etd).slice(0, 10) : null,

@@ -449,7 +449,8 @@ export async function approveDeferralStep(delayRequestId: string, note?: string,
   const needRole = chain[step];
   // 2026-07-11:CAN_APPROVE_DELAY 经理(admin/order_manager/sales_manager)可代任一步确认(与 admin 同权)。
   //   否则业务执行(merchandiser)的延期链首是 sales,高洁(order_manager)角色不匹配 → 审批不了。
-  if (!hasRoleInGroup(roles, 'CAN_APPROVE_DELAY') && !roles.includes(needRole)) {
+  const { canActOnDeferralStep } = await import('@/lib/domain/deferral-routing');
+  if (!canActOnDeferralStep({ roles, requiredRole: needRole, actorId: user.id, requesterId: (dr as any).requested_by })) {
     return { error: `本步需「${roleCn(needRole)}」或业务经理确认,你的角色不匹配` };
   }
 
@@ -794,11 +795,11 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
   const rejectChain: string[] = Array.isArray(delayRequestData.approval_chain) ? delayRequestData.approval_chain : [];
   const rejectStep = Number(delayRequestData.current_step) || 0;
   const rejectRole = rejectChain[rejectStep];
-  if (!hasRoleInGroup(rejectUserRoles, 'CAN_APPROVE_DELAY') && !rejectUserRoles.includes(rejectRole)) {
+  const { canActOnDeferralStep } = await import('@/lib/domain/deferral-routing');
+  if (!canActOnDeferralStep({ roles: rejectUserRoles, requiredRole: rejectRole, actorId: user.id, requesterId: delayRequestData.requested_by })) {
     const { roleCn } = await import('@/lib/domain/deferral-routing');
     return { error: `当前步骤需由「${roleCn(rejectRole || 'admin')}」驳回` };
   }
-  if (delayRequestData.requested_by === user.id && !rejectUserRoles.includes('admin')) return { error: '不能驳回自己提交的改期申请' };
 
   // Update delay request
   const updatePayload: any = {

@@ -6,6 +6,7 @@ import { approveDelayRequest, rejectDelayRequest, getImpactedMilestones } from '
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
 import { roleCn } from '@/lib/domain/deferral-routing';
+import { canActOnDeferralStep } from '@/lib/domain/deferral-routing';
 
 interface DelayRequest {
   id: string;
@@ -57,7 +58,8 @@ const REASON_TYPE_MAP: Record<string, string> = {
 
 export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], currentUserId }: DelayRequestDetailProps) {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
+  const [processing, setProcessing] = useState<'approve' | 'reject' | null>(null);
+  const loading = processing !== null;
   const [impactedMilestones, setImpactedMilestones] = useState<ImpactedMilestone[]>([]);
   const [loadingImpacted, setLoadingImpacted] = useState(false);
   const [decisionNote, setDecisionNote] = useState('');
@@ -81,7 +83,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], c
   }
 
   async function handleApprove(mode?: 'push_delivery' | 'urgent') {
-    setLoading(true);
+    setProcessing('approve');
     try {
     // P1/P3:优先走多级审批链(逐级推进);无链的旧单 → 回退原单人审批。
     const { approveDeferralStep } = await import('@/app/actions/delays');
@@ -102,7 +104,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], c
     } else {
       alert(result.error);
     }
-    } finally { setLoading(false); }
+    } finally { setProcessing(null); }
   }
 
   async function handleReject() {
@@ -110,7 +112,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], c
       alert('拒绝延期必须填写审批意见');
       return;
     }
-    setLoading(true);
+    setProcessing('reject');
     try {
     const result = await rejectDelayRequest(delayRequest.id, decisionNote);
     if (!result.error) {
@@ -120,7 +122,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], c
     } else {
       alert(result.error);
     }
-    } finally { setLoading(false); }
+    } finally { setProcessing(null); }
   }
 
   const reasonTypeLabel = REASON_TYPE_MAP[delayRequest.reason_type] || delayRequest.reason_type;
@@ -147,7 +149,9 @@ export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], c
   const chainStep = Number(delayRequest.current_step) || 0;
   const chainApprovals = Array.isArray(delayRequest.approvals) ? delayRequest.approvals : [];
   const hasChain = chain.length > 0;
-  const canAct = currentUserId !== delayRequest.requested_by && (isAdmin || currentRoles.includes(chain[chainStep]));
+  const canAct = hasChain
+    ? canActOnDeferralStep({ roles: isAdmin ? [...currentRoles, 'admin'] : currentRoles, requiredRole: chain[chainStep], actorId: currentUserId, requesterId: delayRequest.requested_by })
+    : isAdmin && currentUserId !== delayRequest.requested_by;
 
   return (
     <div className="border border-yellow-200 bg-yellow-50 rounded-lg p-6 mb-4">
@@ -326,14 +330,14 @@ export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], c
                 disabled={loading || needMode}
                 className="flex-1 rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:opacity-50 font-medium"
               >
-                {loading ? '处理中...' : '✓ 批准延期'}
+                {processing === 'approve' ? '处理中...' : '✓ 批准延期'}
               </button>
               <button
                 onClick={handleReject}
                 disabled={loading || !decisionNote.trim()}
                 className="flex-1 rounded-md bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:opacity-50 font-medium"
               >
-                {loading ? '处理中...' : '✗ 拒绝延期'}
+                {processing === 'reject' ? '处理中...' : '✗ 拒绝延期'}
               </button>
               <button
                 onClick={() => {

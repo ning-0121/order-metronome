@@ -25,3 +25,9 @@ export const ROLE_CN: Record<string, string> = {
   finance: '财务', production_manager: '生产主管', sales_manager: '业务经理', qc: '品控', logistics: '物流',
 };
 export const roleCn = (r: string) => ROLE_CN[r] || r;
+
+/** One authorization source for server actions and button visibility. */
+export function canActOnDeferralStep(input: { roles: string[]; requiredRole?: string; actorId?: string; requesterId?: string | null }): boolean {
+  if (input.actorId && input.requesterId && input.actorId === input.requesterId && !input.roles.includes('admin')) return false;
+  return input.roles.includes('admin') || (!!input.requiredRole && input.roles.includes(input.requiredRole));
+}

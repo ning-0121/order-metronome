@@ -1745,18 +1745,20 @@ export async function assignMerchandiser(
   }
 
   // 验证目标用户角色与 kind 匹配
-  const { data: targetProfile } = await (supabase.from('profiles') as any)
-    .select('name, role, roles')
-    .eq('user_id', merchandiserUserId)
-    .single();
+  let { data: targetProfile, error: targetProfileError } = await (supabase.from('profiles') as any)
+    .select('name, role, roles, active').eq('user_id', merchandiserUserId).single();
+  if (targetProfileError && /active|column|does not exist/i.test(targetProfileError.message || '')) {
+    ({ data: targetProfile } = await (supabase.from('profiles') as any).select('name, role, roles').eq('user_id', merchandiserUserId).single());
+  }
   if (!targetProfile) return { error: '目标用户不存在' };
+  if ((targetProfile as any).active === false) return { error: '目标用户已停用，不能接收生产任务' };
 
   const targetRoles: string[] = targetProfile.roles?.length > 0 ? targetProfile.roles : [targetProfile.role].filter(Boolean);
   const targetOkForKind = kind === 'production'
-    ? (targetRoles.includes('production') || targetRoles.includes('qc') || targetRoles.includes('admin'))
+    ? (targetRoles.includes('production') || targetRoles.includes('admin'))
     : (targetRoles.includes('merchandiser') || targetRoles.includes('admin'));
   if (!targetOkForKind) {
-    return { error: kind === 'production' ? '目标用户不是生产跟单/QC角色' : '目标用户不是业务执行(理单)角色' };
+    return { error: kind === 'production' ? '目标用户不是生产跟单角色' : '目标用户不是业务执行(理单)角色' };
   }
 
   // 批量更新 — 排除生产主管固定节点（工厂匹配确认 + 产前样准备完成）
@@ -1787,8 +1789,7 @@ export async function assignMerchandiser(
   if (kind === 'production' && toUpdate.length === 0) {
     const PRODUCTION_EXECUTION_STEPS = new Set([
       'materials_received_inspected', 'pre_production_sample_sent', 'pre_production_sample_approved',
-      'production_kickoff', 'mid_qc_check', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check',
-      'packing_method_confirmed', 'factory_completion', 'shipping_sample_send',
+      'production_kickoff', 'packing_method_confirmed', 'factory_completion', 'shipping_sample_send',
     ]);
     const { data: legacy } = await (admin.from('milestones') as any).select('id, step_key, status').eq('order_id', orderId);
     const candidates = ((legacy || []) as any[]).filter(m => PRODUCTION_EXECUTION_STEPS.has(m.step_key) && !pmFixedSet.has(m.step_key));
@@ -1893,15 +1894,11 @@ export async function saveChecklistData(
   if (milestone.step_key === 'production_kickoff') {
     const quoteVal = responses.find(r => r.key === 'quote_consumption')?.value;
     const actualVal = responses.find(r => r.key === 'actual_consumption')?.value;
-    const quoteUnit = String(responses.find(r => r.key === 'quote_consumption_unit')?.value || '');
-    const actualUnit = String(responses.find(r => r.key === 'actual_consumption_unit')?.value || '');
-    if (!quoteUnit || !actualUnit) return { error: '请确认报价单耗和实际单耗的单位' };
-    if (quoteUnit !== actualUnit) return { error: `单耗单位不一致：报价 ${quoteVal ?? '—'} ${quoteUnit}，实际 ${actualVal ?? '—'} ${actualUnit}。请先明确换算，系统不会自动转换。` };
-    if (quoteVal != null && !/^\d+(?:\.\d{1,6})?$/.test(String(quoteVal))) return { error: '报价单耗格式不正确，最多保留6位小数' };
-    if (actualVal != null && !/^\d+(?:\.\d{1,6})?$/.test(String(actualVal))) return { error: '实际单耗格式不正确，最多保留6位小数' };
-    if (quoteVal && actualVal && Number(actualVal) > Number(quoteVal)) {
-      return { error: `实际单耗（${actualVal} ${actualUnit}）超过报价单耗（${quoteVal} ${quoteUnit}），不允许开裁。请与工厂沟通优化排料方案。` };
-    }
+    const quoteUnit = responses.find(r => r.key === 'quote_consumption_unit')?.value;
+    const actualUnit = responses.find(r => r.key === 'actual_consumption_unit')?.value;
+    const { compareConsumption } = await import('@/lib/production/consumption');
+    const comparison = compareConsumption({ quoted: quoteVal, actual: actualVal, quotedUnit: quoteUnit, actualUnit });
+    if (!comparison.ok) return { error: comparison.error };
   }
 
   // 合并响应（保留其他用户填的项，更新当前用户填的项）

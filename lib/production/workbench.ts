@@ -20,10 +20,14 @@ export function classifyProductionTasks(row: ProductionOrderRow, role: Workbench
     tasks.push({ key, label, reason, action, href, urgent });
 
   if (role === 'supervisor') {
-    if (row.stage === 'awaiting_procurement') add('intake', '待生产接单', '订单已进入生产但物料尚未落实', '检查并分配生产跟单');
+    if (row.stage === 'awaiting_procurement' && !row.production_follow_up_id) add('intake', '待生产接单', '订单已由业务交接、尚未完成生产接单', '检查订单并接单');
+    if (!row.production_follow_up_id) add('assign', '待分配生产跟单', '尚未指定生产跟单', '指定在职生产跟单');
+    else if (!row.factory_name) add('assigned', '已分配待跟进', `已分配给 ${row.production_follow_up_name || '生产跟单'}`, '督促选择工厂');
     if (!row.factory_name) add('factory', '待选工厂', '尚未指定生产工厂', '选择工厂');
-    if (row.material.total > 0 && row.material.received < row.material.total) add('material', '待确认物料齐套', `已到 ${row.material.received}/${row.material.total}`, '检查物料风险');
-    if (row.stage === 'ready_to_schedule') add('schedule', '待排单', '物料已具备生产排期条件', '进入排产工作台');
+    if (row.pending_delay) add('delay', '延期待审批', '存在待处理生产改期申请', '审核生产执行影响');
+    if (row.risk) add('exception', '异常待处理', '生产节点已超期或存在执行风险', '处理异常并明确责任人', true);
+    if (row.kickoff?.due === today() && row.kickoff.status !== 'done') add('cut_today', '今日应开裁', '生产启动计划日期为今天', '完成开裁确认', true);
+    if (row.stage === 'in_production' && row.kickoff?.due === today()) add('online_today', '今日应上线', '开裁节点今天到期且订单进入生产', '确认上线状态', true);
     if (row.risk) add('overdue', '已超期', '生产节点已经超过计划日期', '立即处理风险', true);
   } else if (role === 'follow_up') {
     if (!row.factory_name) add('contact_factory', '待联系工厂', '订单尚未选定工厂', '联系并提交工厂选择');
@@ -38,7 +42,6 @@ export function classifyProductionTasks(row: ProductionOrderRow, role: Workbench
   }
 
   const due = row.kickoff?.due || row.completion?.due;
-  if (due === today()) add('today', role === 'qc' ? '今日验货' : '今日需完成', '计划日期为今天', '立即处理', true);
+  if (role !== 'supervisor' && due === today()) add('today', role === 'qc' ? '今日验货' : '今日需完成', '计划日期为今天', '立即处理', true);
   return tasks;
 }
-

@@ -16,12 +16,16 @@ export function SchedulingBoard() {
   const [loading, setLoading] = useState(true);
   const [openStyle, setOpenStyle] = useState<string>('');   // 展开派工的 key
   const [msg, setMsg] = useState('');
+  const [orderSearch, setOrderSearch] = useState('');
 
   const load = () => getSchedulingBoard().then((r) => { setData((r as any).data || { orders: [], factories: [] }); setLoading(false); if ((r as any).error) setMsg((r as any).error); });
   useEffect(() => { load(); }, []);
 
   if (loading) return <div className="text-sm text-gray-400 py-6">加载排产数据…</div>;
   const orders = data?.orders || [];
+  const q = orderSearch.trim().toLowerCase();
+  const visibleOrders = !q ? orders : orders.filter((o: any) => [o.order_no, o.internal_order_no, o.po_number, o.style_no, o.customer_name]
+    .some((value) => String(value || '').toLowerCase().includes(q)));
 
   async function saveAttr(orderId: string, patch: any) {
     await setOrderProductionAttrs(orderId, patch);
@@ -35,7 +39,9 @@ export function SchedulingBoard() {
         <span className="text-xs text-gray-500">把款派给工厂:看擅长/剩余产能/在做量,选厂+排窗口。个别可细到单色。</span>
         {msg && <span className="text-xs text-rose-600">{msg}</span>}
       </div>
-      {orders.length === 0 ? <p className="text-sm text-gray-400">暂无待排产订单。</p> : orders.map((o: any) => (
+      <input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="搜索 QM 单号、内部单号、客户 PO、款号或客户"
+        className="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+      {visibleOrders.length === 0 ? <p className="text-sm text-gray-400">{orders.length ? '没有匹配的排产订单。' : '暂无待排产订单。'}</p> : visibleOrders.map((o: any) => (
         <div key={o.id} className="rounded-xl border border-gray-200 bg-white p-3">
           {/* 订单头 + 要求 */}
           <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -111,7 +117,7 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
   const [overbook, setOverbook] = useState<any[] | null>(null);   // 超卖详情,非空=需强制确认
   const [factorySearch, setFactorySearch] = useState('');
   const selected = candidates.find((c: any) => c.factory_id === factoryId);
-  const visibleCandidates = candidates.filter((c: any) => String(c.factory_name || '').toLowerCase().includes(factorySearch.trim().toLowerCase()));
+  const visibleCandidates = candidates.filter((c: any) => `${c.factory_name || ''} ${c.factory_code || ''}`.toLowerCase().includes(factorySearch.trim().toLowerCase()));
 
   async function submit(force = false) {
     if (!factoryId) { setErr('请选工厂'); return; }
@@ -130,13 +136,14 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
       <div className="overflow-x-auto">
         <table className="text-[11px] w-full">
           <thead><tr className="text-gray-400 text-left border-b border-gray-100">
-            {['选', '工厂', '品类', '品质', '织造', '包装', '类型', '月产能', '剩余', '在做'].map((h) => <th key={h} className="px-1.5 py-1 whitespace-nowrap font-medium">{h}</th>)}
+            {['选', '工厂', '状态', '品类', '品质', '织造', '包装', '类型', '月产能', '剩余', '在做'].map((h) => <th key={h} className="px-1.5 py-1 whitespace-nowrap font-medium">{h}</th>)}
           </tr></thead>
           <tbody>
             {visibleCandidates.map((c: any) => (
               <tr key={c.factory_id} className={`border-b border-gray-50 cursor-pointer ${factoryId === c.factory_id ? 'bg-indigo-50' : ''} ${c.match.hardMiss > 0 ? 'opacity-60' : ''}`} onClick={() => setFactoryId(c.factory_id)}>
                 <td className="px-1.5 py-1"><input type="radio" checked={factoryId === c.factory_id} onChange={() => setFactoryId(c.factory_id)} /></td>
-                <td className="px-1.5 py-1 font-medium text-gray-800 whitespace-nowrap">{c.factory_name}{c.match.allOk && <span className="ml-1 text-emerald-600">★</span>}</td>
+                <td className="px-1.5 py-1 font-medium text-gray-800 whitespace-nowrap">{c.factory_name}{c.factory_code ? ` (${c.factory_code})` : ''}</td>
+                <td className="px-1.5 py-1 whitespace-nowrap"><span className={c.recommendation === '推荐' ? 'text-emerald-600' : 'text-amber-600'}>{c.recommendation}</span></td>
                 <td className="px-1.5 py-1 text-center" title={(c.product_categories || []).join('、')}>{chip(c.match.category)}</td>
                 <td className="px-1.5 py-1 text-center">{chip(c.match.quality)}</td>
                 <td className="px-1.5 py-1 text-center">{chip(c.match.weave)}</td>

@@ -9,7 +9,7 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { RECEIVED } from '@/lib/production/stage';
-import { deriveOrderCapability, matchFactory, rankScore, type FactoryCaps, type OrderReq } from '@/lib/production/scheduling';
+import { deriveOrderCapability, factoryRecommendationLabel, matchFactory, rankScore, type FactoryCaps, type OrderReq } from '@/lib/production/scheduling';
 import { factoryMonthlyLoad, checkOverbook, monthlyLedger } from '@/lib/production/capacityLedger';
 
 async function gate(view: boolean): Promise<{ svc: any; roles: string[]; userId: string } | { error: string }> {
@@ -31,9 +31,9 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 工厂能力
   const { data: facs } = await (svc.from('factories') as any)
-    .select('id, factory_name, product_categories, quality_grades, weave_types, can_package, order_capabilities, monthly_capacity')
+    .select('id, factory_code, factory_name, cooperation_status, product_categories, quality_grades, weave_types, can_package, order_capabilities, monthly_capacity')
     .is('deleted_at', null).in('cooperation_status', ['active', 'trial']);
-  const factories: FactoryCaps[] = (facs || []) as any[];
+  const factories: FactoryCaps[] = [...new Map(((facs || []) as FactoryCaps[]).map((factory) => [factory.id, factory])).values()];
 
   // 已派工(算工厂在线量 + 每款现状)
   const { data: disp } = await (svc.from('production_dispatch') as any)
@@ -82,7 +82,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     const committed = committedByFactory.get(f.id)?.qty || 0;
     const remaining = f.monthly_capacity != null ? (Number(f.monthly_capacity) - committed) : null;
     const load = loadByFactory.get(f.id) || {};
-    return { factory_id: f.id, factory_name: f.factory_name, match: m, monthly_capacity: f.monthly_capacity ?? null, remaining, active_count: committedByFactory.get(f.id)?.count || 0, product_categories: f.product_categories || [], monthly_load: load, ledger: monthlyLedger(load, f.monthly_capacity, fromMonth, 4), score: rankScore(m, remaining, null) };
+    return { factory_id: f.id, factory_code: f.factory_code, factory_name: f.factory_name, match: m, recommendation: factoryRecommendationLabel(m, remaining), monthly_capacity: f.monthly_capacity ?? null, remaining, active_count: committedByFactory.get(f.id)?.count || 0, product_categories: f.product_categories || [], monthly_load: load, ledger: monthlyLedger(load, f.monthly_capacity, fromMonth, 4), score: rankScore(m, remaining, null) };
   }).sort((a, b) => b.score - a.score);
 
   const out = orderList.map((o: any) => {

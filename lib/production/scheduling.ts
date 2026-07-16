@@ -10,6 +10,8 @@ export const ORDER_CAPABILITIES = ['清加工', '经销单', '委托加工'] as 
 export interface FactoryCaps {
   id: string;
   factory_name: string;
+  factory_code?: string | null;
+  cooperation_status?: string | null;
   product_categories?: string[] | null;   // 擅长品类
   quality_grades?: string[] | null;        // 高/中/跑量
   weave_types?: string[] | null;           // 针织/梭织
@@ -43,7 +45,7 @@ export function deriveOrderCapability(opts: { orderPurpose?: string | null; hasC
   return '清加工';
 }
 
-const has = (arr: any, v: any): boolean => Array.isArray(arr) && v != null && v !== '' && arr.map(String).includes(String(v));
+const has = (arr: unknown, value: unknown): boolean => Array.isArray(arr) && value != null && value !== '' && arr.map(String).includes(String(value));
 
 /** 工厂能力 vs 订单要求。订单某项没填 → 该项 null(不判定)。 */
 export function matchFactory(f: FactoryCaps, req: OrderReq): MatchResult {
@@ -66,4 +68,12 @@ export function rankScore(m: MatchResult, remaining: number | null, onTimeRate: 
   s += Math.max(0, Math.min(remaining ?? 0, 100000)) / 10;   // 剩余产能(封顶,权重小)
   s += (onTimeRate ?? 0) * 50;                                 // 准时率 0-100
   return Math.round(s);
+}
+
+export function factoryRecommendationLabel(m: MatchResult, remaining: number | null): string {
+  if (m.allOk && (remaining == null || remaining >= 0)) return '推荐';
+  if (remaining != null && remaining < 0) return '产能不足';
+  if (m.category === false) return '品类经验不足';
+  if (m.hardMiss > 0) return '能力资料不匹配';
+  return '资料不完整';
 }
