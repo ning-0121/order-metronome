@@ -39,14 +39,6 @@ export const ROLE_MAP_TO_DB: Record<AppRole, string> = {
 };
 
 /**
- * 回退映射：当数据库不支持扩展枚举值时的回退方案
- */
-const ROLE_FALLBACK: Record<string, DbUserRole> = {
-  'qc': 'quality', // 如果数据库没有 qc，使用 quality
-  'logistics': 'admin', // 如果数据库没有 logistics，使用 admin
-};
-
-/**
  * 反向映射：数据库枚举值 -> 代码角色值
  */
 export const ROLE_MAP_FROM_DB: Record<string, AppRole> = {
@@ -80,7 +72,7 @@ export function normalizeRoleToDb(
   useFallback: boolean = true
 ): string {
   if (!input) {
-    return 'sales'; // 默认值
+    throw new Error('角色不能为空');
   }
   
   const normalized = input.trim().toLowerCase();
@@ -107,11 +99,8 @@ export function normalizeRoleToDb(
     return mapped;
   }
   
-  // 未知值，返回默认值
-  if (process.env.NODE_ENV === 'development') {
-    console.warn(`[Roles] Unknown role value: ${input}, defaulting to 'sales'`);
-  }
-  return 'sales';
+  // 权限数据必须 fail closed。静默降级为 sales 会把未知/拼错角色变成真实业务权限和节点责任。
+  throw new Error(`未知角色: ${input}`);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -160,7 +149,7 @@ export const ROLE_GROUPS = {
   CAN_SEE_FINANCIALS: ['admin', 'finance', 'sales', 'sales_manager', 'order_manager'] as const,
 
   /** 可审批延期申请：admin + 订单管理经理（交期归订单管理部）+ 业务部经理（对客户交期负责） */
-  CAN_APPROVE_DELAY: ['admin', 'order_manager', 'sales_manager'] as const,
+  CAN_APPROVE_DELAY: ['admin', 'production_manager', 'order_manager', 'sales_manager'] as const,
 
   /** 可审批客户价格申请：admin + 业务部经理（客户价格归开发业务） */
   CAN_APPROVE_PRICE: ['admin', 'sales_manager'] as const,

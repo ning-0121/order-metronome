@@ -13,7 +13,13 @@ export type Capability =
   | 'order.execute' // 订单执行
   | 'procurement.manage' // 采购
   | 'production.manage' // 生产/品控
-  | 'finance.view'; // 财务
+  | 'finance.view'
+  | 'factory.recommend'
+  | 'factory.finalize'
+  | 'production.schedule.finalize'
+  | 'production.execute'
+  | 'quality.release'
+  | 'shipment.coordinate';
 
 export const ALL_CAPABILITIES: Capability[] = [
   'client.develop',
@@ -21,6 +27,12 @@ export const ALL_CAPABILITIES: Capability[] = [
   'procurement.manage',
   'production.manage',
   'finance.view',
+  'factory.recommend',
+  'factory.finalize',
+  'production.schedule.finalize',
+  'production.execute',
+  'quality.release',
+  'shipment.coordinate',
 ];
 
 /** 角色 → 能力（种子，可调；不新增角色、不碰 DB）。 */
@@ -28,14 +40,15 @@ export const ROLE_CAPABILITIES: Record<string, Capability[]> = {
   admin: [...ALL_CAPABILITIES],
   sales: ['client.develop', 'order.execute'],
   sales_manager: ['client.develop', 'order.execute'],
-  merchandiser: ['order.execute', 'production.manage'],
+  merchandiser: ['order.execute', 'shipment.coordinate'],
   order_manager: ['order.execute'],
-  production: ['order.execute', 'production.manage'],
-  production_manager: ['production.manage'],
-  qc: ['production.manage'],
+  production: ['production.manage', 'production.execute', 'factory.recommend', 'quality.release', 'shipment.coordinate'],
+  production_manager: ['production.manage', 'factory.finalize', 'production.schedule.finalize'],
+  qc: ['production.manage', 'production.execute', 'quality.release'],
   procurement: ['procurement.manage'],
   procurement_manager: ['procurement.manage'],
   finance: ['finance.view', 'procurement.manage'],
+  logistics: ['shipment.coordinate'],
 };
 
 /** 角色集合 → 能力集合（并集）。 */

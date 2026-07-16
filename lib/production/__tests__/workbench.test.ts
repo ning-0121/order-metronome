@@ -30,4 +30,10 @@ describe('production role workbench classification', () => {
     const keys = classifyProductionTasks(row({ production_follow_up_id: 'u1', production_follow_up_name: '跟单A', pending_delay: true }), 'supervisor').map((t) => t.key);
     assert.ok(keys.includes('assigned')); assert.ok(keys.includes('delay')); assert.ok(!keys.includes('assign'));
   });
+  it('keeps production follow-up responsible through packing and shipment', () => {
+    const keys = classifyProductionTasks(row({ stage: 'ready_to_ship', production_follow_up_id: 'u1' }), 'follow_up').map((t) => t.key);
+    assert.ok(keys.includes('final_qc'));
+    assert.ok(keys.includes('packing'));
+    assert.ok(keys.includes('shipment_follow_up'));
+  });
 });
