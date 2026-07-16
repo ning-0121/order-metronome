@@ -39,7 +39,7 @@ export async function uploadOrderShareDoc(orderId: string, fileType: string, for
   if (upErr) return { error: `上传失败:${upErr.message}` };
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
 
-  const { error: insErr } = await (supabase.from('order_attachments') as any).insert({
+  const { data: attachment, error: insErr } = await (supabase.from('order_attachments') as any).insert({
     order_id: orderId,
     file_name: file.name || `${base}${ext}`,
     file_type: fileType,
@@ -47,13 +47,20 @@ export async function uploadOrderShareDoc(orderId: string, fileType: string, for
     file_url: pub?.publicUrl || '',       // 永久公开 URL(跨部门/供应商可开)
     mime_type: file.type || null,
     uploaded_by: user.id,
-  });
+  }).select('id').single();
   if (insErr) {
     await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
     return { error: insErr.message };
   }
+  let imported = 0; let warning: string | undefined;
+  if (fileType === 'accessory_purchase_list' && /\.xlsx$/i.test(file.name)) {
+    const { importAccessoryCandidates } = await import('@/app/actions/accessory-import');
+    const parsed = await importAccessoryCandidates(orderId, (attachment as any).id, await file.arrayBuffer());
+    if ((parsed as any).error) warning = `文件已上传，但候选行解析失败：${(parsed as any).error}`;
+    else imported = Number((parsed as any).count) || 0;
+  }
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true };
+  return { ok: true, imported, warning } as any;
 }
 
 /** 列出该订单某类共享文件(公开 URL,直接可开)。 */
@@ -76,6 +83,10 @@ export async function deleteOrderShareDoc(id: string, orderId: string, fileType:
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   const { data: att } = await (supabase.from('order_attachments') as any).select('storage_path').eq('id', id).eq('file_type', fileType).maybeSingle();
+  if (fileType === 'accessory_purchase_list') {
+    const { error: candidateErr } = await (supabase.from('accessory_import_candidates') as any).delete().eq('source_attachment_id', id).eq('order_id', orderId);
+    if (candidateErr) return { error: `候选审核记录清理失败:${candidateErr.message}` };
+  }
   const { error } = await (supabase.from('order_attachments') as any).delete().eq('id', id).eq('file_type', fileType);
   if (error) return { error: error.message };
   if ((att as any)?.storage_path) await supabase.storage.from(BUCKET).remove([(att as any).storage_path]).catch(() => {});

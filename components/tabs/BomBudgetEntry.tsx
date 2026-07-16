@@ -35,7 +35,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         cmt: b.cmt != null ? String(b.cmt) : '',
       })));
     }
-    setAccessoryPerPiece((sb as any)?.accessoryPerPiece != null ? String((sb as any).accessoryPerPiece) : '');
+    setAccessoryPerPiece((sb as any)?.accessoryPerSet != null ? String((sb as any).accessoryPerSet) : '');
     setOrderQty(Number((sb as any)?.orderQty) || 0);
     setLoading(false);
   }
@@ -51,12 +51,12 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
     const accPer = accessoryPerPiece === '' ? null : Number(accessoryPerPiece);
     const [r1, r2] = await Promise.all([
       saveBomBudgetUnitPrice(orderId, prices as any),
-      saveOrderStyleBudgets(orderId, sbPayload as any, accPer, 'per_piece'),
+      saveOrderStyleBudgets(orderId, sbPayload as any, accPer, 'per_set'),
     ]);
     setSaving(false);
     const err = (r1 as any).error || (r2 as any).error;
     if (err) { setMsg('❌ ' + err); return; }
-    setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料元/件×件数)');
+    setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料元/套×套数)');
     await load();
   }
 
@@ -127,11 +127,11 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
       {/* 逐款加工费(元/件) */}
       {styleBudgets.length > 0 && (
         <div className="rounded-lg border border-indigo-100 bg-white p-3">
-          <div className="text-xs font-semibold text-gray-700 mb-1.5">🧵 逐款加工费(元/件)· 加工费预算 = 加工费 × 该款件数</div>
+          <div className="text-xs font-semibold text-gray-700 mb-1.5">🧵 逐款加工费(元/套)· 加工费预算 = 元/套 × 订单套数</div>
           <div className="overflow-x-auto">
             <table className="text-xs">
               <thead><tr className="text-left text-gray-400">
-                {['款号', '加工费(元/件)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
+                {['款号', '加工费(元/套)'].map(h => <th key={h} className="py-1 px-2 font-medium whitespace-nowrap">{h}</th>)}
               </tr></thead>
               <tbody>
                 {styleBudgets.map((b, i) => (
@@ -151,17 +151,17 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
 
       {/* 辅料预算(元/件 × 订单件数;2026-07-11 老板拍板改口径 —— 此前一口价被当元/件填,财务收到 ¥1) */}
       <div className="rounded-lg border border-indigo-100 bg-white p-3 flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-semibold text-gray-700">🧷 辅料预算(元/件)</span>
+        <span className="text-xs font-semibold text-gray-700">🧷 辅料预算(元/套)</span>
         <span className="text-gray-400 text-sm">¥</span>
         <input type="number" step="any" min="0" value={accessoryPerPiece}
           placeholder="单件辅料(拉链/标/袋…)"
           onChange={e => setAccessoryPerPiece(e.target.value)}
           className="w-28 rounded border border-gray-300 px-2 py-1 text-sm" />
-        <span className="text-xs text-gray-500">/件 × {orderQty > 0 ? orderQty.toLocaleString() : '?'} 件</span>
+        <span className="text-xs text-gray-500">元/套 × {orderQty > 0 ? orderQty.toLocaleString() : '?'} 套</span>
         {Number(accessoryPerPiece) > 0 && orderQty > 0 && (
           <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * orderQty * 100) / 100).toLocaleString()}</span>
         )}
-        <span className="text-[11px] text-gray-400">与加工费同口径(元/件);保存时按订单件数换算成辅料预算总额</span>
+        <span className="text-[11px] text-gray-400">按整套计价；组件级费用请在辅料明细中拆分</span>
       </div>
 
       {msg && <p className="text-xs text-gray-600">{msg}</p>}
