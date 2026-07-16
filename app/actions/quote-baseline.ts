@@ -80,6 +80,27 @@ export async function getQuoteBaseline(orderId: string): Promise<{
   };
 }
 
+/** 生产开裁清单只读继承报价单耗；多个不同基线时拒绝猜测。 */
+export async function getKickoffConsumptionBaseline(orderId: string): Promise<{ data?: { value: number; unit: string }; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+  const { data } = await (supabase.from('order_cost_baseline') as any).select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
+  const rows: QuoteBaselineLine[] = ((data as any)?.quote_baseline_lines || []).filter((l: QuoteBaselineLine) => Number(l.quote_consumption) > 0);
+  const normalizeUnit = (u: unknown) => {
+    const s = String(u || '').trim().toLowerCase();
+    if (['m', '米', '米/件'].includes(s)) return '米/件';
+    if (['m2', 'm²', '平方米', '平方', '平方米/件'].includes(s)) return '平方米/件';
+    if (['kg', '公斤', 'kg/件'].includes(s)) return 'kg/件';
+    if (['yard', 'yd', '码', '码/件'].includes(s)) return '码/件';
+    return s ? '其他' : '';
+  };
+  const pairs = [...new Map(rows.map(l => [`${Number(l.quote_consumption)}|${normalizeUnit(l.quote_unit)}`, { value: Number(l.quote_consumption), unit: normalizeUnit(l.quote_unit) }])).values()];
+  if (pairs.length !== 1 || !pairs[0].unit) return { error: pairs.length > 1 ? '存在多种报价单耗，请按款核对后填写' : '报价基线缺少单耗或单位' };
+  return { data: pairs[0] };
+}
+
 /** exceljs 单元格取文本(富文本/公式)。 */
 function xlsxCell(v: unknown): unknown {
   if (v && typeof v === 'object') {

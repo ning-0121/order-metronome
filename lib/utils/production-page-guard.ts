@@ -15,7 +15,7 @@ export async function requireProductionPage(extraRoles: string[] = []): Promise<
     .select('role, roles').eq('user_id', user!.id).single();
   const roles: string[] = (profile as any)?.roles?.length > 0
     ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
-  const allowed = ['admin', 'production', 'production_manager', 'merchandiser', 'order_manager', ...extraRoles];
+  const allowed = ['admin', 'production', 'production_manager', 'merchandiser', 'order_manager', 'qc', 'quality', ...extraRoles];
   if (!roles.some((r) => allowed.includes(r))) redirect('/dashboard');
   return { userId: user!.id, roles };
 }

@@ -1772,24 +1772,41 @@ export async function assignMerchandiser(
   const assignRole = kind === 'production' ? 'production' : 'merchandiser';
   const roleLabel = kind === 'production' ? '生产跟单' : '业务执行';
   const { data: allMerchMs } = await (admin.from('milestones') as any)
-    .select('id, step_key')
+    .select('id, step_key, owner_role, status')
     .eq('order_id', orderId)
     .eq('owner_role', assignRole);
 
   // 过滤掉生产主管固定节点
   const pmFixedSet = new Set(PRODUCTION_MANAGER_FIXED_STEPS);
-  const toUpdate = ((allMerchMs || []) as any[])
+  let toUpdate = ((allMerchMs || []) as any[])
     .filter(m => !pmFixedSet.has(m.step_key))
     .map(m => m.id);
+
+  // 老模板把生产执行节点错误归给 sales/merchandiser 时，生产主管应仍能完成接单指派。
+  // 只修明确的生产执行节点，固定主管/业务承诺/财务节点不动。
+  if (kind === 'production' && toUpdate.length === 0) {
+    const PRODUCTION_EXECUTION_STEPS = new Set([
+      'materials_received_inspected', 'pre_production_sample_sent', 'pre_production_sample_approved',
+      'production_kickoff', 'mid_qc_check', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check',
+      'packing_method_confirmed', 'factory_completion', 'shipping_sample_send',
+    ]);
+    const { data: legacy } = await (admin.from('milestones') as any).select('id, step_key, status').eq('order_id', orderId);
+    const candidates = ((legacy || []) as any[]).filter(m => PRODUCTION_EXECUTION_STEPS.has(m.step_key) && !pmFixedSet.has(m.step_key));
+    if (candidates.length > 0) {
+      const ids = candidates.map(m => m.id);
+      const { data: normalized, error: normalizeErr } = await (admin.from('milestones') as any)
+        .update({ owner_role: 'production', owner_user_id: merchandiserUserId }).in('id', ids).select('id');
+      if (normalizeErr) return { error: normalizeErr.message };
+      toUpdate = (normalized || []).map((m: any) => m.id);
+    }
+  }
 
   if (toUpdate.length === 0) {
     return { error: `本单没有可指派给「${roleLabel}」的节点(可能都是生产主管固定节点)。` };
   }
 
   const { data: upd, error: updateErr } = await (admin.from('milestones') as any)
-    .update({ owner_user_id: merchandiserUserId })
-    .in('id', toUpdate)
-    .select('id');
+    .update({ owner_user_id: merchandiserUserId }).in('id', toUpdate).select('id');
   if (updateErr) return { error: updateErr.message };
   const updated = upd || [];
   if (updated.length === 0) {
@@ -1876,8 +1893,14 @@ export async function saveChecklistData(
   if (milestone.step_key === 'production_kickoff') {
     const quoteVal = responses.find(r => r.key === 'quote_consumption')?.value;
     const actualVal = responses.find(r => r.key === 'actual_consumption')?.value;
+    const quoteUnit = String(responses.find(r => r.key === 'quote_consumption_unit')?.value || '');
+    const actualUnit = String(responses.find(r => r.key === 'actual_consumption_unit')?.value || '');
+    if (!quoteUnit || !actualUnit) return { error: '请确认报价单耗和实际单耗的单位' };
+    if (quoteUnit !== actualUnit) return { error: `单耗单位不一致：报价 ${quoteVal ?? '—'} ${quoteUnit}，实际 ${actualVal ?? '—'} ${actualUnit}。请先明确换算，系统不会自动转换。` };
+    if (quoteVal != null && !/^\d+(?:\.\d{1,6})?$/.test(String(quoteVal))) return { error: '报价单耗格式不正确，最多保留6位小数' };
+    if (actualVal != null && !/^\d+(?:\.\d{1,6})?$/.test(String(actualVal))) return { error: '实际单耗格式不正确，最多保留6位小数' };
     if (quoteVal && actualVal && Number(actualVal) > Number(quoteVal)) {
-      return { error: `实际单耗（${actualVal}）超过报价单耗（${quoteVal}），不允许开裁。请与工厂沟通优化排料方案。` };
+      return { error: `实际单耗（${actualVal} ${actualUnit}）超过报价单耗（${quoteVal} ${quoteUnit}），不允许开裁。请与工厂沟通优化排料方案。` };
     }
   }
 

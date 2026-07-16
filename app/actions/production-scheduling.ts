@@ -58,7 +58,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 待排产订单:活跃(未完成/取消)、非经销(经销=买成品不排产)
   const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status')
+    .select('id, order_no, internal_order_no, po_number, style_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status')
     .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")')
     .order('factory_date', { ascending: true }).limit(200);
   const orderList = (orders || []).filter((o: any) => String(o.order_purpose || '').toLowerCase() !== 'trade');
@@ -113,11 +113,11 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     }
     const mat = matByOrder.get(o.id);
     return {
-      id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, customer_name: o.customer_name,
+      id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, po_number: o.po_number, style_no: o.style_no, customer_name: o.customer_name,
       product_description: o.product_description, quantity: o.quantity, factory_date: o.factory_date,
       order_capability: orderCap, quality_grade: o.quality_grade, weave_type: o.weave_type, needs_package: o.needs_package,
       material_ready_pct: mat && mat.total > 0 ? Math.round((mat.ready / mat.total) * 100) : null,
-      styles, candidates: candidates.slice(0, 8),
+      styles, candidates,
     };
   });
   return { data: { orders: out, factories } };

@@ -21,6 +21,7 @@ interface DelayRequest {
   approval_chain?: string[] | null;
   approvals?: { role: string; name?: string | null; at?: string; note?: string | null }[] | null;
   current_step?: number | null;
+  requested_by?: string | null;
   milestone?: {
     id: string;
     name: string;
@@ -40,6 +41,8 @@ interface ImpactedMilestone {
 interface DelayRequestDetailProps {
   delayRequest: DelayRequest;
   isAdmin: boolean;
+  currentRoles?: string[];
+  currentUserId?: string;
 }
 
 // Map reason types to Chinese
@@ -52,7 +55,7 @@ const REASON_TYPE_MAP: Record<string, string> = {
   'other': '其他',
 };
 
-export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetailProps) {
+export function DelayRequestDetail({ delayRequest, isAdmin, currentRoles = [], currentUserId }: DelayRequestDetailProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [impactedMilestones, setImpactedMilestones] = useState<ImpactedMilestone[]>([]);
@@ -79,6 +82,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
 
   async function handleApprove(mode?: 'push_delivery' | 'urgent') {
     setLoading(true);
+    try {
     // P1/P3:优先走多级审批链(逐级推进);无链的旧单 → 回退原单人审批。
     const { approveDeferralStep } = await import('@/app/actions/delays');
     const step = await approveDeferralStep(delayRequest.id, decisionNote || undefined, mode);
@@ -87,7 +91,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
       result = await approveDelayRequest(delayRequest.id, decisionNote || undefined);
     }
     // P3:链末位影响交期 → 需选 退交期/转紧急
-    if ((step as any).needsMode) { setNeedMode(true); setLoading(false); return; }
+    if ((step as any).needsMode) { setNeedMode(true); return; }
     if (!result.error) {
       if ((step as any).urgent) alert('✅ 已选「转紧急·不退交期」,已转采购+生产确认下游压缩。');
       else if ((step as any).done === false && (step as any).nextRole) alert('✅ 你这一步已确认,已转下一级审批(等待确认)。');
@@ -98,7 +102,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
     } else {
       alert(result.error);
     }
-    setLoading(false);
+    } finally { setLoading(false); }
   }
 
   async function handleReject() {
@@ -107,6 +111,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
       return;
     }
     setLoading(true);
+    try {
     const result = await rejectDelayRequest(delayRequest.id, decisionNote);
     if (!result.error) {
       router.refresh();
@@ -115,7 +120,7 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
     } else {
       alert(result.error);
     }
-    setLoading(false);
+    } finally { setLoading(false); }
   }
 
   const reasonTypeLabel = REASON_TYPE_MAP[delayRequest.reason_type] || delayRequest.reason_type;
@@ -142,12 +147,13 @@ export function DelayRequestDetail({ delayRequest, isAdmin }: DelayRequestDetail
   const chainStep = Number(delayRequest.current_step) || 0;
   const chainApprovals = Array.isArray(delayRequest.approvals) ? delayRequest.approvals : [];
   const hasChain = chain.length > 0;
+  const canAct = currentUserId !== delayRequest.requested_by && (isAdmin || currentRoles.includes(chain[chainStep]));
 
   return (
     <div className="border border-yellow-200 bg-yellow-50 rounded-lg p-6 mb-4">
       <div className="flex items-start justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900">延期申请详情</h3>
-        {(isAdmin || hasChain) && !showActions && (
+        {canAct && !showActions && (
           <button
             onClick={() => setShowActions(true)}
             className="text-sm text-blue-600 hover:text-blue-700 font-medium"

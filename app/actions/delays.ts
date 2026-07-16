@@ -189,6 +189,10 @@ export async function createDelayRequest(
   // 改期审批链快照(2026-07-05 P1):按该节点 owner_role 从路由表冻结审批链,逐级确认
   const { deferralChainFor } = await import('@/lib/domain/deferral-routing');
   const approvalChain = deferralChainFor(milestoneData.owner_role);
+  // 生产内部排期由生产主管批准；只有改变客户承诺交期时才追加业务经理。
+  if (String(milestoneData.owner_role).toLowerCase() === 'production' && impactsFinalDelivery && !approvalChain.includes('sales_manager')) {
+    approvalChain.push('sales_manager');
+  }
 
   // Create delay request
   const insertPayload: any = {
@@ -787,10 +791,14 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
     .single();
   const rejectUserRoles: string[] = (rejectProfile as any)?.roles?.length > 0 ? (rejectProfile as any).roles : [(rejectProfile as any)?.role].filter(Boolean);
 
-  if (!hasRoleInGroup(rejectUserRoles, 'CAN_APPROVE_DELAY')) {
-    // 审批/驳回同权：CEO/管理员或业务部经理
-    return { error: '延期审批权限不足，仅 CEO/管理员或业务部经理可驳回。' };
+  const rejectChain: string[] = Array.isArray(delayRequestData.approval_chain) ? delayRequestData.approval_chain : [];
+  const rejectStep = Number(delayRequestData.current_step) || 0;
+  const rejectRole = rejectChain[rejectStep];
+  if (!hasRoleInGroup(rejectUserRoles, 'CAN_APPROVE_DELAY') && !rejectUserRoles.includes(rejectRole)) {
+    const { roleCn } = await import('@/lib/domain/deferral-routing');
+    return { error: `当前步骤需由「${roleCn(rejectRole || 'admin')}」驳回` };
   }
+  if (delayRequestData.requested_by === user.id && !rejectUserRoles.includes('admin')) return { error: '不能驳回自己提交的改期申请' };
 
   // Update delay request
   const updatePayload: any = {

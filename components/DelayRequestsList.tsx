@@ -20,6 +20,10 @@ interface DelayRequest {
   created_at: string;
   approved_at: string | null;
   decision_note: string | null;
+  approval_chain?: string[] | null;
+  approvals?: { role: string; name?: string | null; at?: string; note?: string | null }[] | null;
+  current_step?: number | null;
+  requested_by?: string | null;
   milestone?: {
     id: string;
     name: string;
@@ -32,9 +36,11 @@ interface DelayRequestsListProps {
   orderId: string;
   isAdmin?: boolean;
   isOrderOwner?: boolean;
+  currentRoles?: string[];
+  currentUserId?: string;
 }
 
-export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isOrderOwner = false }: DelayRequestsListProps) {
+export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isOrderOwner = false, currentRoles = [], currentUserId }: DelayRequestsListProps) {
   const router = useRouter();
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState<Record<string, string>>({});
@@ -88,6 +94,8 @@ export function DelayRequestsList({ delayRequests, orderId, isAdmin = false, isO
               key={request.id}
               delayRequest={request}
               isAdmin={isAdmin}
+              currentRoles={currentRoles}
+              currentUserId={currentUserId}
             />
           ))}
         </div>

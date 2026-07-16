@@ -28,7 +28,7 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
     } catch (err: any) {
       alert('批准异常：' + (err?.message || '未知错误'));
     }
-    setLoading(false);
+    finally { setLoading(false); }
   }
 
   async function handleReject() {
@@ -49,7 +49,7 @@ export function DelayRequestActions({ delayRequestId }: DelayRequestActionsProps
     } catch (err: any) {
       alert('驳回异常：' + (err?.message || '未知错误'));
     }
-    setLoading(false);
+    finally { setLoading(false); }
   }
 
   if (!showForm) {

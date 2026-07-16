@@ -8,7 +8,7 @@
 export const DEFERRAL_ROUTING: Record<string, string[]> = {
   procurement:  ['merchandiser', 'order_manager'], // 采购提交 → 业务执行审批 → 业务执行经理审批
   merchandiser: ['sales'],                         // 业务执行延期 → 业务开发确认
-  production:   ['merchandiser'],                  // 生产延期 → 业务执行确认
+  production:   ['production_manager'],            // 生产执行延期 → 生产主管确认可行性
   _default:     ['admin'],                         // 其余(finance/sales 等)→ admin 兜底
 };
 
@@ -22,6 +22,6 @@ export function deferralChainFor(ownerRole: string | null | undefined): string[]
 export const ROLE_CN: Record<string, string> = {
   sales: '业务开发', merchandiser: '业务执行', order_manager: '业务执行经理',
   procurement: '采购', procurement_manager: '采购经理', production: '生产', admin: '管理员',
-  finance: '财务', production_manager: '生产经理', qc: '品控', logistics: '物流',
+  finance: '财务', production_manager: '生产主管', sales_manager: '业务经理', qc: '品控', logistics: '物流',
 };
 export const roleCn = (r: string) => ROLE_CN[r] || r;

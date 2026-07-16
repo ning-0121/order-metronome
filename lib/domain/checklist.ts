@@ -246,9 +246,11 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
     title: '上线工艺确认报告',
     items: [
       // 单耗对比（保留原有）
-      { key: 'quote_consumption', label: '报价单耗（米/件）', type: 'number', required: true, role: 'merchandiser', group: '单耗对比' },
-      { key: 'actual_consumption', label: '工厂排料实际单耗（米/件）', type: 'number', required: true, role: 'merchandiser', group: '单耗对比',
+      { key: 'quote_consumption', label: '报价单耗', type: 'number', required: true, role: 'merchandiser', group: '单耗对比' },
+      { key: 'quote_consumption_unit', label: '报价单耗单位', type: 'select', required: true, role: 'merchandiser', group: '单耗对比', options: ['米/件', '平方米/件', 'kg/件', '码/件', '其他'] },
+      { key: 'actual_consumption', label: '工厂排料实际单耗', type: 'number', required: true, role: 'merchandiser', group: '单耗对比',
         helpText: '实际单耗必须 ≤ 报价单耗才可开裁' },
+      { key: 'actual_consumption_unit', label: '实际单耗单位', type: 'select', required: true, role: 'merchandiser', group: '单耗对比', options: ['米/件', '平方米/件', 'kg/件', '码/件', '其他'] },
       { key: 'consumption_pass', label: '单耗核验通过', type: 'checkbox', required: true, role: 'merchandiser', group: '单耗对比' },
       // 工艺确认（新增）
       { key: 'cut_piece_check', label: '首件裁片尺寸与纸样一致', type: 'checkbox', required: true, role: 'merchandiser', group: '首件工艺确认' },

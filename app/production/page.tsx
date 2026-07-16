@@ -9,6 +9,7 @@ import { FactoryScheduleBoard } from '@/components/production/FactoryScheduleBoa
 import { ProductionProgressBoard } from '@/components/production/ProductionProgressBoard';
 import { ProductionGanttChart } from '@/components/production/ProductionGanttChart';
 import { CollapsibleSection } from '@/components/CollapsibleSection';
+import { RoleTaskWorkbench } from '@/components/production/RoleTaskWorkbench';
 
 /**
  * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
@@ -39,6 +40,8 @@ export default async function ProductionCenterPage() {
 
   const rows = result.data || [];
   const summary = result.summary || { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, ready_to_ship: 0, risk: 0 };
+  const workbenchRole = roles.some((r) => ['qc', 'quality'].includes(r)) ? 'qc'
+    : canInit ? 'supervisor' : 'follow_up';
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -61,7 +64,8 @@ export default async function ProductionCenterPage() {
         </div>
       </div>
 
-      <ProductionCenterClient rows={rows} summary={summary} />
+      <RoleTaskWorkbench rows={rows} role={workbenchRole} />
+      <ProductionCenterClient rows={rows} summary={summary} canAssign={canInit} />
 
       {/* 排产甘特图(生产进度可视化):吃在产订单,每厂一行按工厂期画时间条+阶段进度+逾期红 */}
       {canLogProgress && (

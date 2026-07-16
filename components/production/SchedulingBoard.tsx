@@ -47,6 +47,9 @@ export function SchedulingBoard() {
                 <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{o.order_capability}</span>
               </div>
               <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
+                <span>内部单号 <b className="text-gray-700">{o.internal_order_no || '—'}</b></span>
+                <span>客户PO <b className="text-gray-700">{o.po_number || '—'}</b></span>
+                <span>款号 <b className="text-gray-700">{o.style_no || '—'}</b></span>
                 <span>数量 <b className="text-gray-700">{o.quantity ?? '—'}</b></span>
                 <span>交期 <b className="text-gray-700">{o.factory_date ? String(o.factory_date).slice(0, 10) : '—'}</b></span>
                 <span>原辅料到位 <b className={o.material_ready_pct >= 100 ? 'text-emerald-600' : 'text-amber-600'}>{o.material_ready_pct == null ? '—' : o.material_ready_pct + '%'}</b></span>
@@ -106,7 +109,9 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [overbook, setOverbook] = useState<any[] | null>(null);   // 超卖详情,非空=需强制确认
+  const [factorySearch, setFactorySearch] = useState('');
   const selected = candidates.find((c: any) => c.factory_id === factoryId);
+  const visibleCandidates = candidates.filter((c: any) => String(c.factory_name || '').toLowerCase().includes(factorySearch.trim().toLowerCase()));
 
   async function submit(force = false) {
     if (!factoryId) { setErr('请选工厂'); return; }
@@ -120,13 +125,15 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
   return (
     <div className="mt-2 rounded-lg bg-white border border-indigo-100 p-2 space-y-2">
       {/* 候选工厂对照 */}
+      <input value={factorySearch} onChange={(e) => setFactorySearch(e.target.value)} placeholder={`搜索全部 ${candidates.length} 家可用工厂`}
+        className="w-full max-w-xs rounded border border-gray-300 px-2 py-1 text-xs" />
       <div className="overflow-x-auto">
         <table className="text-[11px] w-full">
           <thead><tr className="text-gray-400 text-left border-b border-gray-100">
             {['选', '工厂', '品类', '品质', '织造', '包装', '类型', '月产能', '剩余', '在做'].map((h) => <th key={h} className="px-1.5 py-1 whitespace-nowrap font-medium">{h}</th>)}
           </tr></thead>
           <tbody>
-            {candidates.map((c: any) => (
+            {visibleCandidates.map((c: any) => (
               <tr key={c.factory_id} className={`border-b border-gray-50 cursor-pointer ${factoryId === c.factory_id ? 'bg-indigo-50' : ''} ${c.match.hardMiss > 0 ? 'opacity-60' : ''}`} onClick={() => setFactoryId(c.factory_id)}>
                 <td className="px-1.5 py-1"><input type="radio" checked={factoryId === c.factory_id} onChange={() => setFactoryId(c.factory_id)} /></td>
                 <td className="px-1.5 py-1 font-medium text-gray-800 whitespace-nowrap">{c.factory_name}{c.match.allOk && <span className="ml-1 text-emerald-600">★</span>}</td>

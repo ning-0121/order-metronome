@@ -20,6 +20,7 @@ export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'm
   const [selectedId, setSelectedId] = useState('');
   // 候选人加载态(修 P3 2026-07-09:此前只 if(res.data),失败/空态无反馈、且空态每次 open 重复请求 → 用户以为死了)
   const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open || fetchState !== 'idle') return;
@@ -31,15 +32,12 @@ export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'm
 
   async function handleAssign() {
     if (!selectedId) return;
-    setLoading(true);
-    const result = await assignMerchandiser(orderId, selectedId, kind);
-    if (result.error) {
-      alert(result.error);
-    } else {
-      setOpen(false);
-      router.refresh();
-    }
-    setLoading(false);
+    setLoading(true); setError('');
+    try {
+      const result = await assignMerchandiser(orderId, selectedId, kind);
+      if (result.error) setError(result.error);
+      else { setOpen(false); router.refresh(); }
+    } finally { setLoading(false); }
   }
 
   if (!open) {
@@ -95,6 +93,7 @@ export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'm
       >
         取消
       </button>
+      {error && <span className="w-full text-xs text-red-600">{error}</span>}
     </div>
   );
 }
