@@ -1,5 +1,7 @@
 # QIMO OS Agent Permission Matrix
 
+Agents must not infer approval from visibility, manager naming or milestone assignment. Factory/schedule actions are recommendations or drafts until a human Production Manager confirms them; payment remains a Finance human action; Agents cannot replace or end Business Execution or Production Follow-up/QC ownership.
+
 | Capability | Class | Allowed behavior | Human gate | Current conformity |
 |---|---|---|---|---|
 | read operational/financial context | READ_ONLY | scoped query and analysis | authenticated visibility | partial; service-role context loaders require careful scoping |

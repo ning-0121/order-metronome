@@ -6,18 +6,18 @@ import { useRouter } from 'next/navigation';
 
 // 2026版组织角色（开发业务部 / 订单管理部 / 采购部 / 生产部）
 const ALL_ROLES = [
-  { value: 'admin', label: 'CEO/管理员', desc: '全览所有数据，审批延期，指定人员，不操作节点' },
-  { value: 'sales', label: '业务开发', desc: '开发业务部：新客户开发、客情维护、报价打样、PO确认；PO后只读全程可见订单进度，不再操作执行节点' },
-  { value: 'sales_manager', label: '开发业务经理', desc: '开发业务部负责人：查看所有订单、看金额利润、审批客户价格与延期、调配负责人（不操作节点、不绕过付款门禁）' },
-  { value: 'merchandiser', label: '业务执行', desc: 'PO 确认后接手，一路跟到出货：订单评审、单据、到料跟踪、包装规格、产前样寄客户、订舱报关物流、验货放行、异常统筹' },
-  { value: 'order_manager', label: '业务执行经理', desc: '业务执行部负责人（监督角色）：查看所有订单、调配负责人、审批延期与改单、统筹交付与异常；不直接操作执行节点' },
-  { value: 'finance', label: '财务', desc: '订单审核、加工费确认、成本核算、收款' },
-  { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认、催货到货' },
-  { value: 'procurement_manager', label: '采购经理', desc: '采购部负责人：供应商开发与分级、价格成本控制、让步接收审批、采购异常处理（查看所有订单）' },
-  { value: 'production', label: '生产跟单（含QC）', desc: '生产部：工厂排产跟进、产前样准备、开裁、生产进度、中查尾查(QC验货)、工厂完成' },
-  { value: 'production_manager', label: '生产主管', desc: '查看所有订单、工厂匹配确认、生产预评估、指定跟单' },
-  { value: 'admin_assistant', label: '行政督办', desc: '查看所有订单进度、催办跟进、不可见价格文件' },
-  { value: 'logistics', label: '物流/仓库', desc: '出货签核、装箱、物流协调、成品入库' },
+  { value: 'admin', label: 'CEO/管理员', desc: '全公司审计与重大异常协调；从异常升级到关闭。可显式覆盖并须记录理由，不能静默绕过财务或职责分离。' },
+  { value: 'sales', label: '业务开发', desc: '负责开发、报价打样、客户关系和 PO 商务确认；从线索到确认 PO。交接后保留客户商业变更职责，不操作普通执行节点。' },
+  { value: 'sales_manager', label: '开发业务经理', desc: '管理开发团队及特殊价格、条款和客户承诺；从报价例外到商务确认。不替代业务执行经理，也无生产/采购/财务通用审批权。' },
+  { value: 'merchandiser', label: '业务执行', desc: 'PO 确认后作为订单总负责人，从建单、资料、采购协同、客户确认一直协调到最终出货和关闭；不能最终决定工厂、排产或付款。' },
+  { value: 'order_manager', label: '业务执行经理', desc: '分配并监督订单总负责人、SLA 和跨部门异常；从 PO 交接到订单关闭。不替代普通节点执行，不越权财务或生产专属审批。' },
+  { value: 'finance', label: '财务', desc: '负责人审、收付、成本利润、对账结算；按财务节点介入。不是订单执行负责人，AI 和其他部门不能代替其审批。' },
+  { value: 'procurement', label: '采购', desc: '负责核料后询价、下单、催货、收货协调和缺料异常；从采购需求到到料。不改变订单商务真相或批准付款。' },
+  { value: 'procurement_manager', label: '采购经理', desc: '负责供应商、采购成本、让步及采购异常；从供应商准入到采购例外关闭。不能批准财务付款或自动接受导入数据。' },
+  { value: 'production', label: '生产跟单（含QC）', desc: '工厂和排期确认后接手现场，从物料、开裁、上线、首件/中查/尾查、整改、包装一直跟到出货；可建议但不能最终定厂排单。' },
+  { value: 'production_manager', label: '生产主管', desc: '负责最终定厂、确认排产、产能风险及分配生产跟单/QC；从生产需求到制造异常关闭。定厂/改排必须留痕。' },
+  { value: 'admin_assistant', label: '行政督办', desc: '仅负责进度可见、催办和升级；不成为业务 owner，不因督办获得价格、财务或跨部门审批权限。' },
+  { value: 'logistics', label: '物流/仓库', desc: '负责成品入库、装箱、订舱、出库和物流凭证；从出货准备到交付跟踪。不能单独放行，也不替代订单总负责人。' },
 ];
 
 function roleLabel(value: string) {

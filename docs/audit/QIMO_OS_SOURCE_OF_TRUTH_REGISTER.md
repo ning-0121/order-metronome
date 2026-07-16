@@ -1,5 +1,7 @@
 # QIMO OS Source-of-Truth Register
 
+`profiles.roles` owns role membership; `orders.owner_user_id` currently owns overall Business Execution responsibility; `milestones.owner_user_id/owner_role` owns only step execution. None is approval authority. Concurrent specialist responsibility lacks an independent truth source; an additive `order_responsibilities` migration is prepared but not applied or backfilled.
+
 1. **Customer identity:** QIMO customer master, reconciled with signed ARAOS identity; free-text names are display aliases.
 2. **Recognition:** PO draft/snapshot is immutable suggestion/evidence only.
 3. **Order:** employee-reviewed `orders` plus `order_line_items` is final order truth.

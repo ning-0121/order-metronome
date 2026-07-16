@@ -1,5 +1,7 @@
 # QIMO OS Module Maturity Evidence
 
+Responsibility-model reassessment: Business Development 3.0/5, Business Execution 3.0/5, Production Manager 3.5/5, Production Follow-up/QC 3.0/5. Business Execution and follow-up duties are operationally clear but cannot yet be represented concurrently as independent database truth. Logistics remains 2.5/5 because shipment has multiple gates without one central release policy.
+
 Scores are 0–5: 0 absent, 1 shell, 2 partial, 3 usable with material gaps, 4 strong/controlled, 5 proven end-to-end including failure recovery.
 
 | Module | Score | Evidence-backed assessment |
