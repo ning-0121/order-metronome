@@ -908,6 +908,22 @@ export async function finalizeCancelledOrder(client: any, orderId: string): Prom
       message: '关联订单已取消,系统已作废其未收货的采购单/执行行。请勿再为此单下单、催货或排产。', relatedOrderId: orderId,
     });
   } catch (e: any) { console.warn('[finalizeCancelledOrder] 取消通知采购/生产失败(不阻断):', e?.message); }
+  // Cancellation ends every explicit scope but never deletes its assignment
+  // history. The cancelling human is already stored on the order by the
+  // authoritative cancellation decision path.
+  try {
+    const { data: cancelledOrder } = await (client.from('orders') as any)
+      .select('termination_approved_by').eq('id',orderId).maybeSingle();
+    const actorId=(cancelledOrder as any)?.termination_approved_by;
+    if (actorId) {
+      const { error:endError } = await (client as any).rpc('end_all_order_responsibilities', {
+        p_order_id:orderId,p_actor_id:actorId,p_reason:'订单取消，终止全部业务责任范围',
+      });
+      if (endError && !/end_all_order_responsibilities|schema cache|does not exist|PGRST/i.test(endError.message||'')) throw endError;
+    }
+  } catch (e:any) {
+    console.warn('[finalizeCancelledOrder] 取消单责任结束失败，需管理员核对:',e?.message);
+  }
 }
 
 /**

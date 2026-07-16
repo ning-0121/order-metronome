@@ -25,6 +25,11 @@ export interface LogisticsShipItem {
   shipNodeStatus: string;
   bookingDone: boolean;         // 订舱是否完成(出口)
   docsReady: boolean;           // 出货单据(装箱单)是否已出
+  businessExecutionOwner: string | null;
+  productionManagerOwner: string | null;
+  productionFollowUpOwner: string | null;
+  logisticsOwner: string | null;
+  ownershipSource: 'explicit' | 'legacy_derived' | 'missing';
 }
 
 const SHIP_STEP_EXPORT = 'shipment_execute';
@@ -55,6 +60,13 @@ export async function getLogisticsShipQueue(): Promise<{ data?: LogisticsShipIte
   const activeOrders = ((orders || []) as any[]).filter((o) => !isTerminalLifecycle(o.lifecycle_status));
   if (!activeOrders.length) return { data: [] };
   const oIds = activeOrders.map((o) => o.id);
+
+  const {getEffectiveResponsibilities}=await import('@/lib/responsibility/service');
+  const effectiveByOrder=new Map<string,Awaited<ReturnType<typeof getEffectiveResponsibilities>>>();
+  await Promise.all(oIds.map(async(id)=>effectiveByOrder.set(id,await getEffectiveResponsibilities(svc as any,id))));
+  const respIds=[...new Set([...effectiveByOrder.values()].flat().map((r)=>r.userId).filter(Boolean))] as string[];
+  const {data:respProfiles}=respIds.length?await (svc.from('profiles') as any).select('user_id,name').in('user_id',respIds):{data:[]};
+  const respNames=new Map<string,string>(((respProfiles||[]) as any[]).map((p)=>[p.user_id,p.name]));
 
   // 3) 出运相关里程碑
   const { data: ms } = await (svc.from('milestones') as any)
@@ -90,6 +102,11 @@ export async function getLogisticsShipQueue(): Promise<{ data?: LogisticsShipIte
       shipNodeName: shipNode.name, shipNodeStatus: shipNode.status,
       bookingDone: booking ? isDoneStatus(booking.status) : false,
       docsReady: docsByOrder.has(o.id),
+      businessExecutionOwner:respNames.get(effectiveByOrder.get(o.id)?.find((r)=>r.type==='business_execution_owner')?.userId||'')||null,
+      productionManagerOwner:respNames.get(effectiveByOrder.get(o.id)?.find((r)=>r.type==='production_manager_owner')?.userId||'')||null,
+      productionFollowUpOwner:respNames.get(effectiveByOrder.get(o.id)?.find((r)=>r.type==='production_follow_up_owner')?.userId||'')||null,
+      logisticsOwner:respNames.get(effectiveByOrder.get(o.id)?.find((r)=>r.type==='logistics_owner')?.userId||'')||null,
+      ownershipSource:effectiveByOrder.get(o.id)?.find((r)=>r.type==='logistics_owner')?.source||'missing',
     });
   }
   // 交期近的在前
@@ -165,6 +182,18 @@ export async function toggleLogisticsSubtask(subtaskId: string, done: boolean, n
   const svc = createServiceRoleClient();
   const { data: st } = await (svc.from('logistics_subtasks') as any).select('id, order_id').eq('id', subtaskId).maybeSingle();
   if (!st) return { error: '子任务不存在' };
+  if (done && roles.includes('logistics')) {
+    try {
+      const { claimOwnResponsibility } = await import('@/lib/responsibility/service');
+      await claimOwnResponsibility(svc as any, { userId:user.id, roles }, {
+        orderId:(st as any).order_id, type:'logistics_owner', reason:'开始处理出货准备任务', sourceType:'workflow', sourceId:subtaskId,
+      });
+    } catch (e: any) {
+      if (!/order_responsibilities|replace_order_responsibility|schema cache|does not exist|PGRST/i.test(e?.message || '')) {
+        return { error:`物流任务未更新：责任登记失败（${e?.message || '未知错误'}）` };
+      }
+    }
+  }
   const now = new Date().toISOString();
   const { error } = await (svc.from('logistics_subtasks') as any).update({
     status: done ? 'done' : 'pending',
@@ -174,6 +203,32 @@ export async function toggleLogisticsSubtask(subtaskId: string, done: boolean, n
     updated_at: now,
   }).eq('id', subtaskId);
   if (error) return { error: error.message };
+  if (done) {
+    // Booking alone never ends ownership. End only after every logistics task
+    // and the physical shipment milestone are complete.
+    try {
+      const [{ data: remaining }, { data: ship }, { data: evidence }] = await Promise.all([
+        (svc.from('logistics_subtasks') as any).select('id').eq('order_id',(st as any).order_id).neq('status','done').limit(1),
+        (svc.from('milestones') as any).select('status').eq('order_id',(st as any).order_id).in('step_key',[SHIP_STEP_EXPORT,SHIP_STEP_DOMESTIC]).limit(1),
+        (svc.from('packing_lists') as any).select('id').eq('order_id',(st as any).order_id).limit(1),
+      ]);
+      const { logisticsScopeComplete } = await import('@/lib/responsibility/lifecycle');
+      if (logisticsScopeComplete({
+        allTasksDone:(remaining || []).length === 0,
+        shipmentDone:(ship || []).some((m:any) => isDoneStatus(m.status)),
+        evidenceComplete:(evidence || []).length > 0,
+      })) {
+        const { error:endErr } = await (svc as any).rpc('end_order_responsibility', {
+          p_order_id:(st as any).order_id,p_type:'logistics_owner',p_actor_id:user.id,p_reason:'出货义务和物流凭证已全部完成',
+        });
+        if (endErr) throw endErr;
+      }
+    } catch (e:any) {
+      if (!/order_responsibilities|end_order_responsibility|schema cache|does not exist|PGRST/i.test(e?.message || '')) {
+        console.warn('[logistics responsibility] completion reconciliation required:',e?.message);
+      }
+    }
+  }
   revalidatePath(`/orders/${(st as any).order_id}`);
   revalidatePath('/logistics');
   return { ok: true };

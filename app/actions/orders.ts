@@ -1497,21 +1497,87 @@ export async function completeOrderAction(orderId: string) {
 
   // 权限检查：只有订单创建者或 admin 可以完成订单
   const { data: order } = await (supabase.from('orders') as any)
-    .select('created_by')
+    .select('created_by, owner_user_id')
     .eq('id', orderId)
     .single();
   if (!order) {
     return { error: '订单不存在' };
   }
   const { isAdmin } = await getCurrentUserRole(supabase);
-  if (order.created_by !== user.id && !isAdmin) {
+  const svc = createServiceRoleClient();
+  const { getEffectiveResponsibilities } = await import('@/lib/responsibility/service');
+  const effective = await getEffectiveResponsibilities(svc as any, orderId);
+  const businessExecutionOwner = effective.find((r) => r.type === 'business_execution_owner')?.userId;
+  if (![order.created_by, order.owner_user_id, businessExecutionOwner].includes(user.id) && !isAdmin) {
     return { error: '无权操作此订单' };
+  }
+
+  // Use the existing milestone/finance truth; do not invent a parallel close
+  // transaction. Historical templates without a dedicated payment milestone
+  // retain their prior all-milestones-complete behavior.
+  const [{ data: closeMilestones }, { count: pendingDelays }] = await Promise.all([
+    (svc.from('milestones') as any).select('step_key,status,evidence_required').eq('order_id', orderId),
+    (svc.from('delay_requests') as any).select('id', { count:'exact', head:true }).eq('order_id',orderId).eq('status','pending'),
+  ]);
+  const closeRows = (closeMilestones || []) as any[];
+  const done = (status: unknown) => normalizeMilestoneStatus(String(status || '')) === '已完成';
+  const shipmentRows = closeRows.filter((m) => ['shipment_execute','domestic_delivery'].includes(m.step_key));
+  const financeRows = closeRows.filter((m) => m.step_key === 'payment_received');
+  const { evaluateOrderClosure } = await import('@/lib/responsibility/closure');
+  const closure = evaluateOrderClosure({
+    shipmentCompleted: shipmentRows.length === 0 || shipmentRows.every((m) => done(m.status)),
+    businessExecutionConfirmed: isAdmin || [order.created_by,order.owner_user_id,businessExecutionOwner].includes(user.id),
+    exceptionsResolvedOrAccepted: (pendingDelays || 0) === 0,
+    financeSatisfied: financeRows.length === 0 || financeRows.every((m) => done(m.status)),
+    evidenceComplete: closeRows.filter((m) => m.evidence_required).every((m) => done(m.status)),
+  });
+  if (!closure.allowed) {
+    const labels:Record<string,string>={shipment:'出货未完成',business_execution:'业务执行未确认',exceptions:'仍有待处理异常',finance:'财务条件未完成',evidence:'必需凭证未完成'};
+    return { error:`暂不能结案：${closure.blockers.map((b)=>labels[b]||b).join('；')}` };
   }
 
   const result = await completeOrder(orderId);
 
   if (result.error) {
     return { error: result.error };
+  }
+
+  // Existing close transaction remains authoritative. Once it succeeds, end
+  // every explicit concurrent responsibility atomically in one database RPC.
+  // Legacy-derived responsibility is never persisted or mutated.
+  try {
+    const { error: responsibilityError } = await (svc as any).rpc('end_all_order_responsibilities', {
+      p_order_id:orderId,p_actor_id:user.id,p_reason:'订单依现有结案规则完成',
+    });
+    if (responsibilityError) {
+      const rpcMissing = /end_all_order_responsibilities|schema cache|does not exist|PGRST/i.test(responsibilityError.message || '');
+      if (!rpcMissing) throw responsibilityError;
+
+      // Compatibility window: old code may run after the additive tables exist
+      // but before the hardened bulk-end RPC is installed. It is safe to skip
+      // only when this order has no explicit active responsibility to reconcile.
+      const { count, error: countError } = await (svc.from('order_responsibilities') as any)
+        .select('id', { count: 'exact', head: true })
+        .eq('order_id', orderId)
+        .eq('status', 'active');
+      if (countError && !/order_responsibilities|schema cache|does not exist|PGRST/i.test(countError.message || '')) {
+        throw countError;
+      }
+      if ((count || 0) > 0) {
+        throw new Error('责任批量结案 RPC 尚未安装，订单存在未结束的显式责任');
+      }
+    }
+  } catch (e:any) {
+    // Order state may already be completed; surface a reconciliation record
+    // instead of silently leaving active responsibilities behind.
+    try {
+      const svc=createServiceRoleClient();
+      await (svc.from('notifications') as any).insert({
+        user_id:user.id,type:`responsibility_closure_reconciliation:${orderId}`,title:'订单责任结案待核对',
+        message:'订单已完成，但显式责任结束失败。请管理员核对责任历史。',related_order_id:orderId,status:'unread',email_sent:false,
+      });
+    } catch { /* the returned error remains visible */ }
+    return { error:`订单已完成，但责任结案需要核对：${e?.message || '未知错误'}` };
   }
 
   // 订单完成后自动计算执行评分

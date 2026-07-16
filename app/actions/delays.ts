@@ -254,6 +254,19 @@ export async function createDelayRequest(
     });
   } catch (e: any) { console.warn('[createDelayRequest] 待审批通知失败(不阻断):', e?.message); }
 
+  // Concurrent-responsibility routing: the operational owners must remain
+  // informed even when a legacy approval-role broadcast changes over time.
+  try {
+    const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify');
+    await notifyResponsibilityEvent(createServiceRoleClient() as any, {
+      orderId: orderData.id,
+      event: impactsFinalDelivery ? 'customer_delay' : 'production_delay',
+      sourceId: String((delayRequest as any).id),
+      title: impactsFinalDelivery ? '生产延期影响客户承诺' : '生产延期申请',
+      message: `节点「${milestoneData.name || '生产节点'}」已提交延期申请，请按当前责任和审批阶段处理。`,
+    });
+  } catch (e: any) { console.warn('[createDelayRequest] 责任人通知失败(不阻断):', e?.message); }
+
   // Customer Memory V1: auto-create on delay request
   const customerName = (orderData.customer_name as string) || '';
   if (customerName) {

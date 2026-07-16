@@ -75,6 +75,34 @@ export async function replaceResponsibility(db: Db, actor: ResponsibilityActor, 
 export const assignResponsibility = replaceResponsibility;
 export const ensureResponsibility = replaceResponsibility;
 
+/** A functional operator may claim their own scope at its real workflow start. */
+export async function claimOwnResponsibility(db: Db, actor: ResponsibilityActor, input: {
+  orderId: string; type: CanonicalResponsibility; reason: string; sourceType: string; sourceId?: string;
+}): Promise<any> {
+  if (!input.reason.trim()) throw new Error('接收责任必须填写原因');
+  if (!actor.roles.some((r) => COMPATIBLE_ROLES[input.type].includes(r))) throw new Error('当前角色不能接收此责任');
+  await assertEligibleAssignee(db, actor.userId, input.type);
+  const { data, error } = await db.rpc('replace_order_responsibility', {
+    p_order_id: input.orderId, p_type: input.type, p_user_id: actor.userId, p_actor_id: actor.userId,
+    p_reason: input.reason.trim(), p_source_type: input.sourceType, p_source_id: input.sourceId || null,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function endOwnResponsibility(db: Db, actor: ResponsibilityActor, input: {
+  orderId: string; type: CanonicalResponsibility; reason: string;
+}): Promise<void> {
+  if (!input.reason.trim()) throw new Error('结束责任必须填写原因');
+  const current = await getResponsibility(db, input.orderId, input.type);
+  if (!current) return;
+  if (current.userId !== actor.userId && !actor.roles.includes('admin')) throw new Error('只能结束本人负责的业务范围');
+  const { error } = await db.rpc('end_order_responsibility', {
+    p_order_id: input.orderId, p_type: input.type, p_actor_id: actor.userId, p_reason: input.reason.trim(),
+  });
+  if (error) throw error;
+}
+
 export async function endResponsibility(db: Db, actor: ResponsibilityActor, input: { orderId: string; type: CanonicalResponsibility; reason: string }): Promise<void> {
   assertAssignmentAuthority(actor, input.type, input.reason);
   const { error } = await db.rpc('end_order_responsibility', {

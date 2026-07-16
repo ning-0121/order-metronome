@@ -1465,6 +1465,8 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
     } catch { /* 超预算闸异常不阻断(降级=不拦,避免误锁;审计可查) */ }
   }
 
+  const { data: previousItem } = await (supabase.from('procurement_items') as any)
+    .select('status,confirmed_by,confirmed_at').eq('id', itemId).maybeSingle();
   const now = new Date().toISOString();
   const upd: any = { status, updated_at: now };
   if (status === 'confirmed') {
@@ -1475,6 +1477,33 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
   }
   const { error } = await (supabase.from('procurement_items') as any).update(upd).eq('id', itemId);
   if (error) return { error: friendlyError(error) };
+
+  // The approved requirement is the real procurement responsibility start.
+  // A procurement operator claims only their own scope; this never replaces the order owner.
+  if (status === 'confirmed') {
+    try {
+      const { data: p } = await (supabase.from('profiles') as any).select('role,roles').eq('user_id', user.id).single();
+      const actorRoles: string[] = (p as any)?.roles?.length ? (p as any).roles : [(p as any)?.role].filter(Boolean);
+      if (actorRoles.some((r) => ['procurement','procurement_manager'].includes(r))) {
+        const { claimOwnResponsibility } = await import('@/lib/responsibility/service');
+        await claimOwnResponsibility(createServiceRoleClient() as any, { userId:user.id, roles:actorRoles }, {
+          orderId, type:'procurement_owner', reason:'已确认采购核料并接收采购执行责任', sourceType:'workflow', sourceId:itemId,
+        });
+      }
+    } catch (e: any) {
+      if (!/order_responsibilities|replace_order_responsibility|schema cache|does not exist|PGRST/i.test(e?.message || '')) {
+        // Compensate the item state so an authorization/RPC failure cannot
+        // leave an accepted procurement scope without a functional owner.
+        await (supabase.from('procurement_items') as any).update({
+          status:(previousItem as any)?.status || 'draft',
+          confirmed_by:(previousItem as any)?.confirmed_by || null,
+          confirmed_at:(previousItem as any)?.confirmed_at || null,
+          updated_at:new Date().toISOString(),
+        }).eq('id',itemId);
+        return { error: `采购责任登记失败，采购项确认已撤回：${e?.message || '未知错误'}。请联系采购经理处理。` };
+      }
+    }
+  }
 
   // 转复核 → 通知全体采购经理(拿不准的项由经理拍板;fire-and-forget 不阻塞)
   if (status === 'reviewing') {
@@ -1662,9 +1691,11 @@ export async function syncProcurementItemReceivingStatus(orderId: string) {
   // 审计修(2026-07-04):整单料齐 → 自动完成「原料到厂检验」里程碑 + 重算交付置信度,
   // 与「采购下单」节点自动完成对齐,否则收齐后风险卡仍显示原料未到直到手工勾节点。
   try {
-    const allReceived = (items as any[]).length > 0 && (items as any[]).every((it: any) => {
-      const a = agg.get(it.id); return a && a.ordered > 0 && a.received >= a.ordered;
-    });
+    const { procurementScopeComplete } = await import('@/lib/responsibility/lifecycle');
+    const allReceived = procurementScopeComplete((items as any[]).map((it:any) => {
+      const a=agg.get(it.id)||{ordered:0,received:0};
+      return {status:it.status,ordered:a.ordered,received:a.received};
+    }));
     if (allReceived) {
       const { data: ms } = await (supabase.from('milestones') as any)
         .select('id, status').eq('order_id', orderId).eq('step_key', 'materials_received_inspected').maybeSingle();
@@ -1686,6 +1717,20 @@ export async function syncProcurementItemReceivingStatus(orderId: string) {
             });
           } catch { /* 忽略 */ }
         })();
+      }
+      // All approved obligations for this order are complete. A partial receipt
+      // never reaches this branch and therefore never ends procurement ownership.
+      try {
+        // Completion is derived from every approved obligation, not from the
+        // receiver's identity. The service-role-only RPC records the authenticated actor.
+        const { error: endErr } = await (createServiceRoleClient() as any).rpc('end_order_responsibility', {
+          p_order_id:orderId, p_type:'procurement_owner', p_actor_id:user.id, p_reason:'全部已批准采购义务已收齐完成',
+        });
+        if (endErr) throw endErr;
+      } catch (e: any) {
+        if (!/order_responsibilities|end_order_responsibility|schema cache|does not exist|PGRST/i.test(e?.message || '')) {
+          console.warn('[procurement responsibility] completion reconciliation required:', e?.message);
+        }
       }
     }
   } catch (e: any) { console.warn('[syncProcurementItemReceivingStatus] 料齐里程碑联动失败(不阻断):', e?.message); }

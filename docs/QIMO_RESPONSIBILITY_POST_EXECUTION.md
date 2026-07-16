@@ -60,6 +60,23 @@ END $$;
 REVOKE ALL ON FUNCTION public.end_order_responsibility(uuid,text,uuid,text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.end_order_responsibility(uuid,text,uuid,text) TO service_role;
 
+CREATE OR REPLACE FUNCTION public.end_all_order_responsibilities(
+  p_order_id uuid, p_actor_id uuid, p_reason text
+) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE affected integer;
+BEGIN
+  IF p_reason IS NULL OR btrim(p_reason) = '' THEN RAISE EXCEPTION 'end_reason_required'; END IF;
+  PERFORM 1 FROM public.orders WHERE id=p_order_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'order_not_found'; END IF;
+  UPDATE public.order_responsibilities SET status='ended',ends_at=now(),ended_by=p_actor_id,
+    end_reason=btrim(p_reason),updated_at=now() WHERE order_id=p_order_id AND status='active';
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RETURN affected;
+END $$;
+REVOKE ALL ON FUNCTION public.end_all_order_responsibilities(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.end_all_order_responsibilities(uuid,uuid,text) TO service_role;
+
 CREATE OR REPLACE FUNCTION public.set_order_responsibility_updated_at()
 RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN NEW.updated_at = now(); RETURN NEW; END $$;

@@ -223,6 +223,18 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
     const gate = await getShipmentReleaseGate((ms as any).order_id);
     if (gate.error) return { error: gate.error, allConfirmed: true };
     if (!gate.data?.allowed) {
+      try {
+        const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify');
+        const { fallbackRolesForShipmentBlockers } = await import('@/lib/responsibility/notifications');
+        await notifyResponsibilityEvent(createServiceRoleClient() as any, {
+          orderId: (ms as any).order_id,
+          event: 'shipment_blocker',
+          sourceId: `confirmation:${milestoneId}`,
+          title: '出货条件待处理',
+          message: `多方确认完成，但出货仍被阻塞：${gate.data?.blockers.map((b) => b.label).join('、')}`,
+          fallbackRoles: fallbackRolesForShipmentBlockers(gate.data?.blockers || []),
+        });
+      } catch { /* notification failure never bypasses the gate */ }
       return {
         error: `多方已确认，但暂不能出货：${gate.data?.blockers.map((b) => `${b.label}（${b.nextAction}）`).join('；') || '出货条件未满足'}`,
         allConfirmed: true,

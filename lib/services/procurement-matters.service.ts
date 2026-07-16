@@ -8,7 +8,8 @@
 //   信号5 quality_reject    — 近期到货验收拒收/让步
 //   信号6 risk_schedule     — V2（kit/APS 联动）才发，V1 不产出
 // 模式：dry_run（只算不写，供人审误报）/ execute（upsert + 清理本轮未检出的行）。
-// 红线：表无 authenticated 写策略 → 调用方必须传 service-role client；不发通知、不写 daily_tasks。
+// 红线：表无 authenticated 写策略 → 调用方必须传 service-role client；不写 daily_tasks。
+// execute 成功后对缺料事项按稳定 matter_key 幂等通知并发责任人；dry_run 永不通知。
 // 完全复用 customer-matters.service 的物化纪律（upsert matter_key + sweep stale）。
 // ============================================================
 
@@ -278,6 +279,25 @@ export async function materializeProcurementMatters(
       .delete({ count: 'exact' })
       .lt('materialized_at', runTs)
     if (delErr) return err(`清理过期 procurement_matters 失败: ${delErr.message}`)
+
+    // Cross-domain shortage routing happens only after the durable projection
+    // succeeds. Stable matter_key makes cron/admin retries idempotent.
+    try {
+      const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify')
+      for (const matter of matters.filter((m) => m.matter_type === 'material_shortage' && m.order_id)) {
+        await notifyResponsibilityEvent(supabase as any, {
+          orderId: matter.order_id as string,
+          event: 'material_shortage',
+          sourceId: matter.matter_key,
+          title: '缺料风险待处理',
+          message: matter.title,
+        })
+      }
+    } catch (notifyError: any) {
+      // The risk projection remains authoritative and visible. A notification
+      // transport failure must never roll it back or create duplicate matters.
+      console.warn('[procurement matters] 缺料责任通知失败:', notifyError?.message)
+    }
 
     stats.written = matters.length
     stats.deleted = deleted ?? 0

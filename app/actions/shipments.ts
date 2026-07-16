@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { isAdminRole } from '@/lib/domain/roles';
 import { syncShipmentApprovalToFinance, syncShipmentApprovalCancelledToFinance } from '@/lib/integration/finance-sync';
@@ -12,6 +12,23 @@ async function getRoles(supabase: any, userId: string): Promise<string[]> {
   return (profile as any)?.roles?.length > 0
     ? (profile as any).roles
     : [(profile as any)?.role].filter(Boolean);
+}
+
+async function enforceShipmentGate(orderId: string, sourceId: string): Promise<string | null> {
+  const { getShipmentReleaseGate } = await import('@/app/actions/shipment-release');
+  const gate = await getShipmentReleaseGate(orderId);
+  if (gate.error) return gate.error;
+  if (gate.data?.allowed) return null;
+  try {
+    const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify');
+    const { fallbackRolesForShipmentBlockers } = await import('@/lib/responsibility/notifications');
+    await notifyResponsibilityEvent(createServiceRoleClient() as any, {
+      orderId,event:'shipment_blocker',sourceId,title:'出货条件待处理',
+      message:`出货被阻塞：${gate.data?.blockers.map((b)=>b.label).join('、')}`,
+      fallbackRoles:fallbackRolesForShipmentBlockers(gate.data?.blockers||[]),
+    });
+  } catch { /* gate remains authoritative */ }
+  return `出货条件未满足：${gate.data?.blockers.map((b)=>`${b.label}（${b.nextAction}）`).join('；')}`;
 }
 
 export async function getShipmentConfirmation(orderId: string) {
@@ -240,6 +257,9 @@ export async function executeShipment(id: string, orderId: string, rec: {
     return { error: `需财务审批通过后才能执行出货，当前状态：${cur.status}` };
   }
 
+  const gateError = await enforceShipmentGate(orderId, `confirmation:${id}`);
+  if (gateError) return { error: gateError };
+
   const now = new Date().toISOString();
   const { error } = await (supabase.from('shipment_confirmations') as any)
     .update({
@@ -263,6 +283,17 @@ export async function signShipment(id: string, orderId: string, signRole: 'sales
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+
+  const roles = await getRoles(supabase,user.id);
+  const allowed = isAdminRole(roles)
+    || (signRole === 'sales' && roles.some((r)=>['sales','merchandiser','order_manager'].includes(r)))
+    || (signRole === 'warehouse' && roles.includes('logistics'))
+    || (signRole === 'finance' && roles.includes('finance'));
+  if (!allowed) return { error:'当前角色无权代表该方签署出货确认' };
+  if (signRole === 'warehouse') {
+    const gateError = await enforceShipmentGate(orderId,`legacy-sign:${id}`);
+    if (gateError) return { error:gateError };
+  }
 
   const now = new Date().toISOString();
   const patch: Record<string, any> = {};

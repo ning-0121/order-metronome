@@ -427,7 +427,7 @@ export async function markMilestoneDone(
   //   可以与生产并行（订舱可以提前预订，报关可以提前备文件）。
   //   只有 inspection_release（放行）和 shipment_execute（物理出运）真正需要
   //   尾查通过。其余原 GATE 内的节点改为允许业务并行推进。
-  const SHIPMENT_GATES = ['inspection_release', 'shipment_execute'];
+  const SHIPMENT_GATES = ['inspection_release', 'shipment_execute', 'domestic_delivery'];
   if (SHIPMENT_GATES.includes(milestone.step_key)) {
     const { data: qcMilestone } = await (supabase.from('milestones') as any)
       .select('status, checklist_data')
@@ -461,11 +461,20 @@ export async function markMilestoneDone(
   // Central release gate: the physical shipment node must satisfy the same
   // Business Execution / QC / Logistics / Finance / document checks in every
   // completion path. This is server-side; UI visibility is never the control.
-  if (milestone.step_key === 'shipment_execute') {
+  if (['shipment_execute', 'domestic_delivery'].includes(milestone.step_key)) {
     const { getShipmentReleaseGate } = await import('@/app/actions/shipment-release');
     const gate = await getShipmentReleaseGate(milestone.order_id);
     if (gate.error) return { error: gate.error };
     if (!gate.data?.allowed) {
+      try {
+        const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify');
+        const { fallbackRolesForShipmentBlockers } = await import('@/lib/responsibility/notifications');
+        await notifyResponsibilityEvent(createServiceRoleClient() as any, {
+          orderId:milestone.order_id,event:'shipment_blocker',sourceId:`milestone:${milestoneId}`,
+          title:'出货条件待处理',message:`出货被阻塞：${gate.data?.blockers.map((b)=>b.label).join('、')}`,
+          fallbackRoles:fallbackRolesForShipmentBlockers(gate.data?.blockers||[]),
+        });
+      } catch { /* notification failure never bypasses the gate */ }
       return { error: `暂不能出货：${gate.data?.blockers.map((b) => `${b.label}（${b.nextAction}）`).join('；') || '出货条件未满足'}` };
     }
   }
@@ -1951,6 +1960,25 @@ export async function saveChecklistData(
     await (supabase.from('milestones') as any)
       .update({ checklist_data: merged })
       .eq('id', milestoneId);
+  }
+
+  // A saved QC failure is a real cross-domain event, independent of whether
+  // the employee subsequently attempts to complete the milestone.
+  if (['final_qc_check', 'inspection_release'].includes(milestone.step_key)) {
+    const qcResult = merged.find((item: any) => item.key === 'final_qc_result');
+    const value = String(qcResult?.value || '');
+    if (value.includes('FAIL') || value.includes('不通过') || value === '不合格') {
+      try {
+        const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify');
+        await notifyResponsibilityEvent(createServiceRoleClient() as any, {
+          orderId: milestone.order_id,
+          event: 'qc_failure',
+          sourceId: `checklist:${milestoneId}`,
+          title: 'QC 不合格待处理',
+          message: '尾期验货记录为不合格，请生产跟单/QC、生产主管和业务执行共同处理。',
+        });
+      } catch { /* checklist truth remains saved; notification is recoverable */ }
+    }
   }
 
   // 检查是否有影响排期的项
