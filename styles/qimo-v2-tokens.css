@@ -1,0 +1,24 @@
+:root {
+  --qimo-primary: #4f46e5;
+  --qimo-primary-hover: #4338ca;
+  --qimo-primary-soft: #eef2ff;
+  --qimo-surface: #ffffff;
+  --qimo-page: #f8fafc;
+  --qimo-border: #e2e8f0;
+  --qimo-text: #0f172a;
+  --qimo-text-secondary: #475569;
+  --qimo-muted: #94a3b8;
+  --qimo-success: #059669;
+  --qimo-warning: #d97706;
+  --qimo-risk: #e11d48;
+  --qimo-info: #0284c7;
+  --qimo-focus: #818cf8;
+  --qimo-radius-sm: 0.5rem;
+  --qimo-radius-md: 0.75rem;
+  --qimo-space-1: 0.25rem;
+  --qimo-space-2: 0.5rem;
+  --qimo-space-3: 0.75rem;
+  --qimo-space-4: 1rem;
+  --qimo-space-6: 1.5rem;
+  --qimo-space-8: 2rem;
+}
