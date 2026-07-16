@@ -19,6 +19,7 @@ import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
+import { normalizePORecognition } from '@/lib/order/po-autofill';
 
 /**
  * 将 AI 返回的各种日期格式统一为 YYYY-MM-DD（HTML date input 要求）
@@ -287,7 +288,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
             const fd = new FormData();
             fd.append('file', file);
             const res = await parsePO(fd);
-            return res.ok && res.data ? { ok: true as const, data: res.data, fileName: file.name } : { ok: false as const, error: res.error || '解析失败', fileName: file.name };
+            return res.ok && res.data ? { ok: true as const, data: normalizePORecognition(res.data), fileName: file.name } : { ok: false as const, error: res.error || '解析失败', fileName: file.name };
           } catch (err: any) {
             return { ok: false as const, error: err?.message || '解析异常', fileName: file.name };
           }
@@ -605,7 +606,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     if (customerPos.length >= 2) {
       rawFormData.set('customer_pos', JSON.stringify(customerPos));
     }
-    // AI 原始识别冻结底档(有 PO 解析时才带):建单落到 orders.po_parse_snapshot,供后续纠错追溯
+    // AI 原始识别冻结底档仅作预填来源和审计证据；员工审核后的表单/逐款明细才是订单真值。
     if (poParseResult) {
       rawFormData.set('po_parse_snapshot', JSON.stringify(poParseResult));
       // 客户 PO 成交价 → 落 orders.unit_price/total_amount/currency,随 order.created 同步财务,
