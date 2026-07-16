@@ -472,11 +472,6 @@ export function BomTab({ orderId }: { orderId: string }) {
     finally { setTrimBusy(false); }
   }
 
-  // 范围:整单通用(款号空,如主吊牌一次录)vs 按款(填款号)。表单打开时按已有款号初始化,输入中不重置
-  // ⚠️ 必须在任何条件 return 之前声明,否则 loading 首屏早退时 hook 数不一致 → React #310
-  const [byStyle, setByStyle] = useState(false);
-  useEffect(() => { setByStyle(!!(form.style_no || '').trim()); /* eslint-disable-next-line */ }, [editId, showAdd]);
-
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
 
   const submitted = items.some(i => i.submit_status === 'submitted');
