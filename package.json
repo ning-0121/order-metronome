@@ -14,6 +14,7 @@
     "test:mrp": "npx tsx scripts/test-mrp.ts",
     "test:production-task": "npx tsx scripts/test-production-task-template.ts",
     "test:production-dashboard": "npx tsx scripts/test-production-dashboard.ts",
+    "test:qimo-v2-foundation": "npx tsx scripts/test-qimo-v2-foundation.ts",
     "test:inventory": "npx tsx scripts/test-inventory-w3.ts",
     "test:ai-runtime": "tsx --test lib/ai/runtime/__tests__/*.test.ts",
     "check:ai-boundaries": "tsx scripts/check-ai-provider-boundaries.ts",
