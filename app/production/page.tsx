@@ -4,21 +4,15 @@ import { getProductionCenter } from '@/app/actions/production-center';
 import { isStageInitOpen } from '@/app/actions/production-stage-init';
 import { ProductionCenterClient } from './ProductionCenterClient';
 import { ReconcileExportButton } from './ReconcileExportButton';
-import { SchedulingBoard } from '@/components/production/SchedulingBoard';
-import { FactoryScheduleBoard } from '@/components/production/FactoryScheduleBoard';
-import { ProductionProgressBoard } from '@/components/production/ProductionProgressBoard';
-import { ProductionGanttChart } from '@/components/production/ProductionGanttChart';
-import { CollapsibleSection } from '@/components/CollapsibleSection';
 import { buildProductionDashboard, type DashboardRole } from '@/lib/production/dashboard';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ProductionCenterPage({ searchParams }: { searchParams: Promise<{ workspace?: string; detail?: string; stage?: string; q?: string }> }) {
+export default async function ProductionCenterPage({ searchParams }: { searchParams: Promise<{ detail?: string; stage?: string; q?: string }> }) {
   const params = await searchParams;
   const { roles } = await requireProductionPage();
   const result = await getProductionCenter();
   const canManage = roles.includes('admin') || roles.includes('production_manager');
-  const canLogProgress = canManage || roles.includes('production') || roles.includes('qc') || roles.includes('quality');
   const showInit = canManage && (await isStageInitOpen());
 
   if (result.error) return <div className="mx-auto max-w-3xl px-4 py-12 text-center"><h1 className="text-xl font-bold">生产中心</h1><p className="mt-2 text-gray-500">{result.error}</p></div>;
@@ -45,13 +39,6 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
 
       <ProductionCenterClient summary={summary} dashboard={dashboard} canManage={canManage} initialDetail={initialDetail} initialStage={params.stage || ''} />
 
-      <section className="mt-4 space-y-3" aria-label="生产工作台">
-        {canLogProgress && params.workspace === 'gantt' && <div id="gantt"><CollapsibleSection title="📊 排产甘特图" subtitle="工厂×时间·可视化进度"><ProductionGanttChart rows={rows} /></CollapsibleSection></div>}
-        {canManage && <div id="scheduling"><CollapsibleSection title="🏭 排单与派单工作台" subtitle="把款派给工厂" defaultOpen={params.workspace === 'scheduling'}><SchedulingBoard /></CollapsibleSection></div>}
-        {canManage && <div id="factory"><CollapsibleSection title="🏭 工厂排产看板" subtitle="按工厂看负荷与派工" defaultOpen={params.workspace === 'factory'}><FactoryScheduleBoard /></CollapsibleSection></div>}
-        {canLogProgress && <div id="progress"><CollapsibleSection title="📈 生产进度录入" subtitle="跟单/QC 录实绩" defaultOpen={params.workspace === 'progress'}><ProductionProgressBoard canManage={canManage} /></CollapsibleSection></div>}
-      </section>
-      <p className="mt-3 text-[11px] text-gray-400">阶段为现有订单、采购物料与生产节点的只读派生结果；详细任务仅在展开或导航后加载，不在首页渲染完整队列。</p>
     </main>
   );
 }

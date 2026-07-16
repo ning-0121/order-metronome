@@ -32,10 +32,14 @@ assert.equal(supervisor.today.length <= 5 && supervisor.risks.length <= 5, true)
 const page = readFileSync('app/production/page.tsx', 'utf8');
 const client = readFileSync('app/production/ProductionCenterClient.tsx', 'utf8');
 const action = readFileSync('app/actions/production-center.ts', 'utf8');
+const shared = readFileSync('components/qimo-v2/QimoDashboard.tsx', 'utf8');
+const schedulingPage = readFileSync('app/production/scheduling/page.tsx', 'utf8');
+const factoryPage = readFileSync('app/production/factory-schedule/page.tsx', 'utf8');
+const progressPage = readFileSync('app/production/progress/page.tsx', 'utf8');
 assert.ok(page.indexOf('<header') < page.indexOf('<ProductionCenterClient'));
-assert.match(client, /grid-cols-1.*sm:grid-cols-2.*lg:grid-cols-4/);
-assert.match(client, /lg:grid-cols-6/);
-assert.match(client, /lg:grid-cols-3/);
+assert.match(shared, /grid-cols-1.*sm:grid-cols-2.*lg:grid-cols-4/);
+assert.match(shared, /lg:grid-cols-6/);
+assert.match(shared, /lg:grid-cols-3/);
 assert.match(client, /useState\(Boolean\(initialDetail \|\| initialStage\)\)/);
 assert.match(client, /items\.slice\(0, 5\)/);
 assert.doesNotMatch(client, /rows: ProductionOrderRow\[\]/);
@@ -47,8 +51,8 @@ assert.match(client, /overflow-x-auto/);
 // Exact CEO regression: no role may silently render the legacy expanded workbench.
 assert.doesNotMatch(page, /RoleTaskWorkbench/);
 assert.doesNotMatch(page, /生产主管今日任务/);
-assert.ok(client.indexOf('quick-entry-title') < client.indexOf('生产 KPI'));
-assert.ok(client.indexOf('生产 KPI') < client.indexOf('生产进度总览'));
+assert.ok(client.indexOf('<QimoQuickEntryRow') < client.indexOf('<QimoKpiGrid'));
+assert.ok(client.indexOf('<QimoKpiGrid') < client.indexOf('生产进度总览'));
 assert.ok(client.indexOf('生产进度总览') < client.indexOf('今日待办事项'));
 assert.ok(client.indexOf('今日待办事项') < client.indexOf('生产主管详细任务'));
 assert.match(client, /今日待办事项/);
@@ -58,4 +62,27 @@ assert.doesNotMatch(page, /getProductionDetailedTasks\(/);
 assert.match(client, /limit: 25/);
 assert.match(page, /roles\.some\(\(item\) => \['qc', 'quality'\]\.includes\(item\)\) \? 'qc'/);
 assert.match(page, /canManage \? 'supervisor' : 'follow_up'/);
-console.log('production dashboard: 37 assertions passed');
+// Final cleanup: homepage contains no embedded duplicate workbench navigation.
+assert.doesNotMatch(page, /SchedulingBoard|FactoryScheduleBoard|ProductionProgressBoard|ProductionGanttChart|CollapsibleSection/);
+assert.doesNotMatch(page, /workspace/);
+assert.deepEqual(PRODUCTION_QUICK_ENTRIES.map((item) => item.href), [
+  '/production/scheduling', '/production/factory-schedule', '/production/progress', '/production?detail=已超期#details',
+]);
+// The full Link surface is accessible by Enter natively and Space through explicit routing.
+assert.match(shared, /<Link[\s\S]*href=\{entry\.href\}/);
+assert.match(shared, /event\.key === ' '/);
+assert.match(shared, /router\.push\(entry\.href\)/);
+assert.match(shared, /focus-visible:ring-2/);
+assert.match(shared, /h-14/);
+assert.doesNotMatch(client, /entry\.subtitle|entry\.icon/);
+// Extracted routes reuse existing operational components and retain page-level role gates.
+assert.match(schedulingPage, /requireProductionPage/);
+assert.match(schedulingPage, /SchedulingBoard/);
+assert.match(schedulingPage, /production_manager/);
+assert.match(factoryPage, /requireProductionPage/);
+assert.match(factoryPage, /FactoryScheduleBoard/);
+assert.match(factoryPage, /production_manager/);
+assert.match(progressPage, /requireProductionPage/);
+assert.match(progressPage, /ProductionProgressBoard/);
+assert.match(progressPage, /'production', 'qc', 'quality'/);
+console.log('production dashboard: 55 assertions passed');
