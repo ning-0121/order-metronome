@@ -67,6 +67,9 @@ function RowShell({ line, sizes, children }: { line: QueueLine; sizes?: string[]
             title={line.procurement_item_id ? `只看「${line.material_name}」这一款料的核料明细(可切换查看全部)` : '打开核料页,右上可下载生产任务单'}>
             📋任务单
           </Link>
+          <span className={`text-[11px] shrink-0 ${line.ownership_source === 'missing' ? 'text-amber-700' : 'text-gray-400'}`}>
+            采购负责人：{line.procurement_owner_name || '待采购经理分配'} · {line.ownership_source === 'explicit' ? '已明确' : line.ownership_source === 'legacy_derived' ? '历史推导' : '缺失'}
+          </span>
           {/* 每行点开对应的采购单详情(供应商/合计/明细/状态)——该行已挂到某采购单时显示 */}
           {line.purchase_order_id && (
             <Link href={`/procurement/po/${line.purchase_order_id}`} className="text-xs text-emerald-600 hover:underline shrink-0" title="查看该行所在的采购单">
@@ -118,7 +121,7 @@ export function ProcurementQueueClient({
   pendingRequests = [], pendingOrder: pendingOrder0, chase: chase0, readyShip: readyShip0, receive: receive0,
   counts, banner, canFinanceOver = false,
 }: {
-  pendingRequests?: Array<{ order_id: string; order_no: string | null; internal_order_no?: string | null; customer_name: string | null; submitted_at: string | null; req_count: number; late_count: number }>;
+  pendingRequests?: Array<{ order_id: string; order_no: string | null; internal_order_no?: string | null; customer_name: string | null; submitted_at: string | null; req_count: number; late_count: number; procurement_owner_name?: string | null; ownership_source?: 'explicit' | 'legacy_derived' | 'missing' }>;
   pendingOrder: QueueLine[]; chase: QueueLine[]; readyShip: QueueLine[]; receive: QueueLine[];
   counts: { pendingRequests: number; pendingOrder: number; chase: number; readyShip: number; receive: number; overdueOrders: number; atRiskOrders: number };
   banner?: React.ReactNode;
@@ -334,6 +337,9 @@ export function ProcurementQueueClient({
             <span className="text-sm font-semibold text-gray-900">{o.internal_order_no ? `${o.internal_order_no} | ` : ''}{o.order_no || '—'}</span>
             <span className="text-sm text-gray-600">{o.customer_name || ''}</span>
             <span className="text-xs text-gray-400">{o.req_count} 项物料需求 · 提交于 {fmt(o.submitted_at)}</span>
+            <span className={`text-xs ${o.ownership_source === 'missing' ? 'text-amber-700' : 'text-gray-400'}`}>
+              采购负责人：{o.procurement_owner_name || '待采购经理分配'}
+            </span>
             {o.late_count > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">🔥 {o.late_count} 项超最晚下单日</span>}
             <div className="ml-auto flex items-center gap-2 shrink-0">
               <button onClick={() => handleMarkOffline(o.order_id, `${o.internal_order_no || o.order_no || ''}`)} disabled={offlineBusy !== ''}

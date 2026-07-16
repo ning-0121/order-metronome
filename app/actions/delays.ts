@@ -189,9 +189,10 @@ export async function createDelayRequest(
   // 改期审批链快照(2026-07-05 P1):按该节点 owner_role 从路由表冻结审批链,逐级确认
   const { deferralChainFor } = await import('@/lib/domain/deferral-routing');
   const approvalChain = deferralChainFor(milestoneData.owner_role);
-  // 生产内部排期由生产主管批准；只有改变客户承诺交期时才追加业务经理。
-  if (String(milestoneData.owner_role).toLowerCase() === 'production' && impactsFinalDelivery && !approvalChain.includes('sales_manager')) {
-    approvalChain.push('sales_manager');
+  // 生产内部排期由生产主管批准；只有改变客户承诺交期时才追加独立的商业确认。
+  // commercial_manager 兼容业务执行经理和开发业务经理，但不让生产审批静默代替商业审批。
+  if (String(milestoneData.owner_role).toLowerCase() === 'production' && impactsFinalDelivery && !approvalChain.includes('commercial_manager')) {
+    approvalChain.push('commercial_manager');
   }
 
   // Create delay request
@@ -252,6 +253,19 @@ export async function createDelayRequest(
       relatedOrderId: orderData.id,
     });
   } catch (e: any) { console.warn('[createDelayRequest] 待审批通知失败(不阻断):', e?.message); }
+
+  // Concurrent-responsibility routing: the operational owners must remain
+  // informed even when a legacy approval-role broadcast changes over time.
+  try {
+    const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify');
+    await notifyResponsibilityEvent(createServiceRoleClient() as any, {
+      orderId: orderData.id,
+      event: impactsFinalDelivery ? 'customer_delay' : 'production_delay',
+      sourceId: String((delayRequest as any).id),
+      title: impactsFinalDelivery ? '生产延期影响客户承诺' : '生产延期申请',
+      message: `节点「${milestoneData.name || '生产节点'}」已提交延期申请，请按当前责任和审批阶段处理。`,
+    });
+  } catch (e: any) { console.warn('[createDelayRequest] 责任人通知失败(不阻断):', e?.message); }
 
   // Customer Memory V1: auto-create on delay request
   const customerName = (orderData.customer_name as string) || '';

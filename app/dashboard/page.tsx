@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { isApprovalPending } from '@/lib/domain/types';
 import { redirect } from 'next/navigation';
 import { formatDate } from '@/lib/utils/date';
@@ -139,6 +139,7 @@ export default async function DashboardPage() {
     { data: createdOrders },
     { data: assignedMilestones },
     { data: rawBlockedMilestones },
+    { data: explicitResponsibilities },
   ] = await Promise.all([
     // 待复盘订单
     (supabase.from('orders') as any)
@@ -182,10 +183,17 @@ export default async function DashboardPage() {
       .not('orders.lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","已复盘")')
       .order('created_at', { ascending: false })
       .limit(500),
+    // Explicit concurrent responsibilities add orders to the employee's real
+    // workbench without replacing legacy owner/milestone compatibility.
+    (createServiceRoleClient().from('order_responsibilities') as any)
+      .select('order_id,responsibility_type')
+      .eq('user_id', user.id)
+      .eq('status', 'active'),
   ]);
   const myOrderIds = new Set([
     ...(createdOrders || []).map((o: any) => o.id),
     ...(assignedMilestones || []).map((m: any) => m.order_id),
+    ...(explicitResponsibilities || []).map((r: any) => r.order_id),
   ]);
 
   // 计算每个订单里「我自己最早的未完成节点序号」

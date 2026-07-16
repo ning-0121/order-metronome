@@ -23,11 +23,16 @@ export const ROLE_CN: Record<string, string> = {
   sales: '业务开发', merchandiser: '业务执行', order_manager: '业务执行经理',
   procurement: '采购', procurement_manager: '采购经理', production: '生产', admin: '管理员',
   finance: '财务', production_manager: '生产主管', sales_manager: '业务经理', qc: '品控', logistics: '物流',
+  commercial_manager: '业务执行经理/开发业务经理',
 };
 export const roleCn = (r: string) => ROLE_CN[r] || r;
 
 /** One authorization source for server actions and button visibility. */
 export function canActOnDeferralStep(input: { roles: string[]; requiredRole?: string; actorId?: string; requesterId?: string | null }): boolean {
   if (input.actorId && input.requesterId && input.actorId === input.requesterId && !input.roles.includes('admin')) return false;
-  return input.roles.includes('admin') || (!!input.requiredRole && input.roles.includes(input.requiredRole));
+  if (input.roles.includes('admin')) return true;
+  if (input.requiredRole === 'commercial_manager') {
+    return input.roles.includes('order_manager') || input.roles.includes('sales_manager');
+  }
+  return !!input.requiredRole && input.roles.includes(input.requiredRole);
 }

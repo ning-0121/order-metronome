@@ -17,6 +17,7 @@ export function FactoryAssign({ orderId, currentFactoryName }: Props) {
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [reason, setReason] = useState('');
 
   useEffect(() => {
     if (open && factories.length === 0) {
@@ -26,7 +27,8 @@ export function FactoryAssign({ orderId, currentFactoryName }: Props) {
 
   async function save() {
     setLoading(true); setErr('');
-    const res = await updateOrderFactory(orderId, selectedId || null);
+    if (!reason.trim()) { setErr('请填写定厂/换厂原因'); setLoading(false); return; }
+    const res = await updateOrderFactory(orderId, selectedId || null, reason);
     setLoading(false);
     if ((res as any).error) { setErr((res as any).error); return; }
     setOpen(false); router.refresh();
@@ -56,6 +58,8 @@ export function FactoryAssign({ orderId, currentFactoryName }: Props) {
         <button onClick={save} disabled={loading} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">{loading ? '保存中…' : '保存'}</button>
         <button onClick={() => { setOpen(false); setErr(''); }} className="text-xs text-gray-400 hover:text-gray-600">取消</button>
       </div>
+      <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="必填：定厂/换厂原因"
+        className="w-full max-w-[280px] rounded border border-gray-300 px-2 py-1 text-xs" />
       {err && <span className="text-xs text-red-600">{err}</span>}
     </div>
   );

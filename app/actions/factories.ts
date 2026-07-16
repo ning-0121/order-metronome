@@ -11,10 +11,12 @@ import { isAdminRole } from '@/lib/domain/roles';
 export async function updateOrderFactory(
   orderId: string,
   factoryId: string | null,
+  reason: string,
 ): Promise<{ ok?: boolean; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  if (!reason?.trim()) return { error: '定厂或换厂必须填写原因' };
 
   const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
   const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
@@ -30,9 +32,18 @@ export async function updateOrderFactory(
     factory_name = (f as any).factory_name;
   }
 
+  const { data: previous } = await (supabase.from('orders') as any).select('factory_id,factory_name').eq('id', orderId).maybeSingle();
   const { error } = await (supabase.from('orders') as any)
     .update({ factory_id: factoryId, factory_name }).eq('id', orderId);
   if (error) return { error: error.message };
+  const audit = await (supabase.from('order_operational_decisions') as any).insert({
+    order_id: orderId, decision_type: 'factory', previous_value: previous || null,
+    new_value: { factory_id: factoryId, factory_name }, actor_id: user.id, actor_roles: userRoles,
+    reason: reason.trim(),
+  });
+  if (audit.error && !/order_operational_decisions|schema cache|does not exist|PGRST/i.test(audit.error.message || '')) {
+    return { error: `工厂已更新但审计写入失败：${audit.error.message}` };
+  }
 
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };

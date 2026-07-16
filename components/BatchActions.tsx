@@ -18,6 +18,7 @@ export function BatchActions({ orderIds, isAdmin, currentRoles }: Props) {
   const [action, setAction] = useState<'assign' | 'nudge' | null>(null);
   const [candidates, setCandidates] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState('');
+  const [assignmentReason, setAssignmentReason] = useState('');
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState('');
 
@@ -49,12 +50,12 @@ export function BatchActions({ orderIds, isAdmin, currentRoles }: Props) {
   }
 
   async function executeBatchAssign() {
-    if (!selectedUser) return;
+    if (!selectedUser || !assignmentReason.trim()) return;
     setExecuting(true);
     setResult('');
     let success = 0;
     for (const orderId of selected) {
-      const res = await assignMerchandiser(orderId, selectedUser);
+      const res = await assignMerchandiser(orderId, selectedUser, 'merchandiser', assignmentReason.trim());
       if (!res.error) success++;
     }
     setResult(`成功分配 ${success}/${selected.size} 个订单`);
@@ -132,7 +133,10 @@ export function BatchActions({ orderIds, isAdmin, currentRoles }: Props) {
                   <option key={c.user_id} value={c.user_id}>{c.name || c.email}</option>
                 ))}
               </select>
-              <button onClick={executeBatchAssign} disabled={executing || !selectedUser}
+              <input value={assignmentReason} onChange={e => setAssignmentReason(e.target.value)}
+                placeholder="批量指派原因（必填）"
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+              <button onClick={executeBatchAssign} disabled={executing || !selectedUser || !assignmentReason.trim()}
                 className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white disabled:opacity-50">
                 {executing ? '分配中...' : '确认分配'}
               </button>

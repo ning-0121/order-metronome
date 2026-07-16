@@ -91,6 +91,22 @@ export async function markBatchMilestoneStep(
     const canShip = isAdmin || isOrderActor
       || roles.includes('logistics') || roles.includes('production_manager');
     if (!canShip) return { ok: false, error: '仅物流/生产管理/订单负责人可标记出运' };
+    const { getShipmentReleaseGate } = await import('@/app/actions/shipment-release');
+    const gate = await getShipmentReleaseGate(orderId);
+    if (gate.error) return { ok: false, error: gate.error };
+    if (!gate.data?.allowed) {
+      try {
+        const { createServiceRoleClient } = await import('@/lib/supabase/server');
+        const { notifyResponsibilityEvent } = await import('@/lib/responsibility/notify');
+        const { fallbackRolesForShipmentBlockers } = await import('@/lib/responsibility/notifications');
+        await notifyResponsibilityEvent(createServiceRoleClient() as any, {
+          orderId,event:'shipment_blocker',sourceId:`batch:${batchId}`,
+          title:'分批出货条件待处理',message:`出货被阻塞：${gate.data?.blockers.map((b)=>b.label).join('、')}`,
+          fallbackRoles:fallbackRolesForShipmentBlockers(gate.data?.blockers||[]),
+        });
+      } catch { /* notification failure never bypasses the gate */ }
+      return { ok: false, error: `出货条件未满足：${gate.data?.blockers.map((b) => `${b.label}（${b.nextAction}）`).join('；')}` };
+    }
 
     // 分批明细强化(2026-07-06 用户拍板:7月起"有明细"的单,分批出运必须填款色明细)——
     // 订单有逐款逐色明细(order_line_items)但本批未填款色明细(shipment_batch_items)→ 拦。
