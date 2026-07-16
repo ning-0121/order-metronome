@@ -189,9 +189,10 @@ export async function createDelayRequest(
   // 改期审批链快照(2026-07-05 P1):按该节点 owner_role 从路由表冻结审批链,逐级确认
   const { deferralChainFor } = await import('@/lib/domain/deferral-routing');
   const approvalChain = deferralChainFor(milestoneData.owner_role);
-  // 生产内部排期由生产主管批准；只有改变客户承诺交期时才追加业务经理。
-  if (String(milestoneData.owner_role).toLowerCase() === 'production' && impactsFinalDelivery && !approvalChain.includes('sales_manager')) {
-    approvalChain.push('sales_manager');
+  // 生产内部排期由生产主管批准；只有改变客户承诺交期时才追加独立的商业确认。
+  // commercial_manager 兼容业务执行经理和开发业务经理，但不让生产审批静默代替商业审批。
+  if (String(milestoneData.owner_role).toLowerCase() === 'production' && impactsFinalDelivery && !approvalChain.includes('commercial_manager')) {
+    approvalChain.push('commercial_manager');
   }
 
   // Create delay request
