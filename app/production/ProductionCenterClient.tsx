@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { type ProductionOrderRow, type ProductionCenterSummary } from '@/app/actions/production-center';
 import { type ProductionStage } from '@/lib/production/stage';
 import { generateManufacturingOrderSheet } from '@/app/actions/manufacturing-order';
+import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 
 const STAGE_LABEL: Record<ProductionStage, string> = {
   awaiting_procurement: '新订单待采购',
@@ -97,7 +98,7 @@ function MoDownload({ orderId, orderNo, hasMo }: { orderId: string; orderNo: str
   );
 }
 
-export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrderRow[]; summary: ProductionCenterSummary }) {
+export function ProductionCenterClient({ rows, summary, canAssign = false }: { rows: ProductionOrderRow[]; summary: ProductionCenterSummary; canAssign?: boolean }) {
   const [filter, setFilter] = useState<Filter | null>(null);
   const [listOpen, setListOpen] = useState(true);
 
@@ -160,6 +161,7 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
                 <th className="px-3 py-2 font-medium">开裁</th>
                 <th className="px-3 py-2 font-medium">工厂完成</th>
                 <th className="px-3 py-2 font-medium">任务单</th>
+                {canAssign && <th className="px-3 py-2 font-medium">生产跟单</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -173,6 +175,7 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
                       <Link href={`/production/order/${r.order_id}`} className="font-medium text-gray-900 hover:underline" title="进生产节点(走节点/传报告)">{orderNo}</Link>
                       {r.risk && <span className="ml-1 text-[11px] text-red-600">⚠</span>}
                       <div className="text-xs text-gray-500">{r.customer_name || '—'}</div>
+                      <div className="text-[11px] text-gray-400">内部单号: {r.internal_order_no || '—'} · PO: {r.po_number || '—'} · 款号: {r.style_no || '—'}</div>
                     </td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${STAGE_BADGE[r.stage]}`}>{STAGE_LABEL[r.stage]}</span>
@@ -186,6 +189,7 @@ export function ProductionCenterClient({ rows, summary }: { rows: ProductionOrde
                     <td className={`px-3 py-2.5 text-xs ${k.cls}`}>{k.text}</td>
                     <td className={`px-3 py-2.5 text-xs ${c.cls}`}>{c.text}</td>
                     <td className="px-3 py-2.5"><MoDownload orderId={r.order_id} orderNo={orderNo} hasMo={r.has_mo} /></td>
+                    {canAssign && <td className="px-3 py-2.5"><MerchandiserAssign orderId={r.order_id} kind="production" /></td>}
                   </tr>
                 );
               })}

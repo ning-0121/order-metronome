@@ -1745,18 +1745,20 @@ export async function assignMerchandiser(
   }
 
   // 验证目标用户角色与 kind 匹配
-  const { data: targetProfile } = await (supabase.from('profiles') as any)
-    .select('name, role, roles')
-    .eq('user_id', merchandiserUserId)
-    .single();
+  let { data: targetProfile, error: targetProfileError } = await (supabase.from('profiles') as any)
+    .select('name, role, roles, active').eq('user_id', merchandiserUserId).single();
+  if (targetProfileError && /active|column|does not exist/i.test(targetProfileError.message || '')) {
+    ({ data: targetProfile } = await (supabase.from('profiles') as any).select('name, role, roles').eq('user_id', merchandiserUserId).single());
+  }
   if (!targetProfile) return { error: '目标用户不存在' };
+  if ((targetProfile as any).active === false) return { error: '目标用户已停用，不能接收生产任务' };
 
   const targetRoles: string[] = targetProfile.roles?.length > 0 ? targetProfile.roles : [targetProfile.role].filter(Boolean);
   const targetOkForKind = kind === 'production'
-    ? (targetRoles.includes('production') || targetRoles.includes('qc') || targetRoles.includes('admin'))
+    ? (targetRoles.includes('production') || targetRoles.includes('admin'))
     : (targetRoles.includes('merchandiser') || targetRoles.includes('admin'));
   if (!targetOkForKind) {
-    return { error: kind === 'production' ? '目标用户不是生产跟单/QC角色' : '目标用户不是业务执行(理单)角色' };
+    return { error: kind === 'production' ? '目标用户不是生产跟单角色' : '目标用户不是业务执行(理单)角色' };
   }
 
   // 批量更新 — 排除生产主管固定节点（工厂匹配确认 + 产前样准备完成）
@@ -1772,24 +1774,40 @@ export async function assignMerchandiser(
   const assignRole = kind === 'production' ? 'production' : 'merchandiser';
   const roleLabel = kind === 'production' ? '生产跟单' : '业务执行';
   const { data: allMerchMs } = await (admin.from('milestones') as any)
-    .select('id, step_key')
+    .select('id, step_key, owner_role, status')
     .eq('order_id', orderId)
     .eq('owner_role', assignRole);
 
   // 过滤掉生产主管固定节点
   const pmFixedSet = new Set(PRODUCTION_MANAGER_FIXED_STEPS);
-  const toUpdate = ((allMerchMs || []) as any[])
+  let toUpdate = ((allMerchMs || []) as any[])
     .filter(m => !pmFixedSet.has(m.step_key))
     .map(m => m.id);
+
+  // 老模板把生产执行节点错误归给 sales/merchandiser 时，生产主管应仍能完成接单指派。
+  // 只修明确的生产执行节点，固定主管/业务承诺/财务节点不动。
+  if (kind === 'production' && toUpdate.length === 0) {
+    const PRODUCTION_EXECUTION_STEPS = new Set([
+      'materials_received_inspected', 'pre_production_sample_sent', 'pre_production_sample_approved',
+      'production_kickoff', 'packing_method_confirmed', 'factory_completion', 'shipping_sample_send',
+    ]);
+    const { data: legacy } = await (admin.from('milestones') as any).select('id, step_key, status').eq('order_id', orderId);
+    const candidates = ((legacy || []) as any[]).filter(m => PRODUCTION_EXECUTION_STEPS.has(m.step_key) && !pmFixedSet.has(m.step_key));
+    if (candidates.length > 0) {
+      const ids = candidates.map(m => m.id);
+      const { data: normalized, error: normalizeErr } = await (admin.from('milestones') as any)
+        .update({ owner_role: 'production', owner_user_id: merchandiserUserId }).in('id', ids).select('id');
+      if (normalizeErr) return { error: normalizeErr.message };
+      toUpdate = (normalized || []).map((m: any) => m.id);
+    }
+  }
 
   if (toUpdate.length === 0) {
     return { error: `本单没有可指派给「${roleLabel}」的节点(可能都是生产主管固定节点)。` };
   }
 
   const { data: upd, error: updateErr } = await (admin.from('milestones') as any)
-    .update({ owner_user_id: merchandiserUserId })
-    .in('id', toUpdate)
-    .select('id');
+    .update({ owner_user_id: merchandiserUserId }).in('id', toUpdate).select('id');
   if (updateErr) return { error: updateErr.message };
   const updated = upd || [];
   if (updated.length === 0) {
@@ -1876,9 +1894,11 @@ export async function saveChecklistData(
   if (milestone.step_key === 'production_kickoff') {
     const quoteVal = responses.find(r => r.key === 'quote_consumption')?.value;
     const actualVal = responses.find(r => r.key === 'actual_consumption')?.value;
-    if (quoteVal && actualVal && Number(actualVal) > Number(quoteVal)) {
-      return { error: `实际单耗（${actualVal}）超过报价单耗（${quoteVal}），不允许开裁。请与工厂沟通优化排料方案。` };
-    }
+    const quoteUnit = responses.find(r => r.key === 'quote_consumption_unit')?.value;
+    const actualUnit = responses.find(r => r.key === 'actual_consumption_unit')?.value;
+    const { compareConsumption } = await import('@/lib/production/consumption');
+    const comparison = compareConsumption({ quoted: quoteVal, actual: actualVal, quotedUnit: quoteUnit, actualUnit });
+    if (!comparison.ok) return { error: comparison.error };
   }
 
   // 合并响应（保留其他用户填的项，更新当前用户填的项）

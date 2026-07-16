@@ -877,9 +877,10 @@ export default async function OrderDetailPage({
               <DelayRequestsList
                 delayRequests={delayRequests}
                 orderId={id}
-                // 业务部经理与 admin 同样可审批延期（按钮显隐；服务端 delays.ts 已按 CAN_APPROVE_DELAY 兜底校验）
-                isAdmin={isAdmin || currentRoles.some((r) => ['sales_manager', 'order_manager'].includes(r))}
+                isAdmin={isAdmin}
                 isOrderOwner={isOrderOwner}
+                currentRoles={currentRoles}
+                currentUserId={user.id}
               />
             ) : (
               <p className="text-gray-400 text-center py-8">暂无延期申请</p>

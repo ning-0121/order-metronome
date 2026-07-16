@@ -9,7 +9,7 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { RECEIVED } from '@/lib/production/stage';
-import { deriveOrderCapability, matchFactory, rankScore, type FactoryCaps, type OrderReq } from '@/lib/production/scheduling';
+import { deriveOrderCapability, factoryRecommendationLabel, matchFactory, rankScore, type FactoryCaps, type OrderReq } from '@/lib/production/scheduling';
 import { factoryMonthlyLoad, checkOverbook, monthlyLedger } from '@/lib/production/capacityLedger';
 
 async function gate(view: boolean): Promise<{ svc: any; roles: string[]; userId: string } | { error: string }> {
@@ -31,9 +31,9 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 工厂能力
   const { data: facs } = await (svc.from('factories') as any)
-    .select('id, factory_name, product_categories, quality_grades, weave_types, can_package, order_capabilities, monthly_capacity')
+    .select('id, factory_code, factory_name, cooperation_status, product_categories, quality_grades, weave_types, can_package, order_capabilities, monthly_capacity')
     .is('deleted_at', null).in('cooperation_status', ['active', 'trial']);
-  const factories: FactoryCaps[] = (facs || []) as any[];
+  const factories: FactoryCaps[] = [...new Map(((facs || []) as FactoryCaps[]).map((factory) => [factory.id, factory])).values()];
 
   // 已派工(算工厂在线量 + 每款现状)
   const { data: disp } = await (svc.from('production_dispatch') as any)
@@ -58,7 +58,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 待排产订单:活跃(未完成/取消)、非经销(经销=买成品不排产)
   const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status')
+    .select('id, order_no, internal_order_no, po_number, style_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status')
     .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")')
     .order('factory_date', { ascending: true }).limit(200);
   const orderList = (orders || []).filter((o: any) => String(o.order_purpose || '').toLowerCase() !== 'trade');
@@ -82,7 +82,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     const committed = committedByFactory.get(f.id)?.qty || 0;
     const remaining = f.monthly_capacity != null ? (Number(f.monthly_capacity) - committed) : null;
     const load = loadByFactory.get(f.id) || {};
-    return { factory_id: f.id, factory_name: f.factory_name, match: m, monthly_capacity: f.monthly_capacity ?? null, remaining, active_count: committedByFactory.get(f.id)?.count || 0, product_categories: f.product_categories || [], monthly_load: load, ledger: monthlyLedger(load, f.monthly_capacity, fromMonth, 4), score: rankScore(m, remaining, null) };
+    return { factory_id: f.id, factory_code: f.factory_code, factory_name: f.factory_name, match: m, recommendation: factoryRecommendationLabel(m, remaining), monthly_capacity: f.monthly_capacity ?? null, remaining, active_count: committedByFactory.get(f.id)?.count || 0, product_categories: f.product_categories || [], monthly_load: load, ledger: monthlyLedger(load, f.monthly_capacity, fromMonth, 4), score: rankScore(m, remaining, null) };
   }).sort((a, b) => b.score - a.score);
 
   const out = orderList.map((o: any) => {
@@ -113,11 +113,11 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     }
     const mat = matByOrder.get(o.id);
     return {
-      id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, customer_name: o.customer_name,
+      id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, po_number: o.po_number, style_no: o.style_no, customer_name: o.customer_name,
       product_description: o.product_description, quantity: o.quantity, factory_date: o.factory_date,
       order_capability: orderCap, quality_grade: o.quality_grade, weave_type: o.weave_type, needs_package: o.needs_package,
       material_ready_pct: mat && mat.total > 0 ? Math.round((mat.ready / mat.total) * 100) : null,
-      styles, candidates: candidates.slice(0, 8),
+      styles, candidates,
     };
   });
   return { data: { orders: out, factories } };

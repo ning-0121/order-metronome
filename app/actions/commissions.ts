@@ -362,7 +362,7 @@ export async function getOrderCommissions(orderId: string) {
 
 /**
  * 获取跟单候选人列表
- * kind='merchandiser' → 业务执行(理单)候选;kind='production' → 生产跟单/QC 候选。
+ * kind='merchandiser' → 业务执行(理单)候选;kind='production' → 生产跟单候选。
  * (2026-07-10:两类分开,业务执行由业务执行部主管派、生产跟单由生产主管派)
  */
 export async function getMerchandiserCandidates(
@@ -372,14 +372,18 @@ export async function getMerchandiserCandidates(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '未登录' };
 
-  const { data: profiles } = await (supabase.from('profiles') as any)
-    .select('user_id, name, email, role, roles');
+  let { data: profiles, error } = await (supabase.from('profiles') as any)
+    .select('user_id, name, email, role, roles, active');
+  if (error && /active|column|does not exist/i.test(error.message || '')) {
+    ({ data: profiles } = await (supabase.from('profiles') as any).select('user_id, name, email, role, roles'));
+  }
 
   const candidates = (profiles || []).filter((p: any) => {
     const roles: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
-    if (roles.includes('admin')) return true; // admin 两类都可作为候选人
+    if (p.active === false) return false;
+    if (roles.includes('admin')) return true;
     return kind === 'production'
-      ? (roles.includes('production') || roles.includes('qc'))
+      ? roles.includes('production')
       : roles.includes('merchandiser');
   });
 

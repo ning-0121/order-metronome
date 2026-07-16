@@ -1076,6 +1076,21 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
     setResponses(map);
   }, [config, milestone.checklist_data]);
 
+  // 开裁单耗继承已冻结报价基线；仅在基线有唯一明确值/单位时自动预填。
+  useEffect(() => {
+    if (milestone.step_key !== 'production_kickoff') return;
+    import('@/app/actions/quote-baseline').then(({ getKickoffConsumptionBaseline }) => getKickoffConsumptionBaseline(orderId)).then((r) => {
+      if (!r.data) return;
+      setResponses(prev => {
+        const next = { ...prev };
+        if (next.quote_consumption?.value == null) next.quote_consumption = { value: String(r.data!.value) };
+        if (!next.quote_consumption_unit?.value) next.quote_consumption_unit = { value: r.data!.unit };
+        if (!next.actual_consumption_unit?.value) next.actual_consumption_unit = { value: r.data!.unit };
+        onResponsesChange?.(next); return next;
+      });
+    }).catch(() => {});
+  }, [milestone.step_key, orderId, onResponsesChange]);
+
   // 拍照解析填表入口：把识别出的 { key: value } merge 到 responses
   // 只覆盖 schema 里存在的 key，避免脏数据
   useEffect(() => {
@@ -1252,9 +1267,10 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
                       </label>
                       <input
                         type="number"
-                        step="0.01"
+                        step="0.001"
+                        inputMode="decimal"
                         value={val?.value !== null && val?.value !== undefined ? String(val.value) : ''}
-                        onChange={e => handleChange(item.key, e.target.value ? parseFloat(e.target.value) : null)}
+                        onChange={e => handleChange(item.key, e.target.value === '' ? null : e.target.value)}
                         placeholder={item.helpText || ''}
                         className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
                       />
