@@ -1,7 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/purity */
 import { getOrders } from '@/app/actions/orders';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { computeOrderStatus, getRedCulprits } from '@/lib/utils/order-status';
+import { loadOrderCenterDashboard, ORDER_STAGE_DEFINITIONS } from '@/lib/orders/order-center-dashboard';
+import { OrderCenterDashboardShell } from './OrderCenterDashboardShell';
 import { RedOrderHealthPanel } from '@/components/RedOrderHealthPanel';
 import { OrderSearchBar } from '@/components/OrderSearchBar';
 import { ExportProductionSheetButton } from '@/components/ExportProductionSheetButton';
@@ -38,6 +41,20 @@ function computePhases(milestones: any[]) {
     const total = items.length;
     return { ...phase, done, total, active, blocked, allDone: total > 0 && done === total };
   });
+}
+
+function getCurrentPhaseKey(milestones: any[]): string {
+  const phases = PHASE_KEYS.map((phase, index) => {
+    const items = milestones.filter((m) => phase.keys.includes(m.step_key));
+    const done = items.filter((m) => _isDone(m.status)).length;
+    return {
+      key: ORDER_STAGE_DEFINITIONS[index]?.key || phase.label,
+      total: items.length,
+      allDone: items.length > 0 && done === items.length,
+    };
+  });
+  const current = phases.find((phase) => !phase.allDone && phase.total > 0);
+  return current?.key || 'completed';
 }
 
 // 多维度搜索
@@ -99,7 +116,7 @@ function getSearchDimensions(orders: any[]): {
   };
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string; ship_hold?: string }> }) {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string; ship_hold?: string; detail?: string; view?: string; phase?: string }> }) {
   const params = await searchParams;
   const statusFilter = params?.status || 'active';
   const purposeFilter = params?.purpose || 'production';
@@ -115,6 +132,22 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     | 'created_desc' | 'created_asc'
     | 'qty_desc' | 'qty_asc';
   const shipHoldFilter = params?.ship_hold === 'yes' || params?.ship_hold === 'stale' ? params.ship_hold : '';
+  const showDetailWorkbench = params?.detail === '1' || params?.view === 'list';
+  const phaseFilter = params?.phase || '';
+
+  if (!showDetailWorkbench) {
+    const dashboardRes = await loadOrderCenterDashboard();
+    if (dashboardRes.error || !dashboardRes.data) {
+      return (
+        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+            <p className="text-rose-700">订单中心加载失败: {dashboardRes.error || '未知错误'}</p>
+          </div>
+        </div>
+      );
+    }
+    return <OrderCenterDashboardShell dashboard={dashboardRes.data} searchParams={params || {}} />;
+  }
 
   const { data: allOrders, error } = await getOrders();
 
@@ -214,6 +247,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     if (cmp === 0) cmp = (a.order_no || '').localeCompare(b.order_no || '');
     return cmp;
   });
+  const visibleOrders = phaseFilter
+    ? orders.filter((order: any) => getCurrentPhaseKey(order.milestones || []) === phaseFilter)
+    : orders;
 
   // 搜索维度统计（基于 base orders，不受搜索关键词影响）
   const dimensions = getSearchDimensions(baseOrders);
@@ -227,7 +263,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     typeFilter ||
     merchandiserFilter ||
     salesFilter ||
-    shipHoldFilter
+    shipHoldFilter ||
+    phaseFilter
   );
 
   // 统计超出交期的订单（考虑已批准/待审批的延期申请）
@@ -276,10 +313,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     return acc;
   }, []);
 
-  // 分组：真超期（需要行动） vs 延期申请中（等待审批）
-  const trueOverdue = overdueOrders.filter(x => !x.pendingDelay);
-  const pendingDelayOrders = overdueOrders.filter(x => x.pendingDelay);
-
   // 红单体检（方案 C·B）：把红单按「元凶节点 + 交期远近」归类，挑出「疑似没回填」给跟单补录
   const overdueIds = new Set(overdueOrders.map(x => x.order.id));
   const nowDate = new Date(now);
@@ -314,7 +347,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           <h1 className="text-2xl font-bold text-gray-900">订单列表</h1>
           <p className="mt-1 text-sm text-gray-500">
             共 {allOrders?.length || 0} 个订单
-            {hasFilters && <span className="text-indigo-600 ml-1">（当前显示 {orders.length} 个）</span>}
+            {hasFilters && <span className="text-indigo-600 ml-1">（当前显示 {visibleOrders.length} 个）</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -505,6 +538,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               类型: {{ trial: '试单', bulk: '正常', repeat: '翻单', urgent: '加急', sample: '样品' }[typeFilter] || typeFilter} <span className="text-amber-400">×</span>
             </Link>
           )}
+          {phaseFilter && (
+            <Link
+              href={`/orders?purpose=${purposeFilter}&status=${statusFilter}&sort=${sortOrder}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}${merchandiserFilter ? `&merchandiser=${encodeURIComponent(merchandiserFilter)}` : ''}${salesFilter ? `&sales=${encodeURIComponent(salesFilter)}` : ''}${shipHoldFilter ? `&ship_hold=${shipHoldFilter}` : ''}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-violet-100 text-violet-800 hover:bg-violet-200"
+            >
+              阶段: {PHASE_KEYS.find((phase, index) => ORDER_STAGE_DEFINITIONS[index]?.key === phaseFilter)?.label || phaseFilter} <span className="text-violet-400">×</span>
+            </Link>
+          )}
           {shipHoldFilter && (
             <Link
               href={`/orders?purpose=${purposeFilter}&status=${statusFilter}&sort=${sortOrder}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
@@ -520,7 +561,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         </div>
       )}
 
-      {!orders || orders.length === 0 ? (
+      {!visibleOrders || visibleOrders.length === 0 ? (
         <div className="empty-state rounded-2xl bg-white border border-gray-200">
           <div className="empty-state-icon">{hasFilters ? '🔍' : '📦'}</div>
           <div className="empty-state-title">{hasFilters ? '没有找到匹配的订单' : '暂无订单'}</div>
@@ -547,7 +588,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         <>
         {/* Mobile: card layout */}
         <div className="md:hidden space-y-3">
-          {orders.map((order: any) => {
+          {visibleOrders.map((order: any) => {
             const milestones = (order as any).milestones || [];
             const status = computeOrderStatus(milestones);
             const statusConfig = {
@@ -612,7 +653,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               </tr>
             </thead>
             <tbody>
-              {orders.map((order: any) => {
+              {visibleOrders.map((order: any) => {
                 const milestones = (order as any).milestones || [];
                 const status = computeOrderStatus(milestones);
                 const statusConfig = {

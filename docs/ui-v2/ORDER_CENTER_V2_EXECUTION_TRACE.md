@@ -4,11 +4,20 @@ Date: 2026-07-16
 Branch context: `feat/order-center-qimo-v2`
 Source of truth: current `origin/main` after PR #29 and PR #30 merges
 
+## Current branch implementation status
+
+The current `feat/order-center-qimo-v2` branch now introduces a presentation-only Order Center dashboard shell on top of existing order truth:
+
+- `/orders` defaults to a summary-first dashboard shell when `detail` is not requested.
+- The legacy order table/workbench is preserved behind `?detail=1` or `?view=list`.
+- The new shell uses shared `qimo-v2` primitives rather than creating a second component family.
+- No mutation paths were changed.
+
 ## 1. Current route map
 
 | Route | Current role | Current purpose | Notes |
 | --- | --- | --- | --- |
-| `/orders` | Primary order list / workbench hybrid | Search, filter, inspect and drill into orders | Table-first page; fetches all orders up front via `getOrders()` and filters/sorts in-memory |
+| `/orders` | Primary order list / workbench hybrid | Summary dashboard + legacy workbench entry | Dashboard shell by default; detailed table/workbench behind `?detail=1` |
 | `/orders/new` | Order intake entry | Create order from PO / legacy intake mode selector | Server-gated by role; still a form/workflow page, not a dashboard shell |
 | `/orders/[id]` | Order detail workspace | Manage one order end-to-end | Dense multi-tab detail page with many action panels, approvals, and operational tools |
 | `/orders/from-araos` | ARAOS handoff bridge | Import confirmed PO / ARAOS-originated order data | Bridge surface, not part of the core execution-chain dashboard |
@@ -21,7 +30,18 @@ Source of truth: current `origin/main` after PR #29 and PR #30 merges
 
 ### `/orders`
 
-Current structure:
+Current structure when `detail !== 1`:
+
+1. compact header
+2. quick-entry row
+3. KPI summary
+4. stage overview
+5. today tasks
+6. approvals
+7. risks
+8. collapsed detailed-order section
+
+Current structure when `detail=1` or `view=list`:
 
 1. page title / top controls
 2. order purpose tabs
@@ -34,10 +54,9 @@ Current structure:
 
 Observed behavior:
 
-- The page is table-first, not dashboard-first.
-- It loads all orders through `getOrders()` and then performs client/server-side filtering and sorting in the page.
-- The list and the summary are tightly coupled, so the page doubles as overview and workbench.
-- It still exposes many direct actions in-page, which makes the page long and dense.
+- The page is now dashboard-first by default and only loads the heavy workbench when requested.
+- The detailed workbench still uses the existing `getOrders()` path and the full row actions.
+- The summary shell is read-only and derives KPI/stage/task/risk summaries from existing order truth.
 
 ### `/orders/[id]`
 
@@ -107,15 +126,17 @@ Observed behavior:
 
 Current data path:
 
-- page component calls `getOrders()`
-- page performs purpose filtering, completion grouping, ship-hold filtering, search, and sorting
-- summary dimensions are derived from the fetched order array
-- desktop table and mobile card list are rendered from the filtered array
+- dashboard shell calls `loadOrderCenterDashboard()`
+- summary loader fetches only the order fields needed for KPI/stage/risk summaries plus daily tasks and approvals
+- detailed workbench path continues to call `getOrders()`
+- detail path performs purpose filtering, completion grouping, ship-hold filtering, search, and sorting
+- summary dimensions are derived from the summarized order array
+- desktop table and mobile card list are rendered only in detail mode
 
 Implications:
 
-- The initial render depends on a broad order payload rather than summary-only queries.
-- The page is doing both dashboard and workbench jobs at once.
+- Initial module-center render is now summary-only.
+- The workbench and dashboard responsibilities are separated by route parameter rather than mixed on the home view.
 
 ### `/orders/[id]`
 
@@ -163,9 +184,9 @@ Implications:
 | Quick entry label | Real route | Notes |
 | --- | --- | --- |
 | 新建订单 | `/orders/new` | Canonical intake entry |
-| 订单执行工作台 | `/orders` | Existing operational workbench / list hybrid |
-| 风险订单 | `/risk-orders/[type]` | Real route family; choose `red`, `yellow`, `blocked`, or `overdue` depending on the card |
-| 待补资料 | No dedicated `/orders/*` route exists today | Closest existing surfaces are `/my-today` and the order detail banners / missing-info tasks; this needs a presentation-only adapter or a dedicated filtered route in the migration |
+| 订单执行工作台 | `/orders?detail=1` | Existing operational workbench / list hybrid, kept behind lazy detail mode |
+| 风险订单 | `/risk-orders/overdue` | Real route family; other risk variants remain reachable from the list family |
+| 待补资料 | `/my-today` | Closest existing surface for missing-info tasks until a dedicated filtered route is added |
 
 ## 6. KPI / status truth already in use
 
@@ -178,7 +199,7 @@ Relevant existing predicates and groupings:
 - lifecycle completion grouping on `completed` / `cancelled` / `已完成` / `已取消`
 - risk-order families: `red`, `yellow`, `green`, `blocked`, `overdue`, `pending`
 
-Likely module-center KPI candidates based on current truth:
+Likely module-center KPI candidates based on current truth and current read model:
 
 - 待确认 PO
 - 待建单
@@ -224,4 +245,4 @@ The safest first step is a presentation-only module-center shell on top of exist
 5. today tasks / approvals / risks with top-five summary queries
 6. collapsed detailed order list, loading lazily or linking to the workbench
 
-This should be implemented with summary adapters only; no schema change and no lifecycle change.
+This has now been implemented as a summary-first shell for `/orders`, while the legacy workbench remains available behind explicit detail navigation.
