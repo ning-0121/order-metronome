@@ -9,9 +9,11 @@ interface CustomerSelectProps {
   onSelect?: (customer: Customer | null) => void;
   /** 初始显示名（可选） */
   initialName?: string;
+  selectedValue?: { id: string; name: string } | null;
+  suggestedName?: string;
 }
 
-export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = {}) {
+export function CustomerSelect({ onSelect, initialName, selectedValue, suggestedName }: CustomerSelectProps = {}) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selected, setSelected] = useState<Customer | null>(null);
   const [query, setQuery] = useState(initialName ?? '');
@@ -26,6 +28,9 @@ export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = 
   const [createError, setCreateError] = useState('');
 
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const controlled = selectedValue !== undefined;
+  const effectiveId = controlled ? selectedValue?.id || '' : selected?.id || '';
+  const effectiveName = controlled ? selectedValue?.name || '' : selected?.customer_name || '';
 
   useEffect(() => {
     getCustomers()
@@ -44,6 +49,12 @@ export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = 
       });
   }, []);
 
+  useEffect(() => {
+    if (controlled && !loading && !loadError && effectiveId && !customers.some(customer => customer.id === effectiveId)) {
+      onSelect?.(null);
+    }
+  }, [controlled, loading, loadError, effectiveId, customers, onSelect]);
+
   // 点击外部关闭下拉
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -55,12 +66,13 @@ export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = 
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  const searchText = effectiveId ? effectiveName : query;
   const filtered = customers.filter(c =>
-    c.customer_name.toLowerCase().includes(query.toLowerCase())
+    c.customer_name.toLowerCase().includes(searchText.toLowerCase())
   );
 
   function handleSelect(c: Customer) {
-    setSelected(c);
+    if (!controlled) setSelected(c);
     setQuery(c.customer_name);
     setOpen(false);
     onSelect?.(c);
@@ -97,19 +109,19 @@ export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = 
       <div className="relative">
         <input
           type="text"
-          value={query}
+          value={effectiveId ? effectiveName : query}
           onChange={e => {
             setQuery(e.target.value);
-            if (selected) onSelect?.(null);
-            setSelected(null);
+            if (effectiveId) onSelect?.(null);
+            if (!controlled) setSelected(null);
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder={loading ? '加载中...' : '搜索或选择客户'}
+          placeholder={loading ? '加载中...' : suggestedName ? `AI识别“${suggestedName}”，请搜索确认` : '搜索或选择客户'}
           autoComplete="off"
           className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 pr-8"
         />
-        {selected && (
+        {effectiveId && (
           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-green-500 text-sm">✓</span>
         )}
       </div>
@@ -118,11 +130,11 @@ export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = 
       )}
 
       {/* Hidden inputs for form submission */}
-      <input type="hidden" name="customer_id" value={selected?.id || ''} />
-      <input type="hidden" name="customer_name" value={selected?.customer_name || ''} />
+      <input type="hidden" name="customer_id" value={effectiveId} />
+      <input type="hidden" name="customer_name" value={effectiveName} />
 
       {/* 建单时客户经验提醒（Phase 1：只读提醒） */}
-      <CustomerMemoReminder customerName={selected?.customer_name || null} />
+      <CustomerMemoReminder customerName={effectiveName || null} />
 
       {/* 下拉列表 */}
       {open && !showCreate && (
@@ -138,7 +150,7 @@ export function CustomerSelect({ onSelect, initialName }: CustomerSelectProps = 
               type="button"
               onClick={() => handleSelect(c)}
               className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 transition-colors ${
-                selected?.id === c.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700'
+                effectiveId === c.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700'
               }`}
             >
               {c.customer_name}

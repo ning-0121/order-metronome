@@ -40,6 +40,8 @@ export function clearSafeOrderDraft(storage: Pick<Storage, 'removeItem'> = sessi
 
 export function restoreSafeOrderDraft(form: HTMLFormElement, draft: SafeOrderDraft) {
   for (const [name, value] of draft.fields) {
+    // CustomerSelect owns this pair as one canonical value. The parent restores it atomically.
+    if (name === 'customer_id' || name === 'customer_name') continue;
     const field = form.elements.namedItem(name);
     if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) continue;
     if (field instanceof HTMLInputElement && (field.type === 'file' || field.type === 'password')) continue;
