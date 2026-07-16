@@ -26,6 +26,10 @@ export interface ProductionOrderRow {
   style_no: string | null;
   production_follow_up_id: string | null;
   production_follow_up_name: string | null;
+  business_execution_owner_id?: string | null;
+  business_execution_owner_name?: string | null;
+  production_manager_owner_id?: string | null;
+  production_manager_owner_name?: string | null;
   pending_delay: boolean;
   customer_name: string | null;
   factory_name: string | null;
@@ -84,8 +88,8 @@ export async function getProductionCenter(): Promise<{
 
   // 建单即进(仅排除 已取消/已完成/归档;保留 draft/pending_approval/active)
   // production_stage_manual(20260708 迁移)未执行时降级不带该列(全按 auto 推算),否则整页变空(2026-07-08)
-  const OSEL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, production_stage_manual';
-  const OSEL_NO_MANUAL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status';
+  const OSEL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, owner_user_id, created_by, production_stage_manual';
+  const OSEL_NO_MANUAL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, owner_user_id, created_by';
   const runOrders = (sel: string) => {
     let q = (svc.from('orders') as any)
       .select(sel)
@@ -131,9 +135,19 @@ export async function getProductionCenter(): Promise<{
   const pendingDelaySet = new Set<string>((pendingDelays || []).map((r: any) => r.order_id));
   const followUpIdByOrder = new Map<string, string>();
   for (const m of (ms || []) as any[]) if (m.owner_role === 'production' && m.owner_user_id && !followUpIdByOrder.has(m.order_id)) followUpIdByOrder.set(m.order_id, m.owner_user_id);
-  const followUpIds = [...new Set(followUpIdByOrder.values())];
-  const { data: followUps } = followUpIds.length ? await (svc.from('profiles') as any).select('user_id, name').in('user_id', followUpIds) : { data: [] };
-  const followUpNames = new Map<string, string>((followUps || []).map((p: any) => [p.user_id, p.name || '—']));
+  const responsibilityByOrder = new Map<string, Map<string, string>>();
+  const rr = await (svc.from('order_responsibilities') as any).select('order_id,responsibility_type,user_id').in('order_id', orderIds).eq('status', 'active');
+  if (!rr.error) for (const r of (rr.data || []) as any[]) {
+    const map = responsibilityByOrder.get(r.order_id) || new Map<string, string>(); map.set(r.responsibility_type, r.user_id); responsibilityByOrder.set(r.order_id, map);
+    if (r.responsibility_type === 'production_follow_up_owner') followUpIdByOrder.set(r.order_id, r.user_id);
+  }
+  const responsibilityIds = new Set<string>();
+  for (const o of list) responsibilityIds.add(responsibilityByOrder.get(o.id)?.get('business_execution_owner') || o.owner_user_id || o.created_by);
+  for (const m of responsibilityByOrder.values()) for (const id of m.values()) responsibilityIds.add(id);
+  for (const id of followUpIdByOrder.values()) responsibilityIds.add(id);
+  responsibilityIds.delete(undefined as any); responsibilityIds.delete(null as any);
+  const { data: responsibilityProfiles } = responsibilityIds.size ? await (svc.from('profiles') as any).select('user_id, name').in('user_id', [...responsibilityIds]) : { data: [] };
+  const responsibilityNames = new Map<string, string>((responsibilityProfiles || []).map((p: any) => [p.user_id, p.name || '—']));
 
   const today = new Date().toISOString().slice(0, 10);
   const rows: ProductionOrderRow[] = [];
@@ -153,7 +167,11 @@ export async function getProductionCenter(): Promise<{
       order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no,
       po_number: o.po_number, style_no: o.style_no, customer_name: o.customer_name,
       production_follow_up_id: followUpIdByOrder.get(o.id) || null,
-      production_follow_up_name: followUpNames.get(followUpIdByOrder.get(o.id) || '') || null,
+      production_follow_up_name: responsibilityNames.get(followUpIdByOrder.get(o.id) || '') || null,
+      business_execution_owner_id: responsibilityByOrder.get(o.id)?.get('business_execution_owner') || o.owner_user_id || o.created_by || null,
+      business_execution_owner_name: responsibilityNames.get(responsibilityByOrder.get(o.id)?.get('business_execution_owner') || o.owner_user_id || o.created_by || '') || null,
+      production_manager_owner_id: responsibilityByOrder.get(o.id)?.get('production_manager_owner') || null,
+      production_manager_owner_name: responsibilityNames.get(responsibilityByOrder.get(o.id)?.get('production_manager_owner') || '') || null,
       pending_delay: pendingDelaySet.has(o.id),
       factory_name: o.factory_name, quantity: o.quantity,
       factory_date: o.factory_date ? String(o.factory_date).slice(0, 10) : null,

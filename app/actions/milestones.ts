@@ -458,6 +458,18 @@ export async function markMilestoneDone(
     }
   }
 
+  // Central release gate: the physical shipment node must satisfy the same
+  // Business Execution / QC / Logistics / Finance / document checks in every
+  // completion path. This is server-side; UI visibility is never the control.
+  if (milestone.step_key === 'shipment_execute') {
+    const { getShipmentReleaseGate } = await import('@/app/actions/shipment-release');
+    const gate = await getShipmentReleaseGate(milestone.order_id);
+    if (gate.error) return { error: gate.error };
+    if (!gate.data?.allowed) {
+      return { error: `暂不能出货：${gate.data?.blockers.map((b) => `${b.label}（${b.nextAction}）`).join('；') || '出货条件未满足'}` };
+    }
+  }
+
   // ── V2 多方确认门禁(P1b 2026-07-03)──
   // V2 多方节点(PO确认/产前会/产前样/尾查/发货出运):所有要求方确认完毕才能完成。
   // 配置在 lib/domain/confirmationParties.ts;V1 节点不在配置里,零影响。
@@ -1707,12 +1719,14 @@ export async function updateMilestoneOwner(
 export async function assignMerchandiser(
   orderId: string,
   merchandiserUserId: string,
-  kind: 'merchandiser' | 'production' = 'merchandiser'
+  kind: 'merchandiser' | 'production' = 'merchandiser',
+  assignmentReason?: string,
 ): Promise<{ data?: { updated: number }; error?: string }> {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  if (!assignmentReason?.trim()) return { error: '指派或改派必须填写原因' };
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -1813,6 +1827,15 @@ export async function assignMerchandiser(
   if (updated.length === 0) {
     return { error: '指派失败:0 行被更新(数据库权限/RLS 拦截或节点已变)。请刷新后重试或联系管理员。' };
   }
+
+  // 新 responsibility truth 可用时同步写入；表未迁移时兼容旧里程碑流程。
+  const responsibilityType = kind === 'production' ? 'production_follow_up_owner' : 'business_execution_owner';
+  const { tryWriteOrderResponsibility } = await import('@/app/actions/order-responsibilities');
+  const responsibilityWrite = await tryWriteOrderResponsibility({
+    orderId, type: responsibilityType, userId: merchandiserUserId,
+    reason: assignmentReason.trim(), sourceType: kind === 'production' ? 'workflow' : 'handoff',
+  });
+  if (!responsibilityWrite.ok) return { error: responsibilityWrite.error };
 
   // 日志(同样走 service-role,避免被 RLS 拦)
   const updatedCount = updated.length;

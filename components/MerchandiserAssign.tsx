@@ -18,6 +18,7 @@ export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'm
   const [candidates, setCandidates] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState('');
+  const [reason, setReason] = useState('');
   // 候选人加载态(修 P3 2026-07-09:此前只 if(res.data),失败/空态无反馈、且空态每次 open 重复请求 → 用户以为死了)
   const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle');
   const [error, setError] = useState('');
@@ -31,10 +32,10 @@ export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'm
   }, [open, fetchState, kind]);
 
   async function handleAssign() {
-    if (!selectedId) return;
+    if (!selectedId || !reason.trim()) return;
     setLoading(true); setError('');
     try {
-      const result = await assignMerchandiser(orderId, selectedId, kind);
+      const result = await assignMerchandiser(orderId, selectedId, kind, reason.trim());
       if (result.error) setError(result.error);
       else { setOpen(false); router.refresh(); }
     } finally { setLoading(false); }
@@ -78,9 +79,15 @@ export function MerchandiserAssign({ orderId, currentMerchandiserName, kind = 'm
               </option>
             ))}
           </select>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={currentMerchandiserName ? '填写改派原因（必填）' : '填写指派原因（必填）'}
+            className="text-sm border border-gray-300 rounded-lg px-2 py-1 bg-white min-w-48"
+          />
           <button
             onClick={handleAssign}
-            disabled={loading || !selectedId}
+            disabled={loading || !selectedId || !reason.trim()}
             className="text-xs px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {loading ? '...' : '确认'}

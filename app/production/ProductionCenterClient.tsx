@@ -176,6 +176,9 @@ export function ProductionCenterClient({ rows, summary, canAssign = false }: { r
                       {r.risk && <span className="ml-1 text-[11px] text-red-600">⚠</span>}
                       <div className="text-xs text-gray-500">{r.customer_name || '—'}</div>
                       <div className="text-[11px] text-gray-400">内部单号: {r.internal_order_no || '—'} · PO: {r.po_number || '—'} · 款号: {r.style_no || '—'}</div>
+                      <div className="mt-1 text-[11px] text-gray-500">
+                        总负责人: {r.business_execution_owner_name || '—'} · 生产主管: {r.production_manager_owner_name || '—'} · 跟单/QC: {r.follow_up_name || '—'}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${STAGE_BADGE[r.stage]}`}>{STAGE_LABEL[r.stage]}</span>
