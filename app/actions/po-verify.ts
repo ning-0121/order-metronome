@@ -134,7 +134,7 @@ async function extractDocument(fileBase64: string, fileType: string, fileName: s
   }
   const result = await qimoAI.generateObject({
     scene, capability: 'structured-extraction', logicalModel: 'qimo.structured-extraction', riskLevel: 'high',
-    prompt, schema: extractedDocumentSchema, image, file, timeoutMs: 45_000, maxOutputTokens: 2048, fallback: 'allowed',
+    prompt, schema: extractedDocumentSchema, image, file, timeoutMs: 45_000, maxOutputTokens: 2048, fallback: 'disabled',
   });
   return result.data;
 }

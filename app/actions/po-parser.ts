@@ -236,7 +236,7 @@ export async function parsePO(
       scene: 'order.po.parse', capability: 'structured-extraction',
       logicalModel: 'qimo.structured-extraction', riskLevel: 'high',
       system: SYSTEM_PROMPT, prompt, schema: poParsedSchema, image, file: inputFile,
-      timeoutMs: 45_000, maxOutputTokens: 8192, fallback: 'allowed',
+      timeoutMs: 45_000, maxOutputTokens: 8192, fallback: 'disabled',
     });
     const parsed = result.data;
 
@@ -290,8 +290,18 @@ export async function parsePO(
     const runtimeCause = runtimeError?.cause as { lastError?: AIRuntimeError } | undefined;
     const isTimeout = runtimeError?.code === 'TIMEOUT' || runtimeCause?.lastError?.code === 'TIMEOUT';
     logAICall('po_parse', orderId || null, isTimeout ? 'timeout' : 'error', Date.now() - startedAt, message.slice(0, 200)).catch(() => {});
-    if (runtimeError?.code === 'ALL_PROVIDERS_FAILED') return { ok: false, error: 'AI 识别服务当前不可用，未保存任何识别数据。请稍后重试或联系管理员检查 Provider 配置。' };
-    return { ok: false, error: `解析失败：${runtimeError?.code ?? message}` };
+    const lastCode = runtimeCause?.lastError?.code;
+    const code = lastCode || runtimeError?.code;
+    const safe = code === 'MODEL_NOT_CONFIGURED' || code === 'AUTHENTICATION'
+      ? 'AI 配置缺失，请联系管理员检查模型或访问权限'
+      : code === 'RATE_LIMIT'
+        ? 'AI 服务当前请求过多，请稍后重试'
+        : code === 'PROVIDER_UNAVAILABLE' || code === 'ALL_PROVIDERS_FAILED'
+          ? 'AI 模型当前不可用，请稍后重试或改用手工录入'
+          : code === 'SCHEMA_MISMATCH' || code === 'INVALID_JSON' || code === 'EMPTY_RESPONSE' || code === 'REFUSAL'
+            ? 'PO 内容提取失败，请核对文件后重试或改用手工录入'
+            : isTimeout ? 'PO 识别超时，请稍后重试或改用手工录入' : 'PO 识别失败，请改用手工录入';
+    return { ok: false, error: safe };
   }
 }
 

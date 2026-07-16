@@ -301,7 +301,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
         console.error('[PO auto-parse] 全部解析失败', failures);
         // 2026-07-03:此前静默 return,用户只看到「快但啥也没填」。改成可见错误,暴露真实原因。
         const reasons = failures.map(f => `${f.fileName}: ${f.error}`).join('；');
-        showError(`PO 识别失败,未能预填:${reasons || '未知原因'}。（服务器繁忙类可直接重试;其余可手工填写)`);
+        showError(`PO 识别未完成：${reasons || '提取失败'}。你仍可继续手工填写并创建订单。`);
         return;
       }
 
