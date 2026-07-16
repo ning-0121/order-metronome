@@ -2,6 +2,10 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createOrder, preGenerateOrderNo } from '@/app/actions/orders';
+import {
+  clearSafeOrderDraft, isStaleServerActionError, loadSafeOrderDraft, restoreSafeOrderDraft,
+  saveSafeOrderDraft, STALE_SERVER_ACTION_MESSAGE,
+} from '@/lib/order/create-order-resilience';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { CustomerSelect } from '@/components/CustomerSelect';
@@ -122,6 +126,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState<Step>(1);
   const [loading, setLoading] = useState(false);
+  const [staleActionDetected, setStaleActionDetected] = useState(false);
+  const stepOneFormRef = React.useRef<HTMLFormElement>(null);
+  const createSubmissionInFlight = React.useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<any[]>([]);
@@ -564,6 +571,17 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     }
   }, [currentStep, preGeneratedOrderNo]);
 
+  useEffect(() => {
+    if (currentStep !== 1 || !stepOneFormRef.current) return;
+    const draft = loadSafeOrderDraft();
+    if (!draft) return;
+    restoreSafeOrderDraft(stepOneFormRef.current, draft);
+    showError('已恢复上次刷新前保存的表单文字内容。出于浏览器安全限制，请重新选择客户 PO 和内部报价文件。');
+    // Restore once only. A later stale-action failure writes a fresh draft.
+    clearSafeOrderDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
+
   const errorRef = React.useRef<HTMLDivElement>(null);
   const bottomErrorRef = React.useRef<HTMLDivElement>(null);
 
@@ -971,6 +989,8 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
   /** 实际创建订单 */
   async function doCreateOrder(rawFormData: FormData, filesToUpload: { file: File; fileType: string; label: string }[]) {
+    if (createSubmissionInFlight.current) return;
+    createSubmissionInFlight.current = true;
     setLoading(true);
     // 订单用途标记:样品单 > 采购成品/贸易订单 / 委托加工·外发单 > 生产(默认)
     if (isSampleOrder) {
@@ -992,6 +1012,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
           if (confirmDup) {
             rawFormData.set('confirm_duplicate', 'true');
             setLoading(false);
+            createSubmissionInFlight.current = false;
             await doCreateOrder(rawFormData, filesToUpload);
             return;
           }
@@ -1003,6 +1024,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
       }
 
       const newOrderId = result.orderId!;
+      clearSafeOrderDraft();
       setOrderId(newOrderId);
 
       if (filesToUpload.length > 0) {
@@ -1021,8 +1043,15 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
       setCurrentStep(2);
 
     } catch (err: any) {
-      showError(err?.message || '创建订单时发生意外错误');
+      if (isStaleServerActionError(err)) {
+        saveSafeOrderDraft(rawFormData);
+        setStaleActionDetected(true);
+        showError(STALE_SERVER_ACTION_MESSAGE + '\n客户 PO 和内部报价文件不会保存在浏览器中，刷新后需要重新选择。');
+      } else {
+        showError(err?.message || '创建订单时发生意外错误');
+      }
     } finally {
+      createSubmissionInFlight.current = false;
       setLoading(false);
     }
   }
@@ -1067,6 +1096,12 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
       {error && (
         <div ref={errorRef} className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-800 whitespace-pre-line">
           <span className="font-medium">⚠ 创建失败：</span>{error}
+          {staleActionDetected && (
+            <button type="button" onClick={() => window.location.reload()}
+              className="ml-3 rounded-md bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800">
+              刷新页面
+            </button>
+          )}
         </div>
       )}
 
@@ -1184,7 +1219,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
             )}
           </div>
 
-          <form onSubmit={handleStep1Submit} className="space-y-8"
+          <form ref={stepOneFormRef} onSubmit={handleStep1Submit} className="space-y-8"
             onKeyDown={(e) => {
               // 2026-07-03 事故:输入框里按回车 = 浏览器隐式提交整表(业务没填完就"自动提交",
               // 看起来像被 AI 接管)。拦死:回车只用于换行/确认输入,提交必须手点「提交订单」按钮。

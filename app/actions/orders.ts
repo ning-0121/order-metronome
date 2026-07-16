@@ -188,6 +188,17 @@ export async function createOrder(
   const colorCount = formData.get('color_count') as string | null;
 
   if (!internal_order_no?.trim()) return { ok: false, error: '请填写内部订单号（订单册编号），财务需要此编号进行核算' };
+  // Stable submission idempotency: a retry after a lost/stale response reuses the order created
+  // by this user and this pre-generated order number. It never creates or mutates another order.
+  {
+    const { data: prior } = await (supabase.from('orders') as any)
+      .select('id, internal_order_no, created_by')
+      .eq('order_no', preGeneratedOrderNo)
+      .maybeSingle();
+    if (prior && (prior as any).created_by === user.id && (prior as any).internal_order_no === internal_order_no.trim()) {
+      return { ok: true, orderId: (prior as any).id };
+    }
+  }
   // 防内部单号撞车(2026-07-04 审计):同一内部单号只能有一张活跃订单,否则财务按内部号对账会串单。
   {
     const { data: dupIno } = await (supabase.from('orders') as any)
