@@ -9,6 +9,7 @@
     "lint": "eslint",
     "check": "npx tsx scripts/pre-deploy-check.ts && npx tsx scripts/test-runtime-confidence.ts && npx tsx scripts/test-mrp.ts && npx tsx scripts/test-inventory-w3.ts && npx tsx scripts/test-procurement-execution.ts && npx tsx scripts/test-material-catalog.ts && npx tsx scripts/test-inventory-scp2.ts && npx tsx scripts/test-procurement-kernel.ts && npx tsx scripts/test-schedule-floors.ts && npx tsx scripts/test-delay-reschedule.ts",
     "test:runtime": "npx tsx scripts/test-runtime-confidence.ts",
+    "test:server-action-resilience": "npx tsx scripts/test-server-action-resilience.ts",
     "test:mrp": "npx tsx scripts/test-mrp.ts",
     "test:production-task": "npx tsx scripts/test-production-task-template.ts",
     "test:inventory": "npx tsx scripts/test-inventory-w3.ts",

@@ -1,24 +1,16 @@
 /**
- * Service Worker — 让系统像 App 一样离线可用
- *
- * 策略：Network First + Cache Fallback
- * - 有网络时从服务器拿最新内容
- * - 离线时显示缓存版本
- * - 静态资源（CSS/JS/图片）缓存 7 天
+ * Service Worker — cache only deployment-neutral static assets.
+ * Never cache HTML, RSC/navigation responses, Next.js chunks, or Server Actions:
+ * those resources contain build-specific Server Action references.
  */
 
-const CACHE_NAME = 'qimo-v1';
-const OFFLINE_URL = '/';
+const CACHE_NAME = 'qimo-static-v2';
 
 // 安装：预缓存关键资源
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll([
-        OFFLINE_URL,
-        '/manifest.json',
-        '/icon.svg',
-      ]);
+      return cache.addAll(['/manifest.json', '/icon.svg']);
     })
   );
   self.skipWaiting();
@@ -38,12 +30,13 @@ self.addEventListener('activate', (event) => {
 
 // 拦截请求
 self.addEventListener('fetch', (event) => {
-  // 跳过非 GET 请求
   if (event.request.method !== 'GET') return;
-
-  // 跳过 API 请求（不缓存动态数据）
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/')) return;
+  if (url.origin !== self.location.origin) return;
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') return;
+  if (url.pathname.startsWith('/_next/') || url.pathname.startsWith('/api/')) return;
+  if (event.request.headers.get('RSC') || event.request.headers.get('Next-Action')) return;
+  if (!['image', 'font'].includes(event.request.destination) && !['/manifest.json', '/icon.svg'].includes(url.pathname)) return;
 
   event.respondWith(
     fetch(event.request)
@@ -57,11 +50,6 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => {
-        // 网络失败 → 从缓存拿
-        return caches.match(event.request).then((cached) => {
-          return cached || caches.match(OFFLINE_URL);
-        });
-      })
+      .catch(() => caches.match(event.request).then((cached) => cached || Response.error()))
   );
 });
