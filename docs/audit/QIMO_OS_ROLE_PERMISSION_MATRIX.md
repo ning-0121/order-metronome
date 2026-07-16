@@ -1,5 +1,16 @@
 # QIMO OS Role and Permission Matrix
 
+> CEO correction (2026-07-16): role membership, per-order responsibility and approval authority are independent truths. `merchandiser` is Business Execution and remains overall order owner through shipment/closure. `production_manager` alone finalizes factory and production schedule. `production` is the combined Production Follow-up/QC and remains factory-side owner through shipment. Administrative supervision is visibility/escalation only.
+
+| Decision | Allowed | Explicitly denied |
+|---|---|---|
+| Special price | sales_manager; explicit audited admin override | execution/production/procurement |
+| Customer commitment change | order_manager or sales_manager according to commercial ownership | production acting alone |
+| Production delay | production_manager | requester self-approval / production self-approval |
+| Final factory and schedule | production_manager; audited admin override | merchandiser, production, logistics |
+| QC release | authorized production/QC responsibility | logistics, sales |
+| Payment | authenticated Finance workflow | AI, procurement, production, execution |
+
 Canonical application roles are defined in `lib/domain/roles.ts`. `profiles.roles[]` is preferred over legacy `profiles.role`.
 
 | Role | Primary scope | Create/edit | Assign | Approve/reject | Sensitive values | Key restrictions |

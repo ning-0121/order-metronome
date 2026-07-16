@@ -10,6 +10,8 @@
 
 ## 30 天执行顺序
 
+角色责任纠偏优先插入 Phase 1：评审并应用 additive `order_responsibilities`；先以 `orders.owner_user_id` 兼容派生 Business Execution owner，再让新交接/定厂/排产/指派写入并行 responsibility。禁止历史批量回填，旧单仅在人工变更责任时进入新模型。
+
 1. 48 小时内处理 SEC-003 和 FIN-007，并为 ORD-001/PROC-002 增加运营对账。
 2. 第 1 周完成订单创建事务设计、收货 outbox schema 与 QC release gate RFC。
 3. 第 2 周分别上线订单事务和采购 outbox，禁止合并成一个不可回滚发布。

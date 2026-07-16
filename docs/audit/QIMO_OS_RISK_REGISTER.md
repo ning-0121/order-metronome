@@ -18,6 +18,8 @@
 | KPI-012 | P2 | Analytics | 取消/测试/贸易单、时区及“避免损失”口径不统一 | 多个 dashboard/analytics 查询 | 实际同名 KPI 口径不同；期望版本化定义 | 落实 KPI register 和共享 predicates；M | 固定数据集跨页面一致；中风险 |
 | UX-013 | P2 | 操作恢复 | 部分失败只 toast/log，异常未进入有 owner 的队列 | 多处 server action/UI catch | 实际需人工发现；期望 actionable exception queue | 统一安全错误分类与责任人；M | 故障均生成下一动作；低风险 |
 | DEBT-014 | P3 | 工程 | 旧文件存在大量 `any`，Next metadata/middleware 警告 | scoped lint 197 errors/18 warnings；build warnings | 实际构建通过但类型边界弱 | 按模块偿债，不阻塞业务热修；M | 新代码零新增 lint debt；低风险 |
+| ROLE-015 | P1 | 角色/工作流 | 单一 `orders.owner_user_id` + 节点 owner 无法完整表达业务执行、生产主管、生产跟单/QC、物流并行责任 | orders/milestones schema；生产跟单从节点推导 | 实际容易在指派时替换责任或提前结束；期望 additive responsibility truth | 新增 `order_responsibilities`，不回填历史；M | handoff/assignment/shipment owner invariants；需 migration 审批 |
+| ROLE-016 | P1 | RBAC | 未知/空角色静默降级为 sales | `lib/domain/roles.ts::normalizeRoleToDb` | 实际 fail-open；期望拒绝未知角色 | 本分支已改为 throw/fail closed；S | unknown-role regression；低风险 |
 
 ## 立即控制
 

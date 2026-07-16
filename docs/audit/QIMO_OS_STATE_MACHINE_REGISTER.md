@@ -1,5 +1,13 @@
 # QIMO OS State-Machine Register
 
+## Responsibility invariants
+
+- Confirmed handoff adds Business Execution ownership; Development retains customer-commercial-change visibility only.
+- Factory/schedule confirmation is a Production Manager decision with actor/time/reason.
+- Assigning Production Follow-up/QC adds responsibility; it never replaces the order owner.
+- Packing/shipment retain Business Execution and Production Follow-up/QC while adding Logistics.
+- A customer-impacting production delay requires production approval followed by commercial confirmation.
+
 | Machine | Canonical states evidenced | Owner / transition guard | Side effects | Audit gaps |
 |---|---|---|---|---|
 | Order lifecycle | draft, active/in_progress, completed, cancelled, archived plus Chinese legacy aliases | order roles/managers; lifecycle guards | milestones, finance sync, notifications | duplicate bilingual status definitions; late initialization is non-atomic |

@@ -1,5 +1,7 @@
 # QIMO OS Golden Path
 
+> Responsibility correction: after commercial PO confirmation, Business Execution becomes overall owner through final shipment and closure. Production Manager adds manufacturing-resource ownership and exclusively finalizes factory/schedule. Production Follow-up/QC adds factory-side ownership through shipment. Adding a specialist owner never replaces Business Execution.
+
 Status values: **PASS** means a code-backed owner/action/output exists; **PARTIAL** means the path exists but is non-atomic, incomplete or awaits employee validation; **FAIL** means a business-truth violation or disconnected chain is evidenced.
 
 | Step | Trigger / role | Input and source of truth | Action / output / next state | Evidence | Status |

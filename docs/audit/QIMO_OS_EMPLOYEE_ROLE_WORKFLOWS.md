@@ -1,5 +1,15 @@
 # QIMO OS Employee Role Workflows
 
+## Corrected ownership model
+
+- Business Development ends ordinary ownership at confirmed PO handoff, retaining customer commercial-change responsibility.
+- Business Execution becomes overall order owner and remains accountable through final shipment and closure.
+- Production Manager owns final factory, schedule, capacity and assignment decisions.
+- Combined Production Follow-up/QC owns factory-side execution and quality from confirmed schedule through shipment.
+- Procurement, Logistics and Finance add specialist responsibility; none replaces the two operational owners.
+
+Daily workbench intent: Development sees lead/quote/sample/PO handoff; Execution sees new PO, missing documents, procurement/production/customer/shipment coordination and closure; Production Manager sees production intake, factory, schedule, assignment, delay and major QC risk; Follow-up/QC sees material/cutting/online/first-piece/inline/final/reinspection/packing/shipment; Logistics sees gated shipment work; Finance sees financial review/receivable/payable/cost/reconciliation/settlement.
+
 ## Sales / Business Development
 
 Customer/quote -> upload or manually enter PO -> review AI prefill -> obtain internal order number from Finance offline -> create Order -> complete PO handoff -> remain owner of customer-facing commitment and commercial revisions.

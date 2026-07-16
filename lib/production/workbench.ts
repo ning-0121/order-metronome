@@ -30,10 +30,20 @@ export function classifyProductionTasks(row: ProductionOrderRow, role: Workbench
     if (row.stage === 'in_production' && row.kickoff?.due === today()) add('online_today', '今日应上线', '开裁节点今天到期且订单进入生产', '确认上线状态', true);
     if (row.risk) add('overdue', '已超期', '生产节点已经超过计划日期', '立即处理风险', true);
   } else if (role === 'follow_up') {
-    if (!row.factory_name) add('contact_factory', '待联系工厂', '订单尚未选定工厂', '联系并提交工厂选择');
+    if (row.production_follow_up_id) add('new_assignment', '新分配订单', '生产主管已分配本单', '确认接单并联系工厂');
+    if (!row.factory_name) add('contact_factory', '工厂待确认沟通', '工厂尚未由生产主管最终确认', '沟通并提交工厂建议');
     if (row.stage === 'materials_in_transit') add('material', '待物料齐套', '仍有物料在途或未下单', '更新物料进度');
     if (row.stage === 'ready_to_schedule') add('cutting', '待开裁', '物料齐套、尚未完成开裁', '完成生产启动凭证');
-    if (row.stage === 'in_production') add('production', '生产中待跟进', '订单已进入生产阶段', '更新今日进度');
+    if (row.stage === 'in_production') {
+      add('production', '生产中待更新', '订单已进入生产阶段', '更新今日进度');
+      add('first_piece', '待首件', '上线后需保留首件质量证据', '提交首件记录');
+      add('inline_qc', '待中查', '生产中需完成过程质量检查', '提交中查报告');
+    }
+    if (row.stage === 'ready_to_ship') {
+      add('final_qc', '待尾查', '工厂完成前需最终质量检查', '提交尾查/复检结论');
+      add('packing', '待包装', '质量放行后需跟进包装', '确认包装与箱唛');
+      add('shipment_follow_up', '待出货跟进', '生产跟单责任持续到工厂侧出货完成', '跟进装运并上传凭证');
+    }
     if (row.risk) add('overdue', '已超期未更新', '计划节点逾期', '更新或申请延期', true);
   } else {
     if (row.stage === 'in_production' && !row.completion) add('inspection', '待中期巡检', '订单生产中且尚未完成质量放行', '进入质量检查');
