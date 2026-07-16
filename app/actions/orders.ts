@@ -105,10 +105,23 @@ export async function createOrder(
     return { ok: false, error: '订单号未生成，请刷新页面重试' };
   }
   // ── STEP 2: validate — 提取并校验表单字段 ──
-  const customer_name = formData.get('customer_name') as string;
-  const customer_id = formData.get('customer_id') as string;
-  if (!customer_name || !customer_id) {
-    return { ok: false, error: '请选择客户（customer_name 或 customer_id 为空）' };
+  const customer_id = String(formData.get('customer_id') || '').trim();
+  const submittedCustomerName = String(formData.get('customer_name') || '').trim();
+  if (!customer_id) return { ok: false, error: '请选择并确认客户' };
+
+  // Customer ID is the contract. Resolve the canonical name under the caller's RLS scope;
+  // never accept a visible label or a stale hidden name as business truth.
+  const { data: selectedCustomerRecord, error: selectedCustomerError } = await (supabase.from('customers') as any)
+    .select('id, customer_name')
+    .eq('id', customer_id)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (selectedCustomerError || !selectedCustomerRecord?.customer_name) {
+    return { ok: false, error: '所选客户不存在或当前账号无权访问，请重新选择客户' };
+  }
+  const customer_name = String(selectedCustomerRecord.customer_name).trim();
+  if (submittedCustomerName && submittedCustomerName !== customer_name) {
+    return { ok: false, error: '客户信息已更新，请重新选择客户后再创建订单' };
   }
 
   const incoterm = formData.get('incoterm') as IncotermType;

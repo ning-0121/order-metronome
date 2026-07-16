@@ -23,6 +23,10 @@ import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
+import {
+  customerSelectionLabel, selectedCustomerFromDraft, toSelectedCustomer,
+  writeSelectedCustomer, type SelectedCustomer,
+} from '@/lib/order/customer-selection';
 
 /**
  * 将 AI 返回的各种日期格式统一为 YYYY-MM-DD（HTML date input 要求）
@@ -151,7 +155,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   // CEO 价格审批闸门（Phase 1）
   const [showPriceGate, setShowPriceGate] = useState(false);
   const [priceApprovalId, setPriceApprovalId] = useState<string | null>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<SelectedCustomer>(null);
+  const [aiRecognizedCustomerName, setAiRecognizedCustomerName] = useState('');
+  const customerSelectorRef = React.useRef<HTMLDivElement>(null);
   const [selectedFactory, setSelectedFactory] = useState('');
   const [isImport, setIsImport] = useState(false);
   const [importCurrentStep, setImportCurrentStep] = useState('');
@@ -449,11 +455,11 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
       const conflicts: Array<{ field: string; userValue: string; aiValue: string }> = [];
 
-      // 客户名
+      // AI customer text is a suggestion only. Never mutate CustomerSelect's controlled hidden fields.
       if (merged.customer_name) {
-        const r = fillIfEmpty('customer_name', merged.customer_name);
-        if (!r.applied && r.existing && r.existing !== merged.customer_name) {
-          conflicts.push({ field: '客户名', userValue: r.existing, aiValue: merged.customer_name });
+        setAiRecognizedCustomerName(merged.customer_name);
+        if (selectedCustomer && selectedCustomer.name !== merged.customer_name) {
+          conflicts.push({ field: '客户名', userValue: selectedCustomer.name, aiValue: merged.customer_name });
         }
       }
       // PO 号合并
@@ -575,6 +581,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     if (currentStep !== 1 || !stepOneFormRef.current) return;
     const draft = loadSafeOrderDraft();
     if (!draft) return;
+    setSelectedCustomer(selectedCustomerFromDraft(draft.fields));
     restoreSafeOrderDraft(stepOneFormRef.current, draft);
     showError('已恢复上次刷新前保存的表单文字内容。出于浏览器安全限制，请重新选择客户 PO 和内部报价文件。');
     // Restore once only. A later stale-action failure writes a fresh draft.
@@ -612,6 +619,11 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     }
 
     const rawFormData = new FormData(e.currentTarget);
+    if (!writeSelectedCustomer(rawFormData, selectedCustomer)) {
+      showError('请在客户名称处选择并确认客户后再创建订单');
+      setTimeout(() => customerSelectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      return;
+    }
 
     // 逐款明细落库 order_line_items(喂生产任务单/PI):优先富录入表手工录入,否则用 AI 解析结果。
     const submitStyles = lineStyles.length > 0 ? lineStyles : (poParseResult?.styles || []);
@@ -990,6 +1002,12 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   /** 实际创建订单 */
   async function doCreateOrder(rawFormData: FormData, filesToUpload: { file: File; fileType: string; label: string }[]) {
     if (createSubmissionInFlight.current) return;
+    // Dialogs may delay submission; always overwrite the payload from the latest canonical selection.
+    if (!writeSelectedCustomer(rawFormData, selectedCustomer)) {
+      showError('请在客户名称处选择并确认客户后再创建订单');
+      setTimeout(() => customerSelectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      return;
+    }
     createSubmissionInFlight.current = true;
     setLoading(true);
     // 订单用途标记:样品单 > 采购成品/贸易订单 / 委托加工·外发单 > 生产(默认)
@@ -1230,9 +1248,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
             }}
             onChange={(e) => {
               const form = e.currentTarget;
-              const cn = (form.querySelector('input[name="customer_name"]') as HTMLInputElement)?.value || '';
               const fn = (form.querySelector('input[name="factory_name"]') as HTMLInputElement)?.value || '';
-              if (cn !== selectedCustomer) setSelectedCustomer(cn);
               if (fn !== selectedFactory) setSelectedFactory(fn);
             }}
           >
@@ -1269,16 +1285,23 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 基本信息
               </h3>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <CustomerSelect />
+                <div ref={customerSelectorRef}>
+                  <CustomerSelect
+                    selectedValue={selectedCustomer}
+                    suggestedName={aiRecognizedCustomerName}
+                    onSelect={(customer) => setSelectedCustomer(toSelectedCustomer(customer || {}))}
+                  />
+                  <p className={`mt-1 text-xs ${selectedCustomer ? 'text-green-700' : aiRecognizedCustomerName ? 'text-amber-700' : 'text-gray-500'}`}>
+                    {customerSelectionLabel(selectedCustomer, aiRecognizedCustomerName)}
+                  </p>
                 </div>
                 <div>
                   <FactorySelect />
                 </div>
                 {/* 客户信用风险 banner — 选客户后实时查询 customer_rhythm 评估 */}
-                {selectedCustomer && selectedCustomer.trim().length >= 2 && (
+                {selectedCustomer && selectedCustomer.name.length >= 2 && (
                   <div className="col-span-2">
-                    <CustomerCreditBanner customerName={selectedCustomer} />
+                    <CustomerCreditBanner customerName={selectedCustomer.name} />
                   </div>
                 )}
                 <div className="col-span-2">
@@ -1657,7 +1680,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
             {/* ── AI 智脑提醒 ── */}
             <SmartInsightsPanel
-              customerName={selectedCustomer}
+              customerName={selectedCustomer?.name || ''}
               factoryName={selectedFactory}
             />
 
@@ -1788,13 +1811,13 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
               {poAutoFilled && poParseResult && (
                 <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-4">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-green-600 text-sm font-semibold">AI 已从 PO 自动填入表单</span>
+                    <span className="text-green-600 text-sm font-semibold">AI 已识别 PO 内容（客户需单独确认）</span>
                     {poParseResult.confidence_notes?.length > 0 && (
                       <span className="text-xs text-amber-600">（{poParseResult.confidence_notes.length} 项需确认）</span>
                     )}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div><span className="text-gray-500">客户：</span><span className="font-medium">{poParseResult.customer_name || '—'}</span></div>
+                    <div><span className="text-gray-500">AI识别客户：</span><span className="font-medium">{poParseResult.customer_name || '—'}{!selectedCustomer && poParseResult.customer_name ? '（待确认）' : ''}</span></div>
                     <div><span className="text-gray-500">PO号：</span><span className="font-medium">{poParseResult.order_no || '—'}</span></div>
                     <div><span className="text-gray-500">款数：</span><span className="font-medium">{poParseResult.styles?.length || 0}</span></div>
                     <div>
