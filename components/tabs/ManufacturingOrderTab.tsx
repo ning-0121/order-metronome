@@ -480,8 +480,6 @@ function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
   const [loaded, setLoaded] = useState(false);
   const [snap, setSnap] = useState<any>(null);
   const [at, setAt] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
 
   async function load() {
     const { getPoParseSnapshot } = await import('@/app/actions/order-line-items');
@@ -494,16 +492,6 @@ function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
     const next = !open; setOpen(next);
     if (next && !loaded) await load();
   }
-  async function refreeze() {
-    if (!confirm('用当前「逐款明细」覆盖冻结底档?覆盖后底档 = 现在的明细。')) return;
-    setBusy(true); setMsg('');
-    const { refreezePoParseSnapshot } = await import('@/app/actions/order-line-items');
-    const res = await refreezePoParseSnapshot(orderId);
-    setBusy(false);
-    if ((res as any).error) { setMsg('❌ ' + (res as any).error); return; }
-    setMsg('✅ 已重新冻结'); await load();
-  }
-
   const styles = snap?.styles || [];
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-3">
@@ -517,7 +505,7 @@ function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
             : !snap ? <p className="text-xs text-gray-400">此单无 PO 解析底档(手工录入或从 PO 创建的单没有 AI 原文)。</p>
             : (
             <>
-              <p className="text-[11px] text-gray-500 mb-2">这是建单时 AI 从 PO 读出的原文(只读)。和上方「逐款明细」对比可看当初读错在哪;纠正在上方明细里改,改完点下面「再冻结」把底档更新成现在的明细。</p>
+              <p className="text-[11px] text-gray-500 mb-2">这是建单时 AI 从 PO 读出的原始建议，仅供审计且不可覆盖。人工纠正请保存到上方逐款明细；BOM、采购、生产与财务均以订单及已审批业务数据为准。</p>
               <div className="overflow-x-auto border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead><tr className="bg-gray-50 text-gray-500 text-left">
@@ -535,12 +523,6 @@ function PoParseSnapshotPanel({ orderId }: { orderId: string }) {
                     {styles.length === 0 && <tr><td colSpan={4} className="px-2 py-2 text-gray-400">（底档无款色码）</td></tr>}
                   </tbody>
                 </table>
-              </div>
-              <div className="flex items-center gap-3 mt-2">
-                <button onClick={refreeze} disabled={busy}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-50">
-                  {busy ? '处理中…' : '🔒 用当前明细再冻结'}</button>
-                {msg && <span className="text-xs text-gray-600">{msg}</span>}
               </div>
             </>
           )}

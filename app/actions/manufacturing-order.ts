@@ -38,7 +38,7 @@ export async function getManufacturingOrder(orderId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, created_by, po_parse_snapshot')
+    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, created_by')
     .eq('id', orderId).single();
   if (oErr) return { error: friendlyError(oErr) };
   // 尺码列手排顺序(容错读:列未建/迁移未执行时静默为 null,不 brick 生产任务单)
@@ -383,10 +383,9 @@ async function buildMoWorkbook(
     const moreDesc = moreFabs.map(fbDesc).filter(Boolean).join('；');
     const moreUse = moreFabs.map((f: any) => `${f?.material_name || ''} ${fbUse(f)}`.trim()).filter(Boolean).join('；');
 
-    // 尺码明细表(PO 冻结底档 measurements;固定 9 行,不足留白,多则截断 → 右侧产品图块高度统一)
-    const snapStyles: any[] = Array.isArray((order as any).po_parse_snapshot?.styles) ? (order as any).po_parse_snapshot.styles : [];
-    const snapStyle = snapStyles.find((s: any) => String(s?.style_no || '').trim() === String(g.style_no || '').trim());
-    const measAll: any[] = Array.isArray(snapStyle?.measurements) ? snapStyle.measurements : [];
+    // AI PO 快照只用于建单预填，不能成为生产尺寸真值。
+    // 尺寸须来自已审批尺码表；在审批数据接入本模板前留白，避免把未经审核的 AI 值发给工厂。
+    const measAll: any[] = [];
     const measVal = (values: Record<string, any> | undefined, key: string) => {
       if (!values) return '';
       if (values[key] != null) return String(values[key]);

@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { qimoAI, AIRuntimeError, type FileInput, type ImageInput } from '@/lib/ai/runtime';
 import { poParsedSchema } from '@/lib/ai/scenes/po-schema';
+import { createHash } from 'node:crypto';
 
 /** 上传文件最大字节数：10MB。超过后拒绝读入内存。 */
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -58,6 +59,14 @@ export interface POParsedData {
   total_amount?: number;
   incoterm?: string;
   payment_terms?: string;
+  _recognition?: {
+    checksumSha256?: string;
+    provider?: string;
+    model?: string;
+    recognizedAt?: string;
+    sourceFileName?: string;
+    schemaVersion?: string;
+  };
 }
 
 const SYSTEM_PROMPT = `你是绮陌服饰的订单录入专家。你正在为一张【生产单/生产任务单】提取数据。
@@ -187,12 +196,24 @@ export async function parsePO(
     };
   }
 
-  // 省 token(2026-07-03):同名同大小文件 30 分钟内已解析过 → 直接复用冻结草稿,零 AI 调用。
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const checksumSha256 = createHash('sha256').update(buffer).digest('hex');
+
+  // 同一用户、同一文件内容优先复用识别草稿；文件名变化也不会重复付费。
   // 覆盖:上传后重试、误操作二次上传、建单失败后重传同一 PO。
   try {
     const supabaseCache = await createClient();
     const { data: { user: cacheUser } } = await supabaseCache.auth.getUser();
     if (cacheUser) {
+      const { data: checksumCached } = await (supabaseCache.from('po_parse_drafts') as any)
+        .select('id, parsed_json')
+        .eq('user_id', cacheUser.id)
+        .contains('parsed_json', { _recognition: { checksumSha256 } })
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle();
+      if (checksumCached?.parsed_json) {
+        return { ok: true, data: checksumCached.parsed_json as POParsedData, draftId: checksumCached.id };
+      }
       const cutoff = new Date(Date.now() - DRAFT_FRESH_MINUTES * 60 * 1000).toISOString();
       const { data: cached } = await (supabaseCache.from('po_parse_drafts') as any)
         .select('id, parsed_json')
@@ -211,7 +232,6 @@ export async function parsePO(
 
   const startedAt = Date.now();
   try {
-    const buffer = Buffer.from(await file.arrayBuffer());
     const fileType = file.type;
     const fileName = file.name.toLowerCase();
     let prompt = '';
@@ -238,7 +258,17 @@ export async function parsePO(
       system: SYSTEM_PROMPT, prompt, schema: poParsedSchema, image, file: inputFile,
       timeoutMs: 45_000, maxOutputTokens: 8192, fallback: 'disabled',
     });
-    const parsed = result.data;
+    const parsed: POParsedData = {
+      ...result.data,
+      _recognition: {
+        checksumSha256,
+        provider: result.metadata.provider,
+        model: result.metadata.model,
+        recognizedAt: new Date().toISOString(),
+        sourceFileName: file.name,
+        schemaVersion: 'qimo-po-v1',
+      },
+    };
 
     // 确定性兜底(2026-07-11):prompt 已强约束不许臆造尺寸,这里再补一道确定性网 ——
     // 若「品类/款名是下装(裤/短裤/legging)」却给了只属上衣的测量部位(胸围/肩宽/袖长/领围…),
@@ -273,8 +303,7 @@ export async function parsePO(
       return undefined;
     });
 
-    // 冻结底档(2026-07-10 用户拍板:解析后要冻结,方便以后其他地方提取——生产单/辅料/要求类
-    // 都从 orders.po_parse_snapshot 读)。首冻不覆盖:已有底档不动(人工「重新冻结」按钮才覆盖);
+    // 已有订单场景保留首份 AI 识别证据。该快照只用于审计/建单预填，业务模块不得作为最终真值读取。
     // 走 user session 受 RLS 管;失败不阻断解析结果返回。
     // await 而非 fire-and-forget:Vercel serverless 响应返回后悬空 Promise 会被掐,冻结必须落地。
     if (orderId) {
