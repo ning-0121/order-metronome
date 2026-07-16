@@ -29,3 +29,11 @@ Three PO Runtime/manual-fallback diffs were also present. They belong to the ear
 - No focused RBAC, scheduling search, assignment audit, decimal/unit or factory eligibility tests existed.
 - No database migration had been prepared or applied for G–K.
 
+## Final implementation decisions
+
+- Delay authorization is exact-step RBAC: admin may override; production supervisor cannot impersonate sales manager.
+- Existing milestones remain the assignment truth. Only known production execution nodes may be normalized from legacy ownership; fixed supervisor/business/finance/QC nodes are excluded.
+- Decimal values remain strings through UI/checklist JSON and are validated to six decimal places before numeric comparison.
+- Units normalize only equivalent labels; incompatible dimensions are never converted.
+- Factory capability/capacity is recommendation metadata, not a filter. Only active/trial, non-deleted factory master records enter the selectable pool.
+- Supervisor queues are projections over orders, milestones, assignments and pending delays; no duplicate workflow status table was introduced.
