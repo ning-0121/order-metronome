@@ -216,6 +216,20 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
     return { ok: true, allConfirmed: true, needsEvidence: true };
   }
 
+  // Multi-party confirmation is necessary but not sufficient for shipment.
+  // Apply the same centralized server gate before the auto-complete branch.
+  if (stepKey === 'shipment_execute') {
+    const { getShipmentReleaseGate } = await import('@/app/actions/shipment-release');
+    const gate = await getShipmentReleaseGate((ms as any).order_id);
+    if (gate.error) return { error: gate.error, allConfirmed: true };
+    if (!gate.data?.allowed) {
+      return {
+        error: `多方已确认，但暂不能出货：${gate.data?.blockers.map((b) => `${b.label}（${b.nextAction}）`).join('；') || '出货条件未满足'}`,
+        allConfirmed: true,
+      };
+    }
+  }
+
   const now = new Date().toISOString();
   const { error: doneErr } = await (supabase.from('milestones') as any)
     .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now })
