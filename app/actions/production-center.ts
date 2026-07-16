@@ -17,6 +17,8 @@ import {
   computeStage, effectiveStage, STAGE_ORDER,
   KICKOFF_KEYS, FACTORY_DONE_KEYS, STAGE_SIGNAL_STEP_KEYS, pickStageSignal,
 } from '@/lib/production/stage';
+import { aggregateDetailedTasks, filterDetailedTasks } from '@/lib/production/dashboard';
+import type { WorkbenchRole } from '@/lib/production/workbench';
 
 export interface ProductionOrderRow {
   order_id: string;
@@ -48,6 +50,7 @@ export interface ProductionCenterSummary {
   in_production: number;
   ready_to_ship: number;
   risk: number;
+  completed: number;
 }
 
 export async function getProductionCenter(): Promise<{
@@ -98,7 +101,11 @@ export async function getProductionCenter(): Promise<{
     ({ data: orders, error: ordErr } = await runOrders(OSEL_NO_MANUAL));
   }
   const list = (orders || []) as any[];
-  if (list.length === 0) return { data: [], summary: emptySummary() };
+  let terminalQuery = (svc.from('orders') as any).select('id', { count: 'exact', head: true })
+    .in('lifecycle_status', ['completed', '已完成', 'archived', '已归档']);
+  if (allowedIds) terminalQuery = terminalQuery.in('id', Array.from(allowedIds));
+  const { count: historicalCompletedCount } = await terminalQuery;
+  if (list.length === 0) return { data: [], summary: { ...emptySummary(), completed: historicalCompletedCount || 0 } };
   const orderIds = list.map((o) => o.id);
 
   // 物料就绪 + 生产节点 + 生产任务单存在性(三查并行)
@@ -137,6 +144,7 @@ export async function getProductionCenter(): Promise<{
 
   const today = new Date().toISOString().slice(0, 10);
   const rows: ProductionOrderRow[] = [];
+  let completed = 0;
   for (const o of list) {
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
@@ -147,7 +155,7 @@ export async function getProductionCenter(): Promise<{
     const auto = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
     // 生产主管一次性设的手动档做「下限」:只把订单往前推,不会倒退到比手动档更早的阶段。
     const stage = effectiveStage(auto, (o.production_stage_manual as ProductionStage | 'done' | null) || null);
-    if (stage === 'done') continue;   // 工厂已完工/主管标已完工,出中心
+    if (stage === 'done') { completed++; continue; }   // 已完工/已出运:只计入进度完成数
     const risk = [kickoff, completion].some((n) => n && !DONE(n.status) && n.due && n.due < today);
     rows.push({
       order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no,
@@ -176,12 +184,29 @@ export async function getProductionCenter(): Promise<{
     in_production: rows.filter((r) => r.stage === 'in_production').length,
     ready_to_ship: rows.filter((r) => r.stage === 'ready_to_ship').length,
     risk: rows.filter((r) => r.risk).length,
+    completed: completed + (historicalCompletedCount || 0),
   };
   return { data: rows, summary };
 }
 
 function emptySummary(): ProductionCenterSummary {
-  return { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, ready_to_ship: 0, risk: 0 };
+  return { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, ready_to_ship: 0, risk: 0, completed: 0 };
+}
+
+/** Detailed rows are loaded only after an explicit expand/search action. */
+export async function getProductionDetailedTasks(params: { offset?: number; limit?: number; query?: string; stage?: string } = {}) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录', total: 0, items: [], hasMore: false };
+  const { data: profile } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (profile as any)?.roles?.length ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  const role: WorkbenchRole = roles.some((item) => ['qc', 'quality'].includes(item)) ? 'qc'
+    : roles.some((item) => ['admin', 'production_manager', 'order_manager'].includes(item)) ? 'supervisor' : 'follow_up';
+  const result = await getProductionCenter();
+  if (result.error) return { error: result.error, total: 0, items: [], hasMore: false };
+  const scopedRows = params.stage === 'risk' ? (result.data || []).filter((row) => row.risk)
+    : params.stage ? (result.data || []).filter((row) => row.stage === params.stage) : (result.data || []);
+  return { ...filterDetailedTasks(aggregateDetailedTasks(scopedRows, role), params.query, params.offset || 0, Math.min(params.limit || 25, 50)) };
 }
 
 /**
