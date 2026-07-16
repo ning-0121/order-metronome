@@ -7,20 +7,22 @@ import {
   PRODUCTION_QUICK_ENTRIES, STAGE_DEFINITIONS,
   type DashboardLink, type DetailedProductionTask,
 } from '@/lib/production/dashboard';
+import { QimoCommandGrid, QimoEmptyState, QimoKpiCard, QimoKpiGrid, QimoQuickEntryRow } from '@/components/qimo-v2/QimoDashboard';
+import { FactoryIcon, ProgressIcon, ScheduleIcon, ShieldIcon } from '@/components/qimo-v2/icons';
 
 type DashboardData = { today: DashboardLink[]; approvals: DashboardLink[]; risks: DashboardLink[]; detailedCount: number };
 
 const KPI = [
-  ['awaiting_procurement', '新订单待采购', '📥', 'text-slate-700'],
-  ['materials_in_transit', '物料在途', '🚚', 'text-sky-700'],
-  ['ready_to_schedule', '开生产待排单', '🗓️', 'text-emerald-700'],
-  ['in_production', '生产中', '🏭', 'text-indigo-700'],
-  ['ready_to_ship', '待发货', '📦', 'text-teal-700'],
-  ['risk', '风险单', '⚠️', 'text-rose-700'],
+  ['awaiting_procurement', '新订单待采购', '○', 'text-slate-700'],
+  ['materials_in_transit', '物料在途', '→', 'text-sky-700'],
+  ['ready_to_schedule', '开生产待排单', '□', 'text-emerald-700'],
+  ['in_production', '生产中', '◇', 'text-indigo-700'],
+  ['ready_to_ship', '待发货', '△', 'text-teal-700'],
+  ['risk', '风险单', '!', 'text-rose-700'],
 ] as const;
 
 function Empty({ text }: { text: string }) {
-  return <div className="rounded-lg bg-gray-50 px-3 py-6 text-center text-xs text-gray-400">{text}</div>;
+  return <QimoEmptyState>{text}</QimoEmptyState>;
 }
 
 function CommandPanel({ title, icon, items, allHref }: { title: string; icon: string; items: DashboardLink[]; allHref: string }) {
@@ -73,28 +75,18 @@ export function ProductionCenterClient({
   const activeTotal = summary.awaiting_procurement + summary.materials_in_transit + summary.ready_to_schedule + summary.in_production + summary.ready_to_ship;
   const flowTotal = activeTotal + summary.completed;
   const completionRate = flowTotal ? Math.round((summary.completed / flowTotal) * 100) : 0;
+  const quickEntryIcons = [<ScheduleIcon key="schedule" className="h-4 w-4" />, <FactoryIcon key="factory" className="h-4 w-4" />, <ProgressIcon key="progress" className="h-4 w-4" />, <ShieldIcon key="risk" className="h-4 w-4" />];
+  const quickEntries = PRODUCTION_QUICK_ENTRIES.map((entry, index) => ({ ...entry, icon: quickEntryIcons[index] }));
 
   return (
     <div className="space-y-4">
-      <section aria-labelledby="quick-entry-title">
-        <h2 id="quick-entry-title" className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">快捷入口</h2>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {PRODUCTION_QUICK_ENTRIES.map((entry) => (
-            <Link key={entry.title} href={entry.href} className="group flex min-h-16 items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 transition hover:border-indigo-300 hover:bg-indigo-50/40 focus:outline-none focus:ring-2 focus:ring-indigo-400">
-              <span className="text-xl">{entry.icon}</span><span className="min-w-0"><span className="block text-sm font-semibold text-gray-900 group-hover:text-indigo-700">{entry.title}</span><span className="block truncate text-xs text-gray-500">{entry.subtitle}</span></span>
-            </Link>
-          ))}
-        </div>
-      </section>
+      <QimoQuickEntryRow entries={quickEntries} />
 
-      <section aria-label="生产 KPI" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <QimoKpiGrid>
         {KPI.map(([key, label, icon, tone]) => (
-          <Link key={key} href={`/production?stage=${key}#details`} className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 hover:border-indigo-300">
-            <div className="flex items-center justify-between"><span className="text-base">{icon}</span><span className={`text-xl font-bold tabular-nums ${tone}`}>{summary[key]}</span></div>
-            <div className="mt-1 truncate text-xs text-gray-600">{label}</div>
-          </Link>
+          <QimoKpiCard key={key} href={`/production?stage=${key}#details`} label={label} value={summary[key]} icon={<span className="text-sm font-semibold">{icon}</span>} tone={tone} />
         ))}
-      </section>
+      </QimoKpiGrid>
 
       <section className="rounded-xl border border-gray-200 bg-white p-3">
         <div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold text-gray-900">生产进度总览</h2><span className="text-xs text-gray-500">整体完成率 <b className="text-emerald-700">{completionRate}%</b></span></div>
@@ -109,11 +101,11 @@ export function ProductionCenterClient({
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${completionRate}%` }} /></div>
       </section>
 
-      <div className="grid gap-3 lg:grid-cols-3">
-        <CommandPanel title="今日待办事项" icon="✅" items={dashboard.today} allHref="/production?detail=all#details" />
-        <CommandPanel title="协作 / 审批提示" icon="🤝" items={dashboard.approvals} allHref={canManage ? '/production?detail=延期待审批#details' : '/production?detail=all#details'} />
-        <CommandPanel title="风险干预预警" icon="🚨" items={dashboard.risks} allHref="/production?detail=已超期#details" />
-      </div>
+      <QimoCommandGrid>
+        <CommandPanel title="今日待办事项" icon="·" items={dashboard.today} allHref="/production?detail=all#details" />
+        <CommandPanel title="协作 / 审批提示" icon="·" items={dashboard.approvals} allHref={canManage ? '/production?detail=延期待审批#details' : '/production?detail=all#details'} />
+        <CommandPanel title="风险干预预警" icon="·" items={dashboard.risks} allHref="/production?detail=已超期#details" />
+      </QimoCommandGrid>
 
       <section id="details" className="rounded-xl border border-gray-200 bg-white">
         <button type="button" onClick={() => { const next = !open; setOpen(next); if (next && tasks.length === 0) load(true); }} className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-gray-50" aria-expanded={open}>

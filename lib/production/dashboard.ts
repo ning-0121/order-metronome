@@ -9,10 +9,10 @@ export type DetailedProductionTask = {
 };
 
 export const PRODUCTION_QUICK_ENTRIES = [
-  { title: '排单与派单工作台', subtitle: '生产计划排产与工单派发', icon: '🗓️', href: '/production?workspace=scheduling#scheduling' },
-  { title: '工厂排产看板', subtitle: '工厂排产负荷与计划看板', icon: '🏭', href: '/production?workspace=factory#factory' },
-  { title: '生产进度录入', subtitle: '生产进度更新与报工录入', icon: '📈', href: '/production?workspace=progress#progress' },
-  { title: '风险订单攻克', subtitle: '风险订单跟踪与专项攻克', icon: '🛡️', href: '/production?detail=已超期#details' },
+  { title: '排单与派单工作台', href: '/production/scheduling' },
+  { title: '工厂排产看板', href: '/production/factory-schedule' },
+  { title: '生产进度录入', href: '/production/progress' },
+  { title: '风险订单攻克', href: '/production?detail=已超期#details' },
 ] as const;
 
 export const STAGE_DEFINITIONS = [
