@@ -480,7 +480,6 @@ export function BomTab({ orderId }: { orderId: string }) {
   // 面料(含里料)= 完整表维持现状;辅料 = 精简为 款号/辅料名/单件数/总数(2026-07-11 用户拍板)
   const FULL_FORM_TYPES = ['fabric', 'lining'];
   const isFabricForm = FULL_FORM_TYPES.includes(form.material_type);
-  // 范围:整单通用(款号空,如主吊牌一次录)vs 按款(填款号)。表单打开时按已有款号初始化,输入中不重置
   const formRow = (
     <div className="bg-indigo-50 rounded-xl p-4 mb-4 space-y-3">
       {!isFabricForm && (
