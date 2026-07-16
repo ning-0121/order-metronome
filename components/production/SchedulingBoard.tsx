@@ -116,13 +116,15 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
   const [err, setErr] = useState('');
   const [overbook, setOverbook] = useState<any[] | null>(null);   // 超卖详情,非空=需强制确认
   const [factorySearch, setFactorySearch] = useState('');
+  const [decisionReason, setDecisionReason] = useState('');
   const selected = candidates.find((c: any) => c.factory_id === factoryId);
   const visibleCandidates = candidates.filter((c: any) => `${c.factory_name || ''} ${c.factory_code || ''}`.toLowerCase().includes(factorySearch.trim().toLowerCase()));
 
   async function submit(force = false) {
     if (!factoryId) { setErr('请选工厂'); return; }
+    if (!decisionReason.trim()) { setErr('请填写定厂/排产原因'); return; }
     setBusy(true); setErr(''); if (force) setOverbook(null);
-    const r = await dispatchStyle({ orderId: order.id, styleNo: style.style_no, color: color || null, factoryId, plannedQty: qty ? Number(qty) : null, start: start || null, end: end || null, force });
+    const r = await dispatchStyle({ orderId: order.id, styleNo: style.style_no, color: color || null, factoryId, plannedQty: qty ? Number(qty) : null, start: start || null, end: end || null, reason: decisionReason, force });
     setBusy(false);
     if ((r as any).overbook && !force) { setOverbook((r as any).overbook); setErr((r as any).error || ''); return; }
     if ((r as any).error) setErr((r as any).error); else onDone();
@@ -130,6 +132,8 @@ function DispatchPanel({ order, style, candidates, onDone }: { order: any; style
 
   return (
     <div className="mt-2 rounded-lg bg-white border border-indigo-100 p-2 space-y-2">
+      <input value={decisionReason} onChange={(e) => setDecisionReason(e.target.value)} placeholder="必填：定厂/排产或调整原因"
+        className="w-full max-w-sm rounded border border-gray-300 px-2 py-1 text-xs" />
       {/* 候选工厂对照 */}
       <input value={factorySearch} onChange={(e) => setFactorySearch(e.target.value)} placeholder={`搜索全部 ${candidates.length} 家可用工厂`}
         className="w-full max-w-xs rounded border border-gray-300 px-2 py-1 text-xs" />

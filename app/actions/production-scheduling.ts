@@ -124,10 +124,11 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 }
 
 /** 派工:款(或色)→ 工厂 + 排产窗口。upsert 同款同色。 */
-export async function dispatchStyle(input: { orderId: string; styleNo: string; color?: string | null; factoryId: string; plannedQty?: number | null; start?: string | null; end?: string | null; notes?: string | null; force?: boolean }): Promise<{ ok?: boolean; error?: string; overbook?: any[] }> {
+export async function dispatchStyle(input: { orderId: string; styleNo: string; color?: string | null; factoryId: string; plannedQty?: number | null; start?: string | null; end?: string | null; notes?: string | null; reason: string; force?: boolean }): Promise<{ ok?: boolean; error?: string; overbook?: any[] }> {
   const g = await gate(false);
   if ('error' in g) return { error: g.error };
   const { svc, userId } = g;
+  if (!input.reason?.trim()) return { error: '定厂/排产必须填写原因' };
   const { data: fac } = await (svc.from('factories') as any).select('factory_name, monthly_capacity').eq('id', input.factoryId).maybeSingle();
   const row = {
     order_id: input.orderId, style_no: input.styleNo || null, color: input.color?.trim() || null,
@@ -154,9 +155,18 @@ export async function dispatchStyle(input: { orderId: string; styleNo: string; c
     }
   }
   let error;
-  if ((exist as any)?.id) ({ error } = await (svc.from('production_dispatch') as any).update(row).eq('id', (exist as any).id));
+  let previous: any = null;
+  if ((exist as any)?.id) {
+    const { data: prev } = await (svc.from('production_dispatch') as any).select('*').eq('id', (exist as any).id).maybeSingle(); previous = prev;
+    ({ error } = await (svc.from('production_dispatch') as any).update(row).eq('id', (exist as any).id));
+  }
   else ({ error } = await (svc.from('production_dispatch') as any).insert({ ...row, status: 'scheduled', created_by: userId }));
   if (error) return { error: /production_dispatch|does not exist/i.test(error.message || '') ? '派工表未建:请先执行 20260712_production_scheduling_p1.sql' : error.message };
+  const audit = await (svc.from('order_operational_decisions') as any).insert({
+    order_id: input.orderId, decision_type: 'production_schedule', previous_value: previous,
+    new_value: row, actor_id: userId, actor_roles: g.roles, reason: input.reason.trim(),
+  });
+  if (audit.error && !/order_operational_decisions|schema cache|does not exist|PGRST/i.test(audit.error.message || '')) return { error: `排产已更新但审计写入失败：${audit.error.message}` };
   revalidatePath('/production');
   return { ok: true };
 }
