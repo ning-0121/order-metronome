@@ -44,4 +44,18 @@ assert.ok(action.indexOf('getProductionDetailedTasks') > action.indexOf('getProd
 assert.match(action, /无权查看生产中心/);
 assert.match(client, /当前没有需要处理的事项/);
 assert.match(client, /overflow-x-auto/);
-console.log('production dashboard: 24 assertions passed');
+// Exact CEO regression: no role may silently render the legacy expanded workbench.
+assert.doesNotMatch(page, /RoleTaskWorkbench/);
+assert.doesNotMatch(page, /生产主管今日任务/);
+assert.ok(client.indexOf('quick-entry-title') < client.indexOf('生产 KPI'));
+assert.ok(client.indexOf('生产 KPI') < client.indexOf('生产进度总览'));
+assert.ok(client.indexOf('生产进度总览') < client.indexOf('今日待办事项'));
+assert.ok(client.indexOf('今日待办事项') < client.indexOf('生产主管详细任务'));
+assert.match(client, /今日待办事项/);
+assert.match(client, /协作 \/ 审批提示/);
+assert.match(client, /风险干预预警/);
+assert.doesNotMatch(page, /getProductionDetailedTasks\(/);
+assert.match(client, /limit: 25/);
+assert.match(page, /roles\.some\(\(item\) => \['qc', 'quality'\]\.includes\(item\)\) \? 'qc'/);
+assert.match(page, /canManage \? 'supervisor' : 'follow_up'/);
+console.log('production dashboard: 37 assertions passed');
