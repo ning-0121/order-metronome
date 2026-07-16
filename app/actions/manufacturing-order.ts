@@ -11,6 +11,8 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
+import { buildProductionTaskWorkbook, safeProductionTaskFilename } from '@/lib/exports/production-task-template';
+import type { ProductionTaskTemplateModel } from '@/lib/exports/production-task-template-map';
 
 const MO_WRITE_MSG = '仅业务/跟单/生产/生产主管/管理员可编辑或推进生产任务单';
 
@@ -188,15 +190,86 @@ type MoBuildOpts = { styles: boolean; trims: boolean; label: string };
 
 /** 合并版:生产订单 + 辅料明细 一份 Excel(生产中心/采购核料页整包用)。 */
 export async function generateManufacturingOrderSheet(orderId: string) {
-  return buildMoWorkbook(orderId, { styles: true, trims: true, label: '生产任务单' });
+  return buildExactProductionTaskWorkbook(orderId);
 }
 /** 第一张:只出「生产订单」(款式主表)——建单即可生成,不等 BOM/辅料确认。 */
 export async function generateProductionOrderSheet(orderId: string) {
-  return buildMoWorkbook(orderId, { styles: true, trims: false, label: '生产订单' });
+  return buildExactProductionTaskWorkbook(orderId);
 }
 /** 第二张:只出「辅料单」(辅料明细)——在「原辅料和包装」页填完 BOM 后生成,自动读最新 BOM。 */
 export async function generateTrimSheet(orderId: string) {
   return buildMoWorkbook(orderId, { styles: false, trims: true, label: '辅料单' });
+}
+
+/**
+ * Exact CEO-approved production-task export. Values come only from persisted Order Master,
+ * approved line items, BOM and confirmed MO fields; the template owns all presentation.
+ */
+async function buildExactProductionTaskWorkbook(orderId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!user.email?.endsWith('@qimoclothing.com')) return { error: '仅允许 @qimoclothing.com 邮箱使用本系统' };
+  const res = await getManufacturingOrder(orderId);
+  if ((res as any).error) return { error: (res as any).error };
+  const { mo: moRaw, order, lineItems, bom } = (res as any).data;
+  const mo = moRaw || {};
+  const lines: any[] = Array.isArray(lineItems) ? lineItems : [];
+  const materials: any[] = Array.isArray(bom) ? bom : [];
+  const styleNumber = lines.find(x => x.style_no)?.style_no || order.style_no || '';
+  const styleLines = lines;
+  const mergedColors = new Map<string, any>();
+  for (const line of styleLines) {
+    const key = `${line.style_no || styleNumber}|${line.color_en || ''}|${line.color_cn || ''}`;
+    const current = mergedColors.get(key) || { styleNumber: line.style_no || styleNumber, colorEn: line.color_en, colorCn: line.color_cn, sizes: {}, quantity: 0, cartonCount: 0 };
+    for (const [size, qty] of Object.entries(line.sizes || {})) current.sizes[size] = (Number(current.sizes[size]) || 0) + (Number(qty) || 0);
+    current.quantity += Number(line.qty_pcs) || 0;
+    current.cartonCount += Number(line.carton_count) || 0;
+    mergedColors.set(key, current);
+  }
+  const colors = [...mergedColors.values()];
+  const lineStyles = new Set(lines.map(x => x.style_no).filter(Boolean));
+  const fabrics = materials.filter(x => x.material_type === 'fabric' && (!x.style_no || lineStyles.size === 0 || lineStyles.has(x.style_no)));
+  const garmentAccessories = materials.filter(x => ['trim', 'lining', 'embroidery'].includes(x.material_type));
+  const packagingAccessories = materials.filter(x => ['packing', 'label', 'washing', 'print'].includes(x.material_type));
+  const materialText = (rows: any[]) => rows.map(x => [x.material_name, x.spec, x.color].filter(Boolean).join(' ')).filter(Boolean).join('，');
+  const isSet = /set|套/i.test(`${styleNumber} ${order.product_description || ''}`) || new Set(lines.map(x => x.style_no).filter(Boolean)).size > 1;
+  const total = isSet ? (Number(order.quantity) || Math.max(0, ...colors.map(color => Number(color.quantity) || 0)))
+    : (colors.reduce((n, color) => n + (Number(color.quantity) || 0), 0) || Number(order.quantity) || 0);
+  const model: ProductionTaskTemplateModel = {
+    internalOrderNumber: order.internal_order_no || order.order_no,
+    customer: order.customer_name,
+    orderDate: order.order_date,
+    productName: styleLines.find(x => x.product_name)?.product_name || order.product_description,
+    materialComposition: materialText(fabrics),
+    deliveryDate: order.factory_date || order.etd,
+    fabricWeight: fabrics.map(x => x.spec).filter(Boolean).join('；'),
+    totalQuantity: total,
+    styleNumber,
+    quantityBasis: isSet ? 'set' : 'piece',
+    colors,
+    sizeOrder: Array.isArray(order.size_order) ? order.size_order : null,
+    customerPackaging: order.packing_requirement || order.packaging_requirements || order.packaging_type || '',
+    fabrics: fabrics.map(x => ({ name: x.material_name, consumption: x.qty_per_piece, unit: x.unit, basis: x.consumption_basis })),
+    requirements: {
+      garmentAccessories: materialText(garmentAccessories),
+      packagingAccessories: materialText(packagingAccessories),
+      cutting: mo.factory_notes,
+      sewing: mo.print_embroidery_requirements,
+      inspection: mo.qc_focus,
+      packaging: mo.factory_packing_instructions,
+      carton: '',
+      attention: [mo.risk_notes, mo.special_requirements].filter(Boolean).join('；'),
+    },
+    receiver: '', receiptTime: '', sizeChart: null,
+  };
+  try {
+    const workbook = await buildProductionTaskWorkbook(model);
+    const buffer = await workbook.xlsx.writeBuffer();
+    return { ok: true, base64: Buffer.from(buffer).toString('base64'), fileName: safeProductionTaskFilename(model.internalOrderNumber, styleNumber) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : '生产任务单生成失败' };
+  }
 }
 
 async function buildMoWorkbook(

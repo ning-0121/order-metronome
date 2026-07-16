@@ -154,7 +154,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
           <button onClick={() => generate('production')} disabled={generating}
             className="text-sm px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50"
             title="第一张:款式主表。建单即可下载,不用等辅料确认">
-            {generating ? '生成中…' : '📄 下载生产订单'}</button>
+            {generating ? '生成中…' : '📄 下载生产任务单'}</button>
           <button onClick={() => generate('trim')} disabled={generating}
             className="text-sm px-3 py-1.5 rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-50"
             title="第二张:辅料明细。读最新 BOM,包装辅料确认后再下载">
@@ -319,7 +319,7 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
     <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
       <div className="bg-white rounded-xl max-w-5xl w-full my-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white rounded-t-xl border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
-          <span className="text-sm font-semibold text-gray-800">👁 生产任务单预览（{groups.length} 款,与下载 Excel 同源）</span>
+          <span className="text-sm font-semibold text-gray-800">👁 生产任务单预览 · QIMO 生产任务单标准模板 V1.0（{groups.length} 款）</span>
           <div className="flex gap-2">
             <button onClick={onDownload} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700">📄 下载 Excel</button>
             <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">关闭</button>
