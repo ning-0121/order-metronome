@@ -9,103 +9,49 @@ import { FactoryScheduleBoard } from '@/components/production/FactoryScheduleBoa
 import { ProductionProgressBoard } from '@/components/production/ProductionProgressBoard';
 import { ProductionGanttChart } from '@/components/production/ProductionGanttChart';
 import { CollapsibleSection } from '@/components/CollapsibleSection';
-import { RoleTaskWorkbench } from '@/components/production/RoleTaskWorkbench';
-
-/**
- * 生产中心(Production Center)Phase 1 —— 跨订单生产执行分析 HUB。
- * 生命周期四段(新订单待采购 → 物料在途 → 开生产待排单 → 生产中)+ 风险单,卡可点开筛选。
- * 门禁:生产/生产经理/理单/管理员;生产(非经理)只看分配到自己的单。
- * **不显示售价/毛利/成本**(生产角色红线)。状态纯派生,不猜。
- */
+import { buildProductionDashboard, type DashboardRole } from '@/lib/production/dashboard';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ProductionCenterPage() {
+export default async function ProductionCenterPage({ searchParams }: { searchParams: Promise<{ workspace?: string; detail?: string; stage?: string; q?: string }> }) {
+  const params = await searchParams;
   const { roles } = await requireProductionPage();
   const result = await getProductionCenter();
-  // 一次性进度初始化入口:仅生产主管/管理员、且入口未关闭时显示
-  const canInit = roles.includes('admin') || roles.includes('production_manager');
-  // 生产进度录入:生产/跟单/QC/主管/管理员都能录(P4)
-  const canLogProgress = canInit || roles.includes('production');
-  const showInit = canInit && (await isStageInitOpen());
+  const canManage = roles.includes('admin') || roles.includes('production_manager');
+  const canLogProgress = canManage || roles.includes('production') || roles.includes('qc') || roles.includes('quality');
+  const showInit = canManage && (await isStageInitOpen());
 
-  if (result.error) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-12 text-center text-gray-500">
-        <h1 className="mb-2 text-xl font-bold text-gray-900">生产中心</h1>
-        <p>{result.error}</p>
-      </div>
-    );
-  }
+  if (result.error) return <div className="mx-auto max-w-3xl px-4 py-12 text-center"><h1 className="text-xl font-bold">生产中心</h1><p className="mt-2 text-gray-500">{result.error}</p></div>;
 
   const rows = result.data || [];
-  const summary = result.summary || { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, ready_to_ship: 0, risk: 0 };
-  const workbenchRole = roles.some((r) => ['qc', 'quality'].includes(r)) ? 'qc'
-    : canInit ? 'supervisor' : 'follow_up';
+  const summary = result.summary || { total: 0, awaiting_procurement: 0, materials_in_transit: 0, ready_to_schedule: 0, in_production: 0, ready_to_ship: 0, risk: 0, completed: 0 };
+  const role: DashboardRole = roles.some((item) => ['admin', 'order_manager'].includes(item)) ? 'executive'
+    : roles.some((item) => ['qc', 'quality'].includes(item)) ? 'qc'
+    : canManage ? 'supervisor' : 'follow_up';
+  const dashboard = buildProductionDashboard(rows, summary, role);
+  const initialDetail = params.q || params.detail || '';
+  const updatedAt = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(new Date());
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-1 flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">生产中心</h1>
-        <span className="text-xs text-gray-400">卡风险,不走流程 · 生产视角</span>
-      </div>
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <p className="text-sm text-gray-500">
-          客户下单即进本中心,按物料就绪与生产节点自动落到对应阶段。点卡片筛选;数量/物料/工厂可见,售价与成本不在此视图。
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
-          {showInit && (
-            <Link href="/production/stage-init"
-              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
-              初始化各单进度
-            </Link>
-          )}
-          <ReconcileExportButton />
+    <main className="mx-auto max-w-[1440px] px-3 py-4 sm:px-5">
+      <header className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="min-w-0 lg:w-72"><h1 className="text-xl font-bold text-gray-900">生产中心</h1><p className="truncate text-xs text-gray-500">生产进度总览与任务协同执行中心</p></div>
+        <form action="/production" className="flex min-w-0 flex-1"><label htmlFor="production-search" className="sr-only">搜索生产订单</label><input id="production-search" name="q" defaultValue={params.q || ''} placeholder="订单、PO、款号、客户" className="w-full rounded-l-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" /><button className="rounded-r-lg bg-indigo-600 px-3 text-sm text-white hover:bg-indigo-700">搜索</button></form>
+        <div className="flex shrink-0 items-center gap-2 text-xs text-gray-500">
+          {showInit && <Link href="/production/stage-init" className="rounded-lg border border-gray-200 px-2.5 py-1.5 hover:bg-gray-50">设置 / 初始化</Link>}
+          <span>最后更新 {updatedAt}</span><Link href="/production" className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-indigo-600 hover:bg-indigo-50">刷新</Link><ReconcileExportButton />
         </div>
-      </div>
+      </header>
 
-      <RoleTaskWorkbench rows={rows} role={workbenchRole} />
-      <ProductionCenterClient rows={rows} summary={summary} canAssign={canInit} />
+      <ProductionCenterClient summary={summary} dashboard={dashboard} canManage={canManage} initialDetail={initialDetail} initialStage={params.stage || ''} />
 
-      {/* 排产甘特图(生产进度可视化):吃在产订单,每厂一行按工厂期画时间条+阶段进度+逾期红 */}
-      {canLogProgress && (
-        <div className="mt-6">
-          <CollapsibleSection title="📊 排产甘特图" subtitle="工厂×时间·可视化进度">
-            <ProductionGanttChart rows={rows} />
-          </CollapsibleSection>
-        </div>
-      )}
-
-      {/* 排产工作台(生产主管/管理员):把待排产的款派给工厂 */}
-      {canInit && (
-        <div className="mt-4">
-          <CollapsibleSection title="🏭 排产工作台" subtitle="把款派给工厂" defaultOpen={false}>
-            <SchedulingBoard />
-          </CollapsibleSection>
-        </div>
-      )}
-
-      {/* 工厂排产看板(P3):按工厂看负荷 + 名下派工(跨订单)+ 导派工单 */}
-      {canInit && (
-        <div className="mt-4">
-          <CollapsibleSection title="🏭 工厂排产看板" subtitle="按工厂看负荷+派工明细" defaultOpen={false}>
-            <FactoryScheduleBoard />
-          </CollapsibleSection>
-        </div>
-      )}
-
-      {/* 生产进度录入(P4):跟单/QC 每天录实际产出,对照派工计划看进度 */}
-      {canLogProgress && (
-        <div className="mt-4">
-          <CollapsibleSection title="📈 生产进度录入 · 交期预警" subtitle="跟单/QC 录实绩" defaultOpen={false}>
-            <ProductionProgressBoard canManage={canInit} />
-          </CollapsibleSection>
-        </div>
-      )}
-
-      <p className="mt-4 text-xs text-gray-400">
-        阶段口径:新订单待采购=有料未下单/未起料 · 物料在途=已下单未到齐 · 开生产待排单=料齐未开裁 · 生产中=已开裁未完工 · 待发货=尾查/工厂完成、未出运。出运后离开本中心。风险单=开裁/工厂完成节点逾期且未处置(可在订单里申请改期)。
-      </p>
-    </div>
+      <section className="mt-4 space-y-3" aria-label="生产工作台">
+        {canLogProgress && params.workspace === 'gantt' && <div id="gantt"><CollapsibleSection title="📊 排产甘特图" subtitle="工厂×时间·可视化进度"><ProductionGanttChart rows={rows} /></CollapsibleSection></div>}
+        {canManage && <div id="scheduling"><CollapsibleSection title="🏭 排单与派单工作台" subtitle="把款派给工厂" defaultOpen={params.workspace === 'scheduling'}><SchedulingBoard /></CollapsibleSection></div>}
+        {canManage && <div id="factory"><CollapsibleSection title="🏭 工厂排产看板" subtitle="按工厂看负荷与派工" defaultOpen={params.workspace === 'factory'}><FactoryScheduleBoard /></CollapsibleSection></div>}
+        {canLogProgress && <div id="progress"><CollapsibleSection title="📈 生产进度录入" subtitle="跟单/QC 录实绩" defaultOpen={params.workspace === 'progress'}><ProductionProgressBoard canManage={canManage} /></CollapsibleSection></div>}
+      </section>
+      <p className="mt-3 text-[11px] text-gray-400">阶段为现有订单、采购物料与生产节点的只读派生结果；详细任务仅在展开或导航后加载，不在首页渲染完整队列。</p>
+    </main>
   );
 }
