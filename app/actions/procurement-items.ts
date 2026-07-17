@@ -11,6 +11,7 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { deriveBudgetUnitPriceView, normalizeBudgetUnitPrice } from '@/lib/domain/budget-unit-price';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
   buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, distributeByWeights, shouldSplitBySize,
@@ -92,7 +93,7 @@ export async function listProcurementItems(orderId: string) {
     const { data: bomRows } = await (supabase.from('materials_bom') as any)
       .select('material_name, color, style_no, budget_unit_price').eq('order_id', orderId);
     const budgetLines = ((bomRows || []) as any[])
-      .filter((b) => Number(b.budget_unit_price) > 0)
+      .filter((b) => b.budget_unit_price !== null && b.budget_unit_price !== undefined && b.budget_unit_price !== '')
       .map((b) => ({ style_no: b.style_no, material_name: b.material_name, color: b.color, quote_consumption: null, quote_unit_price: Number(b.budget_unit_price) }));
     if (budgetLines.length > 0) {
       const { matchBaseline, checkOverBaseline } = await import('@/lib/domain/cost-baseline');
@@ -392,8 +393,17 @@ export async function listBomConsumptionLines(orderId: string) {
     spec: b.spec || null,
     unit: b.unit || null,
     development_consumption: b.qty_per_piece ?? null,          // 开发单耗(业务,只读)
-    // 预算单价:业务在采购核料填(存 materials_bom.budget_unit_price);老单退回报价基线(将弃用)
-    budget_unit_price: b.budget_unit_price ?? quoteOf(b).price ?? null,
+    // 预算单价:业务在采购核料填(存 materials_bom.budget_unit_price);旧报价基线仅作建议/历史兜底
+    ...(() => {
+      const view = deriveBudgetUnitPriceView(b.budget_unit_price, quoteOf(b).price);
+      return {
+        budget_unit_price: view.budgetUnitPrice,
+        budgetUnitPrice: view.budgetUnitPrice,
+        quotationBaselineUnitPrice: view.quotationBaselineUnitPrice,
+        effectiveDisplayUnitPrice: view.effectiveDisplayUnitPrice,
+        budgetPriceSource: view.budgetPriceSource,
+      };
+    })(),
     // 预算单耗 = 大货单耗(采购真实口径);老单退回报价单耗。面料预算=预算单耗×预算单价×件数
     budget_consumption: b.production_consumption ?? quoteOf(b).cons ?? null,
     production_consumption: b.production_consumption ?? null,  // 大货单耗(业务/技术填,采购核实)
@@ -494,9 +504,12 @@ export async function saveBomOverPurchasePct(orderId: string, entries: Record<st
   return { ok: true, saved };
 }
 
-/** 保存面料预算单价(2026-07-08 用户拍板:预算改在采购核料按真实物料填,取代报价单识别)。批量 {bom_id: 单价}。 */
-export async function saveBomBudgetUnitPrice(orderId: string, entries: Record<string, number | null>) {
-  const supabase = await createClient();
+export async function saveBomBudgetUnitPriceWithClient(
+  supabase: any,
+  orderId: string,
+  entries: Record<string, number | null>,
+  opts: { skipPostWriteHooks?: boolean } = {},
+) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
@@ -504,23 +517,67 @@ export async function saveBomBudgetUnitPrice(orderId: string, entries: Record<st
   if (!uRoles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
     return { error: '仅业务/理单/采购/管理员可填预算单价' };
   }
-  let saved = 0;
+  const normalizedEntries: Record<string, number | null> = {};
   for (const [bomId, val] of Object.entries(entries || {})) {
-    const v = val === null || val === undefined || isNaN(Number(val)) || Number(val) <= 0 ? null : Number(val);
-    const { error } = await (supabase.from('materials_bom') as any)
-      .update({ budget_unit_price: v }).eq('id', bomId).eq('order_id', orderId);
+    if (val === null || val === undefined || val === '') {
+      normalizedEntries[bomId] = null;
+      continue;
+    }
+    const num = Number(val);
+    if (!Number.isFinite(num)) return { error: `预算单价格式不正确:${bomId}` };
+    if (num < 0) return { error: '预算单价不能为负数' };
+    normalizedEntries[bomId] = num;
+  }
+  const writtenRows: Array<{ id: string; budget_unit_price: number | null }> = [];
+  for (const [bomId, v] of Object.entries(normalizedEntries)) {
+    const { data: updated, error } = await (supabase.from('materials_bom') as any)
+      .update({ budget_unit_price: v }).eq('id', bomId).eq('order_id', orderId)
+      .select('id, budget_unit_price');
     if (error) {
       if (/budget_unit_price|column .* does not exist/i.test(error.message || '')) {
         return { error: '预算单价列尚未建立:请先在 Supabase 执行 20260708_bom_budget_unit_price.sql' };
       }
       return { error: friendlyError(error) };
     }
-    saved++;
+    if (!updated || updated.length !== 1) {
+      return { error: `预算单价写入失败:${bomId} 未返回唯一更新行` };
+    }
+    const row = updated[0] as { id: string; budget_unit_price: number | null };
+    if (row.id !== bomId) {
+      return { error: `预算单价写入失败:${bomId} 返回了错误的行` };
+    }
+    if (normalizeBudgetUnitPrice(row.budget_unit_price) !== normalizeBudgetUnitPrice(v)) {
+      return { error: `预算单价写入失败:${bomId} 回写值不一致` };
+    }
+    writtenRows.push(row);
   }
-  // 预算变动 → 重算财务成本兜底缓存(budget_fabric_amount 等)
-  try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
-  revalidatePath(`/orders/${orderId}`);
-  return { ok: true, saved };
+  const verifyIds = [...new Set(Object.keys(normalizedEntries))];
+  if (verifyIds.length > 0) {
+    const { data: verifyRows, error: verifyErr } = await (supabase.from('materials_bom') as any)
+      .select('id, budget_unit_price').eq('order_id', orderId).in('id', verifyIds).order('id');
+    if (verifyErr) return { error: friendlyError(verifyErr) };
+    if (!verifyRows || verifyRows.length !== verifyIds.length) {
+      return { error: `预算单价写入失败:仅回读到 ${verifyRows?.length || 0}/${verifyIds.length} 行` };
+    }
+    const expected = new Map(Object.entries(normalizedEntries));
+    for (const row of verifyRows as Array<{ id: string; budget_unit_price: number | null }>) {
+      if (normalizeBudgetUnitPrice(row.budget_unit_price) !== normalizeBudgetUnitPrice(expected.get(row.id))) {
+        return { error: `预算单价写入失败:${row.id} 回读值不一致` };
+      }
+    }
+  }
+  if (!opts.skipPostWriteHooks) {
+    // 预算变动 → 重算财务成本兜底缓存(budget_fabric_amount 等)
+    try { const { recomputeOrderBudgetCaches } = await import('@/app/actions/quote-baseline'); await recomputeOrderBudgetCaches(orderId); } catch { /* 不阻断 */ }
+    revalidatePath(`/orders/${orderId}`);
+  }
+  return { ok: true, saved: writtenRows.length, rows: writtenRows };
+}
+
+/** 保存面料预算单价(2026-07-08 用户拍板:预算改在采购核料按真实物料填,取代报价单识别)。批量 {bom_id: 单价}。 */
+export async function saveBomBudgetUnitPrice(orderId: string, entries: Record<string, number | null>) {
+  const supabase = await createClient();
+  return saveBomBudgetUnitPriceWithClient(supabase, orderId, entries);
 }
 
 // 可看/可填预算(加工费/辅料)的角色 —— 业务/理单/采购/财务/管理员。

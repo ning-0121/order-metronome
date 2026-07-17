@@ -105,7 +105,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     if ((r as any).data) {
       setConsLines((r as any).data);
       setOverEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.over_purchase_pct != null ? String(l.over_purchase_pct) : ''])));
-      setPriceEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.budget_unit_price != null ? String(l.budget_unit_price) : ''])));
+      setPriceEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.budgetUnitPrice != null ? String(l.budgetUnitPrice) : ''])));
       setSupplyEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.supply_mode || 'self'])));
     }
     if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
@@ -889,9 +889,17 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                         : l.required ? (<>
                         <span className="text-gray-400 mr-0.5">¥</span>
                         <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''}
-                          placeholder="必填"
+                          placeholder={l.budgetPriceSource === 'quotation_baseline' && l.effectiveDisplayUnitPrice != null
+                            ? `建议 ¥${Number(l.effectiveDisplayUnitPrice).toLocaleString()}`
+                            : '必填'}
                           onChange={e => setPriceEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
-                          className={`w-20 rounded border px-2 py-1 ${!(Number(priceEdit[l.id]) > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                          className={`w-20 rounded border px-2 py-1 ${priceEdit[l.id] === '' ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                        {l.budgetPriceSource === 'quotation_baseline' && l.effectiveDisplayUnitPrice != null && (
+                          <div className="mt-1 text-[11px] text-amber-600">报价基线建议 {Number(l.effectiveDisplayUnitPrice).toLocaleString()}</div>
+                        )}
+                        {l.budgetPriceSource === 'saved_budget' && l.budgetUnitPrice != null && (
+                          <div className="mt-1 text-[11px] text-emerald-600">已保存预算 ¥{Number(l.budgetUnitPrice).toLocaleString()}</div>
+                        )}
                       </>) : <span className="text-gray-300">—</span>}
                     </td>
                     {/* 抛量%:采购填,采购量=件数×大货单耗×(1+抛量%) */}

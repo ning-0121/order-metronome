@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { collectBudgetUnitPriceMismatches } from '../lib/domain/budget-unit-price';
+import { collectBudgetUnitPriceMismatches, deriveBudgetUnitPriceView } from '../lib/domain/budget-unit-price';
 import { base64ToBlob, triggerBlobDownload } from '../lib/browser/download';
 import { loadProductionTaskTemplate, safeProductionTaskFilename } from '../lib/exports/production-task-template';
 import { PRODUCTION_TASK_SHEETS } from '../lib/exports/production-task-template-map';
@@ -78,6 +78,18 @@ async function main() {
     [{ id: 'bom-1', budget_unit_price: 12.5 }, { id: 'bom-2', budget_unit_price: null }],
     { 'bom-1': 12.5, 'bom-2': null, 'bom-3': 3 },
   ), [{ id: 'bom-3', expected: '3', actual: '' }]);
+  assert.deepEqual(deriveBudgetUnitPriceView(null, 9.25), {
+    budgetUnitPrice: null,
+    quotationBaselineUnitPrice: 9.25,
+    effectiveDisplayUnitPrice: 9.25,
+    budgetPriceSource: 'quotation_baseline',
+  });
+  assert.deepEqual(deriveBudgetUnitPriceView(0, 9.25), {
+    budgetUnitPrice: 0,
+    quotationBaselineUnitPrice: 9.25,
+    effectiveDisplayUnitPrice: 0,
+    budgetPriceSource: 'saved_budget',
+  });
 
   const moButton = readFileSync('app/procurement/verify/[orderId]/MoDownloadButton.tsx', 'utf8');
   assert.match(moButton, /import \{ base64ToBlob, triggerBlobDownload \} from '@\/lib\/browser\/download'/);
