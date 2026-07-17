@@ -9,6 +9,7 @@ import {
   listBomConsumptionLines, getOrderStyleBudgets,
   saveBomBudgetUnitPrice, saveOrderStyleBudgets,
 } from '@/app/actions/procurement-items';
+import { collectBudgetUnitPriceMismatches } from '@/lib/domain/budget-unit-price';
 
 const yuan = (n: number) => `¥${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
@@ -56,6 +57,12 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
     setSaving(false);
     const err = (r1 as any).error || (r2 as any).error;
     if (err) { setMsg('❌ ' + err); return; }
+    const verify = await listBomConsumptionLines(orderId);
+    const mismatches = (verify as any).data ? collectBudgetUnitPriceMismatches((verify as any).data as any[], prices) : [];
+    if (mismatches.length > 0) {
+      setMsg(`⚠️ 预算已提交，但有 ${mismatches.length} 行回显不一致，请刷新后重试或检查权限`);
+      return;
+    }
     setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料元/套×套数)');
     await load();
   }

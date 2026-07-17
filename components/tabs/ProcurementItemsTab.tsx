@@ -21,6 +21,7 @@ import { useDialogs } from '@/components/ui/useDialogs';
 import { orderSizeKeys } from '@/lib/utils/size-sort';
 import { getOrderSizeOrder } from '@/app/actions/order-line-items';
 import { OrderShareDocsLinks } from '@/components/OrderShareDocsLinks';
+import { collectBudgetUnitPriceMismatches } from '@/lib/domain/budget-unit-price';
 
 /** 补采购财务审批状态 → 显示 */
 const SUPP_STATUS: Record<string, { label: string; cls: string }> = {
@@ -131,6 +132,12 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     setConsSaving(false);
     const err = results.map(r => (r as any).error).find(Boolean);
     if (err) { setMsg(err); return; }
+    const verify = await listBomConsumptionLines(orderId);
+    const mismatches = (verify as any).data ? collectBudgetUnitPriceMismatches((verify as any).data as any[], prices) : [];
+    if (mismatches.length > 0) {
+      setMsg(`⚠️ 已提交预算单价，但有 ${mismatches.length} 行回显不一致，请刷新后重试或检查权限`);
+      return;
+    }
     const warn = results.map(r => (r as any).warning).find(Boolean);
     setMsg(warn ? ('⚠️ ' + warn) : '✅ 已保存(预算单价 + 加工费 + 辅料总价' + (trackingPhase ? '' : ' + 抛量') + ')');
     await loadCons();

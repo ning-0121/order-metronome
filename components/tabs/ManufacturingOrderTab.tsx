@@ -8,6 +8,7 @@ import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { OrderShareDocsLinks } from '@/components/OrderShareDocsLinks';
 import { orderSizeKeys, sizeComparator } from '@/lib/utils/size-sort';
 import { useDialogs } from '@/components/ui/useDialogs';
+import { base64ToBlob, triggerBlobDownload } from '@/lib/browser/download';
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', lining: '里料', label: '标签', packing: '包装',
@@ -114,14 +115,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         : await generateTrimSheet(orderId);
       if ((res as any).error) { setMsg((res as any).error); return; }
       const { base64, fileName } = res as any;
-      const bytes = atob(base64);
-      const arr = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-      const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fileName; document.body.appendChild(a); a.click();
-      document.body.removeChild(a); URL.revokeObjectURL(url);
+      triggerBlobDownload(base64ToBlob(base64), fileName);
     } catch (e: any) { setMsg('生成出错：' + (e?.message || e)); }
     finally { setGenerating(false); }
   }
