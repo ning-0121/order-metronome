@@ -505,15 +505,15 @@ export async function saveBomOverPurchasePct(orderId: string, entries: Record<st
 }
 
 export async function saveBomBudgetUnitPriceWithClient(
-  supabase: any,
+  supabase: BudgetUnitPriceSupabaseClient,
   orderId: string,
   entries: Record<string, number | null>,
   opts: { skipPostWriteHooks?: boolean } = {},
 ) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
-  const uRoles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  const { data: prof } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const uRoles: string[] = prof?.roles?.length ? prof.roles : [prof?.role].filter(Boolean) as string[];
   if (!uRoles.some((r) => ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'procurement', 'procurement_manager', 'admin'].includes(r))) {
     return { error: '仅业务/理单/采购/管理员可填预算单价' };
   }
@@ -530,7 +530,7 @@ export async function saveBomBudgetUnitPriceWithClient(
   }
   const writtenRows: Array<{ id: string; budget_unit_price: number | null }> = [];
   for (const [bomId, v] of Object.entries(normalizedEntries)) {
-    const { data: updated, error } = await (supabase.from('materials_bom') as any)
+    const { data: updated, error } = await supabase.from('materials_bom')
       .update({ budget_unit_price: v }).eq('id', bomId).eq('order_id', orderId)
       .select('id, budget_unit_price');
     if (error) {
@@ -553,7 +553,7 @@ export async function saveBomBudgetUnitPriceWithClient(
   }
   const verifyIds = [...new Set(Object.keys(normalizedEntries))];
   if (verifyIds.length > 0) {
-    const { data: verifyRows, error: verifyErr } = await (supabase.from('materials_bom') as any)
+    const { data: verifyRows, error: verifyErr } = await supabase.from('materials_bom')
       .select('id, budget_unit_price').eq('order_id', orderId).in('id', verifyIds).order('id');
     if (verifyErr) return { error: friendlyError(verifyErr) };
     if (!verifyRows || verifyRows.length !== verifyIds.length) {
@@ -579,6 +579,28 @@ export async function saveBomBudgetUnitPrice(orderId: string, entries: Record<st
   const supabase = await createClient();
   return saveBomBudgetUnitPriceWithClient(supabase, orderId, entries);
 }
+
+type BudgetUnitPriceProfile = { role: string | null; roles: string[] | null };
+type BudgetUnitPriceWriteRow = { id: string; budget_unit_price: number | null };
+type BudgetUnitPriceQueryResult<T> = { data: T; error: { message?: string } | null };
+interface BudgetUnitPriceQueryBuilder<T> {
+  select(columns: string): BudgetUnitPriceQueryBuilder<T>;
+  update(payload: { budget_unit_price: number | null }): BudgetUnitPriceQueryBuilder<T>;
+  eq(column: string, value: string): BudgetUnitPriceQueryBuilder<T>;
+  in(column: string, values: string[]): BudgetUnitPriceQueryBuilder<T>;
+  order(column: string): BudgetUnitPriceQueryBuilder<T>;
+  single(): Promise<BudgetUnitPriceQueryResult<T>>;
+  maybeSingle(): Promise<BudgetUnitPriceQueryResult<T>>;
+  then<TResult1 = BudgetUnitPriceQueryResult<T>, TResult2 = never>(
+    onFulfilled?: ((value: BudgetUnitPriceQueryResult<T>) => TResult1 | PromiseLike<TResult1>) | null,
+    onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): PromiseLike<TResult1 | TResult2>;
+}
+type BudgetUnitPriceSupabaseClient = {
+  auth: { getUser: () => Promise<{ data: { user: { id: string } | null }; error: null }> };
+  from(table: 'profiles'): BudgetUnitPriceQueryBuilder<BudgetUnitPriceProfile | null>;
+  from(table: 'materials_bom'): BudgetUnitPriceQueryBuilder<BudgetUnitPriceWriteRow[]>;
+};
 
 // 可看/可填预算(加工费/辅料)的角色 —— 业务/理单/采购/财务/管理员。
 // order_cost_baseline 的 RLS 只放行 订单 owner/创建人/canSeeAll;非订单负责人的业务执行(merchandiser)、

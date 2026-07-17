@@ -3,69 +3,70 @@ import { collectBudgetUnitPriceMismatches, deriveBudgetUnitPriceView, normalizeB
 import { saveBomBudgetUnitPriceWithClient } from '../app/actions/procurement-items';
 
 type MockRow = { id: string; order_id: string; budget_unit_price: number | null };
+type MockProfile = { role: string; roles: string[] };
+type QueryResult<T> = { data: T; error: null };
+type MockActionRow = { id: string; budget_unit_price: number | null };
+type MockFilterValue = string | string[];
+type MockPayload = { budget_unit_price?: number | null };
 
-function createMockClient(rows: MockRow[], role: string = 'procurement') {
-  const state = {
+interface MockQueryBuilder {
+  select(columns: string): MockQueryBuilder;
+  update(payload: MockPayload): MockQueryBuilder;
+  eq(column: string, value: MockFilterValue): MockQueryBuilder;
+  in(column: string, value: string[]): MockQueryBuilder;
+  order(column: string): MockQueryBuilder;
+  single(): Promise<QueryResult<MockProfile | null>>;
+  maybeSingle(): Promise<QueryResult<MockProfile | null>>;
+  then<TResult1 = QueryResult<MockActionRow[] | MockProfile | null>, TResult2 = never>(
+    onFulfilled?: ((value: QueryResult<MockActionRow[] | MockProfile | null>) => TResult1 | PromiseLike<TResult1>) | null,
+    onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): PromiseLike<TResult1 | TResult2>;
+}
+
+type MockSupabaseClient = {
+  auth: { getUser: () => Promise<{ data: { user: { id: string } | null }; error: null }> };
+  from: (table: string) => MockQueryBuilder;
+};
+type BudgetHelperClient = Parameters<typeof saveBomBudgetUnitPriceWithClient>[0];
+
+type MockState = {
+  rows: MockRow[];
+  writes: Array<{ id: string; value: number | null }>;
+};
+
+function createMockClient(rows: MockRow[], role: string = 'procurement'): { client: MockSupabaseClient; state: MockState } {
+  const state: MockState = {
     rows: rows.map((row) => ({ ...row })),
-    writes: [] as Array<{ id: string; value: number | null }>,
+    writes: [],
   };
-  const auth = { getUser: async () => ({ data: { user: { id: 'user-1' } }, error: null }) };
-  const from = (table: string) => {
-    const builder: any = {
-      _table: table,
-      _op: 'select',
-      _filters: {} as Record<string, any>,
-      _payload: null as Record<string, any> | null,
-      select(_cols: string) {
-        if (builder._op === 'update') builder._op = 'update-select';
-        return builder;
-      },
-      update(payload: Record<string, any>) {
-        builder._op = 'update';
-        builder._payload = payload;
-        return builder;
-      },
-      eq(col: string, value: any) { builder._filters[col] = value; return builder; },
-      in(col: string, value: any[]) { builder._filters[col] = value; return builder; },
-      order() { return builder; },
-      single: async () => {
-        if (table === 'profiles') {
-          return { data: { role, roles: [role] }, error: null };
-        }
-        return { data: null, error: null };
-      },
-      maybeSingle: async () => {
-        if (table === 'profiles') {
-          return { data: { role, roles: [role] }, error: null };
-        }
-        return { data: null, error: null };
-      },
-      then(onFulfilled: (value: any) => any, onRejected?: (reason: any) => any) {
-        return Promise.resolve(run()).then(onFulfilled, onRejected);
-      },
-    };
+  const auth = { getUser: async () => ({ data: { user: { id: 'user-1' } }, error: null as const }) };
 
-    const run = async () => {
+  const createBuilder = (table: string): MockQueryBuilder => {
+    let op: 'select' | 'update' | 'update-select' = 'select';
+    const filters: Record<string, MockFilterValue> = {};
+    let payload: MockPayload = {};
+
+    const run = async (): Promise<QueryResult<MockActionRow[] | MockProfile | null>> => {
       if (table === 'profiles') {
         return { data: { role, roles: [role] }, error: null };
       }
       if (table !== 'materials_bom') {
         return { data: [], error: null };
       }
-      if (builder._op === 'update-select') {
-        const id = builder._filters.id;
-        const orderId = builder._filters.order_id;
+      if (op === 'update-select') {
+        const id = String(filters.id ?? '');
+        const orderId = String(filters.order_id ?? '');
         const row = state.rows.find((r) => r.id === id && r.order_id === orderId);
         if (!row) return { data: [], error: null };
-        if (typeof builder._payload?.budget_unit_price !== 'undefined') {
-          row.budget_unit_price = builder._payload.budget_unit_price;
+        if (typeof payload.budget_unit_price !== 'undefined') {
+          row.budget_unit_price = payload.budget_unit_price;
           state.writes.push({ id: row.id, value: row.budget_unit_price });
         }
         return { data: [{ id: row.id, budget_unit_price: row.budget_unit_price }], error: null };
       }
-      if (builder._op === 'select') {
-        const orderId = builder._filters.order_id;
-        const ids = builder._filters.id;
+      if (op === 'select') {
+        const orderId = String(filters.order_id ?? '');
+        const ids = filters.id;
         const selected = state.rows
           .filter((r) => r.order_id === orderId && (Array.isArray(ids) ? ids.includes(r.id) : true))
           .map((r) => ({ id: r.id, budget_unit_price: r.budget_unit_price }));
@@ -74,9 +75,48 @@ function createMockClient(rows: MockRow[], role: string = 'procurement') {
       return { data: [], error: null };
     };
 
-    return builder;
+    return {
+      select(columns: string) {
+        void columns;
+        if (op === 'update') op = 'update-select';
+        return this;
+      },
+      update(nextPayload: MockPayload) {
+        op = 'update';
+        payload = nextPayload;
+        return this;
+      },
+      eq(column: string, value: MockFilterValue) {
+        filters[column] = value;
+        return this;
+      },
+      in(column: string, value: string[]) {
+        filters[column] = value;
+        return this;
+      },
+      order(column: string) {
+        void column;
+        return this;
+      },
+      single: async () => run() as Promise<QueryResult<MockProfile | null>>,
+      maybeSingle: async () => run() as Promise<QueryResult<MockProfile | null>>,
+      then<TResult1 = QueryResult<MockActionRow[] | MockProfile | null>, TResult2 = never>(
+        onFulfilled?: ((value: QueryResult<MockActionRow[] | MockProfile | null>) => TResult1 | PromiseLike<TResult1>) | null,
+        onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+      ) {
+        return Promise.resolve(run()).then(onFulfilled, onRejected);
+      },
+    };
   };
-  return { client: { auth, from }, state };
+
+  const client: MockSupabaseClient = {
+    auth,
+    from(table: string) {
+      return createBuilder(table);
+    },
+  };
+
+  return { client, state };
 }
 
 async function main() {
@@ -116,25 +156,25 @@ async function main() {
     { id: 'bom-2', order_id: 'order-1', budget_unit_price: 4 },
   ];
   const okMock = createMockClient(okRows);
-  const ok = await saveBomBudgetUnitPriceWithClient(okMock.client, 'order-1', { 'bom-1': 12.5, 'bom-2': 0 }, { skipPostWriteHooks: true });
-  assert.equal((ok as any).ok, true);
-  assert.equal((ok as any).saved, 2);
+  const ok = await saveBomBudgetUnitPriceWithClient(okMock.client as BudgetHelperClient, 'order-1', { 'bom-1': 12.5, 'bom-2': 0 }, { skipPostWriteHooks: true });
+  assert.equal((ok as { ok?: boolean }).ok, true);
+  assert.equal((ok as { saved?: number }).saved, 2);
   assert.equal(okMock.state.rows.find((r) => r.id === 'bom-1')?.budget_unit_price, 12.5);
   assert.equal(okMock.state.rows.find((r) => r.id === 'bom-2')?.budget_unit_price, 0);
 
   // zero-row update fails
   const missMock = createMockClient([{ id: 'bom-1', order_id: 'order-1', budget_unit_price: null }]);
-  const miss = await saveBomBudgetUnitPriceWithClient(missMock.client, 'order-1', { 'missing-row': 9 }, { skipPostWriteHooks: true });
-  assert.match(String((miss as any).error || ''), /未返回唯一更新行|写入失败/);
+  const miss = await saveBomBudgetUnitPriceWithClient(missMock.client as BudgetHelperClient, 'order-1', { 'missing-row': 9 }, { skipPostWriteHooks: true });
+  assert.match(String((miss as { error?: string }).error || ''), /未返回唯一更新行|写入失败/);
 
   // unauthorized write rejected
   const noAuthMock = createMockClient([{ id: 'bom-1', order_id: 'order-1', budget_unit_price: null }], 'logistics');
-  const noAuth = await saveBomBudgetUnitPriceWithClient(noAuthMock.client, 'order-1', { 'bom-1': 9 }, { skipPostWriteHooks: true });
-  assert.match(String((noAuth as any).error || ''), /仅业务\/理单\/采购\/管理员可填预算单价/);
+  const noAuth = await saveBomBudgetUnitPriceWithClient(noAuthMock.client as BudgetHelperClient, 'order-1', { 'bom-1': 9 }, { skipPostWriteHooks: true });
+  assert.match(String((noAuth as { error?: string }).error || ''), /仅业务\/理单\/采购\/管理员可填预算单价/);
 
   const negativeMock = createMockClient([{ id: 'bom-1', order_id: 'order-1', budget_unit_price: null }]);
-  const negative = await saveBomBudgetUnitPriceWithClient(negativeMock.client, 'order-1', { 'bom-1': -1 }, { skipPostWriteHooks: true });
-  assert.match(String((negative as any).error || ''), /预算单价不能为负数/);
+  const negative = await saveBomBudgetUnitPriceWithClient(negativeMock.client as BudgetHelperClient, 'order-1', { 'bom-1': -1 }, { skipPostWriteHooks: true });
+  assert.match(String((negative as { error?: string }).error || ''), /预算单价不能为负数/);
 
   console.log('budget unit price contract: assertions passed');
 }
