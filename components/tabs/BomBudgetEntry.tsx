@@ -19,6 +19,8 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
   const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]);
   const [accessoryPerPiece, setAccessoryPerPiece] = useState('');   // 辅料预算【元/件】(2026-07-11 老板拍板:×订单件数存总额,与加工费同口径)
   const [orderQty, setOrderQty] = useState(0);
+  const [commercialOrderQty, setCommercialOrderQty] = useState<number | null>(null);
+  const [orderQuantityDisplay, setOrderQuantityDisplay] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -38,6 +40,8 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
     }
     setAccessoryPerPiece((sb as any)?.accessoryPerSet != null ? String((sb as any).accessoryPerSet) : '');
     setOrderQty(Number((sb as any)?.orderQty) || 0);
+    setCommercialOrderQty((sb as any)?.commercialOrderQty ?? null);
+    setOrderQuantityDisplay((sb as any)?.orderQuantityDisplay || '');
     setLoading(false);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -63,7 +67,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
       setMsg(`⚠️ 预算已提交，但有 ${mismatches.length} 行回显不一致，请刷新后重试或检查权限`);
       return;
     }
-    setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料元/套×套数)');
+    setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料元/套×商业数量)');
     await load();
   }
 
@@ -71,6 +75,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
 
   const fabricLines = lines.filter(l => l.required);   // 布料(面料/里料):必填预算单价
   const missing = fabricLines.filter(l => priceEdit[l.id] === '').length;
+  const orderQtyDisplay = orderQuantityDisplay || (commercialOrderQty != null ? `${commercialOrderQty.toLocaleString()} 套` : (orderQty > 0 ? `${orderQty.toLocaleString()} 件` : '?'));
 
   return (
     <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/50 p-4 space-y-3 mb-5">
@@ -85,7 +90,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         </button>
       </div>
       <p className="text-[11px] text-gray-500">
-        面料按<b>采购真实布料</b>逐料填【预算单价】:面料预算 = 大货单耗 × 预算单价 × 件数(大货单耗在「原辅料和包装」页填,此处只读)。
+        面料按<b>采购真实布料</b>逐料填【预算单价】:面料预算 = 大货单耗 × 预算单价 × 数量基准(大货单耗在「原辅料和包装」页填,此处只读)。
         辅料<b>不逐个填价</b>,在下方填整单一口价【辅料总价】;加工费按款填【元/件】。抛量% 由采购在采购中心填,这里不涉及。
       </p>
 
@@ -112,7 +117,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
                   <td className="py-1.5 px-2 text-gray-600">{l.color || '—'}</td>
                   <td className="py-1.5 px-2 text-gray-800">{l.material_name || '—'}
                     {l.required ? <span className="ml-1 text-amber-600">·布料</span> : <span className="ml-1 text-gray-300">·辅料</span>}</td>
-                  <td className="py-1.5 px-2 text-gray-700" title="该款×色件数(整单通用辅料=订单总数)">{l.pieces ?? '—'}</td>
+                  <td className="py-1.5 px-2 text-gray-700" title="该款×色数量基准">{l.quantity_display ?? l.pieces ?? '—'}</td>
                   <td className="py-1.5 px-2">
                     {cons > 0
                       ? <span className="text-gray-800">{l.production_consumption}</span>
@@ -173,9 +178,9 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
           placeholder="单件辅料(拉链/标/袋…)"
           onChange={e => setAccessoryPerPiece(e.target.value)}
           className="w-28 rounded border border-gray-300 px-2 py-1 text-sm" />
-        <span className="text-xs text-gray-500">元/套 × {orderQty > 0 ? orderQty.toLocaleString() : '?'} 套</span>
-        {Number(accessoryPerPiece) > 0 && orderQty > 0 && (
-          <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * orderQty * 100) / 100).toLocaleString()}</span>
+        <span className="text-xs text-gray-500">元/套 × {orderQtyDisplay}</span>
+        {Number(accessoryPerPiece) > 0 && (commercialOrderQty ?? orderQty) > 0 && (
+          <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * (commercialOrderQty ?? orderQty) * 100) / 100).toLocaleString()}</span>
         )}
         <span className="text-[11px] text-gray-400">按整套计价；组件级费用请在辅料明细中拆分</span>
       </div>

@@ -12,6 +12,12 @@ import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { deriveBudgetUnitPriceView, normalizeBudgetUnitPrice } from '@/lib/domain/budget-unit-price';
+import {
+  deriveOrderQuantityContext,
+  formatQuantityDisplay,
+  quantityForBasis,
+  quantityLabelForBasis,
+} from '@/lib/domain/quantity-engine';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
   buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, distributeByWeights, shouldSplitBySize,
@@ -360,7 +366,7 @@ export async function listBomConsumptionLines(orderId: string) {
   };
 
   // 数量(件数,#1 用户):按 款×色 从 order_line_items 取;整单通用辅料行(无款号)→ 订单总数
-  const { data: ord } = await (supabase.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+  const { data: ord } = await (supabase.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
   const orderQty = Number((ord as any)?.quantity) || 0;
   const { data: lis } = await (supabase.from('order_line_items') as any)
     .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
@@ -387,7 +393,7 @@ export async function listBomConsumptionLines(orderId: string) {
     id: b.id,
     style_no: b.style_no || null,
     color: b.color || null,
-    pieces: pieceOf(b),                                        // 数量(件数,#1):供采购核料看单
+    pieces: pieceOf(b),                                        // 数量基数(商业数量或物理件数,由用量基准决定)
     material_name: b.material_name || null,
     material_type: b.material_type || null,
     spec: b.spec || null,
@@ -411,6 +417,12 @@ export async function listBomConsumptionLines(orderId: string) {
     required: b.material_type === 'fabric' || b.material_type === 'lining',  // 布料必核
     // 供料方式:self=绮陌自购 / customer=客供 / factory=加工厂承担。后两者绮陌都不采购、不计成本。
     supply_mode: b.factory_supplied === true ? 'factory' : (b.customer_supplied === true ? 'customer' : 'self'),
+    quantity_basis: b.consumption_basis || 'PER_SET',
+    quantity_label: quantityLabelForBasis(b.consumption_basis || 'PER_SET'),
+    quantity_display: formatQuantityDisplay(deriveOrderQuantityContext({
+      physicalQuantity: pieceOf(b),
+      quantityUnit: (ord as any)?.quantity_unit ?? null,
+    })),
   }));
   return { data: rows };
 }
@@ -636,13 +648,25 @@ export async function getOrderStyleBudgets(orderId: string) {
     return { style_no: st, cmt: (b as any).cmt ?? null, cmt_basis: (b as any).cmt_basis || 'PER_SET' };
   });
   const accessoryTotal = (cb as any)?.accessory_budget_total ?? null;   // 库里永远存【总额】(下游财务同步/对账口径不变)
-  // 2026-07-11 老板拍板:辅料录入改【元/件】×订单件数(此前一口价被业务当元/件填,财务收到 ¥1 总额)。
-  // 回显单件价 = 总额 ÷ 订单件数;订单件数一并给 UI 显示换算。
-  const { data: ordRow } = await (svc.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
-  const orderQty = Number((ordRow as any)?.quantity) || 0;
-  const accessoryPerSet = accessoryTotal != null && orderQty > 0
-    ? Math.round((Number(accessoryTotal) / orderQty) * 10000) / 10000 : null;
-  return { data: rows, accessoryTotal, accessoryPerSet, accessoryBasis: 'PER_SET', orderQty };
+  const { data: ordRow } = await (svc.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
+  const qtyCtx = deriveOrderQuantityContext({
+    physicalQuantity: (ordRow as any)?.quantity ?? null,
+    quantityUnit: (ordRow as any)?.quantity_unit ?? null,
+  });
+  const accessoryQty = quantityForBasis(qtyCtx, 'PER_SET');
+  const accessoryPerSet = accessoryTotal != null && accessoryQty != null && accessoryQty > 0
+    ? Math.round((Number(accessoryTotal) / accessoryQty) * 10000) / 10000 : null;
+  return {
+    data: rows,
+    accessoryTotal,
+    accessoryPerSet,
+    accessoryBasis: 'PER_SET',
+    orderQty: Number((ordRow as any)?.quantity) || 0,
+    commercialOrderQty: qtyCtx.commercialQuantity,
+    orderQuantityDisplay: formatQuantityDisplay(qtyCtx),
+    quantityNeedsReview: qtyCtx.needsReview,
+    quantityReviewReason: qtyCtx.reviewReason,
+  };
 }
 
 /**
@@ -672,8 +696,12 @@ export async function saveOrderStyleBudgets(
   let accTotal = accessoryValue === undefined ? undefined : num(accessoryValue);
   if (accTotal != null && (accessoryMode === 'per_piece' || accessoryMode === 'per_set')) {
     const svcQty = createServiceRoleClient();
-    const { data: ordRow } = await (svcQty.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
-    const qty = Number((ordRow as any)?.quantity) || 0;
+    const { data: ordRow } = await (svcQty.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
+    const qtyCtx = deriveOrderQuantityContext({
+      physicalQuantity: (ordRow as any)?.quantity ?? null,
+      quantityUnit: (ordRow as any)?.quantity_unit ?? null,
+    });
+    const qty = quantityForBasis(qtyCtx, accessoryMode === 'per_set' ? 'PER_SET' : 'PER_PIECE') || 0;
     if (qty <= 0) return { error: `订单数量缺失,无法按【${accessoryMode === 'per_set' ? '元/套' : '元/件'}】换算辅料预算 —— 请先补订单数量,或改填总额` };
     accTotal = Math.round(accTotal * qty * 100) / 100;
   }

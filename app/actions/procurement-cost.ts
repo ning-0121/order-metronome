@@ -9,6 +9,7 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine';
 import { computeProcurementCostSummary, computeReceivingDiff } from '@/lib/services/procurement-cost';
 import { calculateProfitSnapshot } from '@/lib/services/profit.service';
 
@@ -82,9 +83,13 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   const svc = createServiceRoleClient();
 
   const { data: order } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, quantity').eq('id', orderId).maybeSingle();
+    .select('id, order_no, internal_order_no, customer_name, quantity, quantity_unit').eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
   const orderQty = Number((order as any).quantity) || 0;
+  const orderQtyCtx = deriveOrderQuantityContext({
+    physicalQuantity: (order as any).quantity ?? null,
+    quantityUnit: (order as any).quantity_unit ?? null,
+  });
 
   // 2026-07-08 弃用报价基线:面料预算改从 materials_bom(采购核料业务填 大货单耗×预算单价,真实物料名 →
   //   与实际下单同名对齐,不再"仿锦 vs 280g直贡呢"对不上);辅料/加工按款存 quote_style_budgets(采购核料填)。
@@ -108,9 +113,31 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   }
   const piecesForBom = (b: any): number => {
     const st = nrm(b.style_no);
-    if (b.style_no && b.color) { const v = qtyByStyleColor.get(`${st}¦${nrm(b.color)}`); if (v != null) return v; }
-    if (b.style_no) { const v = qtyByStyle.get(st); if (v) return v; }
-    return orderQty;
+    if (b.style_no && b.color) {
+      const v = qtyByStyleColor.get(`${st}¦${nrm(b.color)}`);
+      if (v != null) {
+        return quantityForBasis(
+          deriveOrderQuantityContext({
+            physicalQuantity: v,
+            quantityUnit: (order as any).quantity_unit ?? null,
+          }),
+          b.consumption_basis || 'PER_SET',
+        ) || v;
+      }
+    }
+    if (b.style_no) {
+      const v = qtyByStyle.get(st);
+      if (v) {
+        return quantityForBasis(
+          deriveOrderQuantityContext({
+            physicalQuantity: v,
+            quantityUnit: (order as any).quantity_unit ?? null,
+          }),
+          b.consumption_basis || 'PER_SET',
+        ) || v;
+      }
+    }
+    return quantityForBasis(orderQtyCtx, b.consumption_basis || 'PER_SET') || orderQty;
   };
   // 辅料预算 = 整单一口价 order_cost_baseline.accessory_budget_total(不按件数;2026-07-08 用户拍板)
   const trimBudgetTotal = Math.round((Number((base as any)?.accessory_budget_total) || 0) * 100) / 100;
@@ -120,7 +147,13 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
   for (const sb of styleBudgets) {
     const c = Number((sb as any).cmt); if (!(c > 0)) continue;
     const st = nrm((sb as any).style_no);
-    const q = qtyByStyle.get(st) || (styleBudgets.length === 1 ? orderQty : 0);
+    const q = quantityForBasis(
+      deriveOrderQuantityContext({
+        physicalQuantity: qtyByStyle.get(st) || (styleBudgets.length === 1 ? orderQty : 0),
+        quantityUnit: (order as any).quantity_unit ?? null,
+      }),
+      (sb as any).cmt_basis || 'PER_SET',
+    ) || 0;
     if (q > 0) { cmtBudgetTotal += c * q; hasCmtBudget = true; }
   }
   cmtBudgetTotal = Math.round(cmtBudgetTotal * 100) / 100;

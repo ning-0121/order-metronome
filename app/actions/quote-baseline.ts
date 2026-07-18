@@ -12,6 +12,7 @@ import { revalidatePath } from 'next/cache';
 import { getUserRoles } from '@/lib/utils/user-role';
 import { hasRoleInGroup, isAdminRole } from '@/lib/domain/roles';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
+import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine';
 
 export interface QuoteBaselineLine {
   style_no?: string | null;             // 款号(单耗按款不同)
@@ -245,8 +246,12 @@ export async function saveQuoteBaseline(
   // 旧「成本控制」上传单会把 budget_fabric_amount/budget_fabric_kg/fabric_consumption_kg 写进
   // order_cost_baseline,被 profit.service(成本兜底)、order-financials、procurement(面料KG预警)、
   // supply-chain 读。弃用旧单后,这些必须由报价基线冻结时按逐款算出来喂,否则利润/预算断供。
-  const { data: ord } = await (supabase.from('orders') as any).select('quantity').eq('id', orderId).maybeSingle();
+  const { data: ord } = await (supabase.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
   const orderQty = Number((ord as any)?.quantity) || 0;
+  const orderQtyCtx = deriveOrderQuantityContext({
+    physicalQuantity: (ord as any)?.quantity ?? null,
+    quantityUnit: (ord as any)?.quantity_unit ?? null,
+  });
   const { data: liRows } = await (supabase.from('order_line_items') as any).select('style_no, qty_pcs').eq('order_id', orderId);
   const normS = (s: any) => String(s ?? '').trim().toLowerCase();
   const qtyByStyle = new Map<string, number>();
@@ -254,8 +259,16 @@ export async function saveQuoteBaseline(
   const singleStyle = styleBudgets.length <= 1;
   const qtyFor = (styleNo: string | null): number => {
     const q = qtyByStyle.get(normS(styleNo));
-    if (q && q > 0) return q;
-    return singleStyle ? orderQty : 0;   // 单款单/无逐款件数 → 用整单数量兜底
+    if (q && q > 0) {
+      return quantityForBasis(
+        deriveOrderQuantityContext({
+          physicalQuantity: q,
+          quantityUnit: (ord as any)?.quantity_unit ?? null,
+        }),
+        'PER_SET',
+      ) || q;
+    }
+    return singleStyle ? (quantityForBasis(orderQtyCtx, 'PER_SET') || orderQty) : 0;   // 单款单/无逐款件数 → 用整单数量兜底
   };
 
   // 面料成本总额:优先报价单自带的逐款「面料成本(件)」×该款件数(权威,不猜损耗);
@@ -339,8 +352,12 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
   if (!_rbcUser) return { error: '未登录' };
   const svc = createServiceRoleClient();
   const normS = (s: any) => String(s ?? '').trim().toLowerCase();
-  const { data: ord } = await (svc.from('orders') as any).select('id, order_no, internal_order_no, quantity').eq('id', orderId).maybeSingle();
+  const { data: ord } = await (svc.from('orders') as any).select('id, order_no, internal_order_no, quantity, quantity_unit').eq('id', orderId).maybeSingle();
   const orderQty = Number((ord as any)?.quantity) || 0;
+  const orderQtyCtx = deriveOrderQuantityContext({
+    physicalQuantity: (ord as any)?.quantity ?? null,
+    quantityUnit: (ord as any)?.quantity_unit ?? null,
+  });
 
   // 件数:按 款×色 / 款 / 整单
   const { data: lis } = await (svc.from('order_line_items') as any).select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
@@ -353,11 +370,45 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
   const singleStyle = byStyle.size <= 1;
   const piecesForBom = (b: any): number => {
     const st = normS(b.style_no);
-    if (b.style_no && b.color) { const v = byStyleColor.get(`${st}¦${normS(b.color)}`); if (v != null) return v; }
-    if (b.style_no) { const v = byStyle.get(st); if (v) return v; }
-    return orderQty;
+    if (b.style_no && b.color) {
+      const v = byStyleColor.get(`${st}¦${normS(b.color)}`);
+      if (v != null) {
+        return quantityForBasis(
+          deriveOrderQuantityContext({
+            physicalQuantity: v,
+            quantityUnit: (ord as any)?.quantity_unit ?? null,
+          }),
+          b.consumption_basis || 'PER_SET',
+        ) || v;
+      }
+    }
+    if (b.style_no) {
+      const v = byStyle.get(st);
+      if (v) {
+        return quantityForBasis(
+          deriveOrderQuantityContext({
+            physicalQuantity: v,
+            quantityUnit: (ord as any)?.quantity_unit ?? null,
+          }),
+          b.consumption_basis || 'PER_SET',
+        ) || v;
+      }
+    }
+    return quantityForBasis(orderQtyCtx, b.consumption_basis || 'PER_SET') || orderQty;
   };
-  const qtyForStyle = (st: string): number => { const q = byStyle.get(normS(st)); if (q && q > 0) return q; return singleStyle ? orderQty : 0; };
+  const qtyForStyle = (st: string): number => {
+    const q = byStyle.get(normS(st));
+    if (q && q > 0) {
+      return quantityForBasis(
+        deriveOrderQuantityContext({
+          physicalQuantity: q,
+          quantityUnit: (ord as any)?.quantity_unit ?? null,
+        }),
+        'PER_SET',
+      ) || q;
+    }
+    return singleStyle ? (quantityForBasis(orderQtyCtx, 'PER_SET') || orderQty) : 0;
+  };
 
   // 面料预算(materials_bom 布料行:大货单耗 × 预算单价 × 件数)
   const { data: bom } = await (svc.from('materials_bom') as any).select('*').eq('order_id', orderId);

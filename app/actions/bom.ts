@@ -7,7 +7,12 @@ import { aggregateInventoryBalance, reservedByKey } from '@/lib/services/invento
 import { consolidationKey } from '@/lib/services/procurement-consolidation';
 import { subtractWorkingDays } from '@/lib/utils/date';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
-import { calculateRequirement } from '@/lib/domain/quantity-calculation';
+import {
+  calculateRequirementFromContext,
+  deriveOrderQuantityContext,
+  formatQuantityDisplay,
+  quantityForBasis,
+} from '@/lib/domain/quantity-engine';
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -25,17 +30,21 @@ export async function getBomItems(orderId: string) {
   try {
     const rows = (data || []) as any[];
     const { data: order } = await (supabase.from('orders') as any)
-      .select('quantity').eq('id', orderId).maybeSingle();
+      .select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
     const orderQty = Number((order as any)?.quantity) || 0;
     const { data: liRows } = await (supabase.from('order_line_items') as any)
       .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
+    const quantity = deriveOrderQuantityContext({
+      physicalQuantity: (order as any)?.quantity ?? null,
+      quantityUnit: (order as any)?.quantity_unit ?? null,
+      lineItemMultipliers: (liRows || []).map((r: any) => r.set_multiplier),
+    });
     const styleQty = new Map<string, number>();
     const styleColorQty = new Map<string, number>();
     const colorAlias = new Map<string, string>();
     const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
     for (const r of (liRows || []) as any[]) {
       if (!r.style_no) continue;
-      // qty_pcs 目前保存的是订单套数。BOM 单耗默认是整套单耗,不可再次乘套装件数。
       const q = Number(r.qty_pcs) || 0;
       styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
       const canon = normColor(r.color_cn) || normColor(r.color_en);
@@ -48,7 +57,7 @@ export async function getBomItems(orderId: string) {
       }
     }
     for (const b of rows) {
-      // 件数基数:款×色 命中 → 该色件数;款命中 → 该款件数;否则整单数量(与提交同"宁多勿缺")
+      // 数量基数:款×色 命中 → 该色件数;款命中 → 该款件数;否则整单数量(与提交同"宁多勿缺")
       let pieces = 0;
       const st = b.style_no || null;
       if (st && String(b.color ?? '').trim()) {
@@ -60,10 +69,29 @@ export async function getBomItems(orderId: string) {
         pieces = orderQty;
       }
       const qpp = b.qty_per_piece != null ? Number(b.qty_per_piece) : null;
+      const basis = (b.consumption_basis || 'PER_SET') as any;
       b.computed_pieces = pieces > 0 ? pieces : null;
-      b.computed_total_qty = (qpp != null && qpp > 0 && pieces > 0)
-        ? calculateRequirement({ consumption: qpp, orderSets: pieces, basis: (b.consumption_basis || 'PER_SET') }).gross
+      const rowQuantity = deriveOrderQuantityContext({
+        physicalQuantity: pieces > 0 ? pieces : quantity.physicalQuantity,
+        quantityUnit: (order as any)?.quantity_unit ?? null,
+      });
+      b.quantity_display = formatQuantityDisplay(rowQuantity);
+      b.computed_total_qty = (qpp != null && qpp > 0 && quantityForBasis(rowQuantity, basis) != null)
+        ? calculateRequirementFromContext({
+          consumption: qpp,
+          quantity: rowQuantity,
+          basis,
+        }).gross
         : null;
+      b.quantity_basis = basis;
+      b.quantity_context = {
+        physicalQuantity: rowQuantity.physicalQuantity,
+        commercialQuantity: rowQuantity.commercialQuantity,
+        commercialUnit: rowQuantity.commercialUnit,
+        componentsPerCommercialUnit: rowQuantity.componentsPerCommercialUnit,
+        needsReview: rowQuantity.needsReview,
+        reviewReason: rowQuantity.reviewReason,
+      };
     }
   } catch (e: any) { console.warn('[getBomItems] 总需派生失败(不阻断):', e?.message); }
 
@@ -594,7 +622,7 @@ export async function submitBomToProcurement(
 
   // 订单(MRP 输入:数量 + 阶段日期兜底)
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, quantity, factory_date, etd').eq('id', orderId).single();
+    .select('id, order_no, customer_name, quantity, quantity_unit, factory_date, etd').eq('id', orderId).single();
   if (!order) return { error: '订单不存在' };
   if (!order.quantity || order.quantity <= 0) return { error: '订单缺数量,无法生成物料需求' };
 
@@ -854,7 +882,7 @@ export async function submitBomToProcurement(
         qty_per_piece: line.qty_per_piece, loss_rate: line.loss_rate,
         pack_size: line.pack_size,   // 每包件数 → MRP 需求÷每包件数(中包袋6件一中包→6)
       },
-      po_quantity: poQty, stageAnchors, inventoryQty, reuseQty: 0, today,
+      po_quantity: poQty, quantityUnit: (order as any)?.quantity_unit || null, stageAnchors, inventoryQty, reuseQty: 0, today,
     });
     // 业务手填总需量 → 直接以人工为准(不自动算;中包袋/打包件等)。填了就用。
     // 没填时:辅料(非面料/里料)缺单耗 → 兜底=件数(不再算成 0/needs_input);面料仍需大货单耗,保持原样。

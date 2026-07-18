@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server';
 import { verifyContractRequest, sha256Hex } from '../../_lib/auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { notifyUsersByRole } from '@/lib/utils/notifications';
+import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -174,7 +175,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     const dealBits = [
       d.po_number ? `单号 ${d.po_number}` : null,
       d.style ? `款 ${d.style}` : null,
-      d.quantity ? `${d.quantity} 件` : null,
+      d.quantity ? formatQuantityDisplay(deriveOrderQuantityContext({
+        physicalQuantity: d.quantity,
+        quantityUnit: d.quantity_unit || null,
+      })) : null,
       d.target_delivery ? `交期 ${String(d.target_delivery).slice(0, 10)}` : null,
     ].filter(Boolean).join(' · ');
     await notifyUsersByRole(svc, ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'admin'], {

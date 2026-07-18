@@ -15,6 +15,7 @@ import type {
 } from './types'
 import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus'
 import { createSystemAlert, resolveAlertByKey, MARGIN_THRESHOLDS } from './alerts.service'
+import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine'
 
 // ── 利润状态判断（纯函数，可单独测试）───────────────────────
 export function evaluateMarginStatus(margin: number | null): MarginStatus {
@@ -62,7 +63,11 @@ export function checkDataCompleteness(financials: any, baseline: any, order: any
 // ── 从现有数据源聚合利润数字 ──────────────────────────────────
 function aggregateProfitNumbers(financials: any, baseline: any, order: any, overrides?: ProfitInput['overrides']) {
   const exchangeRate = overrides?.exchangeRate ?? financials?.exchange_rate ?? 7.2
-  const quantity = order?.quantity ?? 0
+  const qtyCtx = deriveOrderQuantityContext({
+    physicalQuantity: order?.quantity ?? null,
+    quantityUnit: order?.quantity_unit ?? null,
+  })
+  const quantity = quantityForBasis(qtyCtx, 'PER_SET') ?? order?.quantity ?? 0
 
   // 收入（优先用 sale_total，没有则用单价×数量）
   let revenueCny: number | null = null
@@ -142,7 +147,7 @@ export async function calculateProfitSnapshot(
 
     // 1. 读取订单基础数据
     const { data: order, error: orderErr } = await (supabase.from('orders') as any)
-      .select('id, order_no, customer_name, quantity, incoterm, order_type')
+      .select('id, order_no, customer_name, quantity, quantity_unit, incoterm, order_type')
       .eq('id', orderId)
       .single()
 

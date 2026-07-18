@@ -71,6 +71,7 @@ import {
   isCustomerHoldStale,
   CUSTOMER_HOLD_STALE_DAYS,
 } from '@/lib/domain/customerShipHold';
+import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 // POVerifyButton removed - auto-verify at order creation
 
 export default async function OrderDetailPage({
@@ -595,7 +596,10 @@ export default async function OrderDetailPage({
               <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">订单详情</h2>
               <dl className="space-y-3">
                 {[
-                  { label: '订单数量', value: orderData.quantity ? `${orderData.quantity} 件` : null },
+                  { label: '订单数量', value: orderData.quantity ? formatQuantityDisplay(deriveOrderQuantityContext({
+                    physicalQuantity: orderData.quantity,
+                    quantityUnit: orderData.quantity_unit || null,
+                  })) : null },
                   { label: '款数', value: orderData.style_count ? `${orderData.style_count} 款` : null },
                   { label: '颜色数', value: orderData.color_count ? `${orderData.color_count} 色` : null },
                   { label: '下单日期', value: orderData.order_date ? formatDate(orderData.order_date) : null },

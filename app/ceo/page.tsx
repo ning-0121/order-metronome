@@ -13,6 +13,7 @@ import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib
 import { CeoInsightButton } from '@/components/CeoInsightButton';
 import { CustomerMattersPanel } from '@/components/CustomerMattersPanel';
 import { CollabRiskGroups } from '@/components/CollabRiskGroups';
+import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 // 邮件晨报（briefing.service / MorningBriefingCard）已下线 — 用户反馈"太费钱用处不大"
 // 服务代码保留在 lib/services/briefing.service.ts，仅移除 UI 入口
 // RecalcButton removed from global — now per-order only
@@ -825,7 +826,10 @@ export default async function CEOWarRoom() {
                       <span className="text-gray-500 ml-1">{o.customer_name}</span>
                     </span>
                     <span className="text-xs text-gray-400 shrink-0 ml-2">
-                      {o.quantity ? `${o.quantity}件 · ` : ''}{formatDate(o.created_at)}
+                      {o.quantity ? `${formatQuantityDisplay(deriveOrderQuantityContext({
+                        physicalQuantity: o.quantity,
+                        quantityUnit: o.quantity_unit || null,
+                      }))} · ` : ''}{formatDate(o.created_at)}
                     </span>
                   </Link>
                 ))}
@@ -866,7 +870,10 @@ export default async function CEOWarRoom() {
                     <span className="font-medium text-gray-900">{o.order_no}</span>
                     <span className="text-gray-500 ml-1">{o.customer_name}</span>
                   </span>
-                  <span className="text-xs text-gray-400 shrink-0 ml-2">{o.quantity ? `${o.quantity}件` : ''}</span>
+                  <span className="text-xs text-gray-400 shrink-0 ml-2">{o.quantity ? formatQuantityDisplay(deriveOrderQuantityContext({
+                    physicalQuantity: o.quantity,
+                    quantityUnit: o.quantity_unit || null,
+                  })) : ''}</span>
                 </Link>
               ))}
               {newOrders.length === 0 && <p className="text-sm text-gray-400 text-center py-2">暂无新订单</p>}
@@ -989,7 +996,10 @@ export default async function CEOWarRoom() {
                     <span className="font-medium text-gray-900">{o.order_no}</span>
                     <span className="text-gray-500 ml-1">{o.customer_name}</span>
                   </span>
-                  <span className="text-xs text-gray-400 shrink-0 ml-2">{o.quantity ? `${o.quantity}件` : ''}</span>
+                  <span className="text-xs text-gray-400 shrink-0 ml-2">{o.quantity ? formatQuantityDisplay(deriveOrderQuantityContext({
+                    physicalQuantity: o.quantity,
+                    quantityUnit: o.quantity_unit || null,
+                  })) : ''}</span>
                 </Link>
               ))}
             </div>
