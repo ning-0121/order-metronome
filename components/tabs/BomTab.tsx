@@ -4,7 +4,7 @@ import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBr
 import { BulkConsumptionEditor } from '@/components/BulkConsumptionEditor';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
-import { uploadSizeChart, listSizeCharts, deleteSizeChart, getSizeChartImport, reviewSizeChart } from '@/app/actions/size-chart';
+import { uploadSizeChart, listSizeCharts, deleteSizeChart, getSizeChartImport, reviewSizeChart, reparseSizeChart } from '@/app/actions/size-chart';
 import { uploadOrderShareDoc, listOrderShareDocs, deleteOrderShareDoc } from '@/app/actions/order-share-docs';
 import { bulkApproveExactCandidates, listAccessoryCandidates, reviewAccessoryCandidate } from '@/app/actions/accessory-import';
 import { CartonSpecEditor } from '@/components/order/CartonSpecEditor';
@@ -373,10 +373,18 @@ export function BomTab({ orderId }: { orderId: string }) {
   // 尺码表(2026-07-08:改在 BOM 页上传,喂生产任务单)。
   // ⚠ Hooks 必须在任何早退(下面的 if (loading) return)之前声明,否则 loading→false 后
   //   本轮多跑几个 hook,React 报「Rendered more hooks than during the previous render」→ 整页崩。
-  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number }>>([]);
+  const [sizeCharts, setSizeCharts] = useState<Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number; orientation: string | null; confidence: number | null; worksheet_name: string | null; size_count: number; measurement_count: number }>>([]);
   const [scUploading, setScUploading] = useState(false);
   const [scMsg, setScMsg] = useState('');
   const [scDetail, setScDetail] = useState<any | null>(null);
+  const [scReparseForm, setScReparseForm] = useState({
+    worksheetName: '',
+    headerRow: '',
+    orientation: '' as '' | 'horizontal' | 'vertical',
+    sizeAxis: '' as '' | 'row' | 'column',
+    measurementAxis: '' as '' | 'row' | 'column',
+    ignoreRows: '',
+  });
   useEffect(() => { listSizeCharts(orderId).then(r => { if ((r as any).data) setSizeCharts((r as any).data); }); }, [orderId]);
   async function reloadSizeCharts() { const r = await listSizeCharts(orderId); if ((r as any).data) setSizeCharts((r as any).data); }
   async function handleUploadSizeCharts(files: FileList) {
@@ -399,8 +407,40 @@ export function BomTab({ orderId }: { orderId: string }) {
     await deleteSizeChart(id, orderId);
     await reloadSizeCharts();
   }
-  async function openSizeChartReview(id: string) { const r = await getSizeChartImport(id, orderId); setScDetail((r as any).data ? { ...(r as any).data, attachment_id: id } : null); }
+  async function openSizeChartReview(id: string) {
+    const r = await getSizeChartImport(id, orderId);
+    const data = (r as any).data ? { ...(r as any).data, attachment_id: id } : null;
+    setScDetail(data);
+    setScReparseForm({
+      worksheetName: data?.worksheet_name || '',
+      headerRow: data?.parsed_json?.headerRow ? String(data.parsed_json.headerRow) : '',
+      orientation: data?.parsed_json?.orientation || '',
+      sizeAxis: '',
+      measurementAxis: '',
+      ignoreRows: '',
+    });
+  }
   async function decideSizeChart(id: string, decision: 'approve'|'reject') { const r = await reviewSizeChart(id, orderId, decision); if ((r as any).error) setScMsg((r as any).error); else { setScDetail(null); await reloadSizeCharts(); } }
+  async function reparseOpenedSizeChart() {
+    if (!scDetail?.attachment_id) return;
+    const parsedHeaderRow = scReparseForm.headerRow ? Number(scReparseForm.headerRow) : undefined;
+    const ignoreRows = scReparseForm.ignoreRows
+      .split(/[,\s]+/g)
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v) && v > 0);
+    const r = await reparseSizeChart(scDetail.attachment_id, orderId, {
+      worksheetName: scReparseForm.worksheetName.trim() || null,
+      headerRow: Number.isFinite(parsedHeaderRow as number) && (parsedHeaderRow as number) > 0 ? (parsedHeaderRow as number) : null,
+      orientation: scReparseForm.orientation || null,
+      sizeAxis: scReparseForm.sizeAxis || null,
+      measurementAxis: scReparseForm.measurementAxis || null,
+      ignoreRows: ignoreRows.length ? ignoreRows : null,
+    });
+    if ((r as any).error) { setScMsg((r as any).error); return; }
+    const reopened = await getSizeChartImport(scDetail.attachment_id, orderId);
+    setScDetail((reopened as any).data ? { ...(reopened as any).data, attachment_id: scDetail.attachment_id } : null);
+    await reloadSizeCharts();
+  }
 
   // 订单共享文件:辅料采购清单 + 包装方式(整个 PO 上传一份,共享给采购/生产/财务)
   const [shareDocs, setShareDocs] = useState<Record<string, Array<{ id: string; file_name: string; url: string | null }>>>({});
@@ -902,21 +942,77 @@ export function BomTab({ orderId }: { orderId: string }) {
                 {sc.url
                   ? <a href={sc.url} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline truncate">{sc.file_name}</a>
                   : <span className="text-gray-600 truncate">{sc.file_name}</span>}
-                {sc.parse_status === 'NEEDS_REVIEW' && <span className="text-[11px] rounded bg-amber-100 text-amber-700 px-1.5 py-0.5">待复核 · {sc.row_count} 行</span>}
+                {sc.parse_status === 'PARSED' && <span className="text-[11px] rounded bg-sky-100 text-sky-700 px-1.5 py-0.5">解析成功 · {sc.row_count} 行</span>}
+                {sc.parse_status === 'NEEDS_REVIEW' && <span className="text-[11px] rounded bg-amber-100 text-amber-700 px-1.5 py-0.5">需复核 · {sc.row_count} 行</span>}
                 {sc.parse_status === 'FAILED' && <span className="text-[11px] rounded bg-rose-100 text-rose-700 px-1.5 py-0.5" title={sc.failure_reason || ''}>解析失败：{sc.failure_reason || '请检查表头'}</span>}
                 {sc.parse_status === 'UPLOADED' && <span className="text-[11px] rounded bg-gray-100 text-gray-600 px-1.5 py-0.5">仅已上传</span>}
+                {sc.parse_status === 'PARSING' && <span className="text-[11px] rounded bg-indigo-100 text-indigo-700 px-1.5 py-0.5">解析中</span>}
                 {sc.parse_status === 'APPROVED' && <span className="text-[11px] rounded bg-emerald-100 text-emerald-700 px-1.5 py-0.5">已审核</span>}
-                {sc.parse_status === 'NEEDS_REVIEW' && <button onClick={() => openSizeChartReview(sc.id)} className="text-xs text-indigo-600 hover:underline">查看并审核</button>}
+                <span className="text-[11px] text-gray-400">{sc.orientation || '—'} · {sc.worksheet_name || '—'} · {sc.size_count}码/{sc.measurement_count}部位{sc.confidence != null ? ` · ${sc.confidence}%` : ''}</span>
+                {sc.parse_status !== 'UPLOADED' && sc.parse_status !== 'PARSING' && <button onClick={() => openSizeChartReview(sc.id)} className="text-xs text-indigo-600 hover:underline">查看</button>}
                 <button onClick={() => handleDeleteSizeChart(sc.id)} className="ml-auto text-gray-300 hover:text-rose-500 text-xs" title="删除">✕</button>
               </div>
             ))}
           </div>
         ) : <p className="text-xs text-gray-400 mt-1">暂无尺码表,点右上「上传尺码表」。</p>}
-        {scDetail && <div className="mt-3 rounded-lg border bg-white p-3 text-xs space-y-2">
-          <p className="font-semibold">工作表：{scDetail.worksheet_name} · {scDetail.parsed_row_count} 行 · 仅供复核，尚未应用</p>
+        {scDetail && <div className="mt-3 rounded-lg border bg-white p-3 text-xs space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold">工作表：{scDetail.worksheet_name || '—'} · {scDetail.parsed_row_count} 行</p>
+            <span className="rounded bg-gray-100 text-gray-600 px-1.5 py-0.5">状态：{scDetail.parse_status}</span>
+            {scDetail.parsed_json?.orientation && <span className="rounded bg-sky-100 text-sky-700 px-1.5 py-0.5">方向：{scDetail.parsed_json.orientation}</span>}
+            {Number.isFinite(Number(scDetail.parsed_json?.confidence)) && <span className="rounded bg-indigo-100 text-indigo-700 px-1.5 py-0.5">置信度：{Math.round(Number(scDetail.parsed_json.confidence))}%</span>}
+          </div>
+          <div className="flex flex-wrap gap-2 text-[11px] text-gray-600">
+            <span>尺码数：{scDetail.parsed_json?.sizeLabels?.length || 0}</span>
+            <span>部位数：{scDetail.parsed_json?.measurementLabels?.length || 0}</span>
+            {Array.isArray(scDetail.parsed_json?.warnings) && scDetail.parsed_json.warnings.length > 0 && <span className="text-amber-700">警告：{scDetail.parsed_json.warnings[0]}</span>}
+            {Array.isArray(scDetail.parsed_json?.errors) && scDetail.parsed_json.errors.length > 0 && <span className="text-rose-700">错误：{scDetail.parsed_json.errors[0]}</span>}
+          </div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+            <label className="text-[11px] text-gray-500">worksheet
+              <input value={scReparseForm.worksheetName} onChange={e => setScReparseForm(f => ({ ...f, worksheetName: e.target.value }))}
+                className="mt-1 w-full rounded border px-2 py-1 text-xs" />
+            </label>
+            <label className="text-[11px] text-gray-500">header row
+              <input value={scReparseForm.headerRow} onChange={e => setScReparseForm(f => ({ ...f, headerRow: e.target.value }))}
+                className="mt-1 w-full rounded border px-2 py-1 text-xs" placeholder="如 2" />
+            </label>
+            <label className="text-[11px] text-gray-500">orientation
+              <select value={scReparseForm.orientation} onChange={e => setScReparseForm(f => ({ ...f, orientation: e.target.value as any }))}
+                className="mt-1 w-full rounded border px-2 py-1 text-xs">
+                <option value="">自动</option>
+                <option value="horizontal">横向</option>
+                <option value="vertical">纵向</option>
+              </select>
+            </label>
+            <label className="text-[11px] text-gray-500">size axis
+              <select value={scReparseForm.sizeAxis} onChange={e => setScReparseForm(f => ({ ...f, sizeAxis: e.target.value as any }))}
+                className="mt-1 w-full rounded border px-2 py-1 text-xs">
+                <option value="">自动</option>
+                <option value="row">行</option>
+                <option value="column">列</option>
+              </select>
+            </label>
+            <label className="text-[11px] text-gray-500">measurement axis
+              <select value={scReparseForm.measurementAxis} onChange={e => setScReparseForm(f => ({ ...f, measurementAxis: e.target.value as any }))}
+                className="mt-1 w-full rounded border px-2 py-1 text-xs">
+                <option value="">自动</option>
+                <option value="row">行</option>
+                <option value="column">列</option>
+              </select>
+            </label>
+            <label className="text-[11px] text-gray-500">ignore rows
+              <input value={scReparseForm.ignoreRows} onChange={e => setScReparseForm(f => ({ ...f, ignoreRows: e.target.value }))}
+                className="mt-1 w-full rounded border px-2 py-1 text-xs" placeholder="3,4,5" />
+            </label>
+          </div>
           <div className="overflow-x-auto"><table className="w-full"><tbody>{(scDetail.parsed_json?.rows || []).map((r: any, i: number) => <tr key={i} className="border-t"><td className="p-1 font-medium">{r.measurement}</td><td className="p-1 font-mono">{JSON.stringify(r.values)}</td></tr>)}</tbody></table></div>
-          <div className="flex gap-2"><button onClick={() => decideSizeChart(scDetail.attachment_id, 'approve')} className="px-2 py-1 bg-emerald-600 text-white rounded">确认通过</button>
-          <button onClick={() => decideSizeChart(scDetail.attachment_id, 'reject')} className="px-2 py-1 border rounded text-rose-600">复核不通过</button><button onClick={() => setScDetail(null)}>关闭</button></div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={reparseOpenedSizeChart} className="px-2 py-1 bg-indigo-600 text-white rounded">重新识别</button>
+            <button onClick={() => decideSizeChart(scDetail.attachment_id, 'approve')} className="px-2 py-1 bg-emerald-600 text-white rounded">确认通过</button>
+            <button onClick={() => decideSizeChart(scDetail.attachment_id, 'reject')} className="px-2 py-1 border rounded text-rose-600">复核不通过</button>
+            <button onClick={() => setScDetail(null)} className="px-2 py-1 border rounded">关闭</button>
+          </div>
         </div>}
       </div>
       {/* 订单共享文件:整个 PO 上传辅料采购清单 + 包装方式,共享给采购/生产/财务(2026-07-11:取代 AI 识别) */}

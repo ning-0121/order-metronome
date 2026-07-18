@@ -8,10 +8,35 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { createHash, randomUUID } from 'node:crypto';
-import { parseSizeChartWorkbook } from '@/lib/parsers/size-chart';
+import { parseSizeChartWorkbook, type SizeChartParseOptions } from '@/lib/parsers/size-chart';
 
 const SIZE_CHART_TYPE = 'size_chart';   // 'use server' 只能 export async 函数,故不导出常量
 const SIZE_CHART_PARSER_VERSION = 'xlsx-deterministic-v1';
+
+function parseFailureMessage(parsed: Awaited<ReturnType<typeof parseSizeChartWorkbook>>): string | null {
+  return parsed.errors[0] || parsed.diagnostics[0]?.message || parsed.warnings[0] || null;
+}
+
+async function persistParsedResult(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  attachmentId: string,
+  orderId: string,
+  parsed: Awaited<ReturnType<typeof parseSizeChartWorkbook>>,
+  userId: string,
+) {
+  const { data, error } = await (supabase.from('size_chart_imports') as any).update({
+    worksheet_name: parsed.worksheetName,
+    parse_status: parsed.status,
+    parsed_row_count: parsed.rows.length,
+    parsed_json: parsed,
+    error_code: parsed.status === 'FAILED' ? 'UNSUPPORTED_LAYOUT' : null,
+    safe_error_message: parsed.status === 'FAILED' ? parseFailureMessage(parsed) : null,
+    updated_by: userId,
+  }).eq('attachment_id', attachmentId).eq('order_id', orderId).select('id').single();
+  if (error) return error;
+  if (!data?.id) return new Error('解析结果更新未命中目标记录');
+  return null;
+}
 
 /** 上传尺码表(FormData 传 file)。 */
 export async function uploadSizeChart(orderId: string, formData: FormData): Promise<{ ok?: boolean; error?: string }> {
@@ -71,9 +96,7 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
   await (supabase.from('size_chart_imports') as any).update({ parse_status: 'PARSING', updated_by: user.id }).eq('attachment_id', (attachment as any).id);
   try {
     const parsed = await parseSizeChartWorkbook(bytes);
-    const { error: parseSaveErr } = await (supabase.from('size_chart_imports') as any).update({ worksheet_name: parsed.sheetName,
-      parse_status: 'NEEDS_REVIEW', parsed_row_count: parsed.rows.length, parsed_json: parsed, error_code: null,
-      safe_error_message: null, updated_by: user.id }).eq('attachment_id', (attachment as any).id);
+    const parseSaveErr = await persistParsedResult(supabase, (attachment as any).id, orderId, parsed, user.id);
     if (parseSaveErr) return { error: `解析结果保存失败:${parseSaveErr.message}` };
   } catch (error: any) {
     const safe = String(error?.message || '无法识别尺码表布局').slice(0, 300);
@@ -84,8 +107,40 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
   return { ok: true };
 }
 
+export async function reparseSizeChart(
+  attachmentId: string,
+  orderId: string,
+  options: SizeChartParseOptions = {},
+): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: attachment, error: attachmentErr } = await (supabase.from('order_attachments') as any)
+    .select('id, file_name, storage_path, file_type, order_id')
+    .eq('id', attachmentId)
+    .eq('order_id', orderId)
+    .eq('file_type', SIZE_CHART_TYPE)
+    .single();
+  if (attachmentErr || !attachment) return { error: '未找到尺码表附件' };
+  const { data: file, error: downloadErr } = await supabase.storage.from('order-docs').download((attachment as any).storage_path);
+  if (downloadErr || !file) return { error: `读取尺码表失败:${downloadErr?.message || '文件不可读取'}` };
+  const bytes = await file.arrayBuffer();
+  try {
+    await (supabase.from('size_chart_imports') as any).update({ parse_status: 'PARSING', updated_by: user.id }).eq('attachment_id', attachmentId).eq('order_id', orderId);
+    const parsed = await parseSizeChartWorkbook(bytes, options);
+    const parseSaveErr = await persistParsedResult(supabase, attachmentId, orderId, parsed, user.id);
+    if (parseSaveErr) return { error: `重新解析结果保存失败:${parseSaveErr.message}` };
+    revalidatePath(`/orders/${orderId}`);
+    return { ok: true };
+  } catch (error: any) {
+    const safe = String(error?.message || '无法识别尺码表布局').slice(0, 300);
+    await (supabase.from('size_chart_imports') as any).update({ parse_status: 'FAILED', error_code: 'UNSUPPORTED_LAYOUT', safe_error_message: safe, updated_by: user.id }).eq('attachment_id', attachmentId).eq('order_id', orderId);
+    return { error: safe };
+  }
+}
+
 /** 列出该订单的尺码表(含签名下载 URL)。 */
-export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number }>; error?: string }> {
+export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number; orientation: string | null; confidence: number | null; worksheet_name: string | null; size_count: number; measurement_count: number }>; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -95,15 +150,27 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
   if (error) return { error: error.message };
   const ids = (data || []).map((a: any) => a.id);
   const { data: imports } = ids.length ? await (supabase.from('size_chart_imports') as any)
-    .select('attachment_id, parse_status, safe_error_message, parsed_row_count').in('attachment_id', ids) : { data: [] };
+    .select('attachment_id, parse_status, safe_error_message, parsed_row_count, parsed_json, worksheet_name')
+    .in('attachment_id', ids) : { data: [] };
   const byAttachment = new Map((imports || []).map((r: any) => [r.attachment_id, r]));
-  const out: Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number }> = [];
+  const out: Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number; orientation: string | null; confidence: number | null; worksheet_name: string | null; size_count: number; measurement_count: number }> = [];
   for (const a of (data || [])) {
     const { data: signed } = await supabase.storage.from('order-docs').createSignedUrl((a as any).storage_path, 3600);
     const status: any = byAttachment.get((a as any).id);
-    out.push({ id: (a as any).id, file_name: (a as any).file_name, url: signed?.signedUrl ?? null,
-      parse_status: status?.parse_status || 'UPLOADED', failure_reason: status?.safe_error_message || null,
-      row_count: Number(status?.parsed_row_count) || 0 });
+    const parsed = status?.parsed_json || {};
+    out.push({
+      id: (a as any).id,
+      file_name: (a as any).file_name,
+      url: signed?.signedUrl ?? null,
+      parse_status: status?.parse_status || 'UPLOADED',
+      failure_reason: status?.safe_error_message || status?.parsed_json?.warnings?.[0] || null,
+      row_count: Number(status?.parsed_row_count) || 0,
+      orientation: parsed?.orientation || null,
+      confidence: Number.isFinite(Number(parsed?.confidence)) ? Number(parsed.confidence) : null,
+      worksheet_name: status?.worksheet_name || parsed?.worksheetName || null,
+      size_count: Array.isArray(parsed?.sizeLabels) ? parsed.sizeLabels.length : 0,
+      measurement_count: Array.isArray(parsed?.measurementLabels) ? parsed.measurementLabels.length : 0,
+    });
   }
   return { data: out };
 }
@@ -111,7 +178,7 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
 export async function getSizeChartImport(attachmentId: string, orderId: string) {
   const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); if (!user) return { error: '请先登录' };
   const { data, error } = await (supabase.from('size_chart_imports') as any)
-    .select('id,parse_status,worksheet_name,parsed_row_count,parsed_json,error_code,safe_error_message,reviewed_at')
+    .select('id,parse_status,worksheet_name,parsed_row_count,parsed_json,error_code,safe_error_message,reviewed_at,created_at,updated_at')
     .eq('attachment_id', attachmentId).eq('order_id', orderId).single();
   return error ? { error: error.message } : { data };
 }
