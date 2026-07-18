@@ -168,6 +168,7 @@ export function quantityForBasis(
 ): number | null {
   const resolvedBasis = basis || 'PER_SET';
   if (resolvedBasis === 'PER_ORDER' || resolvedBasis === 'MANUAL_TOTAL') return 1;
+  if (ctx.source === 'line_item_fallback' || ctx.source === 'ambiguous') return null;
   if (resolvedBasis === 'PER_PIECE' || resolvedBasis === 'PER_COMPONENT') return ctx.physicalQuantity;
   return ctx.commercialQuantity;
 }

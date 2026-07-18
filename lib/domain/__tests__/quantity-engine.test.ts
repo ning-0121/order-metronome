@@ -51,6 +51,7 @@ test('ambiguous records surface needs review', () => {
   assert.equal(ctx.needsReview, true);
   assert.equal(ctx.reviewReason?.includes('不一致'), true);
   assert.equal(quantityLabelForBasis('PER_SET'), '每套');
+  assert.equal(quantityForBasis(ctx, 'PER_SET'), null);
 });
 
 test('unknown unit falls back to explicit review state', () => {
@@ -58,4 +59,6 @@ test('unknown unit falls back to explicit review state', () => {
   assert.equal(ctx.needsReview, true);
   assert.equal(ctx.reviewReason, '数量单位待确认，默认按件处理');
   assert.equal(formatQuantityDisplay(ctx), '4800件（数量基准待确认）');
+  assert.equal(quantityForBasis(ctx, 'PER_SET'), 4800);
+  assert.equal(calculateRequirementFromContext({ consumption: 0.67, quantity: ctx, basis: 'PER_SET' }).gross, 3216);
 });
