@@ -257,18 +257,19 @@ export async function saveQuoteBaseline(
   const qtyByStyle = new Map<string, number>();
   for (const li of (liRows || [])) qtyByStyle.set(normS((li as any).style_no), (qtyByStyle.get(normS((li as any).style_no)) || 0) + (Number((li as any).qty_pcs) || 0));
   const singleStyle = styleBudgets.length <= 1;
-  const qtyFor = (styleNo: string | null): number => {
+  const qtyFor = (styleNo: string | null): number | null => {
     const q = qtyByStyle.get(normS(styleNo));
     if (q && q > 0) {
-      return quantityForBasis(
+      const resolved = quantityForBasis(
         deriveOrderQuantityContext({
           physicalQuantity: q,
           quantityUnit: (ord as any)?.quantity_unit ?? null,
         }),
         'PER_SET',
-      ) || q;
+      );
+      return resolved ?? q;
     }
-    return singleStyle ? (quantityForBasis(orderQtyCtx, 'PER_SET') || orderQty) : 0;   // 单款单/无逐款件数 → 用整单数量兜底
+    return singleStyle ? quantityForBasis(orderQtyCtx, 'PER_SET') : 0;   // 单款单/无逐款件数 → 用整单数量兜底
   };
 
   // 面料成本总额:优先报价单自带的逐款「面料成本(件)」×该款件数(权威,不猜损耗);
@@ -276,13 +277,15 @@ export async function saveQuoteBaseline(
   let budgetFabricAmount = 0; let hasFabricCost = false;
   for (const b of styleBudgets) {
     const fc = Number((b as any).fabric_cost);
-    if (fc > 0) { hasFabricCost = true; budgetFabricAmount += fc * qtyFor((b as any).style_no); }
+    const q = qtyFor((b as any).style_no);
+    if (fc > 0 && q != null) { hasFabricCost = true; budgetFabricAmount += fc * q; }
   }
   const fabricLines = lines.filter((l) => normS(l.category) === 'fabric');
   if (!hasFabricCost) {
     for (const l of fabricLines) {
       const cons = Number(l.quote_consumption) || 0; const price = Number(l.quote_unit_price) || 0;
-      if (cons > 0 && price > 0) budgetFabricAmount += cons * price * (qtyFor(l.style_no) || orderQty);
+      const qty = qtyFor(l.style_no);
+      if (cons > 0 && price > 0 && qty != null) budgetFabricAmount += cons * price * qty;
     }
   }
   budgetFabricAmount = Math.round(budgetFabricAmount * 100) / 100;
@@ -291,7 +294,8 @@ export async function saveQuoteBaseline(
   let budgetFabricKg = 0; let consPerPiece = 0;
   for (const l of fabricLines) {
     const cons = Number(l.quote_consumption) || 0; if (!(cons > 0)) continue;
-    budgetFabricKg += cons * (qtyFor(l.style_no) || orderQty);
+    const qty = qtyFor(l.style_no);
+    if (qty != null) budgetFabricKg += cons * qty;
     consPerPiece += cons;
   }
   budgetFabricKg = Math.round(budgetFabricKg * 100) / 100;
@@ -368,46 +372,51 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
     for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) byStyleColor.set(`${st}¦${normS(col)}`, q);
   }
   const singleStyle = byStyle.size <= 1;
-  const piecesForBom = (b: any): number => {
+  const piecesForBom = (b: any): number | null => {
     const st = normS(b.style_no);
+    const basis = b.consumption_basis || 'PER_SET';
+    const measurementBasis = ['PER_KG', 'PER_METER', 'PER_SQUARE_METER', 'PER_YARD', 'PER_PACK'].includes(basis);
     if (b.style_no && b.color) {
       const v = byStyleColor.get(`${st}¦${normS(b.color)}`);
       if (v != null) {
-        return quantityForBasis(
+        const resolved = quantityForBasis(
           deriveOrderQuantityContext({
             physicalQuantity: v,
             quantityUnit: (ord as any)?.quantity_unit ?? null,
           }),
-          b.consumption_basis || 'PER_SET',
-        ) || v;
+          basis,
+        );
+        return resolved ?? (measurementBasis ? null : v);
       }
     }
     if (b.style_no) {
       const v = byStyle.get(st);
       if (v) {
-        return quantityForBasis(
+        const resolved = quantityForBasis(
           deriveOrderQuantityContext({
             physicalQuantity: v,
             quantityUnit: (ord as any)?.quantity_unit ?? null,
           }),
-          b.consumption_basis || 'PER_SET',
-        ) || v;
+          basis,
+        );
+        return resolved ?? (measurementBasis ? null : v);
       }
     }
-    return quantityForBasis(orderQtyCtx, b.consumption_basis || 'PER_SET') || orderQty;
+    return quantityForBasis(orderQtyCtx, basis);
   };
-  const qtyForStyle = (st: string): number => {
+  const qtyForStyle = (st: string): number | null => {
     const q = byStyle.get(normS(st));
     if (q && q > 0) {
-      return quantityForBasis(
+      const resolved = quantityForBasis(
         deriveOrderQuantityContext({
           physicalQuantity: q,
           quantityUnit: (ord as any)?.quantity_unit ?? null,
         }),
         'PER_SET',
-      ) || q;
+      );
+      return resolved ?? q;
     }
-    return singleStyle ? (quantityForBasis(orderQtyCtx, 'PER_SET') || orderQty) : 0;
+    return singleStyle ? quantityForBasis(orderQtyCtx, 'PER_SET') : 0;
   };
 
   // 面料预算(materials_bom 布料行:大货单耗 × 预算单价 × 件数)
@@ -419,7 +428,7 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
     const cons = Number((b as any).production_consumption) || 0;
     const price = Number((b as any).budget_unit_price) || 0;
     const pcs = piecesForBom(b);
-    if (cons > 0 && pcs > 0) { budgetFabricKg += cons * pcs; consPerPiece += cons; if (price > 0) budgetFabricAmount += cons * price * pcs; }
+    if (cons > 0 && pcs != null && pcs > 0) { budgetFabricKg += cons * pcs; consPerPiece += cons; if (price > 0) budgetFabricAmount += cons * price * pcs; }
   }
   budgetFabricAmount = Math.round(budgetFabricAmount * 100) / 100;
   budgetFabricKg = Math.round(budgetFabricKg * 100) / 100;

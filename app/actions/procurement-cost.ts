@@ -111,33 +111,38 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     qtyByStyle.set(st, (qtyByStyle.get(st) || 0) + q);
     for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) qtyByStyleColor.set(`${st}¦${nrm(col)}`, q);
   }
-  const piecesForBom = (b: any): number => {
+  const piecesForBom = (b: any): number | null => {
     const st = nrm(b.style_no);
+    const basis = b.consumption_basis || 'PER_SET';
+    const measurementBasis = ['PER_KG', 'PER_METER', 'PER_SQUARE_METER', 'PER_YARD', 'PER_PACK'].includes(basis);
     if (b.style_no && b.color) {
       const v = qtyByStyleColor.get(`${st}¦${nrm(b.color)}`);
       if (v != null) {
-        return quantityForBasis(
+        const q = quantityForBasis(
           deriveOrderQuantityContext({
             physicalQuantity: v,
             quantityUnit: (order as any).quantity_unit ?? null,
           }),
-          b.consumption_basis || 'PER_SET',
-        ) || v;
+          basis,
+        );
+        return q ?? (measurementBasis ? null : v);
       }
     }
     if (b.style_no) {
       const v = qtyByStyle.get(st);
       if (v) {
-        return quantityForBasis(
+        const q = quantityForBasis(
           deriveOrderQuantityContext({
             physicalQuantity: v,
             quantityUnit: (order as any).quantity_unit ?? null,
           }),
-          b.consumption_basis || 'PER_SET',
-        ) || v;
+          basis,
+        );
+        return q ?? (measurementBasis ? null : v);
       }
     }
-    return quantityForBasis(orderQtyCtx, b.consumption_basis || 'PER_SET') || orderQty;
+    const q = quantityForBasis(orderQtyCtx, basis);
+    return q ?? null;
   };
   // 辅料预算 = 整单一口价 order_cost_baseline.accessory_budget_total(不按件数;2026-07-08 用户拍板)
   const trimBudgetTotal = Math.round((Number((base as any)?.accessory_budget_total) || 0) * 100) / 100;
@@ -153,7 +158,7 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
         quantityUnit: (order as any).quantity_unit ?? null,
       }),
       (sb as any).cmt_basis || 'PER_SET',
-    ) || 0;
+    );
     if (q > 0) { cmtBudgetTotal += c * q; hasCmtBudget = true; }
   }
   cmtBudgetTotal = Math.round(cmtBudgetTotal * 100) / 100;

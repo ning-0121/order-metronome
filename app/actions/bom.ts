@@ -11,7 +11,6 @@ import {
   calculateRequirementFromContext,
   deriveOrderQuantityContext,
   formatQuantityDisplay,
-  quantityForBasis,
 } from '@/lib/domain/quantity-engine';
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
@@ -76,19 +75,37 @@ export async function getBomItems(orderId: string) {
         quantityUnit: (order as any)?.quantity_unit ?? null,
       });
       b.quantity_display = formatQuantityDisplay(rowQuantity);
-      b.computed_total_qty = (qpp != null && qpp > 0 && quantityForBasis(rowQuantity, basis) != null)
+      const measurementBasis = ['PER_KG', 'PER_METER', 'PER_SQUARE_METER', 'PER_YARD', 'PER_PACK'].includes(basis);
+      const resolved = qpp != null && qpp > 0
         ? calculateRequirementFromContext({
           consumption: qpp,
           quantity: rowQuantity,
           basis,
-        }).gross
+          measurementQuantity: measurementBasis ? Number(b.total_qty) || null : null,
+          measurementUnit: measurementBasis
+            ? (basis === 'PER_KG' ? 'kg'
+              : basis === 'PER_METER' ? 'm'
+                : basis === 'PER_SQUARE_METER' ? 'sqm'
+                  : basis === 'PER_YARD' ? 'yard'
+                    : 'pack')
+            : null,
+        })
         : null;
+      b.computed_total_qty = resolved?.gross ?? null;
+      b.quantity_calc_status = resolved?.status || null;
+      b.quantity_issue = resolved?.status === 'NEEDS_MEASUREMENT_QUANTITY'
+        ? `缺少${resolved.missingMeasurementLabel}`
+        : resolved?.status === 'NEEDS_REVIEW'
+          ? (rowQuantity.reviewReason || '数量基准待确认')
+          : null;
       b.quantity_basis = basis;
       b.quantity_context = {
         physicalQuantity: rowQuantity.physicalQuantity,
         commercialQuantity: rowQuantity.commercialQuantity,
         commercialUnit: rowQuantity.commercialUnit,
         componentsPerCommercialUnit: rowQuantity.componentsPerCommercialUnit,
+        measurementQuantity: rowQuantity.measurementQuantity ?? null,
+        measurementUnit: rowQuantity.measurementUnit ?? null,
         needsReview: rowQuantity.needsReview,
         reviewReason: rowQuantity.reviewReason,
       };

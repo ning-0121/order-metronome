@@ -10,17 +10,39 @@ export type QuantityBasis =
   | 'PER_PACK'
   | 'MANUAL_TOTAL';
 
+export type MeasurementUnit = 'kg' | 'm' | 'sqm' | 'yard' | 'pack';
+
 export type QuantitySource =
   | 'explicit_unit'
   | 'line_item_fallback'
   | 'legacy_piece'
   | 'ambiguous';
 
+export type QuantityResolution =
+  | {
+    status: 'OK';
+    quantity: number;
+    source: 'commercial' | 'physical' | 'measurement' | 'fixed';
+  }
+  | {
+    status: 'NEEDS_REVIEW';
+    quantity: null;
+    reason: string;
+  }
+  | {
+    status: 'NEEDS_MEASUREMENT_QUANTITY';
+    quantity: null;
+    missingMeasurementLabel: string;
+    measurementUnit: MeasurementUnit | null;
+  };
+
 export interface QuantityContext {
   physicalQuantity: number | null;
   commercialQuantity: number | null;
   commercialUnit: string | null;
   componentsPerCommercialUnit: number | null;
+  measurementQuantity?: number | null;
+  measurementUnit?: MeasurementUnit | null;
   source: QuantitySource;
   needsReview: boolean;
   reviewReason: string | null;
@@ -114,6 +136,8 @@ export function deriveQuantityContext(input: {
   quantityUnit?: string | null;
   componentsPerCommercialUnit?: number | string | null;
   lineItemMultipliers?: Array<number | string | null | undefined>;
+  measurementQuantity?: number | string | null;
+  measurementUnit?: MeasurementUnit | null;
 }): QuantityContext {
   const physicalQuantity = positiveDecimal(input.physicalQuantity);
   const explicitUnit = normalizeQuantityUnit(input.quantityUnit);
@@ -121,6 +145,8 @@ export function deriveQuantityContext(input: {
   const inferredMultipliers = uniquePositiveIntegers(input.lineItemMultipliers || []);
   const fallbackMultiplier = inferredMultipliers.length === 1 ? inferredMultipliers[0] : null;
   const multiplier = explicitMultiplier || quantityComponentsForUnit(explicitUnit) || fallbackMultiplier || 1;
+  const measurementQuantity = positiveDecimal(input.measurementQuantity);
+  const measurementUnit = input.measurementUnit || null;
 
   let source: QuantitySource = 'legacy_piece';
   let needsReview = false;
@@ -156,21 +182,91 @@ export function deriveQuantityContext(input: {
     commercialQuantity,
     commercialUnit: explicitUnit || (multiplier > 1 ? '套' : '件'),
     componentsPerCommercialUnit: multiplier,
+    measurementQuantity,
+    measurementUnit,
     source,
     needsReview: needsReview || !explicitUnit && multiplier > 1,
     reviewReason,
   };
 }
 
+function isMeasurementBasis(basis: QuantityBasis): basis is 'PER_KG' | 'PER_METER' | 'PER_SQUARE_METER' | 'PER_YARD' | 'PER_PACK' {
+  return basis === 'PER_KG'
+    || basis === 'PER_METER'
+    || basis === 'PER_SQUARE_METER'
+    || basis === 'PER_YARD'
+    || basis === 'PER_PACK';
+}
+
+export function measurementLabelForBasis(basis?: QuantityBasis | null): string | null {
+  switch (basis || 'PER_SET') {
+    case 'PER_KG':
+      return '公斤总需';
+    case 'PER_METER':
+      return '米数总需';
+    case 'PER_SQUARE_METER':
+      return '平方米总需';
+    case 'PER_YARD':
+      return '码数总需';
+    case 'PER_PACK':
+      return '采购包数';
+    default:
+      return null;
+  }
+}
+
+export function resolveQuantityForBasis(
+  ctx: QuantityContext,
+  basis?: QuantityBasis | null,
+): QuantityResolution {
+  const resolvedBasis = basis || 'PER_SET';
+  if (resolvedBasis === 'PER_ORDER' || resolvedBasis === 'MANUAL_TOTAL') {
+    return { status: 'OK', quantity: 1, source: 'fixed' };
+  }
+  if (isMeasurementBasis(resolvedBasis)) {
+    if (ctx.measurementQuantity != null && ctx.measurementQuantity > 0) {
+      return { status: 'OK', quantity: ctx.measurementQuantity, source: 'measurement' };
+    }
+    return {
+      status: 'NEEDS_MEASUREMENT_QUANTITY',
+      quantity: null,
+      missingMeasurementLabel: measurementLabelForBasis(resolvedBasis) || '数量基准',
+      measurementUnit: ctx.measurementUnit || null,
+    };
+  }
+  if (ctx.source === 'line_item_fallback' || ctx.source === 'ambiguous') {
+    return {
+      status: 'NEEDS_REVIEW',
+      quantity: null,
+      reason: ctx.reviewReason || '数量基准待确认',
+    };
+  }
+  if (resolvedBasis === 'PER_PIECE' || resolvedBasis === 'PER_COMPONENT') {
+    if (ctx.physicalQuantity == null) {
+      return {
+        status: 'NEEDS_REVIEW',
+        quantity: null,
+        reason: ctx.reviewReason || '数量基准待确认',
+      };
+    }
+    return { status: 'OK', quantity: ctx.physicalQuantity, source: 'physical' };
+  }
+  if (ctx.commercialQuantity == null) {
+    return {
+      status: 'NEEDS_REVIEW',
+      quantity: null,
+      reason: ctx.reviewReason || '数量基准待确认',
+    };
+  }
+  return { status: 'OK', quantity: ctx.commercialQuantity, source: 'commercial' };
+}
+
 export function quantityForBasis(
   ctx: QuantityContext,
   basis?: QuantityBasis | null,
 ): number | null {
-  const resolvedBasis = basis || 'PER_SET';
-  if (resolvedBasis === 'PER_ORDER' || resolvedBasis === 'MANUAL_TOTAL') return 1;
-  if (ctx.source === 'line_item_fallback' || ctx.source === 'ambiguous') return null;
-  if (resolvedBasis === 'PER_PIECE' || resolvedBasis === 'PER_COMPONENT') return ctx.physicalQuantity;
-  return ctx.commercialQuantity;
+  const resolved = resolveQuantityForBasis(ctx, basis);
+  return resolved.status === 'OK' ? resolved.quantity : null;
 }
 
 export function formatQuantityDisplay(ctx: QuantityContext): string {
@@ -223,23 +319,35 @@ export function calculateRequirementFromContext(input: {
   quantity: QuantityContext;
   basis?: QuantityBasis | null;
   lossRatePct?: number | string | null;
+  measurementQuantity?: number | string | null;
+  measurementUnit?: MeasurementUnit | null;
 }) {
   const basis = input.basis || 'PER_SET';
-  const quantity = quantityForBasis(input.quantity, basis);
+  const quantityCtx = {
+    ...input.quantity,
+    measurementQuantity: input.measurementQuantity !== undefined
+      ? positiveDecimal(input.measurementQuantity)
+      : input.quantity.measurementQuantity ?? null,
+    measurementUnit: input.measurementUnit || input.quantity.measurementUnit || null,
+  } as QuantityContext;
+  const resolved = resolveQuantityForBasis(quantityCtx, basis);
   const consumption = positiveDecimal(input.consumption);
-  const gross = quantity == null || consumption == null
+  const gross = resolved.status !== 'OK' || consumption == null
     ? null
-    : multiplyDecimal(consumption, quantity);
+    : multiplyDecimal(consumption, resolved.quantity);
   const loss = gross == null || !input.lossRatePct
     ? 0
     : multiplyDecimal(gross, Number(input.lossRatePct) / 100);
   return {
     basis,
-    quantity,
+    quantity: resolved.status === 'OK' ? resolved.quantity : null,
+    status: resolved.status,
+    missingMeasurementLabel: resolved.status === 'NEEDS_MEASUREMENT_QUANTITY' ? resolved.missingMeasurementLabel : null,
+    measurementUnit: resolved.status === 'NEEDS_MEASUREMENT_QUANTITY' ? resolved.measurementUnit : null,
     gross,
     loss,
     totalWithLoss: gross == null ? null : gross + loss,
-    needsReview: input.quantity.needsReview,
+    needsReview: input.quantity.needsReview || resolved.status !== 'OK',
     reviewReason: input.quantity.reviewReason,
   };
 }
