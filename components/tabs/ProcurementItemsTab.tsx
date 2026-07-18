@@ -97,6 +97,8 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/套)
   const [accessoryPerPiece, setAccessoryPerPiece] = useState('')   // 变量名为兼容旧 UI；业务口径为元/套
   const [budgetOrderQty, setBudgetOrderQty] = useState(0)
+  const [commercialOrderQty, setCommercialOrderQty] = useState<number | null>(null);
+  const [orderQuantityDisplay, setOrderQuantityDisplay] = useState('');
   const [accCost, setAccCost] = useState<{ budget: number | null; actual: number; over: number | null; itemsPriced: number; itemsTotal: number } | null>(null);  // 辅料 预算vs实际(采购填价)
   const [consSaving, setConsSaving] = useState(false);
   const loadCons = async () => {
@@ -111,6 +113,8 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
     setAccessoryPerPiece((sb as any)?.accessoryPerSet != null ? String((sb as any).accessoryPerSet) : '');
     setBudgetOrderQty(Number((sb as any)?.orderQty) || 0);
+    setCommercialOrderQty((sb as any)?.commercialOrderQty ?? null);
+    setOrderQuantityDisplay((sb as any)?.orderQuantityDisplay || '');
   };
   useEffect(() => { loadCons(); /* eslint-disable-next-line */ }, [orderId]);
   // 布料大货单耗必须由业务填好(BOM 页),否则不许归并
@@ -875,7 +879,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                         <option value="factory">加工厂承担</option>
                       </select>
                     </td>
-                    <td className="py-1.5 px-2 font-medium text-gray-800" title="该款×色件数(整单通用辅料=订单总数)">{l.pieces ?? '—'}</td>
+                  <td className="py-1.5 px-2 font-medium text-gray-800" title="该款×色数量基准">{l.quantity_display ?? l.pieces ?? '—'}</td>
                     <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
                     {/* 大货单耗:业务在 BOM 页填,采购这里只读核实 */}
                     <td className="py-1.5 px-2">
@@ -946,9 +950,9 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                   placeholder="单件辅料(拉链/标/袋…)" disabled={trackingPhase}
                   onChange={e => setAccessoryPerPiece(e.target.value)}
                   className="w-28 rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
-                <span className="text-xs text-gray-500">元/套 × {budgetOrderQty > 0 ? budgetOrderQty.toLocaleString() : '?'} 套</span>
-                {Number(accessoryPerPiece) > 0 && budgetOrderQty > 0 && (
-                  <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * budgetOrderQty * 100) / 100).toLocaleString()}</span>
+                <span className="text-xs text-gray-500">元/套 × {orderQuantityDisplay || (commercialOrderQty != null ? `${commercialOrderQty.toLocaleString()} 套` : (budgetOrderQty > 0 ? `${budgetOrderQty.toLocaleString()} 件` : '?'))}</span>
+                {Number(accessoryPerPiece) > 0 && (commercialOrderQty ?? budgetOrderQty) > 0 && (
+                  <span className="text-xs font-mono font-semibold text-indigo-700">= ¥{(Math.round(Number(accessoryPerPiece) * (commercialOrderQty ?? budgetOrderQty) * 100) / 100).toLocaleString()}</span>
                 )}
                 <span className="text-[11px] text-gray-400">公式明确按套计算；组件级费用需在辅料明细中单独录入</span>
               </div>

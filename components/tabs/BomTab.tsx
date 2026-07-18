@@ -1114,6 +1114,11 @@ export function BomTab({ orderId }: { orderId: string }) {
                           </span>
                         )
                         : '—'}
+                    {item.quantity_issue && (
+                      <div className="mt-0.5 text-[11px] text-amber-600" title={item.quantity_issue}>
+                        {item.quantity_issue}
+                      </div>
+                    )}
                   </td>
                   <td className="py-2 px-3 text-gray-600">{item.unit}</td>
                   <td className="py-2 px-3 text-gray-500">{item.supplier || '—'}</td>

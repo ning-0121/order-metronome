@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addDecimals, calculateRequirement } from '../quantity-calculation';
+import { addDecimals, calculateRequirement } from '../quantity-calculation.ts';
 
 test('two-piece component consumption is already per set', () => {
   const total = calculateRequirement({ consumption: addDecimals('0.35', '0.32'), orderSets: 7700, piecesPerSet: 2 });

@@ -11,6 +11,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 
@@ -87,7 +88,7 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
 
   // 读取订单基本信息
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, quantity, unit_price, currency, total_amount, incoterm, created_by, owner_user_id')
+    .select('id, quantity, quantity_unit, unit_price, currency, total_amount, incoterm, created_by, owner_user_id')
     .eq('id', orderId).single();
   if (!order) return { error: '订单不存在' };
   // P2 修:原仅校验登录 → 任意角色可 upsert 重算财务、把 4 个确认模块重置 not_started(冲掉已确认进度)。
@@ -106,7 +107,11 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
     .select('total_cost_per_piece, fob_price, ddp_price, cmt_factory_quote, budget_fabric_amount, exchange_rate')
     .eq('order_id', orderId).maybeSingle();
 
-  const qty = order.quantity || 0;
+  const qtyCtx = deriveOrderQuantityContext({
+    physicalQuantity: order.quantity ?? null,
+    quantityUnit: order.quantity_unit ?? null,
+  });
+  const qty = quantityForBasis(qtyCtx, 'PER_SET') || order.quantity || 0;
   const salePrice = order.unit_price || (order.incoterm === 'DDP' ? baseline?.ddp_price : baseline?.fob_price) || 0;
   const exchangeRate = baseline?.exchange_rate || 7.2;
   const saleTotal = salePrice * qty * (order.currency === 'CNY' ? 1 : exchangeRate);

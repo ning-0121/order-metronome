@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
+import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 import { CustomerEmailMappingPanel } from '@/components/CustomerEmailMappingPanel';
 import { AddCustomerMemoForm } from '@/components/AddCustomerMemoForm';
 import { CustomerTrimLibraryPanel } from '@/components/CustomerTrimLibraryPanel';
@@ -314,7 +315,10 @@ export default async function CustomersPage() {
                         <Link key={o.id} href={`/orders/${o.id}`}
                           className="grid grid-cols-6 gap-4 px-5 py-2.5 text-sm hover:bg-gray-50 items-center">
                           <span className="font-medium text-indigo-600">{o.order_no}</span>
-                          <span className="text-gray-700">{o.quantity ? `${o.quantity}件` : '-'}</span>
+                          <span className="text-gray-700">{o.quantity ? formatQuantityDisplay(deriveOrderQuantityContext({
+                            physicalQuantity: o.quantity,
+                            quantityUnit: o.quantity_unit || null,
+                          })) : '-'}</span>
                           <span className="text-gray-600 truncate">{o.factory_name || '-'}</span>
                           <span className="text-gray-500">{o.incoterm}</span>
                           <span className="text-gray-500">{formatDate(o.factory_date || o.etd)}</span>

@@ -12,6 +12,7 @@ import {
   isCustomerHoldStale,
   CUSTOMER_HOLD_STALE_DAYS,
 } from '@/lib/domain/customerShipHold';
+import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 import { ORDER_TYPE_LABELS, ORDER_TYPE_COLORS } from '@/lib/theme/colors';
 
 // 阶段进度计算
@@ -681,7 +682,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
                     {/* 列 3：数量（贴内容） */}
                     <td className="col-shrink">
-                      <span className="text-gray-800 font-medium whitespace-nowrap">{order.quantity ? `${order.quantity} 件` : '—'}</span>
+                      <span className="text-gray-800 font-medium whitespace-nowrap">
+                        {order.quantity
+                          ? formatQuantityDisplay(deriveOrderQuantityContext({
+                              physicalQuantity: order.quantity,
+                              quantityUnit: order.quantity_unit || null,
+                            }))
+                          : '—'}
+                      </span>
                     </td>
 
                     {/* 列 4：日期 + 状态徽章（合并 — 状态在顶部一行，下面是下单/出厂/超期） */}

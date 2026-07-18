@@ -1101,7 +1101,7 @@ export async function getOrders() {
 
   if (canSeeAll) {
     const { data: orders, error } = await (supabase.from('orders') as any)
-      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id, sequence_number)')
+      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id, sequence_number)')
       .order('created_at', { ascending: false })
       .limit(ORDERS_HARD_LIMIT);
     if (error) return { error: error.message };
@@ -1156,7 +1156,7 @@ export async function getOrders() {
   if (myOrderIds.length === 0) return { data: [] };
 
   const { data: orders, error } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id, sequence_number)')
+    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id, sequence_number)')
     .in('id', myOrderIds)
     .order('created_at', { ascending: false })
     .limit(ORDERS_HARD_LIMIT);

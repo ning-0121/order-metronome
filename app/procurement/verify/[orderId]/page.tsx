@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
 import { MoDownloadButton } from './MoDownloadButton';
+import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 
 /**
  * 采购专属核料工作页(2026-07-03 用户拍板:采购不进订单详情,防看到/误改订单一切)。
@@ -25,7 +26,10 @@ export default async function ProcurementVerifyPage({ params, searchParams }: { 
   const headItems: Array<[string, any]> = [
     ['客户', order.customer_name],
     ['款号', order.style_no],
-    ['数量', order.quantity ? `${order.quantity} 件` : null],
+    ['数量', order.quantity ? formatQuantityDisplay(deriveOrderQuantityContext({
+      physicalQuantity: order.quantity,
+      quantityUnit: order.quantity_unit || null,
+    })) : null],
     ['下单日', fmt(order.order_date)],
     ['工厂交期', fmt(order.factory_date)],
     ['ETD', fmt(order.etd)],
