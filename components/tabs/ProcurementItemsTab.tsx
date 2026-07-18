@@ -21,6 +21,7 @@ import { useDialogs } from '@/components/ui/useDialogs';
 import { orderSizeKeys } from '@/lib/utils/size-sort';
 import { getOrderSizeOrder } from '@/app/actions/order-line-items';
 import { OrderShareDocsLinks } from '@/components/OrderShareDocsLinks';
+import { collectBudgetUnitPriceMismatches } from '@/lib/domain/budget-unit-price';
 
 /** 补采购财务审批状态 → 显示 */
 const SUPP_STATUS: Record<string, { label: string; cls: string }> = {
@@ -104,7 +105,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     if ((r as any).data) {
       setConsLines((r as any).data);
       setOverEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.over_purchase_pct != null ? String(l.over_purchase_pct) : ''])));
-      setPriceEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.budget_unit_price != null ? String(l.budget_unit_price) : ''])));
+      setPriceEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.budgetUnitPrice != null ? String(l.budgetUnitPrice) : ''])));
       setSupplyEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.supply_mode || 'self'])));
     }
     if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
@@ -131,6 +132,12 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
     setConsSaving(false);
     const err = results.map(r => (r as any).error).find(Boolean);
     if (err) { setMsg(err); return; }
+    const verify = await listBomConsumptionLines(orderId);
+    const mismatches = (verify as any).data ? collectBudgetUnitPriceMismatches((verify as any).data as any[], prices) : [];
+    if (mismatches.length > 0) {
+      setMsg(`⚠️ 已提交预算单价，但有 ${mismatches.length} 行回显不一致，请刷新后重试或检查权限`);
+      return;
+    }
     const warn = results.map(r => (r as any).warning).find(Boolean);
     setMsg(warn ? ('⚠️ ' + warn) : '✅ 已保存(预算单价 + 加工费 + 辅料总价' + (trackingPhase ? '' : ' + 抛量') + ')');
     await loadCons();
@@ -882,9 +889,17 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                         : l.required ? (<>
                         <span className="text-gray-400 mr-0.5">¥</span>
                         <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''}
-                          placeholder="必填"
+                          placeholder={l.budgetPriceSource === 'quotation_baseline' && l.effectiveDisplayUnitPrice != null
+                            ? `建议 ¥${Number(l.effectiveDisplayUnitPrice).toLocaleString()}`
+                            : '必填'}
                           onChange={e => setPriceEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
-                          className={`w-20 rounded border px-2 py-1 ${!(Number(priceEdit[l.id]) > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                          className={`w-20 rounded border px-2 py-1 ${priceEdit[l.id] === '' ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                        {l.budgetPriceSource === 'quotation_baseline' && l.effectiveDisplayUnitPrice != null && (
+                          <div className="mt-1 text-[11px] text-amber-600">报价基线建议 {Number(l.effectiveDisplayUnitPrice).toLocaleString()}</div>
+                        )}
+                        {l.budgetPriceSource === 'saved_budget' && l.budgetUnitPrice != null && (
+                          <div className="mt-1 text-[11px] text-emerald-600">已保存预算 ¥{Number(l.budgetUnitPrice).toLocaleString()}</div>
+                        )}
                       </>) : <span className="text-gray-300">—</span>}
                     </td>
                     {/* 抛量%:采购填,采购量=件数×大货单耗×(1+抛量%) */}

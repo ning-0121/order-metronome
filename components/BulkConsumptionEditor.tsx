@@ -17,6 +17,7 @@ export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: st
   const [edit, setEdit] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [techMsg, setTechMsg] = useState('');
   const [open, setOpen] = useState<boolean | null>(null);
   // 技术部大货确认单(必传,不传不许提交采购)
   const [techCount, setTechCount] = useState<number | null>(null);
@@ -34,13 +35,15 @@ export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: st
     const file = e.target.files?.[0]; e.target.value = '';
     if (!file) return;
     setUploading(true);
+    setTechMsg('');
     const fd = new FormData(); fd.append('file', file);
     try {
       const r = await uploadTechConfirm(orderId, fd);
-      if ((r as any).error) { alert((r as any).error); return; }
+      if ((r as any).error) { setTechMsg(`❌ ${(r as any).error}`); return; }
+      setTechMsg('✅ 技术部大货确认单已上传');
       setTechKey(k => k + 1);
     } catch {
-      alert('上传失败，请检查网络后重试');
+      setTechMsg('❌ 上传失败，请检查网络后重试');
     } finally {
       setUploading(false);
     }
@@ -107,6 +110,7 @@ export function BulkConsumptionEditor({ orderId, canEdit = true }: { orderId: st
         </div>
         <p className="text-[11px] text-gray-500 mt-1">业务上传技术部签名的大货确认单(大货单耗的依据);不传不能提交采购。</p>
         <div className="mt-1.5"><PackingFilesSection key={techKey} orderId={orderId} fileTypes={['tech_bulk_confirm']} emptyText="尚未上传技术确认单" canDelete={canEdit} /></div>
+        {techMsg && <p className={`text-[11px] mt-1 ${techMsg.startsWith('✅') ? 'text-emerald-700' : 'text-red-600'}`}>{techMsg}</p>}
       </div>
 
       {effectiveOpen && <>

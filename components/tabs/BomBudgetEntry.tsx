@@ -9,6 +9,7 @@ import {
   listBomConsumptionLines, getOrderStyleBudgets,
   saveBomBudgetUnitPrice, saveOrderStyleBudgets,
 } from '@/app/actions/procurement-items';
+import { collectBudgetUnitPriceMismatches } from '@/lib/domain/budget-unit-price';
 
 const yuan = (n: number) => `¥${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
@@ -27,7 +28,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
     if ((r as any).data) {
       const rows = (r as any).data as any[];
       setLines(rows);
-      setPriceEdit(Object.fromEntries(rows.map(l => [l.id, l.budget_unit_price != null ? String(l.budget_unit_price) : ''])));
+      setPriceEdit(Object.fromEntries(rows.map(l => [l.id, l.budgetUnitPrice != null ? String(l.budgetUnitPrice) : ''])));
     }
     if ((sb as any).data) {
       setStyleBudgets(((sb as any).data as any[]).map(b => ({
@@ -56,6 +57,12 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
     setSaving(false);
     const err = (r1 as any).error || (r2 as any).error;
     if (err) { setMsg('❌ ' + err); return; }
+    const verify = await listBomConsumptionLines(orderId);
+    const mismatches = (verify as any).data ? collectBudgetUnitPriceMismatches((verify as any).data as any[], prices) : [];
+    if (mismatches.length > 0) {
+      setMsg(`⚠️ 预算已提交，但有 ${mismatches.length} 行回显不一致，请刷新后重试或检查权限`);
+      return;
+    }
     setMsg((r2 as any).warning ? ('⚠️ ' + (r2 as any).warning) : '✅ 已保存预算(面料单价 + 逐款加工费 + 辅料元/套×套数)');
     await load();
   }
@@ -63,7 +70,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-6 text-gray-400 text-sm">加载核料预算…</div>;
 
   const fabricLines = lines.filter(l => l.required);   // 布料(面料/里料):必填预算单价
-  const missing = fabricLines.filter(l => !(Number(priceEdit[l.id]) > 0)).length;
+  const missing = fabricLines.filter(l => priceEdit[l.id] === '').length;
 
   return (
     <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/50 p-4 space-y-3 mb-5">
@@ -92,12 +99,15 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
           </tr></thead>
           <tbody>
             {fabricLines.map(l => {
-              const price = Number(priceEdit[l.id]);
+              const price = priceEdit[l.id] === '' ? null : Number(priceEdit[l.id]);
               const cons = Number(l.production_consumption);
               const pcs = Number(l.pieces);
-              const budget = l.required && price > 0 && cons > 0 && pcs > 0 ? Math.round(price * cons * pcs * 100) / 100 : null;
+              const budget = l.required && price != null && cons > 0 && pcs > 0 ? Math.round(price * cons * pcs * 100) / 100 : null;
+              const hasSavedBudget = l.budgetPriceSource === 'saved_budget' && l.budgetUnitPrice != null;
+              const suggestedBudget = l.budgetPriceSource === 'quotation_baseline' && l.effectiveDisplayUnitPrice != null
+                ? Number(l.effectiveDisplayUnitPrice) : null;
               return (
-                <tr key={l.id} className={`border-t border-gray-100 ${l.required && !(price > 0) ? 'bg-amber-50/60' : ''}`}>
+                <tr key={l.id} className={`border-t border-gray-100 ${l.required && price == null ? 'bg-amber-50/60' : ''}`}>
                   <td className="py-1.5 px-2 font-mono text-gray-700">{l.style_no || '—'}</td>
                   <td className="py-1.5 px-2 text-gray-600">{l.color || '—'}</td>
                   <td className="py-1.5 px-2 text-gray-800">{l.material_name || '—'}
@@ -111,9 +121,15 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
                   <td className="py-1.5 px-2 whitespace-nowrap">
                     <span className="text-gray-400 mr-0.5">¥</span>
                     <input type="number" step="any" min="0" value={priceEdit[l.id] ?? ''}
-                      placeholder={l.required ? '必填' : '—'}
+                      placeholder={l.required && suggestedBudget != null ? `建议 ¥${suggestedBudget.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : (l.required ? '必填' : '—')}
                       onChange={e => setPriceEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
-                      className={`w-20 rounded border px-2 py-1 ${l.required && !(price > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                      className={`w-20 rounded border px-2 py-1 ${l.required && price == null ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                    {!hasSavedBudget && suggestedBudget != null && (
+                      <div className="mt-1 text-[11px] text-amber-600">报价基线建议 {yuan(suggestedBudget)}</div>
+                    )}
+                    {hasSavedBudget && (
+                      <div className="mt-1 text-[11px] text-emerald-600">已保存预算 {yuan(Number(l.budgetUnitPrice))}</div>
+                    )}
                   </td>
                   <td className="py-1.5 px-2 text-gray-400">{l.unit || '—'}</td>
                   <td className="py-1.5 px-2 font-mono text-indigo-700">{budget != null ? yuan(budget) : '—'}</td>
