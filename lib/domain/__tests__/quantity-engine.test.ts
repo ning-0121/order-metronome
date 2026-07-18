@@ -21,6 +21,9 @@ test('PER_SET uses commercial quantity, PER_PIECE uses physical quantity', () =>
   assert.equal(quantityForBasis(ctx, 'PER_SET'), 2400);
   assert.equal(quantityForBasis(ctx, 'PER_PIECE'), 4800);
   assert.equal(quantityForBasis(ctx, 'PER_COMPONENT'), 4800);
+  assert.equal(quantityForBasis(ctx, 'PER_ORDER'), 1);
+  assert.equal(quantityForBasis(ctx, 'MANUAL_TOTAL'), 1);
+  assert.equal(quantityForBasis(ctx, null), 2400);
 });
 
 test('processing fee and accessory budget follow commercial quantity', () => {
@@ -48,4 +51,11 @@ test('ambiguous records surface needs review', () => {
   assert.equal(ctx.needsReview, true);
   assert.equal(ctx.reviewReason?.includes('不一致'), true);
   assert.equal(quantityLabelForBasis('PER_SET'), '每套');
+});
+
+test('unknown unit falls back to explicit review state', () => {
+  const ctx = deriveOrderQuantityContext({ physicalQuantity: 4800, quantityUnit: null, lineItemMultipliers: [] });
+  assert.equal(ctx.needsReview, true);
+  assert.equal(ctx.reviewReason, '数量单位待确认，默认按件处理');
+  assert.equal(formatQuantityDisplay(ctx), '4800件（数量基准待确认）');
 });

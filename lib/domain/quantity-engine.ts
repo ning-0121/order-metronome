@@ -177,13 +177,18 @@ export function formatQuantityDisplay(ctx: QuantityContext): string {
   const commercial = ctx.commercialQuantity;
   const unit = formatQuantityUnit(ctx.commercialUnit, ctx.componentsPerCommercialUnit);
   if (physical == null) return '数量待确认';
+  let display: string;
   if (commercial == null) {
-    return `${formatDecimal(physical)}件（数量基准待确认）`;
+    display = `${formatDecimal(physical)}件`;
+  } else if (commercial === physical || ctx.componentsPerCommercialUnit === 1) {
+    display = `${formatDecimal(physical)}件`;
+  } else {
+    display = `${formatDecimal(commercial)}${unit}（折合${formatDecimal(physical)}件）`;
   }
-  if (commercial === physical || ctx.componentsPerCommercialUnit === 1) {
-    return `${formatDecimal(physical)}件`;
+  if (ctx.needsReview && !display.includes('数量基准待确认')) {
+    display += '（数量基准待确认）';
   }
-  return `${formatDecimal(commercial)}${unit}（折合${formatDecimal(physical)}件）`;
+  return display;
 }
 
 export function quantityLabelForBasis(basis?: QuantityBasis | null): string {
