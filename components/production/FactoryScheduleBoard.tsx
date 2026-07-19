@@ -60,7 +60,9 @@ export function FactoryScheduleBoard() {
                 <div className="flex items-center gap-2 flex-wrap text-sm">
                   <span className="font-semibold text-gray-900">{f.factory_name}</span>
                   <span className="text-xs text-gray-500">月产能 <b className="text-gray-700">{f.monthly_capacity ?? '—'}</b></span>
-                  <span className="text-xs text-gray-500">在排 <b className="text-gray-700">{f.dispatches.length}</b> 单 · <b className="text-gray-700">{f.total_committed}</b> 件</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${f.capacity_label === '月产能未配置' ? 'bg-slate-100 text-slate-700' : f.capacity_label === '配置产能为0' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{f.capacity_label}</span>
+                  <span className="text-xs text-gray-500">在排 <b className="text-gray-700">{f.active_count}</b> 单 · <b className="text-gray-700">{f.total_committed}</b> 件</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{f.source_label}</span>
                   {anyOver && <span className="text-xs px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700">有月份超卖</span>}
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400 flex-wrap">
@@ -74,7 +76,7 @@ export function FactoryScheduleBoard() {
                 {f.dispatches.length > 0 && (
                   <button onClick={() => doExport(f.id)} disabled={busyExport === f.id} className="text-xs px-2 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50">{busyExport === f.id ? '导出中…' : '⬇ 派工单'}</button>
                 )}
-                <button onClick={() => setOpen(open === f.id ? '' : f.id)} className="text-xs text-indigo-600 hover:underline">{open === f.id ? '收起' : `明细(${f.dispatches.length})`}</button>
+                <button onClick={() => setOpen(open === f.id ? '' : f.id)} className="text-xs text-indigo-600 hover:underline">{open === f.id ? '收起' : `明细(${f.active_count})`}</button>
               </div>
             </div>
 
@@ -102,7 +104,7 @@ export function FactoryScheduleBoard() {
                 {f.dispatches.length === 0 ? <p className="text-xs text-gray-400">该工厂暂无在排派工。</p> : (
                   <table className="text-[11px] w-full">
                     <thead><tr className="text-gray-400 text-left border-b border-gray-100">
-                      {['订单', '客户', '款号', '颜色', '件数', '完成', '排产窗口', '交期', '状态'].map((h) => <th key={h} className="px-1.5 py-1 whitespace-nowrap font-medium">{h}</th>)}
+                      {['订单', '客户', '款号', '颜色', '件数', '完成', '排产窗口', '交期', '来源', '状态'].map((h) => <th key={h} className="px-1.5 py-1 whitespace-nowrap font-medium">{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {f.dispatches.map((d: any) => (
@@ -115,6 +117,7 @@ export function FactoryScheduleBoard() {
                           <td className={`px-1.5 py-1 text-right font-medium ${d.planned_qty && d.done_qty >= d.planned_qty ? 'text-emerald-600' : d.done_qty > 0 ? 'text-indigo-600' : 'text-gray-400'}`}>{d.done_qty || 0}</td>
                           <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{d.planned_start ? `${String(d.planned_start).slice(5, 10)}~${String(d.planned_end || '').slice(5, 10)}` : '—'}</td>
                           <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{d.order?.factory_date ? String(d.order.factory_date).slice(5, 10) : '—'}</td>
+                          <td className="px-1.5 py-1"><span className={`rounded-full px-1.5 py-0.5 text-[10px] ${d.source === 'legacy' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{d.source === 'legacy' ? 'legacy' : 'dispatch'}</span></td>
                           <td className="px-1.5 py-1"><span className={d.status === 'in_production' ? 'text-emerald-700' : 'text-gray-600'}>{stCn[d.status] || d.status}</span></td>
                         </tr>
                       ))}

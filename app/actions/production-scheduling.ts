@@ -11,6 +11,7 @@ import { revalidatePath } from 'next/cache';
 import { RECEIVED } from '@/lib/production/stage';
 import { deriveOrderCapability, factoryRecommendationLabel, matchFactory, rankScore, type FactoryCaps, type OrderReq } from '@/lib/production/scheduling';
 import { factoryMonthlyLoad, checkOverbook, monthlyLedger } from '@/lib/production/capacityLedger';
+import { buildFactoryScheduleTruth, pickConfirmedStyleImage, summarizeConfirmedColors, summarizeProductionOrderCard } from '@/lib/production/board-truth';
 import { assignMerchandiser } from '@/app/actions/milestones';
 import { classifyDispatchQueueStatus, summarizeDispatchQueue } from '@/lib/production/dispatch-queue';
 
@@ -60,7 +61,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 待排产订单:活跃(未完成/取消)、非经销(经销=买成品不排产)
   const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, style_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status')
+    .select('id, order_no, internal_order_no, po_number, style_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status, style_count, color_count')
     .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")')
     .order('factory_date', { ascending: true }).limit(200);
   const orderList = (orders || []).filter((o: any) => String(o.order_purpose || '').toLowerCase() !== 'trade');
@@ -75,8 +76,6 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     (svc.from('milestones') as any).select('order_id, owner_role, owner_user_id, step_key').in('order_id', orderIds),
   ]);
   const custSupplied = new Set<string>((bom || []).map((b: any) => b.order_id));
-  const linesByOrder = new Map<string, any[]>();
-  for (const l of (lines || [])) linesByOrder.set(l.order_id, [...(linesByOrder.get(l.order_id) || []), l]);
   const matByOrder = new Map<string, { total: number; ready: number }>();
   for (const p of (pli || [])) { const m = matByOrder.get(p.order_id) || { total: 0, ready: 0 }; m.total++; if (RECEIVED.has(String(p.line_status || ''))) m.ready++; matByOrder.set(p.order_id, m); }
   const followUpIdByOrder = new Map<string, string>();
@@ -86,6 +85,8 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
   const followUpIds = [...new Set(followUpIdByOrder.values())];
   const { data: followUps } = followUpIds.length ? await (svc.from('profiles') as any).select('user_id, name').in('user_id', followUpIds) : { data: [] };
   const followUpNames = new Map<string, string>((followUps || []).map((p: any) => [p.user_id, p.name || '—']));
+  const linesByOrder = new Map<string, any[]>();
+  for (const l of (lines || []) as any[]) linesByOrder.set(l.order_id, [...(linesByOrder.get(l.order_id) || []), l]);
 
   const cand = (req: OrderReq) => factories.map((f) => {
     const m = matchFactory(f, req);
@@ -99,26 +100,54 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     const orderCap = deriveOrderCapability({ orderPurpose: o.order_purpose, hasCustomerSupplied: custSupplied.has(o.id) });
     const req: OrderReq = { quality_grade: o.quality_grade || null, weave_type: o.weave_type || null, needs_package: o.needs_package ?? null, order_capability: orderCap };
     // 款分组
-    const styleMap = new Map<string, { style_no: string; product_name: string; qty: number; colors: string[]; image_url: string | null }>();
+    const styleMap = new Map<string, { style_no: string; product_name: string; qty: number; colors: string[]; image_url: string | null; lines: any[] }>();
     for (const l of (linesByOrder.get(o.id) || [])) {
       const sn = String(l.style_no || '').trim();
-      const s = styleMap.get(sn) || { style_no: sn, product_name: l.product_name || '', qty: 0, colors: [] as string[], image_url: null };
+      const s = styleMap.get(sn) || { style_no: sn, product_name: l.product_name || '', qty: 0, colors: [] as string[], image_url: null, lines: [] as any[] };
       s.qty += Number(l.qty_pcs) || 0;
-      if (!s.image_url && l.image_url) s.image_url = String(l.image_url);   // 同款各色存同一图,取首个非空
-      const cc = String(l.color_cn || l.color_en || '').trim(); if (cc && !s.colors.includes(cc)) s.colors.push(cc);
+      s.lines.push(l);
       styleMap.set(sn, s);
     }
+    const orderSummary = summarizeProductionOrderCard(
+      (linesByOrder.get(o.id) || []).map((line) => ({
+        style_no: line.style_no || null,
+        product_name: line.product_name || null,
+        image_url: line.image_url || null,
+        color_cn: line.color_cn || null,
+        color_en: line.color_en || null,
+        qty_pcs: line.qty_pcs || null,
+      })),
+      o.quantity,
+      (o.style_count != null ? Number(o.style_count) : null) || styleMap.size || null,
+    );
     const candidates = cand(req);
-    const styles = [...styleMap.values()].map((s) => ({
-      ...s,
-      dispatches: (dispatchByStyle.get(`${o.id}¦${s.style_no}¦`) || []).concat(
-        s.colors.flatMap((c) => dispatchByStyle.get(`${o.id}¦${s.style_no}¦${c}`) || [])),
-    }));
+    const styles = [...styleMap.values()].map((s) => {
+      const colorSummary = summarizeConfirmedColors(s.lines.map((line) => ({
+        color_cn: line.color_cn || null,
+        color_en: line.color_en || null,
+        image_url: line.image_url || null,
+        qty_pcs: line.qty_pcs || null,
+        style_no: line.style_no || null,
+      })));
+      return {
+        ...s,
+        image_url: pickConfirmedStyleImage(s.lines),
+        colors: colorSummary.colors,
+        color_count: colorSummary.count,
+        color_label: colorSummary.label,
+        dispatches: (dispatchByStyle.get(`${o.id}¦${s.style_no}¦`) || []).concat(
+          s.lines.flatMap((line) => {
+            const colorKey = String(line.color_cn || line.color_en || '').trim();
+            return colorKey ? (dispatchByStyle.get(`${o.id}¦${s.style_no}¦${colorKey}`) || []) : [];
+          })),
+      };
+    });
     // 兜底:没有逐款明细(order_line_items)的订单,合成一条「整单」让主管仍能整单派工
     if (styles.length === 0) {
       styles.push({
         style_no: '', product_name: o.product_description || '整单', qty: o.quantity || 0, colors: [] as string[],
         dispatches: dispatchByStyle.get(`${o.id}¦¦`) || [],
+        image_url: null, color_count: null, color_label: '颜色待补',
       });
     }
     const mat = matByOrder.get(o.id);
@@ -126,6 +155,10 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
       id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, po_number: o.po_number, style_no: o.style_no, customer_name: o.customer_name,
       product_description: o.product_description, quantity: o.quantity, factory_date: o.factory_date,
       order_capability: orderCap, quality_grade: o.quality_grade, weave_type: o.weave_type, needs_package: o.needs_package,
+      piece_count: orderSummary.pieceCount,
+      style_count: orderSummary.styleCount,
+      color_count: orderSummary.colorCount,
+      color_label: orderSummary.colorLabel,
       production_follow_up_id: followUpIdByOrder.get(o.id) || null,
       production_follow_up_name: followUpNames.get(followUpIdByOrder.get(o.id) || '') || null,
       material_ready_pct: mat && mat.total > 0 ? Math.round((mat.ready / mat.total) * 100) : null,
@@ -350,35 +383,25 @@ export async function getFactoryScheduleBoard(): Promise<{ data?: any; error?: s
     .select('id, factory_name, product_categories, quality_grades, weave_types, can_package, order_capabilities, monthly_capacity')
     .is('deleted_at', null).in('cooperation_status', ['active', 'trial']);
   const factories = (facs || []) as any[];
-  const { data: disp } = await (svc.from('production_dispatch') as any)
-    .select('id, order_id, style_no, color, factory_id, factory_name, planned_qty, planned_start, planned_end, status')
-    .in('status', ['scheduled', 'in_production']);
-  const dispatches = (disp || []) as any[];
-  const orderIds = [...new Set(dispatches.map((d) => d.order_id))];
-  const dispIds = dispatches.map((d) => d.id);
-  const [{ data: ords }, { data: logs }] = await Promise.all([
-    orderIds.length ? (svc.from('orders') as any).select('id, order_no, internal_order_no, customer_name, factory_date').in('id', orderIds) : Promise.resolve({ data: [] }),
-    dispIds.length ? (svc.from('production_dispatch_logs') as any).select('dispatch_id, qty_done').in('dispatch_id', dispIds) : Promise.resolve({ data: [] }),
+  const [{ data: disp }, { data: orders }, { data: moRows }] = await Promise.all([
+    (svc.from('production_dispatch') as any)
+      .select('id, order_id, style_no, color, factory_id, factory_name, planned_qty, planned_start, planned_end, status')
+      .in('status', ['scheduled', 'in_production']),
+    (svc.from('orders') as any)
+      .select('id, order_no, internal_order_no, customer_name, factory_id, factory_name, quantity, factory_date, etd, lifecycle_status, style_no')
+      .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")'),
+    (svc.from('manufacturing_orders') as any).select('order_id'),
   ]);
-  const orderMap = new Map((ords || []).map((o: any) => [o.id, o]));
-  const doneBy = new Map<string, number>();
-  for (const l of (logs || [])) doneBy.set(l.dispatch_id, (doneBy.get(l.dispatch_id) || 0) + (Number(l.qty_done) || 0));
-  const now = new Date();
-  const fromMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const byFactory = new Map<string, any[]>();
-  for (const d of dispatches) if (d.factory_id) byFactory.set(d.factory_id, [...(byFactory.get(d.factory_id) || []), d]);
-
-  const out = factories.map((f) => {
-    const ds = (byFactory.get(f.id) || []).map((d) => ({ ...d, order: orderMap.get(d.order_id) || null, done_qty: doneBy.get(d.id) || 0 }))
-      .sort((a, b) => String(a.planned_start || '').localeCompare(String(b.planned_start || '')));
-    const load = factoryMonthlyLoad(ds);
-    return {
-      id: f.id, factory_name: f.factory_name, monthly_capacity: f.monthly_capacity ?? null,
-      product_categories: f.product_categories || [], quality_grades: f.quality_grades || [], weave_types: f.weave_types || [],
-      can_package: f.can_package, order_capabilities: f.order_capabilities || [],
-      dispatches: ds, ledger: monthlyLedger(load, f.monthly_capacity, fromMonth, 6),
-      total_committed: ds.reduce((s: number, d: any) => s + (Number(d.planned_qty) || 0), 0),
-    };
+  const dispatches = (disp || []) as any[];
+  const orderMap = new Map((orders || []).map((o: any) => [o.id, { ...o, has_manufacturing_order: false }]));
+  for (const mo of (moRows || []) as any[]) {
+    const cur = orderMap.get(mo.order_id);
+    if (cur) cur.has_manufacturing_order = true;
+  }
+  const out = buildFactoryScheduleTruth({
+    factories,
+    orders: [...orderMap.values()],
+    dispatches,
   }).sort((a, b) => b.dispatches.length - a.dispatches.length);
   return { data: { factories: out } };
 }
