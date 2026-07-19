@@ -134,6 +134,9 @@ export interface DelayValidationResult {
   suggestedMaxDate?: string; // ISO date
   mustCompressDownstream: boolean; // 是否必须压缩下游
   willPushFinalDeliveryDate: boolean; // 是否会推迟最终交期
+  delayDays?: number;
+  remainingBufferDays?: number | null;
+  riskLevel?: 'low' | 'medium' | 'high' | 'critical';
 }
 
 /**
@@ -145,13 +148,16 @@ export function validateDelayRequest(params: {
   currentDueAt: string;
   proposedDueAt: string;
   downstreamEarliestDue?: string; // 下游最早截止日（用于判断压缩空间）
+  mode?: 'push_delivery' | 'hold_delivery';
 }): DelayValidationResult {
-  const { stepKey, category, currentDueAt, proposedDueAt } = params;
+  const { stepKey, category, currentDueAt, proposedDueAt, mode } = params;
   const categoryInfo = DELAY_CATEGORIES[category];
 
   const currentDate = new Date(currentDueAt);
   const proposedDate = new Date(proposedDueAt);
   const delayDays = Math.ceil((proposedDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
+  const maxAllowed = NODE_MAX_DELAY_DAYS[stepKey];
+  const remainingBufferDays = Number.isFinite(maxAllowed) ? ((maxAllowed ?? 0) - delayDays) : null;
 
   // 基础验证
   if (delayDays <= 0) {
@@ -160,6 +166,9 @@ export function validateDelayRequest(params: {
       reason: '新日期必须晚于原截止日期',
       mustCompressDownstream: false,
       willPushFinalDeliveryDate: false,
+      delayDays,
+      remainingBufferDays,
+      riskLevel: 'low',
     };
   }
 
@@ -172,17 +181,43 @@ export function validateDelayRequest(params: {
         : `不可抗力延期 ${delayDays} 天，需客户书面同意后推迟交期`,
       mustCompressDownstream: false,
       willPushFinalDeliveryDate: true,
+      delayDays,
+      remainingBufferDays: null,
+      riskLevel: 'low',
+    };
+  }
+
+  if (mode === 'hold_delivery') {
+    const riskLevel = remainingBufferDays == null
+      ? 'medium'
+      : remainingBufferDays >= 0
+        ? (remainingBufferDays <= 1 ? 'medium' : 'low')
+        : (remainingBufferDays <= -3 ? 'critical' : 'high');
+    return {
+      allowed: true,
+      reason: remainingBufferDays == null
+        ? `保交期延期 ${delayDays} 天，节点缓冲基线未配置，请人工复核`
+        : remainingBufferDays >= 0
+          ? `保交期延期 ${delayDays} 天，仍在缓冲内，剩余缓冲 ${remainingBufferDays} 天`
+          : `保交期延期 ${delayDays} 天，已超出缓冲 ${Math.abs(remainingBufferDays)} 天，将压缩下游并提升风险`,
+      mustCompressDownstream: true,
+      willPushFinalDeliveryDate: false,
+      delayDays,
+      remainingBufferDays,
+      riskLevel,
     };
   }
 
   // 内部/供应商原因 → 检查最大允许天数
-  const maxAllowed = NODE_MAX_DELAY_DAYS[stepKey];
   if (maxAllowed === undefined) {
     return {
       allowed: true,
       reason: `此节点未设定最大延期天数，建议谨慎操作`,
       mustCompressDownstream: true,
       willPushFinalDeliveryDate: false,
+      delayDays,
+      remainingBufferDays: null,
+      riskLevel: 'medium',
     };
   }
 
@@ -192,6 +227,9 @@ export function validateDelayRequest(params: {
       reason: `【${stepKey}】属于硬性死线节点，${categoryInfo.label}不允许延期。如确实无法按时完成，请联系客户协商（选择"客户原因"或"不可抗力"）`,
       mustCompressDownstream: false,
       willPushFinalDeliveryDate: false,
+      delayDays,
+      remainingBufferDays: 0,
+      riskLevel: 'critical',
     };
   }
 
@@ -203,6 +241,9 @@ export function validateDelayRequest(params: {
       suggestedMaxDate: maxDate.toISOString(),
       mustCompressDownstream: true,
       willPushFinalDeliveryDate: false,
+      delayDays,
+      remainingBufferDays,
+      riskLevel: 'high',
     };
   }
 
@@ -211,6 +252,8 @@ export function validateDelayRequest(params: {
     reason: `${categoryInfo.label}延期 ${delayDays} 天（不超过最大限制 ${maxAllowed} 天）。交期不变，下游节点窗口将被压缩 ${delayDays} 天，需要加快进度`,
     mustCompressDownstream: true,
     willPushFinalDeliveryDate: false,
+    delayDays,
+    remainingBufferDays,
+    riskLevel: delayDays === maxAllowed ? 'medium' : 'low',
   };
 }
-

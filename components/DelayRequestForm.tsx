@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createDelayRequest } from '@/app/actions/delays';
 import { useRouter } from 'next/navigation';
 import type { Milestone } from '@/lib/types';
-import { DELAY_CATEGORIES, NODE_MAX_DELAY_DAYS, validateDelayRequest, type DelayCategory } from '@/lib/domain/delay-rules';
+import { DELAY_CATEGORIES, validateDelayRequest, type DelayCategory } from '@/lib/domain/delay-rules';
 
 interface DelayRequestFormProps {
   milestoneId: string;
@@ -25,7 +25,6 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
   const [validationResult, setValidationResult] = useState<any>(null);
 
   const stepKey = (milestone as any).step_key || '';
-  const maxDays = NODE_MAX_DELAY_DAYS[stepKey];
   const categoryInfo = DELAY_CATEGORIES[category];
 
   // 实时校验
@@ -39,9 +38,10 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
       category,
       currentDueAt: milestoneDueAt,
       proposedDueAt: proposedNewDueAt,
+      mode,
     });
     setValidationResult(result);
-  }, [category, proposedNewDueAt, milestoneDueAt, stepKey]);
+  }, [category, mode, proposedNewDueAt, milestoneDueAt, stepKey]);
 
   // 分类切换时给个默认建议:客户/不可抗力 → 顺延交期;内部/供应商 → 保交期(可手动改)
   useEffect(() => {
@@ -153,14 +153,17 @@ export function DelayRequestForm({ milestoneId, milestone, orderIncoterm, milest
           <button type="button" onClick={() => setMode('hold_delivery')}
             className={`text-left p-3 rounded-lg border-2 transition-all ${mode === 'hold_delivery' ? 'border-amber-500 bg-amber-50' : 'border-gray-200'}`}>
             <div className="font-semibold text-sm text-gray-900">⚡ 保交期</div>
-            <div className="text-xs text-gray-500 mt-1 leading-snug">交期不动,下游节点压进剩余窗口(标「交期紧急」,需赶工)</div>
+            <div className="text-xs text-gray-500 mt-1 leading-snug">客户承诺交期不变;内部节点可按实际需要延期,超缓冲会提示风险并走现有审批</div>
           </button>
         </div>
-        {mode === 'hold_delivery' && maxDays === 0 && (
-          <div className="mt-1.5 text-xs text-red-700">⛔ 该节点是硬性死线,保交期下不允许延期</div>
-        )}
-        {mode === 'hold_delivery' && maxDays !== undefined && maxDays > 0 && (
-          <div className="mt-1.5 text-xs text-amber-700">该节点保交期下最多延 <strong>{maxDays} 天</strong></div>
+        {mode === 'hold_delivery' && proposedNewDueAt && validationResult && (
+          <div className={`mt-1.5 text-xs ${validationResult.allowed ? 'text-amber-700' : 'text-red-700'}`}>
+            {validationResult.remainingBufferDays == null
+              ? `当前节点缺少缓冲基线，系统将按实际日期提交保交期延期 ${validationResult.delayDays || 0} 天`
+              : validationResult.remainingBufferDays >= 0
+                ? `剩余缓冲 ${validationResult.remainingBufferDays} 天`
+                : `已超出缓冲 ${Math.abs(validationResult.remainingBufferDays)} 天，将提示高风险并继续走审批`}
+          </div>
         )}
       </div>
 
