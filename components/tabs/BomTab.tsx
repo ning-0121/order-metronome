@@ -476,9 +476,32 @@ export function BomTab({ orderId }: { orderId: string }) {
   }
   async function editCandidate(c: any) {
     const name = prompt('辅料名称', c.extracted_value?.accessory_name || ''); if (!name) return;
+    const spec = prompt('规格', c.extracted_value?.specification || '');
+    const color = prompt('颜色', c.extracted_value?.color || '');
+    const position = prompt('使用部位', c.extracted_value?.usage_position || '');
     const unit = prompt('单位', c.extracted_value?.unit || ''); if (!unit) return;
     const consumption = prompt('单耗', String(c.extracted_value?.unit_consumption ?? '')); if (!(Number(consumption) > 0)) return;
-    const value = { ...c.extracted_value, accessory_name: name, unit, unit_consumption: Number(consumption) };
+    const notes = prompt('备注', c.extracted_value?.notes || '');
+    const special = prompt('特殊要求', c.extracted_value?.special_requirements || '');
+    const sampleRef = prompt('样品/参考编号', c.extracted_value?.sample_reference || '');
+    const positionDesc = prompt('位置说明', c.extracted_value?.position_description || '');
+    const imageUrls = prompt('图片链接（逗号分隔，可留空）', Array.isArray(c.extracted_value?.image_urls) ? c.extracted_value.image_urls.join(',') : '');
+    const attachmentFiles = prompt('画稿/附件链接（逗号分隔，可留空）', Array.isArray(c.extracted_value?.attachment_files) ? c.extracted_value.attachment_files.join(',') : '');
+    const value = {
+      ...c.extracted_value,
+      accessory_name: name,
+      specification: spec || null,
+      color: color || null,
+      usage_position: position || null,
+      unit,
+      unit_consumption: Number(consumption),
+      notes: notes || null,
+      special_requirements: special || null,
+      sample_reference: sampleRef || null,
+      position_description: positionDesc || null,
+      image_urls: (imageUrls || '').split(/[，,]+/g).map((s) => s.trim()).filter(Boolean),
+      attachment_files: (attachmentFiles || '').split(/[，,]+/g).map((s) => s.trim()).filter(Boolean),
+    };
     const r = await reviewAccessoryCandidate(c.id, orderId, 'approve', value); if ((r as any).error) alert((r as any).error); else { await reloadCandidates(); await reload(); }
   }
   async function bulkApprove() { const r = await bulkApproveExactCandidates(orderId); if ((r as any).error) alert((r as any).error); else { alert(`已批准 ${(r as any).approved} 条精确完整匹配`); await reloadCandidates(); } }
@@ -1054,7 +1077,7 @@ export function BomTab({ orderId }: { orderId: string }) {
       </div>
       {candidates.length > 0 && <div className="mb-4 p-3 rounded-xl border border-amber-200 bg-amber-50/40">
         <div className="flex items-center gap-2"><b className="text-sm">辅料导入候选审核</b><button onClick={bulkApprove} className="text-xs border rounded px-2 py-1 text-emerald-700">批量批准精确完整匹配</button><select value={candidateFilter} onChange={e => { setCandidateFilter(e.target.value); reloadCandidates(e.target.value); }} className="ml-auto text-xs border rounded p-1"><option value="">全部状态</option>{['SOURCE_IMPORTED','MATCHED_TO_EXISTING','NEW_ACCESSORY','NEEDS_REVIEW','APPROVED','EXCLUDED'].map(s => <option key={s}>{s}</option>)}</select></div>
-        <div className="mt-2 overflow-x-auto"><table className="w-full text-xs"><thead><tr><th>源行</th><th>名称/规格/颜色/位置</th><th>状态</th><th>缺失</th><th>匹配原因</th><th>操作</th></tr></thead><tbody>{candidates.map(c => <tr key={c.id} className="border-t"><td>{c.source_row_number}{c.order_attachments?.file_url && <a href={c.order_attachments.file_url} target="_blank" rel="noreferrer" className="ml-1 text-indigo-600">源文件</a>}</td><td>{c.extracted_value?.accessory_name} / {c.extracted_value?.specification || '—'} / {c.extracted_value?.color || '—'} / {c.extracted_value?.usage_position || '—'}</td><td>{c.import_status}</td><td className="text-rose-600">{(c.missing_fields || []).join('、') || '—'}</td><td>{c.extracted_value?.match_reason || '新辅料/待判断'}</td><td>{!['APPROVED','EXCLUDED'].includes(c.import_status) && <div className="flex gap-1"><button onClick={() => reviewCandidate(c,'approve')} className="text-emerald-700">批准</button><button onClick={() => editCandidate(c)} className="text-indigo-600">编辑并批准</button><button onClick={() => reviewCandidate(c,'exclude')} className="text-rose-600">排除</button></div>}</td></tr>)}</tbody></table></div>
+        <div className="mt-2 overflow-x-auto"><table className="w-full text-xs"><thead><tr><th>源行</th><th>名称/规格/颜色/位置</th><th>状态</th><th>缺失/差异</th><th>图片/附件</th><th>匹配原因</th><th>操作</th></tr></thead><tbody>{candidates.map(c => <tr key={c.id} className="border-t"><td>{c.source_row_number}{c.order_attachments?.file_url && <a href={c.order_attachments.file_url} target="_blank" rel="noreferrer" className="ml-1 text-indigo-600">源文件</a>}</td><td>{c.extracted_value?.accessory_name} / {c.extracted_value?.specification || '—'} / {c.extracted_value?.color || '—'} / {c.extracted_value?.usage_position || '—'}<div className="text-[11px] text-gray-500">{c.extracted_value?.notes || c.extracted_value?.special_requirements ? [c.extracted_value?.notes, c.extracted_value?.special_requirements].filter(Boolean).join(' · ') : '—'}</div></td><td>{c.import_status}</td><td className="text-rose-600">{[...(c.missing_fields || []), ...((c.extracted_value?.difference_fields || []))].join('、') || '—'}</td><td>{Array.isArray(c.extracted_value?.image_urls) ? c.extracted_value.image_urls.length : 0} / {Array.isArray(c.extracted_value?.attachment_files) ? c.extracted_value.attachment_files.length : 0}</td><td>{c.extracted_value?.match_reason || '新辅料/待判断'}</td><td>{!['APPROVED','EXCLUDED'].includes(c.import_status) && <div className="flex gap-1"><button onClick={() => reviewCandidate(c,'approve')} className="text-emerald-700">批准</button><button onClick={() => editCandidate(c)} className="text-indigo-600">编辑并批准</button><button onClick={() => reviewCandidate(c,'exclude')} className="text-rose-600">排除</button></div>}</td></tr>)}</tbody></table></div>
         <p className="mt-2 text-[11px] text-amber-700">候选行不会自动生成采购单；批准新辅料只创建最小 BOM 记录。禁止在此点击最终提交采购。</p>
       </div>}
       {/* 纸箱规格 + 箱唛(#3:一套默认 + 个别款/色例外 + 箱唛模板,按款×色自动派生) */}
