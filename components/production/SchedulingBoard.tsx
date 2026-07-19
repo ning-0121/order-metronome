@@ -93,7 +93,9 @@ export function SchedulingBoard() {
                 <span>内部单号 <b className="text-gray-700">{o.internal_order_no || '—'}</b></span>
                 <span>客户PO <b className="text-gray-700">{o.po_number || '—'}</b></span>
                 <span>款号 <b className="text-gray-700">{o.style_no || '—'}</b></span>
-                <span>数量 <b className="text-gray-700">{o.quantity ?? '—'}</b></span>
+                <span>件数 <b className="text-gray-700">{o.piece_count ?? o.quantity ?? '—'}</b></span>
+                <span>款数 <b className="text-gray-700">{o.style_count ?? '—'}</b></span>
+                <span>颜色 <b className="text-gray-700">{o.color_label || '颜色待补'}</b></span>
                 <span>交期 <b className="text-gray-700">{o.factory_date ? String(o.factory_date).slice(0, 10) : '—'}</b></span>
                 <span>原辅料到位 <b className={o.material_ready_pct >= 100 ? 'text-emerald-600' : 'text-amber-600'}>{o.material_ready_pct == null ? '—' : o.material_ready_pct + '%'}</b></span>
               </div>
@@ -123,7 +125,7 @@ export function SchedulingBoard() {
                       : <span className="w-9 h-9 rounded border border-dashed border-gray-200 flex items-center justify-center text-gray-300 text-xs shrink-0">图</span>}
                     <span className="font-mono text-gray-800">{s.style_no || '(整单)'}</span>
                     <span className="text-gray-500 truncate">{s.product_name}</span>
-                    <span className="text-xs text-gray-500">{s.qty} 件 · {s.colors.length} 色</span>
+                    <span className="text-xs text-gray-500">{s.qty} 件 · {s.color_label || `${s.colors.length || 0} 色`}</span>
                     {dispatched
                       ? <span className="text-xs text-emerald-700">已派:{s.dispatches.map((d: any) => `${d.factory_name || '?'}${d.color ? `(${d.color})` : ''}`).join('、')}</span>
                       : <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">待排单</span>}
