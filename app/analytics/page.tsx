@@ -4,6 +4,7 @@ import { getAnalyticsSummary, getRoleEfficiency, getShipmentDistribution, getCap
 import Link from 'next/link';
 import { ShipmentDistributionChart } from '@/components/ShipmentDistributionChart';
 import { SchedulingPanel } from '@/components/SchedulingPanel';
+import { summarizeEffectiveOrderQuantity } from '@/lib/services/analytics-metrics';
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
@@ -35,9 +36,9 @@ export default async function AnalyticsPage() {
   const currentMonth = new Date().toISOString().slice(0, 7);
 
   // 总览统计
-  const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity, created_at');
+  const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity, created_at, order_purpose, lifecycle_status');
   const totalOrders = (allOrders || []).length;
-  const totalQuantity = (allOrders || []).reduce((s: number, o: any) => s + (o.quantity || 0), 0);
+  const effectiveQuantity = summarizeEffectiveOrderQuantity(allOrders || []);
   const totalCustomers = new Set((allOrders || []).map((o: any) => o.customer_name).filter(Boolean)).size;
   const totalFactories = new Set((allOrders || []).map((o: any) => o.factory_name).filter(Boolean)).size;
 
@@ -158,9 +159,10 @@ export default async function AnalyticsPage() {
             <div className="text-2xl font-bold text-indigo-600">{totalOrders}</div>
             <div className="text-xs text-gray-500 mt-1">总订单</div>
           </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">{totalQuantity.toLocaleString()}</div>
-            <div className="text-xs text-gray-500 mt-1">总件数</div>
+          <div className="text-center" title={effectiveQuantity.scopeHint}>
+            <div className="text-2xl font-bold text-blue-600">{effectiveQuantity.totalQuantity.toLocaleString()}</div>
+            <div className="text-xs text-gray-500 mt-1">{effectiveQuantity.scopeLabel}</div>
+            <div className="text-[10px] text-gray-400 mt-0.5">{effectiveQuantity.scopeHint}</div>
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-green-600">{totalCustomers}</div>
