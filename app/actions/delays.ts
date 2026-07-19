@@ -145,6 +145,7 @@ export async function createDelayRequest(
       category,
       currentDueAt: milestoneData.due_at,
       proposedDueAt: proposedNewDueAt,
+      mode,
     });
     if (!validation.allowed) {
       return { error: validation.reason };

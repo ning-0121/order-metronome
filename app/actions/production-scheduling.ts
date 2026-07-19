@@ -11,6 +11,8 @@ import { revalidatePath } from 'next/cache';
 import { RECEIVED } from '@/lib/production/stage';
 import { deriveOrderCapability, factoryRecommendationLabel, matchFactory, rankScore, type FactoryCaps, type OrderReq } from '@/lib/production/scheduling';
 import { factoryMonthlyLoad, checkOverbook, monthlyLedger } from '@/lib/production/capacityLedger';
+import { assignMerchandiser } from '@/app/actions/milestones';
+import { classifyDispatchQueueStatus, summarizeDispatchQueue } from '@/lib/production/dispatch-queue';
 
 async function gate(view: boolean): Promise<{ svc: any; roles: string[]; userId: string } | { error: string }> {
   const supabase = await createClient();
@@ -66,16 +68,24 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
   if (orderIds.length === 0) return { data: { orders: [], factories } };
 
   // 明细(款×色)/ 客供料(委托加工判定)/ 采购到位
-  const [{ data: lines }, { data: bom }, { data: pli }] = await Promise.all([
+  const [{ data: lines }, { data: bom }, { data: pli }, { data: allMilestones }] = await Promise.all([
     (svc.from('order_line_items') as any).select('order_id, style_no, product_name, color_cn, color_en, qty_pcs, image_url').in('order_id', orderIds),
     (svc.from('materials_bom') as any).select('order_id, customer_supplied').in('order_id', orderIds).eq('customer_supplied', true),
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
+    (svc.from('milestones') as any).select('order_id, owner_role, owner_user_id, step_key').in('order_id', orderIds),
   ]);
   const custSupplied = new Set<string>((bom || []).map((b: any) => b.order_id));
   const linesByOrder = new Map<string, any[]>();
   for (const l of (lines || [])) linesByOrder.set(l.order_id, [...(linesByOrder.get(l.order_id) || []), l]);
   const matByOrder = new Map<string, { total: number; ready: number }>();
   for (const p of (pli || [])) { const m = matByOrder.get(p.order_id) || { total: 0, ready: 0 }; m.total++; if (RECEIVED.has(String(p.line_status || ''))) m.ready++; matByOrder.set(p.order_id, m); }
+  const followUpIdByOrder = new Map<string, string>();
+  for (const m of (allMilestones || []) as any[]) {
+    if (m.owner_role === 'production' && m.owner_user_id && !followUpIdByOrder.has(m.order_id)) followUpIdByOrder.set(m.order_id, m.owner_user_id);
+  }
+  const followUpIds = [...new Set(followUpIdByOrder.values())];
+  const { data: followUps } = followUpIds.length ? await (svc.from('profiles') as any).select('user_id, name').in('user_id', followUpIds) : { data: [] };
+  const followUpNames = new Map<string, string>((followUps || []).map((p: any) => [p.user_id, p.name || '—']));
 
   const cand = (req: OrderReq) => factories.map((f) => {
     const m = matchFactory(f, req);
@@ -116,11 +126,23 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
       id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no, po_number: o.po_number, style_no: o.style_no, customer_name: o.customer_name,
       product_description: o.product_description, quantity: o.quantity, factory_date: o.factory_date,
       order_capability: orderCap, quality_grade: o.quality_grade, weave_type: o.weave_type, needs_package: o.needs_package,
+      production_follow_up_id: followUpIdByOrder.get(o.id) || null,
+      production_follow_up_name: followUpNames.get(followUpIdByOrder.get(o.id) || '') || null,
       material_ready_pct: mat && mat.total > 0 ? Math.round((mat.ready / mat.total) * 100) : null,
       styles, candidates,
     };
   });
-  return { data: { orders: out, factories } };
+  const queue = out
+    .map((row) => ({ ...row, dispatch_status: classifyDispatchQueueStatus(row) }))
+    .filter((row) => row.dispatch_status !== 'ready');
+  return {
+    data: {
+      orders: out,
+      factories,
+      queue,
+      queue_summary: summarizeDispatchQueue(out),
+    },
+  };
 }
 
 /** 派工:款(或色)→ 工厂 + 排产窗口。upsert 同款同色。 */
@@ -158,6 +180,68 @@ export async function dispatchStyle(input: { orderId: string; styleNo: string; c
   else ({ error } = await (svc.from('production_dispatch') as any).insert({ ...row, status: 'scheduled', created_by: userId }));
   if (error) return { error: /production_dispatch|does not exist/i.test(error.message || '') ? '派工表未建:请先执行 20260712_production_scheduling_p1.sql' : error.message };
   revalidatePath('/production');
+  return { ok: true };
+}
+
+export async function assignProductionDispatch(input: {
+  orderId: string;
+  factoryId?: string | null;
+  productionFollowUpId?: string | null;
+  reason: string;
+}): Promise<{ ok?: boolean; error?: string; partial?: boolean }> {
+  const g = await gate(false);
+  if ('error' in g) return { error: g.error };
+  const { svc, userId } = g;
+  const reason = String(input.reason || '').trim();
+  if (!reason || reason.length < 3) return { error: '请填写派单原因' };
+  if (!input.factoryId && !input.productionFollowUpId) return { error: '请至少选择工厂或生产跟单' };
+
+  const { data: order } = await (svc.from('orders') as any)
+    .select('id, factory_id, factory_name')
+    .eq('id', input.orderId)
+    .maybeSingle();
+  if (!order) return { error: '订单不存在' };
+
+  const rollbackFactory = { factory_id: (order as any).factory_id || null, factory_name: (order as any).factory_name || null };
+
+  if (input.factoryId) {
+    const { data: factory } = await (svc.from('factories') as any)
+      .select('id, factory_name')
+      .eq('id', input.factoryId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (!factory) return { error: '工厂不存在或已停用' };
+    const { error: updateErr } = await (svc.from('orders') as any)
+      .update({ factory_id: input.factoryId, factory_name: (factory as any).factory_name })
+      .eq('id', input.orderId);
+    if (updateErr) return { error: updateErr.message };
+  }
+
+  if (input.productionFollowUpId) {
+    const result = await assignMerchandiser(input.orderId, input.productionFollowUpId, 'production');
+    if (result.error && input.factoryId) {
+      await (svc.from('orders') as any).update(rollbackFactory).eq('id', input.orderId);
+      return { error: result.error, partial: true };
+    }
+    if (result.error) return { error: result.error };
+  }
+
+  await (svc.from('order_logs') as any).insert({
+    order_id: input.orderId,
+    actor_user_id: userId,
+    action: 'production_dispatch_assigned',
+    note: reason,
+    payload: JSON.stringify({
+      factory_id: input.factoryId || null,
+      production_follow_up_id: input.productionFollowUpId || null,
+      reason,
+    }),
+    created_at: new Date().toISOString(),
+  });
+
+  revalidatePath('/production');
+  revalidatePath('/production/scheduling');
+  revalidatePath(`/orders/${input.orderId}`);
   return { ok: true };
 }
 

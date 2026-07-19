@@ -28,6 +28,9 @@ export async function deleteAttachment(attachmentId: string, orderId: string) {
     .eq('id', attachmentId)
     .single();
   if (fetchError || !row) return { error: '附件不存在或已被删除' };
+  if ((row as any).file_type === 'customer_po') {
+    return { error: '客户 PO 不支持物理删除，请使用「更换 PO」或「撤回版本」' };
+  }
 
   // 权限检查
   const { data: profile } = await (supabase.from('profiles') as any)
@@ -150,4 +153,3 @@ export async function getAttachmentDownloadUrl(
 
   return { url: signedData.signedUrl };
 }
-

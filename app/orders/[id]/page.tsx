@@ -27,6 +27,7 @@ import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
 import { ProductVariantPicker } from '@/components/ProductVariantPicker';
 import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
 import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
+import { getCustomerPoHistory } from '@/app/actions/customer-po';
 import { OrderActions } from '@/components/OrderActions';
 import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
 import { BackfillProgressButton } from '@/components/BackfillProgressButton';
@@ -42,6 +43,7 @@ import { QuantityCorrectionButton } from '@/components/QuantityCorrectionButton'
 import { CustomerAddOrderPanel } from '@/components/order/CustomerAddOrderPanel';
 import { PerPoOperationsPanel } from '@/components/order/PerPoOperationsPanel';
 import { BuildDocsSupplement } from '@/components/order/BuildDocsSupplement';
+import { CustomerPoVersionPanel } from '@/components/order/CustomerPoVersionPanel';
 import { CancelRequestPanel } from '@/components/CancelRequestPanel';
 import { OverdueOrderGate } from '@/components/OverdueOrderGate';
 import { SplitShipmentTag } from '@/components/SplitShipmentTag';
@@ -126,7 +128,7 @@ export default async function OrderDetailPage({
   const canEnterBudget = canSeeFinancials || currentRoles.some((r) => ['merchandiser', 'procurement', 'procurement_manager'].includes(r));
 
   // ── 并行加载 5 个独立查询（owner profile 之前是串行额外查询，2026-05-19 合并到并行池）──
-  const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult, ownerProfileResult] = await Promise.all([
+  const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult, ownerProfileResult, customerPoHistoryResult] = await Promise.all([
     getMilestonesByOrder(id),
     getDelayRequestsByOrder(id),
     getOrderLogs(id),
@@ -140,6 +142,7 @@ export default async function OrderDetailPage({
           .eq('user_id', orderData.owner_user_id)
           .single()
       : Promise.resolve({ data: null }),
+    getCustomerPoHistory(id),
   ]);
   const { data: milestones } = milestonesResult;
   const { data: delayRequests } = delayRequestsResult;
@@ -441,6 +444,17 @@ export default async function OrderDetailPage({
               </div>
             );
           })()}
+
+          {customerPoHistoryResult?.versions?.length ? (
+            <div className="mt-4">
+              <CustomerPoVersionPanel
+                orderId={id}
+                versions={customerPoHistoryResult.versions as any}
+                activeVersionId={customerPoHistoryResult.activeVersion?.id || null}
+                canManage={isAdmin || (userId && (orderData.created_by === userId || orderData.owner_user_id === userId)) || currentRoles.includes('sales_manager') || currentRoles.includes('order_manager')}
+              />
+            </div>
+          ) : null}
 
           {/* 超期订单强制确认 — 只显示给负责业务或管理员 */}
           {(() => {

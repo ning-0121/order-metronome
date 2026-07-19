@@ -6,7 +6,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { getSchedulingBoard, dispatchStyle, setOrderProductionAttrs, updateDispatchStatus } from '@/app/actions/production-scheduling';
+import { getSchedulingBoard, dispatchStyle, setOrderProductionAttrs, updateDispatchStatus, assignProductionDispatch } from '@/app/actions/production-scheduling';
+import { getMerchandiserCandidates } from '@/app/actions/commissions';
 import { QUALITY_GRADES, WEAVE_TYPES } from '@/lib/production/scheduling';
 
 const chip = (ok: boolean | null) => ok === null ? <span className="text-gray-300">·</span> : ok ? <span className="text-emerald-600">✓</span> : <span className="text-rose-500">✗</span>;
@@ -17,14 +18,28 @@ export function SchedulingBoard() {
   const [openStyle, setOpenStyle] = useState<string>('');   // 展开派工的 key
   const [msg, setMsg] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
+  const [productionCandidates, setProductionCandidates] = useState<any[]>([]);
 
-  const load = () => getSchedulingBoard().then((r) => { setData((r as any).data || { orders: [], factories: [] }); setLoading(false); if ((r as any).error) setMsg((r as any).error); });
+  const load = async () => {
+    const [board, candidates] = await Promise.all([
+      getSchedulingBoard(),
+      getMerchandiserCandidates('production'),
+    ]);
+    setData((board as any).data || { orders: [], factories: [], queue: [], queue_summary: {} });
+    setProductionCandidates((candidates as any).data || []);
+    setLoading(false);
+    if ((board as any).error) setMsg((board as any).error);
+  };
   useEffect(() => { load(); }, []);
 
   if (loading) return <div className="text-sm text-gray-400 py-6">加载排产数据…</div>;
   const orders = data?.orders || [];
+  const queue = data?.queue || [];
+  const queueSummary = data?.queue_summary || {};
   const q = orderSearch.trim().toLowerCase();
   const visibleOrders = !q ? orders : orders.filter((o: any) => [o.order_no, o.internal_order_no, o.po_number, o.style_no, o.customer_name]
+    .some((value) => String(value || '').toLowerCase().includes(q)));
+  const visibleQueue = !q ? queue : queue.filter((o: any) => [o.order_no, o.internal_order_no, o.po_number, o.style_no, o.customer_name, o.factory_name, o.production_follow_up_name]
     .some((value) => String(value || '').toLowerCase().includes(q)));
 
   async function saveAttr(orderId: string, patch: any) {
@@ -41,6 +56,28 @@ export function SchedulingBoard() {
       </div>
       <input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="搜索 QM 单号、内部单号、客户 PO、款号或客户"
         className="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+      {(queueSummary?.total || 0) > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-amber-900">
+            <span className="font-semibold">未派单总数 {queueSummary.total || 0}</span>
+            <span>未定工厂 {queueSummary.missing_factory || 0}</span>
+            <span>未派跟单 {queueSummary.missing_follow_up || 0}</span>
+            <span>两项均未完成 {queueSummary.both_missing || 0}</span>
+          </div>
+          <div className="space-y-2">
+            {visibleQueue.map((o: any) => (
+              <UnassignedDispatchCard
+                key={o.id}
+                order={o}
+                factories={data?.factories || []}
+                candidates={productionCandidates}
+                onDone={() => { setOpenStyle(''); load(); }}
+              />
+            ))}
+            {visibleQueue.length === 0 && <p className="text-xs text-amber-800">没有匹配的未派单订单。</p>}
+          </div>
+        </div>
+      )}
       {visibleOrders.length === 0 ? <p className="text-sm text-gray-400">{orders.length ? '没有匹配的排产订单。' : '暂无待排产订单。'}</p> : visibleOrders.map((o: any) => (
         <div key={o.id} className="rounded-xl border border-gray-200 bg-white p-3">
           {/* 订单头 + 要求 */}
@@ -102,6 +139,101 @@ export function SchedulingBoard() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function UnassignedDispatchCard({
+  order,
+  factories,
+  candidates,
+  onDone,
+}: {
+  order: any;
+  factories: any[];
+  candidates: any[];
+  onDone: () => void;
+}) {
+  const [factoryId, setFactoryId] = useState(order.factory_id || '');
+  const [followUpId, setFollowUpId] = useState(order.production_follow_up_id || '');
+  const [reason, setReason] = useState(`生产派单：${order.order_no || order.internal_order_no || ''}`.trim());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const statusLabel = order.dispatch_status === 'both_missing'
+    ? '未定工厂 / 未派跟单'
+    : order.dispatch_status === 'missing_factory'
+      ? '未定工厂'
+      : '未派跟单';
+
+  async function submit() {
+    setBusy(true);
+    setErr('');
+    const res = await assignProductionDispatch({
+      orderId: order.id,
+      factoryId: factoryId || null,
+      productionFollowUpId: followUpId || null,
+      reason,
+    });
+    setBusy(false);
+    if ((res as any).error) {
+      setErr((res as any).error);
+      return;
+    }
+    onDone();
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-white p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-semibold text-gray-900">{order.order_no}</span>
+            <span className="text-gray-500">{order.customer_name}</span>
+            <span className="text-xs rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">{statusLabel}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-500">
+            <span>内部单号 <b className="text-gray-700">{order.internal_order_no || '—'}</b></span>
+            <span>客户PO <b className="text-gray-700">{order.po_number || '—'}</b></span>
+            <span>款号 <b className="text-gray-700">{order.style_no || '—'}</b></span>
+            <span>数量 <b className="text-gray-700">{order.quantity ?? '—'}</b></span>
+            <span>交期 <b className="text-gray-700">{order.factory_date || '—'}</b></span>
+            <span>当前工厂 <b className="text-gray-700">{order.factory_name || '—'}</b></span>
+            <span>当前跟单 <b className="text-gray-700">{order.production_follow_up_name || '—'}</b></span>
+          </div>
+        </div>
+        <div className="text-xs text-gray-500">原辅料到位 {order.material_ready_pct == null ? '—' : `${order.material_ready_pct}%`}</div>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_1.2fr_auto]">
+        <select value={factoryId} onChange={(e) => setFactoryId(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm bg-white">
+          <option value="">选择工厂</option>
+          {factories.map((f: any) => (
+            <option key={f.id} value={f.id}>{f.factory_name}{f.factory_code ? ` (${f.factory_code})` : ''}</option>
+          ))}
+        </select>
+        <select value={followUpId} onChange={(e) => setFollowUpId(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm bg-white">
+          <option value="">选择生产跟单</option>
+          {candidates.map((c: any) => (
+            <option key={c.user_id} value={c.user_id}>{c.name || c.email || c.user_id}</option>
+          ))}
+        </select>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          className="rounded border border-gray-300 px-3 py-1.5 text-sm"
+          placeholder="派单原因"
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={submit}
+          className="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+        >
+          {busy ? '派单中…' : '确认派单'}
+        </button>
+      </div>
+      {err && <div className="mt-2 text-xs text-rose-600">{err}</div>}
     </div>
   );
 }
