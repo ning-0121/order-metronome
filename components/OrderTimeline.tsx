@@ -468,6 +468,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                         {/* 元信息行 */}
                         <div className="flex flex-wrap gap-x-3 md:gap-x-4 gap-y-1 text-[11px] md:text-xs text-gray-500">
                           <span>责任人：{(m as any).display_owner_name || m.owner_user?.name || m.owner_user?.email?.split('@')[0] || `未分配（${getRoleLabel((m as any).display_owner_role || m.owner_role)}）`}</span>
+                          {isAdmin && (m as any).owner_source && <span className="text-[10px] text-indigo-600">诊断：stored={((m as any).stored_owner_name || '—')} · effective={((m as any).effective_owner_name || (m as any).display_owner_name || '—')} · source={((m as any).owner_source || '—')}</span>}
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (() => {
                             if (!overdue || isDone || isBlocked) return (

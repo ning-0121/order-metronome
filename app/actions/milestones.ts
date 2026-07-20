@@ -121,7 +121,7 @@ export async function getMilestonesByOrder(orderId: string) {
   }
   
   // Get owner user IDs
-  const { effectiveMilestoneOwner } = await import('@/lib/domain/milestone-owner');
+  const { effectiveMilestoneOwner, isBusinessExecutionFixedStep } = await import('@/lib/domain/milestone-owner');
   const effectiveMilestones = (milestones || []).map((m: any) => effectiveMilestoneOwner(m, ord));
   const ownerUserIds = effectiveMilestones
     .map((m: any) => m.owner_user_id)
@@ -144,6 +144,10 @@ export async function getMilestonesByOrder(orderId: string) {
   // Attach user info to milestones
   const milestonesWithUsers = effectiveMilestones.map((m: any) => ({
     ...m,
+    stored_owner_name: m.owner_user_id !== (ord.owner_user_id || ord.created_by) ? (userMap[m.owner_user_id]?.name || userMap[m.owner_user_id]?.email?.split('@')[0] || null) : null,
+    effective_owner_name: m.owner_user_id ? (userMap[m.owner_user_id]?.name || userMap[m.owner_user_id]?.email?.split('@')[0] || null) : null,
+    effective_owner_role: m.owner_role,
+    owner_source: isBusinessExecutionFixedStep(m.step_key) ? 'business_execution_order_owner' : 'stored_milestone_owner',
     owner_user: m.owner_user_id ? userMap[m.owner_user_id] || null : null,
     display_owner_user_id: m.owner_user_id || null,
     display_owner_role: m.owner_role,

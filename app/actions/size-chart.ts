@@ -138,19 +138,19 @@ export async function reparseSizeChart(
     await (svc.from('size_chart_imports') as any).update({ parse_status: 'PARSING', updated_by: user.id }).eq('id', (target as any).id);
     const parsed = await parseSizeChartWorkbook(bytes, options);
     const parseSaveErr = await persistParsedResult(svc as any, attachmentId, orderId, parsed, user.id);
-    if (parseSaveErr) return { error: `重新解析结果保存失败:${parseSaveErr.message}` };
+    if (parseSaveErr) return { error: `重新解析结果保存失败:${parseSaveErr.message}`, data: { attachmentId, updatedRecordId: (target as any).id, updatedRowCount: 0, parserStatus: 'FAILED' } };
     const { data: persisted, error: verifyErr } = await (svc.from('size_chart_imports') as any)
       .select('id,attachment_id,order_id,parser_version,parse_status,worksheet_name,parsed_row_count,parsed_json,error_code,safe_error_message,updated_at')
       .eq('id', (target as any).id).single();
     if (verifyErr || !persisted || (persisted as any).parse_status !== parsed.status || Number((persisted as any).parsed_row_count) !== parsed.rows.length) {
-      return { error: '重新解析已执行，但持久化回读不一致，请联系管理员' };
+      return { error: '重新解析已执行，但持久化回读不一致，请联系管理员', data: { attachmentId, updatedRecordId: (target as any).id, updatedRowCount: 0, parserStatus: (persisted as any)?.parse_status || parsed.status } };
     }
     revalidatePath(`/orders/${orderId}`);
-    return { ok: true, data: persisted };
+    return { ok: true, data: { ...persisted, attachmentId, storagePath: String((attachment as any).storage_path || '').replace(/([^/]{6})[^/]*(\.xlsx)$/i, '$1…$2'), updatedRecordId: (target as any).id, updatedRowCount: parsed.rows.length, parserStatus: parsed.status, worksheet: parsed.worksheetName, sizeCount: parsed.sizeLabels.length, measurementCount: parsed.measurementLabels.length, error: null } };
   } catch (error: any) {
     const safe = String(error?.message || '无法识别尺码表布局').slice(0, 300);
     await (svc.from('size_chart_imports') as any).update({ parse_status: 'FAILED', error_code: 'UNSUPPORTED_LAYOUT', safe_error_message: safe, updated_by: user.id }).eq('attachment_id', attachmentId).eq('order_id', orderId);
-    return { error: safe };
+    return { error: safe, data: { attachmentId, updatedRecordId: null, updatedRowCount: 0, parserStatus: 'FAILED', error: safe } };
   }
 }
 
@@ -168,7 +168,7 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
   if (error) return { error: error.message };
   const ids = (data || []).map((a: any) => a.id);
   const { data: imports } = ids.length ? await (svc.from('size_chart_imports') as any)
-    .select('attachment_id, parse_status, safe_error_message, parsed_row_count, parsed_json, worksheet_name')
+    .select('id, attachment_id, parse_status, safe_error_message, parsed_row_count, parsed_json, worksheet_name')
     .in('attachment_id', ids) : { data: [] };
   const byAttachment = new Map((imports || []).map((r: any) => [r.attachment_id, r]));
   const out: Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number; orientation: string | null; confidence: number | null; worksheet_name: string | null; size_count: number; measurement_count: number }> = [];
@@ -188,6 +188,8 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
       worksheet_name: status?.worksheet_name || parsed?.worksheetName || null,
       size_count: Array.isArray(parsed?.sizeLabels) ? parsed.sizeLabels.length : 0,
       measurement_count: Array.isArray(parsed?.measurementLabels) ? parsed.measurementLabels.length : 0,
+      parser_record_id: status?.id || null,
+      storage_path_hint: String((a as any).storage_path || '').replace(/([^/]{6})[^/]*(\.xlsx)$/i, '$1…$2'),
     });
   }
   return { data: out };
