@@ -8,7 +8,14 @@ import {
   resolveQuantityForBasis,
   quantityForBasis,
   quantityLabelForBasis,
+  commercialQuantityFromLine,
 } from '../quantity-engine.ts';
+
+test('line quantities normalize kit pieces to commercial sets', () => {
+  assert.equal(commercialQuantityFromLine(2400, 1), 2400);
+  assert.equal(commercialQuantityFromLine(4800, 2), 2400);
+  assert.equal(commercialQuantityFromLine(3000, 3), 1000);
+});
 
 test('2400套 resolves to 4800 pieces and 2400 commercial units', () => {
   const ctx = deriveOrderQuantityContext({ physicalQuantity: 4800, quantityUnit: '套' });

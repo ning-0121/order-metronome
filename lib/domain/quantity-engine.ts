@@ -359,3 +359,11 @@ export function deriveOrderQuantityContext(input: {
 }): QuantityContext {
   return deriveQuantityContext(input);
 }
+
+/** Commercial/set quantity from a persisted line. Legacy `qty_pcs` may be physical
+ * pieces when the line carries a kit multiplier; keep the conversion at this boundary. */
+export function commercialQuantityFromLine(qty: number | string | null | undefined, multiplier: number | string | null | undefined): number {
+  const q = positiveDecimal(qty) || 0;
+  const m = positiveInteger(multiplier) || 1;
+  return m > 1 ? divideDecimal(q, m) : q;
+}

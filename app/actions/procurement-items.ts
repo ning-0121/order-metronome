@@ -17,6 +17,7 @@ import {
   formatQuantityDisplay,
   quantityForBasis,
   quantityLabelForBasis,
+  commercialQuantityFromLine,
 } from '@/lib/domain/quantity-engine';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
@@ -369,11 +370,11 @@ export async function listBomConsumptionLines(orderId: string) {
   const { data: ord } = await (supabase.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
   const orderQty = Number((ord as any)?.quantity) || 0;
   const { data: lis } = await (supabase.from('order_line_items') as any)
-    .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
+    .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
   const byStyle = new Map<string, number>();
   const byStyleColor = new Map<string, number>();
   for (const li of (lis || [])) {
-    const q = Number((li as any).qty_pcs) || 0;
+    const q = commercialQuantityFromLine((li as any).qty_pcs, (li as any).set_multiplier);
     const st = norm((li as any).style_no);
     byStyle.set(st, (byStyle.get(st) || 0) + q);
     // 累加(原用 = 覆盖:同款×色多行(客户加单)只显示最后一行量,预览失真)

@@ -13,6 +13,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 import { buildProductionTaskWorkbook, safeProductionTaskFilename } from '@/lib/exports/production-task-template';
 import type { ProductionTaskTemplateModel } from '@/lib/exports/production-task-template-map';
+import { commercialQuantityFromLine, deriveOrderQuantityContext } from '@/lib/domain/quantity-engine';
 
 const MO_WRITE_MSG = '仅业务/跟单/生产/生产主管/管理员可编辑或推进生产任务单';
 
@@ -40,7 +41,7 @@ export async function getManufacturingOrder(orderId: string) {
   if (!user) return { error: '请先登录' };
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, created_by, po_parse_snapshot')
+    .select('id, order_no, internal_order_no, po_number, customer_name, product_description, style_no, quantity, quantity_unit, etd, factory_date, order_date, packaging_type, factory_name, owner_user_id, created_by, po_parse_snapshot')
     .eq('id', orderId).single();
   if (oErr) return { error: friendlyError(oErr) };
   // 尺码列手排顺序(容错读:列未建/迁移未执行时静默为 null,不 brick 生产任务单)
@@ -62,7 +63,12 @@ export async function getManufacturingOrder(orderId: string) {
   const { data: customerPos } = await (supabase.from('order_customer_pos') as any)
     .select('id, customer_po_number, seq').eq('order_id', orderId).order('seq');
 
-  return { data: { mo: mo || null, order, lineItems: lineItems || [], bom: bom || [], customerPos: customerPos || [] } };
+  const quantityContext = deriveOrderQuantityContext({
+    physicalQuantity: (order as any).quantity,
+    quantityUnit: (order as any).quantity_unit,
+    lineItemMultipliers: (lineItems || []).map((line: any) => line.set_multiplier),
+  });
+  return { data: { mo: mo || null, order, lineItems: lineItems || [], bom: bom || [], customerPos: customerPos || [], quantityContext } };
 }
 
 /** 录入/保存生产任务单的 6 个翻译字段(无则建,自动赋 mo_no=MO-{order_no})。 */
@@ -224,13 +230,18 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   if (lines.some((line) => !line.sizes || Object.keys(line.sizes).length === 0)) return { error: '逐款明细缺少尺码数量，不能生成生产任务单' };
   if (lines.some((line) => !(Number(line.qty_pcs) > 0))) return { error: '逐款明细存在空数量，不能生成生产任务单' };
   const styleNumber = lines.find(x => x.style_no)?.style_no || order.style_no || '';
+  const orderQuantityContext = deriveOrderQuantityContext({
+    physicalQuantity: order.quantity,
+    quantityUnit: (order as any).quantity_unit,
+    lineItemMultipliers: lines.map((line: any) => line.set_multiplier),
+  });
   const styleLines = lines;
   const mergedColors = new Map<string, any>();
   for (const line of styleLines) {
     const key = `${line.style_no || styleNumber}|${line.color_en || ''}|${line.color_cn || ''}`;
     const current = mergedColors.get(key) || { styleNumber: line.style_no || styleNumber, colorEn: line.color_en, colorCn: line.color_cn, sizes: {}, quantity: 0, cartonCount: 0 };
     for (const [size, qty] of Object.entries(line.sizes || {})) current.sizes[size] = (Number(current.sizes[size]) || 0) + (Number(qty) || 0);
-    current.quantity += Number(line.qty_pcs) || 0;
+    current.quantity += commercialQuantityFromLine(line.qty_pcs, line.set_multiplier);
     current.cartonCount += Number(line.carton_count) || 0;
     mergedColors.set(key, current);
   }
@@ -241,7 +252,8 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   const packagingAccessories = materials.filter(x => ['packing', 'label', 'washing', 'print'].includes(x.material_type));
   const materialText = (rows: any[]) => rows.map(x => [x.material_name, x.spec, x.color].filter(Boolean).join(' ')).filter(Boolean).join('，');
   const isSet = /set|套/i.test(`${styleNumber} ${order.product_description || ''}`) || new Set(lines.map(x => x.style_no).filter(Boolean)).size > 1;
-  const total = isSet ? (Number(order.quantity) || Math.max(0, ...colors.map(color => Number(color.quantity) || 0)))
+  const total = isSet
+    ? (orderQuantityContext.commercialQuantity || Math.max(0, ...colors.map(color => Number(color.quantity) || 0)))
     : (colors.reduce((n, color) => n + (Number(color.quantity) || 0), 0) || Number(order.quantity) || 0);
   const { data: chartImport } = await (supabase.from('size_chart_imports') as any)
     .select('parsed_json, parse_status').eq('order_id', orderId)

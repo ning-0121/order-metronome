@@ -11,6 +11,7 @@ import {
   calculateRequirementFromContext,
   deriveOrderQuantityContext,
   formatQuantityDisplay,
+  commercialQuantityFromLine,
 } from '@/lib/domain/quantity-engine';
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
@@ -30,9 +31,13 @@ export async function getBomItems(orderId: string) {
     const rows = (data || []) as any[];
     const { data: order } = await (supabase.from('orders') as any)
       .select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
-    const orderQty = Number((order as any)?.quantity) || 0;
     const { data: liRows } = await (supabase.from('order_line_items') as any)
       .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
+    const orderQty = deriveOrderQuantityContext({
+      physicalQuantity: (order as any)?.quantity ?? null,
+      quantityUnit: (order as any)?.quantity_unit ?? null,
+      lineItemMultipliers: (liRows || []).map((r: any) => r.set_multiplier),
+    }).commercialQuantity || Number((order as any)?.quantity) || 0;
     const quantity = deriveOrderQuantityContext({
       physicalQuantity: (order as any)?.quantity ?? null,
       quantityUnit: (order as any)?.quantity_unit ?? null,
@@ -44,7 +49,7 @@ export async function getBomItems(orderId: string) {
     const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
     for (const r of (liRows || []) as any[]) {
       if (!r.style_no) continue;
-      const q = Number(r.qty_pcs) || 0;
+      const q = commercialQuantityFromLine(r.qty_pcs, r.set_multiplier);
       styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
       const canon = normColor(r.color_cn) || normColor(r.color_en);
       if (!canon) continue;
@@ -664,7 +669,7 @@ export async function submitBomToProcurement(
   for (const r of (liRows || []) as any[]) {
     if (!r.style_no) continue;
     // qty_pcs 是套数;BOM 单耗是每套用量。只有明确 PER_PIECE 的行才允许换算物理件数。
-    const q = Number(r.qty_pcs) || 0;
+    const q = commercialQuantityFromLine(r.qty_pcs, r.set_multiplier);
     styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
     // 2026-07-04 审计修:件数每行只加一次(原来 color_cn/color_en 各加一次,同名色翻倍→多算料)。
     // 规范色=中文优先,英文兜底;中英文两个色名都做别名指向同一桶,BOM 用任一色名可命中。
@@ -677,6 +682,11 @@ export async function submitBomToProcurement(
       if (nc) colorAlias.set(`${r.style_no}¦${nc}`, canonKey);
     }
   }
+  const commercialOrderQty = deriveOrderQuantityContext({
+    physicalQuantity: order.quantity,
+    quantityUnit: (order as any).quantity_unit,
+    lineItemMultipliers: (liRows || []).map((r: any) => r.set_multiplier),
+  }).commercialQuantity || Number(order.quantity) || 0;
   const bomStyle = new Map<string, string | null>((bomRows as any[]).map(r => [r.id, r.style_no || null]));
 
   // R2(2026-07-02 审计):缺单耗的行生成不了需求量,显式警示而不是静默吞掉
@@ -884,7 +894,7 @@ export async function submitBomToProcurement(
     // R1:款级行用该款件数(明细未录该款时兜底整单数量,宁多勿缺);整单通用行用整单数量
     // 2026-07-03:行带颜色且明细里有该 款×色 → 用该色件数(布料一色一数,不再全款重复算)
     const lineStyle = line.bom_id ? bomStyle.get(line.bom_id) : null;
-    let poQty = (lineStyle && styleQty.get(lineStyle)) ? styleQty.get(lineStyle)! : order.quantity;
+    let poQty = (lineStyle && styleQty.get(lineStyle)) ? styleQty.get(lineStyle)! : commercialOrderQty;
     if (lineStyle && String(line.color ?? '').trim()) {
       // 别名解析:BOM 色名(中或英)→ 规范色桶,再取件数(不再因中英文写法漏命中/翻倍)
       const bk = `${lineStyle}¦${normColor(line.color)}`;

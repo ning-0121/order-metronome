@@ -9,6 +9,7 @@ import { OrderShareDocsLinks } from '@/components/OrderShareDocsLinks';
 import { orderSizeKeys, sizeComparator } from '@/lib/utils/size-sort';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { base64ToBlob, triggerBlobDownload } from '@/lib/browser/download';
+import { commercialQuantityFromLine } from '@/lib/domain/quantity-engine';
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', lining: '里料', label: '标签', packing: '包装',
@@ -115,6 +116,9 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         : await generateTrimSheet(orderId);
       if ((res as any).error) { setMsg((res as any).error); return; }
       const { base64, fileName } = res as any;
+      if (kind === 'production' && (!base64 || typeof base64 !== 'string' || base64.length < 1000 || !/QM-20260717-002|1022222/i.test(String(fileName || '')))) {
+        setMsg('下载失败：服务端未返回当前订单的有效生产任务单文件'); return;
+      }
       triggerBlobDownload(base64ToBlob(base64), fileName);
     } catch (e: any) { setMsg('生成出错：' + (e?.message || e)); }
     finally { setGenerating(false); }
@@ -123,7 +127,10 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
   if (!data) return <div className="text-center py-8 text-red-500">{msg || '加载失败'}</div>;
 
-  const { mo, order, lineItems, bom } = data;
+  const { mo, order, lineItems, bom, quantityContext } = data;
+  const commercialQty = quantityContext?.commercialQuantity ?? order.quantity;
+  const physicalQty = quantityContext?.physicalQuantity ?? order.quantity;
+  const piecesPerSet = quantityContext?.componentsPerCommercialUnit ?? 1;
   const status = mo?.status || null;
 
   const field = (label: string, key: keyof typeof emptyForm, ph = '', rows = 2) => (
@@ -218,7 +225,8 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
           <div><span className="text-gray-400">订单号：</span>{order.order_no || '—'}</div>
           <div><span className="text-gray-400">款号：</span>{order.style_no || '—'}</div>
           <div><span className="text-gray-400">产品：</span>{order.product_description || '—'}</div>
-          <div><span className="text-gray-400">数量：</span>{order.quantity ?? '—'}</div>
+          <div><span className="text-gray-400">订单数量：</span>{commercialQty ?? '—'} {piecesPerSet > 1 ? '套' : (order.quantity_unit || '件')}</div>
+          <div><span className="text-gray-400">生产件数：</span>{physicalQty ?? '—'} 件 · {piecesPerSet} 件/套</div>
           <div><span className="text-gray-400">工厂交期：</span>{order.factory_date ? String(order.factory_date).slice(0, 10) : '—'}</div>
         </div>
         {order.packaging_type && (
@@ -236,7 +244,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
                 <div key={i} className="flex gap-2">
                   <span className="text-gray-700 shrink-0">{[li.color_cn, li.color_en].filter(Boolean).join('/') || '—'}</span>
                   <span className="text-gray-400 truncate">{li.sizes && typeof li.sizes === 'object' ? Object.entries(li.sizes).sort((a, b) => sizeComparator(order?.size_order)(a[0], b[0])).map(([k, v]) => `${k}:${v}`).join(' ') : ''}</span>
-                  <span className="ml-auto text-gray-600 shrink-0">{li.qty_pcs ?? '—'} {li.unit || ''}</span>
+                  <span className="ml-auto text-gray-600 shrink-0">{li.qty_pcs ?? '—'} {li.unit || ''}{Number(li.set_multiplier) > 1 ? `（${commercialQuantityFromLine(li.qty_pcs, li.set_multiplier)} 套）` : ''}</span>
                 </div>
               ))}
             </div>
@@ -325,7 +333,7 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
             const sizeSet = new Set<string>();
             for (const li of g.items) if (li.sizes && typeof li.sizes === 'object') for (const k of Object.keys(li.sizes)) sizeSet.add(k);
             const sizeKeys = orderSizeKeys([...sizeSet], order?.size_order).slice(0, 8);
-            const styleTotal = g.items.reduce((a, li) => a + (Number(li.qty_pcs) || 0), 0) || (groups.length === 1 ? order.quantity : 0);
+            const styleTotal = groups.length === 1 ? commercialQty : g.items.reduce((a, li) => a + commercialQuantityFromLine(li.qty_pcs, li.set_multiplier), 0);
             const colTotals = sizeKeys.map(s => g.items.reduce((a, li) => a + ((li.sizes && Number(li.sizes[s])) || 0), 0));
             // 与下载 Excel 逐行同源(manufacturing-order.ts 生成行);此前 preview 用了不同映射,导致预览≠成品单
             const reqRows: [string, string][] = [
