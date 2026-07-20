@@ -467,7 +467,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
 
                         {/* 元信息行 */}
                         <div className="flex flex-wrap gap-x-3 md:gap-x-4 gap-y-1 text-[11px] md:text-xs text-gray-500">
-                          <span>责任人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || `未分配（${getRoleLabel(m.owner_role)}）`}</span>
+                          <span>责任人：{(m as any).display_owner_name || m.owner_user?.name || m.owner_user?.email?.split('@')[0] || `未分配（${getRoleLabel((m as any).display_owner_role || m.owner_role)}）`}</span>
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (() => {
                             if (!overdue || isDone || isBlocked) return (
@@ -656,7 +656,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                             <div className={`rounded-lg p-3 flex items-center justify-between ${isCross ? 'bg-purple-50' : 'bg-blue-50'}`}>
                               <div className="text-xs">
                                 <span className={`font-medium ${isCross ? 'text-purple-700' : 'text-blue-700'}`}>
-                                  负责人：{m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'}
+                                  负责人：{(m as any).display_owner_name || m.owner_user?.name || m.owner_user?.email?.split('@')[0] || '未分配'}
                                 </span>
                                 <span className={`ml-2 ${isCross ? 'text-purple-500' : 'text-blue-500'}`}>
                                   {getRoleLabel(m.owner_role)}

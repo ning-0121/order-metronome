@@ -5,13 +5,13 @@
  * 存 order_attachments(file_type='size_chart')+ order-docs 私有桶;生产任务单直读该 file_type。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseSizeChartWorkbook, type SizeChartParseOptions } from '@/lib/parsers/size-chart';
 
 const SIZE_CHART_TYPE = 'size_chart';   // 'use server' 只能 export async 函数,故不导出常量
-const SIZE_CHART_PARSER_VERSION = 'xlsx-deterministic-v1';
+const SIZE_CHART_PARSER_VERSION = 'size-chart-v2-2026-07-18';
 
 function parseFailureMessage(parsed: Awaited<ReturnType<typeof parseSizeChartWorkbook>>): string | null {
   return parsed.errors[0] || parsed.diagnostics[0]?.message || parsed.warnings[0] || null;
@@ -29,6 +29,7 @@ async function persistParsedResult(
     parse_status: parsed.status,
     parsed_row_count: parsed.rows.length,
     parsed_json: parsed,
+    parser_version: parsed.parserVersion,
     error_code: parsed.status === 'FAILED' ? 'UNSUPPORTED_LAYOUT' : null,
     safe_error_message: parsed.status === 'FAILED' ? parseFailureMessage(parsed) : null,
     updated_by: userId,
@@ -111,30 +112,44 @@ export async function reparseSizeChart(
   attachmentId: string,
   orderId: string,
   options: SizeChartParseOptions = {},
-): Promise<{ ok?: boolean; error?: string }> {
+): Promise<{ ok?: boolean; data?: any; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { data: attachment, error: attachmentErr } = await (supabase.from('order_attachments') as any)
+  // User session proves that this logged-in employee can see the order. The exact attachment read/write then
+  // uses service-role because Storage and size_chart_imports RLS previously made reparses silently retain FAILED.
+  const { data: visibleOrder } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
+  if (!visibleOrder) return { error: '无权读取该订单' };
+  const svc = createServiceRoleClient();
+  const { data: attachment, error: attachmentErr } = await (svc.from('order_attachments') as any)
     .select('id, file_name, storage_path, file_type, order_id')
     .eq('id', attachmentId)
     .eq('order_id', orderId)
     .eq('file_type', SIZE_CHART_TYPE)
     .single();
   if (attachmentErr || !attachment) return { error: '未找到尺码表附件' };
-  const { data: file, error: downloadErr } = await supabase.storage.from('order-docs').download((attachment as any).storage_path);
+  const { data: file, error: downloadErr } = await svc.storage.from('order-docs').download((attachment as any).storage_path);
   if (downloadErr || !file) return { error: `读取尺码表失败:${downloadErr?.message || '文件不可读取'}` };
   const bytes = await file.arrayBuffer();
   try {
-    await (supabase.from('size_chart_imports') as any).update({ parse_status: 'PARSING', updated_by: user.id }).eq('attachment_id', attachmentId).eq('order_id', orderId);
+    const { data: target, error: targetErr } = await (svc.from('size_chart_imports') as any)
+      .select('id').eq('attachment_id', attachmentId).eq('order_id', orderId).single();
+    if (targetErr || !target) return { error: '当前附件没有对应的尺码解析记录' };
+    await (svc.from('size_chart_imports') as any).update({ parse_status: 'PARSING', updated_by: user.id }).eq('id', (target as any).id);
     const parsed = await parseSizeChartWorkbook(bytes, options);
-    const parseSaveErr = await persistParsedResult(supabase, attachmentId, orderId, parsed, user.id);
+    const parseSaveErr = await persistParsedResult(svc as any, attachmentId, orderId, parsed, user.id);
     if (parseSaveErr) return { error: `重新解析结果保存失败:${parseSaveErr.message}` };
+    const { data: persisted, error: verifyErr } = await (svc.from('size_chart_imports') as any)
+      .select('id,attachment_id,order_id,parser_version,parse_status,worksheet_name,parsed_row_count,parsed_json,error_code,safe_error_message,updated_at')
+      .eq('id', (target as any).id).single();
+    if (verifyErr || !persisted || (persisted as any).parse_status !== parsed.status || Number((persisted as any).parsed_row_count) !== parsed.rows.length) {
+      return { error: '重新解析已执行，但持久化回读不一致，请联系管理员' };
+    }
     revalidatePath(`/orders/${orderId}`);
-    return { ok: true };
+    return { ok: true, data: persisted };
   } catch (error: any) {
     const safe = String(error?.message || '无法识别尺码表布局').slice(0, 300);
-    await (supabase.from('size_chart_imports') as any).update({ parse_status: 'FAILED', error_code: 'UNSUPPORTED_LAYOUT', safe_error_message: safe, updated_by: user.id }).eq('attachment_id', attachmentId).eq('order_id', orderId);
+    await (svc.from('size_chart_imports') as any).update({ parse_status: 'FAILED', error_code: 'UNSUPPORTED_LAYOUT', safe_error_message: safe, updated_by: user.id }).eq('attachment_id', attachmentId).eq('order_id', orderId);
     return { error: safe };
   }
 }

@@ -130,7 +130,7 @@ export async function getMilestonesByOrder(orderId: string) {
   // Get user profiles if there are any owner_user_ids
   let userMap: Record<string, any> = {};
   if (ownerUserIds.length > 0) {
-    const { data: profiles } = await (supabase.from('profiles') as any)
+    const { data: profiles } = await (svc.from('profiles') as any)
       .select('user_id, email, name, role')
       .in('user_id', ownerUserIds);
     if (profiles) {
@@ -145,6 +145,9 @@ export async function getMilestonesByOrder(orderId: string) {
   const milestonesWithUsers = effectiveMilestones.map((m: any) => ({
     ...m,
     owner_user: m.owner_user_id ? userMap[m.owner_user_id] || null : null,
+    display_owner_user_id: m.owner_user_id || null,
+    display_owner_role: m.owner_role,
+    display_owner_name: m.owner_user_id ? (userMap[m.owner_user_id]?.name || userMap[m.owner_user_id]?.email?.split('@')[0] || null) : null,
   }));
   
   return { data: milestonesWithUsers };

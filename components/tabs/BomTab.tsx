@@ -437,8 +437,8 @@ export function BomTab({ orderId }: { orderId: string }) {
       ignoreRows: ignoreRows.length ? ignoreRows : null,
     });
     if ((r as any).error) { setScMsg((r as any).error); return; }
-    const reopened = await getSizeChartImport(scDetail.attachment_id, orderId);
-    setScDetail((reopened as any).data ? { ...(reopened as any).data, attachment_id: scDetail.attachment_id } : null);
+    const persisted = (r as any).data;
+    setScDetail(persisted ? { ...persisted, attachment_id: scDetail.attachment_id } : null);
     await reloadSizeCharts();
   }
 
