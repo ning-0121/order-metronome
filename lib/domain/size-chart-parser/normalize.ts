@@ -19,6 +19,7 @@ const SIZE_SYNONYMS = new Map([
 
 const MEASUREMENT_SYNONYMS = new Map([
   ['部位', 'MEASUREMENT'],
+  ['部位尺码', 'MEASUREMENT'],
   ['测量部位', 'MEASUREMENT'],
   ['尺寸部位', 'MEASUREMENT'],
   ['measurement', 'MEASUREMENT'],

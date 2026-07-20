@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { aggregateDetailedTasks, buildProductionDashboard, filterDetailedTasks, PRODUCTION_QUICK_ENTRIES, STAGE_DEFINITIONS } from '../lib/production/dashboard';
 import type { ProductionOrderRow, ProductionCenterSummary } from '../app/actions/production-center';
+import { resolveFactoryTruth } from '../lib/production/factory-truth';
+import { effectiveMilestoneOwner } from '../lib/domain/milestone-owner';
 
 const row = (patch: Partial<ProductionOrderRow> = {}): ProductionOrderRow => ({
   order_id: 'o1', order_no: 'QM-1', internal_order_no: 'IN-1', po_number: 'PO-1', style_no: 'S-1',
@@ -28,6 +30,17 @@ const followUp = buildProductionDashboard(rows, summary, 'follow_up');
 assert.equal(supervisor.approvals.some((item) => item.label === '延期申请审批'), true);
 assert.equal(followUp.approvals.length, 0);
 assert.equal(supervisor.today.length <= 5 && supervisor.risks.length <= 5, true);
+const historicalFactory = resolveFactoryTruth({}, [{ factory_id: 'f1', factory_name: '盛涛', status: 'scheduled', created_at: '2026-07-17' }]);
+assert.deepEqual(historicalFactory, { factory_id: 'f1', factory_name: '盛涛', source: 'dispatch' });
+const assignedRow = row({ factory_name: historicalFactory.factory_name, production_follow_up_id: 'u1', production_follow_up_name: '骆淑娟' });
+const assignedTasks = aggregateDetailedTasks([assignedRow], 'supervisor');
+assert.equal(assignedTasks.some((task) => task.title === '待选工厂'), false);
+assert.deepEqual(assignedTasks.filter((task) => ['待选工厂', '已分配待跟进'].includes(task.title)).map((task) => task.title), ['已分配待跟进']);
+assert.equal(assignedTasks.find((task) => task.title === '已分配待跟进')?.href, '/production/order/o1');
+const missingFactory = aggregateDetailedTasks([row({ risk: false })], 'supervisor').find((task) => task.title === '待选工厂');
+assert.match(missingFactory?.href || '', /^\/production\/scheduling\?q=IN-1#order-o1$/);
+const effective = effectiveMilestoneOwner({ step_key: 'packing_method_confirmed', owner_role: 'production', owner_user_id: 'luo' }, { owner_user_id: 'wang' });
+assert.deepEqual({ role: effective.owner_role, user: effective.owner_user_id }, { role: 'merchandiser', user: 'wang' });
 
 const page = readFileSync('app/production/page.tsx', 'utf8');
 const client = readFileSync('app/production/ProductionCenterClient.tsx', 'utf8');

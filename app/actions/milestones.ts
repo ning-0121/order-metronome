@@ -103,7 +103,7 @@ export async function getMilestonesByOrder(orderId: string) {
   // 非订单负责人的生产/跟单只看到自己名下 1-2 个节点,看不到上下游、不知为何卡住
   // (2026-07-11 生产部实测:584 单 9 节点,跟单只看到 2 个)。
   const { data: ord } = await (supabase.from('orders') as any)
-    .select('id').eq('id', orderId).maybeSingle();
+    .select('id, owner_user_id, created_by').eq('id', orderId).maybeSingle();
   if (!ord) {
     return { error: '无权查看该订单' };   // orders RLS 挡住 = 没权限,不泄露里程碑
   }
@@ -121,7 +121,9 @@ export async function getMilestonesByOrder(orderId: string) {
   }
   
   // Get owner user IDs
-  const ownerUserIds = (milestones || [])
+  const { effectiveMilestoneOwner } = await import('@/lib/domain/milestone-owner');
+  const effectiveMilestones = (milestones || []).map((m: any) => effectiveMilestoneOwner(m, ord));
+  const ownerUserIds = effectiveMilestones
     .map((m: any) => m.owner_user_id)
     .filter((id: string | null) => id !== null) as string[];
   
@@ -140,7 +142,7 @@ export async function getMilestonesByOrder(orderId: string) {
   }
   
   // Attach user info to milestones
-  const milestonesWithUsers = (milestones || []).map((m: any) => ({
+  const milestonesWithUsers = effectiveMilestones.map((m: any) => ({
     ...m,
     owner_user: m.owner_user_id ? userMap[m.owner_user_id] || null : null,
   }));
@@ -1764,6 +1766,7 @@ export async function assignMerchandiser(
   // 批量更新 — 排除生产主管固定节点（工厂匹配确认 + 产前样准备完成）
   // CEO 2026-04-09：这两个节点永远绑定生产主管，指派跟单时不能覆盖
   const { PRODUCTION_MANAGER_FIXED_STEPS } = await import('@/lib/domain/default-assignees');
+  const { BUSINESS_EXECUTION_FIXED_STEPS } = await import('@/lib/milestoneTemplate');
 
   // 用 service-role 读/写里程碑:milestones 若缺 UPDATE 的 RLS 策略,用户 session 改会静默 0 行、
   // 无报错 → 前端以为成功但值没变(本项目老毛病:改了没反应)。权限已在上面用 session 校验过,这里
@@ -1780,16 +1783,16 @@ export async function assignMerchandiser(
 
   // 过滤掉生产主管固定节点
   const pmFixedSet = new Set(PRODUCTION_MANAGER_FIXED_STEPS);
+  const businessFixedSet = new Set<string>(BUSINESS_EXECUTION_FIXED_STEPS as readonly string[]);
   let toUpdate = ((allMerchMs || []) as any[])
-    .filter(m => !pmFixedSet.has(m.step_key))
+    .filter(m => !pmFixedSet.has(m.step_key) && !(kind === 'production' && businessFixedSet.has(m.step_key)))
     .map(m => m.id);
 
   // 老模板把生产执行节点错误归给 sales/merchandiser 时，生产主管应仍能完成接单指派。
   // 只修明确的生产执行节点，固定主管/业务承诺/财务节点不动。
   if (kind === 'production' && toUpdate.length === 0) {
     const PRODUCTION_EXECUTION_STEPS = new Set([
-      'materials_received_inspected', 'pre_production_sample_sent', 'pre_production_sample_approved',
-      'production_kickoff', 'packing_method_confirmed', 'factory_completion', 'shipping_sample_send',
+      'materials_received_inspected', 'production_kickoff', 'factory_completion',
     ]);
     const { data: legacy } = await (admin.from('milestones') as any).select('id, step_key, status').eq('order_id', orderId);
     const candidates = ((legacy || []) as any[]).filter(m => PRODUCTION_EXECUTION_STEPS.has(m.step_key) && !pmFixedSet.has(m.step_key));
