@@ -144,6 +144,13 @@ const PRE_PRODUCTION_SAMPLE_STEPS = new Set([
  */
 export type SamplePhase = 'confirmed' | 'dev_sample' | 'dev_sample_with_revision' | 'skip_all';
 
+/** Customer-facing confirmations owned by the order's business execution owner. */
+export const BUSINESS_EXECUTION_FIXED_STEPS = [
+  'pre_production_sample_sent',
+  'pre_production_sample_approved',
+  'packing_method_confirmed',
+] as const;
+
 /**
  * 头样节点（插入在 factory_confirmed 之后、pre_production_sample_ready 之前）
  * 场景：客户下了PO但头样还没确认，需要先出头样给客户看

@@ -144,7 +144,21 @@ export default async function OrderDetailPage({
       : Promise.resolve({ data: null }),
     getCustomerPoHistory(id),
   ]);
-  const { data: milestones } = milestonesResult;
+  let { data: milestones } = milestonesResult;
+  // Final display projection consumed by OrderTimeline. Historical database rows may still carry
+  // a production follow-up, but customer-facing confirmations belong to the order business owner.
+  const { isBusinessExecutionFixedStep } = await import('@/lib/domain/milestone-owner');
+  const businessOwnerId = orderData.owner_user_id || orderData.created_by || null;
+  const { data: businessOwner } = businessOwnerId
+    ? await (supabase.from('profiles') as any).select('user_id, name, email, role').eq('user_id', businessOwnerId).maybeSingle()
+    : { data: null };
+  if (Array.isArray(milestones)) {
+    milestones = milestones.map((m: any) => isBusinessExecutionFixedStep(m.step_key) && businessOwnerId
+      ? { ...m, owner_role: 'merchandiser', owner_user_id: businessOwnerId,
+          owner_user: businessOwner ? { ...businessOwner, full_name: businessOwner.name || businessOwner.email } : null,
+          display_owner_name: businessOwner?.name || businessOwner?.email || null, display_owner_role: 'merchandiser' }
+      : m) as any;
+  }
   const { data: delayRequests } = delayRequestsResult;
   const { data: logs } = logsResult;
   const attachments = (attachmentsResult.data || []) as any[];

@@ -68,7 +68,7 @@ export async function createOrder(
 ): Promise<{ ok: boolean; orderId?: string; error?: string; warning?: string }> {
   try { // 全局 try-catch：防止未处理异常导致"Server Components render"
   // 动态导入（避免模块初始化顺序问题 — 历次遇到 Cannot access 'X' before initialization 都是静态导入链路里出问题）
-  const { MILESTONE_TEMPLATE_V1, getApplicableMilestones } = await import('@/lib/milestoneTemplate');
+  const { MILESTONE_TEMPLATE_V1, getApplicableMilestones, BUSINESS_EXECUTION_FIXED_STEPS } = await import('@/lib/milestoneTemplate');
   const { calcDueDates, recalcRemainingDueDates } = await import('@/lib/schedule');
   const { subtractWorkingDays, ensureBusinessDay } = await import('@/lib/utils/date');
   const { createOrder: createOrderRepo, deleteOrder } = await import('@/lib/repositories/ordersRepo');
@@ -582,12 +582,15 @@ export async function createOrder(
     //   2. DEFAULT_ASSIGNEES（财务=方圆，采购=Helen）
     //   3. 角色唯一用户
     //   4. null（待管理员手动指定）
-    const autoAssign = fixedStepOwnerMap[template.step_key] || roleUserMap[dbRole] || null;
+    const businessExecutionFixed = (BUSINESS_EXECUTION_FIXED_STEPS as readonly string[]).includes(template.step_key);
+    const autoAssign = businessExecutionFixed
+      ? (orderData.owner_user_id || orderData.created_by || user.id)
+      : (fixedStepOwnerMap[template.step_key] || roleUserMap[dbRole] || null);
     const safeDue = clampNotBeforeT0(ensureBusinessDay(dueAt));
     milestonesData.push({
       step_key: template.step_key,
       name: template.name,
-      owner_role: dbRole,
+      owner_role: businessExecutionFixed ? 'merchandiser' : dbRole,
       owner_user_id: autoAssign,
       planned_at: safeDue.toISOString(),
       due_at: safeDue.toISOString(),

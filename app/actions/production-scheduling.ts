@@ -14,6 +14,7 @@ import { factoryMonthlyLoad, checkOverbook, monthlyLedger } from '@/lib/producti
 import { buildFactoryScheduleTruth, pickConfirmedStyleImage, summarizeConfirmedColors, summarizeProductionOrderCard } from '@/lib/production/board-truth';
 import { assignMerchandiser } from '@/app/actions/milestones';
 import { classifyDispatchQueueStatus, summarizeDispatchQueue } from '@/lib/production/dispatch-queue';
+import { resolveFactoryTruth } from '@/lib/production/factory-truth';
 
 async function gate(view: boolean): Promise<{ svc: any; roles: string[]; userId: string } | { error: string }> {
   const supabase = await createClient();
@@ -40,12 +41,14 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 已派工(算工厂在线量 + 每款现状)
   const { data: disp } = await (svc.from('production_dispatch') as any)
-    .select('id, order_id, style_no, color, factory_id, factory_name, planned_qty, planned_start, planned_end, status')
+    .select('id, order_id, style_no, color, factory_id, factory_name, planned_qty, planned_start, planned_end, status, created_at')
     .in('status', ['scheduled', 'in_production']);
   const committedByFactory = new Map<string, { qty: number; count: number }>();
   const dispatchesByFactory = new Map<string, any[]>();   // 算按月产能账
   const dispatchByStyle = new Map<string, any[]>();   // key = order_id¦style_no¦color
+  const dispatchByOrder = new Map<string, any[]>();
   for (const d of (disp || [])) {
+    dispatchByOrder.set(d.order_id, [...(dispatchByOrder.get(d.order_id) || []), d]);
     if (d.factory_id) {
       const c = committedByFactory.get(d.factory_id) || { qty: 0, count: 0 }; c.qty += Number(d.planned_qty) || 0; c.count++; committedByFactory.set(d.factory_id, c);
       dispatchesByFactory.set(d.factory_id, [...(dispatchesByFactory.get(d.factory_id) || []), d]);
@@ -97,6 +100,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
   }).sort((a, b) => b.score - a.score);
 
   const out = orderList.map((o: any) => {
+    const factory = resolveFactoryTruth(o, dispatchByOrder.get(o.id) || []);
     const orderCap = deriveOrderCapability({ orderPurpose: o.order_purpose, hasCustomerSupplied: custSupplied.has(o.id) });
     const req: OrderReq = { quality_grade: o.quality_grade || null, weave_type: o.weave_type || null, needs_package: o.needs_package ?? null, order_capability: orderCap };
     // 款分组
@@ -161,6 +165,8 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
       color_label: orderSummary.colorLabel,
       production_follow_up_id: followUpIdByOrder.get(o.id) || null,
       production_follow_up_name: followUpNames.get(followUpIdByOrder.get(o.id) || '') || null,
+      factory_id: factory.factory_id,
+      factory_name: factory.factory_name,
       material_ready_pct: mat && mat.total > 0 ? Math.round((mat.ready / mat.total) * 100) : null,
       styles, candidates,
     };
@@ -212,6 +218,11 @@ export async function dispatchStyle(input: { orderId: string; styleNo: string; c
   if ((exist as any)?.id) ({ error } = await (svc.from('production_dispatch') as any).update(row).eq('id', (exist as any).id));
   else ({ error } = await (svc.from('production_dispatch') as any).insert({ ...row, status: 'scheduled', created_by: userId }));
   if (error) return { error: /production_dispatch|does not exist/i.test(error.message || '') ? '派工表未建:请先执行 20260712_production_scheduling_p1.sql' : error.message };
+  // orders.factory_* is the canonical order-level factory. Backfill only when empty so multi-factory style dispatches do not overwrite the primary factory.
+  const { data: canonical } = await (svc.from('orders') as any).select('factory_id, factory_name').eq('id', input.orderId).maybeSingle();
+  if (!String((canonical as any)?.factory_id || (canonical as any)?.factory_name || '').trim()) {
+    await (svc.from('orders') as any).update({ factory_id: input.factoryId, factory_name: (fac as any)?.factory_name || null }).eq('id', input.orderId);
+  }
   revalidatePath('/production');
   return { ok: true };
 }

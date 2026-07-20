@@ -160,3 +160,24 @@ test('reports a workbook-level failure when no table exists', async () => {
   assert.equal(parsed.status, 'FAILED');
   assert.ok(parsed.errors.includes('NO_RECOGNIZABLE_TABLE'));
 });
+
+test('parses the anonymized real workbook structure with combined 部位/尺码 header and formula results', async () => {
+  const parsed = await parseWorkbook((book) => {
+    const sheet = book.addWorksheet('Sheet1');
+    sheet.mergeCells('A1:G1'); sheet.getCell('A1').value = '匿名款式尺寸表';
+    sheet.addRow(['部位/尺码', 'XS', 'S', 'M', 'L', 'XL', '跳码']);
+    sheet.addRow(['松紧围', { formula: 'C3-G3', result: 28.5 }, { formula: 'D3-G3', result: 31 }, 33.5, { formula: 'D3+G3', result: 36 }, { formula: 'E3+G3', result: 38.5 }, 2.5]);
+    for (const row of [
+      ['半臀围', 35.5, 38, 40.5, 43, 45.5, 2.5], ['前浪含腰', 23.5, 24.5, 25.5, 26.5, 27.5, 1],
+      ['后浪含腰', 36, 37, 38, 39, 40, 1], ['膝围', 17.5, 18.5, 19.5, 20.5, 21.5, 1],
+      ['脚口', 22.5, 23, 23.5, 24, 24.5, 0.5], ['腰头高', 9, 9, 9, 9, 9, 0],
+      ['腿肥', 21.75, 23, 24.25, 25.5, 26.75, 1.25], ['内长', 77.5, 78, 78.5, 79, 79.5, 0.5],
+      ['三角裆尺寸', '4.4*5.2', '4.4*5.2', '4.4*5.2', '4.4*5.2', '4.4*5.2', 0],
+    ]) sheet.addRow(row);
+    book.addWorksheet('Sheet2'); book.addWorksheet('Sheet3');
+  });
+  assert.equal(parsed.status, 'PARSED'); assert.equal(parsed.worksheetName, 'Sheet1');
+  assert.equal(parsed.orientation, 'horizontal'); assert.equal(parsed.headerRow, 2);
+  assert.deepEqual(parsed.sizeLabels, ['XS', 'S', 'M', 'L', 'XL']); assert.equal(parsed.rows.length, 10);
+  assert.equal(parsed.rows[0].values.XS, 28.5); assert.deepEqual(parsed.errors, []);
+});

@@ -377,6 +377,7 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [scUploading, setScUploading] = useState(false);
   const [scMsg, setScMsg] = useState('');
   const [scDetail, setScDetail] = useState<any | null>(null);
+  const [scDiagnostic, setScDiagnostic] = useState<any | null>(null);
   const [scReparseForm, setScReparseForm] = useState({
     worksheetName: '',
     headerRow: '',
@@ -436,9 +437,10 @@ export function BomTab({ orderId }: { orderId: string }) {
       measurementAxis: scReparseForm.measurementAxis || null,
       ignoreRows: ignoreRows.length ? ignoreRows : null,
     });
+    setScDiagnostic((r as any).data || { attachmentId: scDetail.attachment_id, updatedRecordId: null, updatedRowCount: 0, parserStatus: 'FAILED', error: (r as any).error || null });
     if ((r as any).error) { setScMsg((r as any).error); return; }
-    const reopened = await getSizeChartImport(scDetail.attachment_id, orderId);
-    setScDetail((reopened as any).data ? { ...(reopened as any).data, attachment_id: scDetail.attachment_id } : null);
+    const persisted = (r as any).data;
+    setScDetail(persisted ? { ...persisted, attachment_id: scDetail.attachment_id } : null);
     await reloadSizeCharts();
   }
 
@@ -991,6 +993,13 @@ export function BomTab({ orderId }: { orderId: string }) {
             {Array.isArray(scDetail.parsed_json?.warnings) && scDetail.parsed_json.warnings.length > 0 && <span className="text-amber-700">警告：{scDetail.parsed_json.warnings[0]}</span>}
             {Array.isArray(scDetail.parsed_json?.errors) && scDetail.parsed_json.errors.length > 0 && <span className="text-rose-700">错误：{scDetail.parsed_json.errors[0]}</span>}
           </div>
+          {scDiagnostic && <div className="rounded border border-indigo-200 bg-indigo-50 p-2 text-[11px] text-indigo-900">
+            <div className="font-semibold">管理员诊断（本次重新识别）</div>
+            <div>attachmentId：{scDiagnostic.attachmentId || scDetail.attachment_id}</div>
+            <div>updatedRecordId：{scDiagnostic.updatedRecordId || '—'} · updatedRowCount：{scDiagnostic.updatedRowCount ?? 0}</div>
+            <div>action status：{scDiagnostic.parserStatus || '—'} · 页面当前读取：{scDetail.parse_status || '—'} · worksheet：{scDiagnostic.worksheet || scDetail.worksheet_name || '—'}</div>
+            <div>sizeCount：{scDiagnostic.sizeCount ?? scDetail.parsed_json?.sizeLabels?.length ?? 0} · measurementCount：{scDiagnostic.measurementCount ?? scDetail.parsed_json?.measurementLabels?.length ?? 0}{scDiagnostic.error ? ` · error：${scDiagnostic.error}` : ''}</div>
+          </div>}
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
             <label className="text-[11px] text-gray-500">worksheet
               <input value={scReparseForm.worksheetName} onChange={e => setScReparseForm(f => ({ ...f, worksheetName: e.target.value }))}

@@ -14,16 +14,17 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 /** Pure projection of existing order/milestone truth; it never persists another status. */
 export function classifyProductionTasks(row: ProductionOrderRow, role: WorkbenchRole): WorkbenchTask[] {
-  const href = `/production/order/${row.order_id}`;
+  const orderHref = `/production/order/${row.order_id}`;
+  const schedulingHref = `/production/scheduling?q=${encodeURIComponent(row.internal_order_no || row.order_no || row.order_id)}#order-${row.order_id}`;
   const tasks: WorkbenchTask[] = [];
-  const add = (key: string, label: string, reason: string, action: string, urgent = false) =>
+  const add = (key: string, label: string, reason: string, action: string, urgent = false, href = orderHref) =>
     tasks.push({ key, label, reason, action, href, urgent });
 
   if (role === 'supervisor') {
     if (row.stage === 'awaiting_procurement' && !row.production_follow_up_id) add('intake', '待生产接单', '订单已由业务交接、尚未完成生产接单', '检查订单并接单');
-    if (!row.production_follow_up_id) add('assign', '待分配生产跟单', '尚未指定生产跟单', '指定在职生产跟单');
-    else if (!row.factory_name) add('assigned', '已分配待跟进', `已分配给 ${row.production_follow_up_name || '生产跟单'}`, '督促选择工厂');
-    if (!row.factory_name) add('factory', '待选工厂', '尚未指定生产工厂', '选择工厂');
+    if (!row.production_follow_up_id) add('assign', '待分配生产跟单', '尚未指定生产跟单', '指定在职生产跟单', false, schedulingHref);
+    else add('assigned', '已分配待跟进', `已分配给 ${row.production_follow_up_name || '生产跟单'}`, row.factory_name ? '进入订单跟进生产执行' : '督促选择工厂');
+    if (!row.factory_name) add('factory', '待选工厂', '尚未指定生产工厂', '选择工厂', false, schedulingHref);
     if (row.pending_delay) add('delay', '延期待审批', '存在待处理生产改期申请', '审核生产执行影响');
     if (row.risk) add('exception', '异常待处理', '生产节点已超期或存在执行风险', '处理异常并明确责任人', true);
     if (row.kickoff?.due === today() && row.kickoff.status !== 'done') add('cut_today', '今日应开裁', '生产启动计划日期为今天', '完成开裁确认', true);

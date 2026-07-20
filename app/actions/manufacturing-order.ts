@@ -194,6 +194,8 @@ export async function generateManufacturingOrderSheet(orderId: string) {
 }
 /** 第一张:只出「生产订单」(款式主表)——建单即可生成,不等 BOM/辅料确认。 */
 export async function generateProductionOrderSheet(orderId: string) {
+  const ensured = await ensureProductionTaskRecord(orderId);
+  if (ensured.error) return ensured;
   return buildExactProductionTaskWorkbook(orderId);
 }
 /** 第二张:只出「辅料单」(辅料明细)——在「原辅料和包装」页填完 BOM 后生成,自动读最新 BOM。 */
@@ -216,6 +218,11 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   const mo = moRaw || {};
   const lines: any[] = Array.isArray(lineItems) ? lineItems : [];
   const materials: any[] = Array.isArray(bom) ? bom : [];
+  if (!lines.length) return { error: '缺少逐款明细：请先填写款号、颜色、尺码和数量后再生成生产任务单' };
+  if (lines.some((line) => !String(line.style_no || order.style_no || '').trim())) return { error: '逐款明细缺少款号，不能生成生产任务单' };
+  if (lines.some((line) => !String(line.color_cn || line.color_en || '').trim())) return { error: '逐款明细缺少颜色，不能生成生产任务单' };
+  if (lines.some((line) => !line.sizes || Object.keys(line.sizes).length === 0)) return { error: '逐款明细缺少尺码数量，不能生成生产任务单' };
+  if (lines.some((line) => !(Number(line.qty_pcs) > 0))) return { error: '逐款明细存在空数量，不能生成生产任务单' };
   const styleNumber = lines.find(x => x.style_no)?.style_no || order.style_no || '';
   const styleLines = lines;
   const mergedColors = new Map<string, any>();
@@ -236,6 +243,16 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   const isSet = /set|套/i.test(`${styleNumber} ${order.product_description || ''}`) || new Set(lines.map(x => x.style_no).filter(Boolean)).size > 1;
   const total = isSet ? (Number(order.quantity) || Math.max(0, ...colors.map(color => Number(color.quantity) || 0)))
     : (colors.reduce((n, color) => n + (Number(color.quantity) || 0), 0) || Number(order.quantity) || 0);
+  const { data: chartImport } = await (supabase.from('size_chart_imports') as any)
+    .select('parsed_json, parse_status').eq('order_id', orderId)
+    .in('parse_status', ['PARSED', 'NEEDS_REVIEW']).order('updated_at', { ascending: false }).limit(1).maybeSingle();
+  const parsedRows = Array.isArray((chartImport as any)?.parsed_json?.rows) ? (chartImport as any).parsed_json.rows : [];
+  const sizeChart = parsedRows.length ? {
+    top: parsedRows.filter((row: any) => !/腰|臀|裆|浪|膝|腿|脚口|内长|裤长/i.test(String(row.measurement || '')))
+      .map((row: any, index: number) => ({ sequence: index + 1, position: row.measurement, values: row.values })),
+    bottom: parsedRows.filter((row: any) => /腰|臀|裆|浪|膝|腿|脚口|内长|裤长/i.test(String(row.measurement || '')))
+      .map((row: any) => ({ position: row.measurement, values: row.values })),
+  } : null;
   const model: ProductionTaskTemplateModel = {
     internalOrderNumber: order.internal_order_no || order.order_no,
     customer: order.customer_name,
@@ -261,7 +278,7 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
       carton: '',
       attention: [mo.risk_notes, mo.special_requirements].filter(Boolean).join('；'),
     },
-    receiver: '', receiptTime: '', sizeChart: null,
+    receiver: '', receiptTime: '', sizeChart,
   };
   try {
     const workbook = await buildProductionTaskWorkbook(model);
@@ -270,6 +287,28 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   } catch (error) {
     return { error: error instanceof Error ? error.message : '生产任务单生成失败' };
   }
+}
+
+/** The download button creates the MO record transactionally; it never emits a pretend/empty workbook. */
+async function ensureProductionTaskRecord(orderId: string): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_MO', MO_WRITE_MSG); if (err) return { error: err }; }
+  const [{ data: existing }, { data: order }, { data: lines }] = await Promise.all([
+    (supabase.from('manufacturing_orders') as any).select('id').eq('order_id', orderId).maybeSingle(),
+    (supabase.from('orders') as any).select('order_no, style_no').eq('id', orderId).maybeSingle(),
+    (supabase.from('order_line_items') as any).select('style_no, color_cn, color_en, sizes, qty_pcs').eq('order_id', orderId),
+  ]);
+  if (existing) return { ok: true };
+  if (!order) return { error: '订单不存在' };
+  if (!(lines || []).length) return { error: '缺少逐款明细：请先填写款号、颜色、尺码和数量' };
+  const { error } = await (supabase.from('manufacturing_orders') as any).insert({
+    order_id: orderId, mo_no: `MO-${(order as any).order_no || orderId.slice(0, 8)}`, status: 'draft', created_by: user.id,
+  });
+  if (error) return { error: friendlyError(error) };
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }
 
 async function buildMoWorkbook(

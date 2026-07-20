@@ -12,12 +12,12 @@ import { QUALITY_GRADES, WEAVE_TYPES } from '@/lib/production/scheduling';
 
 const chip = (ok: boolean | null) => ok === null ? <span className="text-gray-300">·</span> : ok ? <span className="text-emerald-600">✓</span> : <span className="text-rose-500">✗</span>;
 
-export function SchedulingBoard() {
+export function SchedulingBoard({ initialSearch = '' }: { initialSearch?: string }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [openStyle, setOpenStyle] = useState<string>('');   // 展开派工的 key
   const [msg, setMsg] = useState('');
-  const [orderSearch, setOrderSearch] = useState('');
+  const [orderSearch, setOrderSearch] = useState(initialSearch);
   const [productionCandidates, setProductionCandidates] = useState<any[]>([]);
 
   const load = async () => {
@@ -79,7 +79,7 @@ export function SchedulingBoard() {
         </div>
       )}
       {visibleOrders.length === 0 ? <p className="text-sm text-gray-400">{orders.length ? '没有匹配的排产订单。' : '暂无待排产订单。'}</p> : visibleOrders.map((o: any) => (
-        <div key={o.id} className="rounded-xl border border-gray-200 bg-white p-3">
+        <div key={o.id} id={`order-${o.id}`} className="scroll-mt-4 rounded-xl border border-gray-200 bg-white p-3">
           {/* 订单头 + 要求 */}
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="min-w-0">

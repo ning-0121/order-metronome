@@ -19,6 +19,7 @@ import {
 } from '@/lib/production/stage';
 import { aggregateDetailedTasks, filterDetailedTasks } from '@/lib/production/dashboard';
 import type { WorkbenchRole } from '@/lib/production/workbench';
+import { resolveFactoryTruth } from '@/lib/production/factory-truth';
 
 export interface ProductionOrderRow {
   order_id: string;
@@ -87,8 +88,8 @@ export async function getProductionCenter(): Promise<{
 
   // 建单即进(仅排除 已取消/已完成/归档;保留 draft/pending_approval/active)
   // production_stage_manual(20260708 迁移)未执行时降级不带该列(全按 auto 推算),否则整页变空(2026-07-08)
-  const OSEL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, production_stage_manual';
-  const OSEL_NO_MANUAL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status';
+  const OSEL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_id, factory_name, quantity, factory_date, etd, lifecycle_status, production_stage_manual';
+  const OSEL_NO_MANUAL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_id, factory_name, quantity, factory_date, etd, lifecycle_status';
   const runOrders = (sel: string) => {
     let q = (svc.from('orders') as any)
       .select(sel)
@@ -109,13 +110,16 @@ export async function getProductionCenter(): Promise<{
   const orderIds = list.map((o) => o.id);
 
   // 物料就绪 + 生产节点 + 生产任务单存在性(三查并行)
-  const [{ data: lines }, { data: ms }, { data: mos }, { data: pendingDelays }] = await Promise.all([
+  const [{ data: lines }, { data: ms }, { data: mos }, { data: pendingDelays }, { data: dispatches }] = await Promise.all([
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
     (svc.from('milestones') as any).select('order_id, step_key, status, due_at, owner_role, owner_user_id')
       .in('order_id', orderIds).in('step_key', STAGE_SIGNAL_STEP_KEYS),
     (svc.from('manufacturing_orders') as any).select('order_id').in('order_id', orderIds),
     (svc.from('delay_requests') as any).select('order_id').in('order_id', orderIds).eq('status', 'pending'),
+    (svc.from('production_dispatch') as any).select('order_id, factory_id, factory_name, status, created_at').in('order_id', orderIds),
   ]);
+  const dispatchesByOrder = new Map<string, any[]>();
+  for (const dispatch of (dispatches || []) as any[]) dispatchesByOrder.set(dispatch.order_id, [...(dispatchesByOrder.get(dispatch.order_id) || []), dispatch]);
 
   const matByOrder = new Map<string, ProductionOrderRow['material']>();
   for (const l of (lines || []) as any[]) {
@@ -146,6 +150,7 @@ export async function getProductionCenter(): Promise<{
   const rows: ProductionOrderRow[] = [];
   let completed = 0;
   for (const o of list) {
+    const factory = resolveFactoryTruth(o, dispatchesByOrder.get(o.id) || []);
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
     const kickoff = pickStageSignal(mo, KICKOFF_KEYS);            // V2:回落产前样确认(大货启动)
@@ -163,7 +168,7 @@ export async function getProductionCenter(): Promise<{
       production_follow_up_id: followUpIdByOrder.get(o.id) || null,
       production_follow_up_name: followUpNames.get(followUpIdByOrder.get(o.id) || '') || null,
       pending_delay: pendingDelaySet.has(o.id),
-      factory_name: o.factory_name, quantity: o.quantity,
+      factory_name: factory.factory_name, quantity: o.quantity,
       factory_date: o.factory_date ? String(o.factory_date).slice(0, 10) : null,
       etd: o.etd ? String(o.etd).slice(0, 10) : null,
       stage, risk, has_mo: moSet.has(o.id), material: m, kickoff, completion,
