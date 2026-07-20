@@ -9,6 +9,7 @@ import { OrderShareDocsLinks } from '@/components/OrderShareDocsLinks';
 import { orderSizeKeys, sizeComparator } from '@/lib/utils/size-sort';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { base64ToBlob, triggerBlobDownload } from '@/lib/browser/download';
+import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 
 const CAT_LABEL: Record<string, string> = {
   fabric: '面料', trim: '辅料', lining: '里料', label: '标签', packing: '包装',
@@ -157,6 +158,9 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         </div>
       </div>
       {dlErr && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">⚠ {dlErr}</div>
+      )}
+      {dlErr && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
           ⚠ {dlErr}
         </div>
@@ -224,7 +228,9 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
           <div><span className="text-gray-400">订单号：</span>{order.order_no || '—'}</div>
           <div><span className="text-gray-400">款号：</span>{order.style_no || '—'}</div>
           <div><span className="text-gray-400">产品：</span>{order.product_description || '—'}</div>
-          <div><span className="text-gray-400">数量：</span>{order.quantity ?? '—'}</div>
+          <div><span className="text-gray-400">数量：</span>{order.quantity != null
+            ? formatQuantityDisplay(deriveOrderQuantityContext({ physicalQuantity: order.quantity, quantityUnit: order.quantity_unit, lineItemMultipliers: (lineItems || []).map((li: any) => li.set_multiplier) }))
+            : '—'}</div>
           <div><span className="text-gray-400">工厂交期：</span>{order.factory_date ? String(order.factory_date).slice(0, 10) : '—'}</div>
         </div>
         {order.packaging_type && (
