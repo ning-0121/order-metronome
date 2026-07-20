@@ -53,6 +53,7 @@ import { isInspectionWaived } from '@/lib/domain/inspectionWaiver';
 import { isColorPending } from '@/lib/domain/colorPending';
 import { ProcurementTrackingTab } from '@/components/tabs/ProcurementTrackingTab';
 import { ShipmentTab } from '@/components/tabs/ShipmentTab';
+import { QcTab } from '@/components/tabs/QcTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { InlineEditField } from '@/components/InlineEditField';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
@@ -97,7 +98,7 @@ export default async function OrderDetailPage({
     redirect(`/orders/${id}?tab=basic`);
   }
   // 2026-07-08 用户拍板:弃用「成本控制」+「报价基线/报价单识别」(布料名对不上采购)。预算/成本真相全走「采购核料」。
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'procurement', 'supply_chain', 'production', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -506,6 +507,7 @@ export default async function OrderDetailPage({
               { key: 'procurement_items', label: '🛒 采购核料' },
               { key: 'procurement', label: '📦 采购进度' },
               { key: 'production', label: '生产进度' },
+              { key: 'qc', label: '🔍 质检' },
               { key: 'shipment', label: '🚢 出货单据' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             // 经销/采购成品单(trade)买成品无原辅料 → 隐藏「采购核料」tab(生产任务单/原辅料和包装(含包装方式)/PI 等保留)
@@ -1049,6 +1051,14 @@ export default async function OrderDetailPage({
               isAdmin={isAdmin}
               canReport={isAdmin}
             />
+          </div>
+        )}
+
+        {/* Tab: 质检(QC 结构化验货录入 — 中查/尾查/巡查/复检,合格数·AQL·pass/fail) */}
+        {activeTab === 'qc' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">质量检验</h2>
+            <QcTab orderId={id} isAdmin={isAdmin} currentRole={currentRole || ''} />
           </div>
         )}
 

@@ -37,7 +37,7 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
         </div>
       </header>
 
-      <ProductionCenterClient summary={summary} dashboard={dashboard} canManage={canManage} initialDetail={initialDetail} initialStage={params.stage || ''} />
+      <ProductionCenterClient summary={summary} dashboard={dashboard} canManage={canManage} role={role} initialDetail={initialDetail} initialStage={params.stage || ''} />
 
     </main>
   );
