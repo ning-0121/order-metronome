@@ -43,6 +43,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   const [statusMsg, setStatusMsg] = useState('');
   const [generating, setGenerating] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [downloadDiagnostic, setDownloadDiagnostic] = useState<any | null>(null);
   const { confirm, dialog } = useDialogs();
 
   const reload = async () => {
@@ -116,9 +117,15 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         : await generateTrimSheet(orderId);
       if ((res as any).error) { setMsg((res as any).error); return; }
       const { base64, fileName } = res as any;
+      const binary = base64 ? atob(base64) : '';
+      const decodedByteLength = binary.length;
+      const fileSignature = binary.slice(0, 2) === 'PK' ? 'PK' : binary.slice(0, 2) || '—';
+      setDownloadDiagnostic({ actionInvoked: true, orderId, productionTaskId: data?.mo?.id || null, generator: (res as any).generator || '—', sheetCount: (res as any).sheetCount || '—', generationMs: (res as any).generationMs || '—', returnedFilename: fileName || null, returnedMimeType: (res as any).mimeType || null, base64Length: base64?.length || 0, decodedByteLength, fileSignature, triggerBlobDownloadReached: false, browserDownloadInvoked: false, error: null });
       if (kind === 'production' && (!base64 || typeof base64 !== 'string' || base64.length < 1000 || !/QM-20260717-002|1022222/i.test(String(fileName || '')))) {
         setMsg('下载失败：服务端未返回当前订单的有效生产任务单文件'); return;
       }
+      if (kind === 'production' && fileSignature !== 'PK') { setMsg('下载失败：返回内容不是有效 XLSX 文件'); return; }
+      setDownloadDiagnostic((d: any) => d ? { ...d, triggerBlobDownloadReached: true, browserDownloadInvoked: true } : d);
       triggerBlobDownload(base64ToBlob(base64), fileName);
     } catch (e: any) { setMsg('生成出错：' + (e?.message || e)); }
     finally { setGenerating(false); }
@@ -131,6 +138,9 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   const commercialQty = quantityContext?.commercialQuantity ?? order.quantity;
   const physicalQty = quantityContext?.physicalQuantity ?? order.quantity;
   const piecesPerSet = quantityContext?.componentsPerCommercialUnit ?? 1;
+  const headerQuantityValue = commercialQty;
+  const headerQuantityUnit = piecesPerSet > 1 ? '套' : (order.quantity_unit || '件');
+  const displayedProductionQuantity = physicalQty;
   const status = mo?.status || null;
 
   const field = (label: string, key: keyof typeof emptyForm, ph = '', rows = 2) => (
@@ -141,7 +151,13 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   );
 
   return (
-    <div className="space-y-5">
+      <div className="space-y-5">
+      <div className="rounded border border-indigo-200 bg-indigo-50 p-2 text-[11px] text-indigo-900">
+        PR39_BUILD_SHA=52aaef68fa87fa027e9208e55c722215230aff6 · environment=Preview · RENDER_COMPONENT=components/tabs/ManufacturingOrderTab.tsx · RENDER_VERSION=PR39-V2
+        <div>orders.quantity={order.quantity} · orders.quantity_unit={order.quantity_unit || '—'} · line_qty_sum={lineItems.reduce((n: number, l: any) => n + (Number(l.qty_pcs) || 0), 0)} · set_multiplier={piecesPerSet}</div>
+        <div>commercialQuantity={commercialQty} · physicalPieceQuantity={physicalQty} · piecesPerSet={piecesPerSet} · headerQuantityValue={headerQuantityValue} · headerQuantityUnit={headerQuantityUnit} · displayedProductionQuantity={displayedProductionQuantity} · boundOrderQuantityValue={commercialQty} · boundOrderQuantityUnit={headerQuantityUnit} · styleSubtotalValue={commercialQty} · styleSubtotalUnit={headerQuantityUnit} · productionTaskRecordId={mo?.id || '—'} · status={mo?.status || '—'} · version={mo?.updated_at || '—'}</div>
+      </div>
+      {downloadDiagnostic && <div className="rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">下载诊断：action invoked={String(downloadDiagnostic.actionInvoked)} · orderId={downloadDiagnostic.orderId} · productionTaskId={downloadDiagnostic.productionTaskId || '—'} · generator={downloadDiagnostic.generator} · sheets={downloadDiagnostic.sheetCount} · ms={downloadDiagnostic.generationMs} · filename={downloadDiagnostic.returnedFilename || '—'} · mime={downloadDiagnostic.returnedMimeType || '—'} · base64={downloadDiagnostic.base64Length} · bytes={downloadDiagnostic.decodedByteLength} · signature={downloadDiagnostic.fileSignature} · triggerBlobDownload={String(downloadDiagnostic.triggerBlobDownloadReached)} · browser download={String(downloadDiagnostic.browserDownloadInvoked)}{downloadDiagnostic.error ? ` · error=${downloadDiagnostic.error}` : ''}</div>}
       {/* 顶部:MO 号 + 生命周期 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm">

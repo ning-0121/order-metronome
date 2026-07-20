@@ -214,6 +214,7 @@ export async function generateTrimSheet(orderId: string) {
  * approved line items, BOM and confirmed MO fields; the template owns all presentation.
  */
 async function buildExactProductionTaskWorkbook(orderId: string) {
+  const generationStartedAt = Date.now();
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -295,7 +296,8 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   try {
     const workbook = await buildProductionTaskWorkbook(model);
     const buffer = await workbook.xlsx.writeBuffer();
-    return { ok: true, base64: Buffer.from(buffer).toString('base64'), fileName: safeProductionTaskFilename(model.internalOrderNumber, styleNumber) };
+    const bytes = Buffer.from(buffer);
+    return { ok: true, base64: bytes.toString('base64'), fileName: safeProductionTaskFilename(model.internalOrderNumber, styleNumber), mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', byteLength: bytes.length, sheetCount: workbook.worksheets.length, generator: 'buildExactProductionTaskWorkbook', generationMs: Date.now() - generationStartedAt };
   } catch (error) {
     return { error: error instanceof Error ? error.message : '生产任务单生成失败' };
   }

@@ -1105,7 +1105,7 @@ export default async function OrderDetailPage({
           <div className="space-y-4">
             {/* 真实采购执行进度(实时投影,采购在采购中心下单/催货/收货即刻反映;单一真相)*/}
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <SupplyChainTab orderId={id} />
+              <SupplyChainTab orderId={id} isAdmin={isAdmin} />
             </div>
             {/* 手工协作备注(非实时·仅补充说明,默认收起;真实进度以上方为准)*/}
             <details className="bg-white rounded-xl border border-gray-200 p-4 group">

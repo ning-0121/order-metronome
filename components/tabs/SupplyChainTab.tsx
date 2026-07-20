@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getOrderSupplyChainOverview, type SupplyChainOverview } from '@/app/actions/supply-chain';
+import { getOrderSupplyChainOverview, recalculateOrderFabricDemand, type SupplyChainOverview } from '@/app/actions/supply-chain';
 
 const CAT: Record<string, string> = {
   fabric: '面料', trim: '辅料', trims: '辅料', packing: '包装', packaging: '包装', print: '印花', other: '其他',
@@ -22,9 +22,10 @@ const STATUS_TONE: Record<string, string> = {
 
 function fmt(d: string | null) { return d ? d.slice(0, 10) : '—'; }
 
-export function SupplyChainTab({ orderId }: { orderId: string }) {
+export function SupplyChainTab({ orderId, isAdmin = false }: { orderId: string; isAdmin?: boolean }) {
   const [data, setData] = useState<SupplyChainOverview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recalcMsg, setRecalcMsg] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +42,14 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
 
   const { statusCounts: sc, attentionCount, byCategory, receipts, lines } = data;
   const hasLines = lines.length > 0;
+  async function recalc() {
+    setRecalcMsg('重算中…');
+    const r = await recalculateOrderFabricDemand(orderId);
+    if (r.error) { setRecalcMsg(`重算失败：${r.error}`); return; }
+    setRecalcMsg(`已更新 ${r.updated || 0} 条采购记录`);
+    const fresh = await getOrderSupplyChainOverview(orderId);
+    if (fresh.data) setData(fresh.data);
+  }
 
   const stats = [
     { label: '待下单', value: sc.pending, tone: 'border-indigo-200 bg-indigo-50 text-indigo-800' },
@@ -58,6 +67,12 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
           归集本订单的物料采购 / 到货 / 预算现状(只读)。具体操作请到下方对应 Tab。
         </p>
       </div>
+      {isAdmin && <div className="rounded border border-indigo-200 bg-indigo-50 p-2 text-[11px] text-indigo-900">
+        <div className="font-semibold">PR39-V2 · RENDER_COMPONENT=components/tabs/SupplyChainTab.tsx</div>
+        <div>source=procurement_line_items · record id / generated_at shown per row</div>
+        <button onClick={recalc} className="mt-1 rounded bg-indigo-600 px-2 py-1 text-white">重新计算当前订单面料需求</button>
+        {recalcMsg && <span className="ml-2">{recalcMsg}</span>}
+      </div>}
 
       {/* 物料采购状态 */}
       <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
@@ -98,6 +113,7 @@ export function SupplyChainTab({ orderId }: { orderId: string }) {
                       : null}
                   {l.supplier_name && <span className="text-xs text-gray-400 truncate">· {l.supplier_name}</span>}
                 </div>
+                {isAdmin && <div className="w-full text-[10px] text-indigo-600">record={l.diagnostic_record_id || l.id} · stored={l.ordered_qty}{l.ordered_unit || ''} · source={l.diagnostic_source || 'procurement_line_items'} · generated={l.diagnostic_generated_at || '—'}</div>}
                 <div className="flex items-center gap-2 shrink-0">
                   {l.overdue && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">逾期</span>}
                   <span className="text-xs text-gray-400">

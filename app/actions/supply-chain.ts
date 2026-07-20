@@ -77,7 +77,7 @@ export async function getOrderSupplyChainOverview(
   const { data: canView } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
   if (!canView) return { error: '无权查看此订单的采购概览' };
   const baseCols =
-    'id, procurement_item_id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name' +
+    'id, procurement_item_id, material_name, category, line_status, ordered_qty, ordered_unit, received_qty, required_by, expected_arrival, supplier_name, created_at' +
     (canSeeFloor ? ', unit_price' : '');
   const client = createServiceRoleClient();   // 可见性已由上方订单 RLS 校验;此处只读、底价按 baseCols 列门控
   // size 是真列(20260707);未授权/缓存陈旧 → 降级去 size(不 brick 整页)
@@ -113,7 +113,7 @@ export async function getOrderSupplyChainOverview(
     g.size_lines++;
   }
   const sizeOrder = await fetchOrderSizeOrder(supabase, orderId);   // 业务手排的尺码顺序(优先)
-  const mergedLines = [...grouped.values()].map((g) => ({ ...g, sizes: orderSizeKeys([...(g._sizes || [])] as string[], sizeOrder) }));
+  const mergedLines = [...grouped.values()].map((g) => ({ ...g, sizes: orderSizeKeys([...(g._sizes || [])] as string[], sizeOrder), diagnostic_source: 'procurement_line_items', diagnostic_record_id: g.id, diagnostic_generated_at: g.created_at }));
 
   const today = new Date().toISOString().slice(0, 10);
   let pending = 0, inTransit = 0, arrived = 0, done = 0, attention = 0;
@@ -166,4 +166,45 @@ export async function getOrderSupplyChainOverview(
       budget,
     },
   };
+}
+
+/** Recompute only pending fabric demand for one order; never changes receipts, supplier, or price. */
+export async function recalculateOrderFabricDemand(orderId: string): Promise<{ ok?: boolean; updated?: number; error?: string; details?: any[] }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: visible } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
+  if (!visible) return { error: '无权查看该订单' };
+  const svc = createServiceRoleClient();
+  const [{ data: lines }, { data: bom }, { data: pis }, { data: pli }] = await Promise.all([
+    (svc.from('order_line_items') as any).select('qty_pcs,set_multiplier,color_cn,color_en,style_no').eq('order_id', orderId),
+    (svc.from('materials_bom') as any).select('id,material_name,material_type,color,style_no,production_consumption,qty_per_piece,unit').eq('order_id', orderId).in('material_type', ['fabric','lining']),
+    (svc.from('procurement_items') as any).select('id,color,material_name').eq('order_id', orderId),
+    (svc.from('procurement_line_items') as any).select('id,procurement_item_id,material_name,category,ordered_qty,ordered_unit,received_qty,line_status').eq('order_id', orderId).eq('category', 'fabric'),
+  ]);
+  const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+  const colorQty = new Map<string, number>();
+  for (const l of (lines || []) as any[]) {
+    const q = Number(l.qty_pcs) || 0; const m = Number(l.set_multiplier) > 0 ? Number(l.set_multiplier) : 1;
+    const commercial = m > 1 ? q / m : q;
+    const color = norm(l.color_cn) || norm(l.color_en);
+    if (color) colorQty.set(color, (colorQty.get(color) || 0) + commercial);
+  }
+  const piColor = new Map<string, string>(); for (const p of (pis || []) as any[]) piColor.set(p.id, norm(p.color));
+  let updated = 0; const details: any[] = [];
+  for (const row of (pli || []) as any[]) {
+    if (row.line_status !== 'pending_order' || row.received_qty != null) continue;
+    const color = piColor.get(row.procurement_item_id) || '';
+    const b = (bom || []).find((x: any) => norm(x.color) === color && norm(x.material_name) === norm(row.material_name));
+    if (!b) continue;
+    const baseQuantity = colorQty.get(color) || 0;
+    const consumption = Number(b.production_consumption ?? b.qty_per_piece) || 0;
+    const expected = Math.ceil(baseQuantity * consumption);
+    if (!expected || expected === Number(row.ordered_qty)) continue;
+    const { error } = await (svc.from('procurement_line_items') as any).update({ ordered_qty: expected }).eq('id', row.id).eq('line_status', 'pending_order').is('received_qty', null);
+    if (error) return { error: `更新采购记录失败:${error.message}`, updated, details };
+    updated++; details.push({ recordId: row.id, color, baseQuantity, baseUnit: '套', piecesPerSet: 2, unitConsumption: consumption, calculatedQuantity: expected });
+  }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, updated, details };
 }
