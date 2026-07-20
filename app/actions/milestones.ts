@@ -465,6 +465,21 @@ export async function markMilestoneDone(
         }
       }
     }
+
+    // 红线1(2026-07-20 全链审计):放行判据不能只看里程碑手填清单,必须也读结构化质检表 qc_inspections。
+    // 防「跟单在质检表录了尾查不合格,但里程碑清单没填 FAIL → 照样放行出运」。
+    // 安全设计:只看「尾查(final/尾)」类型、取最新一条;result='fail' 才拦。类型/表缺失 → 不生效(维持现状,零回归)。
+    const { data: qcInsp } = await (supabase.from('qc_inspections') as any)
+      .select('inspection_type, result, created_at')
+      .eq('order_id', (milestone as any).order_id)
+      .order('created_at', { ascending: false });
+    const latestFinal = ((qcInsp || []) as any[]).find((q) => {
+      const t = String(q.inspection_type || '').toLowerCase();
+      return t.includes('final') || t.includes('尾');
+    });
+    if (latestFinal && String(latestFinal.result || '').toLowerCase() === 'fail') {
+      return { error: '结构化质检记录的尾查结论为「不合格」，不能出运。请在质检模块处理并复检通过后再放行' };
+    }
   }
 
   // ── V2 多方确认门禁(P1b 2026-07-03)──

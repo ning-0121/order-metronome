@@ -605,6 +605,34 @@ async function approveDelayRequestCore(
   const orderData = order as any;
   const milestoneData = milestone as any;
 
+  // 红线3(2026-07-20 全链审计):日期链校验前移到审批提交前。
+  // 原来校验在 fire-and-forget 的 recalculateSchedule 里,新锚点破坏日期链(如 ETA<ETD)时只记日志 return,
+  // 但此时延期已 status='approved'、已给申请人发"延期已通过"通知 → 申请人误信,而节点/订单日期实际未写。
+  // 改为:破坏日期链 → 直接驳回审批,不 approve、不发"已通过",让申请人修正后重申。
+  if (delayRequestData.proposed_new_anchor_date) {
+    try {
+      const { validateDateChainWithUpdate, formatDateChainErrors } = await import('@/lib/domain/orderDates');
+      const chk: any = orderData.incoterm === 'FOB'
+        ? { etd: delayRequestData.proposed_new_anchor_date }
+        : { warehouse_due_date: delayRequestData.proposed_new_anchor_date };
+      const violations = validateDateChainWithUpdate(
+        {
+          order_date: orderData.order_date, factory_date: orderData.factory_date, etd: orderData.etd,
+          warehouse_due_date: orderData.warehouse_due_date, eta: orderData.eta, cancel_date: orderData.cancel_date,
+        },
+        chk,
+      );
+      if (violations.length > 0) {
+        return failure(
+          `新交期会破坏订单日期链,无法通过:${formatDateChainErrors(violations)}。请修正新交期后重新申请`,
+          'DATE_CHAIN_VIOLATION',
+        );
+      }
+    } catch (e: any) {
+      console.error('[approveDelayRequestCore] 日期链前置校验异常(不阻断,后续 recalculateSchedule 仍会兜底):', e?.message);
+    }
+  }
+
   // Update delay request
   const updatePayload: any = {
     status: 'approved',
