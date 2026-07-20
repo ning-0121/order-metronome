@@ -519,6 +519,26 @@ export async function createOrder(
       .select('user_id, name, email, role, roles');
 
     if (allProfiles) {
+      // 建单人非业务侧(业务开发/业务执行/理单/管理员)时,不该默认背 sales/merchandiser 业务节点。
+      // 例:生产部跟单/QC 建单,产前样等"业务执行"节点若默认给 ta,ta 会被误当责任人计分/催办。
+      // 2026-07-20 用户反馈:骆淑娟(生产跟单/QC)建单后被指派产前样,应归业务执行 → 加建单人角色门禁。
+      const BUSINESS_CREATOR_ROLES = ['sales', 'merchandiser', 'order_manager', 'sales_manager', 'admin', 'admin_assistant'];
+      const creatorProfile = (allProfiles as any[]).find((p: any) => p.user_id === user.id);
+      const creatorRoles: string[] = creatorProfile?.roles?.length ? creatorProfile.roles : [creatorProfile?.role].filter(Boolean);
+      const creatorIsBusiness = creatorRoles.some((r: string) => BUSINESS_CREATOR_ROLES.includes(r));
+      if (!creatorIsBusiness) {
+        const uniqueByRole = (role: string): string | null => {
+          const m = (allProfiles as any[]).filter((p: any) => {
+            const r: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
+            return r.includes(role);
+          });
+          return m.length === 1 ? m[0].user_id : null;
+        };
+        // 解析真正的业务执行/理单(全公司唯一时自动派);解析不到 → null,留给 admin/「理单跟单」手动指派,
+        // 绝不回落给非业务的建单人。
+        roleUserMap.merchandiser = uniqueByRole('merchandiser') || uniqueByRole('order_manager');
+        roleUserMap.sales = uniqueByRole('sales');
+      }
       // 先匹配生产主管（用于固定步骤）
       for (const roleToFind of ['procurement', 'finance', 'logistics', 'production_manager']) {
         const matcher = (DEFAULT_ASSIGNEES as any)[roleToFind];

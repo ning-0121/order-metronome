@@ -41,6 +41,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [dlErr, setDlErr] = useState('');
   const [previewing, setPreviewing] = useState(false);
   const { confirm, dialog } = useDialogs();
 
@@ -108,15 +109,15 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
 
   // 两张单独出:'production'=生产订单(第一张,款式主表),'trim'=辅料单(第二张,辅料明细)
   async function generate(kind: 'production' | 'trim') {
-    setGenerating(true); setMsg('');
+    setGenerating(true); setMsg(''); setDlErr('');
     try {
       const res = kind === 'production'
         ? await generateProductionOrderSheet(orderId)
         : await generateTrimSheet(orderId);
-      if ((res as any).error) { setMsg((res as any).error); return; }
+      if ((res as any).error) { setDlErr(`下载${kind === 'production' ? '生产任务单' : '辅料单'}失败：${(res as any).error}`); return; }
       const { base64, fileName } = res as any;
       triggerBlobDownload(base64ToBlob(base64), fileName);
-    } catch (e: any) { setMsg('生成出错：' + (e?.message || e)); }
+    } catch (e: any) { setDlErr('生成出错：' + (e?.message || e)); }
     finally { setGenerating(false); }
   }
 
@@ -155,6 +156,11 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
             {generating ? '生成中…' : '🧵 下载辅料单'}</button>
         </div>
       </div>
+      {dlErr && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          ⚠ {dlErr}
+        </div>
+      )}
 
       {/* 预览弹窗:按范本版式渲染(数据与下载的 Excel 同源) */}
       {previewing && (
