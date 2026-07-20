@@ -14,6 +14,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 export interface ProcurementItem {
   id: string;
@@ -71,6 +72,7 @@ export async function addProcurementItem(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可维护采购项'); if (err) return { error: err }; }
 
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || user.email?.split('@')[0] || '';
@@ -118,6 +120,7 @@ export async function submitSupplementRequest(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可提交补充采购申请'); if (err) return { error: err }; }
 
   if (!item.supplement_reason?.trim()) return { error: '请填写补充原因' };
 
@@ -274,6 +277,7 @@ export async function updateProcurementItem(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可维护采购项'); if (err) return { error: err }; }
 
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || user.email?.split('@')[0] || '';
@@ -295,6 +299,7 @@ export async function deleteProcurementItem(itemId: string): Promise<{ error?: s
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可删除采购项'); if (err) return { error: err }; }
 
   const { data: item } = await (supabase.from('procurement_tracking') as any)
     .select('order_id').eq('id', itemId).single();
@@ -312,6 +317,7 @@ export async function initDefaultProcurementItems(orderId: string): Promise<{ er
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可维护采购项'); if (err) return { error: err }; }
 
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || '';

@@ -22,6 +22,7 @@ export async function listPaymentRequests(reconId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_SEE_PROCUREMENT_FLOOR', '无权查看采购付款金额'); if (err) return { error: err }; }
   const { data: recon } = await (supabase.from('procurement_reconciliations') as any)
     .select('id, net_payable, paid_amount, currency, status').eq('id', reconId).maybeSingle();
   if (!recon) return { error: '对账单不存在' };

@@ -8,6 +8,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -50,6 +51,7 @@ export async function addCustomerContactEmail(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_CUSTOMER', '仅业务/理单/管理可维护客户联系邮箱'); if (err) return { error: err }; }
 
   // 读取当前列表
   const { data: row } = await (supabase.from('customers') as any)
@@ -88,6 +90,7 @@ export async function removeCustomerContactEmail(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_CUSTOMER', '仅业务/理单/管理可维护客户联系邮箱'); if (err) return { error: err }; }
 
   const { data: row } = await (supabase.from('customers') as any)
     .select('id, contact_emails')

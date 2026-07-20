@@ -197,6 +197,10 @@ export const ROLE_GROUPS = {
 
   /** 可增删改物料清单(BOM):业务+采购+管理 —— 生产/QC/物流/财务不碰料单(2026-07-10 审计 #5) */
   CAN_EDIT_BOM: ['admin', 'sales', 'sales_manager', 'order_manager', 'merchandiser', 'admin_assistant', 'procurement', 'procurement_manager'] as const,
+
+  /** 可维护客户主数据(联系邮箱/邮箱域名映射):业务+理单+管理 —— 直接影响「邮件→客户/订单」归集路由,
+   *  生产/QC/采购/物流/财务不碰(2026-07-20 全链审计:此前仅验登录,任意角色可污染归集路由) */
+  CAN_EDIT_CUSTOMER: ['admin', 'sales', 'sales_manager', 'order_manager', 'merchandiser', 'admin_assistant'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;

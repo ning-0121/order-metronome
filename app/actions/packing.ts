@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 export async function getPackingLists(orderId: string) {
   const supabase = await createClient();
@@ -18,6 +19,7 @@ export async function addPackingList(orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_MO', '仅业务/理单/生产/QC/主管可编辑装箱单'); if (err) return { data: null, error: err }; }
 
   const plNumber = `PL-${Date.now().toString(36).toUpperCase()}`;
   const { data, error } = await (supabase.from('packing_lists') as any)
@@ -35,6 +37,7 @@ export async function addPackingLine(packingListId: string, orderId: string, lin
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_MO', '仅业务/理单/生产/QC/主管可编辑装箱单'); if (err) return { error: err }; }
 
   const totalQty = (line.carton_count || 0) * (line.qty_per_carton || 0);
   const { error } = await (supabase.from('packing_list_lines') as any).insert({
@@ -187,6 +190,7 @@ export async function saveShippingLines(orderId: string, packingListId: string, 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_MO', '仅业务/理单/生产/QC/主管可编辑装箱单'); if (err) return { error: err }; }
 
   const num = (v: any) => (v === '' || v == null ? null : Number(v));
   const clean = (lines || [])
@@ -242,6 +246,7 @@ export async function confirmPackingList(id: string, orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_MO', '仅业务/理单/生产/QC/主管可确认装箱单'); if (err) return { error: err }; }
 
   const { error } = await (supabase.from('packing_lists') as any)
     .update({ status: 'confirmed', confirmed_by: user.id, confirmed_at: new Date().toISOString() })
