@@ -159,18 +159,21 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { data, error } = await (supabase.from('order_attachments') as any)
+  const { data: visibleOrder } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
+  if (!visibleOrder) return { error: '无权读取该订单' };
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('order_attachments') as any)
     .select('id, file_name, storage_path').eq('order_id', orderId).eq('file_type', SIZE_CHART_TYPE)
     .order('created_at', { ascending: false });
   if (error) return { error: error.message };
   const ids = (data || []).map((a: any) => a.id);
-  const { data: imports } = ids.length ? await (supabase.from('size_chart_imports') as any)
+  const { data: imports } = ids.length ? await (svc.from('size_chart_imports') as any)
     .select('attachment_id, parse_status, safe_error_message, parsed_row_count, parsed_json, worksheet_name')
     .in('attachment_id', ids) : { data: [] };
   const byAttachment = new Map((imports || []).map((r: any) => [r.attachment_id, r]));
   const out: Array<{ id: string; file_name: string; url: string | null; parse_status: string; failure_reason: string | null; row_count: number; orientation: string | null; confidence: number | null; worksheet_name: string | null; size_count: number; measurement_count: number }> = [];
   for (const a of (data || [])) {
-    const { data: signed } = await supabase.storage.from('order-docs').createSignedUrl((a as any).storage_path, 3600);
+    const { data: signed } = await svc.storage.from('order-docs').createSignedUrl((a as any).storage_path, 3600);
     const status: any = byAttachment.get((a as any).id);
     const parsed = status?.parsed_json || {};
     out.push({
@@ -192,7 +195,10 @@ export async function listSizeCharts(orderId: string): Promise<{ data?: Array<{ 
 
 export async function getSizeChartImport(attachmentId: string, orderId: string) {
   const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); if (!user) return { error: '请先登录' };
-  const { data, error } = await (supabase.from('size_chart_imports') as any)
+  const { data: visibleOrder } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
+  if (!visibleOrder) return { error: '无权读取该订单' };
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('size_chart_imports') as any)
     .select('id,parse_status,worksheet_name,parsed_row_count,parsed_json,error_code,safe_error_message,reviewed_at,created_at,updated_at')
     .eq('attachment_id', attachmentId).eq('order_id', orderId).single();
   return error ? { error: error.message } : { data };
