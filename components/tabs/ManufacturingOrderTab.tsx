@@ -112,6 +112,16 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
   async function generate(kind: 'production' | 'trim') {
     setGenerating(true); setMsg('');
     try {
+      if (kind === 'production') {
+        const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}/production-task/download`, { credentials: 'include', cache: 'no-store' });
+        if (!response.ok) { const body = await response.json().catch(() => ({})); setMsg(`下载失败：${body.error || `HTTP ${response.status}`}`); return; }
+        const blob = await response.blob();
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const fileSignature = String.fromCharCode(bytes[0] || 0, bytes[1] || 0);
+        setDownloadDiagnostic({ actionInvoked: false, orderId, productionTaskId: data?.mo?.id || null, generator: 'binary route handler', returnedFilename: response.headers.get('content-disposition') || null, returnedMimeType: response.headers.get('content-type'), base64Length: 0, decodedByteLength: bytes.length, fileSignature, triggerBlobDownloadReached: true, browserDownloadInvoked: true, error: null });
+        if (!bytes.length || fileSignature !== 'PK') { setMsg('下载失败：二进制响应不是有效 XLSX 文件'); return; }
+        const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `生产任务单_${orderId}.xlsx`; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url); return;
+      }
       const res = kind === 'production'
         ? await generateProductionOrderSheet(orderId)
         : await generateTrimSheet(orderId);
