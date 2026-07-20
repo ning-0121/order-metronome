@@ -94,6 +94,12 @@ export function buildLineItemsFromSnapshot(lines: unknown[]): any[] {
         fabric_width: l.fabric_width_cm != null ? `${l.fabric_width_cm}cm` : '',
         fabric_consumption: l.fabric_consumption_kg != null ? Number(l.fabric_consumption_kg) : '',
         fabric_unit: 'kg',
+        // 资金流红线(2026-07-20 全链审计 · 业务开发 P0):携带 approved 冻结快照的成交价
+        // → createOrder 写 order_line_items.po_unit_price → PI 单价 / 应收 total_amount 自洽。
+        // 此前丢弃 quoted_price_per_piece → PO-first 建单的订单 PI 单价一律 0、应收为 0。
+        // 是「逐字继承快照」,非重算,不违反防火墙铁律。
+        po_unit_price: (l.quoted_price_per_piece != null && !isNaN(Number(l.quoted_price_per_piece)))
+          ? Number(l.quoted_price_per_piece) : null,
         colors: [],
       };
       groups.set(key, g);
