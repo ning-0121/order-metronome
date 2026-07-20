@@ -1,6 +1,5 @@
 import { QimoAIGateway } from './gateway';
 import { AnthropicAdapter } from './providers/anthropic';
-import { OpenAIAdapter } from './providers/openai';
 
 export * from './contracts';
 export * from './compat';
@@ -11,8 +10,9 @@ export * from './router';
 export * from './telemetry';
 export * from './tool-safety';
 
+// 2026-07-20 用户拍板:纯 Claude Sonnet,运行时只注册 Anthropic(已移除 OpenAI adapter)。
+// Anthropic adapter 现已支持图片/PDF 多模态 + tool-use 结构化输出,PO 解析/核对可直接跑 Claude。
 export const qimoAI = new QimoAIGateway([
-  new OpenAIAdapter(),
   new AnthropicAdapter(),
 ]);
 

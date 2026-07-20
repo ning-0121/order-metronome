@@ -93,7 +93,7 @@ ${customerContext}
 
     const response = await client.messages.create(
       {
-        model: 'claude-haiku-4-5',
+        model: 'claude-sonnet-5',
         max_tokens: 800,
         messages: [{ role: 'user', content: prompt }],
       },

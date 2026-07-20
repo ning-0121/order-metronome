@@ -170,7 +170,7 @@ async function extractFromImage(
 
   const result = await callClaude({
     scene: 'quoter-cmt-extract',
-    model: 'claude-haiku-4-5',
+    model: 'claude-sonnet-5',
     maxTokens: 2500,
     timeoutMs: 45_000,
     system: systemPrompt,
