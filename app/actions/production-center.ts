@@ -66,7 +66,10 @@ export async function getProductionCenter(): Promise<{
     return { error: '无权查看生产中心' };
   }
   // 生产经理/理单/管理层看全部;生产(非经理)/跟单只看分配到自己的单
-  const canSeeAll = roles.includes('admin') || hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS');
+  // 2026-07-20 审计:QC/质检天然要看所有待验货的单(验货节点在模板里归 merchandiser/production,
+  //   QC 不拥有任何 milestone → 原 owner 过滤会让 QC 看到空页,无法工作)。故 QC 也放开看全量生产单。
+  const canSeeAll = roles.includes('admin') || hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS')
+    || roles.some((r) => ['qc', 'quality'].includes(r));
 
   const svc = createServiceRoleClient();
 

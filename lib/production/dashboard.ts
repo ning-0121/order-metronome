@@ -15,6 +15,27 @@ export const PRODUCTION_QUICK_ENTRIES = [
   { title: '风险订单攻克', href: '/production?detail=已超期#details' },
 ] as const;
 
+/**
+ * 快捷入口按角色聚焦(2026-07-20 审计:此前对所有角色都发生产主管口径的入口,QC/跟单被无关入口淹没)。
+ * 固定 4 个(与图标数组按序对齐)。
+ */
+export function getQuickEntries(role: DashboardRole): Array<{ title: string; href: string }> {
+  if (role === 'qc') return [
+    { title: '今日验货', href: '/production?detail=今日验货#details' },
+    { title: '待放行', href: '/production?detail=待放行#details' },
+    { title: '生产进度录入', href: '/production/progress' },
+    { title: '风险订单攻克', href: '/production?detail=已超期#details' },
+  ];
+  if (role === 'follow_up') return [
+    { title: '生产进度录入', href: '/production/progress' },
+    { title: '工厂排产看板', href: '/production/factory-schedule' },
+    { title: '我的今日任务', href: '/production?detail=all#details' },
+    { title: '风险订单攻克', href: '/production?detail=已超期#details' },
+  ];
+  // supervisor / executive:派单 + 排产 + 录入 + 攻风险
+  return [...PRODUCTION_QUICK_ENTRIES];
+}
+
 export const STAGE_DEFINITIONS = [
   ['awaiting_procurement', '新订单待采购'], ['materials_in_transit', '物料在途'],
   ['ready_to_schedule', '开生产待排单'], ['in_production', '生产中'],
