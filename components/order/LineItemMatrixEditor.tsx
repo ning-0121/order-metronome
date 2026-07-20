@@ -319,8 +319,14 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
     }) }));
 
   // ── 汇总 ──
+  // 尺码格录的是"套数"。件/套(set_multiplier)>1 时,物理件数 = 套数 × 件/套。
+  // 客户订单/order.quantity 按"件"存,这里同时显示套数与折合件数,消除"2400 vs 4800"的困惑。
+  const setMulOf = (st: Style) => Number(st.set_multiplier) > 0 ? Number(st.set_multiplier) : 1;
   const styleTotal = (st: Style) => st.colors.reduce((a, c) => a + sumSizes(c.sizes), 0);
+  const stylePieces = (st: Style) => styleTotal(st) * setMulOf(st);
   const orderTotal = styles.reduce((a, st) => a + styleTotal(st), 0);
+  const orderPieces = styles.reduce((a, st) => a + stylePieces(st), 0);
+  const hasSet = styles.some(st => setMulOf(st) > 1);
   const colorRows = styles.reduce((a, st) => a + st.colors.length, 0);
 
   async function save() {
@@ -368,7 +374,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
           )}
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-600">总量 <b className="text-gray-900">{orderTotal}</b> 件 · <b>{styles.length}</b> 款 · <b>{colorRows}</b> 颜色行</span>
+          <span className="text-xs text-gray-600">总量 <b className="text-gray-900">{orderTotal}</b> {hasSet ? '套' : '件'}{hasSet && <> · 折合 <b className="text-gray-900">{orderPieces}</b> 件</>} · <b>{styles.length}</b> 款 · <b>{colorRows}</b> 颜色行</span>
           {canEdit && (
             <label className={`px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 text-xs font-medium hover:bg-indigo-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="尺码数量成列的客户订单/生产单 Excel(如伊彤数量表),零 token 解析,预览可改">
               {parsing ? '解析中…' : '📄 上传客户订单'}
@@ -425,7 +431,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
               </label>
             )}
             {st.image_url && <a href={st.image_url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">看图</a>}
-            <span className="text-xs text-gray-500">款小计 <b>{styleTotal(st)}</b></span>
+            <span className="text-xs text-gray-500">款小计 <b>{styleTotal(st)}</b>{setMulOf(st) > 1 && <> 套(<b>{stylePieces(st)}</b> 件)</>}</span>
             {canEdit && <button onClick={() => copyStyle(si)} className="text-xs text-indigo-600 hover:underline">复制款</button>}
             {canEdit && <button onClick={() => removeStyle(si)} className="text-xs text-red-500 hover:underline">删款</button>}
           </div>

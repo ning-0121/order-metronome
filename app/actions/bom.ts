@@ -44,7 +44,11 @@ export async function getBomItems(orderId: string) {
     const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
     for (const r of (liRows || []) as any[]) {
       if (!r.style_no) continue;
-      const q = Number(r.qty_pcs) || 0;
+      // qty_pcs 存的是"套数"(逐款明细尺码格按套录)。件/套(set_multiplier)把套数换算成物理件数;
+      // 单耗(qty_per_piece)是"每件"口径 → 需求 = 单耗 × 件数 = 单耗 × 套数 × 件/套。
+      // 2026-07-20 用户拍板:数量与面料统一按"件"口径,order.quantity 也是件数,两侧一致(非套装 件/套=1 无影响)。
+      const setMul = Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1;
+      const q = (Number(r.qty_pcs) || 0) * setMul;
       styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
       const canon = normColor(r.color_cn) || normColor(r.color_en);
       if (!canon) continue;
@@ -663,8 +667,10 @@ export async function submitBomToProcurement(
   const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
   for (const r of (liRows || []) as any[]) {
     if (!r.style_no) continue;
-    // qty_pcs 是套数;BOM 单耗是每套用量。只有明确 PER_PIECE 的行才允许换算物理件数。
-    const q = Number(r.qty_pcs) || 0;
+    // qty_pcs 是套数;件/套(set_multiplier)换算成物理件数,单耗是"每件"口径 → 需求 = 单耗 × 套数 × 件/套。
+    // 2026-07-20 用户拍板:数量与面料统一按"件",与 order.quantity(件数)一致(非套装 件/套=1 无影响)。
+    const setMul = Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1;
+    const q = (Number(r.qty_pcs) || 0) * setMul;
     styleQty.set(r.style_no, (styleQty.get(r.style_no) || 0) + q);
     // 2026-07-04 审计修:件数每行只加一次(原来 color_cn/color_en 各加一次,同名色翻倍→多算料)。
     // 规范色=中文优先,英文兜底;中英文两个色名都做别名指向同一桶,BOM 用任一色名可命中。
