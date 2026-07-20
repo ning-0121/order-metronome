@@ -68,7 +68,7 @@ ${emailSummary}
 只返回JSON。`;
 
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5', max_tokens: 500,
+      model: 'claude-sonnet-5', max_tokens: 500,
       messages: [{ role: 'user', content: prompt }],
     });
 

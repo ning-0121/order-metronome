@@ -426,7 +426,7 @@ export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
   try {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const client = new Anthropic();
-    const response = await client.messages.create({ model: 'claude-haiku-4-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] });
+    const response = await client.messages.create({ model: 'claude-sonnet-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] });
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
