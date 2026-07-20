@@ -8,6 +8,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 const str = (v: unknown) => (v == null ? null : String(v).trim() || null);
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : null; };
@@ -30,6 +31,7 @@ export async function getAraosHandoffForCustomer(customerId: string): Promise<{ 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_SEE_FINANCIALS', '无权查看客户成交额交接'); if (err) return { error: err }; }
   if (!customerId) return { data: null };
 
   const svc = createServiceRoleClient();

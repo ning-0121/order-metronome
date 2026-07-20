@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 export interface EmailDomainMapping {
   id: string;
@@ -51,6 +52,7 @@ export async function addEmailDomainMapping(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_CUSTOMER', '仅业务/理单/管理可维护客户邮箱域名映射'); if (err) return { data: null, error: err }; }
 
   const { data, error } = await (supabase.from('customer_email_domains') as any)
     .upsert({
@@ -77,6 +79,7 @@ export async function removeEmailDomainMapping(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_CUSTOMER', '仅业务/理单/管理可维护客户邮箱域名映射'); if (err) return { error: err }; }
 
   const { error } = await (supabase.from('customer_email_domains') as any)
     .delete()

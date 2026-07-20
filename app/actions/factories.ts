@@ -94,6 +94,12 @@ export async function createFactory(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: '请先登录' };
 
+  const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!isAdminRole(userRoles) && !userRoles.some(r => ['production_manager', 'procurement', 'procurement_manager'].includes(r))) {
+    return { data: null, error: '只有管理员/生产主管/采购可以新建工厂' };
+  }
+
   const insertPayload: Record<string, any> = { factory_name: trimmed };
   if (extra?.product_categories?.length) insertPayload.product_categories = extra.product_categories;
   if (extra?.worker_count) insertPayload.worker_count = extra.worker_count;

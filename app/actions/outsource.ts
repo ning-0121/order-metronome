@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 export async function getOutsourceJobs(orderId: string) {
   const supabase = await createClient();
@@ -21,6 +22,7 @@ export async function addOutsourceJob(orderId: string, job: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', '仅生产/跟单/QC/主管可操作外发'); if (err) return { error: err }; }
   if (!job.factory_name?.trim()) return { error: '工厂名称不能为空' };
   if (!job.qty_sent || job.qty_sent <= 0) return { error: '发出数量必须大于0' };
 
@@ -49,6 +51,7 @@ export async function updateOutsourceJob(id: string, orderId: string, patch: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', '仅生产/跟单/QC/主管可操作外发'); if (err) return { error: err }; }
 
   const { error } = await (supabase.from('outsource_jobs') as any)
     .update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
@@ -61,6 +64,7 @@ export async function deleteOutsourceJob(id: string, orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', '仅生产/跟单/QC/主管可操作外发'); if (err) return { error: err }; }
 
   const { error } = await (supabase.from('outsource_jobs') as any).delete().eq('id', id);
   if (error) return { error: error.message };
