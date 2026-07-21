@@ -146,11 +146,13 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
     setApprovingId(null);
   }
 
-  async function handleUpdate(id: string, field: string, value: string | null) {
-    const res = await updateProcurementItem(id, { [field]: value || null });
+  async function handleUpdate(id: string, field: string, value: string | boolean | null) {
+    // offline_paid 是布尔(false 要保留,不能被 || null 吞成 null);其余空串→null。
+    const payloadValue = typeof value === 'boolean' ? value : (value || null);
+    const res = await updateProcurementItem(id, { [field]: payloadValue } as any);
     if (res.error) { await confirm({ title: '保存失败', message: res.error, confirmText: '知道了' }); return; }
     setItems(prev => prev.map(item =>
-      item.id === id ? { ...item, [field]: value, updated_at: new Date().toISOString() } : item
+      item.id === id ? { ...item, [field]: payloadValue, updated_at: new Date().toISOString() } : item
     ));
   }
 
@@ -324,6 +326,8 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
                     <th className="px-3 py-2 text-left font-medium">下单日期</th>
                     <th className="px-3 py-2 text-left font-medium">预计到货</th>
                     <th className="px-3 py-2 text-left font-medium">实际到货</th>
+                    <th className="px-3 py-2 text-left font-medium">金额</th>
+                    <th className="px-3 py-2 text-center font-medium">已线下付款</th>
                     <th className="px-3 py-2 text-left font-medium">状态</th>
                     <th className="px-3 py-2 text-left font-medium">备注</th>
                     <th className="px-3 py-2 text-left font-medium">更新人</th>
@@ -419,6 +423,19 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
                               }}
                               className="px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-xs focus:border-indigo-400 focus:outline-none" />
                           ) : <span className="text-gray-600 text-xs">{item.actual_arrival || '—'}</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          {canEdit ? (
+                            <input type="number" step="0.01" defaultValue={item.amount ?? ''} placeholder="¥"
+                              onBlur={e => { const v = e.target.value; if (String(item.amount ?? '') !== v) handleUpdate(item.id, 'amount', v); }}
+                              className="w-24 px-1.5 py-0.5 border border-transparent hover:border-gray-300 rounded text-sm focus:border-indigo-400 focus:outline-none tabular-nums" />
+                          ) : <span className="text-gray-600 text-xs tabular-nums">{item.amount != null ? `¥${item.amount}` : '—'}</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input type="checkbox" checked={!!item.offline_paid} disabled={!canEdit}
+                            onChange={e => handleUpdate(item.id, 'offline_paid', e.target.checked)}
+                            title="已线下付款:金额计入利润实付,不推财务系统"
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
                         </td>
                         <td className="px-3 py-2">
                           {canEdit ? (

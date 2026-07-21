@@ -45,7 +45,15 @@ export async function recomputeOrderActualCost(orderId: string): Promise<{ ok?: 
         .in('status', ['confirmed', 'submitted', 'paid']);
       trimActual = ((recons || []) as any[]).reduce((s, r) => s + (Number(r.net_payable) || 0), 0);
     }
-    const actual = Number((fabricActual + trimActual).toFixed(2));
+    // 线下采购实付(2026-07-21):采购进度里标了「已线下付款」的金额也计入实付。
+    //   与对账/台账不重复(线下付的不走系统对账);列缺失(迁移未跑)则忽略,不阻断。
+    let offlineActual = 0;
+    try {
+      const { data: offRows } = await (svc.from('procurement_tracking') as any)
+        .select('amount').eq('order_id', orderId).eq('offline_paid', true);
+      offlineActual = ((offRows || []) as any[]).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    } catch { /* amount/offline_paid 列未建 → 忽略 */ }
+    const actual = Number((fabricActual + trimActual + offlineActual).toFixed(2));
     // 预算料款:order_financials.cost_material(建单时预算)作录入率分母
     const { data: fin } = await (svc.from('order_financials') as any)
       .select('cost_material').eq('order_id', orderId).maybeSingle();

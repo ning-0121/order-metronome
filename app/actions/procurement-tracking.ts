@@ -28,6 +28,8 @@ export interface ProcurementItem {
   actual_arrival: string | null;
   status: string;
   notes: string | null;
+  amount: number | null;        // 线下采购金额(RMB,2026-07-21)
+  offline_paid: boolean;        // 已线下付款(计入实付回流)
   updated_by_name: string | null;
   updated_at: string;
   created_at: string;
@@ -67,6 +69,8 @@ export async function addProcurementItem(
     order_date?: string;
     expected_arrival?: string;
     notes?: string;
+    amount?: number | string | null;   // 线下采购金额(RMB,2026-07-21)
+    offline_paid?: boolean;             // 已线下付款(计入实付回流)
   }
 ): Promise<{ error?: string; id?: string }> {
   const supabase = await createClient();
@@ -77,23 +81,29 @@ export async function addProcurementItem(
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || user.email?.split('@')[0] || '';
 
-  const { data, error } = await (supabase.from('procurement_tracking') as any)
-    .insert({
-      order_id: orderId,
-      category: item.category || 'other',
-      item_name: item.item_name,
-      supplier: item.supplier || null,
-      quantity: item.quantity || null,
-      order_date: item.order_date || null,
-      expected_arrival: item.expected_arrival || null,
-      status: 'pending',
-      notes: item.notes || null,
-      updated_by: user.id,
-      updated_by_name: userName,
-      is_supplement: false,
-    })
-    .select('id')
-    .single();
+  const amt = item.amount === '' || item.amount == null ? null : Number(item.amount);
+  const row: any = {
+    order_id: orderId,
+    category: item.category || 'other',
+    item_name: item.item_name,
+    supplier: item.supplier || null,
+    quantity: item.quantity || null,
+    order_date: item.order_date || null,
+    expected_arrival: item.expected_arrival || null,
+    status: 'pending',
+    notes: item.notes || null,
+    amount: amt,
+    offline_paid: !!item.offline_paid,
+    updated_by: user.id,
+    updated_by_name: userName,
+    is_supplement: false,
+  };
+  // amount/offline_paid(20260721 迁移)未执行 → 去掉这两列重试,不阻断录入。
+  let { data, error } = await (supabase.from('procurement_tracking') as any).insert(row).select('id').single();
+  if (error && /amount|offline_paid|does not exist|schema cache/i.test(error.message || '')) {
+    const { amount, offline_paid, ...rest } = row;
+    ({ data, error } = await (supabase.from('procurement_tracking') as any).insert(rest).select('id').single());
+  }
 
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
@@ -272,6 +282,8 @@ export async function updateProcurementItem(
     actual_arrival?: string | null;
     status?: string;
     notes?: string;
+    amount?: number | string | null;   // 线下采购金额(RMB,2026-07-21)
+    offline_paid?: boolean;             // 已线下付款(计入实付回流)
   }
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -282,9 +294,14 @@ export async function updateProcurementItem(
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || user.email?.split('@')[0] || '';
 
-  const { error } = await (supabase.from('procurement_tracking') as any)
-    .update({ ...updates, updated_by: user.id, updated_by_name: userName, updated_at: new Date().toISOString() })
-    .eq('id', itemId);
+  const patch: any = { ...updates, updated_by: user.id, updated_by_name: userName, updated_at: new Date().toISOString() };
+  if ('amount' in patch) patch.amount = patch.amount === '' || patch.amount == null ? null : Number(patch.amount);
+  let { error } = await (supabase.from('procurement_tracking') as any).update(patch).eq('id', itemId);
+  // amount/offline_paid(20260721 迁移)未执行 → 去掉这两列重试,不阻断更新。
+  if (error && /amount|offline_paid|does not exist|schema cache/i.test(error.message || '')) {
+    const { amount, offline_paid, ...rest } = patch;
+    ({ error } = await (supabase.from('procurement_tracking') as any).update(rest).eq('id', itemId));
+  }
 
   if (error) return { error: error.message };
 
