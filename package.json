@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts",
+    "check": "node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts && node --import tsx scripts/test-keep90-invariants.ts",
     "test:runtime": "node --import tsx scripts/test-runtime-confidence.ts",
     "test:server-action-resilience": "node --import tsx scripts/test-server-action-resilience.ts",
     "test:customer-selection": "node --import tsx scripts/test-create-order-customer-selection.ts",

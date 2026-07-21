@@ -48,7 +48,7 @@ function isBlocked(status: string | null | undefined): boolean {
  * 此前只看硬编码列表 → 与模板 is_critical 发散:V2 标 is_critical=true 的 order_kickoff_meeting/mid_qc_sales_check
  * 不在硬编码里 → 引擎当非关键几乎不扣分,与 UI 标红的"关键"徽章对不上,削弱"卡风险"可信度。
  */
-function isMilestoneCritical(m: any): boolean {
+export function isMilestoneCritical(m: any): boolean {
   if (m?.is_critical != null) return !!m.is_critical;
   return isCriticalStep(m?.step_key);
 }
