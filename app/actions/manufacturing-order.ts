@@ -7,11 +7,11 @@
  * 红线:不接 AI、不动旧 legacy 生成器、不碰采购/B1/Material Package/procurement_line_items、无新 migration。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
-import { buildProductionTaskWorkbook, safeProductionTaskFilename } from '@/lib/exports/production-task-template';
+import { buildProductionTaskWorkbook, overlayRawSizeChart, safeProductionTaskFilename } from '@/lib/exports/production-task-template';
 import type { ProductionTaskTemplateModel } from '@/lib/exports/production-task-template-map';
 
 const MO_WRITE_MSG = '仅业务/跟单/生产/生产主管/管理员可编辑或推进生产任务单';
@@ -292,6 +292,19 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   };
   try {
     const workbook = await buildProductionTaskWorkbook(model);
+    // 直接照搬上传的尺码表整张进「尺寸表」sheet(2026-07-20 用户拍板:绕开解析器,任何布局都可用)。
+    //   有上传就照搬;无上传或读取失败 → 保留模板/解析结果,不阻断下载。
+    try {
+      const svc = createServiceRoleClient();
+      const { data: att } = await (svc.from('order_attachments') as any)
+        .select('storage_path').eq('order_id', orderId).eq('file_type', 'size_chart')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      const sp = (att as any)?.storage_path;
+      if (sp) {
+        const { data: file } = await svc.storage.from('order-docs').download(sp);
+        if (file) await overlayRawSizeChart(workbook, await file.arrayBuffer());
+      }
+    } catch { /* 无上传/读取失败 → 保留原尺寸表 */ }
     const buffer = await workbook.xlsx.writeBuffer();
     return { ok: true, base64: Buffer.from(buffer).toString('base64'), fileName: safeProductionTaskFilename(model.internalOrderNumber, styleNumber) };
   } catch (error) {

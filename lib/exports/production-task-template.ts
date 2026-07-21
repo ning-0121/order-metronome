@@ -12,6 +12,41 @@ export function productionTaskTemplatePath(root = process.cwd()) {
 }
 
 /**
+ * 把【上传的尺码表 xlsx 整张】照搬进生产任务单的「尺寸表」sheet(2026-07-20 用户拍板)。
+ * 绕开脆弱的尺码表解析器(NO_RECOGNIZABLE_TABLE)——任何布局的尺码表都能原样进生产单。
+ * 复制单元格值 + 基础样式 + 行高/列宽 + 合并格。成功返回 true;失败(读不出/无表)返回 false,调用方保留原尺寸表。
+ */
+export async function overlayRawSizeChart(
+  workbook: ExcelJS.Workbook,
+  uploadBuffer: ArrayBuffer | Buffer,
+): Promise<boolean> {
+  try {
+    const up = new ExcelJS.Workbook();
+    await up.xlsx.load(uploadBuffer as any);
+    const src = up.worksheets.find(w => w.rowCount > 0) || up.worksheets[0];
+    const dst = workbook.getWorksheet(PRODUCTION_TASK_SHEETS.size);
+    if (!src || !dst) return false;
+    // 清空目标 sheet 现有内容(值)
+    dst.eachRow({ includeEmpty: true }, (row) => { row.eachCell({ includeEmpty: true }, (cell) => { cell.value = null; }); });
+    // 复制源 sheet:值 + 样式 + 行高
+    src.eachRow({ includeEmpty: true }, (row, r) => {
+      if (row.height) dst.getRow(r).height = row.height;
+      row.eachCell({ includeEmpty: true }, (cell, c) => {
+        const d = dst.getCell(r, c);
+        d.value = cell.value as any;
+        try { d.style = JSON.parse(JSON.stringify(cell.style || {})); } catch { /* 样式复制失败忽略 */ }
+      });
+    });
+    // 列宽
+    (src.columns || []).forEach((col, i) => { if (col && col.width) dst.getColumn(i + 1).width = col.width; });
+    // 合并单元格
+    const merges: string[] = (src.model as any)?.merges || [];
+    for (const m of merges) { try { dst.mergeCells(m); } catch { /* 已合并/冲突忽略 */ } }
+    return true;
+  } catch { return false; }
+}
+
+/**
  * 从【内嵌 base64 母版】读取(2026-07-20 修:导出是共享 server-action 包,Vercel 的
  * outputFileTracingIncludes 按页面路由不命中它 → process.cwd()/public 读不到母版“缺失”)。
  * 内嵌成模块 import 必被打包,dev/serverless 都可用,根治 fs/public 问题。root 参数保留仅为向后兼容。
