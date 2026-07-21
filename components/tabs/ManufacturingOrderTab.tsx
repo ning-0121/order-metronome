@@ -134,6 +134,17 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm resize-y" />
     </label>
   );
+  // 成衣辅料/包装辅料:从 BOM 自动带出(只读,与生产任务单模板 B16/B17 同源,不手填避免双录)
+  const accText = (types: string[]) => (bom || [])
+    .filter((b: any) => types.includes(b.material_type))
+    .map((b: any) => [b.material_name, b.spec, b.color].filter(Boolean).join(' ')).filter(Boolean).join('，');
+  const garmentAcc = accText(['trim', 'lining', 'embroidery']);
+  const packagingAcc = accText(['packing', 'label', 'washing', 'print']);
+  const roRow = (label: string, val: string) => (
+    <div className="text-xs text-gray-600">{label}<span className="ml-1 text-[10px] text-gray-400">（BOM 自动带出）</span>
+      <div className="mt-1 w-full rounded-lg border border-gray-200 bg-gray-100 px-3 py-2 text-sm text-gray-700 min-h-[38px] whitespace-pre-wrap">{val || '—'}</div>
+    </div>
+  );
 
   return (
     <div className="space-y-5">
@@ -275,16 +286,19 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
       <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
         <div className="text-xs font-semibold text-gray-600">工厂执行说明（业务翻译，结构化录入）</div>
         <div className="grid md:grid-cols-2 gap-3">
-          {/* 标签与「生产任务单」Excel 行一一对齐(2026-07-10):字段 key 不变,只改显示名,避免误填。
-              缝制要求←print_embroidery_requirements / 检验要求←qc_focus / 包装要求←factory_packing_instructions
-              / 注意事项←risk_notes / 裁剪要求←factory_notes(见 manufacturing-order.ts 生成行) */}
+          {/* 顺序与「生产任务单」模板 B16-B23 一一对齐(2026-07-20):
+              成衣辅料 / 包装辅料(BOM 自动只读)→ 裁剪 → 缝制 → 检验 → 包装 → 装箱 → 注意事项。
+              字段 key 为历史列名:裁剪←factory_notes / 缝制←print_embroidery_requirements / 检验←qc_focus /
+              包装←factory_packing_instructions / 装箱←carton_requirements / 注意事项←risk_notes。
+              「特殊要求」不在模板 → 移除输入框;其旧数据仍并入生产任务单「注意事项」行,不丢。 */}
+          {roRow('成衣辅料', garmentAcc)}
+          {roRow('包装辅料', packagingAcc)}
+          {field('裁剪要求', 'factory_notes')}
           {field('缝制要求', 'print_embroidery_requirements')}
           {field('检验要求（QC 重点）', 'qc_focus')}
-          {field('特殊要求', 'special_requirements')}
-          {field('注意事项', 'risk_notes')}
           {field('包装要求（内部，≠客户原始要求）', 'factory_packing_instructions')}
-          {field('裁剪要求', 'factory_notes')}
           {field('装箱要求', 'carton_requirements')}
+          {field('注意事项', 'risk_notes')}
         </div>
         <div className="flex items-center gap-3">
           <button onClick={save} disabled={saving}
