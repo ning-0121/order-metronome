@@ -45,7 +45,7 @@ export async function uploadSizeChart(orderId: string, formData: FormData): Prom
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', '仅生产/跟单/QC/主管可上传·复核尺码表'); if (err) return { error: err }; }
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可上传·复核尺码表'); if (err) return { error: err }; }
   const file = formData.get('file') as File | null;
   if (!file || !file.size) return { error: '请选择文件' };
   if (file.size > 20 * 1024 * 1024) return { error: '文件不能超过 20MB' };
@@ -118,7 +118,7 @@ export async function reparseSizeChart(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', '仅生产/跟单/QC/主管可上传·复核尺码表'); if (err) return { error: err }; }
+  { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可上传·复核尺码表'); if (err) return { error: err }; }
   // User session proves that this logged-in employee can see the order. The exact attachment read/write then
   // uses service-role because Storage and size_chart_imports RLS previously made reparses silently retain FAILED.
   const { data: visibleOrder } = await (supabase.from('orders') as any).select('id').eq('id', orderId).maybeSingle();
