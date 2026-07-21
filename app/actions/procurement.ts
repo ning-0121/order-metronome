@@ -351,9 +351,9 @@ export async function syncFromProcurementTracking(
   const canSync = roles.some(r => ['merchandiser', 'procurement', 'admin'].includes(r));
   if (!canSync) return { added: 0, skipped: 0, error: '仅跟单/采购/管理员可同步' };
 
-  // 取采购进度里的条目
+  // 取采购进度里的条目(2026-07-21:带上下单日/到货日,同步时映射 line_status,让线下采购补录落对供应链桶)
   const { data: tracking, error: tErr } = await (supabase.from('procurement_tracking') as any)
-    .select('item_name, supplier, quantity, category, notes')
+    .select('item_name, supplier, quantity, category, notes, order_date, expected_arrival, actual_arrival, status')
     .eq('order_id', orderId)
     .eq('is_supplement', false)
     .not('quantity', 'is', null);
@@ -372,17 +372,29 @@ export async function syncFromProcurementTracking(
 
   const toInsert = (tracking as any[])
     .filter(t => !existingNames.has(t.item_name))
-    .map(t => ({
-      order_id: orderId,
-      material_name: t.item_name,
-      supplier_name: t.supplier || null,
-      category: CATEGORY_MAP[t.category] || 'other',
-      ordered_qty: Number(t.quantity) || 0,
-      ordered_unit: 'KG',
-      notes: t.notes || null,
-      ordered_by: auth.userId,
-      ordered_at: new Date().toISOString(),
-    }));
+    .map(t => {
+      // 线下采购补录落对供应链桶(与 20260613_02 迁移映射一致):
+      //   实际到货 → arrived(已送达待验收)/ 下单日 → ordered(在途)/ 其余 → pending_order(待下单)。
+      //   这条路只桥接数据、不 emit 任何财务应付 → 与已线下付款的财务不冲突。
+      const arrived = !!t.actual_arrival;
+      const ordered = !!t.order_date;
+      const lineStatus = arrived ? 'arrived' : ordered ? 'ordered' : 'pending_order';
+      const qty = Number(t.quantity) || 0;
+      return {
+        order_id: orderId,
+        material_name: t.item_name,
+        supplier_name: t.supplier || null,
+        category: CATEGORY_MAP[t.category] || 'other',
+        ordered_qty: qty,
+        ordered_unit: 'KG',
+        line_status: lineStatus,
+        ordered_at: t.order_date ? new Date(t.order_date).toISOString() : new Date().toISOString(),
+        expected_arrival: t.expected_arrival || null,
+        ...(arrived ? { received_qty: qty, received_at: new Date(t.actual_arrival).toISOString() } : {}),
+        notes: t.notes || null,
+        ordered_by: auth.userId,
+      };
+    });
 
   const skipped = tracking.length - toInsert.length;
   if (toInsert.length === 0) return { added: 0, skipped, error: '所有采购进度条目已存在于对账明细中' };
