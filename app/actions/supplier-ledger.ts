@@ -457,6 +457,12 @@ export async function pushLedgerGroupToFinance(params: { supplierNameRaw: string
       });
     } catch (e: any) { console.warn('[pushLedgerGroupToFinance] emit payable.created 失败(不阻断):', e?.message); }
 
+    // 冲90资金流:面料实付(LG)推财务后,把该订单实付回流利润(fire-and-forget,不阻断)
+    if (orderId) {
+      try { const { recomputeOrderActualCost } = await import('./order-financials'); recomputeOrderActualCost(orderId).catch(() => {}); }
+      catch { /* 不阻断 */ }
+    }
+
     revalidatePath('/procurement/ledger');
     return { ok: true, billNo, amount: amountInclTax };
   } catch (e: any) { return { ok: false, error: e?.message || '推财务失败' }; }

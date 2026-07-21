@@ -10,10 +10,65 @@
  * - 控制开关（allow_production/allow_shipment）：admin / finance
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { calculateProfitSnapshot } from '@/lib/services/profit.service';
+
+// 实付成本录入率阈值 0.8:≥ 此值才用实付算利润,否则用预算(防数据不全把利润算高)。
+// 判定在 profit.service 里(lib 不 import server action,硬编码 0.8);'use server' 文件只能 export async 函数,故此处不导出常量。
+
+/**
+ * 采购实付回流利润(2026-07-20 冲90资金流):把面料实付(LG台账 amount_incl_tax,order_id匹配)
+ * + 辅料实付(单订单PO对账 net_payable,confirmed/submitted/paid)汇总到 order_financials.cost_material_actual,
+ * 并记实付录入率 cost_actual_coverage=实付/预算。profit.service 在录入率≥阈值时用实付,否则用预算。
+ * fire-and-forget:采购对账确认 / LG推财务 后调用(不阻断主链路)。service-role 跨表聚合(系统级只读)。
+ */
+export async function recomputeOrderActualCost(orderId: string): Promise<{ ok?: boolean; error?: string }> {
+  try {
+    if (!orderId) return { error: '缺 orderId' };
+    const svc = createServiceRoleClient();
+    // 面料实付:LG 台账应付(order_id 匹配,未作废)
+    const { data: lgRows } = await (svc.from('supplier_ledger_payables') as any)
+      .select('amount_incl_tax').eq('order_id', orderId).eq('status', 'submitted');
+    const fabricActual = ((lgRows || []) as any[]).reduce((s, r) => s + (Number(r.amount_incl_tax) || 0), 0);
+    // 辅料实付:单订单 PO(order_ids 恰含本单且仅本单)的对账 net_payable
+    const { data: pos } = await (svc.from('purchase_orders') as any)
+      .select('id, order_ids').contains('order_ids', [orderId]);
+    const singleOrderPoIds = ((pos || []) as any[])
+      .filter((p) => Array.isArray(p.order_ids) && p.order_ids.length === 1).map((p) => p.id);
+    let trimActual = 0;
+    if (singleOrderPoIds.length) {
+      const { data: recons } = await (svc.from('procurement_reconciliations') as any)
+        .select('net_payable, status').in('purchase_order_id', singleOrderPoIds)
+        .in('status', ['confirmed', 'submitted', 'paid']);
+      trimActual = ((recons || []) as any[]).reduce((s, r) => s + (Number(r.net_payable) || 0), 0);
+    }
+    const actual = Number((fabricActual + trimActual).toFixed(2));
+    // 预算料款:order_financials.cost_material(建单时预算)作录入率分母
+    const { data: fin } = await (svc.from('order_financials') as any)
+      .select('cost_material').eq('order_id', orderId).maybeSingle();
+    const budgetMaterial = Number((fin as any)?.cost_material) || 0;
+    const coverage = budgetMaterial > 0
+      ? Math.min(1, Number((actual / budgetMaterial).toFixed(3)))
+      : (actual > 0 ? 1 : 0);
+    const { error } = await (svc.from('order_financials') as any)
+      .update({ cost_material_actual: actual || null, cost_actual_coverage: coverage, updated_at: new Date().toISOString() })
+      .eq('order_id', orderId);
+    if (error) {
+      if (/cost_material_actual|cost_actual_coverage|does not exist|schema cache/i.test(error.message || '')) {
+        return { error: '实付列未建(请执行 20260720_order_financials_actual_cost migration)' };
+      }
+      return { error: error.message };
+    }
+    // 重算利润快照(用新实付)
+    try { await calculateProfitSnapshot(svc as any, { orderId, snapshotType: 'live' }); } catch { /* 不阻断 */ }
+    return { ok: true };
+  } catch (e: any) {
+    return { error: e?.message || '实付回流失败' };
+  }
+}
 
 export interface OrderFinancials {
   id: string;
