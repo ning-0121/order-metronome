@@ -213,6 +213,19 @@ export async function calculateProfitSnapshot(
       return err(`Failed to save profit snapshot: ${snapErr.message}`)
     }
 
+    // 收口利润双轨(2026-07-21):profit_snapshots 为利润单一真相源;顺手把 order_financials.margin_pct/
+    //   gross_profit_rmb 同步成快照值,避免建单期旧值与快照发散(orderDecisionRules/riskAssessment 等读 margin_pct)。
+    //   仅 live 快照同步;best-effort,失败不阻断。
+    if (snapshotType === 'live') {
+      try {
+        await (supabase.from('order_financials') as any).update({
+          margin_pct: numbers.grossMargin != null ? Number((numbers.grossMargin * 100).toFixed(1)) : null,
+          gross_profit_rmb: numbers.grossProfit != null ? Number(numbers.grossProfit.toFixed(2)) : null,
+          updated_at: new Date().toISOString(),
+        }).eq('order_id', orderId)
+      } catch { /* 同步失败不阻断快照 */ }
+    }
+
     // 7. 触发告警逻辑
     let shouldAlert = false
     let alertSeverity = null as any

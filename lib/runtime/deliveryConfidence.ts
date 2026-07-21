@@ -12,7 +12,6 @@
  */
 
 import {
-  CRITICAL_STEP_KEYS,
   SHIPMENT_STEP_KEYS,
   isCriticalStep,
   isShipmentStep,
@@ -41,6 +40,17 @@ function isDone(status: string | null | undefined): boolean {
 
 function isBlocked(status: string | null | undefined): boolean {
   return !!status && BLOCKED_STATUSES.has(status);
+}
+
+/**
+ * 关键节点判定(2026-07-21 收口双轨真相):优先用 milestone 物化的 is_critical(= 模板 MILESTONE_TEMPLATE 单一真相),
+ * 仅当 is_critical 为空(老数据/未物化)时回退硬编码 CRITICAL_STEP_KEYS。
+ * 此前只看硬编码列表 → 与模板 is_critical 发散:V2 标 is_critical=true 的 order_kickoff_meeting/mid_qc_sales_check
+ * 不在硬编码里 → 引擎当非关键几乎不扣分,与 UI 标红的"关键"徽章对不上,削弱"卡风险"可信度。
+ */
+function isMilestoneCritical(m: any): boolean {
+  if (m?.is_critical != null) return !!m.is_critical;
+  return isCriticalStep(m?.step_key);
 }
 
 function daysBetween(a: Date, b: Date): number {
@@ -79,7 +89,7 @@ export function findNextCriticalBlocker(
   now: Date,
 ): NextBlocker | null {
   const undone = milestones
-    .filter(m => !isDone(m.status) && CRITICAL_STEP_KEYS.has(m.step_key))
+    .filter(m => !isDone(m.status) && isMilestoneCritical(m))
     .sort((a, b) => {
       const ax = a.sequence_number ?? 999;
       const bx = b.sequence_number ?? 999;
@@ -165,7 +175,7 @@ export function computeDeliveryConfidence(
 
   // ─── B. 关键节点扣分
   const undoneCritical = milestones.filter(
-    m => !isDone(m.status) && isCriticalStep(m.step_key),
+    m => !isDone(m.status) && isMilestoneCritical(m),
   );
 
   // 收集"普通超期"的关键节点（blocked / 已批延期单独立刻扣分）
@@ -261,7 +271,7 @@ export function computeDeliveryConfidence(
 
   // ─── C. 非关键节点超期（小幅扣分，封顶 -10）
   const undoneNonCritical = milestones.filter(
-    m => !isDone(m.status) && !isCriticalStep(m.step_key),
+    m => !isDone(m.status) && !isMilestoneCritical(m),
   );
   let nonCriticalOverdueCount = 0;
   for (const m of undoneNonCritical) {
@@ -526,7 +536,7 @@ function predictFinishDate(milestones: any[], factoryDate: Date | null, now: Dat
   for (const m of undone) {
     const due = new Date(m.due_at);
     if (due > latest) latest = due;
-    if (isCriticalStep(m.step_key)) {
+    if (isMilestoneCritical(m)) {
       const od = daysBetween(now, due);
       if (od > maxOverdue) maxOverdue = od;
     }
