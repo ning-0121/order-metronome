@@ -1,21 +1,26 @@
 import ExcelJS from 'exceljs';
 import path from 'node:path';
-import { access } from 'node:fs/promises';
 import {
   PRODUCTION_TASK_CELLS as C, PRODUCTION_TASK_SHEETS, PRODUCTION_TASK_TEMPLATE_RELATIVE_PATH,
   type ProductionTaskTemplateModel, type ProductionTaskSizeMeasurement,
 } from './production-task-template-map';
+import { PRODUCTION_TASK_TEMPLATE_BASE64 } from './production-task-template-data';
 import { orderSizeKeys } from '@/lib/utils/size-sort';
 
 export function productionTaskTemplatePath(root = process.cwd()) {
   return path.join(root, PRODUCTION_TASK_TEMPLATE_RELATIVE_PATH);
 }
 
-export async function loadProductionTaskTemplate(root = process.cwd()) {
-  const templatePath = productionTaskTemplatePath(root);
-  try { await access(templatePath); } catch { throw new Error(`生产任务单母版缺失：${templatePath}`); }
+/**
+ * 从【内嵌 base64 母版】读取(2026-07-20 修:导出是共享 server-action 包,Vercel 的
+ * outputFileTracingIncludes 按页面路由不命中它 → process.cwd()/public 读不到母版“缺失”)。
+ * 内嵌成模块 import 必被打包,dev/serverless 都可用,根治 fs/public 问题。root 参数保留仅为向后兼容。
+ */
+export async function loadProductionTaskTemplate(_root = process.cwd()) {
+  const buffer = Buffer.from(PRODUCTION_TASK_TEMPLATE_BASE64, 'base64');
+  if (!buffer.length) throw new Error('生产任务单母版缺失：内嵌母版为空(请重跑 gen 脚本)');
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(templatePath);
+  await workbook.xlsx.load(buffer);
   const names = workbook.worksheets.map(s => s.name);
   if (names.length !== 2 || names[0] !== PRODUCTION_TASK_SHEETS.main || names[1] !== PRODUCTION_TASK_SHEETS.size) {
     throw new Error(`生产任务单母版工作表不匹配：${names.join('、')}`);

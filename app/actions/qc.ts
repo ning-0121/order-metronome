@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 
@@ -61,8 +61,12 @@ export async function deleteQcInspection(id: string, orderId: string) {
   if (!user) return { error: '请先登录' };
   { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', QC_WRITE_MSG); if (err) return { error: err }; }
 
-  const { error } = await (supabase.from('qc_inspections') as any).delete().eq('id', id);
+  // 2026-07-20 修:qc_inspections 无 DELETE 的 RLS 策略 → user-session 删静默删 0 行、无 error(“无法删除”)。
+  // 门禁已在上面用 user-session 校验;实际删除走 service-role 绕 RLS,并用 .select() 确认真删了行。
+  const svc = createServiceRoleClient();
+  const { data: deleted, error } = await (svc.from('qc_inspections') as any).delete().eq('id', id).select('id');
   if (error) return { error: error.message };
+  if (!deleted || deleted.length === 0) return { error: '删除失败:记录不存在' };
   revalidatePath(`/orders/${orderId}`);
   return {};
 }
