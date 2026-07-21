@@ -92,7 +92,7 @@ export function QcTab({ orderId, isAdmin, currentRole }: { orderId: string; isAd
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${rc.cls}`}>{rc.label}</span>
-                    <button onClick={() => { if (confirm('删除此检验记录？')) deleteQcInspection(rec.id, orderId).then(reload); }} className="text-xs text-red-500 hover:underline">删除</button>
+                    <button onClick={async () => { if (!confirm('删除此检验记录？')) return; const r = await deleteQcInspection(rec.id, orderId); if ((r as any)?.error) { setError((r as any).error); return; } setError(''); reload(); }} className="text-xs text-red-500 hover:underline">删除</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-4 gap-3 mb-3">

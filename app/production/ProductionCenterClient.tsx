@@ -77,7 +77,9 @@ export function ProductionCenterClient({
     });
   }
 
-  useEffect(() => { if (initialDetail || initialStage) load(true); /* explicit navigation only */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 2026-07-20 修:点不同 KPI/入口/面板是客户端导航,组件复用不重挂,[] 依赖只跑一次 →
+  //   永远显示第一次的全量、不按点击的 detail/stage 过滤。改为随 initialDetail/initialStage 变化重载。
+  useEffect(() => { if (initialDetail || initialStage) { setOpen(true); load(true); } }, [initialDetail, initialStage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeTotal = summary.awaiting_procurement + summary.materials_in_transit + summary.ready_to_schedule + summary.in_production + summary.ready_to_ship;
   const flowTotal = activeTotal + summary.completed;
