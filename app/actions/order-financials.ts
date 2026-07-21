@@ -124,12 +124,25 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
   const grossProfit = saleTotal - costTotal;
   const marginPct = saleTotal > 0 ? Number(((grossProfit / saleTotal) * 100).toFixed(1)) : 0;
 
+  // 应收额落库(2026-07-20 冲90 资金流②):把成交总额 sale_total 拆成 定金/尾款,供 recordPayment 判
+  //   received、放货门禁读 *_status==='received'(此前 deposit_amount/balance_amount 全库无写入→状态永卡 partial)。
+  //   定金比例:沿用已录 deposit_rate,首次默认 0.3(30%定金/70%尾款,用户 2026-07-20 拍板)。
+  //   sale_total 变则金额重算;deposit_received/balance_received 不在 payload,upsert 不动 → 收款进度不丢。
+  const { data: existingFin } = await (supabase.from('order_financials') as any)
+    .select('deposit_rate').eq('order_id', orderId).maybeSingle();
+  const depositRate = Number((existingFin as any)?.deposit_rate) > 0 ? Number((existingFin as any).deposit_rate) : 0.3;
+  const depositAmount = saleTotal > 0 ? Number((saleTotal * depositRate).toFixed(2)) : null;
+  const balanceAmount = saleTotal > 0 ? Number((saleTotal - (depositAmount || 0)).toFixed(2)) : null;
+
   // 插入 order_financials(cost_total 是生成列,不写→428C9;只写普通列)
   const finPayload: Record<string, unknown> = {
     order_id: orderId,
     sale_price_per_piece: salePrice || null,
     sale_currency: order.currency || 'USD',
     sale_total: saleTotal || null,
+    deposit_rate: depositRate,
+    deposit_amount: depositAmount,
+    balance_amount: balanceAmount,
     exchange_rate: exchangeRate,
     cost_material: costMaterial,
     cost_cmt: costCmt,
