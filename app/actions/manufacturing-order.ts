@@ -25,12 +25,13 @@ const CAT_LABEL: Record<string, string> = {
 };
 
 export interface MoFields {
-  print_embroidery_requirements?: string | null;
-  qc_focus?: string | null;
-  special_requirements?: string | null;
-  risk_notes?: string | null;
-  factory_packing_instructions?: string | null;
-  factory_notes?: string | null;
+  print_embroidery_requirements?: string | null;   // 缝制要求(列名历史遗留)
+  qc_focus?: string | null;                         // 检验要求(QC重点)
+  special_requirements?: string | null;             // 特殊要求
+  risk_notes?: string | null;                       // 注意事项
+  factory_packing_instructions?: string | null;     // 包装要求(内部)
+  factory_notes?: string | null;                    // 裁剪要求(列名历史遗留)
+  carton_requirements?: string | null;              // 装箱要求(2026-07-20 对齐模板 B22)
 }
 
 /** 取生产任务单 + 绑定的 Customer Order / 款色码 / Material Package 摘要(组合,不复制)。 */
@@ -79,24 +80,31 @@ export async function upsertManufacturingOrder(orderId: string, fields: MoFields
     risk_notes: fields.risk_notes || null,
     factory_packing_instructions: fields.factory_packing_instructions || null,
     factory_notes: fields.factory_notes || null,
+    carton_requirements: fields.carton_requirements || null,   // 2026-07-20 对齐模板 B22
   };
+  // carton_requirements(20260720 迁移)未执行时,DB 报「column does not exist」→ 去掉该列重试,不阻断保存。
+  const isMissingCartonCol = (msg?: string) => /carton_requirements|column .* does not exist|schema cache/i.test(msg || '');
+  const stripCarton = ({ carton_requirements, ...rest }: typeof patch) => rest;
 
   const { data: existing } = await (supabase.from('manufacturing_orders') as any)
     .select('id').eq('order_id', orderId).maybeSingle();
 
   if (existing) {
-    const { error } = await (supabase.from('manufacturing_orders') as any)
+    let { error } = await (supabase.from('manufacturing_orders') as any)
       .update({ ...patch, updated_at: new Date().toISOString() }).eq('order_id', orderId);
+    if (error && isMissingCartonCol(error.message)) {
+      ({ error } = await (supabase.from('manufacturing_orders') as any)
+        .update({ ...stripCarton(patch), updated_at: new Date().toISOString() }).eq('order_id', orderId));
+    }
     if (error) return { error: friendlyError(error) };
   } else {
     const { data: order } = await (supabase.from('orders') as any)
       .select('order_no').eq('id', orderId).single();
-    const { error } = await (supabase.from('manufacturing_orders') as any).insert({
-      order_id: orderId,
-      mo_no: `MO-${(order as any)?.order_no || orderId.slice(0, 8)}`,
-      ...patch,
-      created_by: user.id,
-    });
+    const base = { order_id: orderId, mo_no: `MO-${(order as any)?.order_no || orderId.slice(0, 8)}`, created_by: user.id };
+    let { error } = await (supabase.from('manufacturing_orders') as any).insert({ ...base, ...patch });
+    if (error && isMissingCartonCol(error.message)) {
+      ({ error } = await (supabase.from('manufacturing_orders') as any).insert({ ...base, ...stripCarton(patch) }));
+    }
     if (error) return { error: friendlyError(error) };
   }
   revalidatePath(`/orders/${orderId}`);
@@ -275,7 +283,7 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
       sewing: mo.print_embroidery_requirements,
       inspection: mo.qc_focus,
       packaging: mo.factory_packing_instructions,
-      carton: '',
+      carton: mo.carton_requirements || '',   // 2026-07-20 对齐模板 B22「装箱要求」(此前硬编码空)
       attention: [mo.risk_notes, mo.special_requirements].filter(Boolean).join('；'),
     },
     receiver: '', receiptTime: '', sizeChart,
@@ -614,7 +622,7 @@ async function buildMoWorkbook(
       ['缝制要求：', mo.print_embroidery_requirements || ''],
       ['检验要求：', mo.qc_focus || ''],
       ['包装要求：', mo.factory_packing_instructions || ''],
-      ['装箱要求：', ''],
+      ['装箱要求：', mo.carton_requirements || ''],
       ['注意事项：', mo.risk_notes || mo.special_requirements || '', true],
     ];
     reqRows.forEach(([label, val, red], i) => {

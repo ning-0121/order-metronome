@@ -30,7 +30,7 @@ const STATUS_RANK: Record<string, number> = { draft: 0, reviewing: 0, confirmed:
 
 const emptyForm = {
   print_embroidery_requirements: '', qc_focus: '', special_requirements: '',
-  risk_notes: '', factory_packing_instructions: '', factory_notes: '',
+  risk_notes: '', factory_packing_instructions: '', factory_notes: '', carton_requirements: '',
 };
 
 export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
@@ -56,7 +56,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
         print_embroidery_requirements: d.mo.print_embroidery_requirements || '',
         qc_focus: d.mo.qc_focus || '', special_requirements: d.mo.special_requirements || '',
         risk_notes: d.mo.risk_notes || '', factory_packing_instructions: d.mo.factory_packing_instructions || '',
-        factory_notes: d.mo.factory_notes || '',
+        factory_notes: d.mo.factory_notes || '', carton_requirements: d.mo.carton_requirements || '',
       });
     }
     setLoading(false);
@@ -284,6 +284,7 @@ export function ManufacturingOrderTab({ orderId }: { orderId: string }) {
           {field('注意事项', 'risk_notes')}
           {field('包装要求（内部，≠客户原始要求）', 'factory_packing_instructions')}
           {field('裁剪要求', 'factory_notes')}
+          {field('装箱要求', 'carton_requirements')}
         </div>
         <div className="flex items-center gap-3">
           <button onClick={save} disabled={saving}
@@ -345,7 +346,7 @@ function MoSheetPreview({ order, mo, lineItems, bom, onClose, onDownload }: {
               ['缝制要求', mo.print_embroidery_requirements || ''],
               ['检验要求', mo.qc_focus || ''],
               ['包装要求', mo.factory_packing_instructions || ''],
-              ['装箱要求', ''],
+              ['装箱要求', mo.carton_requirements || ''],
               ['注意事项', mo.risk_notes || mo.special_requirements || ''],
             ];
             const nCols = Math.max(sizeKeys.length, 1) + 5;
