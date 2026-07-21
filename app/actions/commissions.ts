@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import { isDoneStatus } from '@/lib/domain/types';
+import { COMMISSION_BASE_TYPE, computeCommissionAmount } from '@/lib/domain/commission-config';
 
 // 业务负责的关卡 step_keys
 const SALES_STEPS = [
@@ -211,6 +212,33 @@ export async function calculateOrderScore(
   const vetoed = (cancelReqs || []).length > 0;
   const vetoReason = vetoed ? '订单已取消' : null;
 
+  // 佣金金额化(2026-07-21 冲90资金流③):应发佣金 = 成交额 × 标准率 × 绩效系数(commission_rate)。
+  //   成交额取 order_financials.sale_total 折 RMB;标准率见 commission-config(默认1%,可改)。vetoed→0。
+  let revenueCny = 0;
+  {
+    const { data: fin } = await (supabase.from('order_financials') as any)
+      .select('sale_total, sale_currency, exchange_rate').eq('order_id', orderId).maybeSingle();
+    if (fin) {
+      const cur = String((fin as any).sale_currency || 'USD').toUpperCase();
+      const st = Number((fin as any).sale_total) || 0;
+      revenueCny = (cur === 'CNY' || cur === 'RMB') ? st : st * (Number((fin as any).exchange_rate) || 7.2);
+    }
+  }
+  const commFields = (rate: number) => ({
+    commission_amount: vetoed ? 0 : computeCommissionAmount(revenueCny, rate),
+    commission_base: Math.round(revenueCny * 100) / 100,
+    commission_base_type: COMMISSION_BASE_TYPE,
+  });
+  // 降级 upsert:commission_amount 等列(20260721 迁移)未执行 → 去掉这些列重试,不阻断评分写入。
+  const upsertComm = async (payload: any) => {
+    let { error } = await (supabase.from('order_commissions') as any).upsert(payload, { onConflict: 'order_id,user_id' });
+    if (error && /commission_amount|commission_base|does not exist|schema cache/i.test(error.message || '')) {
+      const { commission_amount, commission_base, commission_base_type, ...rest } = payload;
+      ({ error } = await (supabase.from('order_commissions') as any).upsert(rest, { onConflict: 'order_id,user_id' }));
+    }
+    return error;
+  };
+
   // 写入业务评分
   const salesPayload = {
     order_id: orderId,
@@ -224,6 +252,7 @@ export async function calculateOrderScore(
     total_score: salesTotal,
     grade: vetoed ? 'D' : salesGrade.grade,
     commission_rate: vetoed ? 0 : salesGrade.rate,
+    ...commFields(vetoed ? 0 : salesGrade.rate),
     vetoed,
     veto_reason: vetoReason,
     detail_json: salesDetail,
@@ -231,8 +260,7 @@ export async function calculateOrderScore(
     calculated_by: manualCalcBy || null,
   };
 
-  await (supabase.from('order_commissions') as any)
-    .upsert(salesPayload, { onConflict: 'order_id,user_id' });
+  await upsertComm(salesPayload);
 
   // 写入跟单评分（如有跟单负责人）
   if (merchandiserUserId) {
@@ -255,6 +283,7 @@ export async function calculateOrderScore(
       total_score: merchTotal,
       grade: vetoed ? 'D' : merchGrade.grade,
       commission_rate: vetoed ? 0 : merchGrade.rate,
+      ...commFields(vetoed ? 0 : merchGrade.rate),
       vetoed,
       veto_reason: vetoReason,
       detail_json: merchDetail,
@@ -262,8 +291,7 @@ export async function calculateOrderScore(
       calculated_by: manualCalcBy || null,
     };
 
-    await (supabase.from('order_commissions') as any)
-      .upsert(merchPayload, { onConflict: 'order_id,user_id' });
+    await upsertComm(merchPayload);
   }
 
   revalidatePath(`/orders/${orderId}`);
