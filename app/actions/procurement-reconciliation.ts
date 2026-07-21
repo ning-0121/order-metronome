@@ -176,7 +176,7 @@ export async function confirmReconciliation(reconId: string, confirm = true) {
   if (gate) return { error: gate };
 
   const { data: recon } = await (supabase.from('procurement_reconciliations') as any)
-    .select('status').eq('id', reconId).maybeSingle();
+    .select('status, purchase_order_id').eq('id', reconId).maybeSingle();
   if (!recon) return { error: '对账单不存在' };
   if (confirm && (recon as any).status !== 'draft') return { error: '仅草稿态可确认' };
   if (!confirm && (recon as any).status !== 'confirmed') return { error: '仅已确认(未推财务)可撤回' };
@@ -187,6 +187,19 @@ export async function confirmReconciliation(reconId: string, confirm = true) {
     : { status: 'draft', confirmed_by: null, confirmed_at: null, updated_at: new Date().toISOString() };
   const { error } = await (supabase.from('procurement_reconciliations') as any).update(upd).eq('id', reconId);
   if (error) return { error: friendlyError(error) };
+
+  // 冲90资金流:对账确认/撤回后,把该 PO 单订单的实付回流利润(fire-and-forget,不阻断对账)
+  try {
+    const poId = (recon as any).purchase_order_id;
+    if (poId) {
+      const { data: po } = await (supabase.from('purchase_orders') as any).select('order_ids').eq('id', poId).maybeSingle();
+      const oids: string[] = Array.isArray((po as any)?.order_ids) ? (po as any).order_ids : [];
+      if (oids.length === 1) {
+        const { recomputeOrderActualCost } = await import('./order-financials');
+        recomputeOrderActualCost(oids[0]).catch(() => {});
+      }
+    }
+  } catch { /* 不阻断 */ }
   return { ok: true };
 }
 

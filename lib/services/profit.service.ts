@@ -99,10 +99,18 @@ function aggregateProfitNumbers(financials: any, baseline: any, order: any, over
   // 成本（优先用 overrides，其次 order_financials，最后 cost_baseline）
   // 审计 P1:原用 `||` → 合法 0 值(cost_material=0)被当缺失回退到预算面料额。
   // 改显式 null 判断:financials 填了(含 0)就用它,没填才回退基线。
+  // 料款优先级(2026-07-20 冲90资金流):手动override > 采购实付(录入率≥0.8) > order_financials预算 > 基线。
+  //   实付录入率 cost_actual_coverage<0.8 视为数据不全 → 回退预算,不因实付未录全把成本算低/利润算高。
+  //   (阈值同 order-financials.COST_ACTUAL_COVERAGE_THRESHOLD;此处 lib 不 import server action,硬编码 0.8。)
+  const useActualMaterial = financials?.cost_material_actual != null
+    && Number(financials?.cost_material_actual) > 0
+    && Number(financials?.cost_actual_coverage ?? 0) >= 0.8
   const materialCost = overrides?.materialCost
-    ?? (financials?.cost_material != null
-      ? Number(financials.cost_material)
-      : Number(baseline?.budget_fabric_amount ?? 0))
+    ?? (useActualMaterial
+      ? Number(financials.cost_material_actual)
+      : (financials?.cost_material != null
+        ? Number(financials.cost_material)
+        : Number(baseline?.budget_fabric_amount ?? 0)))
 
   const processingCost = overrides?.processingCost
     ?? (financials?.cost_cmt != null
