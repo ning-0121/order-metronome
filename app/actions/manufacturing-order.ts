@@ -249,8 +249,10 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   const packagingAccessories = materials.filter(x => ['packing', 'label', 'washing', 'print'].includes(x.material_type));
   const materialText = (rows: any[]) => rows.map(x => [x.material_name, x.spec, x.color].filter(Boolean).join(' ')).filter(Boolean).join('，');
   const isSet = /set|套/i.test(`${styleNumber} ${order.product_description || ''}`) || new Set(lines.map(x => x.style_no).filter(Boolean)).size > 1;
-  const total = isSet ? (Number(order.quantity) || Math.max(0, ...colors.map(color => Number(color.quantity) || 0)))
-    : (colors.reduce((n, color) => n + (Number(color.quantity) || 0), 0) || Number(order.quantity) || 0);
+  // 2026-07-20 修:表头「数量」/「总计」必须与每色数量(qty_pcs;套装单=套数)同口径求和。
+  //   此前套装单 total 走 order.quantity(件数,如 4800)→ 与每色(套,和=2400)对不上。
+  //   逐款明细(套数)是唯一真相源;order.quantity 仅在无逐款时兜底。quantityBasis='set' 保证显示「套」。
+  const total = colors.reduce((n, color) => n + (Number(color.quantity) || 0), 0) || Number(order.quantity) || 0;
   const { data: chartImport } = await (supabase.from('size_chart_imports') as any)
     .select('parsed_json, parse_status').eq('order_id', orderId)
     .in('parse_status', ['PARSED', 'NEEDS_REVIEW']).order('updated_at', { ascending: false }).limit(1).maybeSingle();
