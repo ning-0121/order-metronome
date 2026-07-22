@@ -6,29 +6,9 @@ import { ProductionCenterClient } from './ProductionCenterClient';
 import { ReconcileExportButton } from './ReconcileExportButton';
 import { buildProductionDashboard, type DashboardRole } from '@/lib/production/dashboard';
 import { createClient } from '@/lib/supabase/server';
-import { getDailyTasks, generateDailyTasks } from '@/lib/services/daily-tasks.service';
+import { loadUserProductionTodayTasks } from '@/lib/production/today-tasks';
 
 export const dynamic = 'force-dynamic';
-
-const PROD_TASK_TYPES = ['prod_material_chase', 'prod_factory_arrange', 'prod_first_day', 'prod_mid_qc', 'prod_final_qc', 'prod_packing', 'prod_issue'];
-
-/** 当前用户今日的生产待办(当天未生成则触发一次幂等生成)。 */
-async function loadProductionTodayTasks(): Promise<any[]> {
-  try {
-    const supa = await createClient();
-    const { data: { user } } = await supa.auth.getUser();
-    if (!user) return [];
-    const today = new Date().toISOString().slice(0, 10);
-    let r: any = await getDailyTasks(supa, user.id);
-    let all: any[] = r?.ok ? r.data : [];
-    if (all.length === 0) {   // 当天还没为该用户生成过 → 触发一次(幂等,UNIQUE 去重)
-      await generateDailyTasks(supa, { trigger: 'daily_cron', date: today });
-      r = await getDailyTasks(supa, user.id);
-      all = r?.ok ? r.data : [];
-    }
-    return all.filter((t: any) => PROD_TASK_TYPES.includes(t.task_type));
-  } catch { return []; }
-}
 
 export default async function ProductionCenterPage({ searchParams }: { searchParams: Promise<{ detail?: string; stage?: string; q?: string }> }) {
   const params = await searchParams;
@@ -45,7 +25,9 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
     : roles.some((item) => ['qc', 'quality'].includes(item)) ? 'qc'
     : canManage ? 'supervisor' : 'follow_up';
   const dashboard = buildProductionDashboard(rows, summary, role);
-  const todayTasks = await loadProductionTodayTasks();
+  const supa = await createClient();
+  const { data: { user } } = await supa.auth.getUser();
+  const todayTasks = user ? await loadUserProductionTodayTasks(supa, user.id) : [];
   const initialDetail = params.q || params.detail || '';
   const updatedAt = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(new Date());
 

@@ -10,6 +10,7 @@ import { ExpandableList } from '@/components/ExpandableList';
 import { MyProcurementTrackingCard } from '@/components/MyProcurementTrackingCard';
 import { ExportOrderSummaryButton } from '@/components/ExportOrderSummaryButton';
 import { getPendingApprovals, CATEGORY_META } from '@/lib/services/pending-approvals.service';
+import { loadUserProductionTodayTasks } from '@/lib/production/today-tasks';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -116,6 +117,9 @@ export default async function DashboardPage() {
     .select('*')
     .eq('user_id', user.id)
     .single();
+
+  // 生产今日待办(催料/排厂/首日/中查/尾查/包装/追踪问题);非生产跟单一般为空 → 卡片自动隐藏
+  const prodTodayTasks = await loadUserProductionTodayTasks(supabase, user.id);
 
   // 获取用户角色列表
   const userRoles: string[] = (() => {
@@ -310,6 +314,25 @@ export default async function DashboardPage() {
         </div>
         </div>
       </div>
+
+      {/* 🗓️ 我的今日待办 — 生产跟单该干的活(催料/排厂/首日/中查/尾查/包装/追踪问题;无则隐藏) */}
+      {prodTodayTasks.length > 0 && (
+        <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold text-indigo-900">🗓️ 我的今日待办（{prodTodayTasks.length} 件）</h2>
+            <Link href="/production" className="text-xs text-indigo-700 hover:underline">去生产中心 →</Link>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {prodTodayTasks.slice(0, 8).map((t: any) => (
+              <Link key={t.id} href={t.action_url || '/production'}
+                className="flex items-center gap-2.5 bg-white rounded-lg border border-indigo-100 p-3 hover:border-indigo-300 transition-all">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${t.priority === 1 ? 'bg-red-500' : 'bg-amber-400'}`} />
+                <span className="text-sm text-gray-800 truncate flex-1">{t.title}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ⏳ 审批中心 — 待我处理的延期/改单等审批(审批人角色才有;0 项不显示) */}
       {myApprovals.length > 0 && (
