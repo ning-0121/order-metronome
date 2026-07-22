@@ -260,6 +260,14 @@ export type TaskType =
   | 'email_action'
   | 'missing_info'
   | 'decision_required'
+  // 生产今日工作台(2026-07-22,见 migration 20260722_production_daily_tasks.sql)
+  | 'prod_material_chase'
+  | 'prod_factory_arrange'
+  | 'prod_first_day'
+  | 'prod_mid_qc'
+  | 'prod_final_qc'
+  | 'prod_packing'
+  | 'prod_issue'
 
 export type TaskPriority = 1 | 2 | 3
 

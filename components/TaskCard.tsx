@@ -16,6 +16,14 @@ const TASK_TYPE_CONFIG: Record<TaskType, { icon: string; label: string; color: s
   email_action:       { icon: '📧', label: '邮件待处理', color: 'border-l-purple-400' },
   missing_info:       { icon: '⚠️', label: '信息缺失',   color: 'border-l-yellow-500' },
   decision_required:  { icon: '🤔', label: '待决策',     color: 'border-l-indigo-500' },
+  // 生产今日工作台(2026-07-22)
+  prod_material_chase:  { icon: '📦', label: '催原辅料', color: 'border-l-amber-500' },
+  prod_factory_arrange: { icon: '🏭', label: '安排工厂', color: 'border-l-cyan-500' },
+  prod_first_day:       { icon: '🎬', label: '首日上线', color: 'border-l-violet-500' },
+  prod_mid_qc:          { icon: '🔍', label: '中期验货', color: 'border-l-blue-500' },
+  prod_final_qc:        { icon: '✅', label: '尾期验货', color: 'border-l-teal-500' },
+  prod_packing:         { icon: '📦', label: '包装追踪', color: 'border-l-lime-500' },
+  prod_issue:           { icon: '❗', label: '问题追踪', color: 'border-l-red-500' },
 };
 
 const PRIORITY_LABEL: Record<number, { text: string; badge: string }> = {

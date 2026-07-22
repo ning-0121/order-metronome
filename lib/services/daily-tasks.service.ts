@@ -16,6 +16,7 @@ import type {
   TaskPriority,
 } from './types'
 import { TERMINAL_LIFECYCLE_FILTER } from '@/lib/domain/lifecycleStatus'
+import { KICKOFF_KEYS, MID_QC_KEYS, FACTORY_DONE_KEYS, RECEIVED, DONE } from '@/lib/production/stage'
 
 // ── 今日日期字符串 ─────────────────────────────────────────────
 function todayStr(): string {
@@ -702,6 +703,139 @@ export async function escalateStaleTasks(
 // generateDailyTasks
 // 主函数：根据 trigger 类型生成对应任务
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// generateProductionTasks — 来源8(2026-07-22 生产今日工作台)
+// 生产跟单每天该干的活:催料 / 排厂 / 首日上线 / 中查 / 尾查 / 包装。
+// 纯派生自「生产节点 due_at + 物料就绪 + 工厂」,指派给该单的生产跟单
+// (production 角色节点 owner,回落订单 owner/建单人)。写进 daily_tasks →
+// 自动出现在 /my-today 与生产中心「今日待办」面板。追踪历史问题(prod_issue)
+// 由第3步 production_issues 单独生成。
+// ─────────────────────────────────────────────────────────────
+async function generateProductionTasks(
+  supabase: SupabaseClient,
+  targetDate: string
+): Promise<TaskGenerationResult> {
+  let created = 0
+  let skipped = 0
+  const errors: string[] = []
+  const SOON_DAYS = 3       // 节点到期前 3 天内(含逾期)开始提醒
+  const MATERIAL_DAYS = 7   // 催料窗口更早:开裁前 7 天就该盯料
+
+  const { data: orders, error: ordErr } = await (supabase.from('orders') as any)
+    .select('id, order_no, internal_order_no, customer_name, factory_name, owner_user_id, created_by, lifecycle_status')
+    .not('lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER)
+  if (ordErr) { errors.push(`prodOrders: ${ordErr.message}`); return { created, skipped, errors } }
+  const list = (orders || []) as any[]
+  if (list.length === 0) return { created, skipped, errors }
+  const orderIds = list.map((o) => o.id)
+
+  const PROD_STEP_KEYS = [...KICKOFF_KEYS, ...MID_QC_KEYS, ...FACTORY_DONE_KEYS, 'packing_method_confirmed']
+  const [{ data: ms, error: msErr }, { data: lines }] = await Promise.all([
+    (supabase.from('milestones') as any)
+      .select('order_id, step_key, name, status, due_at, actual_at, owner_role, owner_user_id')
+      .in('order_id', orderIds).in('step_key', PROD_STEP_KEYS),
+    (supabase.from('procurement_line_items') as any)
+      .select('order_id, line_status').in('order_id', orderIds),
+  ])
+  if (msErr) { errors.push(`prodMilestones: ${msErr.message}`); return { created, skipped, errors } }
+
+  const msByOrder = new Map<string, Record<string, any>>()
+  const followUpByOrder = new Map<string, string>()
+  for (const m of (ms || []) as any[]) {
+    const o = msByOrder.get(m.order_id) || {}
+    o[m.step_key] = m
+    msByOrder.set(m.order_id, o)
+    if (m.owner_role === 'production' && m.owner_user_id && !followUpByOrder.has(m.order_id)) {
+      followUpByOrder.set(m.order_id, m.owner_user_id)
+    }
+  }
+  const matByOrder = new Map<string, { total: number; received: number }>()
+  for (const l of (lines || []) as any[]) {
+    const mm = matByOrder.get(l.order_id) || { total: 0, received: 0 }
+    mm.total++
+    if (RECEIVED.has(String(l.line_status || ''))) mm.received++
+    matByOrder.set(l.order_id, mm)
+  }
+
+  const daysUntil = (dueStr: string | null): number | null => {
+    if (!dueStr) return null
+    const due = new Date(String(dueStr).slice(0, 10)).getTime()
+    const t = new Date(targetDate).getTime()
+    if (Number.isNaN(due)) return null
+    return Math.floor((due - t) / 86400000)
+  }
+  const pick = (mo: Record<string, any>, keys: readonly string[]) => {
+    for (const k of keys) if (mo[k] != null) return mo[k]
+    return null
+  }
+  const notDone = (n: any) => n && !DONE(n.status)
+  const withinSoon = (n: any) => { const d = daysUntil(n?.due_at || null); return d != null && d <= SOON_DAYS }
+
+  for (const o of list) {
+    const followUp = followUpByOrder.get(o.id) || o.owner_user_id || o.created_by
+    if (!followUp) continue
+    const mo = msByOrder.get(o.id) || {}
+    const mat = matByOrder.get(o.id) || { total: 0, received: 0 }
+    const label = o.internal_order_no || o.order_no || o.id
+    const href = `/production/order/${o.id}`
+
+    const kickoff = pick(mo, KICKOFF_KEYS)
+    const midQc = pick(mo, MID_QC_KEYS)
+    const finalQc = pick(mo, FACTORY_DONE_KEYS)
+    const packing = mo['packing_method_confirmed'] || null
+
+    const emit = async (kind: string, taskType: TaskType, node: any, title: string, desc: string) => {
+      const d = daysUntil(node?.due_at || null)
+      const overdue = d != null && d < 0
+      const priority: TaskPriority = overdue ? 1 : 2
+      const dText = d == null ? '' : overdue ? `逾期${-d}天` : d === 0 ? '今天到期' : `${d}天后`
+      const res = await upsertTask(supabase, {
+        assignedTo: followUp, taskDate: targetDate, taskType, priority,
+        title: `${title}${dText ? `【${dText}】` : ''} — ${label}`,
+        description: desc + (o.customer_name ? ` · 客户:${o.customer_name}` : ''),
+        actionUrl: href, actionLabel: '进入订单跟进',
+        relatedOrderId: o.id, relatedCustomer: o.customer_name,
+        sourceType: 'production', sourceId: `${o.id}:${kind}`,
+      })
+      if (res.ok) { if (res.data.created) created++; else skipped++ } else errors.push(`prod ${o.id}/${kind}: ${res.error}`)
+    }
+
+    // 中查 / 尾查 / 包装:节点未完成且临近或逾期
+    if (notDone(midQc) && withinSoon(midQc)) await emit('mid_qc', 'prod_mid_qc', midQc, '安排中期验货', '订单进行中,该做中期验货')
+    if (notDone(finalQc) && withinSoon(finalQc)) await emit('final_qc', 'prod_final_qc', finalQc, '安排尾期验货', '临近完工,该做尾期验货')
+    if (notDone(packing) && withinSoon(packing)) await emit('packing', 'prod_packing', packing, '追踪包装方式确认', '确认唛头/装箱/包装资料')
+
+    // 安排工厂:未选工厂 + 开裁未完成 + 临近开裁
+    if (!o.factory_name && notDone(kickoff) && withinSoon(kickoff)) {
+      await emit('factory', 'prod_factory_arrange', kickoff, '安排生产工厂', '临近开裁仍未指定工厂')
+    }
+    // 催原辅料:物料未齐 + 开裁未完成 + 开裁 7 天内
+    if (mat.total > 0 && mat.received < mat.total && notDone(kickoff)) {
+      const dk = daysUntil(kickoff?.due_at || null)
+      if (dk != null && dk <= MATERIAL_DAYS) {
+        await emit('material', 'prod_material_chase', kickoff, '催原辅料到位', `物料 ${mat.received}/${mat.total} 到位,开裁前需齐套`)
+      }
+    }
+    // 首日上线监控:开裁已完成且当天/次日
+    if (kickoff && DONE(kickoff.status) && kickoff.actual_at) {
+      const da = daysUntil(String(kickoff.actual_at).slice(0, 10))
+      if (da != null && da >= -1 && da <= 0) {
+        const res = await upsertTask(supabase, {
+          assignedTo: followUp, taskDate: targetDate, taskType: 'prod_first_day', priority: 1,
+          title: `首日上线监控 — ${label}`,
+          description: '大货刚开裁,盯首日上线质量/进度' + (o.customer_name ? ` · 客户:${o.customer_name}` : ''),
+          actionUrl: href, actionLabel: '进入订单跟进',
+          relatedOrderId: o.id, relatedCustomer: o.customer_name,
+          sourceType: 'production', sourceId: `${o.id}:first_day`,
+        })
+        if (res.ok) { if (res.data.created) created++; else skipped++ } else errors.push(`prod ${o.id}/first_day: ${res.error}`)
+      }
+    }
+  }
+
+  return { created, skipped, errors }
+}
+
 export async function generateDailyTasks(
   supabase: SupabaseClient,
   trigger: TaskGenerationTrigger
@@ -720,7 +854,7 @@ export async function generateDailyTasks(
 
     if (trigger.trigger === 'daily_cron') {
       // 全量生成：所有来源并行跑（含 missing_info + 轻升级）
-      const [ms, cr, da, pw, al, mi, rt] = await Promise.all([
+      const [ms, cr, da, pw, al, mi, rt, pr] = await Promise.all([
         generateMilestoneTasks(supabase, targetDate),
         generateCustomerFollowupTasks(supabase, targetDate),
         generateDelayApprovalTasks(supabase, targetDate),
@@ -728,8 +862,9 @@ export async function generateDailyTasks(
         generateAlertTasks(supabase, targetDate),
         generateMissingInfoTasks(supabase, targetDate),
         generateRetrospectiveTasks(supabase, targetDate),
+        generateProductionTasks(supabase, targetDate),
       ])
-      merge(ms); merge(cr); merge(da); merge(pw); merge(al); merge(mi); merge(rt)
+      merge(ms); merge(cr); merge(da); merge(pw); merge(al); merge(mi); merge(rt); merge(pr)
       // 轻升级：fire-and-forget，不阻塞主流程
       void escalateStaleTasks(supabase).catch(() => {})
 
