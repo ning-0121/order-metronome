@@ -292,15 +292,26 @@ export async function parsePO(
     logAICall('po_parse', orderId || null, isTimeout ? 'timeout' : 'error', Date.now() - startedAt, message.slice(0, 200)).catch(() => {});
     const lastCode = runtimeCause?.lastError?.code;
     const code = lastCode || runtimeError?.code;
-    const safe = code === 'MODEL_NOT_CONFIGURED' || code === 'AUTHENTICATION'
-      ? 'AI 配置缺失，请联系管理员检查模型或访问权限'
-      : code === 'RATE_LIMIT'
-        ? 'AI 服务当前请求过多，请稍后重试'
-        : code === 'PROVIDER_UNAVAILABLE' || code === 'ALL_PROVIDERS_FAILED'
-          ? 'AI 模型当前不可用，请稍后重试或改用手工录入'
-          : code === 'SCHEMA_MISMATCH' || code === 'INVALID_JSON' || code === 'EMPTY_RESPONSE' || code === 'REFUSAL'
-            ? 'PO 内容提取失败，请核对文件后重试或改用手工录入'
-            : isTimeout ? 'PO 识别超时，请稍后重试或改用手工录入' : 'PO 识别失败，请改用手工录入';
+    // 2026-07-22:Anthropic 余额不足返回 400 → 归类成 PROVIDER_ERROR(不在下面识别列表)→ 以前
+    // 掉进末尾兜底显示「PO 识别失败,请改用手工录入」,把人误导去查文件格式。挖底层 provider 报文,
+    // 命中余额/计费关键词就明说"账户余额不足",并给 PROVIDER_ERROR/TRANSIENT_PROVIDER 兜底成"AI 服务不可用"。
+    const rawProviderMsg = String(
+      (runtimeCause?.lastError?.cause as { message?: string } | undefined)?.message
+      ?? (runtimeError?.cause as { message?: string } | undefined)?.message
+      ?? message ?? '',
+    );
+    const isBilling = /credit balance|billing|insufficient|too low|quota|余额/i.test(rawProviderMsg);
+    const safe = isBilling
+      ? 'AI 服务账户余额不足，请管理员到 Anthropic 控制台（Plans & Billing）充值后重试；可先手工录入创建订单'
+      : code === 'MODEL_NOT_CONFIGURED' || code === 'AUTHENTICATION'
+        ? 'AI 配置缺失，请联系管理员检查模型或访问权限'
+        : code === 'RATE_LIMIT'
+          ? 'AI 服务当前请求过多，请稍后重试'
+          : code === 'PROVIDER_UNAVAILABLE' || code === 'ALL_PROVIDERS_FAILED' || code === 'PROVIDER_ERROR' || code === 'TRANSIENT_PROVIDER'
+            ? 'AI 服务暂时不可用，请稍后重试或改用手工录入'
+            : code === 'SCHEMA_MISMATCH' || code === 'INVALID_JSON' || code === 'EMPTY_RESPONSE' || code === 'REFUSAL'
+              ? 'PO 内容提取失败，请核对文件后重试或改用手工录入'
+              : isTimeout ? 'PO 识别超时，请稍后重试或改用手工录入' : 'PO 识别失败，请改用手工录入';
     return { ok: false, error: safe };
   }
 }
