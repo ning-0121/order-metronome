@@ -260,10 +260,7 @@ async function generateDelayApprovalTasks(
   const errors: string[] = []
 
   const { data: requests, error } = await (supabase.from('delay_requests') as any)
-    .select(`
-      id, order_id, reason, created_at,
-      orders!inner(order_no, customer_name)
-    `)
+    .select('id, order_id, reason, created_at')
     .eq('status', 'pending')
 
   if (error) {
@@ -271,11 +268,22 @@ async function generateDelayApprovalTasks(
     return { created, skipped, errors }
   }
 
+  // 2026-07-22:两步查订单 —— delay_requests↔orders 线上无 FK 关系(order_id 列在、约束没生效),
+  //   内嵌 orders!inner(...) 报 PGRST200 → 延期审批待办此前对全员从未生成。改两步(库内既有惯例)。
+  const orderIds = [...new Set((requests || []).map((r: any) => r.order_id).filter(Boolean))]
+  const orderMap = new Map<string, any>()
+  if (orderIds.length) {
+    const { data: ords } = await (supabase.from('orders') as any)
+      .select('id, order_no, customer_name').in('id', orderIds)
+    for (const o of ords || []) orderMap.set(o.id, o)
+  }
+
   // 延期审批 → 分配给 admin + production_manager
   const approvers = await getUsersByRole(supabase, ['admin', 'production_manager'])
 
   for (const req of requests || []) {
-    const order = req.orders
+    const order = orderMap.get(req.order_id)
+    if (!order) continue
     const daysWaiting = Math.floor(
       (Date.now() - new Date(req.created_at).getTime()) / (1000 * 60 * 60 * 24)
     )
