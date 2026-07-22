@@ -24,6 +24,8 @@ export async function GET(request: Request) {
     let autoEscalated = 0;
     // ── 采购单自定义提醒节点：到点通知采购/业务/跟单 ──
     let poReminders = 0;
+    // ── 生产问题定时提醒：到点通知负责人 ──
+    let prodIssueReminders = 0;
     // ── 采购风险中心近实时物化(审计修 2026-07-04:原只每晚物化,滞后近24h→改每15分钟)──
     let mattersMaterialized: number | string = 0;
     try {
@@ -35,6 +37,7 @@ export async function GET(request: Request) {
         supervisorAlerts = await notifyAdminAssistantOverdue(supabase);
         autoEscalated = await runEscalationChain(supabase);
         poReminders = await checkPoReminders(supabase);
+        prodIssueReminders = await checkProductionIssueReminders(supabase);
         try {
           const { materializeProcurementMatters } = await import('@/lib/services/procurement-matters.service');
           const r = await materializeProcurementMatters(supabase as any, { mode: 'execute' });
@@ -84,6 +87,7 @@ export async function GET(request: Request) {
       supervisor_alerts: supervisorAlerts,
       auto_escalated: autoEscalated,
       po_reminders: poReminders,
+      prod_issue_reminders: prodIssueReminders,
       matters_materialized: mattersMaterialized,
       finance_outbox: financeOutbox,
     });
@@ -158,6 +162,59 @@ async function checkPoReminders(supabase: any): Promise<number> {
     await supabase.from('po_reminders').update({ status: 'notified', notified_at: new Date().toISOString() }).in('id', markIds);
   }
   return fired;
+}
+
+/**
+ * 生产问题定时提醒(2026-07-22 生产今日工作台第3步):到提醒点仍未解决的 production_issues
+ * → 通知 assigned_to(站内 + 企微)。防重:last_reminded_at >= remind_at 跳过。
+ * 表未建(migration 未跑)时静默跳过,不报错。
+ */
+async function checkProductionIssueReminders(supabase: any): Promise<number> {
+  const nowIso = new Date().toISOString();
+  const { data: issues, error } = await supabase
+    .from('production_issues')
+    .select('id, order_id, title, severity, assigned_to, remind_at, last_reminded_at')
+    .eq('status', 'open')
+    .not('remind_at', 'is', null)
+    .lte('remind_at', nowIso);
+  if (error) { if (!/does not exist/i.test(error.message)) console.error('[prod_issue_remind] query:', error.message); return 0; }
+  const due = (issues || []).filter((r: any) => !r.last_reminded_at || new Date(r.last_reminded_at) < new Date(r.remind_at));
+  if (due.length === 0) return 0;
+
+  const orderIds = [...new Set(due.map((r: any) => r.order_id))];
+  const { data: orders } = await supabase.from('orders').select('id, order_no, internal_order_no, customer_name').in('id', orderIds);
+  const orderMap = new Map<string, any>((orders || []).map((o: any) => [o.id, o]));
+
+  const notifs: any[] = [];
+  const recipients = new Set<string>();
+  const markIds: string[] = [];
+  for (const r of due) {
+    markIds.push(r.id);           // 标记后即使无负责人也不反复扫
+    if (!r.assigned_to) continue;
+    const o: any = orderMap.get(r.order_id);
+    const label = o?.internal_order_no || o?.order_no || r.order_id;
+    notifs.push({
+      user_id: r.assigned_to, type: 'production_issue_reminder',
+      title: `⏰ 生产问题待跟进:${r.title}`,
+      message: `订单 ${label}${o?.customer_name ? ` · ${o.customer_name}` : ''} 的生产问题「${r.title}」到提醒时间,确认是否已落地/关闭。`,
+      related_order_id: r.order_id, status: 'unread', email_sent: false,
+    });
+    recipients.add(r.assigned_to);
+  }
+  if (notifs.length > 0) {
+    const { error: insErr } = await supabase.from('notifications').insert(notifs);
+    if (insErr) { console.error('[prod_issue_remind] notify insert:', insErr.message); return 0; }  // 未标记 → 下轮重试
+  }
+  if (markIds.length > 0) {
+    await supabase.from('production_issues').update({ last_reminded_at: nowIso }).in('id', markIds);
+  }
+  if (recipients.size > 0) {
+    try {
+      const { pushToUsers } = await import('@/lib/utils/wechat-push');
+      await pushToUsers(supabase, Array.from(recipients), '⏰ 生产问题待跟进', '你负责的生产问题到提醒时间了,请到生产中心确认是否已落地。').catch(() => {});
+    } catch (e: any) { console.error('[prod_issue_remind] push:', e?.message); }
+  }
+  return due.length;
 }
 
 /**

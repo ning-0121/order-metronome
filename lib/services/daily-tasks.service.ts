@@ -836,6 +836,46 @@ async function generateProductionTasks(
   return { created, skipped, errors }
 }
 
+// ─────────────────────────────────────────────────────────────
+// generateProductionIssueTasks — 来源9(2026-07-22)
+// 「追踪历史问题」:未解决的生产问题(production_issues)进今日待办,
+// 让跟单每天盯之前记的问题有没有落地。到提醒日的、或没设提醒但仍未解决的都上。
+// production_issues 表未建(migration 未跑)时查询报错 → 计入 errors,非致命。
+// ─────────────────────────────────────────────────────────────
+async function generateProductionIssueTasks(
+  supabase: SupabaseClient,
+  targetDate: string
+): Promise<TaskGenerationResult> {
+  let created = 0
+  let skipped = 0
+  const errors: string[] = []
+  const endOfDay = new Date(new Date(targetDate).getTime() + 24 * 3600 * 1000).toISOString()
+
+  // 未解决 + (无提醒日 或 提醒日已到)
+  const { data: issues, error } = await (supabase.from('production_issues') as any)
+    .select('id, order_id, title, severity, assigned_to, remind_at, created_at, orders!inner(order_no, internal_order_no, customer_name)')
+    .eq('status', 'open')
+    .or(`remind_at.is.null,remind_at.lte.${endOfDay}`)
+  if (error) { errors.push(`prodIssues: ${error.message}`); return { created, skipped, errors } }
+
+  for (const it of (issues || []) as any[]) {
+    if (!it.assigned_to) continue
+    const order = it.orders || {}
+    const label = order.internal_order_no || order.order_no || it.order_id
+    const priority: TaskPriority = it.severity === 'high' ? 1 : 2
+    const res = await upsertTask(supabase, {
+      assignedTo: it.assigned_to, taskDate: targetDate, taskType: 'prod_issue', priority,
+      title: `追踪问题:${it.title} — ${label}`,
+      description: '之前记录的生产问题还没关闭,确认是否已落地' + (order.customer_name ? ` · 客户:${order.customer_name}` : ''),
+      actionUrl: `/production/order/${it.order_id}`, actionLabel: '查看并处理',
+      relatedOrderId: it.order_id, relatedCustomer: order.customer_name,
+      sourceType: 'production_issue', sourceId: it.id,
+    })
+    if (res.ok) { if (res.data.created) created++; else skipped++ } else errors.push(`prodIssue ${it.id}: ${res.error}`)
+  }
+  return { created, skipped, errors }
+}
+
 export async function generateDailyTasks(
   supabase: SupabaseClient,
   trigger: TaskGenerationTrigger
@@ -854,7 +894,7 @@ export async function generateDailyTasks(
 
     if (trigger.trigger === 'daily_cron') {
       // 全量生成：所有来源并行跑（含 missing_info + 轻升级）
-      const [ms, cr, da, pw, al, mi, rt, pr] = await Promise.all([
+      const [ms, cr, da, pw, al, mi, rt, pr, pi] = await Promise.all([
         generateMilestoneTasks(supabase, targetDate),
         generateCustomerFollowupTasks(supabase, targetDate),
         generateDelayApprovalTasks(supabase, targetDate),
@@ -863,8 +903,9 @@ export async function generateDailyTasks(
         generateMissingInfoTasks(supabase, targetDate),
         generateRetrospectiveTasks(supabase, targetDate),
         generateProductionTasks(supabase, targetDate),
+        generateProductionIssueTasks(supabase, targetDate),
       ])
-      merge(ms); merge(cr); merge(da); merge(pw); merge(al); merge(mi); merge(rt); merge(pr)
+      merge(ms); merge(cr); merge(da); merge(pw); merge(al); merge(mi); merge(rt); merge(pr); merge(pi)
       // 轻升级：fire-and-forget，不阻塞主流程
       void escalateStaleTasks(supabase).catch(() => {})
 
