@@ -113,10 +113,12 @@ async function generateMilestoneTasks(
   const errors: string[] = []
 
   // 读取所有未完成的里程碑（含负责人信息）
+  // 2026-07-22:修列名 bug —— 表列是 name / owner_user_id,此前误写 step_name / owner_id / owner_name,
+  //   PostgREST 直接报 42703「column does not exist」→ 本生成器一直静默返回 0,全员今日任务缺里程碑那块。
   const { data: milestones, error } = await (supabase.from('milestones') as any)
     .select(`
-      id, step_key, step_name, planned_at, status,
-      owner_id, owner_name,
+      id, step_key, name, planned_at, status,
+      owner_user_id,
       order_id,
       orders!inner(order_no, customer_name, lifecycle_status)
     `)
@@ -131,7 +133,7 @@ async function generateMilestoneTasks(
   }
 
   for (const ms of milestones || []) {
-    if (!ms.owner_id) continue
+    if (!ms.owner_user_id) continue
 
     const order = ms.orders
     const plannedDate = new Date(ms.planned_at)
@@ -149,13 +151,13 @@ async function generateMilestoneTasks(
     const priority: TaskPriority = computeTaskPriority(daysOverdue, 1)
 
     const result = await upsertTask(supabase, {
-      assignedTo: ms.owner_id,
+      assignedTo: ms.owner_user_id,
       taskDate: targetDate,
       taskType,
       priority,
       title: isOverdue
-        ? `【逾期${daysOverdue}天】${ms.step_name} — ${order.order_no}`
-        : `【今日到期】${ms.step_name} — ${order.order_no}`,
+        ? `【逾期${daysOverdue}天】${ms.name} — ${order.order_no}`
+        : `【今日到期】${ms.name} — ${order.order_no}`,
       description: `客户：${order.customer_name}，计划日期：${ms.planned_at.split('T')[0]}`,
       actionUrl: `/orders/${ms.order_id}`,
       actionLabel: '查看订单',
