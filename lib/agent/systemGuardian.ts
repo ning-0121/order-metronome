@@ -238,7 +238,7 @@ async function checkStaleCompletedOrders(
     // ⚠️ 2026-04-27 统一为英文（清账：lifecycle_status 中英混用）
     // 注：nightly-maintenance cron 已禁用，此代码暂不会被调用
     await (supabase.from('orders') as any)
-      .update({ lifecycle_status: 'completed' })
+      .update({ lifecycle_status: 'completed', terminated_at: new Date().toISOString() })
       .in(
         'id',
         stale.map(o => o.id),

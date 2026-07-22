@@ -831,6 +831,7 @@ export async function createOrder(
         const { error: ordErr } = await (supabase.from('orders') as any)
           .update({
             lifecycle_status: 'completed',
+            terminated_at: new Date().toISOString(),
             notes: (orderData.notes || '') + `\n\n【补录】已发货订单，系统自动标记完成（已更新 ${msUpdated ?? '?'} 个节点）`,
           })
           .eq('id', orderData.id);
@@ -1705,7 +1706,7 @@ export async function rejectImportOrder(orderId: string, reason?: string): Promi
 
   // 标记为 rejected（不删除，保留记录）
   await (supabase.from('orders') as any)
-    .update({ lifecycle_status: 'cancelled', notes: `[CEO 拒绝] ${reason || '未说明原因'}` })
+    .update({ lifecycle_status: 'cancelled', terminated_at: new Date().toISOString(), notes: `[CEO 拒绝] ${reason || '未说明原因'}` })
     .eq('id', orderId);
 
   // 通知创建者
@@ -1753,7 +1754,7 @@ export async function forceCompleteOrderAction(orderId: string): Promise<{ error
   // 标记订单完成
   // ⚠️ 2026-04-27 统一为英文（清账：lifecycle_status 中英混用）
   const { error: completeError } = await (supabase.from('orders') as any)
-    .update({ lifecycle_status: 'completed' })
+    .update({ lifecycle_status: 'completed', terminated_at: now })
     .eq('id', orderId);
   // 状态写失败必须中止——否则节点已全部 done、后续还会算佣金，但订单仍未完成，状态错乱
   if (completeError) {
