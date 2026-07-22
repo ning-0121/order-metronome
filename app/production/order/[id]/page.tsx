@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { requireProductionPage } from '@/lib/utils/production-page-guard';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
+import { ProductionIssuesPanel } from '@/components/production/ProductionIssuesPanel';
 
 /**
  * 生产中心 · 单订单生产节点(2026-07-06 用户拍板:生产/QC 在生产中心走节点,不进完整订单详情)。
@@ -45,6 +46,7 @@ export default async function ProductionOrderNodePage({ params }: { params: Prom
         <p className="text-xs text-gray-400 mt-1">生产/QC 在此走节点、传报告;业务在订单「生产进度」只读看进度。</p>
       </div>
       <ProductionProgressTab orderId={id} orderNo={(order as any).order_no || ''} isAdmin={isAdmin} canReport={canReport} />
+      <ProductionIssuesPanel orderId={id} canWrite={canReport} />
     </div>
   );
 }
