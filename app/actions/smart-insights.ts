@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { qimoAI } from '@/lib/ai/runtime';
 
 export interface SmartInsight {
   type: 'customer' | 'factory' | 'product' | 'general';
@@ -360,13 +360,13 @@ async function generateAIInsights(
   const guard = await guardAICall('smart_insights');
   if (!guard.ok) return [];
 
-  // 调用 Claude
+  // 调用 Claude（2026-07-22 收口:走 qimoAI runtime，统一错误分类/fallback/日志，不再直连 SDK）
   const aiStartedAt = Date.now();
-  const client = new Anthropic({ apiKey });
-  const response = await client.messages.create({
-    model: 'claude-sonnet-5',
-    max_tokens: 800,
-    system: `你是服装外贸订单风险分析师。根据历史数据，分析出最关键的风险点和成功经验。
+  let text: string;
+  try {
+    const res = await qimoAI.generateText({
+      scene: 'insights.smart_insights', capability: 'text', riskLevel: 'low',
+      system: `你是服装外贸订单风险分析师。根据历史数据，分析出最关键的风险点和成功经验。
 要求：
 1. 找出数据中的复合模式（如"该客户+浅色面料=高退货风险"）
 2. 给出具体可行的预防建议
@@ -374,16 +374,14 @@ async function generateAIInsights(
 4. 返回JSON数组，每个元素: {"title":"标题","detail":"分析详情","severity":"high/medium/low"}
 5. 最多3条，每条detail不超过80字
 6. 只返回JSON，不要其他内容`,
-    messages: [{
-      role: 'user',
-      content: `${summaryParts.join('\n')}\n${rulesSummary}\n\n请分析风险和经验：`,
-    }],
-  });
-
-  const text = response.content
-    .filter(b => b.type === 'text')
-    .map(b => (b as Anthropic.TextBlock).text)
-    .join('');
+      prompt: `${summaryParts.join('\n')}\n${rulesSummary}\n\n请分析风险和经验：`,
+      maxOutputTokens: 800, timeoutMs: 30_000, fallback: 'disabled',
+    });
+    text = res.data;
+  } catch (err: any) {
+    logAICall('smart_insights', null, 'error', Date.now() - aiStartedAt, err?.message?.slice(0, 200)).catch(() => {});
+    return [];
+  }
 
   let jsonStr = text.trim();
   if (jsonStr.startsWith('```')) {
@@ -501,15 +499,14 @@ export async function getContextualAIAdvice(params: {
 
   const aiStartedAt2 = Date.now();
   try {
-    const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({
-      model: 'claude-sonnet-5',
-      max_tokens: 500,
+    const res = await qimoAI.generateText({
+      scene: 'insights.ai_advice', capability: 'text', riskLevel: 'low',
       system: prompts[params.scene] || prompts.dashboard,
-      messages: [{ role: 'user', content: params.contextData }],
+      prompt: params.contextData,
+      maxOutputTokens: 500, timeoutMs: 30_000, fallback: 'disabled',
     });
 
-    const text = response.content.filter(b => b.type === 'text').map(b => (b as Anthropic.TextBlock).text).join('');
+    const text = res.data;
     let jsonStr = text.trim();
     if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
 

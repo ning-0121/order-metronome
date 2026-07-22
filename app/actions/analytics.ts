@@ -424,10 +424,13 @@ export async function getCapacityAIAnalysis(): Promise<CapacityAnalysis> {
 
   const startedAt = Date.now();
   try {
-    const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    const client = new Anthropic();
-    const response = await client.messages.create({ model: 'claude-sonnet-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] });
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    // 2026-07-22 收口:走 qimoAI runtime(统一错误分类/fallback/日志),不再直连 SDK
+    const { qimoAI } = await import('@/lib/ai/runtime');
+    const res = await qimoAI.generateText({
+      scene: 'analytics.capacity', capability: 'reasoning', riskLevel: 'low',
+      prompt, maxOutputTokens: 1500, timeoutMs: 30_000, fallback: 'disabled',
+    });
+    const text = res.data;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
