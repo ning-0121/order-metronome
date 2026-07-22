@@ -241,7 +241,9 @@ export async function buildOrderContext(
       .eq('id', orderId)
       .single(),
     (supabase.from('milestones') as any)
-      .select('step_key, step_name, status, planned_at, actual_at, owner_name')
+      // 2026-07-22:修列名 bug —— 表列是 name / owner_role(无 step_name / owner_name),
+      //   此前误写导致本 select 报错、AI 订单上下文一直缺里程碑段。
+      .select('step_key, name, status, planned_at, actual_at, owner_role')
       .eq('order_id', orderId)
       .order('planned_at', { ascending: true }),
     (supabase.from('delay_requests') as any)
@@ -294,12 +296,12 @@ export async function buildOrderContext(
   ]
 
   if (overdueMilestones.length > 0) {
-    lines.push('- 逾期节点：' + overdueMilestones.map((m: any) => m.step_name).join('、'))
+    lines.push('- 逾期节点：' + overdueMilestones.map((m: any) => m.name).join('、'))
   }
 
   if (pendingMilestones.length > 0) {
     const next = pendingMilestones[0]
-    lines.push(`- 下一节点：${next.step_name}（计划 ${next.planned_at ? new Date(next.planned_at).toLocaleDateString('zh-CN') : '未定'}，负责：${next.owner_name ?? '未分配'}）`)
+    lines.push(`- 下一节点：${next.name}（计划 ${next.planned_at ? new Date(next.planned_at).toLocaleDateString('zh-CN') : '未定'}，负责：${next.owner_role ?? '未分配'}）`)
   }
 
   if (delays.length > 0) {
