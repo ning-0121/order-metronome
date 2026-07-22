@@ -85,7 +85,7 @@ export async function requestPriceApproval(payload: {
       price_diffs: payload.price_diffs,
       summary: payload.summary || '',
       form_snapshot: payload.form_snapshot,
-      expires_at: new Date(Date.now() + 86400000).toISOString(),
+      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),  // 2026-07-21:24h→7天(24h常来不及批)
       created_at: new Date().toISOString(),
     });
   } catch (e: any) { console.warn(`[price-approvals] 推送失败不阻断:`, e?.message); }
@@ -170,10 +170,10 @@ export async function getPendingPriceApprovalsCount(): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return 0;
   if (!(await canApprovePrice(supabase, user.id))) return 0;
+  // 2026-07-21:过期的待审批也算待办(仍需 admin 处理,不该从计数里消失)。
   const { count } = await (supabase.from('pre_order_price_approvals') as any)
     .select('id', { count: 'exact', head: true })
-    .eq('status', 'pending')
-    .gte('expires_at', new Date().toISOString());
+    .eq('status', 'pending');
   return count || 0;
 }
 
@@ -253,9 +253,7 @@ export async function validatePriceApproval(approvalId: string, requesterId: str
   if ((data as any).status !== 'approved') {
     return { valid: false, error: `审批状态为「${(data as any).status}」，需 CEO 批准` };
   }
-  const expiresAt = (data as any).expires_at;
-  if (expiresAt && new Date(expiresAt) < new Date()) {
-    return { valid: false, error: '审批已过期（24 小时），请重新申请' };
-  }
+  // 2026-07-21:已批准 = 已做决策,建单不再卡原始申请窗口的过期(过期只针对"待审批"未处理时限,
+  //   批准后即有效)。此前 admin 批了过期申请、业务员建单仍被"审批已过期"挡,导致订单建不出来。
   return { valid: true };
 }
