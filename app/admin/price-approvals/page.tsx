@@ -129,7 +129,8 @@ export default function PriceApprovalsPage() {
                       <p className="text-sm text-gray-600 mt-1">{it.summary}</p>
                     )}
                   </div>
-                  {isApprovalPending(it.status) && !expired && (
+                  {/* 2026-07-21:过期的待审批 admin 仍可批(过期只是提示,不该挡决策人)。批准后建单不再卡过期。 */}
+                  {isApprovalPending(it.status) && (
                     <div className="flex gap-2 shrink-0">
                       <button
                         onClick={() => handleDecide(it.id, 'approved')}

@@ -969,7 +969,7 @@ export function BomTab({ orderId }: { orderId: string }) {
                   : <span className="text-gray-600 truncate">{sc.file_name}</span>}
                 {sc.parse_status === 'PARSED' && <span className="text-[11px] rounded bg-sky-100 text-sky-700 px-1.5 py-0.5">解析成功 · {sc.row_count} 行</span>}
                 {sc.parse_status === 'NEEDS_REVIEW' && <span className="text-[11px] rounded bg-amber-100 text-amber-700 px-1.5 py-0.5">需复核 · {sc.row_count} 行</span>}
-                {sc.parse_status === 'FAILED' && <span className="text-[11px] rounded bg-rose-100 text-rose-700 px-1.5 py-0.5" title={sc.failure_reason || ''}>解析失败：{sc.failure_reason || '请检查表头'}</span>}
+                {sc.parse_status === 'FAILED' && <span className="text-[11px] rounded bg-amber-100 text-amber-700 px-1.5 py-0.5" title={sc.failure_reason || ''}>已上传 · 生产任务单将直接照搬此表(未自动识别尺码,不影响使用)</span>}
                 {sc.parse_status === 'UPLOADED' && <span className="text-[11px] rounded bg-gray-100 text-gray-600 px-1.5 py-0.5">仅已上传</span>}
                 {sc.parse_status === 'PARSING' && <span className="text-[11px] rounded bg-indigo-100 text-indigo-700 px-1.5 py-0.5">解析中</span>}
                 {sc.parse_status === 'APPROVED' && <span className="text-[11px] rounded bg-emerald-100 text-emerald-700 px-1.5 py-0.5">已审核</span>}
