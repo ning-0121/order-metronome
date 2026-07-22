@@ -78,71 +78,62 @@ export const poParsedJsonSchema: JSONSchema = {
   },
 };
 
-function assertString(value: unknown, path: string): asserts value is string {
-  if (typeof value !== 'string') throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `${path} must be a string` });
-}
-
-function assertNumber(value: unknown, path: string): asserts value is number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `${path} must be a finite number` });
-}
-
-function assertStringArray(value: unknown, path: string): asserts value is string[] {
-  if (!Array.isArray(value)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `${path} must be an array` });
-  value.forEach((item, index) => assertString(item, `${path}[${index}]`));
-}
+// 2026-07-21:改「宽容强制转换」——AI 输出个别字段缺失/类型不符不再整单硬失败(否则复杂PO如RAG
+//   把面料成分/克重放表头→AI填不出每款的→null→SCHEMA_MISMATCH→整单"PO识别失败")。
+//   缺失降级为空串/0/other/[],产出可编辑草稿("识别结果冻结保存·读错在下方改"),不退回手工从零录。
+const str = (v: unknown): string => (v == null ? '' : String(v));
+const numOr = (v: unknown, d = 0): number => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+const GARMENT_CATEGORIES = ['pants', 'tops', 'dress', 'outerwear', 'other'];
 
 export function validatePOParsedData(value: unknown): POParsedData {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: 'PO result must be an object' });
   const data = value as Record<string, unknown>;
-  for (const field of ['order_no', 'customer_name', 'delivery_date', 'order_date', 'currency', 'incoterm', 'payment_terms', 'warning_notes']) assertString(data[field], field);
-  for (const field of ['unit_price', 'total_amount']) assertNumber(data[field], field);
-  if (!['pants', 'tops', 'dress', 'outerwear', 'other'].includes(String(data.garment_category))) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: 'garment_category is invalid' });
-  if (!Array.isArray(data.styles) || !Array.isArray(data.trims)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: 'PO list fields are invalid' });
-  assertStringArray(data.size_labels, 'size_labels');
-  assertStringArray(data.confidence_notes, 'confidence_notes');
-  for (const [index, rawStyle] of data.styles.entries()) {
-    if (!rawStyle || typeof rawStyle !== 'object' || Array.isArray(rawStyle)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}] is invalid` });
+  for (const field of ['order_no', 'customer_name', 'delivery_date', 'order_date', 'currency', 'incoterm', 'payment_terms', 'warning_notes']) data[field] = str(data[field]);
+  data.unit_price = numOr(data.unit_price);
+  data.total_amount = numOr(data.total_amount);
+  if (!GARMENT_CATEGORIES.includes(String(data.garment_category))) data.garment_category = 'other';
+  data.size_labels = Array.isArray(data.size_labels) ? (data.size_labels as unknown[]).map(str) : [];
+  data.confidence_notes = Array.isArray(data.confidence_notes) ? (data.confidence_notes as unknown[]).map(str) : [];
+  data.styles = Array.isArray(data.styles) ? data.styles : [];
+  data.trims = Array.isArray(data.trims) ? data.trims : [];
+  for (const rawStyle of data.styles as unknown[]) {
+    if (!rawStyle || typeof rawStyle !== 'object' || Array.isArray(rawStyle)) continue;
     const style = rawStyle as Record<string, unknown>;
-    for (const field of ['style_no', 'product_name', 'material', 'fabric_weight', 'packaging', 'quality_notes', 'sample_requirements', 'unit_consumption']) assertString(style[field], `styles[${index}].${field}`);
-    if (!Array.isArray(style.colors)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].colors is invalid` });
-    assertNumber(style.total_qty, `styles[${index}].total_qty`);
-    for (const color of style.colors) {
-      if (!color || typeof color !== 'object' || Array.isArray(color)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].colors is invalid` });
-      const row = color as Record<string, unknown>;
-      for (const field of ['color_cn', 'color_en', 'packaging']) assertString(row[field], `styles[${index}].colors.${field}`);
-      assertNumber(row.qty, `styles[${index}].colors.qty`);
-      if (!Array.isArray(row.sizes)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].color sizes are invalid` });
+    for (const field of ['style_no', 'product_name', 'material', 'fabric_weight', 'packaging', 'quality_notes', 'sample_requirements', 'unit_consumption']) style[field] = str(style[field]);
+    style.total_qty = numOr(style.total_qty);
+    style.colors = Array.isArray(style.colors) ? style.colors : [];
+    for (const rawColor of style.colors as unknown[]) {
+      if (!rawColor || typeof rawColor !== 'object' || Array.isArray(rawColor)) continue;
+      const row = rawColor as Record<string, unknown>;
+      for (const field of ['color_cn', 'color_en', 'packaging']) row[field] = str(row[field]);
+      row.qty = numOr(row.qty);
       const sizes: Record<string, number> = {};
-      for (const [sizeIndex, rawSize] of row.sizes.entries()) {
-        if (!rawSize || typeof rawSize !== 'object' || Array.isArray(rawSize)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].colors.sizes[${sizeIndex}] is invalid` });
+      if (Array.isArray(row.sizes)) for (const rawSize of row.sizes as unknown[]) {
+        if (!rawSize || typeof rawSize !== 'object' || Array.isArray(rawSize)) continue;
         const size = rawSize as Record<string, unknown>;
-        assertString(size.label, `styles[${index}].colors.sizes[${sizeIndex}].label`);
-        if (typeof size.qty !== 'number' || !Number.isFinite(size.qty)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].colors.sizes[${sizeIndex}].qty is invalid` });
-        sizes[size.label] = size.qty;
+        const label = str(size.label); if (label) sizes[label] = numOr(size.qty);
       }
       row.sizes = sizes;
     }
-    if (!Array.isArray(style.measurements)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].measurements is invalid` });
-    for (const [measurementIndex, rawMeasurement] of style.measurements.entries()) {
-      if (!rawMeasurement || typeof rawMeasurement !== 'object' || Array.isArray(rawMeasurement)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].measurements[${measurementIndex}] is invalid` });
+    const measurements = Array.isArray(style.measurements) ? style.measurements : [];
+    for (const rawMeasurement of measurements as unknown[]) {
+      if (!rawMeasurement || typeof rawMeasurement !== 'object' || Array.isArray(rawMeasurement)) continue;
       const measurement = rawMeasurement as Record<string, unknown>;
-      assertString(measurement.label, `styles[${index}].measurements[${measurementIndex}].label`);
-      if (!Array.isArray(measurement.values)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].measurements[${measurementIndex}].values is invalid` });
+      measurement.label = str(measurement.label);
       const values: Record<string, string> = {};
-      for (const [valueIndex, rawValue] of measurement.values.entries()) {
-        if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `styles[${index}].measurements.values[${valueIndex}] is invalid` });
+      if (Array.isArray(measurement.values)) for (const rawValue of measurement.values as unknown[]) {
+        if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) continue;
         const item = rawValue as Record<string, unknown>;
-        assertString(item.size, `styles[${index}].measurements.values[${valueIndex}].size`);
-        assertString(item.value, `styles[${index}].measurements.values[${valueIndex}].value`);
-        values[item.size] = item.value;
+        const s = str(item.size); if (s) values[s] = str(item.value);
       }
       measurement.values = values;
     }
+    style.measurements = measurements;
   }
-  for (const [index, rawTrim] of data.trims.entries()) {
-    if (!rawTrim || typeof rawTrim !== 'object' || Array.isArray(rawTrim)) throw new AIRuntimeError({ code: 'SCHEMA_MISMATCH', message: `trims[${index}] is invalid` });
+  for (const rawTrim of data.trims as unknown[]) {
+    if (!rawTrim || typeof rawTrim !== 'object' || Array.isArray(rawTrim)) continue;
     const trim = rawTrim as Record<string, unknown>;
-    for (const field of ['name', 'position', 'notes']) assertString(trim[field], `trims[${index}].${field}`);
+    for (const field of ['name', 'position', 'notes']) trim[field] = str(trim[field]);
   }
   return value as POParsedData;
 }
