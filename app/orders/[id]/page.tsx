@@ -214,6 +214,29 @@ export default async function OrderDetailPage({
 
       {/* 重排排期横幅（出厂日已过且未出运/送仓时显示给 admin/owner） */}
       <div className="max-w-7xl mx-auto px-6 pt-4 space-y-3">
+        {/* PO 逾期上传罚款横幅(2026-07-23):客户下达当日必须建单;逾期→罚款¥200+扣绩效+已上报三方 */}
+        {(orderData as any).po_overdue && (
+          (orderData as any).po_penalty_waived ? (
+            <div className="rounded-xl border border-green-300 bg-green-50 px-4 py-3 flex items-start gap-3">
+              <span className="text-xl shrink-0">✅</span>
+              <div className="text-sm">
+                <p className="font-semibold text-green-900">PO 逾期罚款已免除</p>
+                <p className="text-green-700 mt-0.5">本单 PO 逾期 {(orderData as any).po_overdue_days} 天上传,已通过免罚审批,不计罚款、不计逾期考核。</p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 flex items-start gap-3">
+              <span className="text-xl shrink-0">⚠️</span>
+              <div className="text-sm">
+                <p className="font-semibold text-red-900">PO 逾期上传 · 罚款 ¥{Number((orderData as any).po_penalty_amount) || 200}</p>
+                <p className="text-red-700 mt-0.5">
+                  客户下达日 {(orderData as any).po_baseline_date || '—'},逾期 <b>{(orderData as any).po_overdue_days} 天</b> 才建单/上传 PO。已记罚款 ¥{Number((orderData as any).po_penalty_amount) || 200} + 扣绩效,并已上报业务执行经理 / 财务 / 老板。
+                  如有正当理由可申请免罚(业务执行经理 + 财务两方通过、或老板批准后撤销罚款与考核)。
+                </p>
+              </div>
+            </div>
+          )
+        )}
         {/* 超预算提交采购审批横幅(超基线单耗:经理批;超5%:+财务批) */}
         {(budgetApproval as any)?.data && (
           <BudgetApprovalBanner approval={(budgetApproval as any).data} canMgr={!!(budgetApproval as any).canMgr} canFin={!!(budgetApproval as any).canFin} />
