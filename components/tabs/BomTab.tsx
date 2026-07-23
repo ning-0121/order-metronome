@@ -27,6 +27,7 @@ const GENERIC = '__generic__';
 
 export function BomTab({ orderId }: { orderId: string }) {
   const [items, setItems] = useState<any[]>([]);
+  const [openBatches, setOpenBatches] = useState<Record<string, boolean>>({});   // 已提交批次默认折叠,点开才展开
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -541,6 +542,23 @@ export function BomTab({ orderId }: { orderId: string }) {
 
   const submitted = items.some(i => i.submit_status === 'submitted');
   const submittedAt = items.find(i => i.submitted_at)?.submitted_at || null;
+  // 2026-07-23:未提交的单独一栏「新增·待提交」;已提交的按 submitted_at 日期分批、每批可折叠(默认收起)
+  const pendingItems = items.filter((i: any) => i.submit_status !== 'submitted');
+  const submittedBatches: [string, any[]][] = (() => {
+    const m = new Map<string, any[]>();
+    for (const it of items) {
+      if (it.submit_status !== 'submitted') continue;
+      const key = it.submitted_at ? String(it.submitted_at).slice(0, 10) : '未知日期';
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(it);
+    }
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));   // ISO 日期倒序,新批在前
+  })();
+  const fmtBatchDate = (k: string) => (k === '未知日期' ? k : new Date(k).toLocaleDateString('zh-CN'));
+  const batchGroups: { key: string; type: 'pending' | 'submitted'; label: string; items: any[]; collapsible: boolean; collapsed: boolean }[] = [
+    ...(pendingItems.length > 0 ? [{ key: 'pending', type: 'pending' as const, label: '🆕 新增 · 待提交采购', items: pendingItems, collapsible: false, collapsed: false }] : []),
+    ...submittedBatches.map(([k, its]) => ({ key: k, type: 'submitted' as const, label: `✅ 已提交采购 · ${fmtBatchDate(k)}`, items: its, collapsible: true, collapsed: openBatches[k] !== true })),
+  ];
 
   // 面料(含里料)= 完整表维持现状;辅料 = 精简为 款号/辅料名/单件数/总数(2026-07-11 用户拍板)
   const FULL_FORM_TYPES = ['fabric', 'lining'];
@@ -1129,10 +1147,10 @@ export function BomTab({ orderId }: { orderId: string }) {
       {items.length > 0 && (
         <div className="flex items-center justify-between gap-3 mb-4 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40">
           <div className="text-sm min-w-0">
-            {submitted ? (
-              <span className="text-emerald-700 font-medium">
-                ✅ 已提交采购{submittedAt ? `（${new Date(submittedAt).toLocaleString('zh-CN')}）` : ''}
-              </span>
+            {pendingItems.length > 0 ? (
+              <span className="text-amber-700 font-medium">🆕 有 {pendingItems.length} 项新增辅料待提交采购(提交后单独成一批,不与早先提交的混在一起)</span>
+            ) : submitted ? (
+              <span className="text-emerald-700 font-medium">✅ 已全部提交采购(按提交日期分批,见下方,默认折叠)</span>
             ) : (
               <span className="text-gray-600">原辅料单录好后,提交给采购按 PO 数量汇总、询价、下单。</span>
             )}
@@ -1140,7 +1158,7 @@ export function BomTab({ orderId }: { orderId: string }) {
           </div>
           <button onClick={handleSubmitProcurement} disabled={submitting}
             className="shrink-0 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
-            {submitting ? '提交中...' : submitted ? '重新提交采购' : '✅ 提交采购'}
+            {submitting ? '提交中...' : pendingItems.length > 0 ? `✅ 提交采购（${pendingItems.length} 项新增）` : submitted ? '重新提交采购' : '✅ 提交采购'}
           </button>
         </div>
       )}
@@ -1162,11 +1180,28 @@ export function BomTab({ orderId }: { orderId: string }) {
               ))}
             </tr></thead>
             <tbody>
-              {/* S1.2 按款分组:每款一个原辅料表(第一行=同步的布料),整单通用排最后 */}
-              {[...new Set(items.map((it: any) => it.style_no || ''))]
-                .sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
-                .flatMap(sk => {
-                  const group = items.filter((it: any) => (it.style_no || '') === sk);
+              {/* 2026-07-23:先按批次分组(🆕 新增·待提交 / ✅ 已提交·按日期,后者默认折叠),每批内再按款分组 */}
+              {batchGroups.flatMap(bg => {
+                const batchHeader = (
+                  <tr key={`batch-${bg.key}`} className={bg.type === 'submitted' ? 'bg-emerald-50' : 'bg-amber-50'}>
+                    <td colSpan={15} className="py-2 px-3">
+                      {bg.collapsible ? (
+                        <button onClick={() => setOpenBatches(s => ({ ...s, [bg.key]: !s[bg.key] }))}
+                          className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800 hover:underline">
+                          <span className="text-[10px]">{bg.collapsed ? '▶' : '▼'}</span>{bg.label}（{bg.items.length} 项）
+                          <span className="font-normal text-emerald-600">{bg.collapsed ? '· 点击展开' : '· 点击收起'}</span>
+                        </button>
+                      ) : (
+                        <span className="text-xs font-semibold text-amber-800">{bg.label}（{bg.items.length} 项）· 填好后点右上「提交采购」并入已采购</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+                if (bg.collapsible && bg.collapsed) return [batchHeader];
+                const styleRows = [...new Set(bg.items.map((it: any) => it.style_no || ''))]
+                  .sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
+                  .flatMap(sk => {
+                  const group = bg.items.filter((it: any) => (it.style_no || '') === sk);
                   return [
                     <tr key={`grp-${sk}`} className="bg-indigo-50/70">
                       <td colSpan={15} className="py-1.5 px-3 text-xs font-semibold text-indigo-800">
@@ -1268,7 +1303,9 @@ export function BomTab({ orderId }: { orderId: string }) {
                 </tr>
                     )),
                   ];
-                })}
+                });
+                return [batchHeader, ...styleRows];
+              })}
             </tbody>
           </table>
         </div>
