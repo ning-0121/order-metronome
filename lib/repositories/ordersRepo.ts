@@ -807,6 +807,7 @@ export async function decideCancel(
       .from('orders') as any)
       .update({
         lifecycle_status: 'cancelled', // 关键修复：之前只写 termination_*，没改 lifecycle → 半状态
+        terminated_at: new Date().toISOString(),
         termination_type: '取消',
         termination_reason: cancelRequest.reason_detail,
         termination_approved_by: actorId,
@@ -958,6 +959,7 @@ export async function completeOrder(
   const updateData: any = {
     termination_type: '完成',
     lifecycle_status: 'completed',
+    terminated_at: new Date().toISOString(),
   };
   
   const { data: updated, error: updateError } = await (supabase
