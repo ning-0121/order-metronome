@@ -73,6 +73,12 @@ const INSERT_WHITELIST = [
   // AI 原始识别冻结底档（2026-07-03）
   'po_parse_snapshot',
   'po_parse_snapshot_at',
+  // PO 逾期上传罚款（2026-07-23）
+  'po_overdue',
+  'po_overdue_days',
+  'po_penalty_amount',
+  'po_penalty_waived',
+  'po_baseline_date',
 ] as const;
 
 const UPDATE_WHITELIST = [

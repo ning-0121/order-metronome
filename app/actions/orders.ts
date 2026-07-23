@@ -344,9 +344,32 @@ export async function createOrder(
     }
   }
 
+  // ── PO 逾期上传检测(2026-07-23)──客户下达当日必须建单/上传;逾期→罚款¥200+上报+扣绩效。
+  //   基准下达日:手填 order_date;若 PO 文件解析到 order_date 则以文件为准(业务改不了)。
+  const PO_OVERDUE_PENALTY = 200;
+  const poBaselineDate: Date | null = (() => {
+    let parsed: Date | null = null;
+    try {
+      const raw = formData.get('po_parse_snapshot') as string | null;
+      const snap = raw ? JSON.parse(raw) : null;
+      const d = snap?.order_date;
+      if (d && !isNaN(new Date(d).getTime())) parsed = new Date(d);
+    } catch { /* 解析不到就用手填 */ }
+    const base = parsed || (order_date ? new Date(order_date) : null);   // 能解析到以 PO 文件为准,否则手填
+    return base ? new Date(base.getFullYear(), base.getMonth(), base.getDate()) : null;
+  })();
+  const poOverdueDays = poBaselineDate ? Math.floor((today.getTime() - poBaselineDate.getTime()) / 86400000) : 0;
+  const poOverdue = poOverdueDays > 0;
+
   const insertPayload: Record<string, any> = {
     customer_name,
     customer_id,
+    // PO 逾期上传罚款(逾期=建单日晚于客户下达日)
+    po_overdue: poOverdue,
+    po_overdue_days: poOverdue ? poOverdueDays : 0,
+    po_penalty_amount: poOverdue ? PO_OVERDUE_PENALTY : 0,
+    po_penalty_waived: false,
+    po_baseline_date: poBaselineDate ? poBaselineDate.toISOString().slice(0, 10) : null,
     ...(customer_email ? { customer_email } : {}),
     po_number: po_number || null,
     internal_order_no: internal_order_no || null,
@@ -745,6 +768,25 @@ export async function createOrder(
       });
     }
   } catch (e: any) { console.warn(`[orders] 通知失败不阻断订单创建:`, e?.message); }
+
+  // ── PO 逾期上传 → 上报 业务执行经理(order_manager)/财务(finance)/老板(admin)(2026-07-23)──
+  if (poOverdue) {
+    try {
+      const { data: creator } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
+      const cname = (creator as any)?.name || user.email?.split('@')[0] || '业务';
+      const { data: recips } = await (supabase.from('profiles') as any)
+        .select('user_id')
+        .or('role.in.(order_manager,finance,admin),roles.cs.{order_manager},roles.cs.{finance},roles.cs.{admin}');
+      const ids = [...new Set((recips || []).map((r: any) => r.user_id).filter(Boolean))] as string[];
+      const baselineStr = poBaselineDate ? poBaselineDate.toISOString().slice(0, 10) : '—';
+      const title = `⚠️ PO 逾期上传·罚款¥${PO_OVERDUE_PENALTY} — ${preGeneratedOrderNo}`;
+      const message = `${cname} 建单 ${customer_name}·PO ${po_number || '—'};客户下达日 ${baselineStr},逾期 ${poOverdueDays} 天才上传。已记罚款¥${PO_OVERDUE_PENALTY} + 扣绩效。业务可在订单里申请免罚(业务执行经理 + 财务两方通过、或老板批准后撤销)。`;
+      if (ids.length) {
+        await (supabase.from('notifications') as any).insert(ids.map((uid) => ({ user_id: uid, type: 'po_overdue', title, message, related_order_id: orderData.id, status: 'unread' })));
+        try { const { pushToUsers } = await import('@/lib/utils/wechat-push'); await pushToUsers(supabase, ids, title, message); } catch { /* 企微失败不阻断 */ }
+      }
+    } catch (e: any) { console.warn('[orders] PO逾期上报失败不阻断:', e?.message); }
+  }
 
   // ── 推送到财务系统 ──
   try {
