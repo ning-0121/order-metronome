@@ -759,9 +759,13 @@ export async function submitBomToProcurement(
   const now = new Date().toISOString();
 
   // ── a. 锁定 BOM ──
+  // 2026-07-23:只给「还没提交过」的物料盖 submitted_at,保留每项首次提交日期 → 前端按 submitted_at
+  //   日期把已提交的分成多批折叠展示,提交后新加的辅料自成一批(不再和早先提交的混在一起)。
+  //   已提交项仍是 submit_status='submitted'(锁定不变),只是日期不被后续重提刷新。
   const { error: lockErr } = await (supabase.from('materials_bom') as any)
     .update({ submit_status: 'submitted', submitted_at: now, submitted_by: user.id })
-    .eq('order_id', orderId);
+    .eq('order_id', orderId)
+    .or('submit_status.is.null,submit_status.neq.submitted');
   if (lockErr) return { error: `锁定 BOM 失败:${lockErr.message}` };
 
   // ── b. 冻结 Snapshot(含变更检测:BOM 未变则复用最新版本)──
