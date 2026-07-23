@@ -1030,27 +1030,27 @@ export async function consolidateOrderProcurementItems(
     // 2026-07-22 修 BUG:业务把辅料(如腰卡)从BOM删掉后重提,该采购项变孤儿——但它的执行行
     //   procurement_line_items 此前从不清理 → 采购中心(读 line_items、不看 needs_reconfirm)一直显示已删的腰卡。
     //   修法:孤儿采购项的**未下单执行行**(purchase_order_id 为空=还没真下单)直接删;已下单行(挂PO)绝不动。
-    const { data: killedLines } = await (supabase.from('procurement_line_items') as any)
+    // 2026-07-22 再修:孤儿清理是系统级完整性操作,改走 service-role 绕过 RLS —— 此前依赖 user-session +
+    //   手工跑 20260703_delete_policies_fix.sql,策略没落地时 .delete() 静默 0 行,孤儿(如草稿腰卡)永远清不掉。
+    //   函数顶部已鉴权(采购/管理员),删除按本订单孤儿精确限定,service-role 安全。
+    const svc = createServiceRoleClient();
+    const { data: killedLines } = await (svc.from('procurement_line_items') as any)
       .delete().in('procurement_item_id', orphanIds).is('purchase_order_id', null).select('id');
     removedLines += (killedLines || []).length;
 
     // 删完未下单行后重算主档可删性:草稿孤儿 且 已无任何执行行(剩的必是已下单行,不能动)→ 删主档;其余 → 标 needs_reconfirm
-    const { data: remainRef } = await (supabase.from('procurement_line_items') as any)
+    const { data: remainRef } = await (svc.from('procurement_line_items') as any)
       .select('procurement_item_id').in('procurement_item_id', orphanIds);
     const stillRefd = new Set((remainRef || []).map((r: any) => r.procurement_item_id));
     const deletable = orphans.filter((e: any) => e.status === 'draft' && !stillRefd.has(e.id)).map((e: any) => e.id);
     const flagIds = orphans.filter((e: any) => !deletable.includes(e.id)).map((e: any) => e.id);
     if (deletable.length > 0) {
-      // 保险丝(2026-07-03):带 .select 验证真删了;缺 DELETE 策略时静默 0 行 → 孤儿清理空转
-      const { data: reallyDeleted } = await (supabase.from('procurement_items') as any)
+      const { data: reallyDeleted } = await (svc.from('procurement_items') as any)
         .delete().in('id', deletable).select('id');
       removed += (reallyDeleted || []).length;
-      if ((reallyDeleted || []).length < deletable.length) {
-        console.warn(`[consolidate] 草稿孤儿清理不完整(${(reallyDeleted || []).length}/${deletable.length}),疑缺 DELETE 策略,请执行 20260703_delete_policies_fix.sql`);
-      }
     }
     if (flagIds.length > 0) {
-      await (supabase.from('procurement_items') as any).update({ needs_reconfirm: true, updated_at: now }).in('id', flagIds);
+      await (svc.from('procurement_items') as any).update({ needs_reconfirm: true, updated_at: now }).in('id', flagIds);
       flagged += flagIds.length;
     }
   }
