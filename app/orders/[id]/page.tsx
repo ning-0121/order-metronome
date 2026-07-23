@@ -18,6 +18,8 @@ import { isProcurementOnly } from '@/lib/utils/procurement-page-guard';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { getPoWaiver } from '@/app/actions/po-overdue';
+import { PoOverdueWaiverPanel } from '@/components/order/PoOverdueWaiverPanel';
 import { PRODUCTION_MANAGER_FIXED_STEPS } from '@/lib/domain/default-assignees';
 import Link from 'next/link';
 import { BomTab } from '@/components/tabs/BomTab';
@@ -149,6 +151,13 @@ export default async function OrderDetailPage({
   // Final display projection consumed by OrderTimeline. Historical database rows may still carry
   // a production follow-up, but customer-facing confirmations belong to the order business owner.
   const { isBusinessExecutionFixedStep } = await import('@/lib/domain/milestone-owner');
+  // PO 逾期免罚(二期):逾期未免罚时取最新申请 + 算能否申请/审批
+  const poWaiver = (orderData.po_overdue && !orderData.po_penalty_waived)
+    ? (await getPoWaiver(id).catch(() => ({ data: null }))).data ?? null
+    : null;
+  const canRequestWaiver = !!userId && (userId === orderData.owner_user_id || userId === orderData.created_by || isAdmin || currentRoles.some((r: string) => ['sales', 'merchandiser'].includes(r)));
+  const canReviewWaiver = currentRoles.some((r: string) => ['order_manager', 'finance', 'admin'].includes(r));
+
   const businessOwnerId = orderData.owner_user_id || orderData.created_by || null;
   const { data: businessOwner } = businessOwnerId
     ? await (supabase.from('profiles') as any).select('user_id, name, email, role').eq('user_id', businessOwnerId).maybeSingle()
@@ -214,28 +223,18 @@ export default async function OrderDetailPage({
 
       {/* 重排排期横幅（出厂日已过且未出运/送仓时显示给 admin/owner） */}
       <div className="max-w-7xl mx-auto px-6 pt-4 space-y-3">
-        {/* PO 逾期上传罚款横幅(2026-07-23):客户下达当日必须建单;逾期→罚款¥200+扣绩效+已上报三方 */}
+        {/* PO 逾期上传罚款 + 免罚审批闭环(2026-07-23)*/}
         {(orderData as any).po_overdue && (
-          (orderData as any).po_penalty_waived ? (
-            <div className="rounded-xl border border-green-300 bg-green-50 px-4 py-3 flex items-start gap-3">
-              <span className="text-xl shrink-0">✅</span>
-              <div className="text-sm">
-                <p className="font-semibold text-green-900">PO 逾期罚款已免除</p>
-                <p className="text-green-700 mt-0.5">本单 PO 逾期 {(orderData as any).po_overdue_days} 天上传,已通过免罚审批,不计罚款、不计逾期考核。</p>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 flex items-start gap-3">
-              <span className="text-xl shrink-0">⚠️</span>
-              <div className="text-sm">
-                <p className="font-semibold text-red-900">PO 逾期上传 · 罚款 ¥{Number((orderData as any).po_penalty_amount) || 200}</p>
-                <p className="text-red-700 mt-0.5">
-                  客户下达日 {(orderData as any).po_baseline_date || '—'},逾期 <b>{(orderData as any).po_overdue_days} 天</b> 才建单/上传 PO。已记罚款 ¥{Number((orderData as any).po_penalty_amount) || 200} + 扣绩效,并已上报业务执行经理 / 财务 / 老板。
-                  如有正当理由可申请免罚(业务执行经理 + 财务两方通过、或老板批准后撤销罚款与考核)。
-                </p>
-              </div>
-            </div>
-          )
+          <PoOverdueWaiverPanel
+            orderId={id}
+            overdueDays={Number((orderData as any).po_overdue_days) || 0}
+            penaltyAmount={Number((orderData as any).po_penalty_amount) || 200}
+            baselineDate={(orderData as any).po_baseline_date || null}
+            waived={!!(orderData as any).po_penalty_waived}
+            waiver={poWaiver}
+            canRequest={canRequestWaiver}
+            canReview={canReviewWaiver}
+          />
         )}
         {/* 超预算提交采购审批横幅(超基线单耗:经理批;超5%:+财务批) */}
         {(budgetApproval as any)?.data && (
