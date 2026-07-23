@@ -88,7 +88,14 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       const res = await parseOrderFile(base64);
       if ((res as any).error) { setMsg('❌ ' + (res as any).error); setParsing(false); return; }
       const parsed = ((res as any).styles || []) as Style[];
-      if (parsed.length === 0) { setMsg('❌ 没解析到任何款'); setParsing(false); return; }
+      // 2026-07-23:代码解析读不出逐码数量(如"给总数+尺码区间 Plus 1X-3X"的 RAG 客户 PO 格式)→ 自动转 AI 解析,
+      //   AI 会把总数按配比摊成每码件数并自动加尺码列。用户不用记着点哪个按钮。
+      const hasSizeQty = parsed.some((ps) => (ps.colors || []).some((c: any) => Object.values(c.sizes || {}).some((v: any) => Number(v) > 0)));
+      if (parsed.length === 0 || !hasSizeQty) {
+        setMsg('🤖 代码解析没读出逐码数量,自动改用 AI 解析…(约 10-20 秒)');
+        await runAIParse(file);
+        return;
+      }
       // 追加合并:同款号(非空)并入其颜色行,否则新增款
       const merged: Style[] = styles.map((s) => ({ ...s, colors: [...s.colors] }));
       for (const ps of parsed) {
@@ -117,13 +124,17 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    await runAIParse(file);
+  }
+  // AI 解析核心 —— 供「🤖 AI 解析配比」按钮 + 「上传客户订单」读不出逐码数量时自动兜底调用(2026-07-23)
+  async function runAIParse(file: File) {
     setParsing(true); setMsg('🤖 AI 正在读取配比/复杂版式…(约 10-20 秒)');
     try {
       const fd = new FormData();
       fd.append('file', file);
       // 详情模式带 orderId:解析成功后服务端把 AI 原文冻结到 orders.po_parse_snapshot(首冻,别处提取用)
       const res = await parsePO(fd, orderId);
-      if (!res.ok || !res.data) { setMsg('❌ ' + (res.error || 'AI 解析失败')); setParsing(false); return; }
+      if (!res.ok || !res.data) { setMsg('❌ ' + (res.error || 'AI 解析失败')); return; }
       onParsed?.(res.data);   // 建单(受控)模式:把完整解析结果交给父表单,随建单冻结
       const isImg = /\.(png|jpe?g)$/i.test(file.name);
       const notes = (res.data.confidence_notes || []).filter(Boolean).join('；');
@@ -137,7 +148,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       if (aiStyles.length === 0) {
         // 复杂版式(合并单元格/图片/配比散在备注)Excel 转文本常读不全 → 引导截图当图片传(vision 更稳)
         setMsg(`❌ AI 没解析到款${notes ? `（AI:${notes}）` : ''}。${isImg ? '这张图 AI 也没读到,请换更清晰/更完整的截图。' : '年年旺这类复杂版式建议:把这张表截图(含款号/颜色数量/配比 S:M:L)当图片传给「🤖 AI 解析配比」,vision 比 Excel 转文本准得多。'}`);
-        setParsing(false); return;
+        return;
       }
       // 提示 sizes 是否空(配比没摊出来)
       const noSizeStyles = aiStyles.filter((s) => s.colors.every((c) => !c.sizes || Object.keys(c.sizes).length === 0)).length;
@@ -157,8 +168,9 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       setMsg(`✅ AI 解析 ${aiStyles.length} 款 / ${nColors} 颜色行(配比已按比例摊成每码件数),请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}${sizeWarn}`);
     } catch (err: any) {
       setMsg('❌ AI 解析失败:' + (err?.message || String(err)));
+    } finally {
+      setParsing(false);
     }
-    setParsing(false);
   }
 
   const load = useCallback(async () => {
