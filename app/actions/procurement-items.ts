@@ -910,7 +910,7 @@ export async function consolidateOrderProcurementItems(
   if (opts.dryRun) return { ok: true, plan };
 
   const apply = { create: true, refresh: true, cleanup: true, ...(opts.apply || {}) };
-  let created = 0, updated = 0, flagged = 0, removed = 0, syncedLines = 0;
+  let created = 0, updated = 0, flagged = 0, removed = 0, syncedLines = 0, removedLines = 0;
   let seq = (existing || []).length;
   const now = new Date().toISOString();
 
@@ -1026,8 +1026,20 @@ export async function consolidateOrderProcurementItems(
   //    - 草稿孤儿 且 无执行行引用 → 删(未下游,无痕移除)
   //    - 已确认/在采购中的孤儿(或草稿却已挂执行行)→ 保留 + 标 needs_reconfirm(已下游动过,人来决策)
   if (apply.cleanup && orphans.length > 0) {
-    const deletable = orphans.filter((e: any) => orphanDeletableIds.has(e.id)).map((e: any) => e.id);
-    const flagIds = orphans.filter((e: any) => !orphanDeletableIds.has(e.id)).map((e: any) => e.id);
+    const orphanIds = orphans.map((e: any) => e.id);
+    // 2026-07-22 修 BUG:业务把辅料(如腰卡)从BOM删掉后重提,该采购项变孤儿——但它的执行行
+    //   procurement_line_items 此前从不清理 → 采购中心(读 line_items、不看 needs_reconfirm)一直显示已删的腰卡。
+    //   修法:孤儿采购项的**未下单执行行**(purchase_order_id 为空=还没真下单)直接删;已下单行(挂PO)绝不动。
+    const { data: killedLines } = await (supabase.from('procurement_line_items') as any)
+      .delete().in('procurement_item_id', orphanIds).is('purchase_order_id', null).select('id');
+    removedLines += (killedLines || []).length;
+
+    // 删完未下单行后重算主档可删性:草稿孤儿 且 已无任何执行行(剩的必是已下单行,不能动)→ 删主档;其余 → 标 needs_reconfirm
+    const { data: remainRef } = await (supabase.from('procurement_line_items') as any)
+      .select('procurement_item_id').in('procurement_item_id', orphanIds);
+    const stillRefd = new Set((remainRef || []).map((r: any) => r.procurement_item_id));
+    const deletable = orphans.filter((e: any) => e.status === 'draft' && !stillRefd.has(e.id)).map((e: any) => e.id);
+    const flagIds = orphans.filter((e: any) => !deletable.includes(e.id)).map((e: any) => e.id);
     if (deletable.length > 0) {
       // 保险丝(2026-07-03):带 .select 验证真删了;缺 DELETE 策略时静默 0 行 → 孤儿清理空转
       const { data: reallyDeleted } = await (supabase.from('procurement_items') as any)
@@ -1044,7 +1056,7 @@ export async function consolidateOrderProcurementItems(
   }
 
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true, created, updated, flagged, removed, syncedLines, total_items: groups.size };
+  return { ok: true, created, updated, flagged, removed, removedLines, syncedLines, total_items: groups.size };
 }
 
 /** 来源明细(live):该采购项归并键命中的 requirements ⋈ snapshot_lines。粒度=物料行(产品维度缺口见 P1.md §5.1)。 */
