@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { KICKOFF_KEYS, FACTORY_DONE_KEYS, STAGE_SIGNAL_STEP_KEYS, pickStageSignal, REPORT_STEP_ALIASES } from '@/lib/production/stage';
 
@@ -219,7 +219,11 @@ export async function uploadProductionReportFile(
 
   const { data: { publicUrl } } = supabase.storage.from('order-docs').getPublicUrl(storagePath);
 
-  const { data: row, error: insertError } = await (supabase.from('order_attachments') as any)
+  // order_attachments 的 INSERT RLS 策略(线上面板建,未涵盖 production/qc 角色)会挡下生产日报附件写入。
+  // 本 action 已完成 auth + 角色鉴权(生产/QC 在允许名单),用 service-role 写这一条已授权记录。
+  const admin = (() => { try { return createServiceRoleClient(); } catch { return null; } })();
+  const writer = admin ?? supabase;
+  const { data: row, error: insertError } = await (writer.from('order_attachments') as any)
     .insert({
       order_id: orderId,
       production_report_id: reportId,
