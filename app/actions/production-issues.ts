@@ -33,7 +33,16 @@ export interface ProductionIssue {
   created_at: string;
   creator_name?: string | null;
   assignee_name?: string | null;
+  // 事故追责(2026-07-24;迁移未跑时这几项为 undefined)
+  responsible_party?: string | null;
+  disposition?: string | null;
+  loss_amount?: number | null;
+  accountability_note?: string | null;
 }
+
+// 追责列(迁移 20260724_production_issue_accountability 未跑时,select 这些列会报错 → 退回基础列)
+const ACCT_COLS = ', responsible_party, disposition, loss_amount, accountability_note';
+const MISSING_COL = /responsible_party|disposition|loss_amount|accountability_note|does not exist|schema cache|could not find/i;
 
 export async function createProductionIssue(input: {
   order_id: string;
@@ -85,14 +94,17 @@ export async function listProductionIssues(opts: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  let q = (supabase.from('production_issues') as any)
-    .select('id, order_id, milestone_id, category, title, description, severity, status, created_by, assigned_to, remind_at, last_reminded_at, resolved_at, resolved_by, resolution_note, created_at')
-    .order('created_at', { ascending: false })
-    .limit(opts.limit ?? 100);
-  if (opts.order_id) q = q.eq('order_id', opts.order_id);
-  if (opts.status && opts.status !== 'all') q = q.eq('status', opts.status);
-  if (opts.mine) q = q.eq('assigned_to', user.id);
-  const { data, error } = await q;
+  const BASE_COLS = 'id, order_id, milestone_id, category, title, description, severity, status, created_by, assigned_to, remind_at, last_reminded_at, resolved_at, resolved_by, resolution_note, created_at';
+  const build = (cols: string) => {
+    let q = (supabase.from('production_issues') as any)
+      .select(cols).order('created_at', { ascending: false }).limit(opts.limit ?? 100);
+    if (opts.order_id) q = q.eq('order_id', opts.order_id);
+    if (opts.status && opts.status !== 'all') q = q.eq('status', opts.status);
+    if (opts.mine) q = q.eq('assigned_to', user.id);
+    return q;
+  };
+  let { data, error } = await build(BASE_COLS + ACCT_COLS);
+  if (error && MISSING_COL.test(error.message || '')) ({ data, error } = await build(BASE_COLS));  // 追责列迁移未跑 → 退回基础列
   if (error) return { error: error.message };
 
   // 补人名(两步查,避免 FK 关联报错)
@@ -150,5 +162,35 @@ export async function updateProductionIssueRemind(
     .update({ remind_at: remind, last_reminded_at: null, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) return { error: friendlyError(error) };
+  return {};
+}
+
+/**
+ * 事故追责(2026-07-24):在生产问题上记责任认定 —— 责任方 / 处理方式 / 赔偿金额 / 追责说明。
+ * 不改状态(追责与是否已解决独立);追责列迁移未跑时给清晰提示,不 brick。
+ */
+export async function updateProductionIssueAccountability(
+  id: string,
+  patch: { responsible_party?: string | null; disposition?: string | null; loss_amount?: number | null; accountability_note?: string | null },
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', WRITE_MSG);
+  if (err) return { error: err };
+
+  const clean: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (patch.responsible_party !== undefined) clean.responsible_party = patch.responsible_party?.trim() || null;
+  if (patch.disposition !== undefined) clean.disposition = patch.disposition || null;
+  if (patch.loss_amount !== undefined) clean.loss_amount = patch.loss_amount != null && !Number.isNaN(Number(patch.loss_amount)) ? Number(patch.loss_amount) : null;
+  if (patch.accountability_note !== undefined) clean.accountability_note = patch.accountability_note?.trim() || null;
+
+  const { data: row } = await (supabase.from('production_issues') as any).select('order_id').eq('id', id).single();
+  const { error } = await (supabase.from('production_issues') as any).update(clean).eq('id', id);
+  if (error) {
+    if (MISSING_COL.test(error.message || '')) return { error: '事故追责字段未建,请先在 Supabase 执行 20260724_production_issue_accountability.sql' };
+    return { error: friendlyError(error) };
+  }
+  if (row?.order_id) revalidatePath(`/production/order/${row.order_id}`);
   return {};
 }
