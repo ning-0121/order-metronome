@@ -242,6 +242,18 @@ export async function initOrderFinancials(orderId: string): Promise<{ error?: st
     }
   }
 
+  // B-第2刀(2026-07-24 同步带价):算出成交总额后推财务(把 saleTotal 塞进 total_amount),
+  // 财务侧空壳草稿(收入=0)会自动回填收入,财务只需核成本→提交审批。fire-and-forget,不阻断主链路。
+  if (saleTotal > 0) {
+    try {
+      const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+      const { data: full } = await (supabase.from('orders') as any).select('*').eq('id', orderId).single();
+      if (full) await syncOrderToFinance({ ...full, total_amount: saleTotal }, 'order.updated');
+    } catch (e: any) {
+      console.warn('[initOrderFinancials] 财务同步(推成交价)失败不阻断:', e?.message);
+    }
+  }
+
   return {};
 }
 
