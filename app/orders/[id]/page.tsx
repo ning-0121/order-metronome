@@ -101,7 +101,7 @@ export default async function OrderDetailPage({
     redirect(`/orders/${id}?tab=basic`);
   }
   // 2026-07-08 用户拍板:弃用「成本控制」+「报价基线/报价单识别」(布料名对不上采购)。预算/成本真相全走「采购核料」。
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'trade_purchase', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
