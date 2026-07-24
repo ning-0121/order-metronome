@@ -5,7 +5,7 @@ import {
   getOrCreateReconciliation, saveReconciliationLine, saveReconciliationHeader,
   confirmReconciliation, listPoReceiptBatches, createProcurementReturn, confirmProcurementReturn,
 } from '@/app/actions/procurement-reconciliation';
-import { listPaymentRequests, submitPaymentRequest } from '@/app/actions/procurement-payment';
+import { listPaymentRequests, submitPaymentRequest, submitPurchaseDeposit } from '@/app/actions/procurement-payment';
 
 const n2 = (v: any) => (v == null ? '' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }));
 const RET_TYPE: Record<string, string> = { return: '退货', replace: '换货', rework: '返修' };
@@ -146,7 +146,8 @@ export function ProcurementReconciliationPanel({ poId, canProcure = false }: { p
 
           {/* 付款申请(分批·每周·自定义金额)——对账确认后可提 */}
           {['confirmed', 'submitted', 'paid'].includes(recon.status) && (
-            <PaymentRequests reconId={recon.id} canProcure={canProcure} onChanged={load} />
+            <PaymentRequests reconId={recon.id} poId={poId} canProcure={canProcure}
+              supplierStatement={recon.supplier_statement_amount} onChanged={load} />
           )}
 
           {/* 退货/返修列表 */}
@@ -264,12 +265,17 @@ const PR_STATUS: Record<string, [string, string]> = {
   rejected: ['已驳回', 'bg-rose-100 text-rose-700'], cancelled: ['已取消', 'bg-gray-100 text-gray-500'],
 };
 
-function PaymentRequests({ reconId, canProcure, onChanged }: { reconId: string; canProcure: boolean; onChanged: () => void }) {
+function PaymentRequests({ reconId, poId, canProcure, supplierStatement, onChanged }: { reconId: string; poId: string; canProcure: boolean; supplierStatement?: number | null; onChanged: () => void }) {
   const [data, setData] = useState<any>(null);
   const [amount, setAmount] = useState('');
   const [week, setWeek] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // 月结货款(不卡收货)独立输入
+  const [msAmount, setMsAmount] = useState('');
+  const [msNote, setMsNote] = useState('');
+  const [msBusy, setMsBusy] = useState(false);
+  const [msErr, setMsErr] = useState('');
 
   const load = useCallback(async () => { const r = await listPaymentRequests(reconId); if ((r as any).data) setData((r as any).data); }, [reconId]);
   useEffect(() => { load(); }, [load]);
@@ -282,6 +288,17 @@ function PaymentRequests({ reconId, canProcure, onChanged }: { reconId: string; 
     setBusy(false);
     if ((r as any).error) { setErr((r as any).error); return; }
     setAmount(''); setWeek('');
+    await load(); onChanged();
+  }
+
+  async function submitMonthly() {
+    const amt = Number(msAmount);
+    if (!(amt > 0)) { setMsErr('请输入月结付款金额(依据整月对账单)'); return; }
+    setMsBusy(true); setMsErr('');
+    const r = await submitPurchaseDeposit(poId, amt, { kind: 'monthly', note: msNote || undefined });
+    setMsBusy(false);
+    if ((r as any).error) { setMsErr((r as any).error); return; }
+    setMsAmount(''); setMsNote('');
     await load(); onChanged();
   }
 
@@ -319,7 +336,25 @@ function PaymentRequests({ reconId, canProcure, onChanged }: { reconId: string; 
           {err && <span className="text-[11px] text-rose-600">{err}</span>}
         </div>
       )}
-      {data.remaining <= 0.01 && <div className="text-[11px] text-gray-400">净应付已全部提交付款申请。</div>}
+      {data.remaining <= 0.01 && data.net_payable > 0.01 && <div className="text-[11px] text-gray-400">按收货净应付已全部提交付款申请。货款未到齐的部分可用下方「月结付款」。</div>}
+
+      {/* 月结付款(不卡收货):按整月对账单金额直接提付款,不受净应付/收货限制;走财务同一条付款通道,货到对账自动冲抵。 */}
+      {canProcure && (
+        <div className="mt-2 pt-2 border-t border-indigo-200/70">
+          <div className="text-[11px] font-semibold text-amber-800">🗓 月结付款(不卡收货)</div>
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            月结供应商:按整月对账单金额直接提付款,货没到也能交。走财务同一条付款通道审批出款,货到对账后自动从净应付里冲抵。
+            {supplierStatement != null && Number(supplierStatement) > 0 && <span className="text-amber-700"> 本单对账单金额 ¥{n2(supplierStatement)}。</span>}
+          </p>
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
+            <input type="number" step="any" value={msAmount} onChange={e => setMsAmount(e.target.value)} placeholder="本次付款金额(依据对账单)"
+              className="w-44 rounded border border-amber-300 px-2 py-1 text-xs text-right" />
+            <input value={msNote} onChange={e => setMsNote(e.target.value)} placeholder="用途/备注(如「7月对账货款」)" className="w-48 rounded border border-amber-300 px-2 py-1 text-xs" />
+            <button onClick={submitMonthly} disabled={msBusy} className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 disabled:opacity-50">{msBusy ? '提交中…' : '提交月结付款'}</button>
+            {msErr && <span className="text-[11px] text-rose-600">{msErr}</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
