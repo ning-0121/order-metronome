@@ -147,6 +147,29 @@ export async function buildProductionTaskWorkbook(model: ProductionTaskTemplateM
     set(sizeSheet, `${C.size.bottomPosition}${rowNo}`, bottom?.position);
     C.size.bottomSizeColumns.forEach((column, j) => set(sizeSheet, `${column}${rowNo}`, measurementValue(bottom, baseSizes[j] || '')));
   });
+  // ── 尺寸表「串味」修复(2026-07-24)──
+  // 母版取自真实旧单(LU21-SET),尺寸表 rows 2-3 带款式专属部位标签「上衣部位/长裤部位」+「标准尺寸(英寸)」。
+  // 上面只填/清了 rows 4-13 的值,rows 2-3 表头没覆盖 → 没上传/未解析尺码表的单会残留 LU21 空骨架。
+  // 规则:某块(上衣/长裤)有尺码数据 → 通用表头「部位 / 标准尺寸(英寸)」;无数据 → 整块表头(含序号、S/M/L)清空,不留误导空骨架。
+  //   注:真正上传了尺码表的单走 overlayRawSizeChart 整张替换,不经此分支;这里只兜底「无上传」的解析/空态。
+  const hasChartRows = (rows?: ProductionTaskSizeMeasurement[] | null) =>
+    Array.isArray(rows) && rows.some((r) => r && (r.position != null || (r.values && Object.keys(r.values).length > 0)));
+  const hasTopChart = hasChartRows(model.sizeChart?.top);
+  const hasBottomChart = hasChartRows(model.sizeChart?.bottom);
+  set(sizeSheet, `${C.size.topSequence}2`, hasTopChart ? '序号' : '');
+  set(sizeSheet, `${C.size.topSequence}3`, hasTopChart ? '序号' : '');
+  set(sizeSheet, `${C.size.topPosition}2`, hasTopChart ? '部位' : '');
+  set(sizeSheet, `${C.size.topPosition}3`, hasTopChart ? '部位' : '');
+  C.size.topSizeColumns.forEach((column) => {
+    set(sizeSheet, `${column}2`, hasTopChart ? '标准尺寸（英寸）' : '');
+    if (!hasTopChart) set(sizeSheet, `${column}3`, '');   // 无数据 → 连 S/M/L 表头一起清
+  });
+  set(sizeSheet, `${C.size.bottomPosition}2`, hasBottomChart ? '部位' : '');
+  set(sizeSheet, `${C.size.bottomPosition}3`, hasBottomChart ? '部位' : '');
+  C.size.bottomSizeColumns.forEach((column) => {
+    set(sizeSheet, `${column}2`, hasBottomChart ? '标准尺寸（英寸）' : '');
+    if (!hasBottomChart) set(sizeSheet, `${column}3`, '');
+  });
   addOverflowSheet(workbook, model, sizes);
   return workbook;
 }
