@@ -258,6 +258,37 @@ export async function markMilestoneDone(
     }
   }
 
+  // ── B-第3刀(2026-07-24)源头堵口:PI 客户确认前必须已录客户成交价 ──
+  // 无成交价 → 财务只能建 ¥0 空壳预算、进不了审批队列、采购被硬闸门卡死(1022961 的根因)。
+  // 故在此硬卡:成交价(order_financials.sale_total / orders.unit_price / 明细 po_unit_price)任一 > 0 即放行。
+  // admin 可越过;查询失败 fail-open(绝不因校验自身故障误卡业务)。
+  if (milestone.step_key === 'pi_confirmed' && !isAdmin) {
+    let hasPrice = false;
+    try {
+      const svc = (() => { try { return createServiceRoleClient(); } catch { return supabase; } })();
+      const { data: fin } = await (svc.from('order_financials') as any)
+        .select('sale_total').eq('order_id', milestone.order_id).maybeSingle();
+      if (Number((fin as any)?.sale_total) > 0) hasPrice = true;
+      if (!hasPrice) {
+        const { data: ord } = await (svc.from('orders') as any)
+          .select('unit_price').eq('id', milestone.order_id).maybeSingle();
+        if (Number((ord as any)?.unit_price) > 0) hasPrice = true;
+      }
+      if (!hasPrice) {
+        const { data: li } = await (svc.from('order_line_items') as any)
+          .select('po_unit_price').eq('order_id', milestone.order_id).limit(50);
+        if ((li || []).some((r: any) => Number(r.po_unit_price) > 0)) hasPrice = true;
+      }
+    } catch {
+      hasPrice = true; // 校验查询失败 → 放行,不误卡
+    }
+    if (!hasPrice) {
+      return {
+        error: 'PI 客户确认前必须先录入客户成交价:无成交价财务只能建 ¥0 空壳预算、进不了审批,采购会被卡死。请到订单「财务 / PI」模块填成交价(客户单价)后再完成本节点。',
+      };
+    }
+  }
+
   // 顺序约束：跨角色硬阻塞全部移除
   // 2026-04-14：CEO 要求各角色各自处理各自的节点，不互相卡
   // 2026-05-15：进一步取消业务/跟单 QC 双签的硬依赖
