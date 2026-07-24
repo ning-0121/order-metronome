@@ -26,6 +26,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { assertDailyBudget, recordSpend, AiBudgetExceeded } from '@/lib/ai/spend-budget';
 
 // ── 类型定义 ───────────────────────────────────────────────────
 
@@ -129,6 +130,13 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeRawResu
   const maxTokens = opts.maxTokens ?? 1024;
   const cacheSystem = opts.cacheSystem !== false; // 默认 true
 
+  // 日花费硬性封顶:超上限则跳过(返回 null,调用方按"AI 不可用"优雅降级)
+  try {
+    await assertDailyBudget();
+  } catch (e) {
+    if (e instanceof AiBudgetExceeded) { console.warn(`[claude:${opts.scene}] ⛔ ${e.message}`); return null; }
+  }
+
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -170,6 +178,9 @@ export async function callClaude(opts: ClaudeCallOptions): Promise<ClaudeRawResu
     } else if (usage?.cache_creation_input_tokens > 0) {
       console.log(`[claude:${opts.scene}] 📦 cache WRITE ${usage.cache_creation_input_tokens} tokens cached`);
     }
+
+    // 记账(fire-and-forget,不阻断)
+    await recordSpend(response.model || model, usage?.input_tokens ?? 0, usage?.output_tokens ?? 0, opts.scene);
 
     return {
       text,

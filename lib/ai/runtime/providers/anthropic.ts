@@ -4,6 +4,7 @@ import type {
   ProviderAdapter, ProviderResponse, VisionRequest,
 } from '../contracts';
 import { AIRuntimeError, classifyProviderError } from '../errors';
+import { assertDailyBudget, recordSpend } from '@/lib/ai/spend-budget';
 
 type Block = Anthropic.ContentBlockParam;
 
@@ -32,6 +33,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     model: string; system?: string; timeoutMs?: number; maxTokens?: number;
     content: Block[]; tool?: { name: string; schema: Record<string, unknown> };
   }) {
+    // 日花费硬性封顶:超上限则抛 AiBudgetExceeded(暂停调用,次日自动恢复)
+    await assertDailyBudget();
     const started = Date.now();
     const timeoutMs = args.timeoutMs ?? 30_000;
     const controller = new AbortController();
@@ -49,6 +52,8 @@ export class AnthropicAdapter implements ProviderAdapter {
           tool_choice: { type: 'tool', name: args.tool.name },
         } : {}),
       }, { timeout: timeoutMs, maxRetries: 0, signal: controller.signal });
+      const u = response.usage as any;
+      await recordSpend(response.model || args.model, u?.input_tokens ?? 0, u?.output_tokens ?? 0, args.tool?.name || 'runtime');
       return { response, latencyMs: Date.now() - started };
     } catch (error) { throw classifyProviderError(error, 'anthropic'); }
     finally { clearTimeout(timer); }
