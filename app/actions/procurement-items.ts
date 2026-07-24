@@ -1298,6 +1298,21 @@ export async function saveSizeQtyOverride(itemId: string, orderId: string, sizes
   // 手动改尺码 = 退出「按产品拆分(款×色×码)」模式:清掉产品矩阵。
   // 独立语句 + 容忍 sku_breakdown 列未建(旧库),不影响尺码拆分本身可用。
   await (supabase.from('procurement_items') as any).update({ sku_breakdown: null }).eq('id', itemId).eq('order_id', orderId);
+
+  // ── 修(2026-07-24 尺码丢失根因)──────────────────────────────────────
+  // generateExecutionLines 会跳过"已有执行行"的采购项 → 采购录完抛量/尺码保存后,尺码分布只落在
+  // procurement_items.size_qty_override,从没落到执行行(采购行/导出读的是执行行)→ 导出无尺码。
+  // 修:保存尺码后,删掉该项【未归单】(purchase_order_id IS NULL)的旧执行行并重生成 → 尺码落到执行行。
+  // 已归单的行不动(不擅自动别人 PO);那种情况在采购单页「采购行」手填尺码。
+  try {
+    const svc = createServiceRoleClient();
+    await (svc.from('procurement_line_items') as any)
+      .delete().eq('procurement_item_id', itemId).is('purchase_order_id', null).neq('line_status', 'cancelled');
+    if (hasOverride) await generateExecutionLines(orderId);   // 该项无行了 → 重生成并带上尺码
+  } catch (e: any) {
+    console.warn('[saveSizeQtyOverride] 重生成执行行失败(不阻断保存):', e?.message);
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, total, cleared: !hasOverride };
 }
