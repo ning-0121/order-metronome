@@ -26,6 +26,7 @@ import { BomTab } from '@/components/tabs/BomTab';
 import { TabErrorBoundary } from '@/components/TabErrorBoundary';
 import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
+import { TradeBulkPurchaseTab } from '@/components/tabs/TradeBulkPurchaseTab';
 import { ProductVariantPicker } from '@/components/ProductVariantPicker';
 import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
 import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
@@ -527,13 +528,20 @@ export default async function OrderDetailPage({
               { key: 'pi', label: '🧾 PI' },
               { key: 'bom', label: '原辅料和包装' },
               { key: 'procurement_items', label: '🛒 采购核料' },
+              { key: 'trade_purchase', label: '🛒 大货采购' },
               { key: 'procurement', label: '📦 采购进度' },
               { key: 'production', label: '生产进度' },
               { key: 'qc', label: '🔍 质检' },
               { key: 'shipment', label: '🚢 出货单据' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
-            // 经销/采购成品单(trade)买成品无原辅料 → 隐藏「采购核料」tab(生产任务单/原辅料和包装(含包装方式)/PI 等保留)
-            ].filter(t => !((orderData as any).order_purpose === 'trade' && t.key === 'procurement_items')).map(t => (
+            // 经销/采购成品单(trade)买成品无原辅料 → 隐藏「采购核料」tab,改显「大货采购」;
+            //   非经销单 → 隐藏「大货采购」tab。(生产任务单/原辅料和包装(含包装方式)/PI 等保留)
+            ].filter(t => {
+              const isTrade = (orderData as any).order_purpose === 'trade';
+              if (isTrade && t.key === 'procurement_items') return false;
+              if (!isTrade && t.key === 'trade_purchase') return false;
+              return true;
+            }).map(t => (
               <Link
                 key={t.key}
                 href={`/orders/${id}?tab=${t.key}${fromUrl !== '/orders' ? `&from=${encodeURIComponent(fromUrl)}` : ''}`}
@@ -1132,6 +1140,15 @@ export default async function OrderDetailPage({
         )}
 
         {/* Tab: 成本控制 —— 2026-07-08 已弃用,并入「📋 报价基线」(逐款成本单一真相)。旧 URL(?tab=cost_control)回退到报价基线。 */}
+
+        {/* Tab: 大货采购(经销单专属:成品采购 → 财务应付) */}
+        {activeTab === 'trade_purchase' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <TabErrorBoundary>
+              <TradeBulkPurchaseTab orderId={id} />
+            </TabErrorBoundary>
+          </div>
+        )}
 
         {/* Tab: 采购进度（共享表 + 对账） */}
         {activeTab === 'procurement' && (
