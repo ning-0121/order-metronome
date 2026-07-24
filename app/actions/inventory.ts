@@ -11,6 +11,7 @@ import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { aggregateInventoryBalance, computeReceiptDelta, computeOrderLeftover, materialKeyForLine, availableToPromise, computeAvailability, type ReservationRow } from '@/lib/services/inventory';
 import { sumGrossReceived } from '@/lib/procurement/receivedQty';
+import { notifyUsersByRole } from '@/lib/utils/notifications';
 
 async function authIssueRoles() {
   const supabase = await createClient();
@@ -265,6 +266,29 @@ export async function recordLeftoverStocktake(
 
   const { error } = await (supabase.from('inventory_transactions') as any).insert(rows);
   if (error) return { error: error.message };
+
+  // #2 尾料回收单推采购(2026-07-24):归库后把「尾料回收单」(回收物料摘要)推给采购/采购经理 →
+  //   采购据此复用抵扣/安排退料,不再靠各记各的。站内 + 企微。fire-and-forget,不阻断归库。
+  try {
+    const recovered = valid.filter(i => Number(i.countedQty) > 0);
+    if (recovered.length > 0) {
+      const svc = createServiceRoleClient();
+      const { data: ord } = await (svc.from('orders') as any).select('order_no, internal_order_no, customer_name').eq('id', orderId).maybeSingle();
+      const label = (ord as any)?.internal_order_no || (ord as any)?.order_no || orderId.slice(0, 8);
+      const list = recovered.slice(0, 6).map(i => `${i.materialName || i.materialKey} ${i.countedQty}${i.unit || ''}`).join('、');
+      const more = recovered.length > 6 ? ` 等 ${recovered.length} 项` : '';
+      const title = `♻️ 尾料回收单 — ${label}`;
+      const message = `订单 ${label}${(ord as any)?.customer_name ? '·' + (ord as any).customer_name : ''} 出货后尾料清点归库:${list}${more}。余料已进共享库存,下次采购同料自动抵扣,可复用或安排退料。`;
+      await notifyUsersByRole(svc, ['procurement', 'procurement_manager'], { type: 'leftover_recovery', title, message, relatedOrderId: orderId });
+      try {
+        const { pushToUsers } = await import('@/lib/utils/wechat-push');
+        const { data: procs } = await (svc.from('profiles') as any).select('user_id').or('role.in.(procurement,procurement_manager),roles.cs.{procurement},roles.cs.{procurement_manager}');
+        const ids = [...new Set(((procs || []) as any[]).map(p => p.user_id).filter(Boolean))] as string[];
+        if (ids.length) await pushToUsers(svc, ids, title, message);
+      } catch { /* 企微失败不阻断 */ }
+    }
+  } catch (e: any) { console.warn('[recordLeftoverStocktake] 尾料回收单通知失败不阻断:', e?.message); }
+
   revalidatePath('/procurement/inventory');
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, adjusted: rows.length };
