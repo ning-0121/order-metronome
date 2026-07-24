@@ -38,6 +38,8 @@ interface OrderTimelineProps {
   isAdmin?: boolean;
   /** 本单是否「免验货」(出货前验货节点免报告放行) */
   inspectionWaived?: boolean;
+  /** 订单用途:production(生产)/ trade(经销/采购成品)/ consign(委托加工)/ sample(打样)。trade 用专属阶段分组(无"生产过程")。 */
+  orderPurpose?: string;
 }
 
 // V1 最终分组（对齐新节点表）
@@ -73,6 +75,33 @@ const MILESTONE_GROUPS = [
     titleCn: '阶段 5：出货与收款',
     // 业务:船样 → PackingList/CI/报关单 → 订舱出货 → 发货出运(物流) → 收款
     stepKeys: ['shipping_sample_send', 'ci_made', 'finished_goods_warehouse', 'inspection_release', 'booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'domestic_delivery', 'payment_received'],
+  },
+];
+
+// 经销单 / 采购成品(order_purpose='trade')专属分组:无自有生产 → 不套"生产过程/产前样"标签,
+// 4 段连续不跳号:订单确认 → 采购备货 → 验货出运 → 收款。节点全复用现有 step_key。
+const TRADE_MILESTONE_GROUPS = [
+  {
+    key: 'stage1', emoji: '🟦',
+    titleCn: '阶段 1：订单确认',
+    stepKeys: ['po_confirmed', 'pi_confirmed', 'finance_approval'],
+  },
+  {
+    key: 'stage2', emoji: '🟨',
+    titleCn: '阶段 2：采购备货',
+    // 向供应商下单 + 包装资料确认(经销单不生产,备货即在采购中心跟踪)
+    stepKeys: ['procurement_order_placed', 'packing_method_confirmed'],
+  },
+  {
+    key: 'stage3', emoji: '🟧',
+    titleCn: '阶段 3：验货出运',
+    stepKeys: ['inspection_release', 'finished_goods_warehouse', 'shipping_sample_send', 'ci_made',
+      'booking_done', 'customs_export', 'finance_shipment_approval', 'shipment_execute', 'domestic_delivery'],
+  },
+  {
+    key: 'stage4', emoji: '🟫',
+    titleCn: '阶段 4：收款',
+    stepKeys: ['payment_received'],
   },
 ];
 
@@ -172,7 +201,9 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   );
 }
 
-export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false, inspectionWaived = false }: OrderTimelineProps) {
+export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false, inspectionWaived = false, orderPurpose }: OrderTimelineProps) {
+  // 经销单用专属阶段分组(不套生产/产前样标签,不跳号);其余走标准 5 段。
+  const ACTIVE_GROUPS = orderPurpose === 'trade' ? TRADE_MILESTONE_GROUPS : MILESTONE_GROUPS;
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
   const [showPOParser, setShowPOParser] = useState(false);
@@ -263,7 +294,7 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
 
   // 阶段内：按 stepKeys 数组里的位置排序（永久固定的逻辑顺序）
   // 隐藏空阶段:极简模板(11节点)或 lane/只看关键 过滤后,某阶段无节点时不渲染其标题
-  const grouped = MILESTONE_GROUPS.map(g => {
+  const grouped = ACTIVE_GROUPS.map(g => {
     const items = laneFilteredMilestones.filter(m => g.stepKeys.includes((m as any).step_key));
     items.sort((a, b) => {
       const aIdx = g.stepKeys.indexOf((a as any).step_key);

@@ -918,6 +918,7 @@ export default async function OrderDetailPage({
                 currentUserId={user.id}
                 isAdmin={isAdmin}
                 inspectionWaived={isInspectionWaived(orderData)}
+                orderPurpose={(orderData as any).order_purpose || 'production'}
               />
             ) : (
               <p className="text-gray-400 text-center py-8">暂无执行节点数据</p>
