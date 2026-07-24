@@ -256,14 +256,32 @@ export async function saveOrderLineItems(orderId: string, styles: any[], sizeOrd
     return { error: '保存中止:旧明细删不掉(数据库缺 DELETE 权限,会导致数量翻倍)。请先在 Supabase 执行 20260703_delete_policies_fix.sql' };
   }
   if (rows.length > 0) {
-    let { error: insErr } = await (supabase.from('order_line_items') as any).insert(rows);
-    if (insErr && /product_name_en|carton_count|created_by|po_unit_price|fabrics|column .* does not exist/i.test(insErr.message || '')) {
-      // 新列迁移未执行 → 降级去掉新列重插(不 brick 保存),提醒执行迁移
-      console.warn('[saveOrderLineItems] 双语/箱数/录入人/PO价/多布料列缺失,降级保存。请执行 20260703/20260706/20260710 系列迁移');
-      const plain = rows.map(({ product_name_en, carton_count, created_by, po_unit_price, purchase_unit_cost, fabrics, ...rest }) => rest);
-      ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(plain));
+    // 缺列降级(2026-07-24 修):原实现只要任一可选列缺失,就把 {…, fabrics} 一锅端剥掉重插 →
+    //   面料单价只活在 fabrics JSONB(旧 fabric_* 无 price 镜像),被连坐误删(用户报「填了面料单价自动消失」:
+    //   多半是 purchase_unit_cost 等新列没落生产,报错触发降级,顺手把 fabrics 也剥了)。
+    //   改为【逐列精准降级】:从报错里抠出真正缺失的那一列、只剔那一列重试 → fabrics/单价不再被无辜牵连。
+    const OPTIONAL_COLS = ['product_name_en', 'carton_count', 'created_by', 'po_unit_price', 'purchase_unit_cost', 'fabrics'];
+    let payload: any[] = rows;
+    const dropped: string[] = [];
+    let insErr: any = null;
+    for (let attempt = 0; attempt <= OPTIONAL_COLS.length; attempt++) {
+      ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(payload));
+      if (!insErr) break;
+      const emsg = insErr.message || '';
+      if (!/does not exist|schema cache|could not find/i.test(emsg)) break;   // 非「列不存在」类错误不降级
+      // 抠列名(PostgREST: Could not find the 'xxx' column… / PG: column "xxx" … does not exist)
+      const m = /column ["']([a-z_]+)["']|["']([a-z_]+)["'] column|the ["']([a-z_]+)["']/i.exec(emsg);
+      let col = (m && (m[1] || m[2] || m[3])) || null;
+      if (!col || !OPTIONAL_COLS.includes(col) || dropped.includes(col)) {
+        // 认不出/不在可选列/已剔过 → 退回扫描:剔一个尚未剔、且出现在报错里的可选列
+        col = OPTIONAL_COLS.find((c) => !dropped.includes(c) && new RegExp(`\\b${c}\\b`).test(emsg)) || null;
+      }
+      if (!col || dropped.includes(col)) break;   // 仍认不出 → 停,避免死循环(下面按错误如实返回)
+      dropped.push(col);
+      payload = payload.map((r: any) => { const clone = { ...r }; delete clone[col as string]; return clone; });
     }
     if (insErr) return { error: '写明细失败:' + insErr.message };
+    if (dropped.length) console.warn('[saveOrderLineItems] 缺列降级(请补迁移 20260703/20260706/20260710/20260711):已剔除 ' + dropped.join('、'));
   }
 
   // 尺码列手排顺序 → 持久化订单级(orders.size_order);列缺失(迁移未执行)则静默跳过不阻断保存
