@@ -300,8 +300,14 @@ export async function parsePO(
       ?? (runtimeError?.cause as { message?: string } | undefined)?.message
       ?? message ?? '',
     );
+    // 账户级用量上限(Anthropic 控制台设的月度 usage limit)触顶,报文形如
+    // "You have reached your specified API usage limits. You will regain access on YYYY-MM-DD…"
+    const isUsageLimit = /usage limit|regain access|spending limit|monthly limit/i.test(rawProviderMsg);
     const isBilling = /credit balance|billing|insufficient|too low|quota|余额/i.test(rawProviderMsg);
-    const safe = isBilling
+    const regain = rawProviderMsg.match(/regain access on\s*([0-9-]+(?:\s*at\s*[0-9:]+\s*UTC)?)/i)?.[1];
+    const safe = isUsageLimit
+      ? `已达 Anthropic 账户用量上限（月度限额），${regain ? `${regain} 自动恢复；` : ''}请管理员到 Anthropic 控制台 Settings → Limits 调高或移除限额后即可恢复；可先手工录入创建订单`
+      : isBilling
       ? 'AI 服务账户余额不足，请管理员到 Anthropic 控制台（Plans & Billing）充值后重试；可先手工录入创建订单'
       : code === 'MODEL_NOT_CONFIGURED' || code === 'AUTHENTICATION'
         ? 'AI 配置缺失，请联系管理员检查模型或访问权限'
