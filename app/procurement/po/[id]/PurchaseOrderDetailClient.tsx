@@ -2,13 +2,37 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine, updateProcurementLineSize } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { submitPurchaseDeposit } from '@/app/actions/procurement-payment';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { PoRemindersPanel } from '@/components/procurement/PoRemindersPanel';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { compressImageForUpload, friendlyUploadError } from '@/lib/utils/image-compress';
+
+/** 采购行尺码:草稿单可点击手填/改(拆码行历史 size 缺失时补录);非草稿只读展示。 */
+function EditableSizeCell({ poId, lineId, size, canEdit }: { poId: string; lineId: string; size: string | null; canEdit: boolean }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(size || '');
+  const [saving, setSaving] = useState(false);
+  if (!canEdit) return size ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-700">{size}</span> : <span className="text-gray-300">—</span>;
+  async function save() {
+    setEditing(false);
+    if ((val || '').trim() === (size || '').trim()) return;
+    setSaving(true);
+    const res = await updateProcurementLineSize(poId, lineId, val);
+    setSaving(false);
+    if (res.error) { alert(res.error); setVal(size || ''); return; }
+    router.refresh();
+  }
+  if (editing) {
+    return <input autoFocus value={val} disabled={saving} onChange={e => setVal(e.target.value)}
+      onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setVal(size || ''); setEditing(false); } }}
+      placeholder="XS/S/M…" className="w-16 text-center text-[11px] border rounded px-1 py-0.5" />;
+  }
+  return <button onClick={() => setEditing(true)} className={`text-[10px] px-1.5 py-0.5 rounded-full ${size ? 'bg-teal-50 text-teal-700' : 'border border-dashed border-gray-300 text-gray-400'} hover:ring-1 hover:ring-teal-300`} title="点击改尺码">{saving ? '…' : (size || '+尺码')}</button>;
+}
 
 const REASON_LABELS: Record<string, string> = {
   large_amount: '大额(≥5万)', price_variance: '价格偏差>5%', new_supplier: '新供应商',
@@ -422,7 +446,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                       <td className="px-3 py-2">{l.material_name}</td>
                       <td className="px-3 py-2 text-gray-500">{l.specification || '—'}</td>
                       <td className="px-3 py-2">{l.color ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">{l.color}</span> : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2 text-center">{l.size ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-700">{l.size}</span> : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-center"><EditableSizeCell poId={po.id} lineId={l.id} size={l.size} canEdit={!!canEditLines} /></td>
                       <td className="px-3 py-2 text-center">{l.ordered_qty} {l.ordered_unit}</td>
                       <td className="px-3 py-2 text-center text-emerald-700 font-medium">{received || '—'}</td>
                       <td className={`px-3 py-2 text-center font-semibold ${out > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{ordered ? out : '—'}</td>

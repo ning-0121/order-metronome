@@ -819,6 +819,28 @@ export async function deletePurchaseOrderLine(poId: string, lineId: string): Pro
 }
 
 /**
+ * 手填/改采购行尺码(仅采购、仅草稿)。用于拆码行历史 size 缺失时人工补录 → 采购行/导出正确显示。
+ * service-role 写(绕开 size 列级写授权),draft 才可改。
+ */
+export async function updateProcurementLineSize(poId: string, lineId: string, size: string): Promise<{ ok?: boolean; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可改采购行尺码' };
+  const { data: po } = await (supabase.from('purchase_orders') as any).select('id, status').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') return { error: '仅「草稿」采购单可改尺码;已下单/审批中的请先撤回。' };
+  const svc = createServiceRoleClient();
+  const { data: line } = await (svc.from('procurement_line_items') as any).select('id, purchase_order_id').eq('id', lineId).maybeSingle();
+  if (!line || (line as any).purchase_order_id !== poId) return { error: '采购行不存在或不属于本单' };
+  const clean = (size || '').trim().slice(0, 20) || null;
+  const { error } = await (svc.from('procurement_line_items') as any)
+    .update({ size: clean, updated_at: new Date().toISOString() }).eq('id', lineId).eq('purchase_order_id', poId);
+  if (error) return { error: '保存尺码失败:' + error.message };
+  revalidatePath(`/procurement/po/${poId}`);
+  return { ok: true };
+}
+
+/**
  * 设置/取消采购单「价格待定」(仅采购、仅草稿)。勾上后允许无底价下单(先下单后议价,单上标注);
  * 价格填好后可取消。列缺失(迁移未跑)→ 提示先执行迁移。
  */
