@@ -1300,15 +1300,39 @@ export async function saveSizeQtyOverride(itemId: string, orderId: string, sizes
   await (supabase.from('procurement_items') as any).update({ sku_breakdown: null }).eq('id', itemId).eq('order_id', orderId);
 
   // ── 修(2026-07-24 尺码丢失根因)──────────────────────────────────────
-  // generateExecutionLines 会跳过"已有执行行"的采购项 → 采购录完抛量/尺码保存后,尺码分布只落在
-  // procurement_items.size_qty_override,从没落到执行行(采购行/导出读的是执行行)→ 导出无尺码。
-  // 修:保存尺码后,删掉该项【未归单】(purchase_order_id IS NULL)的旧执行行并重生成 → 尺码落到执行行。
-  // 已归单的行不动(不擅自动别人 PO);那种情况在采购单页「采购行」手填尺码。
+  // generateExecutionLines 跳过"已有执行行"的采购项 → 采购存完尺码拆分,尺码只落在 size_qty_override,
+  // 从没落到执行行(采购行/导出读的是执行行)→ 采购行不带尺码,要手动重分。
+  // 修:存尺码后,把该项【未下单】的执行行(未归单 + 草稿采购单里的)删掉重生成 → 尺码落到执行行;
+  //     若原在草稿采购单里,新行回挂原单 + 重算总额。已【下单(placed)】的不动(那种在采购单页手填)。
   try {
     const svc = createServiceRoleClient();
-    await (svc.from('procurement_line_items') as any)
-      .delete().eq('procurement_item_id', itemId).is('purchase_order_id', null).neq('line_status', 'cancelled');
-    if (hasOverride) await generateExecutionLines(orderId);   // 该项无行了 → 重生成并带上尺码
+    const { data: myLines } = await (svc.from('procurement_line_items') as any)
+      .select('id, purchase_order_id, line_status').eq('procurement_item_id', itemId).neq('line_status', 'cancelled');
+    const poIds = [...new Set(((myLines || []) as any[]).map(l => l.purchase_order_id).filter(Boolean))] as string[];
+    const placedPo = new Set<string>();
+    let draftPoId: string | null = null;
+    if (poIds.length) {
+      const { data: pos } = await (svc.from('purchase_orders') as any).select('id, status').in('id', poIds);
+      for (const p of (pos || []) as any[]) { if (p.status && p.status !== 'draft') placedPo.add(p.id); else draftPoId = draftPoId || p.id; }
+    }
+    const hasPlaced = ((myLines || []) as any[]).some(l => l.purchase_order_id && placedPo.has(l.purchase_order_id));
+    if (!hasPlaced) {   // 只要没有已下单的行,就重生成(草稿单里的也重生成)
+      const delIds = ((myLines || []) as any[]).filter(l => !l.purchase_order_id || !placedPo.has(l.purchase_order_id)).map(l => l.id);
+      if (delIds.length) await (svc.from('procurement_line_items') as any).delete().in('id', delIds);
+      if (hasOverride) {
+        await generateExecutionLines(orderId);   // 该项无行了 → 重生成并带上尺码(未归单)
+        if (draftPoId) {   // 原在草稿采购单里 → 新行回挂原单 + 重算总额
+          await (svc.from('procurement_line_items') as any).update({ purchase_order_id: draftPoId })
+            .eq('procurement_item_id', itemId).is('purchase_order_id', null).neq('line_status', 'cancelled');
+          const { data: rest } = await (svc.from('purchase_orders') as any).select('id').eq('id', draftPoId).maybeSingle();
+          if (rest) {
+            const { data: poLines } = await (svc.from('procurement_line_items') as any).select('ordered_amount, line_status').eq('purchase_order_id', draftPoId);
+            const tot = ((poLines || []) as any[]).filter(l => l.line_status !== 'cancelled').reduce((s, l) => s + (Number(l.ordered_amount) || 0), 0);
+            await (svc.from('purchase_orders') as any).update({ total_amount: Math.round(tot * 100) / 100, updated_at: new Date().toISOString() }).eq('id', draftPoId);
+          }
+        }
+      }
+    }
   } catch (e: any) {
     console.warn('[saveSizeQtyOverride] 重生成执行行失败(不阻断保存):', e?.message);
   }
