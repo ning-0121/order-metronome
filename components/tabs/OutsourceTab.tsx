@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { getOutsourceJobs, addOutsourceJob, updateOutsourceJob, deleteOutsourceJob } from '@/app/actions/outsource';
+import { ProductionTransferSection } from '@/components/tabs/ProductionTransferSection';
 
 const JOB_TYPES = [
   { value: 'cutting', label: '裁剪(裁床)' },
@@ -173,6 +174,9 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
           })}
         </div>
       )}
+
+      {/* 临时调货(裁片/半成品 工厂间救急调拨)—— 与外发同域,放同一 Tab 底部 */}
+      <ProductionTransferSection orderId={orderId} />
     </div>
   );
 }
