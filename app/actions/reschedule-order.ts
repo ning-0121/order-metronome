@@ -117,12 +117,29 @@ export async function previewReschedule(
     return { error: `排期计算失败：${e.message}` };
   }
 
-  // 关键节点用新算法另行覆盖：production_kickoff / factory_completion
-  // 简化：把这两个节点直接覆盖为用户指定的日期
+  // 关键节点用新算法另行覆盖：production_kickoff / factory_completion / 出厂后全部节点。
+  // ─ 修(2026-07-26 排期错乱)─ 出厂后节点(入库/验货/送仓/收款/出运…)原走 calcDueDates,
+  //   但其锚点=出运截止(cap 会把它们钳到旧锚点)→ 新出厂日晚于旧锚点时,这些节点落到工厂完成之前
+  //   (国内送仓 8/16 排在工厂完成 8/20 之前)。改为显式锚定「新出厂日 + 出厂后偏移」,保证永远在工厂完成之后。
+  //   偏移取自 schedule.ts TIMELINE(相对 factory_completion=38 的天数差);收款给足缓冲落在出运后。
+  const POST_FACTORY_OFFSETS: Record<string, number> = {
+    leftover_collection: 1,        // 剩余物料回收
+    finished_goods_warehouse: 1,   // 成品入库
+    inspection_release: 2,         // 验货/放行
+    booking_done: 3,               // 订舱
+    finance_shipment_approval: 5,  // 出货财务审批
+    customs_export: 5,             // 报关
+    domestic_delivery: 5,          // 国内送仓完成
+    shipment_execute: 6,           // 出运
+    payment_received: 12,          // 收款(出运后约一周,避免落在出厂前)
+  };
   const overrides: Record<string, Date> = {
     production_kickoff: start,
     factory_completion: newFactoryDate,
   };
+  for (const [key, off] of Object.entries(POST_FACTORY_OFFSETS)) {
+    overrides[key] = new Date(newFactoryDate.getTime() + off * 86400000);
+  }
 
   // 拉里程碑做对比
   const { data: milestones } = await (supabase.from('milestones') as any)
