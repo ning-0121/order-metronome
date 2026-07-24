@@ -68,7 +68,7 @@ export async function calculateOrderScore(
 
   // 获取订单信息
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, etd, warehouse_due_date, incoterm, owner_user_id, created_by')
+    .select('id, order_no, etd, warehouse_due_date, incoterm, owner_user_id, created_by, po_overdue, po_penalty_waived')
     .eq('id', orderId)
     .single();
   if (!order) return { error: '订单不存在' };
@@ -197,11 +197,17 @@ export async function calculateOrderScore(
     };
   }
 
+  // PO 逾期上传罚款(2026-07-23 三期):未免罚则业务扣绩效分 + 佣金真扣¥200;免罚后不扣。
+  const poFineActive = !!(order as any)?.po_overdue && !(order as any)?.po_penalty_waived;
+  const PO_OVERDUE_SCORE_PENALTY = 10;   // 逾期扣绩效分
+  const PO_OVERDUE_FINE = 200;           // 逾期佣金真扣(元)
+
   const salesDetail = calcRoleScore(new Set(['sales']));
-  const salesTotal = Math.min(110, Math.max(0,
+  const salesTotalRaw = Math.min(110, Math.max(0,
     salesDetail.ontime.score + salesDetail.noBlock.score +
     salesDetail.noDelay.score + salesDetail.quality.score + salesDetail.delivery.score
   ));
+  const salesTotal = Math.max(0, salesTotalRaw - (poFineActive ? PO_OVERDUE_SCORE_PENALTY : 0));
   const salesGrade = calcGrade(salesTotal);
 
   // 检查一票否决
@@ -224,8 +230,8 @@ export async function calculateOrderScore(
       revenueCny = (cur === 'CNY' || cur === 'RMB') ? st : st * (Number((fin as any).exchange_rate) || 7.2);
     }
   }
-  const commFields = (rate: number) => ({
-    commission_amount: vetoed ? 0 : computeCommissionAmount(revenueCny, rate),
+  const commFields = (rate: number, fine = 0) => ({
+    commission_amount: vetoed ? 0 : Math.max(0, computeCommissionAmount(revenueCny, rate) - fine),
     commission_base: Math.round(revenueCny * 100) / 100,
     commission_base_type: COMMISSION_BASE_TYPE,
   });
@@ -252,7 +258,7 @@ export async function calculateOrderScore(
     total_score: salesTotal,
     grade: vetoed ? 'D' : salesGrade.grade,
     commission_rate: vetoed ? 0 : salesGrade.rate,
-    ...commFields(vetoed ? 0 : salesGrade.rate),
+    ...commFields(vetoed ? 0 : salesGrade.rate, poFineActive ? PO_OVERDUE_FINE : 0),
     vetoed,
     veto_reason: vetoReason,
     detail_json: salesDetail,
