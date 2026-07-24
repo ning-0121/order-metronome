@@ -129,6 +129,21 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     setProofPaths(next);
   }
 
+  // 下单凭证 预览/下载(2026-07-24):order-docs 为私有桶,用签名 URL(1 小时有效)在线看 / 存本地。
+  async function previewProof(path: string) {
+    const supabase = createBrowserClient();
+    const { data, error } = await supabase.storage.from('order-docs').createSignedUrl(path, 3600);
+    if (error || !data?.signedUrl) { await confirm({ title: '打开失败:' + (error?.message || '无法生成预览链接'), confirmText: '知道了' }); return; }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+  }
+  async function downloadProof(path: string) {
+    const supabase = createBrowserClient();
+    const name = path.split('/').pop() || '下单凭证';
+    const { data, error } = await supabase.storage.from('order-docs').createSignedUrl(path, 3600, { download: name });
+    if (error || !data?.signedUrl) { await confirm({ title: '下载失败:' + (error?.message || '无法生成下载链接'), confirmText: '知道了' }); return; }
+    const a = document.createElement('a'); a.href = data.signedUrl; a.download = name; a.click();
+  }
+
   async function handlePlace() {
     setBusy('place');
     const res = await placePurchaseOrder(po.id);
@@ -240,27 +255,31 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
         </div>
       </div>
 
-      {/* 下单凭证(2026-07-04 用户拍板:下单强制传凭证)—— 草稿态、采购可传 */}
-      {po.status === 'draft' && canProcure && (
+      {/* 下单凭证(2026-07-04 下单强制传凭证)—— 草稿态采购上传/删除;有凭证时任何能看本 PO 的人都可预览/下载(含下单后复看,2026-07-24)*/}
+      {((po.status === 'draft' && canProcure) || proofPaths.length > 0) && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-semibold text-gray-800">📎 下单凭证</h3>
             {proofPaths.length > 0
               ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">已上传 {proofPaths.length} 个</span>
               : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">未上传 — 下单前必传</span>}
-            <label className={`ml-auto text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 font-medium hover:bg-indigo-50 cursor-pointer ${proofUploading ? 'opacity-50 pointer-events-none' : ''}`}>
-              {proofUploading ? '上传中…' : '+ 上传凭证'}
-              <input type="file" accept="image/*,.pdf,.xlsx,.xls,.xlsm,.csv,.doc,.docx" multiple className="hidden" disabled={proofUploading}
-                onChange={(e) => { if (e.target.files?.length) handleProofUpload(e.target.files); e.currentTarget.value = ''; }} />
-            </label>
+            {po.status === 'draft' && canProcure && (
+              <label className={`ml-auto text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 font-medium hover:bg-indigo-50 cursor-pointer ${proofUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                {proofUploading ? '上传中…' : '+ 上传凭证'}
+                <input type="file" accept="image/*,.pdf,.xlsx,.xls,.xlsm,.csv,.doc,.docx" multiple className="hidden" disabled={proofUploading}
+                  onChange={(e) => { if (e.target.files?.length) handleProofUpload(e.target.files); e.currentTarget.value = ''; }} />
+              </label>
+            )}
           </div>
-          <p className="text-[11px] text-gray-500 mt-1">发供应商的采购单(Excel/PDF）/ 下单截图 / 付款凭证 / 回单等。下单(placed)前必须至少 1 个。</p>
+          <p className="text-[11px] text-gray-500 mt-1">发供应商的采购单(Excel/PDF）/ 下单截图 / 付款凭证 / 回单等。点「预览」在线看,点「下载」存本地。下单(placed)前必须至少 1 个。</p>
           {proofPaths.length > 0 && (
             <ul className="mt-2 space-y-1">
               {proofPaths.map((p, i) => (
                 <li key={p} className="flex items-center gap-2 text-xs text-gray-600">
                   <span className="truncate flex-1">📄 凭证 {i + 1} · {p.split('/').pop()}</span>
-                  <button onClick={() => removeProof(p)} className="text-red-500 hover:underline">删除</button>
+                  <button onClick={() => previewProof(p)} className="px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 shrink-0">预览</button>
+                  <button onClick={() => downloadProof(p)} className="px-2 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 shrink-0">下载</button>
+                  {po.status === 'draft' && canProcure && <button onClick={() => removeProof(p)} className="text-red-500 hover:underline shrink-0">删除</button>}
                 </li>
               ))}
             </ul>
