@@ -18,6 +18,7 @@ export async function addOutsourceJob(orderId: string, job: {
   factory_name: string; job_type: string; qty_sent: number;
   expected_return_date?: string; factory_contact?: string; unit_price?: number;
   expected_workers?: number; expected_start_date?: string; expected_end_date?: string;
+  deliver_to_factory?: string;   // 外发裁剪:裁片交货至的车缝厂
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -26,7 +27,7 @@ export async function addOutsourceJob(orderId: string, job: {
   if (!job.factory_name?.trim()) return { error: '工厂名称不能为空' };
   if (!job.qty_sent || job.qty_sent <= 0) return { error: '发出数量必须大于0' };
 
-  const { error } = await (supabase.from('outsource_jobs') as any).insert({
+  const payload: Record<string, any> = {
     order_id: orderId, created_by: user.id,
     factory_name: job.factory_name.trim(),
     job_type: job.job_type || 'other',
@@ -37,8 +38,15 @@ export async function addOutsourceJob(orderId: string, job: {
     expected_end_date: job.expected_end_date || null,
     factory_contact: job.factory_contact || null,
     unit_price: job.unit_price || null,
+    deliver_to_factory: job.deliver_to_factory?.trim() || null,
     status: 'pending',
-  });
+  };
+  let { error } = await (supabase.from('outsource_jobs') as any).insert(payload);
+  // deliver_to_factory 迁移(20260724)未跑 → 降级去掉该列重插,不 brick 外发
+  if (error && /deliver_to_factory|column .* does not exist/i.test(error.message || '')) {
+    const { deliver_to_factory, ...rest } = payload;
+    ({ error } = await (supabase.from('outsource_jobs') as any).insert(rest));
+  }
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
   return {};

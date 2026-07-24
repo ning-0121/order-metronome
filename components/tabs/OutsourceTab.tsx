@@ -3,9 +3,12 @@ import { useEffect, useState } from 'react';
 import { getOutsourceJobs, addOutsourceJob, updateOutsourceJob, deleteOutsourceJob } from '@/app/actions/outsource';
 
 const JOB_TYPES = [
+  { value: 'cutting', label: '裁剪(裁床)' },
   { value: 'sewing', label: '车缝' }, { value: 'embroidery', label: '绣花' },
   { value: 'printing', label: '印花' }, { value: 'washing', label: '洗水' }, { value: 'other', label: '其他' },
 ];
+// 裁剪类:发出=面料,回收=裁片,并可记「裁片交货至」哪个车缝厂(裁片流转)
+const CUTTING_TYPES = new Set(['cutting']);
 const STATUS_OPTIONS = [
   { value: 'pending', label: '待发出', cls: 'bg-gray-100 text-gray-600' },
   { value: 'in_progress', label: '进行中', cls: 'bg-blue-100 text-blue-700' },
@@ -19,7 +22,7 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '', expected_workers: '', expected_start_date: '', expected_end_date: '' });
+  const [form, setForm] = useState({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '', expected_workers: '', expected_start_date: '', expected_end_date: '', deliver_to_factory: '' });
   const [editForm, setEditForm] = useState({ qty_returned: '', qty_pass: '', qty_defect: '', status: '', notes: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -36,9 +39,10 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
       expected_workers: form.expected_workers ? parseInt(form.expected_workers) : undefined,
       expected_start_date: form.expected_start_date || undefined,
       expected_end_date: form.expected_end_date || undefined,
+      deliver_to_factory: form.deliver_to_factory || undefined,
     });
     if (result.error) setError(result.error);
-    else { setShowAdd(false); setForm({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '', expected_workers: '', expected_start_date: '', expected_end_date: '' }); await reload(); }
+    else { setShowAdd(false); setForm({ factory_name: '', job_type: 'sewing', qty_sent: '', expected_return_date: '', expected_workers: '', expected_start_date: '', expected_end_date: '', deliver_to_factory: '' }); await reload(); }
     setSaving(false);
   }
 
@@ -72,7 +76,10 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
             <select value={form.job_type} onChange={e => setForm(f => ({ ...f, job_type: e.target.value }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
               {JOB_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
-            <input placeholder="发出数量 *" type="number" value={form.qty_sent} onChange={e => setForm(f => ({ ...f, qty_sent: e.target.value }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <input placeholder={CUTTING_TYPES.has(form.job_type) ? '发出面料量 *' : '发出数量 *'} type="number" value={form.qty_sent} onChange={e => setForm(f => ({ ...f, qty_sent: e.target.value }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            {CUTTING_TYPES.has(form.job_type) && (
+              <input placeholder="裁片交货至(车缝厂)" value={form.deliver_to_factory} onChange={e => setForm(f => ({ ...f, deliver_to_factory: e.target.value }))} className="rounded-lg border border-teal-300 bg-teal-50/40 px-3 py-2 text-sm" />
+            )}
             <input placeholder="预计上线人数" type="number" value={form.expected_workers} onChange={e => setForm(f => ({ ...f, expected_workers: e.target.value }))} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -109,9 +116,10 @@ export function OutsourceTab({ orderId, isAdmin }: { orderId: string; isAdmin: b
             return (
               <div key={job.id} className="border border-gray-200 rounded-xl p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <div>
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-gray-900">{job.factory_name}</span>
-                    <span className="ml-2 text-sm text-gray-500">{JOB_TYPES.find(t=>t.value===job.job_type)?.label}</span>
+                    <span className="text-sm text-gray-500">{JOB_TYPES.find(t=>t.value===job.job_type)?.label}</span>
+                    {job.deliver_to_factory && <span className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700">裁片→{job.deliver_to_factory}</span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${st.cls}`}>{st.label}</span>
