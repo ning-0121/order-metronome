@@ -1720,11 +1720,15 @@ export async function generateExecutionLines(orderId: string) {
     });
   if (rows.length === 0) return { ok: true, created: 0, message: '已确认项无需采购(全用库存抵扣)或均已生成执行行' };
 
-  let { error: insErr } = await (supabase.from('procurement_line_items') as any).insert(rows);
+  // 修(2026-07-24 尺码丢失):user-session 对 size 列无 INSERT 授权(20260707 只 GRANT SELECT)→
+  //   带 size 插入报 "permission denied for column size" → 命中下方降级把 size 抹成 null(拆码行全丢尺码)。
+  //   这条已鉴权(采购生成执行行)改走 service-role 插入,绕开列级授权,size 正常落库。
+  const svcIns = (() => { try { return createServiceRoleClient(); } catch { return supabase; } })();
+  let { error: insErr } = await (svcIns.from('procurement_line_items') as any).insert(rows);
   if (insErr && /\bsize\b|column .* does not exist/i.test(insErr.message || '')) {
-    // size 迁移(20260707)未跑 → 降级去 size 列重插(退回不分码,不 brick 生成)
+    // 真·size 列未建(迁移 20260707 没跑)才降级去 size 列重插(退回不分码,不 brick 生成)
     const plain = rows.map(({ size, ...rest }) => rest);
-    ({ error: insErr } = await (supabase.from('procurement_line_items') as any).insert(plain));
+    ({ error: insErr } = await (svcIns.from('procurement_line_items') as any).insert(plain));
   }
   if (insErr) return { error: friendlyError(insErr) };
   revalidatePath(`/orders/${orderId}`);
