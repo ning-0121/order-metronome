@@ -33,7 +33,7 @@ const emptyForm = {
   risk_notes: '', factory_packing_instructions: '', factory_notes: '', carton_requirements: '',
 };
 
-export function ManufacturingOrderTab({ orderId, showPrice = false }: { orderId: string; showPrice?: boolean }) {
+export function ManufacturingOrderTab({ orderId, showPrice = false, showPurchaseCost = false }: { orderId: string; showPrice?: boolean; showPurchaseCost?: boolean }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
@@ -186,8 +186,8 @@ export function ManufacturingOrderTab({ orderId, showPrice = false }: { orderId:
       {/* S1 富明细录入(款/色/码/件数)—— 录/改在此,下方生成任务单读它 */}
       <div className="bg-gray-50/60 rounded-xl border border-gray-200 p-3">
         <div className="text-sm font-semibold text-gray-800 mb-2">逐款明细(款 / 颜色 / 尺码 × 件数)</div>
-        <p className="text-[11px] text-gray-400 mb-3">这里录/改逐款明细,是生产任务单和客户 PI 的数据源。手工录,或修正 AI 解析 PO 的结果。{showPrice && <b className="text-blue-600">「成交价」列填客户单价并保存后,才能完成 PI 客户确认节点。</b>}</p>
-        <LineItemMatrixEditor orderId={orderId} showPrice={showPrice} />
+        <p className="text-[11px] text-gray-400 mb-3">这里录/改逐款明细,是生产任务单和客户 PI 的数据源。手工录,或修正 AI 解析 PO 的结果。{showPrice && <b className="text-blue-600">「成交价」列填客户单价并保存后,才能完成 PI 客户确认节点。</b>}{showPurchaseCost && <b className="text-emerald-600">「进价」列填成品采购价并保存后,才能到「大货采购」生成采购单。</b>}</p>
+        <LineItemMatrixEditor orderId={orderId} showPrice={showPrice} showPurchaseCost={showPurchaseCost} />
       </div>
 
       {/* 订单共享文件(辅料采购清单/包装方式,业务在「原辅料和包装」上传)*/}

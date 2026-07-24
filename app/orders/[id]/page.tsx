@@ -1021,7 +1021,7 @@ export default async function OrderDetailPage({
               <h3 className="text-sm font-medium text-gray-600 mb-2">📐 尺码表</h3>
               <PackingFilesSection orderId={id} fileTypes={['size_chart']} emptyText="暂无尺码表;请到「原辅料和包装」页上传(建单不再传尺码表)" />
             </div>
-            <ManufacturingOrderTab orderId={id} showPrice={canSeeFinancials} />
+            <ManufacturingOrderTab orderId={id} showPrice={canSeeFinancials} showPurchaseCost={canSeeFinancials && (orderData as any).order_purpose === 'trade'} />
           </div>
         )}
         {/* Tab: PI 形式发票(2026-07-09:从生产单+客户PO价+交期生成,业务改/预览/下载)*/}

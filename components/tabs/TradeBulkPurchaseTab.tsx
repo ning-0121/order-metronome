@@ -110,7 +110,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
           )}
         </table>
       </div>
-      {!hasCost && <p className="text-xs text-amber-600">⚠️ 还没录成品进价 —— 请先到订单逐款填「采购进价 + 数量」,才能生成大货采购单。</p>}
+      {!hasCost && <p className="text-xs text-amber-600">⚠️ 还没录成品进价 —— 请到「🏭 生产任务单」tab 的逐款明细,在「进价」列填成品采购价并保存,再回来生成大货采购单。</p>}
 
       {/* 建单(业务) */}
       {data?.canCreate && !activePo && hasCost && (
