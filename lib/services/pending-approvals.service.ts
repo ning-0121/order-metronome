@@ -106,7 +106,7 @@ async function collectDelayRequests(
   // 但 delay_requests 表没声明 FK 到 orders（或 schema cache 不认），整个查询
   // fail 返回 null → 显示 0。改成两次独立查询。
   const { data: delays, error: delaysError } = await (client.from('delay_requests') as any)
-    .select('id, order_id, reason, delay_days, status, created_at, requested_by')
+    .select('id, order_id, reason, delay_days, status, created_at, requested_by, approval_chain, current_step')
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
     .limit(100);
@@ -129,25 +129,37 @@ async function collectDelayRequests(
     }
   }
 
-  // 2026-07-11:补 order_manager/sales_manager(CAN_APPROVE_DELAY 的经理),否则经理在待审批中心看不到可处理的延期
-  const canApprove = hasAnyRole(ctx.roles, ['admin', 'production_manager', 'production', 'order_manager', 'sales_manager']);
+  // 2026-07-24 修:原来按角色一刀切(production_manager 在名单里)→ 生产经理看到所有延期单,
+  //   包括路由给业务开发(sales)的业务执行延期。改为**按每条单的审批链**筛:
+  //   ① 全局审批经理(admin/order_manager/sales_manager,与 delays.ts CAN_APPROVE_DELAY 一致)可代任一步 → 看全部;
+  //   ② 其他角色(如生产主管 production_manager)只看"当前待批角色=自己"的单。
+  const GLOBAL_DELAY_APPROVERS = ['admin', 'order_manager', 'sales_manager'];
+  const isGlobalApprover = hasAnyRole(ctx.roles, GLOBAL_DELAY_APPROVERS);
+  const currentStepRole = (r: any): string | null => {
+    const chain: string[] = Array.isArray(r.approval_chain) ? r.approval_chain : [];
+    const step = Number(r.current_step) || 0;
+    return chain[step] || null;
+  };
 
-  return (delays as any[]).map((r) => {
-    const order = orderMap.get(r.order_id);
-    return {
-      id: r.id,
-      category: 'delay' as ApprovalCategory,
-      title: `${order?.order_no || '?'} 申请延期 ${r.delay_days || '?'} 天`,
-      subtitle: r.reason ? r.reason.slice(0, 50) : undefined,
-      orderId: r.order_id,
-      orderNo: order?.order_no,
-      customerName: order?.customer_name,
-      sourceUrl: `/orders/${r.order_id}#delay-${r.id}`,
-      createdAt: r.created_at,
-      ageDays: ageDaysFrom(r.created_at),
-      actionable: canApprove,
-    };
-  });
+  return (delays as any[])
+    // 只保留"该由我处理"的延期:全局经理看全部;其余仅当自己是当前待批角色。
+    .filter((r) => isGlobalApprover || (() => { const role = currentStepRole(r); return !!role && ctx.roles.includes(role); })())
+    .map((r) => {
+      const order = orderMap.get(r.order_id);
+      return {
+        id: r.id,
+        category: 'delay' as ApprovalCategory,
+        title: `${order?.order_no || '?'} 申请延期 ${r.delay_days || '?'} 天`,
+        subtitle: r.reason ? r.reason.slice(0, 50) : undefined,
+        orderId: r.order_id,
+        orderNo: order?.order_no,
+        customerName: order?.customer_name,
+        sourceUrl: `/orders/${r.order_id}#delay-${r.id}`,
+        createdAt: r.created_at,
+        ageDays: ageDaysFrom(r.created_at),
+        actionable: true,   // 已按链筛,留下的都是我能处理的
+      };
+    });
 }
 
 // 订单修改/改单申请(2026-07-11 补:原来待审批中心根本没采集改单 → 经理在此看不到任何改单)
