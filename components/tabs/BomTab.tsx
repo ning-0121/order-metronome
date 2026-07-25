@@ -10,6 +10,8 @@ import { bulkApproveExactCandidates, listAccessoryCandidates, reviewAccessoryCan
 import { CartonSpecEditor } from '@/components/order/CartonSpecEditor';
 import { generateTrimSheet } from '@/app/actions/manufacturing-order';
 import { matchBaseline, checkOverBaseline, type BaselineLine } from '@/lib/domain/cost-baseline';
+import { classifyBomEdit, classifyBomDelete, toSnapshot, toContext } from '@/lib/knowledge/policy';
+import { REASON_CODE_OPTIONS, type ReasonCode, type EvidenceRef } from '@/lib/knowledge/types';
 
 // 10 值 material_type 中文 label(含 master 的 print/washing/embroidery/service)
 const CAT_LABEL: Record<string, string> = {
@@ -25,7 +27,7 @@ const emptyForm = { material_name: '', material_type: 'fabric', material_code: '
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
 
-export function BomTab({ orderId }: { orderId: string }) {
+export function BomTab({ orderId, captureEnabled = false }: { orderId: string; captureEnabled?: boolean }) {
   const [items, setItems] = useState<any[]>([]);
   const [openBatches, setOpenBatches] = useState<Record<string, boolean>>({});   // 已提交批次默认折叠,点开才展开
   const [loading, setLoading] = useState(true);
@@ -79,6 +81,66 @@ export function BomTab({ orderId }: { orderId: string }) {
   const [instantiating, setInstantiating] = useState(false);
   const [instMsg, setInstMsg] = useState('');
   const [editingTemplate, setEditingTemplate] = useState(false);  // 正在编辑的行是否来自产品款模板
+
+  // Knowledge Layer K1:关键 Override 结构化原因（仅 captureEnabled 时生效；off 时下面逻辑全部短路）
+  const [reasonCode, setReasonCode] = useState<ReasonCode | ''>('');
+  const [evidenceRefs, setEvidenceRefs] = useState<EvidenceRef[]>([]);   // 本次决策的证据（编辑/删除共用）
+  const [evUploading, setEvUploading] = useState(false);
+  const [deletingItem, setDeletingItem] = useState<any | null>(null);    // 需填原因的删除（关键行）
+  const [deleteReason, setDeleteReason] = useState<ReasonCode | ''>('');
+  const editingOriginal = editId ? items.find(i => i.id === editId) : null;
+  function classifyCurrentEdit() {
+    if (!captureEnabled || !editingOriginal) return null;
+    const before = toSnapshot(editingOriginal);
+    const after = toSnapshot({
+      ...editingOriginal,
+      material_name: form.material_name,
+      material_code: form.material_code,
+      qty_per_piece: form.qty_per_piece ? parseFloat(form.qty_per_piece) : null,
+      total_qty: form.total_qty ? parseFloat(form.total_qty) : null,
+      supplier: form.supplier,
+    });
+    return classifyBomEdit(before, after, toContext(editingOriginal));
+  }
+
+  // K1:证据上传（复用 product-images 桶，与辅料图同路径；存 EvidenceRef{url,note}）
+  async function uploadEvidence(file: File) {
+    if (file.size > 20 * 1024 * 1024) { alert('证据文件超过 20MB'); return; }
+    setEvUploading(true);
+    try {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client');
+      const supabase = createBrowserClient();
+      const ext = (file.name.split('.').pop() || 'dat').toLowerCase();
+      const path = `materials/evidence/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { contentType: file.type });
+      if (upErr) { alert('证据上传失败：' + upErr.message); return; }
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      setEvidenceRefs(prev => [...prev, { url: data.publicUrl, note: file.name }]);
+    } finally { setEvUploading(false); }
+  }
+
+  // 证据选择器（编辑捕获 + 删除面板共用；纯渲染 helper，非嵌套组件，避免重挂载）
+  const evidenceUI = () => (
+    <div className="space-y-1">
+      <label className="text-xs text-amber-700 cursor-pointer inline-flex items-center gap-1 hover:underline">
+        📎 附证据（可选）
+        <input type="file" className="hidden" disabled={evUploading}
+          onChange={e => { const f = e.target.files?.[0]; if (f) uploadEvidence(f); e.currentTarget.value = ''; }} />
+      </label>
+      {evUploading && <span className="text-xs text-gray-400 ml-1">上传中…</span>}
+      {evidenceRefs.length > 0 && (
+        <ul className="text-xs text-gray-600 space-y-0.5">
+          {evidenceRefs.map((ev, i) => (
+            <li key={i} className="flex items-center gap-2">
+              <span>📄</span>
+              <a href={ev.url} target="_blank" rel="noreferrer" className="text-indigo-600 truncate max-w-[12rem]">{ev.note || ev.url}</a>
+              <button type="button" onClick={() => setEvidenceRefs(prev => prev.filter((_, j) => j !== i))} className="text-rose-500 hover:text-rose-700">✕</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 
   // 色卡/辅料图上传(公开桶 product-images/materials/,URL 追加进 materials_bom.image_urls)
   const [imgUploadingId, setImgUploadingId] = useState<string | null>(null);
@@ -193,17 +255,43 @@ export function BomTab({ orderId }: { orderId: string }) {
       // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
       ...(editId && editingTemplate ? { override_reason: form.override_reason || undefined } : {}),
     };
+    // K1:关键 Override → 结构化原因随行捕获（captureEnabled 才生效）
+    let decision: { reasonCode: ReasonCode; reasonNote?: string; evidenceRefs?: EvidenceRef[] } | undefined;
+    if (captureEnabled && editId) {
+      const cls = classifyCurrentEdit();
+      if (cls?.isKeyDecision) {
+        if (!reasonCode) { setError('本次改动会影响采购/成本，请先选择「改动原因」'); setSaving(false); return; }
+        decision = { reasonCode, reasonNote: form.override_reason || undefined, evidenceRefs: evidenceRefs.length ? evidenceRefs : undefined };
+      }
+    }
     const result = editId
-      ? await updateBomItem(editId, orderId, payload)
+      ? await updateBomItem(editId, orderId, payload, decision)
       : await addBomItem(orderId, payload);
     if (result.error) { setError(result.error); }
-    else { setShowAdd(false); setEditId(null); setEditingTemplate(false); setForm(emptyForm); await reload(); }
+    else { setShowAdd(false); setEditId(null); setEditingTemplate(false); setReasonCode(''); setEvidenceRefs([]); setForm(emptyForm); await reload(); }
     setSaving(false);
   }
 
   async function handleDelete(id: string) {
+    const item = items.find(i => i.id === id);
+    // K1:删模板来源/已提交行 = 关键决策 → 先填原因(打开面板);否则走原来的普通确认
+    const cls = captureEnabled && item ? classifyBomDelete(toContext(item)) : null;
+    if (cls?.isKeyDecision) { setDeletingItem(item); setDeleteReason(''); setEvidenceRefs([]); return; }
     if (!confirm('确定删除此物料？')) return;
     await deleteBomItem(id, orderId);
+    await reload();
+  }
+
+  async function confirmDelete() {
+    if (!deletingItem) return;
+    if (!deleteReason) { alert('请选择删除原因'); return; }
+    setSaving(true);
+    const res = await deleteBomItem(deletingItem.id, orderId, {
+      reasonCode: deleteReason, evidenceRefs: evidenceRefs.length ? evidenceRefs : undefined,
+    });
+    setSaving(false);
+    if ((res as any)?.error) { alert('删除失败：' + (res as any).error); return; }
+    setDeletingItem(null); setDeleteReason(''); setEvidenceRefs([]);
     await reload();
   }
 
@@ -227,6 +315,7 @@ export function BomTab({ orderId }: { orderId: string }) {
 
   function startEdit(item: any) {
     setEditId(item.id);
+    setReasonCode('');   // K1:每次进入编辑清空原因选择
     setEditingTemplate(!!item.product_bom_template_id);   // 来自产品款模板 → 编辑时显示 Override 原因
     setForm({
       material_name: item.material_name || '', material_type: item.material_type || 'other',
@@ -682,12 +771,32 @@ export function BomTab({ orderId }: { orderId: string }) {
         <input placeholder="样品/参考编号" value={form.sample_reference} onChange={e => set('sample_reference', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <textarea placeholder="详细位置说明" value={form.position_description} onChange={e => set('position_description', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
-      {editId && editingTemplate && (
-        <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">
-          <input placeholder="Override 原因(本行来自产品款模板,改动会记录)" value={form.override_reason} onChange={e => set('override_reason', e.target.value)}
-            className="w-full rounded-lg border border-amber-200 px-3 py-2 text-sm" />
-        </div>
-      )}
+      {editId && (() => {
+        const cls = captureEnabled ? classifyCurrentEdit() : null;
+        const needsCapture = !!cls?.isKeyDecision;
+        if (!needsCapture && !editingTemplate) return null;   // flag off 且非模板行 → 与旧版一致(不显示)
+        return (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 space-y-2">
+            {needsCapture && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-amber-700 whitespace-nowrap">改动原因 *</span>
+                <select value={reasonCode} onChange={e => setReasonCode(e.target.value as ReasonCode | '')}
+                  className="flex-1 rounded-lg border border-amber-300 px-2 py-1.5 text-sm bg-white">
+                  <option value="">— 选择本次改动原因 —</option>
+                  {REASON_CODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            )}
+            <input placeholder={needsCapture ? '补充说明（原因选「其他」时必填 ≥5 字）' : 'Override 原因(本行来自产品款模板,改动会记录)'}
+              value={form.override_reason} onChange={e => set('override_reason', e.target.value)}
+              className="w-full rounded-lg border border-amber-200 px-3 py-2 text-sm" />
+            {needsCapture && evidenceUI()}
+            {needsCapture && cls?.decisionType && (
+              <p className="text-[11px] text-amber-600">📝 将记录一条物料决策（{cls.decisionType}），可在「学习中心」查看并回填结果</p>
+            )}
+          </div>
+        );
+      })()}
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button onClick={handleSave} disabled={saving || !form.material_name.trim()}
@@ -965,6 +1074,31 @@ export function BomTab({ orderId }: { orderId: string }) {
 
   return (
     <div>
+      {/* K1:删除关键物料 → 必填结构化原因(+可选证据),再删 */}
+      {deletingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !saving && setDeletingItem(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-4 space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-gray-900">删除物料：{deletingItem.material_name}</h3>
+            <p className="text-xs text-gray-500">该物料来自产品款模板或已提交采购，删除属关键决策，请说明原因（会记录到学习中心）。</p>
+            <div>
+              <span className="text-xs font-medium text-amber-700">删除原因 *</span>
+              <select value={deleteReason} onChange={e => setDeleteReason(e.target.value as ReasonCode | '')}
+                className="mt-1 w-full rounded-lg border border-amber-300 px-2 py-1.5 text-sm bg-white">
+                <option value="">— 选择删除原因 —</option>
+                {REASON_CODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-2">{evidenceUI()}</div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeletingItem(null)} disabled={saving} className="px-3 py-1.5 rounded-lg bg-gray-100 text-sm">取消</button>
+              <button onClick={confirmDelete} disabled={saving || !deleteReason}
+                className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-sm font-medium hover:bg-rose-700 disabled:opacity-50">
+                {saving ? '删除中…' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 尺码表:在此上传,生产任务单直接读取(2026-07-08:建单不再传尺码表) */}
       <div className="mb-4 p-3 rounded-xl border border-teal-200 bg-teal-50/40">
         <div className="flex items-center gap-2 flex-wrap">

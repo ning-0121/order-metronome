@@ -53,3 +53,36 @@ export function runtimeProjectionEnabled(): boolean {
   return runtimeConfidenceMode() !== 'off';
 }
 
+/**
+ * Knowledge Layer K1 — Material Decision Capture
+ *
+ * 三态（同 Runtime Confidence 灰度范式）：
+ *  - 'off'   : 完全关闭（默认）。BomTab 不弹结构化捕获、投影器 5ms 内跳过、
+ *              捕获动作 no-op。material_decisions 表可以尚未建（迁移未跑），零影响。
+ *  - 'admin' : 仅 admin 看到 / 触发 Decision Capture（灰度）。
+ *  - 'on'    : 全员（受 CAN_EDIT_BOM + RLS 限制）。
+ *
+ * 控制：env KNOWLEDGE_LAYER_CAPTURE = off | admin | on
+ */
+export type KnowledgeLayerMode = 'off' | 'admin' | 'on';
+
+export function knowledgeLayerMode(): KnowledgeLayerMode {
+  const v = (process.env.KNOWLEDGE_LAYER_CAPTURE || 'off').toLowerCase();
+  if (v === 'on' || v === 'admin') return v;
+  return 'off';
+}
+
+/** 当前用户是否能看到 / 触发结构化 Decision Capture（按 mode + isAdmin 判定） */
+export function knowledgeLayerCaptureVisible(isAdmin: boolean): boolean {
+  const mode = knowledgeLayerMode();
+  if (mode === 'off') return false;
+  if (mode === 'on') return true;
+  if (mode === 'admin') return !!isAdmin;
+  return false;
+}
+
+/** 是否写入 material_decisions / 跑 Outcome 投影（mode != off 即积累数据） */
+export function knowledgeLayerProjectionEnabled(): boolean {
+  return knowledgeLayerMode() !== 'off';
+}
+

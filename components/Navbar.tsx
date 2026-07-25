@@ -13,6 +13,7 @@ interface NavbarProps {
   isProcurement?: boolean;
   isProduction?: boolean;
   isFinance?: boolean;
+  knowledgeLayer?: boolean;   // Knowledge Layer K1 学习中心（flag 灰度）
 }
 
 interface NavLink {
@@ -27,7 +28,7 @@ interface NavSection {
   links: NavLink[];
 }
 
-export function Navbar({ isAdmin = false, isProcurement = false, isProduction = false, isFinance = false }: NavbarProps) {
+export function Navbar({ isAdmin = false, isProcurement = false, isProduction = false, isFinance = false, knowledgeLayer = false }: NavbarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingPriceCount, setPendingPriceCount] = useState(0);
@@ -83,6 +84,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
           label: 'AI',
           links: [
             { href: '/ai-knowledge', label: 'AI 知识库', icon: '🧠' },
+            ...(knowledgeLayer ? [{ href: '/learning', label: '学习中心', icon: '🎓' }] : []),
             { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
           ],
         },
@@ -127,6 +129,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/quoter', label: '报价员', icon: '💰' },
             { href: '/products', label: '产品款库', icon: '🧬' },
             { href: '/material-master', label: '物料主数据', icon: '🧱' },
+            ...(knowledgeLayer ? [{ href: '/learning', label: '学习中心', icon: '🎓' }] : []),
             { href: '/memos', label: '备忘录', icon: '📝' },
             { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
             { href: '/guide', label: '操作说明', icon: '📖' },

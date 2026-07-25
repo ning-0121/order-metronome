@@ -70,6 +70,7 @@ import { BomBudgetEntry } from '@/components/tabs/BomBudgetEntry';
 import { BackButton } from '@/components/BackButton';
 import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
+import { knowledgeLayerCaptureVisible } from '@/lib/engine/featureFlags';
 import { RetrospectiveTab } from '@/components/tabs/RetrospectiveTab';
 import {
   isCustomerShipHoldFromOrder,
@@ -1005,7 +1006,7 @@ export default async function OrderDetailPage({
               <h3 className="text-sm font-semibold text-gray-700 mb-3">🧾 原辅料清单（BOM 录入 / 客户标准库带入）</h3>
               <p className="text-xs text-gray-400 mb-3">在这里录面料/辅料/包装的单耗,是采购核料和生产任务单「用料」的数据源。</p>
               <TabErrorBoundary label="原辅料和包装">
-                <BomTab orderId={id} />
+                <BomTab orderId={id} captureEnabled={knowledgeLayerCaptureVisible(isAdmin)} />
               </TabErrorBoundary>
             </div>
             {/* 「包装资料/原辅料单(文件)」两块已移除(2026-07-08):空状态指向已删除的「生产单上传」节点;
