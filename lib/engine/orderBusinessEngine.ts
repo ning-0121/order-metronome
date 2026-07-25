@@ -296,6 +296,7 @@ const CRITICAL_STEP_KEYS = new Set<string>([
   'pre_production_sample_approved',
   'production_kickoff',
   'final_qc_check',
+  'final_qc_sales_check',   // V2 尾查(危险改名):不加则 V2 新单尾查超期不被识别为关键阻塞 → 风险/交期分低估
   'factory_completion',
   'booking_done',
   'domestic_delivery',

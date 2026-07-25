@@ -16,6 +16,7 @@ import {
   MANUAL_STAGE_VALUES,
   RECEIVED, IN_TRANSIT, NOT_SECURED,
   computeStage, effectiveStage,
+  STAGE_SIGNAL_STEP_KEYS, KICKOFF_KEYS, FACTORY_DONE_KEYS, pickStageSignal,
 } from '@/lib/production/stage';
 
 const SETTING_KEY = 'production_stage_init';
@@ -77,7 +78,7 @@ export async function getProductionStageInit(): Promise<{
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
     (svc.from('milestones') as any).select('order_id, step_key, status')
       .in('order_id', orderIds)
-      .in('step_key', ['production_kickoff', 'factory_completion', 'final_qc_check', 'shipment_execute', 'procurement_order_placed']),
+      .in('step_key', STAGE_SIGNAL_STEP_KEYS),   // V1+V2 全量信号键(含 pre_production_sample_approved/final_qc_sales_check),否则 V2 新单阶段永卡
   ]);
 
   const matByOrder = new Map<string, { total: number; received: number; in_transit: number; pending: number }>();
@@ -98,8 +99,10 @@ export async function getProductionStageInit(): Promise<{
   const rows: StageInitRow[] = list.map((o) => {
     const m = matByOrder.get(o.id) || { total: 0, received: 0, in_transit: 0, pending: 0 };
     const mo = msByOrder.get(o.id) || {};
-    const kickoff = mo['production_kickoff'] ? { status: mo['production_kickoff'].status, due: null } : null;
-    const factoryDone = mo['final_qc_check'] || mo['factory_completion'] || null;
+    // V1 优先、回落 V2(pickStageSignal):V2 无 production_kickoff/final_qc_check,由产前样确认/尾期验货承载
+    const kickoffNode = pickStageSignal(mo, KICKOFF_KEYS);
+    const kickoff = kickoffNode ? { status: kickoffNode.status, due: null } : null;
+    const factoryDone = pickStageSignal(mo, FACTORY_DONE_KEYS);
     const shipped = mo['shipment_execute'] || null;
     const auto = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
     const manual = (o.production_stage_manual as ProductionStage | 'done' | null) || null;

@@ -912,7 +912,8 @@ export async function markMilestoneDone(
   }
 
   // 财务审核完成 → 动态更新"生产单上传"截止日为 now + 2 工作日
-  if (milestoneData.step_key === 'finance_approval') {
+  // V2 把 finance_approval 并入 po_confirmed(无独立财审节点)→ 必须兼容 po_confirmed,否则 V2 新单该截止日永不重置
+  if (milestoneData.step_key === 'finance_approval' || milestoneData.step_key === 'po_confirmed') {
     const newDue = ensureBusinessDay(addWorkingDays(new Date(), 2));
     await (supabase.from('milestones') as any)
       .update({ due_at: newDue.toISOString() })

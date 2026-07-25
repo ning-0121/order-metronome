@@ -17,7 +17,8 @@ export const INSPECTION_WAIVED_TAG = '免验货';
  * 「出货前验货」节点 —— 带验货报告凭证要求的节点。本单免验时,这些节点免报告即可放行。
  * 只含出货前的成品验货,不含 mid_qc_check(中查是生产中期内部质检,单独处理)。
  */
-export const INSPECTION_STEP_KEYS = ['inspection_release', 'final_qc_check'] as const;
+// 含 V2 尾查 key final_qc_sales_check,否则 V2 新单免验货放行分支永不触发(免验货对新单静默失效)
+export const INSPECTION_STEP_KEYS = ['inspection_release', 'final_qc_check', 'final_qc_sales_check'] as const;
 
 /** 可设置/取消「本单免验货」的角色(业务/QC 都能提出;放行另有更严门禁)。 */
 export const CAN_SET_INSPECTION_WAIVER = [
