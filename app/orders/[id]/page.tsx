@@ -72,6 +72,7 @@ import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
 import { knowledgeLayerCaptureVisible } from '@/lib/engine/featureFlags';
 import { RetrospectiveTab } from '@/components/tabs/RetrospectiveTab';
+import { RuntimeRiskCardSlot } from '@/components/RuntimeRiskCardSlot';
 import {
   isCustomerShipHoldFromOrder,
   CUSTOMER_SHIP_HOLD_TAG,
@@ -913,6 +914,9 @@ export default async function OrderDetailPage({
 
         {/* Tab: 执行进度 */}
         {activeTab === 'progress' && (
+          <>
+          {/* 交付置信度风险卡(RUNTIME_CONFIDENCE_ENGINE=admin/on 时点亮;off 则自动不渲染)*/}
+          <RuntimeRiskCardSlot orderId={id} />
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">执行时间线</h2>
             {milestones && milestones.length > 0 ? (
@@ -933,6 +937,7 @@ export default async function OrderDetailPage({
               <p className="text-gray-400 text-center py-8">暂无执行节点数据</p>
             )}
           </div>
+          </>
         )}
 
         {/* Tab: 延期申请 */}
