@@ -1827,37 +1827,9 @@ export async function syncProcurementItemReceivingStatus(orderId: string) {
     }
   }
 
-  // ⚠️ 死分支(2026-07-25 审计确认):step_key 'materials_received_inspected' 在 V1/V2/打样/贸易 任何模板都不产生,
-  //   maybeSingle 恒返回 null → 本段自 2026-07-04 写下起对所有订单从未触发。V2 收料进度在采购中心(procurement_items.status)跟,
-  //   不作主时间线节点。保留为 no-op(无害);是否给 V2 加「原料到货检验」节点属 CEO 冻结的 15 节点模板决策,待定后再接。
-  try {
-    const allReceived = (items as any[]).length > 0 && (items as any[]).every((it: any) => {
-      const a = agg.get(it.id); return a && a.ordered > 0 && a.received >= a.ordered;
-    });
-    if (allReceived) {
-      const { data: ms } = await (supabase.from('milestones') as any)
-        .select('id, status').eq('order_id', orderId).eq('step_key', 'materials_received_inspected').maybeSingle();
-      const st = String((ms as any)?.status || '').toLowerCase();
-      if (ms && st !== 'done' && st !== '已完成') {
-        await (supabase.from('milestones') as any)
-          .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now }).eq('id', (ms as any).id);
-        await (supabase.from('milestone_logs') as any).insert({
-          milestone_id: (ms as any).id, order_id: orderId, action: 'status_transition',
-          note: '全部原料已收齐验收 → 系统自动完成「原料到厂检验」节点(收货记录即证据)',
-          payload: { auto: true, source: 'materials_received' },
-        }).then(() => {}, () => {});
-        void (async () => {
-          try {
-            const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');
-            await recomputeDeliveryConfidence(orderId, {
-              type: 'milestone_status_changed', source: `milestone:${(ms as any).id}`, severity: 'info',
-              payload: { milestone_id: (ms as any).id, new_status: 'done', auto: 'materials_received' },
-            });
-          } catch { /* 忽略 */ }
-        })();
-      }
-    }
-  } catch (e: any) { console.warn('[syncProcurementItemReceivingStatus] 料齐里程碑联动失败(不阻断):', e?.message); }
+  // (已删)原「料齐 → 自动完成『原料到厂检验』节点」联动:step_key 'materials_received_inspected' 在任何模板都不产生,
+  //   自 2026-07-04 起对所有订单从未触发(死码)。CEO 2026-07-26 拍板:不给 V2 加此节点 —— V2 收料进度归采购中心
+  //   (procurement_items.status)跟,不作主时间线节点。故移除死码,收料状态仍由本函数上方的 resolveReceivingStatus 落库。
 
   return { ok: true, changed };
 }
