@@ -103,7 +103,7 @@ CREATE POLICY md_upd ON public.material_decisions FOR UPDATE
 -- ========================================================================
 -- ① 表存在(期望 1 行)
 -- SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name='material_decisions';
--- ② 字段齐(期望列数 = 30)
+-- ② 字段齐(期望列数 = 31)
 -- SELECT count(*) FROM information_schema.columns WHERE table_name='material_decisions';
 -- ③ FK 删除规则:order_id=CASCADE(c);bom_id/template/master/actor/evaluated_by/supersedes=SET NULL(n)
 -- SELECT conname, confrelid::regclass AS ref, confdeltype FROM pg_constraint
