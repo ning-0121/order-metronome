@@ -110,9 +110,10 @@ export function ontimeScoreFrom(nodes: Array<{ isCritical: boolean; exempt: bool
 /**
  * 考评生效日切换(CEO 批 2026-07-25):只考评【生效日当天及以后·按建单日】新建的订单;
  * 之前建的(本周新建/在途/历史)不计入考评 —— 免扣分、照常按标准率发佣金,只打"不计入考评"标记。
- * 生效日读 env SCORING_EFFECTIVE_DATE('YYYY-MM-DD');空 = 未启用切换(全部计入,安全默认)。
+ * 生效日:优先读 env SCORING_EFFECTIVE_DATE('YYYY-MM-DD'),否则用下方代码默认值。
+ * 2026-07-27 = CEO 拍板的执行日(下周一);此日前建的单不计入考评。要改:改这里或在 Vercel 设 env(env 优先)。
  */
-export const SCORING_EFFECTIVE_DATE = process.env.SCORING_EFFECTIVE_DATE || '';
+export const SCORING_EFFECTIVE_DATE = process.env.SCORING_EFFECTIVE_DATE || '2026-07-27';
 /** 该订单是否计入考评。createdAtIso=建单日;effectiveDate 缺省取 env。纯函数便于单测。 */
 export function isOrderAssessed(createdAtIso: string | null | undefined, effectiveDate: string = SCORING_EFFECTIVE_DATE): boolean {
   if (!effectiveDate) return true;                 // 未设生效日 → 全部计入
