@@ -9,8 +9,14 @@ export const SCORING_CONFIG = {
   /** 节拍准时（最高40分） */
   ontime: {
     max: 40,
-    /** 每个超期节点扣分 */
+    /** 每个超期节点扣分（legacy·聚合估算用，analytics.ts） */
     perOverduePenalty: 8,
+    /** 每个超期【关键】节点扣分（2026-07-25 CEO 批：关键/非关键分权重） */
+    criticalPenalty: 8,
+    /** 每个超期【非关键】节点扣分 */
+    nonCriticalPenalty: 3,
+    /** 逾期若经审批归为这些（非本人可控）原因 → 不扣准时分（归责豁免打通，2026-07-25 CEO 批） */
+    exemptCategories: ['customer', 'supplier', 'force_majeure'] as const,
   },
 
   /** 零阻塞（最高20分） */
@@ -85,4 +91,18 @@ export function calcGrade(total: number): 'S' | 'A' | 'B' | 'C' | 'D' {
   if (total >= SCORING_CONFIG.grades.B) return 'B';
   if (total >= SCORING_CONFIG.grades.C) return 'C';
   return 'D';
+}
+
+/**
+ * 准时分扣分（2026-07-25 CEO 批的评分尺度）。纯函数,便于单测。
+ *   - 关键节点逾期重扣、非关键轻扣;
+ *   - exempt=true(该逾期经审批归为客户/供应商/不可抗力)→ 不扣。
+ * nodes: 逾期节点 [{ isCritical, exempt }]。
+ */
+export function ontimeDeduction(nodes: Array<{ isCritical: boolean; exempt: boolean }>): number {
+  const { criticalPenalty, nonCriticalPenalty } = SCORING_CONFIG.ontime;
+  return nodes.reduce((s, n) => (n.exempt ? s : s + (n.isCritical ? criticalPenalty : nonCriticalPenalty)), 0);
+}
+export function ontimeScoreFrom(nodes: Array<{ isCritical: boolean; exempt: boolean }>): number {
+  return Math.max(0, SCORING_CONFIG.ontime.max - ontimeDeduction(nodes));
 }

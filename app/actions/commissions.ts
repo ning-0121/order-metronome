@@ -5,6 +5,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import { isDoneStatus } from '@/lib/domain/types';
 import { COMMISSION_BASE_TYPE, computeCommissionAmount } from '@/lib/domain/commission-config';
+import { SCORING_CONFIG, ontimeScoreFrom } from '@/lib/domain/scoring-constants';
 
 // 业务负责的关卡 step_keys
 const SALES_STEPS = [
@@ -30,7 +31,7 @@ const QC_STEPS = ['mid_qc_check', 'final_qc_check'];
 const SHIPMENT_STEP_PRIORITY = ['shipment_execute', 'domestic_delivery', 'booking_done', 'customs_export'];
 
 interface ScoreDetail {
-  ontime: { score: number; max: 40; overdueSteps: string[] };
+  ontime: { score: number; max: 40; overdueSteps: string[]; exemptSteps?: string[] };
   noBlock: { score: number; max: 20; blockedSteps: string[] };
   noDelay: { score: number; max: 15; delayCount: number };
   quality: { score: number; max: 15; midPassed: boolean; finalPassed: boolean };
@@ -75,7 +76,7 @@ export async function calculateOrderScore(
 
   // 获取所有关卡
   const { data: milestones } = await (supabase.from('milestones') as any)
-    .select('id, step_key, name, status, due_at, actual_at, owner_role, owner_user_id')
+    .select('id, step_key, name, status, due_at, actual_at, owner_role, owner_user_id, is_critical')
     .eq('order_id', orderId)
     .order('due_at', { ascending: true });
   if (!milestones || milestones.length === 0) return { error: '无关卡数据' };
@@ -84,6 +85,15 @@ export async function calculateOrderScore(
   const { data: delays } = await (supabase.from('delay_requests') as any)
     .select('id, milestone_id, requested_by, status, reason_category')
     .eq('order_id', orderId);
+
+  // 归责豁免打通准时分(2026-07-25 CEO 批):某逾期节点若有【已批准】且归为客户/供应商/不可抗力的延期 → 该节点不扣准时分。
+  const _exemptCats = new Set<string>(SCORING_CONFIG.ontime.exemptCategories as readonly string[]);
+  const exemptMilestones = new Set<string>(
+    ((delays || []) as any[])
+      .filter((d) => d.status === 'approved' && _exemptCats.has(d.reason_category || 'internal'))
+      .map((d) => d.milestone_id)
+      .filter(Boolean),
+  );
 
   // 获取 milestone_logs 中的阻塞记录
   const milestoneIds = milestones.map((m: any) => m.id);
@@ -151,22 +161,22 @@ export async function calculateOrderScore(
   function calcRoleScore(targetRoleSet: Set<string>): ScoreDetail {
     const roleMilestones = milestones.filter((m: any) => targetRoleSet.has(m.owner_role));
 
-    // 节拍准时率
-    const overdueSteps: string[] = [];
+    // 节拍准时率(2026-07-25 CEO 批的尺度):关键节点逾期重扣(-8)、非关键轻扣(-3);
+    //   经审批归为客户/供应商/不可抗力的逾期节点(exempt)不扣。
+    const overdueNodes: Array<{ name: string; isCritical: boolean; exempt: boolean }> = [];
     for (const m of roleMilestones) {
+      let overdue = false;
       if (m.due_at && isDoneStatus(m.status)) {
-        // 完成日期 > 截止日期 = 逾期
-        const completedAt = m.actual_at || m.due_at;
-        if (new Date(completedAt) > new Date(m.due_at)) {
-          overdueSteps.push(m.name);
-        }
+        const completedAt = m.actual_at || m.due_at;      // 完成日期 > 截止日期 = 逾期
+        if (new Date(completedAt) > new Date(m.due_at)) overdue = true;
       } else if (m.due_at && !isDoneStatus(m.status) && new Date(m.due_at) < new Date()) {
-        // 未完成但已超期 — 扣分
-        overdueSteps.push(m.name);
+        overdue = true;                                   // 未完成但已超期
       }
+      if (overdue) overdueNodes.push({ name: m.name, isCritical: !!m.is_critical, exempt: exemptMilestones.has(m.id) });
     }
-    // 使用统一的评分常量（lib/domain/scoring-constants.ts）
-    const ontimeScore = Math.max(0, 40 - overdueSteps.length * 8); // 与 SCORING_CONFIG.ontime 对齐
+    const overdueSteps = overdueNodes.filter((n) => !n.exempt).map((n) => n.name);   // 展示:实际扣分的逾期节点
+    const exemptSteps = overdueNodes.filter((n) => n.exempt).map((n) => n.name);     // 展示:归责豁免的逾期节点
+    const ontimeScore = ontimeScoreFrom(overdueNodes);   // 关键/非关键加权 + 豁免,纯函数(scoring-constants)
 
     // 零阻塞
     const blockedSteps: string[] = [];
@@ -189,7 +199,7 @@ export async function calculateOrderScore(
     const noDelayScore = Math.max(0, 15 - penaltyDelays.length * 5);
 
     return {
-      ontime: { score: ontimeScore, max: 40, overdueSteps },
+      ontime: { score: ontimeScore, max: 40, overdueSteps, exemptSteps },
       noBlock: { score: noBlockScore, max: 20, blockedSteps },
       noDelay: { score: noDelayScore, max: 15, delayCount: penaltyDelays.length, totalDelays: roleDelays.length, exemptDelays: roleDelays.length - penaltyDelays.length },
       quality: qualityDetail,
