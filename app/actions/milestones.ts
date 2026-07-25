@@ -397,12 +397,20 @@ export async function markMilestoneDone(
       );
 
       // 确认链阻塞改为警告，不再硬阻止（业务可以并行推进）
-      // 财务放货硬闸(2026-07-25 修 B1:此前整段 blockResult 被丢弃 → 财务的付款暂停/未放货闸对里程碑完成零约束,
-      //   尾款未到也能出货,架空 CEO「出货必经财务」)。只对出货类(订舱/发货)强制付款类硬闸;确认链仍只警告;admin 越权。
-      if (!isAdmin && (milestone.step_key === 'booking_done' || milestone.step_key === 'shipment_execute')) {
+      // 财务放货硬闸(2026-07-25 修 B1;CEO 定口径:只卡发货、订舱不卡):
+      //   - 发货 shipment_execute = fail-closed 正向闸:allow_shipment 必须===true 才放行(财务主动「放货」→ 通知物流 → 才能标出运);
+      //     null/false/未建行 一律拦 → 真正「发货必经财务审批」。
+      //   - 订舱 booking_done = 财务能喊停:仅 payment_hold / allow_shipment===false 时拦(不要求正向放行)。
+      //   确认链仍只警告;admin 越权。
+      if (!isAdmin) {
         const fin = finRes.data as any;
-        if (fin?.payment_hold) return { error: '❌ 财务付款暂停中,不允许订舱/出货 —— 请财务先解除付款暂停。' };
-        if (fin && fin.allow_shipment === false) return { error: '❌ 财务放货闸未开(尾款/收款条件未满足),不允许订舱/出货 —— 请财务确认放行。' };
+        if (milestone.step_key === 'shipment_execute') {
+          if (fin?.payment_hold) return { error: '❌ 财务付款暂停中,不允许出货 —— 请财务先解除付款暂停。' };
+          if (fin?.allow_shipment !== true) return { error: '❌ 财务尚未放货(需财务在订单财务页确认「放货」后才能标发货出运)——请财务放行。' };
+        } else if (milestone.step_key === 'booking_done') {
+          if (fin?.payment_hold) return { error: '❌ 财务付款暂停中,不允许订舱 —— 请财务先解除付款暂停。' };
+          if (fin && fin.allow_shipment === false) return { error: '❌ 财务放货闸已关(尾款/收款条件未满足),不允许订舱 —— 请财务确认。' };
+        }
       }
     } catch (e: any) { console.warn(`[milestones] 阻塞检查失败不阻断（降级）:`, e?.message); }
   }
