@@ -12,6 +12,12 @@ import {
   deriveOrderQuantityContext,
   formatQuantityDisplay,
 } from '@/lib/domain/quantity-engine';
+import { classifyBomEdit, classifyBomDelete, toSnapshot, toContext } from '@/lib/knowledge/policy';
+import { captureMaterialDecision } from '@/app/actions/material-decisions';
+import type { EvidenceRef, ReasonCode } from '@/lib/knowledge/types';
+
+// Knowledge Layer K1：BomTab 关键编辑时随行传入（可选）；flag=off 或未传 → 零影响
+export interface BomDecisionInput { reasonCode: ReasonCode; reasonNote?: string; evidenceRefs?: EvidenceRef[]; }
 
 const toYmd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -473,15 +479,15 @@ export async function instantiateOrderMaterialPackage(
   return { ok: true, count: rows.length };
 }
 
-export async function updateBomItem(id: string, orderId: string, patch: Record<string, any>) {
+export async function updateBomItem(id: string, orderId: string, patch: Record<string, any>, decision?: BomDecisionInput) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
-  // 该行来自产品款模板(有 product_bom_template_id)→ 编辑即记 Override 留痕(单向,不回写模板)
+  // 取整行:既做 Override 留痕(product_bom_template_id),也做 K1 决策的 before 快照 + 分类上下文
   const { data: row } = await (supabase.from('materials_bom') as any)
-    .select('product_bom_template_id').eq('id', id).single();
+    .select('*').eq('id', id).single();
   const upd: any = { ...patch, updated_at: new Date().toISOString() };
   if ((row as any)?.product_bom_template_id) {
     upd.overridden_at = new Date().toISOString();
@@ -492,18 +498,66 @@ export async function updateBomItem(id: string, orderId: string, patch: Record<s
   const { error } = await (supabase.from('materials_bom') as any).update(upd).eq('id', id);
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
+
+  // Knowledge Layer K1:关键决策 → fire-and-forget 捕获(flag/表 未就绪或非关键 → 静默,永不阻塞 BOM 保存)
+  if (decision?.reasonCode && row) {
+    try {
+      const before = toSnapshot(row);
+      const after = toSnapshot({ ...row, ...patch });
+      const cls = classifyBomEdit(before, after, toContext(row));
+      if (cls.isKeyDecision && cls.decisionType) {
+        await captureMaterialDecision({
+          orderId, bomId: id,
+          productBomTemplateId: (row as any).product_bom_template_id ?? null,
+          materialMasterId: (row as any).material_master_id ?? null,
+          materialName: (patch.material_name ?? (row as any).material_name) || '',
+          materialCode: (patch.material_code ?? (row as any).material_code) ?? null,
+          decisionType: cls.decisionType,
+          reasonCode: decision.reasonCode,
+          reasonNote: decision.reasonNote,
+          before, after,
+          evidenceRefs: decision.evidenceRefs,
+        });
+      }
+    } catch (e: any) { console.warn('[bom] capture skipped:', e?.message); }
+  }
   return {};
 }
 
-export async function deleteBomItem(id: string, orderId: string) {
+export async function deleteBomItem(id: string, orderId: string, decision?: BomDecisionInput) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   { const _bomErr = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可增删改物料清单(BOM)'); if (_bomErr) return { error: _bomErr }; }
 
+  // 删除前取整行:既给 K1 决策做 before 快照,删除后行没了也可读物料身份
+  const { data: row } = await (supabase.from('materials_bom') as any)
+    .select('*').eq('id', id).single();
+
   const { error } = await (supabase.from('materials_bom') as any).delete().eq('id', id);
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
+
+  // Knowledge Layer K1:删模板来源/已提交行 = 关键决策(bom_id 置空,行已删)
+  if (decision?.reasonCode && row) {
+    try {
+      const cls = classifyBomDelete(toContext(row));
+      if (cls.isKeyDecision) {
+        await captureMaterialDecision({
+          orderId, bomId: null,
+          productBomTemplateId: (row as any).product_bom_template_id ?? null,
+          materialMasterId: (row as any).material_master_id ?? null,
+          materialName: (row as any).material_name || '',
+          materialCode: (row as any).material_code ?? null,
+          decisionType: 'line_delete',
+          reasonCode: decision.reasonCode,
+          reasonNote: decision.reasonNote,
+          before: toSnapshot(row), after: {},
+          evidenceRefs: decision.evidenceRefs,
+        });
+      }
+    } catch (e: any) { console.warn('[bom] delete-capture skipped:', e?.message); }
+  }
   return {};
 }
 
