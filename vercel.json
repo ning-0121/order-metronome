@@ -30,6 +30,10 @@
       "schedule": "0 1 * * *"
     },
     {
+      "path": "/api/cron/mail-attachment-ocr",
+      "schedule": "0,30 * * * *"
+    },
+    {
       "path": "/api/cron/daily-briefing",
       "schedule": "0 0 * * *"
     },

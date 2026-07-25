@@ -118,6 +118,26 @@ export async function getOrderMailSignals(orderId: string): Promise<{ data?: Dig
   return { data: (data || []) as DigestRow[] };
 }
 
+export interface POAttachmentRow {
+  id: string; file_name: string | null; extract_summary: string | null;
+  extracted_json: any; ocr_status: string | null;
+}
+
+/** 某订单的 PO 附件 OCR 要点(闭环 T2b)。订单页展示。 */
+export async function getOrderPOAttachments(orderId: string): Promise<{ data?: POAttachmentRow[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!orderId) return { data: [] };
+  const { data, error } = await (supabase.from('mail_attachments') as any)
+    .select('id, file_name, extract_summary, extracted_json, ocr_status')
+    .eq('order_id', orderId).eq('is_po', true)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) return { error: error.message };
+  return { data: (data || []) as POAttachmentRow[] };
+}
+
 /** 标记一封邮件的处理状态(看板勾选)。 */
 export async function markMailHandled(
   id: string, status: 'seen' | 'handled' | 'ignored' | 'unread',
