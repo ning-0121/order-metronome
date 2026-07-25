@@ -10,6 +10,13 @@
  *   IMAP_PASSWORD=xxxx
  */
 
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  content: Buffer;   // 原始字节(存桶用)
+  size: number;
+}
+
 export interface FetchedEmail {
   uid: number;
   from: string;
@@ -18,6 +25,7 @@ export interface FetchedEmail {
   date: string;
   messageId: string | null;
   inReplyTo: string | null;
+  attachments?: EmailAttachment[];   // PDF/图片附件(仅疑似有附件的邮件才解析)
 }
 
 /**
@@ -99,9 +107,35 @@ export async function fetchNewEmails(
 
           // 提取纯文本正文
           let body = '';
-          if (msg.source) {
-            const sourceStr = msg.source.toString('utf-8');
-            body = extractPlainText(sourceStr);
+          const sourceStr = msg.source ? msg.source.toString('utf-8') : '';
+          if (sourceStr) body = extractPlainText(sourceStr);
+
+          // 附件抓取(Phase 3):仅当源里疑似有附件时才跑 mailparser(省 CPU/时间预算)。
+          // 只留 PDF/图片、单个≤12MB、每封≤5个;正文若能从 parser 拿到更干净的就替换。
+          let attachments: EmailAttachment[] | undefined;
+          if (msg.source && /Content-Disposition:\s*attachment/i.test(sourceStr)) {
+            try {
+              const { simpleParser } = await import('mailparser');
+              const parsed = await simpleParser(msg.source as Buffer);
+              if (parsed.text && parsed.text.trim()) body = parsed.text;   // 更干净的正文
+              const picked: EmailAttachment[] = [];
+              for (const att of (parsed.attachments || [])) {
+                if (picked.length >= 5) break;
+                const ct = String(att.contentType || '').toLowerCase();
+                const isDoc = ct.includes('pdf') || ct.startsWith('image/');
+                if (!isDoc || !att.content || att.content.length === 0) continue;
+                if (att.content.length > 12 * 1024 * 1024) continue;
+                picked.push({
+                  filename: att.filename || `attachment.${ct.includes('pdf') ? 'pdf' : 'bin'}`,
+                  contentType: att.contentType || 'application/octet-stream',
+                  content: att.content as Buffer,
+                  size: att.content.length,
+                });
+              }
+              if (picked.length > 0) attachments = picked;
+            } catch (e: any) {
+              console.warn('[imap-fetch] 附件解析失败(不影响正文):', e?.message);
+            }
           }
 
           emails.push({
@@ -112,6 +146,7 @@ export async function fetchNewEmails(
             date,
             messageId,
             inReplyTo,
+            attachments,
           });
         } catch (parseErr) {
           // 单封邮件解析失败不影响其他

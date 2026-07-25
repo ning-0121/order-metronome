@@ -84,7 +84,7 @@ export async function POST(req: Request) {
             .trim();
           const threadId = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
 
-          const { error: insertErr } = await supabase.from('mail_inbox').insert({
+          const { data: inserted, error: insertErr } = await supabase.from('mail_inbox').insert({
             from_email: fromEmail,
             subject: email.subject,
             raw_body: email.body,
@@ -92,11 +92,15 @@ export async function POST(req: Request) {
             message_id: email.messageId,
             in_reply_to: email.inReplyTo,
             thread_id: threadId,
-          });
+          }).select('id').single();
           if (insertErr) {
             console.error('[email-scan] 写入 mail_inbox 失败:', insertErr.message);
           } else {
             fetched++;
+            // 附件捕获(Phase 3):有 PDF/图片附件 → 传 order-docs 桶 + 落 mail_attachments(供后续 Vision OCR)
+            if (email.attachments?.length && (inserted as any)?.id) {
+              await storeMailAttachments(supabase, (inserted as any).id, email.attachments);
+            }
           }
         }
       } catch (imapErr: any) {
@@ -435,3 +439,27 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) { return POST(req); }
+
+/**
+ * 邮件附件入桶 + 建行(Phase 3 T2a)。传 order-docs 桶 mail/<mailId>/,落 mail_attachments。
+ * is_po=PDF(PDF 是 PO/单据主要载体,值得 OCR;图片先存不自动 OCR 省 Vision 成本)。fire-and-forget。
+ */
+async function storeMailAttachments(supabase: any, mailId: string, attachments: any[]): Promise<void> {
+  for (const att of attachments) {
+    try {
+      const safeName = String(att.filename || 'file').replace(/[^\w.\-]+/g, '_').slice(0, 80);
+      const path = `mail/${mailId}/${safeName}`;
+      const isPdf = String(att.contentType || '').toLowerCase().includes('pdf');
+      const { error: upErr } = await supabase.storage.from('order-docs')
+        .upload(path, att.content, { contentType: att.contentType || 'application/octet-stream', upsert: true });
+      if (upErr) { console.warn('[email-scan] 附件上传失败:', safeName, upErr.message); continue; }
+      await supabase.from('mail_attachments').upsert({
+        mail_id: mailId, file_name: safeName, mime_type: att.contentType || null,
+        storage_path: path, size_bytes: att.size || null,
+        is_po: isPdf, ocr_status: 'pending',
+      }, { onConflict: 'mail_id,file_name' });
+    } catch (e: any) {
+      console.warn('[email-scan] 附件处理异常(不阻断):', e?.message);
+    }
+  }
+}
