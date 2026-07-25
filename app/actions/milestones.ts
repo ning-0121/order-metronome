@@ -14,6 +14,7 @@ import type { MilestoneStatus } from '@/lib/types';
 import { classifyRequirement } from '@/lib/domain/requirements';
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { milestoneOwnerRoleMatches } from '@/lib/domain/milestonePerm';
+import { isBatchAwareStep } from '@/lib/domain/batchAwareSteps';
 import { isInspectionStep, isInspectionWaived, roleAllowed, CAN_RELEASE_WITHOUT_INSPECTION } from '@/lib/domain/inspectionWaiver';
 // TODO(Sprint-1): merchGroup (~L180) 应迁移到 ROLE_GROUPS.EXECUTION，但 EXECUTION 含 production_manager
 //                 而原 merchGroup 不含，直接迁移会改变权限（属 P0 候选 bug），等 P0 评估后再动
@@ -211,6 +212,17 @@ export async function markMilestoneDone(
   const roleMatches = milestoneOwnerRoleMatches(userRoles, milestone.owner_role);
   if (!isAssignedUser && !roleMatches && !isAdmin) {
     return { error: '无权操作：只有对应角色的负责人或管理员可以标记完成' };
+  }
+
+  // H2 出货双轨止血:batch-aware 节点(出运/订舱/放行/报关/财务放货)若订单已建分批,
+  //   主节点只能由「逐批完成 → 全批完成后系统自动晋升」驱动,不许从主路径直接标完成
+  //   (否则主节点说"已发"、批次却还没发,两轨打架)。批次自动晋升走独立 update、不经本函数,不受影响。admin 应急可越权。
+  if (!isAdmin && isBatchAwareStep(milestone.step_key)) {
+    const { count: batchCount } = await (supabase.from('shipment_batches') as any)
+      .select('id', { count: 'exact', head: true }).eq('order_id', milestone.order_id);
+    if ((batchCount || 0) > 0) {
+      return { error: '该订单已按分批出货管理 —— 请到「分批出运」里逐批完成本节点,全部批次完成后系统会自动完成此节点;不要在此直接标完成。' };
+    }
   }
 
   // ── 链内前置软门禁(2026-07-09):前置节点没完成 → 警示 + 二次确认可强行(force)完成 ──
