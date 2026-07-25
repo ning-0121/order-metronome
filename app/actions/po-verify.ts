@@ -1,6 +1,7 @@
 'use server';
 
 import { qimoAI, AIRuntimeError, type FileInput, type ImageInput, type SchemaValidator } from '@/lib/ai/runtime';
+import { guardAICall } from '@/lib/ai/rate-limit';
 
 export interface POVerifyResult {
   document_type?: 'customer_po' | 'quotation' | 'invoice' | 'packing_list' | 'tech_pack' | 'sample_card' | 'other' | 'unknown';
@@ -143,6 +144,9 @@ export async function verifyPOAgainstOrder(
   fileBase64: string, fileType: string, fileName: string,
   orderData: { quantity?: number | null; delivery_date?: string | null; customer_name?: string | null; style_no?: string | null; po_number?: string | null; order_no?: string },
 ): Promise<{ data?: POVerifyResult; error?: string }> {
+  // P0 审计 2026-07-24:原来无任何鉴权,未登录也能触发 AI 抽取(成本/DoS + 泄露比对结果)。
+  const guard = await guardAICall('po_verify');
+  if (!guard.ok) return { error: guard.error };
   try {
     const extracted = await extractDocument(fileBase64, fileType, fileName, 'order.po.verify');
     const differences: POVerifyResult['differences'] = [];
@@ -187,6 +191,8 @@ function compareText(field: string, label: string, actual: string, expected: str
 type UploadDocument = { type: 'internal_quote' | 'customer_quote' | 'customer_po'; base64: string; fileType: string; fileName: string };
 export async function verifyThreeDocuments(files: UploadDocument[]): Promise<{ data?: ThreeDocVerifyResult; error?: string }> {
   if (files.length < 2) return { error: '至少需要2个文件进行比对' };
+  const guard = await guardAICall('three_doc_verify');   // P0 审计 2026-07-24:补鉴权+限流
+  if (!guard.ok) return { error: guard.error };
   try {
     const extracted = await Promise.all(files.map(async item => ({ type: item.type, data: await extractDocument(item.base64, item.fileType, item.fileName, `order.po.compare.${item.type}`) })));
     return { data: compareExtractedDocuments(extracted) };

@@ -372,6 +372,9 @@ export async function getOrderCommissions(orderId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '未登录' };
+  // P1 审计 2026-07-24:提成=敏感薪酬,原来任何登录人可读任意订单的全员提成 → 加订单级访问校验。
+  const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
 
   const { data, error } = await (supabase.from('order_commissions') as any)
     .select('*')

@@ -2,10 +2,13 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { matchAccessory, parseAccessoryWorkbook } from '@/lib/parsers/accessory-import';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 
 export async function importAccessoryCandidates(orderId: string, attachmentId: string, bytes: ArrayBuffer) {
   const sb = await createClient(); const { data: { user } } = await sb.auth.getUser();
   if (!user) return { error: '请先登录' };
+  // P1 审计 2026-07-24:写 materials_bom/候选,须过 BOM 门禁(此前只校验登录,绕过其它 BOM 写路径的 CAN_EDIT_BOM)。
+  { const err = await requireRoleGroup(sb, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可导入辅料'); if (err) return { error: err }; }
   let parsed; try { parsed = await parseAccessoryWorkbook(bytes); } catch (e: unknown) { return { error: String(e instanceof Error ? e.message : '采购清单解析失败') }; }
   const { data: bom } = await sb
     .from('materials_bom')
@@ -50,6 +53,7 @@ export async function listAccessoryCandidates(orderId: string, status?: string) 
 
 export async function reviewAccessoryCandidate(id: string, orderId: string, action: 'approve'|'exclude', approvedValue?: Record<string, unknown>, reason?: string) {
   const sb = await createClient(); const { data: { user } } = await sb.auth.getUser(); if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(sb, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可审核辅料候选'); if (err) return { error: err }; }   // P1 审计:写 materials_bom 须过 BOM 门禁
   const { data: c } = await sb.from('accessory_import_candidates').select('*').eq('id', id).eq('order_id', orderId).single();
   if (!c) return { error: '候选行不存在或无权访问' };
   if (action === 'exclude') {
@@ -85,6 +89,7 @@ export async function reviewAccessoryCandidate(id: string, orderId: string, acti
 
 export async function bulkApproveExactCandidates(orderId: string) {
   const sb = await createClient(); const { data: { user } } = await sb.auth.getUser(); if (!user) return { error: '请先登录' };
+  { const err = await requireRoleGroup(sb, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可批量通过辅料'); if (err) return { error: err }; }   // P1 审计:写 materials_bom 须过 BOM 门禁
   const { data } = await sb.from('accessory_import_candidates').select('id,extracted_value,missing_fields')
     .eq('order_id', orderId).eq('import_status', 'MATCHED_TO_EXISTING');
   type AccessoryCandidateReviewRow = { id: string; extracted_value?: Record<string, unknown> | null; missing_fields?: string[] | null };
