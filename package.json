@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts && node --import tsx scripts/test-keep90-invariants.ts",
+    "check": "node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts && node --import tsx scripts/test-keep90-invariants.ts && npm run test",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:runtime": "node --import tsx scripts/test-runtime-confidence.ts",
     "test:server-action-resilience": "node --import tsx scripts/test-server-action-resilience.ts",
     "test:customer-selection": "node --import tsx scripts/test-create-order-customer-selection.ts",
@@ -51,6 +53,7 @@
     "husky": "^9.1.7",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

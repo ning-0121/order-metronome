@@ -17,6 +17,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { splitSql } from './db/sql-split.ts';
 
 // ── 零依赖加载 .env.local ──
 const envPath = resolve(process.cwd(), '.env.local');
@@ -32,32 +33,6 @@ if (!URL || !KEY) { console.error('❌ 缺 NEXT_PUBLIC_SUPABASE_URL / SUPABASE_S
 const db = createClient(URL, KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
 const MIG_DIR = resolve(process.cwd(), 'supabase/migrations');
-
-/**
- * 把一个 .sql 文件切成独立语句(exec_sql 底层 plpgsql EXECUTE 一次只能跑一条)。
- * 尊重:单引号字符串('' 转义)、-- 行注释、/* *​/ 块注释、$$/$tag$ 美元引用体(体内 ; 不切)。
- */
-function splitSql(sql: string): string[] {
-  const out: string[] = [];
-  let cur = '', i = 0;
-  const n = sql.length;
-  let inStr = false, dollar: string | null = null, lineC = false, blockC = false;
-  while (i < n) {
-    const c = sql[i], c2 = sql[i + 1];
-    if (lineC) { cur += c; if (c === '\n') lineC = false; i++; continue; }
-    if (blockC) { cur += c; if (c === '*' && c2 === '/') { cur += c2; i += 2; blockC = false; continue; } i++; continue; }
-    if (dollar) { if (c === '$' && sql.startsWith(dollar, i)) { cur += dollar; i += dollar.length; dollar = null; continue; } cur += c; i++; continue; }
-    if (inStr) { cur += c; if (c === "'") { if (c2 === "'") { cur += c2; i += 2; continue; } inStr = false; } i++; continue; }
-    if (c === '-' && c2 === '-') { lineC = true; cur += c; i++; continue; }
-    if (c === '/' && c2 === '*') { blockC = true; cur += c; i++; continue; }
-    if (c === "'") { inStr = true; cur += c; i++; continue; }
-    if (c === '$') { const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i)); if (m) { dollar = m[0]; cur += m[0]; i += m[0].length; continue; } }
-    if (c === ';') { const t = cur.trim(); if (t) out.push(t); cur = ''; i++; continue; }
-    cur += c; i++;
-  }
-  const tail = cur.trim(); if (tail) out.push(tail);
-  return out;
-}
 
 const allMigrations = (): string[] =>
   readdirSync(MIG_DIR).filter(f => f.endsWith('.sql')).sort();

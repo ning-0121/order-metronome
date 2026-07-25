@@ -13,6 +13,7 @@ import { syncStyleFabricsToBom } from '@/lib/services/style-fabric-sync';
 import { normalizeStyleFabrics, primaryFabricColumns } from '@/lib/services/style-fabrics';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { isMissingColumnError, pickMissingColumn } from '@/lib/utils/pg-error';
 
 /** 取当前用户角色 + 是否可见客户成交价(CAN_SEE_FINANCIALS)。 */
 async function financialsVisibility(supabase: any, userId: string): Promise<{ roles: string[]; canSeeFin: boolean }> {
@@ -268,17 +269,11 @@ export async function saveOrderLineItems(orderId: string, styles: any[], sizeOrd
       ({ error: insErr } = await (supabase.from('order_line_items') as any).insert(payload));
       if (!insErr) break;
       const emsg = insErr.message || '';
-      if (!/does not exist|schema cache|could not find/i.test(emsg)) break;   // 非「列不存在」类错误不降级
-      // 抠列名(PostgREST: Could not find the 'xxx' column… / PG: column "xxx" … does not exist)
-      const m = /column ["']([a-z_]+)["']|["']([a-z_]+)["'] column|the ["']([a-z_]+)["']/i.exec(emsg);
-      let col = (m && (m[1] || m[2] || m[3])) || null;
-      if (!col || !OPTIONAL_COLS.includes(col) || dropped.includes(col)) {
-        // 认不出/不在可选列/已剔过 → 退回扫描:剔一个尚未剔、且出现在报错里的可选列
-        col = OPTIONAL_COLS.find((c) => !dropped.includes(c) && new RegExp(`\\b${c}\\b`).test(emsg)) || null;
-      }
-      if (!col || dropped.includes(col)) break;   // 仍认不出 → 停,避免死循环(下面按错误如实返回)
+      if (!isMissingColumnError(emsg)) break;                        // 非「列不存在」类错误不降级
+      const col = pickMissingColumn(emsg, OPTIONAL_COLS, dropped);   // 精准抠出缺的那一列(认不出→null)
+      if (!col) break;                                               // 认不出 → 停,避免死循环(下面按错误如实返回)
       dropped.push(col);
-      payload = payload.map((r: any) => { const clone = { ...r }; delete clone[col as string]; return clone; });
+      payload = payload.map((r: any) => { const clone = { ...r }; delete clone[col]; return clone; });
     }
     if (insErr) return { error: '写明细失败:' + insErr.message };
     if (dropped.length) console.warn('[saveOrderLineItems] 缺列降级(请补迁移 20260703/20260706/20260710/20260711):已剔除 ' + dropped.join('、'));
