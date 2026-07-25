@@ -100,6 +100,24 @@ export async function getMailDigest(days = 3): Promise<{ data?: MailDigestView; 
   };
 }
 
+/** 某订单的客户邮件信号(投诉/交期/样品,闭环 P3b)。订单页展示。 */
+export async function getOrderMailSignals(orderId: string): Promise<{ data?: DigestRow[]; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!orderId) return { data: [] };
+  const { data, error } = await (supabase.from('mail_inbox') as any)
+    .select('id, from_email, subject, summary, category, importance, needs_action, action_type, handled_status, received_at, order_id, customer_id')
+    .eq('order_id', orderId)
+    .in('category', ['投诉', '交期', '样品'])
+    .not('digested_at', 'is', null)
+    .order('importance', { ascending: false })
+    .order('received_at', { ascending: false })
+    .limit(30);
+  if (error) return { error: error.message };
+  return { data: (data || []) as DigestRow[] };
+}
+
 /** 标记一封邮件的处理状态(看板勾选)。 */
 export async function markMailHandled(
   id: string, status: 'seen' | 'handled' | 'ignored' | 'unread',

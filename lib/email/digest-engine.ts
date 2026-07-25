@@ -80,7 +80,7 @@ export async function runMailDigest(limit = 30): Promise<{
   const svc = createServiceRoleClient();
   // 增量:只取未归纳(digested_at IS NULL)的邮件
   const { data: rows } = await (svc.from('mail_inbox') as any)
-    .select('id, subject, raw_body, order_id')
+    .select('id, subject, raw_body, order_id, received_at')
     .is('digested_at', null)
     .order('received_at', { ascending: false })
     .limit(limit);
@@ -99,6 +99,18 @@ export async function runMailDigest(limit = 30): Promise<{
     for (const o of (ords || [])) execByOrder.set(o.id, o.owner_user_id || o.created_by || null);
   }
   const execFor = (e: any): string | null => (e.order_id ? execByOrder.get(e.order_id) ?? null : null);
+
+  // 实时告警收集:hot 邮件(投诉/交期/重点度3)+ 关联订单 + 近 2 天 → 归纳时即通知订单负责人。
+  // 近 2 天护栏关键:否则 3277 封历史积压首轮归纳会瞬间刷出几千条通知。
+  const hot: HotAlert[] = [];
+  const RECENT_MS = Date.now() - 2 * 86400 * 1000;
+  const collectHot = (e: any, d: { category: MailCategory; importance: number; summary: string }) => {
+    if (!e.order_id) return;
+    if (new Date(e.received_at || 0).getTime() < RECENT_MS) return;   // 只对近 2 天新邮件实时告警
+    if (d.category === '投诉' || d.category === '交期' || (d.importance ?? 0) >= 3) {
+      hot.push({ orderId: e.order_id, execId: execFor(e), category: d.category, importance: d.importance, summary: d.summary });
+    }
+  };
 
   // Tier 0:规则分类。噪音直接落库(零 AI);其余进 AI 队列。
   const toAI: DigestInput[] = [];
@@ -126,10 +138,13 @@ export async function runMailDigest(limit = 30): Promise<{
         const e = emails.find((x) => x.id === b.id);
         if (a) {
           await writeDigest(svc, b.id, a, execFor(e), 'haiku', now);
+          collectHot(e, a);
           aiDigested++;
         } else {
           // AI 漏了这封 → 用规则结果兜底,不留未归纳
-          await writeDigest(svc, b.id, ruleFallbackOut(b), execFor(e), 'rule', now);
+          const fb = ruleFallbackOut(b);
+          await writeDigest(svc, b.id, fb, execFor(e), 'rule', now);
+          collectHot(e, fb);
           ruleFallback++;
         }
       }
@@ -137,13 +152,82 @@ export async function runMailDigest(limit = 30): Promise<{
       // 整批 AI 失败(超预算/超时)→ 全部规则兜底,标 digested 避免卡住队列
       for (const b of batch) {
         const e = emails.find((x) => x.id === b.id);
-        await writeDigest(svc, b.id, ruleFallbackOut(b), execFor(e), 'rule', now);
+        const fb = ruleFallbackOut(b);
+        await writeDigest(svc, b.id, fb, execFor(e), 'rule', now);
+        collectHot(e, fb);
         ruleFallback++;
       }
     }
   }
 
+  await fireOrderMailAlerts(svc, hot);
+
   return { scanned: emails.length, noise, aiDigested, ruleFallback };
+}
+
+interface HotAlert { orderId: string; execId: string | null; category: MailCategory; importance: number; summary: string; }
+
+/**
+ * 实时告警(闭环 P3):hot 邮件归纳时即通知订单负责人。投诉额外抄送 admin(CEO 可见)。
+ * 按 CEO 优先级路由:投诉最高。给他人建通知走 service-role(绕 notifications 的 auth.uid RLS)。
+ */
+async function fireOrderMailAlerts(svc: any, alerts: HotAlert[]): Promise<void> {
+  if (alerts.length === 0) return;
+  // 富化订单号
+  const orderIds = [...new Set(alerts.map((a) => a.orderId))];
+  const noMap = new Map<string, string>();
+  try {
+    const { data: ords } = await (svc.from('orders') as any).select('id, internal_order_no, order_no').in('id', orderIds);
+    for (const o of (ords || [])) noMap.set(o.id, o.internal_order_no || o.order_no || '');
+  } catch { /* 富化失败用空号 */ }
+
+  // 投诉需抄送的 admin(CEO 可见)
+  const hasComplaint = alerts.some((a) => a.category === '投诉');
+  let adminIds: string[] = [];
+  if (hasComplaint) {
+    try {
+      const { data: ps } = await (svc.from('profiles') as any).select('user_id, role, roles');
+      adminIds = (ps || []).filter((p: any) => {
+        const rr: string[] = p.roles?.length ? p.roles : [p.role].filter(Boolean);
+        return rr.includes('admin');
+      }).map((p: any) => p.user_id);
+    } catch { /* 取不到 admin 就只通知负责人 */ }
+  }
+
+  const meta: Record<string, { icon: string; label: string }> = {
+    投诉: { icon: '🔴', label: '客户投诉/索赔' },
+    交期: { icon: '⏰', label: '客户交期反馈' },
+    样品: { icon: '👔', label: '样品反馈' },
+  };
+
+  const rows: any[] = [];
+  const push = (userId: string, a: HotAlert, no: string) => {
+    const m = meta[a.category] || { icon: '📬', label: '重点邮件' };
+    rows.push({
+      user_id: userId, type: 'mail_alert',
+      title: `${m.icon} ${m.label}${no ? `:#${no}` : ''}`,
+      message: `${a.summary || '(见邮件归纳)'} —— 到「📬 邮件归纳」或该订单邮件中心查看处理。`,
+      related_order_id: a.orderId, status: 'unread', email_sent: false,
+    });
+  };
+
+  const seen = new Set<string>();   // 去重:同一(人,订单,类别)本轮只发一条
+  for (const a of alerts) {
+    const no = noMap.get(a.orderId) || '';
+    if (a.execId) {
+      const k = `${a.execId}|${a.orderId}|${a.category}`;
+      if (!seen.has(k)) { seen.add(k); push(a.execId, a, no); }
+    }
+    if (a.category === '投诉') {
+      for (const adm of adminIds) {
+        if (adm === a.execId) continue;   // 负责人已收
+        const k = `${adm}|${a.orderId}|投诉`;
+        if (!seen.has(k)) { seen.add(k); push(adm, a, no); }
+      }
+    }
+  }
+  if (rows.length === 0) return;
+  try { await (svc.from('notifications') as any).insert(rows); } catch (e: any) { console.warn('[mail-digest] 告警通知写入失败:', e?.message); }
 }
 
 function ruleFallbackOut(b: DigestInput): Omit<DigestOutput, 'id'> {

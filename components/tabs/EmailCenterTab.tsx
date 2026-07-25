@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { EmailTab } from './EmailTab';
 import { EmailDiffsTab } from './EmailDiffsTab';
 import { CustomerContactEmails } from './CustomerContactEmails';
+import { OrderMailSignals } from './OrderMailSignals';
 
 interface Props {
   orderId: string;
@@ -60,6 +61,9 @@ export function EmailCenterTab({ orderId, customerName, orderNo }: Props) {
           </div>
         </div>
       </div>
+
+      {/* 客户邮件信号(交期/投诉/样品,闭环 P3b)—— 空则不渲染 */}
+      <OrderMailSignals orderId={orderId} />
 
       {/* 子 Tab 内容 */}
       {active === 'emails' && (
