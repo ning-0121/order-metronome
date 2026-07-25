@@ -425,6 +425,36 @@ export async function calculateOrderScore(
     result.logisticsScore = { total_score: logiTotal, grade: vetoed ? 'D' : logiGrade.grade, detail_json: logiDetail };
   }
 
+  // 部门执行考核(2026-07-25 CEO:采购/生产中心的活也考核 B 方案)。从 department_assessments 出采购部/生产部分卡:
+  //   V2 主时间线无 owner=procurement/production 的里程碑 → 靠中心动作(下单/收货/生产/QC)生成的考核记录担责。
+  //   缺表/无记录 → 跳过(增量安全:没 hook 数据时现有评分完全不变)。
+  try {
+    const { data: deptRows } = await (supabase.from('department_assessments') as any)
+      .select('department, user_id, on_time').eq('order_id', orderId);
+    if (deptRows && deptRows.length) {
+      const { computeDeptScore } = await import('@/lib/domain/deptAssessment');
+      const byDept: Record<string, any[]> = {};
+      for (const r of deptRows as any[]) (byDept[r.department] ||= []).push(r);
+      for (const dept of ['procurement', 'production'] as const) {
+        const rows = byDept[dept]; if (!rows || !rows.length) continue;
+        const ds = computeDeptScore(rows);
+        const dTotal = vetoed ? 0 : ds.score;
+        const dGrade = calcGrade(dTotal);
+        const dUser = rows.find((r) => r.user_id)?.user_id || null;
+        const dDetail = { dept, ...ds, source: 'department_assessments' };
+        if (dUser) {
+          await (supabase.from('order_commissions') as any).upsert({
+            order_id: orderId, user_id: dUser, role: dept,
+            score_ontime: ds.score, total_score: dTotal,
+            grade: vetoed ? 'D' : dGrade.grade, vetoed, detail_json: dDetail,
+            calculated_at: new Date().toISOString(),
+          }, { onConflict: 'order_id,user_id' });
+        }
+        (result as any)[`${dept}DeptScore`] = { total_score: dTotal, grade: vetoed ? 'D' : dGrade.grade, detail_json: dDetail };
+      }
+    }
+  } catch { /* department_assessments 表未建/无记录 → 跳过 */ }
+
   return { data: result };
 }
 

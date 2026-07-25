@@ -51,6 +51,16 @@ export async function updateQcResult(id: string, orderId: string, result: 'pass'
   const { error } = await (supabase.from('qc_inspections') as any)
     .update({ result, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) return { error: error.message };
+
+  // 部门考核 hook(2026-07-25 CEO B 方案):QC 判 pass → 落一条生产部(QC)考核记录,目标日取尾查节点 due。
+  if (result === 'pass') {
+    try {
+      const { recordDeptAssessment, milestoneDueDate } = await import('./dept-assessment');
+      const { createServiceRoleClient } = await import('@/lib/supabase/server');
+      const target = await milestoneDueDate(createServiceRoleClient(), orderId, ['final_qc_sales_check', 'final_qc_check', 'inspection_release']);
+      await recordDeptAssessment(orderId, 'production', { task_key: 'qc_passed', task_label: '尾查合格', user_id: user.id, target_date: target });
+    } catch { /* 考核旁路,不阻断 QC */ }
+  }
   revalidatePath(`/orders/${orderId}`);
   return {};
 }
