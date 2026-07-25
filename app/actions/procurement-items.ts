@@ -22,6 +22,7 @@ import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } fro
 import {
   buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, distributeByWeights, shouldSplitBySize,
 } from '@/lib/services/procurement-execution';
+import { overrideToSegments } from '@/lib/procurement/sizeOverride';
 import { getOrderLeftover } from '@/app/actions/inventory';
 
 const num = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
@@ -1299,11 +1300,21 @@ export async function saveSizeQtyOverride(itemId: string, orderId: string, sizes
   // 独立语句 + 容忍 sku_breakdown 列未建(旧库),不影响尺码拆分本身可用。
   await (supabase.from('procurement_items') as any).update({ sku_breakdown: null }).eq('id', itemId).eq('order_id', orderId);
 
-  // ── 修(2026-07-24 尺码丢失根因)──────────────────────────────────────
-  // generateExecutionLines 跳过"已有执行行"的采购项 → 采购存完尺码拆分,尺码只落在 size_qty_override,
-  // 从没落到执行行(采购行/导出读的是执行行)→ 采购行不带尺码,要手动重分。
-  // 修:存尺码后,把该项【未下单】的执行行(未归单 + 草稿采购单里的)删掉重生成 → 尺码落到执行行;
-  //     若原在草稿采购单里,新行回挂原单 + 重算总额。已【下单(placed)】的不动(那种在采购单页手填)。
+  // 收口尺码真相源(根因3):意图(size_qty_override)一改就重生成执行行,让物化真相(采购行/导出/收货读的 lines)跟上。
+  await syncItemExecutionLines(orderId, itemId);
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, total, cleared: !hasOverride };
+}
+
+/**
+ * 尺码真相源单一同步口(2026-07-24 根因3)。采购项的"尺码意图"(size_qty_override / sku_breakdown)一改,
+ * 就重生成它的执行行,让 procurement_line_items(采购行/导出/收货/财务读的物化真相)始终跟意图一致。
+ * 删该项【未下单】的执行行(未归单 + 草稿采购单里的)→ generateExecutionLines 重生成(有 override→逐码;无→单行整量)
+ * → 若原在草稿采购单里则新行回挂原单 + 重算总额。已【下单(placed)】的不动(那种在采购单页手填)。
+ * saveSizeQtyOverride / saveSkuBreakdown 共用此口,杜绝"改了意图 lines 没跟上"的漂移。
+ */
+async function syncItemExecutionLines(orderId: string, itemId: string): Promise<void> {
   try {
     const svc = createServiceRoleClient();
     const { data: myLines } = await (svc.from('procurement_line_items') as any)
@@ -1316,29 +1327,20 @@ export async function saveSizeQtyOverride(itemId: string, orderId: string, sizes
       for (const p of (pos || []) as any[]) { if (p.status && p.status !== 'draft') placedPo.add(p.id); else draftPoId = draftPoId || p.id; }
     }
     const hasPlaced = ((myLines || []) as any[]).some(l => l.purchase_order_id && placedPo.has(l.purchase_order_id));
-    if (!hasPlaced) {   // 只要没有已下单的行,就重生成(草稿单里的也重生成)
-      const delIds = ((myLines || []) as any[]).filter(l => !l.purchase_order_id || !placedPo.has(l.purchase_order_id)).map(l => l.id);
-      if (delIds.length) await (svc.from('procurement_line_items') as any).delete().in('id', delIds);
-      if (hasOverride) {
-        await generateExecutionLines(orderId);   // 该项无行了 → 重生成并带上尺码(未归单)
-        if (draftPoId) {   // 原在草稿采购单里 → 新行回挂原单 + 重算总额
-          await (svc.from('procurement_line_items') as any).update({ purchase_order_id: draftPoId })
-            .eq('procurement_item_id', itemId).is('purchase_order_id', null).neq('line_status', 'cancelled');
-          const { data: rest } = await (svc.from('purchase_orders') as any).select('id').eq('id', draftPoId).maybeSingle();
-          if (rest) {
-            const { data: poLines } = await (svc.from('procurement_line_items') as any).select('ordered_amount, line_status').eq('purchase_order_id', draftPoId);
-            const tot = ((poLines || []) as any[]).filter(l => l.line_status !== 'cancelled').reduce((s, l) => s + (Number(l.ordered_amount) || 0), 0);
-            await (svc.from('purchase_orders') as any).update({ total_amount: Math.round(tot * 100) / 100, updated_at: new Date().toISOString() }).eq('id', draftPoId);
-          }
-        }
-      }
+    if (hasPlaced) return;   // 已下单的不动(采购单页手填尺码)
+    const delIds = ((myLines || []) as any[]).filter(l => !l.purchase_order_id || !placedPo.has(l.purchase_order_id)).map(l => l.id);
+    if (delIds.length) await (svc.from('procurement_line_items') as any).delete().in('id', delIds);
+    await generateExecutionLines(orderId);   // 该项无行了 → 按最新意图重生成(逐码 / 单行整量)
+    if (draftPoId) {   // 原在草稿采购单里 → 新行回挂原单 + 重算总额
+      await (svc.from('procurement_line_items') as any).update({ purchase_order_id: draftPoId })
+        .eq('procurement_item_id', itemId).is('purchase_order_id', null).neq('line_status', 'cancelled');
+      const { data: poLines } = await (svc.from('procurement_line_items') as any).select('ordered_amount, line_status').eq('purchase_order_id', draftPoId);
+      const tot = ((poLines || []) as any[]).filter(l => l.line_status !== 'cancelled').reduce((s, l) => s + (Number(l.ordered_amount) || 0), 0);
+      await (svc.from('purchase_orders') as any).update({ total_amount: Math.round(tot * 100) / 100, updated_at: new Date().toISOString() }).eq('id', draftPoId);
     }
   } catch (e: any) {
-    console.warn('[saveSizeQtyOverride] 重生成执行行失败(不阻断保存):', e?.message);
+    console.warn('[syncItemExecutionLines] 重生成执行行失败(不阻断保存):', e?.message);
   }
-
-  revalidatePath(`/orders/${orderId}`);
-  return { ok: true, total, cleared: !hasOverride };
 }
 
 /**
@@ -1398,6 +1400,11 @@ export async function saveSkuBreakdown(
     return { error: '产品拆分列尚未建立:请先在 Supabase 执行 20260710_procurement_item_sku_breakdown.sql' };
   }
   if (error) return { error: friendlyError(error) };
+
+  // 收口尺码真相源(根因3):款×码拆分回写了 size_qty_override → 同 saveSizeQtyOverride 走同一同步口重生成执行行,
+  // 否则采购行/导出读的 lines 还是旧尺码(与 saveSizeQtyOverride 修前同款漂移)。
+  await syncItemExecutionLines(orderId, itemId);
+
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, total, cleared: !hasBreakdown };
 }
@@ -1750,8 +1757,7 @@ export async function generateExecutionLines(orderId: string) {
     // 尺码拆分改为「采购主动录入」opt-in(2026-07-08 用户:辅料很多不带尺码,不再全部自动按码拆)。
     // 默认单行整量(size=null);仅当采购在核料点「按尺码录入」填了 size_qty_override 才按码拆。面料/散装恒单行。
     .flatMap((it) => {
-      const ov = (it as any).size_qty_override && typeof (it as any).size_qty_override === 'object' ? (it as any).size_qty_override : null;
-      const overrideSegs = ov ? Object.entries(ov).map(([size, qty]) => ({ size, qty: Number(qty) || 0 })).filter((s) => s.qty > 0) : [];
+      const overrideSegs = overrideToSegments((it as any).size_qty_override);   // 收口:单一纯派生(根因3)
       if (overrideSegs.length === 0 || !shouldSplitBySize(it)) {
         return [{ ...buildExecutionLineRow(it, user.id, { size: null, qtyOverride: orderableQty(it) }), ordered_at: now }];
       }
