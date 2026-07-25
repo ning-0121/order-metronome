@@ -40,9 +40,15 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
     emailContains: ['helen@', 'helen.'],
   },
   production_manager: {
-    displayName: '秦增富',
-    nameMatches: ['秦增富', '增富', 'zengfu'],
+    displayName: '秦增福',   // 生产主管(名字福/富两种写法都兼容,防匹配不上→未分配)
+    nameMatches: ['秦增福', '秦增富', 'zengfu'],
     emailContains: ['qzf@', 'qzf'],
+  },
+  // 2026-07-25 CEO:发货出运=物流部,责任人物流主管 秦增超(与生产主管秦增福是两个人,勿混)
+  logistics: {
+    displayName: '秦增超',
+    nameMatches: ['秦增超', 'zengchao'],
+    emailContains: ['qzc@', 'qzc'],
   },
 };
 
