@@ -1692,7 +1692,9 @@ export async function getMissingMaterialPlanOrders(): Promise<{ data: MissingPla
       .select('order_id, step_key, status, completed_at').in('order_id', ids);
     const isDone = (s: string) => ['done', '已完成'].includes(String(s || '').toLowerCase());
     const REACHED = new Set(['mo_released', 'po_confirmed']);
-    const DEEP = new Set(['production_kickoff', 'materials_received_inspected', 'mid_qc_check', 'final_qc_check', 'shipment_execute', 'customs_export']);
+    // "已深入生产/出货 → 免报缺料预警" 的深阶段节点。覆盖 V1+V2 两套命名:
+    // V2 中查=mid_qc_sales_check、尾查=final_qc_sales_check、报关=ci_made;去掉幻影 mid_qc_check/customs_export/materials_received_inspected。
+    const DEEP = new Set(['production_kickoff', 'factory_completion', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check', 'shipment_execute', 'ci_made']);
     const reached = new Set<string>(), deep = new Set<string>(), placed = new Set<string>();
     const lastStep = new Map<string, { step: string; at: string }>();
     for (const m of (ms || [])) {

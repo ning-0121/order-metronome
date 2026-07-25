@@ -122,7 +122,7 @@ const CRITICAL_FLOORS: Array<{ from: string; to: string; biz: number; label: str
   { from: 'factory_completion', to: 'inspection_release', biz: 2, label: '工厂完成→验货出结果' },
   { from: 'production_kickoff', to: 'factory_completion', biz: 12, label: '开裁→工厂完成' },
   { from: 'procurement_order_placed', to: 'materials_received_inspected', biz: 4, label: '采购下单→原料到货' },
-  { from: 'pre_production_sample_ready', to: 'pre_production_sample_approved', biz: 5, label: '产前样完成→客户确认' },
+  { from: 'pre_production_sample_sent', to: 'pre_production_sample_approved', biz: 5, label: '产前样寄出→客户确认' },
 ];
 
 /**
@@ -457,9 +457,9 @@ export function calcDueDates(params: CalcDueDatesParams) {
     pre_production_meeting:        cap(calc(TIMELINE.pre_production_meeting)),
     production_kickoff:            cap(calc(TIMELINE.production_kickoff)),
     mid_qc_check:                  cap(applyOverride('mid_qc_check', calc(TIMELINE.mid_qc_check))),
-    mid_qc_sales_check:            cap(calc(TIMELINE.mid_qc_sales_check)),
+    mid_qc_sales_check:            cap(applyOverride('mid_qc_sales_check', calc(TIMELINE.mid_qc_sales_check))),   // V2 中查也吃客户 override
     final_qc_check:                cap(applyOverride('final_qc_check', calc(TIMELINE.final_qc_check))),
-    final_qc_sales_check:          cap(calc(TIMELINE.final_qc_sales_check)),
+    final_qc_sales_check:          cap(applyOverride('final_qc_sales_check', calc(TIMELINE.final_qc_sales_check))), // V2 尾查也吃客户 override
     packing_method_confirmed:      cap(applyOverride('packing_method_confirmed', calc(TIMELINE.packing_method_confirmed))),
     factory_completion:            cap(calc(TIMELINE.factory_completion)),
     leftover_collection:           cap(calc(TIMELINE.leftover_collection)),

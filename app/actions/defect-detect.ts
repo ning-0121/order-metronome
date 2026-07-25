@@ -11,20 +11,22 @@ import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDete
 
 // 哪些 milestone step_key 触发 AI 质检
 const QC_STEP_KEYS = new Set([
-  'pre_production_sample_ready',  // 封样
-  'materials_received_inspected', // 面料验收
-  'production_kickoff',          // 上线工艺确认
+  'pre_production_sample_sent',   // 产前样寄出(V2);旧幻影 pre_production_sample_ready 任何模板都不产生 → 产前样 AI 质检对全部单失效
+  'pre_production_sample_approved', // 产前样确认(V1+V2)
+  'materials_received_inspected', // 面料验收(V2 无对应节点,保留供历史/在途单)
+  'production_kickoff',          // 上线工艺确认(V1)
   'mid_qc_check',                // 中查
-  'mid_qc_sales_check',          // 业务中查
-  'final_qc_check',              // 尾查
-  'final_qc_sales_check',        // 业务尾查
+  'mid_qc_sales_check',          // 业务中查(V2)
+  'final_qc_check',              // 尾查(V1)
+  'final_qc_sales_check',        // 业务尾查(V2)
   'packing_method_confirmed',    // 包装确认
-  'inspection_release',          // 验货放行
+  'inspection_release',          // 验货放行(V1)
 ]);
 
 // step_key → 检查场景映射
 const STEP_TO_SCENE: Record<string, string> = {
-  pre_production_sample_ready: 'sample',
+  pre_production_sample_sent: 'sample',
+  pre_production_sample_approved: 'sample',
   materials_received_inspected: 'fabric',
   production_kickoff: 'general',
   mid_qc_check: 'mid_qc',

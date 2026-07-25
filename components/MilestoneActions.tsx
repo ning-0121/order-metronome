@@ -16,7 +16,8 @@ import { isInspectionStep } from '@/lib/domain/inspectionWaiver';
 import { requiredPartiesFor, pendingParties, isSoftConfirm } from '@/lib/domain/confirmationParties';
 
 const QC_STEPS = new Set([
-  'pre_production_sample_ready', 'materials_received_inspected', 'production_kickoff',
+  // 产前样用真实 V2 键(sent/approved),旧幻影 pre_production_sample_ready 谁都不产生 → 封样 AI 质检按钮对全部单不显示
+  'pre_production_sample_sent', 'pre_production_sample_approved', 'materials_received_inspected', 'production_kickoff',
   'mid_qc_check', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check',
   'packing_method_confirmed', 'inspection_release',
 ]);
@@ -496,15 +497,18 @@ export function MilestoneActions({
                 setLoading(true);
                 try {
                   const supabaseClient = createClient();
-                  // 回退：将 pre_production_sample_ready, pre_production_sample_sent 重新设为 pending
-                  // 当前节点（approved）也设为 pending
-                  const resetSteps = ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'];
+                  // 回退驱动二次样:V2 产前样起点=寄出(sent)→ sent 置 in_progress、approved 置 pending;
+                  // V1(无 sent 节点)则把 approved 自身置 in_progress。旧幻影 pre_production_sample_ready 谁都不产生,已删除。
+                  const { data: sentMs } = await (supabaseClient.from('milestones') as any)
+                    .select('id').eq('order_id', orderId).eq('step_key', 'pre_production_sample_sent').maybeSingle();
+                  const restartKey = sentMs ? 'pre_production_sample_sent' : 'pre_production_sample_approved';
+                  const resetSteps = ['pre_production_sample_sent', 'pre_production_sample_approved'];
                   for (const stepKey of resetSteps) {
                     const { data: ms } = await (supabaseClient.from('milestones') as any)
-                      .select('id').eq('order_id', orderId).eq('step_key', stepKey).single();
+                      .select('id').eq('order_id', orderId).eq('step_key', stepKey).maybeSingle();
                     if (ms) {
                       await (supabaseClient.from('milestones') as any)
-                        .update({ status: stepKey === 'pre_production_sample_ready' ? 'in_progress' : 'pending', actual_at: null })
+                        .update({ status: stepKey === restartKey ? 'in_progress' : 'pending', actual_at: null })
                         .eq('id', ms.id);
                     }
                   }
