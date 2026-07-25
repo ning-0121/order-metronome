@@ -92,6 +92,17 @@ export async function markBatchMilestoneStep(
       || roles.includes('logistics') || roles.includes('production_manager');
     if (!canShip) return { ok: false, error: '仅物流/生产管理/订单负责人可标记出运' };
 
+    // 财务放货硬闸(2026-07-25 修 B2:分批出运走本路径,此前完全绕过财务闸 →
+    //   尾款未到也能分批出货,架空 CEO「订舱+发货必经财务审批」)。与主路径 milestones.ts 同口径:
+    //   付款暂停 / 放货闸未开 → 拦;admin 越权豁免。经 service-role 读,避免物流角色 RLS 看不到 order_financials 造成假放行。
+    if (!isAdmin) {
+      const { createServiceRoleClient } = await import('@/lib/supabase/server');
+      const { data: fin } = await (createServiceRoleClient().from('order_financials') as any)
+        .select('payment_hold, allow_shipment').eq('order_id', orderId).maybeSingle();
+      if ((fin as any)?.payment_hold) return { ok: false, error: '❌ 财务付款暂停中,不允许分批出运 —— 请财务先解除付款暂停。' };
+      if (fin && (fin as any).allow_shipment === false) return { ok: false, error: '❌ 财务放货闸未开(尾款/收款条件未满足),不允许分批出运 —— 请财务确认放行。' };
+    }
+
     // 分批明细强化(2026-07-06 用户拍板:7月起"有明细"的单,分批出运必须填款色明细)——
     // 订单有逐款逐色明细(order_line_items)但本批未填款色明细(shipment_batch_items)→ 拦。
     // 老订单(无明细)不受限;shipment_batch_items 表缺失时不阻断(降级放行)。
