@@ -57,7 +57,7 @@ export const MILESTONE_RISK_MATRIX: Record<string, {
   commonCauses: string[];
   preventionTips: string[];
 }> = {
-  'bom_confirmed': {
+  'production_order_upload': {   // V2:生产单/原辅料单(BOM)制作;旧幻影键 bom_confirmed 谁都不产生
     risk: 'high',
     commonCauses: ['采购清单不完整', '供应商价格未确认', '新款辅料无货'],
     preventionTips: ['产前会当天完成BOM初版', '辅料和面料同步询价', '提前备货常用辅料'],
@@ -72,7 +72,7 @@ export const MILESTONE_RISK_MATRIX: Record<string, {
     commonCauses: ['面料色差超标', '数量短缺', '物流延误'],
     preventionTips: ['到货24小时内完成验收', '短缺立即联系供应商补货', '色差问题当天上报'],
   },
-  'pre_production_sample_confirm': {
+  'pre_production_sample_approved': {   // V1+V2 产前样确认;旧幻影键 pre_production_sample_confirm 谁都不产生
     risk: 'high',
     commonCauses: ['客户内部审批流程慢', '海外时差', '客户要求修改'],
     preventionTips: ['产前样寄出后立即邮件+微信双渠道通知', '提前3天催促确认', '告知客户不确认将阻塞生产'],
@@ -82,12 +82,12 @@ export const MILESTONE_RISK_MATRIX: Record<string, {
     commonCauses: ['原辅料未到齐', '产前样未确认', '工厂产能调度'],
     preventionTips: ['原辅料到货后立即安排产前会', '确保产前样确认后24小时内开裁'],
   },
-  'mid_qc_check': {
+  'mid_qc_sales_check': {   // V2 业务中查;旧 mid_qc_check 幻影键
     risk: 'medium',
     commonCauses: ['跟单未及时跟进进度', '工厂配合度低', '品质问题返工'],
     preventionTips: ['生产30%时主动约验', '中查发现问题当天出报告', '问题件<3%允许继续生产'],
   },
-  'final_qc_check': {
+  'final_qc_sales_check': {   // V2 业务尾查;旧 final_qc_check 是 V1 键
     risk: 'medium',
     commonCauses: ['工厂未完成包装', '品质问题未解决', '数量不足'],
     preventionTips: ['尾查前确认工厂完成率>90%', '提前1天确认包装进度'],

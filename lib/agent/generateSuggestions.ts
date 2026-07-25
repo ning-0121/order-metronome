@@ -13,6 +13,7 @@ import { CIRCUIT_BREAKER } from './types';
 import type { CustomerProfile } from './customerProfile';
 import { getNudgeThreshold } from './customerProfile';
 import { MILESTONE_RISK_MATRIX } from './industryKnowledge';
+import { KICKOFF_KEYS, FACTORY_DONE_KEYS } from '@/lib/production/stage';
 
 interface OrderData {
   id: string;
@@ -292,8 +293,9 @@ export function generateSuggestionsForOrder(
   }
 
   // ── 规则 7: 生产阶段订单无日报提醒 ──
-  const productionStarted = milestones.some(m => m.step_key === 'production_kickoff' && isDoneStatus(m.status));
-  const factoryDone = milestones.some(m => m.step_key === 'factory_completion' && isDoneStatus(m.status));
+  // V2 已移除 production_kickoff/factory_completion,用共享 KEYS 兼容:大货启动=产前样确认承载、完工=尾期验货承载
+  const productionStarted = milestones.some(m => (KICKOFF_KEYS as readonly string[]).includes(m.step_key) && isDoneStatus(m.status));
+  const factoryDone = milestones.some(m => (FACTORY_DONE_KEYS as readonly string[]).includes(m.step_key) && isDoneStatus(m.status));
   if (productionStarted && !factoryDone) {
     const merchMilestone = milestones.find(m => m.owner_role === 'merchandiser' && m.owner_user_id);
     if (merchMilestone?.owner_user_id) {
@@ -313,9 +315,10 @@ export function generateSuggestionsForOrder(
 
   // ── 规则 8: 采购节点专项 ──
   // 当前审计：采购类阻塞占全系统阻塞的 ~50%，原有规则对此无专项处理
+  // 真实采购阶段节点:V2 的 production_order_upload(生产单/原辅料单)承载 BOM/材料清单确认概念。
+  // 去掉幻影键 bom_confirmed/material_inspection/processing_fee_confirmed/factory_match_confirmed(任何模板都不产生)。
   const PROCUREMENT_STEPS = new Set([
-    'bom_confirmed', 'procurement_order_placed', 'material_inspection',
-    'processing_fee_confirmed', 'factory_match_confirmed',
+    'production_order_upload', 'procurement_order_placed',
   ]);
   for (const m of milestones) {
     if (!PROCUREMENT_STEPS.has(m.step_key)) continue;
@@ -339,8 +342,8 @@ export function generateSuggestionsForOrder(
       );
     }
 
-    // BOM/采购预评估 + 面料已确认 → 提示平行下单辅料
-    if (m.step_key === 'bom_confirmed' && !isDoneStatus(m.status)) {
+    // 生产单/原辅料单(BOM)+ 面料已确认 → 提示平行下单辅料
+    if (m.step_key === 'production_order_upload' && !isDoneStatus(m.status)) {
       const fabricOrdered = milestones.some(ms => ms.step_key === 'procurement_order_placed' && !isDoneStatus(ms.status));
       if (fabricOrdered) {
         add(
@@ -354,28 +357,16 @@ export function generateSuggestionsForOrder(
       }
     }
 
-    // 原辅料验收逾期 → 预警生产启动时间
-    if (m.step_key === 'material_inspection' && m.due_at && isOverdue(m.due_at)) {
-      const overdueDays = daysOverdue(m.due_at);
-      const productionStep = milestones.find(ms => ms.step_key === 'production_kickoff');
-      if (productionStep && !isDoneStatus(productionStep.status)) {
-        add(
-          'create_delay_draft', 'high', 88,
-          `原辅料验收逾期 ${overdueDays} 天，生产启动将连带延误`,
-          `原辅料验收是生产启动的前置条件。当前逾期 ${overdueDays} 天，如不解决则生产启动至少推迟 ${overdueDays} 天，影响出厂日期。`,
-          `请立即处理原辅料到货/验收问题，或评估是否需要申请整体延期。`,
-          { overdue_days: overdueDays, impact_step: 'production_kickoff' },
-          m.id, m.name,
-        );
-      }
-    }
+    // (删)原「原辅料验收逾期→生产启动延误」规则:触发键 material_inspection 与依赖 production_kickoff
+    //   在 V1/V2 模板均不产生,自 V2 起为死逻辑。V2 无「原料到货验收」节点(归采购中心),无真实键可repoint,故移除。
   }
 
   // ── 规则 9: 出运前卡点专项（订单出厂日≤7天时升级） ──
   // 针对出货阶段高频阻塞：品控/验货/订舱/出运
   const SHIPMENT_STEPS = new Set([
-    'mid_qc_check', 'final_qc_check', 'inspection_release',
-    'booking_done', 'customs_export', 'shipment_execute', 'sample_sent',
+    // 补 V2 承载节点(中查/尾查/船样/报关),否则 V2 新单出货阶段卡点永不触发 escalate_ceo
+    'mid_qc_check', 'mid_qc_sales_check', 'final_qc_check', 'final_qc_sales_check', 'inspection_release',
+    'shipping_sample_send', 'ci_made', 'booking_done', 'customs_export', 'shipment_execute', 'sample_sent',
   ]);
   for (const m of milestones) {
     if (!SHIPMENT_STEPS.has(m.step_key)) continue;
@@ -414,7 +405,8 @@ export function generateSuggestionsForOrder(
 
   // ── 规则 11: 产前样客户确认逾期 → 主动联系客户 ──
   for (const m of milestones) {
-    if (m.step_key !== 'pre_production_sample_confirm' && m.step_key !== 'sample_customer_confirm') continue;
+    // 真实产前样确认节点 V1/V2 都是 pre_production_sample_approved(旧 pre_production_sample_confirm 是幻影,规则从不触发)
+    if (m.step_key !== 'pre_production_sample_approved' && m.step_key !== 'sample_customer_confirm') continue;
     if (isDoneStatus(m.status)) continue;
     if (!m.due_at || !isOverdue(m.due_at)) continue;
 
