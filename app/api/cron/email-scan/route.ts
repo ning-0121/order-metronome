@@ -59,18 +59,22 @@ export async function POST(req: Request) {
             : rawFrom;
           if (!fromEmail) continue;
 
-          // 去重：同一发件人+同一主题+同一天 只入库一次
-          const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);
-          const { data: existing } = await supabase
-            .from('mail_inbox')
-            .select('id')
-            .eq('from_email', fromEmail)
-            .eq('subject', email.subject)
-            .gte('received_at', `${emailDate}T00:00:00`)
-            .lte('received_at', `${emailDate}T23:59:59`)
-            .limit(1)
-            .maybeSingle();
-
+          // 去重:message_id 是邮件唯一标识,优先按它精确去重(避免"同人同主题同天"误杀不同邮件)。
+          // 无 message_id 时才回退到 发件人+主题+同一天 的弱启发式。
+          let existing: { id: string } | null = null;
+          if (email.messageId) {
+            const { data } = await supabase
+              .from('mail_inbox').select('id').eq('message_id', email.messageId).limit(1).maybeSingle();
+            existing = data;
+          } else {
+            const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+            const { data } = await supabase
+              .from('mail_inbox').select('id')
+              .eq('from_email', fromEmail).eq('subject', email.subject)
+              .gte('received_at', `${emailDate}T00:00:00`).lte('received_at', `${emailDate}T23:59:59`)
+              .limit(1).maybeSingle();
+            existing = data;
+          }
           if (existing) continue;
 
           const threadSubject = email.subject
