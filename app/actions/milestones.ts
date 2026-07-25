@@ -397,7 +397,13 @@ export async function markMilestoneDone(
       );
 
       // 确认链阻塞改为警告，不再硬阻止（业务可以并行推进）
-      // 只有 SEQUENTIAL_REQUIREMENTS 里的硬约束才阻止
+      // 财务放货硬闸(2026-07-25 修 B1:此前整段 blockResult 被丢弃 → 财务的付款暂停/未放货闸对里程碑完成零约束,
+      //   尾款未到也能出货,架空 CEO「出货必经财务」)。只对出货类(订舱/发货)强制付款类硬闸;确认链仍只警告;admin 越权。
+      if (!isAdmin && (milestone.step_key === 'booking_done' || milestone.step_key === 'shipment_execute')) {
+        const fin = finRes.data as any;
+        if (fin?.payment_hold) return { error: '❌ 财务付款暂停中,不允许订舱/出货 —— 请财务先解除付款暂停。' };
+        if (fin && fin.allow_shipment === false) return { error: '❌ 财务放货闸未开(尾款/收款条件未满足),不允许订舱/出货 —— 请财务确认放行。' };
+      }
     } catch (e: any) { console.warn(`[milestones] 阻塞检查失败不阻断（降级）:`, e?.message); }
   }
 
@@ -469,11 +475,14 @@ export async function markMilestoneDone(
   //   尾查通过。其余原 GATE 内的节点改为允许业务并行推进。
   const SHIPMENT_GATES = ['inspection_release', 'shipment_execute'];
   if (SHIPMENT_GATES.includes(milestone.step_key)) {
+    // 修 H1(2026-07-25):V1 尾查节点=final_qc_check、V2=final_qc_sales_check。此前只查 final_qc_check →
+    //   所有 V2 新单查 0 行、QC 门禁被跳过,货可在尾查未过就出运。改为两种 key 都查。
     const { data: qcMilestone } = await (supabase.from('milestones') as any)
       .select('status, checklist_data')
       .eq('order_id', (milestone as any).order_id)
-      .eq('step_key', 'final_qc_check')
-      .single();
+      .in('step_key', ['final_qc_check', 'final_qc_sales_check'])
+      .limit(1)
+      .maybeSingle();
     if (qcMilestone) {
       const qcStatus = normalizeMilestoneStatus(qcMilestone.status);
       if (qcStatus !== '已完成') {
