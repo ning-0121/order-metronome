@@ -98,40 +98,108 @@ function addOverflowSheet(workbook: ExcelJS.Workbook, model: ProductionTaskTempl
   ws.pageSetup = { ...template.pageSetup, printArea: `A1:${ws.getColumn(columns.length).letter}${model.colors.length + 1}` };
 }
 
+// 列号 ↔ 字母
+const colToNum = (s: string) => [...s].reduce((a, c) => a * 26 + (c.charCodeAt(0) - 64), 0);
+const numToCol = (n: number) => { let s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
+
+/**
+ * 动态扩展生产任务单主表(2026-07-24 用户#4):按录入的颜色数/尺码数在母版主表插行插列。
+ * 母版固定:尺码列 E/F/G(3 列),颜色行 7-10(4 行),客户包装 H:L。
+ *  - 尺码 > 3:在第 8 列(客户包装 H 前)插 (n-3) 列;
+ *  - 颜色 > 4:在第 11 行(总计前)插 (n-4) 行。
+ * 合并格「先全拆 → splice → 按位移重合」保证不错位;新行/列仿邻近样式。
+ * 返回:extraRows/extraCols 位移 + 尺码列字母表(≥3,含要清空的母版残列)+ 客户包装列 + 末列。
+ */
+function expandMainSheet(main: ExcelJS.Worksheet, nColors: number, nSizes: number) {
+  const extraRows = Math.max(0, nColors - 4);
+  const extraCols = Math.max(0, nSizes - 3);
+  const COL_INS = 8, ROW_INS = 11;
+  const physSizes = Math.max(3, nSizes);
+  const sizeCols = Array.from({ length: physSizes }, (_, i) => numToCol(5 + i));
+  const ret = { extraRows, extraCols, sizeCols, packCol: numToCol(8 + extraCols), lastCol: numToCol(12 + extraCols) };
+  if (extraRows === 0 && extraCols === 0) return ret;   // 母版够放,不动
+
+  const parse = (m: string) => { const x = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(m); return x ? { l: colToNum(x[1]), t: +x[2], r: colToNum(x[3]), b: +x[4] } : null; };
+  // 1) 记录并拆掉所有合并格(splice 对合并格支持不稳,手动重合)
+  const merges = [...(((main.model as any).merges as string[]) || [])];
+  for (const m of merges) { try { main.unMergeCells(m); } catch { /* 忽略 */ } }
+  // 2) 先插列再插行
+  if (extraCols > 0) main.spliceColumns(COL_INS, 0, ...Array.from({ length: extraCols }, () => [] as any[]));
+  if (extraRows > 0) main.spliceRows(ROW_INS, 0, ...Array.from({ length: extraRows }, () => [] as any[]));
+  // 3) 按位移重合并:列 ≥8 的 +extraCols;行 ≥11 的 +extraRows
+  for (const m of merges) {
+    const p = parse(m); if (!p) continue;
+    const l = p.l >= COL_INS ? p.l + extraCols : p.l, r = p.r >= COL_INS ? p.r + extraCols : p.r;
+    const t = p.t >= ROW_INS ? p.t + extraRows : p.t, b = p.b >= ROW_INS ? p.b + extraRows : p.b;
+    try { main.mergeCells(`${numToCol(l)}${t}:${numToCol(r)}${b}`); } catch { /* 冲突忽略 */ }
+  }
+  // 4) 新尺码列仿母版 G 列(第7列)样式/宽;新颜色行仿第7行样式/高 + 客户包装合并
+  for (let i = 0; i < extraCols; i++) {
+    const c = COL_INS + i;
+    main.getColumn(c).width = main.getColumn(7).width;
+    for (let rr = 6; rr <= 10; rr++) { try { main.getCell(rr, c).style = JSON.parse(JSON.stringify(main.getCell(rr, 7).style || {})); } catch { /* */ } }
+  }
+  for (let i = 0; i < extraRows; i++) {
+    const rr = ROW_INS + i;
+    main.getRow(rr).height = main.getRow(7).height;
+    for (let cc = 1; cc <= 12 + extraCols; cc++) { try { main.getCell(rr, cc).style = JSON.parse(JSON.stringify(main.getCell(7, cc).style || {})); } catch { /* */ } }
+    try { main.mergeCells(`${numToCol(8 + extraCols)}${rr}:${numToCol(12 + extraCols)}${rr}`); } catch { /* */ }
+  }
+  return ret;
+}
+
 export async function buildProductionTaskWorkbook(model: ProductionTaskTemplateModel, root = process.cwd()) {
   const workbook = await loadProductionTaskTemplate(root);
   const main = workbook.getWorksheet(PRODUCTION_TASK_SHEETS.main)!;
   const sizeSheet = workbook.getWorksheet(PRODUCTION_TASK_SHEETS.size)!;
   const sizes = orderSizeKeys(model.sizeOrder?.length ? model.sizeOrder : model.colors.flatMap(c => Object.keys(c.sizes || {}))).filter(Boolean);
-  const baseSizes = sizes.slice(0, 3);
+  const baseSizes = sizes.slice(0, 3);   // 尺寸表 sheet 仍用前3码(#5:上传的尺码表会整张覆盖它)
 
-  set(main, C.header.internalOrderNumber, model.customer
+  // 主表动态扩展(#4):按颜色数/尺码数插行插列;失败回退母版原版式(前3码4色),永不 brick 导出。
+  let mainSizes = sizes;
+  let ex = { extraRows: 0, extraCols: 0, sizeCols: ['E', 'F', 'G'] as string[], packCol: 'H', lastCol: 'L' };
+  try { ex = expandMainSheet(main, model.colors.length, sizes.length); }
+  catch { mainSizes = baseSizes; ex = { extraRows: 0, extraCols: 0, sizeCols: ['E', 'F', 'G'], packCol: 'H', lastCol: 'L' }; }
+  // 插行/列后,原 C 映射固定格坐标要位移:列 ≥8 的 +extraCols,行 ≥11 的 +extraRows
+  const shift = (addr: string) => {
+    const x = /^([A-Z]+)(\d+)$/.exec(addr); if (!x) return addr;
+    let cn = colToNum(x[1]); let rn = +x[2];
+    if (cn >= 8) cn += ex.extraCols;
+    if (rn >= 11) rn += ex.extraRows;
+    return `${numToCol(cn)}${rn}`;
+  };
+
+  set(main, shift(C.header.internalOrderNumber), model.customer
     ? `${model.internalOrderNumber || ''}（${model.customer}）` : model.internalOrderNumber);
-  set(main, C.header.orderDate, dateValue(model.orderDate));
-  set(main, C.header.productName, model.productName);
-  set(main, C.header.materialComposition, model.materialComposition);
-  set(main, C.header.deliveryDate, dateValue(model.deliveryDate));
-  set(main, C.header.fabricWeight, model.fabricWeight);
-  set(main, C.header.totalQuantity, model.totalQuantity);
-  C.colorRows.forEach((row, index) => {
-    const color = model.colors[index];
+  set(main, shift(C.header.orderDate), dateValue(model.orderDate));
+  set(main, shift(C.header.productName), model.productName);
+  set(main, shift(C.header.materialComposition), model.materialComposition);
+  set(main, shift(C.header.deliveryDate), dateValue(model.deliveryDate));
+  set(main, shift(C.header.fabricWeight), model.fabricWeight);
+  set(main, shift(C.header.totalQuantity), model.totalQuantity);
+  // 颜色行:母版4行 + 新插行,逐行写实际颜色;不足则清空(抹掉母版残留样例色)
+  const totalColorRows = 4 + ex.extraRows;
+  for (let i = 0; i < totalColorRows; i++) {
+    const row = 7 + i;
+    const color = model.colors[i];
     set(main, `${C.colorColumns.styleNumber}${row}`, color ? (color.styleNumber || model.styleNumber) : '');
     set(main, `${C.colorColumns.color}${row}`, color ? (textList([color.colorEn, color.colorCn]) || color.color) : '');
-    set(main, `${C.colorColumns.cartonCount}${row}`, color?.cartonCount);
-    set(main, `${C.colorColumns.colorQuantity}${row}`, color?.quantity);
-    C.colorColumns.sizes.forEach((column, i) => set(main, `${column}${row}`, color?.sizes?.[baseSizes[i]]));
-  });
-  C.colorColumns.sizes.forEach((column, i) => set(main, `${column}6`, baseSizes[i] || ''));
-  set(main, C.colorColumns.packaging + '7', model.customerPackaging);
-  set(main, C.totals.cartonCount, model.colors.reduce((n, c) => n + (Number(c.cartonCount) || 0), 0));
-  set(main, C.totals.quantity, model.totalQuantity ?? model.colors.reduce((n, c) => n + (Number(c.quantity) || 0), 0));
-  set(main, C.consumption, (model.fabrics || []).map(f => [f.name, f.consumption, f.unit, f.basis ? `(${f.basis})` : ''].filter(v => v !== null && v !== undefined && v !== '').join(' ')).join('；'));
-  set(main, C.sampling.preProductionDate, model.sampling?.preProductionDate);
-  set(main, C.sampling.preProductionRequirement, model.sampling?.preProductionRequirement);
-  set(main, C.sampling.shipmentDate, model.sampling?.shipmentDate);
-  set(main, C.sampling.shipmentRequirement, model.sampling?.shipmentRequirement);
-  for (const [key, address] of Object.entries(C.requirements)) set(main, address, model.requirements?.[key as keyof NonNullable<typeof model.requirements>]);
-  set(main, C.signature.receiver, model.receiver); set(main, C.signature.receiptTime, dateValue(model.receiptTime));
+    set(main, `${C.colorColumns.cartonCount}${row}`, color?.cartonCount ?? '');
+    set(main, `${C.colorColumns.colorQuantity}${row}`, color?.quantity ?? '');
+    ex.sizeCols.forEach((col, j) => set(main, `${col}${row}`, color?.sizes?.[mainSizes[j]] ?? ''));
+  }
+  // 尺码表头行6(母版残余尺码列一并写空)
+  ex.sizeCols.forEach((col, i) => set(main, `${col}6`, mainSizes[i] || ''));
+  set(main, `${ex.packCol}7`, model.customerPackaging);
+  set(main, shift(C.totals.cartonCount), model.colors.reduce((n, c) => n + (Number(c.cartonCount) || 0), 0));
+  set(main, shift(C.totals.quantity), model.totalQuantity ?? model.colors.reduce((n, c) => n + (Number(c.quantity) || 0), 0));
+  set(main, shift(C.consumption), (model.fabrics || []).map(f => [f.name, f.consumption, f.unit, f.basis ? `(${f.basis})` : ''].filter(v => v !== null && v !== undefined && v !== '').join(' ')).join('；'));
+  set(main, shift(C.sampling.preProductionDate), model.sampling?.preProductionDate);
+  set(main, shift(C.sampling.preProductionRequirement), model.sampling?.preProductionRequirement);
+  set(main, shift(C.sampling.shipmentDate), model.sampling?.shipmentDate);
+  set(main, shift(C.sampling.shipmentRequirement), model.sampling?.shipmentRequirement);
+  for (const [key, address] of Object.entries(C.requirements)) set(main, shift(address), model.requirements?.[key as keyof NonNullable<typeof model.requirements>]);
+  set(main, shift(C.signature.receiver), model.receiver); set(main, shift(C.signature.receiptTime), dateValue(model.receiptTime));
 
   sizeSheet.getCell(C.size.title).value = { richText: [
     { font: { name: 'Calibri', size: 20, bold: true, color: { argb: 'FFFF0000' } }, text: model.styleNumber || '' },
