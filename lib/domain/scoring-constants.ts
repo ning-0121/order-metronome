@@ -106,3 +106,19 @@ export function ontimeDeduction(nodes: Array<{ isCritical: boolean; exempt: bool
 export function ontimeScoreFrom(nodes: Array<{ isCritical: boolean; exempt: boolean }>): number {
   return Math.max(0, SCORING_CONFIG.ontime.max - ontimeDeduction(nodes));
 }
+
+/**
+ * 考评生效日切换(CEO 批 2026-07-25):只考评【生效日当天及以后·按建单日】新建的订单;
+ * 之前建的(本周新建/在途/历史)不计入考评 —— 免扣分、照常按标准率发佣金,只打"不计入考评"标记。
+ * 生效日读 env SCORING_EFFECTIVE_DATE('YYYY-MM-DD');空 = 未启用切换(全部计入,安全默认)。
+ */
+export const SCORING_EFFECTIVE_DATE = process.env.SCORING_EFFECTIVE_DATE || '';
+/** 该订单是否计入考评。createdAtIso=建单日;effectiveDate 缺省取 env。纯函数便于单测。 */
+export function isOrderAssessed(createdAtIso: string | null | undefined, effectiveDate: string = SCORING_EFFECTIVE_DATE): boolean {
+  if (!effectiveDate) return true;                 // 未设生效日 → 全部计入
+  if (!createdAtIso) return true;                  // 无建单日(异常)→ 保守计入
+  const ref = new Date(createdAtIso).getTime();
+  const eff = new Date(effectiveDate + 'T00:00:00+08:00').getTime();   // 北京时区当天 0 点
+  if (isNaN(ref) || isNaN(eff)) return true;
+  return ref >= eff;                               // 生效日当天及以后建的 → 计入
+}

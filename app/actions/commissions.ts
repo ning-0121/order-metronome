@@ -5,7 +5,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import { isDoneStatus } from '@/lib/domain/types';
 import { COMMISSION_BASE_TYPE, computeCommissionAmount } from '@/lib/domain/commission-config';
-import { SCORING_CONFIG, ontimeScoreFrom } from '@/lib/domain/scoring-constants';
+import { SCORING_CONFIG, ontimeScoreFrom, isOrderAssessed } from '@/lib/domain/scoring-constants';
 
 // 业务负责的关卡 step_keys
 const SALES_STEPS = [
@@ -69,10 +69,13 @@ export async function calculateOrderScore(
 
   // 获取订单信息
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, etd, warehouse_due_date, incoterm, owner_user_id, created_by, po_overdue, po_penalty_waived')
+    .select('id, order_no, etd, warehouse_due_date, incoterm, owner_user_id, created_by, po_overdue, po_penalty_waived, created_at')
     .eq('id', orderId)
     .single();
   if (!order) return { error: '订单不存在' };
+
+  // 考评生效日切换(CEO 批 2026-07-25):生效日前【按建单日】建的订单不计入考评 —— 免扣分、照常满额佣金、打标记。
+  const assessed = isOrderAssessed((order as any).created_at);
 
   // 获取所有关卡
   const { data: milestones } = await (supabase.from('milestones') as any)
@@ -136,8 +139,8 @@ export async function calculateOrderScore(
   const finalBlocked = blockLogs?.some((l: any) => l.milestone_id === finalQc?.id) || false;
 
   let qualityScore = 15;
-  if (midBlocked && !qualityMidAppealed) qualityScore -= 5;      // 质量申诉通过 → 不扣(Q3)
-  if (finalBlocked && !qualityFinalAppealed) qualityScore -= 10;
+  if (assessed && midBlocked && !qualityMidAppealed) qualityScore -= 5;      // 质量申诉通过或不计入考评 → 不扣
+  if (assessed && finalBlocked && !qualityFinalAppealed) qualityScore -= 10;
   qualityScore = Math.max(0, qualityScore);
 
   const qualityDetail = {
@@ -154,7 +157,7 @@ export async function calculateOrderScore(
   let deliveryScore = 10;
   let daysLate: number | null = null;
 
-  if (shipmentMilestone && targetDate) {
+  if (assessed && shipmentMilestone && targetDate) {
     // 用关卡的 actual_at 或完成时的时间戳
     const completedAt = shipmentMilestone.actual_at || (isDoneStatus(shipmentMilestone.status) ? shipmentMilestone.due_at : null);
     if (completedAt) {
@@ -175,6 +178,15 @@ export async function calculateOrderScore(
   // 改为按 owner_role 动态归类（不再依赖硬编码 step 列表，防止遗漏节点）
 
   function calcRoleScore(targetRoleSet: Set<string>): ScoreDetail {
+    // 不计入考评(生效日前建的单)→ 各维度满分、无扣分明细
+    if (!assessed) {
+      return {
+        ontime: { score: 40, max: 40, overdueSteps: [], exemptSteps: [] },
+        noBlock: { score: 20, max: 20, blockedSteps: [] },
+        noDelay: { score: 15, max: 15, delayCount: 0, totalDelays: 0, exemptDelays: 0 },
+        quality: qualityDetail, delivery: deliveryDetail,
+      };
+    }
     const roleMilestones = milestones.filter((m: any) => targetRoleSet.has(m.owner_role));
 
     // 节拍准时率(2026-07-25 CEO 批的尺度):关键节点逾期重扣(-8)、非关键轻扣(-3);
@@ -224,7 +236,7 @@ export async function calculateOrderScore(
   }
 
   // PO 逾期上传罚款(2026-07-23 三期):未免罚则业务扣绩效分 + 佣金真扣¥200;免罚后不扣。
-  const poFineActive = !!(order as any)?.po_overdue && !(order as any)?.po_penalty_waived;
+  const poFineActive = assessed && !!(order as any)?.po_overdue && !(order as any)?.po_penalty_waived;
   const PO_OVERDUE_SCORE_PENALTY = 10;   // 逾期扣绩效分
   const PO_OVERDUE_FINE = 200;           // 逾期佣金真扣(元)
 
@@ -330,6 +342,9 @@ export async function calculateOrderScore(
 
   // 返回完整评分数据（供实时预览和最终结果使用）
   const result: any = {
+    // 不计入考评标记(生效日前建的单):UI 据此显示"不计入考评",分数满、佣金满额
+    assessed,
+    notAssessedReason: assessed ? null : '政策生效前建的订单,不计入节拍考评(佣金照常按标准率发)',
     salesScore: { ...salesPayload, total_score: salesTotal, grade: vetoed ? 'D' : salesGrade.grade, detail_json: salesDetail },
   };
   if (merchandiserUserId) {

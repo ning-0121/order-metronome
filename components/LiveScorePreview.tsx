@@ -28,9 +28,15 @@ export function LiveScorePreview({ orderId }: { orderId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg bg-amber-50 border border-amber-200 p-4">
-        <p className="text-sm font-medium text-amber-800">⏳ 实时评分预览（订单进行中，最终评分以完成时为准）</p>
-      </div>
+      {score.assessed === false ? (
+        <div className="rounded-lg bg-slate-100 border border-slate-300 p-4">
+          <p className="text-sm font-medium text-slate-700">🏳️ 不计入考评 —— {score.notAssessedReason || '政策生效前建的订单,不计入节拍考评(佣金照常按标准率发)'}</p>
+        </div>
+      ) : (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-4">
+          <p className="text-sm font-medium text-amber-800">⏳ 实时评分预览（订单进行中，最终评分以完成时为准）</p>
+        </div>
+      )}
 
       {(score.salesScore || score.merchandiserScore) && (
         <div className="grid gap-4 md:grid-cols-2">
