@@ -59,6 +59,23 @@ export async function placePurchaseOrderCore(supabase: any, poId: string): Promi
     await autoCompleteProcurementPlacedForPO(poId, supabase);
   } catch (e: any) { console.warn('[placeCore] 采购下单节点自动完成失败(不阻断):', e?.message); }
 
+  // 部门考核 hook(2026-07-25 CEO B 方案):采购下单 = 采购部准时信号。
+  // 每个关联订单落一条采购部考核(目标日 = 采购下单节点 due,实际 = 下单日),喂评分给采购部分卡。
+  // 走 service-role(placeCore 已是可信上下文);缺表/失败都不阻断下单。user_id 留空 → 记部门层(名册:采购部 Helen/Edward/王一品)。
+  try {
+    const { data: poRow } = await (supabase.from('purchase_orders') as any).select('order_ids').eq('id', poId).maybeSingle();
+    const orderIds = ((poRow as any)?.order_ids || []) as string[];
+    if (orderIds.length > 0) {
+      const { recordDeptAssessment, milestoneDueDate } = await import('@/app/actions/dept-assessment');
+      const { createServiceRoleClient } = await import('@/lib/supabase/server');
+      const svc = createServiceRoleClient();
+      for (const oid of orderIds) {
+        const target = await milestoneDueDate(svc, oid, ['procurement_order_placed']);
+        await recordDeptAssessment(oid, 'procurement', { task_key: 'bulk_po_placed', task_label: '采购下单', target_date: target });
+      }
+    }
+  } catch { /* 考核旁路,不阻断下单 */ }
+
   try { revalidatePath(`/procurement/po/${poId}`); } catch { /* route 外调用无 revalidate 上下文 */ }
   return { ok: true };
 }
