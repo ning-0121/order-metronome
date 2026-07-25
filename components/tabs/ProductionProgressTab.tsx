@@ -26,8 +26,11 @@ import { getMilestonesByOrder } from '@/app/actions/milestones';
 
 // ── 跟单时间线定义 ──
 // 评审会完成后，系统生成跟单的工厂拜访计划和关键检查节点
+// step_key 支持多别名(aliases):跟单 SOP 清单是概念步骤,不同模板(V1 托底 / V2 标准)节点命名不同,
+// 用别名让同一步在 V1 在途单和 V2 新单上都能连到对应里程碑(取状态/due/附件)。无对应节点的概念步(如面料验收/上线工艺/出货前验货)只做指引+可上传。
 const MERCH_TIMELINE_STEPS: Array<{
   step_key: string;
+  aliases?: string[];    // 其他模板的等价 step_key(V2 等)
   label: string;
   action: string;        // 跟单要做什么
   deliverable: string;   // 需要带回什么
@@ -36,6 +39,7 @@ const MERCH_TIMELINE_STEPS: Array<{
 }> = [
   {
     step_key: 'pre_production_sample_ready',
+    aliases: ['pre_production_sample_approved', 'pre_production_sample_sent'],  // V2:产前样确认/寄出
     label: '① 封样交付',
     action: '跟进工厂出封样，检查尺寸/做工/颜色/面料，拍照记录',
     deliverable: '封样照片（正面/背面/细节/测量）',
@@ -60,6 +64,7 @@ const MERCH_TIMELINE_STEPS: Array<{
   },
   {
     step_key: 'mid_qc_check',
+    aliases: ['mid_qc_sales_check'],  // V2:中期验货(业务复核)
     label: '④ 中期验货（中查）',
     action: '生产完成 30-50% 时去工厂：量尺寸，检查色差/做工/功能，记录问题要求整改',
     deliverable: '中查报告（含尺寸数据+外观照片+问题清单）',
@@ -76,6 +81,7 @@ const MERCH_TIMELINE_STEPS: Array<{
   },
   {
     step_key: 'final_qc_check',
+    aliases: ['final_qc_sales_check'],  // V2:尾期验货(业务复核)
     label: '⑥ 尾期验货（尾查）',
     action: '按 AQL 标准抽检：尺寸/做工/外观/颜色/功能逐项检查，统计严重/主要/次要缺陷数',
     deliverable: 'AQL 尾查报告（含缺陷统计+照片）',
@@ -159,10 +165,11 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
       if (attRes.data) setAttachments(attRes.data);
       if (uploadCountsRes.data) setStepUploadCounts(uploadCountsRes.data);
       if (msRes.data) {
-        const stepKeySet = new Set(stepKeys);
+        // 含别名:V2 节点(如 mid_qc_sales_check)也要被收进来,否则新单生产进度全空
+        const msKeySet = new Set(MERCH_TIMELINE_STEPS.flatMap(s => [s.step_key, ...(s.aliases || [])]));
         setMerchMilestones(
           (msRes.data as any[])
-            .filter(m => stepKeySet.has(m.step_key))
+            .filter(m => msKeySet.has(m.step_key))
             .map(m => ({ id: m.id, step_key: m.step_key, name: m.name, status: m.status, due_at: m.due_at, actual_at: m.actual_at }))
         );
       }
@@ -289,7 +296,8 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
 
   // 跟单时间线数据：匹配 milestones + 已上传报告数量
   const timelineData = MERCH_TIMELINE_STEPS.map(step => {
-    const ms = merchMilestones.find(m => m.step_key === step.step_key);
+    // 主 key 或任一别名匹配到里程碑(V1 在途单走主 key,V2 新单走别名)
+    const ms = merchMilestones.find(m => m.step_key === step.step_key || step.aliases?.includes(m.step_key));
     const isDone = ms && (isDoneStatus(ms.status));
     const isInProgress = ms && (isActiveStatus(ms.status));
     const isOverdue = ms?.due_at && !isDone && new Date(ms.due_at) < new Date();
