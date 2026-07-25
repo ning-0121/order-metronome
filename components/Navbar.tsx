@@ -60,6 +60,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/hub', label: '系统门户', icon: '🧭' },
             { href: '/ceo', label: '我的节拍', icon: '🎯' },
             { href: '/orders', label: '订单中心', icon: '📦' },
+            { href: '/inbox', label: '邮件归纳', icon: '📬' },
             { href: '/orders/from-araos', label: 'araos 待建单', icon: '📥' },
             { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
             { href: '/production', label: '生产中心', icon: '🏭' },
@@ -115,6 +116,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/dashboard', label: '我的工作台', icon: '📋' },
             { href: '/my-customers', label: '我的客户', icon: '🎯' },
             { href: '/orders', label: '订单列表', icon: '📦' },
+            { href: '/inbox', label: '邮件归纳', icon: '📬' },
             isProcurement
               ? { href: '/procurement', label: '采购中心', icon: '🛒' }
               : { href: '/briefing', label: '今日简报', icon: '📧' },
