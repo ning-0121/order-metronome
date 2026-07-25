@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { isActiveStatus, isBlockedStatus, isDoneStatus } from '@/lib/domain/types';
+import { KICKOFF_KEYS } from '@/lib/production/stage';
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
 
@@ -311,23 +312,29 @@ export async function getShipmentDistribution(): Promise<MonthlyShipment[]> {
 
   // 获取所有订单的关键里程碑（po_confirmed 实际/计划 + production_kickoff 实际/计划）
   const orderIds = orders.map((o: any) => o.id);
+  // 生产上线信号:V1=production_kickoff,V2 已移除该节点、由产前样确认承载(KICKOFF_KEYS 统一口径)。
+  // 只查 production_kickoff 会让 V2 新单产能"上线"柱恒 0,产能分析越来越失真。
   const { data: keyMilestones, error: kmErr } = await (supabase.from('milestones') as any)
     .select('order_id, step_key, due_at, actual_at')
     .in('order_id', orderIds)
-    .in('step_key', ['po_confirmed', 'production_kickoff']);
+    .in('step_key', ['po_confirmed', ...KICKOFF_KEYS]);
   if (kmErr) throw new Error(`加载里程碑失败: ${kmErr.message}`);
 
   const poDateMap = new Map<string, string>();      // 下单 = po_confirmed.actual_at || due_at || order_date
-  const prodDateMap = new Map<string, string>();    // 生产上线 = production_kickoff.actual_at || due_at
+  const prodDateMap = new Map<string, string>();    // 生产上线 = 生产启动信号.actual_at || due_at(V1 优先回落 V2)
+  for (const key of KICKOFF_KEYS) {                  // 按 KICKOFF_KEYS 顺序:production_kickoff(V1)优先,pre_production_sample_approved(V2)回落
+    for (const m of keyMilestones || []) {
+      if (m.step_key !== key) continue;
+      const date = m.actual_at || m.due_at;
+      if (!date || prodDateMap.has(m.order_id)) continue;
+      prodDateMap.set(m.order_id, date.slice(0, 7));
+    }
+  }
   for (const m of keyMilestones || []) {
     const date = m.actual_at || m.due_at;
     if (!date) continue;
-    const month = date.slice(0, 7);
     if (m.step_key === 'po_confirmed' && !poDateMap.has(m.order_id)) {
-      poDateMap.set(m.order_id, month);
-    }
-    if (m.step_key === 'production_kickoff' && !prodDateMap.has(m.order_id)) {
-      prodDateMap.set(m.order_id, month);
+      poDateMap.set(m.order_id, date.slice(0, 7));
     }
   }
 

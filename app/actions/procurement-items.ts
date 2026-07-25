@@ -1827,8 +1827,9 @@ export async function syncProcurementItemReceivingStatus(orderId: string) {
     }
   }
 
-  // 审计修(2026-07-04):整单料齐 → 自动完成「原料到厂检验」里程碑 + 重算交付置信度,
-  // 与「采购下单」节点自动完成对齐,否则收齐后风险卡仍显示原料未到直到手工勾节点。
+  // ⚠️ 死分支(2026-07-25 审计确认):step_key 'materials_received_inspected' 在 V1/V2/打样/贸易 任何模板都不产生,
+  //   maybeSingle 恒返回 null → 本段自 2026-07-04 写下起对所有订单从未触发。V2 收料进度在采购中心(procurement_items.status)跟,
+  //   不作主时间线节点。保留为 no-op(无害);是否给 V2 加「原料到货检验」节点属 CEO 冻结的 15 节点模板决策,待定后再接。
   try {
     const allReceived = (items as any[]).length > 0 && (items as any[]).every((it: any) => {
       const a = agg.get(it.id); return a && a.ordered > 0 && a.received >= a.ordered;
