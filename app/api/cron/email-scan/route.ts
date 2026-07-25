@@ -14,6 +14,7 @@ import { extractCommunicationDetails, saveCommunicationDetails } from '@/lib/age
 import { generateEmailDraft } from '@/lib/agent/emailDraft';
 import { parseEmailForOrderInfo, fetchNewEmails } from '@/lib/utils/imap-fetch';
 import { deepCompareEmailWithOrder } from '@/lib/agent/emailOrderCompare';
+import { ruleClassify } from '@/lib/email/classify';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 60;
@@ -134,6 +135,17 @@ export async function POST(req: Request) {
 
       // 1. 先用规则引擎快速提取
       const parsed = parseEmailForOrderInfo(email.subject, email.raw_body || '');
+
+      // 1.2 Token 降耗:噪音(自动回复/退信/订阅)规则识别 → 直接跳过全部 AI(analyze/compare/draft/commLog)
+      const rc = ruleClassify(email.subject, email.raw_body || '');
+      if (rc.isNoise) {
+        try {
+          await supabase.from('mail_inbox')
+            .update({ processing_status: 'skipped', last_processed_at: new Date().toISOString() })
+            .eq('id', email.id);
+        } catch { /* 状态写失败不阻断 */ }
+        continue;
+      }
 
       // 1.5 智能客户识别（域名映射 → 历史匹配 → 模糊匹配，不调AI）
       const customerResult = await identifyCustomerFromEmail(supabase, email.from_email, email.subject, email.raw_body || '');
@@ -373,7 +385,11 @@ export async function POST(req: Request) {
       }
 
       // 6.8 提取订单沟通细节（归属到客户+订单，业务员换了也不丢）
-      if (analysis.customerName || customerResult.customerName) {
+      // Token 降耗:原来每封识别到客户的信都跑一次 Sonnet,太贵。改成只在【有信号】时才提取
+      //   (有变更/紧急/样品,或规则判为重点≥2:交期/投诉/PO等),纯知会/寒暄不提取。
+      const commWorth = (analysis.changes?.length > 0) || analysis.urgentLevel !== 'normal'
+        || analysis.sampleRelated || rc.importanceHint >= 2;
+      if ((analysis.customerName || customerResult.customerName) && commWorth) {
         const custName = analysis.customerName || customerResult.customerName || '';
         const details = await extractCommunicationDetails(email.subject, email.raw_body || '', email.from_email, email.received_at);
         if (details.length > 0) {

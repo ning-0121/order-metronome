@@ -62,8 +62,8 @@ ${contextStr || '暂无关联订单信息'}
 只返回JSON。`;
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-5',
-      thinking: { type: 'disabled' },
+      // Token 降耗:拟回复草稿是轻任务,降到 Haiku(约 Sonnet 1/10 成本),质量足够
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 800,
       messages: [{ role: 'user', content: prompt }],
     });
