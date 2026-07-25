@@ -403,6 +403,28 @@ export async function calculateOrderScore(
     result.financeScore = { total_score: finTotal, grade: vetoed ? 'D' : finGrade.grade, detail_json: finDetail };
   }
 
+  // 物流评分(2026-07-25 CEO:发货出运=物流部,物流主管秦增超要担责考核。此前无物流分卡→物流脱考)
+  const logisticsMilestones = milestones.filter((m: any) => m.owner_role === 'logistics');
+  if (logisticsMilestones.length > 0) {
+    const logiDetail = calcRoleScore(new Set(['logistics']));
+    const logiTotal = Math.min(110, Math.max(0,
+      logiDetail.ontime.score + logiDetail.noBlock.score + logiDetail.noDelay.score + logiDetail.quality.score + logiDetail.delivery.score
+    ));
+    const logiGrade = calcGrade(logiTotal);
+    const logiUser = logisticsMilestones.find((m: any) => m.owner_user_id);
+    if (logiUser?.owner_user_id) {
+      await (supabase.from('order_commissions') as any).upsert({
+        order_id: orderId, user_id: logiUser.owner_user_id, role: 'logistics',
+        score_ontime: logiDetail.ontime.score, score_no_block: logiDetail.noBlock.score,
+        score_no_delay: logiDetail.noDelay.score, score_quality: logiDetail.quality.score,
+        score_delivery: logiDetail.delivery.score, total_score: logiTotal,
+        grade: vetoed ? 'D' : logiGrade.grade, vetoed, detail_json: logiDetail,
+        calculated_at: new Date().toISOString(),
+      }, { onConflict: 'order_id,user_id' });
+    }
+    result.logisticsScore = { total_score: logiTotal, grade: vetoed ? 'D' : logiGrade.grade, detail_json: logiDetail };
+  }
+
   return { data: result };
 }
 

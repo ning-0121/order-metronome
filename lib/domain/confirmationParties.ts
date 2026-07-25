@@ -39,10 +39,10 @@ const PRODUCTION_QC = ['production', 'production_manager', 'qc', 'quality', 'mer
  * (mo_released 自动完成;procurement_order_placed / production_kickoff / payment_received 单方)
  */
 export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]> = {
-  // 1. PO确认 = 财务确认 + 生产部确认(2026-07-06 用户拍板:业务建单即已确认,自己再确认多余;改为财务+生产双确认)
+  // 1. PO审查确认 = 业务执行经理 + 财务 双审(2026-07-25 CEO 拍板:PO 必经业务执行经理审核 + 财务审核,预算单到财务)。硬闸。
   po_confirmed: [
-    { key: 'finance', label: '财务', roles: FINANCE, hint: '价格/账期/额度审核通过' },
-    { key: 'production', label: '生产部', roles: PRODUCTION_QC, hint: '订单要求/工艺可执行,已知悉' },
+    { key: 'exec_mgr', label: '业务执行经理', roles: ['order_manager', 'sales_manager'], hint: 'PO 内容/交期/要点/客户要求 审核通过' },
+    { key: 'finance', label: '财务', roles: FINANCE, hint: '价格/账期/额度审核 + 预算录入' },
   ],
   // 产前样确认 = 采购(原辅料大货品质) + 业务执行(客户/自确认) 双确认
   pre_production_sample_approved: [
@@ -53,6 +53,11 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
   final_qc_sales_check: [
     { key: 'qc', label: '生产部QC', roles: PRODUCTION_QC, hint: '尾查合格,问题已闭环' },
     { key: 'sales_exec', label: '业务执行', roles: BIZ_EXEC, hint: '验货结果可对客户交付' },
+  ],
+  // 7. 订舱出货 = 业务执行 + 财务(2026-07-25 CEO 拍板:订舱必经财务审批)。硬闸。
+  booking_done: [
+    { key: 'sales_exec', label: '业务执行', roles: BIZ_EXEC, hint: '订舱信息/舱位/单据齐' },
+    { key: 'finance', label: '财务', roles: FINANCE, hint: '订舱前款项/账期条件满足' },
   ],
   // 8. 发货出运 = 业务执行 + 采购(尾料清点归库) + 财务 三方
   shipment_execute: [
@@ -65,11 +70,11 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
 /**
  * 「软会签」节点(2026-07-14 用户拍板):多方确认改为可选会签(仍可点、仍发提醒),
  * 但责任人可直接完成、不被硬卡——避免催不动别人时节点卡死逾期。
- *  - po_confirmed:2026-07-11 已定(业务建单即确认,财务/生产变提醒);
  *  - pre_production_sample_approved:产前样确认(采购/业务执行会签可选)。
- * 其余多方节点(尾期验货/发货出运)仍硬卡全确认。
+ * 硬卡全确认的节点:po_confirmed(2026-07-25 CEO 改硬:PO必经业务执行经理+财务)、
+ *   尾期验货 final_qc_sales_check、订舱 booking_done、发货出运 shipment_execute。
  */
-export const SOFT_CONFIRM_STEPS = new Set(['po_confirmed', 'pre_production_sample_approved']);
+export const SOFT_CONFIRM_STEPS = new Set(['pre_production_sample_approved']);
 export function isSoftConfirm(stepKey: string | null | undefined): boolean {
   return !!stepKey && SOFT_CONFIRM_STEPS.has(stepKey);
 }

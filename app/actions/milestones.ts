@@ -1321,8 +1321,10 @@ async function autoAdvanceNextMilestone(supabase: any, orderId: string) {
     // 推进为进行中
     await transitionMilestoneStatus(next.id, '进行中', '自动推进：上一节点已完成');
 
-    // 财务审批节点激活 → 提醒财务完成预算录入（过渡方案 B 的"提醒"环，fire-and-forget）
-    if (next.step_key === 'finance_approval') {
+    // 财务审批/PO审查节点激活 → 提醒财务完成预算录入(fire-and-forget)。
+    // 2026-07-25 CEO:V2 把 finance_approval 并进了 po_confirmed(PO 双审含财务),预算此时就要到财务 →
+    //   触发条件补 po_confirmed,否则 V2 单财务永远拿不到预算录入提醒。
+    if (next.step_key === 'finance_approval' || next.step_key === 'po_confirmed') {
       try {
         await notifyFinanceBudgetEntry(supabase, orderId, next.owner_user_id);
       } catch (e: any) {
