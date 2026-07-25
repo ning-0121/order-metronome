@@ -10,6 +10,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
+
+// P1 审计 2026-07-24:产品/BOM模板是主数据,写操作原来只校验登录(Phase 1 不收紧)→ 任何登录人可写。
+// 收紧到 CAN_EDIT_BOM(业务/理单/采购/管理),挡掉财务/物流/未知角色。读函数不动。
+const requireProductEditor = (supabase: any, userId: string) =>
+  requireRoleGroup(supabase, userId, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可维护产品与 BOM 模板');
 
 const num = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
 
@@ -35,6 +41,7 @@ export async function createProduct(input: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const e = await requireProductEditor(supabase, user.id); if (e) return { error: e }; }
   if (!input.product_name?.trim()) return { error: '款名不能为空' };
 
   const { data: p, error } = await (supabase.from('products') as any).insert({
@@ -85,6 +92,7 @@ export async function createVariant(productId: string, input: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const e = await requireProductEditor(supabase, user.id); if (e) return { error: e }; }
   const { error } = await (supabase.from('product_variants') as any).insert({
     product_id: productId,
     variant_code: input.variant_code?.trim() || null,
@@ -102,6 +110,7 @@ export async function confirmDefinition(definitionId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const e = await requireProductEditor(supabase, user.id); if (e) return { error: e }; }
   const { error } = await (supabase.from('product_definitions') as any)
     .update({ status: 'active', confirmed_by: user.id, confirmed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq('id', definitionId);
@@ -117,6 +126,7 @@ export async function addBomTemplateRow(definitionId: string, input: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const e = await requireProductEditor(supabase, user.id); if (e) return { error: e }; }
   if (!input.material_name?.trim()) return { error: '物料名称不能为空' };
   const { error } = await (supabase.from('product_bom_templates') as any).insert({
     definition_id: definitionId,
@@ -137,6 +147,7 @@ export async function deleteBomTemplateRow(id: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const e = await requireProductEditor(supabase, user.id); if (e) return { error: e }; }
   const { error } = await (supabase.from('product_bom_templates') as any).delete().eq('id', id);
   if (error) return { error: friendlyError(error) };
   revalidatePath('/products');
@@ -202,6 +213,7 @@ export async function setOrderLineVariant(orderLineId: string, variantId: string
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  { const e = await requireProductEditor(supabase, user.id); if (e) return { error: e }; }
   const { error } = await (supabase.from('order_line_items') as any)
     .update({ product_variant_id: variantId || null, updated_at: new Date().toISOString() }).eq('id', orderLineId);
   if (error) return { error: friendlyError(error) };
