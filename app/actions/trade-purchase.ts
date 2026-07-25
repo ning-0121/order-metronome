@@ -36,6 +36,13 @@ export async function getTradeBulkData(orderId: string): Promise<{
   const { supabase, user, roles } = await auth();
   if (!user) return { error: '请先登录' };
 
+  // 订单级访问控制 + 成本/售价红线(P0 审计 2026-07-24:原来任何登录人可拉任意经销单的进价+客户售价)
+  const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+  const { hasRoleInGroup } = await import('@/lib/domain/roles');
+  const canCost = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR') || hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS'); // 采购/财务可见进价
+  const canSale = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');   // 客户售价仅财务口径可见
+
   const { data: order } = await (supabase.from('orders') as any)
     .select('id, order_purpose').eq('id', orderId).maybeSingle();
   if (!order) return { error: '订单不存在' };
@@ -47,17 +54,17 @@ export async function getTradeBulkData(orderId: string): Promise<{
     style_no: l.style_no ?? null,
     color: l.color ?? null,
     qty: Number(l.qty_pcs) || 0,
-    purchase_unit_cost: l.purchase_unit_cost != null ? Number(l.purchase_unit_cost) : null,
-    sale_unit_price: l.po_unit_price != null ? Number(l.po_unit_price) : null,
+    purchase_unit_cost: canCost && l.purchase_unit_cost != null ? Number(l.purchase_unit_cost) : null,
+    sale_unit_price: canSale && l.po_unit_price != null ? Number(l.po_unit_price) : null,
   }));
-  const costTotal = Math.round(lines.reduce((s, l) => s + (l.purchase_unit_cost || 0) * l.qty, 0) * 100) / 100;
+  const costTotal = canCost ? Math.round(lines.reduce((s, l) => s + (l.purchase_unit_cost || 0) * l.qty, 0) * 100) / 100 : 0;
 
-  // 直查本单大货采购单(含 total_amount/approval_status/凭证);service-role 读(已鉴权+角色门禁)
+  // 直查本单大货采购单;total_amount(采购花费)对非成本可见角色剥离
   const svc = createServiceRoleClient();
   const { data: pos } = await (svc.from('purchase_orders') as any)
     .select('id, po_no, status, approval_status, total_amount, order_proof_paths, supplier_id, suppliers(name)')
     .contains('order_ids', [orderId]).order('created_at', { ascending: false });
-  const posOut = ((pos || []) as any[]).map((p) => ({ ...p, supplier_name: p.suppliers?.name || null }));
+  const posOut = ((pos || []) as any[]).map((p) => ({ ...p, total_amount: canCost ? p.total_amount : null, supplier_name: p.suppliers?.name || null }));
   const suppliers = roles.some((r) => CAN_CREATE.includes(r)) ? (await listSuppliers()).data || [] : [];
 
   return {

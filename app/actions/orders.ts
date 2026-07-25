@@ -1268,6 +1268,11 @@ export async function getOrder(id: string) {
     if (!canSeeAll && !isOwner && !assigned) {
       return { error: '无权查看此订单(仅创建者/负责人/被指派人/管理层可见)' };
     }
+    // 财务红线(P0 审计 2026-07-24):select('*') 会把客户成交价/总额发给能看该单的所有人
+    //   (含被指派里程碑的生产/QC/跟单)。仅 CAN_SEE_FINANCIALS 可见,其余角色 server 端剥离。
+    if (!hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')) {
+      for (const k of ['unit_price', 'total_amount', 'target_price']) delete (order as any)[k];
+    }
   } catch (e: any) {
     // 修 P3(2026-07-09 审计):鉴权判定异常应 fail-safe 拒绝(与 canUserAccessOrder 一致),
     // 不再 fail-open 放行——否则一旦 SELECT RLS 放宽,这里就是唯一越权口子。

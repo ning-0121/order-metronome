@@ -825,6 +825,12 @@ async function executeSideEffects(
  */
 export async function getOrderAmendments(orderId: string) {
   const supabase = await createClient();
+  // P0 审计 2026-07-24:原来完全无登录/访问校验,任何人可拉任意单的改价历史(fields_to_change/line_items_delta 含 unit_price/total_amount/po_unit_price)。
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+
   const { data, error } = await (supabase.from('order_amendments') as any)
     .select('*, requester:profiles!order_amendments_requested_by_fkey(name, email), reviewer:profiles!order_amendments_reviewed_by_fkey(name)')
     .eq('order_id', orderId)
@@ -834,6 +840,25 @@ export async function getOrderAmendments(orderId: string) {
     // Table might not exist yet
     return { data: [], error: null };
   }
-  return { data: data || [], error: null };
+
+  // 财务红线:改价/金额/条款仅 CAN_SEE_FINANCIALS 可见,其余角色从 fields_to_change / line_items_delta 剥离
+  const { getUserRoles } = await import('@/lib/utils/user-role');
+  const { hasRoleInGroup } = await import('@/lib/domain/roles');
+  const canSeeFin = hasRoleInGroup(await getUserRoles(supabase, user.id), 'CAN_SEE_FINANCIALS');
+  if (canSeeFin) return { data: data || [], error: null };
+  const FIN_KEYS = ['unit_price', 'total_amount', 'currency', 'payment_terms', 'target_price', 'po_unit_price', 'deposit_amount', 'balance_amount'];
+  const rows = ((data || []) as any[]).map((a) => {
+    const clean = { ...a };
+    if (clean.fields_to_change && typeof clean.fields_to_change === 'object' && !Array.isArray(clean.fields_to_change)) {
+      const f = { ...clean.fields_to_change };
+      for (const k of FIN_KEYS) delete f[k];
+      clean.fields_to_change = f;
+    }
+    if (Array.isArray(clean.line_items_delta)) {
+      clean.line_items_delta = clean.line_items_delta.map((r: any) => { const rr = { ...r }; delete rr.po_unit_price; return rr; });
+    }
+    return clean;
+  });
+  return { data: rows, error: null };
 }
 
