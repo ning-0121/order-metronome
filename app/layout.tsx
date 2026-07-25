@@ -6,6 +6,7 @@ import { ChunkErrorReloader } from "@/components/ChunkErrorReloader";
 import { WorkbenchAnchor } from "@/components/WorkbenchAnchor";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRoleFromEmail } from "@/lib/utils/user-role";
+import { knowledgeLayerCaptureVisible } from "@/lib/engine/featureFlags";
 import { PRODUCT_NAME, PRODUCT_DESC, PRODUCT_TAGLINE_EN } from "@/lib/branding/constants";
 
 // 去掉 Google Fonts — Vercel 构建时经常拉不到导致部署失败
@@ -50,6 +51,9 @@ export default async function RootLayout({
     isFinance = roles.some(r => ['finance', 'admin'].includes(r));
   }
 
+  // Knowledge Layer K1:学习中心导航按 flag 灰度显示（off→不显示；admin→仅管理员；on→全员）
+  const knowledgeLayer = knowledgeLayerCaptureVisible(isAdmin);
+
   const currentYear = new Date().getFullYear();
 
   return (
@@ -58,7 +62,7 @@ export default async function RootLayout({
         className="bg-white text-gray-900 antialiased font-sans min-h-screen"
       >
         <ChunkErrorReloader />
-        <Navbar isAdmin={isAdmin} isProcurement={isProcurement} isProduction={isProduction} isFinance={isFinance} />
+        <Navbar isAdmin={isAdmin} isProcurement={isProcurement} isProduction={isProduction} isFinance={isFinance} knowledgeLayer={knowledgeLayer} />
         <PWARegister />
         {/* 打开系统/闲置2小时后再打开 → 回角色工作台;工作中刷新不打扰;单据深链不劫持 */}
         <WorkbenchAnchor />
