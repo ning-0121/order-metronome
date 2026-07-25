@@ -22,6 +22,10 @@
       "schedule": "40 17 * * *"
     },
     {
+      "path": "/api/cron/mail-digest",
+      "schedule": "10,25,40,55 * * * *"
+    },
+    {
       "path": "/api/cron/daily-briefing",
       "schedule": "0 0 * * *"
     },
