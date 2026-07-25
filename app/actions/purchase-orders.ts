@@ -1199,11 +1199,15 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
   const qtyByPi = new Map<string, number>();
   const priceByPi = new Map<string, number>();
   const specByPi = new Map<string, string>();
+  // 每物料的逐码汇总(来自执行行 procurement_line_items.size —— 采购行/详情读的就是它,导出对齐)
+  const sizeRowsByPi = new Map<string, Map<string, number>>();   // piId → (size → qty)
   for (const l of (lines || []) as any[]) {
     const k = l.procurement_item_id; if (!k) continue;
     qtyByPi.set(k, (qtyByPi.get(k) || 0) + (Number(l.ordered_qty) || 0));
     if (l.unit_price != null && !priceByPi.has(k)) priceByPi.set(k, Number(l.unit_price));
     if (!specByPi.has(k) && l.specification) specByPi.set(k, String(l.specification));
+    const sz = l.size == null ? '' : String(l.size).trim();
+    if (sz) { const m = sizeRowsByPi.get(k) || new Map<string, number>(); m.set(sz, (m.get(sz) || 0) + (Number(l.ordered_qty) || 0)); sizeRowsByPi.set(k, m); }
   }
   // 申请单条目:每物料 → 有 sku_breakdown 按【款号×尺码】逐行,否则整单一行(STYLE/SIZE='-')
   type ReqRow = { style: string; size: string; qty: number };
@@ -1225,9 +1229,13 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
     const imgFromBom = (pi.material_master_id ? bomImgByMaster.get(pi.material_master_id)?.[0] : undefined)
       || bomImgByName.get(String(pi.material_name || '').trim().toLowerCase())?.[0];
     const img = imgFromUrls || imgFromAtt || imgFromBom || '';
+    // 逐行优先级:① 款×码明细(sku_breakdown)② 执行行逐码汇总(procurement_line_items.size)③ 整单一行
+    const szMap = sizeRowsByPi.get(pi.id);
     const rowsR: ReqRow[] = bd.length > 0
       ? bd.map((c: any) => ({ style: c?.style_no || c?.product_name || '', size: c?.size || '', qty: Number(c.qty) || 0 }))
-      : [{ style: '-', size: '-', qty: qtyByPi.get(pi.id) || 0 }];
+      : (szMap && szMap.size > 0
+          ? [...szMap.entries()].sort((a, b) => compareSizeKeys(a[0], b[0])).map(([size, qty]) => ({ style: '-', size, qty }))
+          : [{ style: '-', size: '-', qty: qtyByPi.get(pi.id) || 0 }]);
     reqItems.push({ pi, spec, img, rows: rowsR });
   }
 

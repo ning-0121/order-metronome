@@ -149,6 +149,8 @@ export const BUSINESS_EXECUTION_FIXED_STEPS = [
   'pre_production_sample_sent',
   'pre_production_sample_approved',
   'packing_method_confirmed',
+  // 2026-07-24 用户:原辅料到货验收归业务执行,谁建单谁是责任人(此前 owner_role 走生产 → 常无人认领)
+  'materials_received_inspected',
 ] as const;
 
 /**

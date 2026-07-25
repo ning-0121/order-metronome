@@ -53,7 +53,7 @@ const STEP_LANE_MAP: Record<string, SwimLane> = {
   processing_fee_confirmed:      'production',
   factory_confirmed:             'production',
   pre_production_sample_ready:   'production',
-  materials_received_inspected:  'production',
+  materials_received_inspected:  'sales',   // 2026-07-24 用户:到货验收归业务执行,进业务泳道(责任人=建单人)
   pre_production_meeting:        'production',
   production_kickoff:            'production',
   mid_qc_check:                  'production',

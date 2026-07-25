@@ -144,6 +144,20 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     const a = document.createElement('a'); a.href = data.signedUrl; a.download = name; a.click();
   }
 
+  // 跨域 URL 的 <a download> 会被浏览器忽略 → 只预览。改 fetch 成 blob 再触发真下载(2026-07-24)。
+  async function downloadUrl(url: string, name: string) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const obj = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = obj; a.download = name || '附件'; a.click();
+      setTimeout(() => URL.revokeObjectURL(obj), 1000);
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer');   // 兜底:至少能开
+    }
+  }
+
   async function handlePlace() {
     setBusy('place');
     const res = await placePurchaseOrder(po.id);
@@ -303,7 +317,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                 <li key={f.url} className="flex items-center gap-2 text-xs">
                   <span className="truncate flex-1 text-gray-700" title={f.name}>📄 {f.name || `附件 ${i + 1}`}</span>
                   <a href={f.url} target="_blank" rel="noreferrer" className="px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 shrink-0">预览</a>
-                  <a href={f.url} download className="px-2 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 shrink-0">下载</a>
+                  <button onClick={() => downloadUrl(f.url, f.name || `附件${i + 1}`)} className="px-2 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 shrink-0">下载</button>
                 </li>
               ))}
             </ul>
