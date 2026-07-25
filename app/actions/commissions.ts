@@ -107,8 +107,9 @@ export async function calculateOrderScore(
     for (const ap of (appeals || []) as any[]) {
       if (ap.appeal_type === 'node_overdue' && ap.milestone_id) exemptMilestones.add(ap.milestone_id);
       else if (ap.appeal_type === 'quality') {
-        if (ap.target_key === 'mid_qc_check') qualityMidAppealed = true;
-        if (ap.target_key === 'final_qc_check') qualityFinalAppealed = true;
+        // 兼容 V1(mid_qc_check/final_qc_check)与 V2(mid_qc_sales_check/final_qc_sales_check)命名
+        if (ap.target_key === 'mid_qc_check' || ap.target_key === 'mid_qc_sales_check') qualityMidAppealed = true;
+        if (ap.target_key === 'final_qc_check' || ap.target_key === 'final_qc_sales_check') qualityFinalAppealed = true;
       }
     }
   } catch { /* score_appeals 表未建 → 跳过,不影响评分 */ }
@@ -131,9 +132,10 @@ export async function calculateOrderScore(
 
   // ===== 计算共享维度 =====
 
-  // 品质达标（共享）
-  const midQc = milestones.find((m: any) => m.step_key === 'mid_qc_check');
-  const finalQc = milestones.find((m: any) => m.step_key === 'final_qc_check');
+  // 品质达标（共享）—— 兼容 V1(mid_qc_check/final_qc_check)与 V2(mid_qc_sales_check/final_qc_sales_check)命名,
+  // 否则 V2 新单永远找不到质检节点 → 质量分恒满分、QC 失败从不扣(评分制度对新单形同虚设)。
+  const midQc = milestones.find((m: any) => m.step_key === 'mid_qc_check' || m.step_key === 'mid_qc_sales_check');
+  const finalQc = milestones.find((m: any) => m.step_key === 'final_qc_check' || m.step_key === 'final_qc_sales_check');
   // 检查是否有阻塞记录（代表QC不通过）
   const midBlocked = blockLogs?.some((l: any) => l.milestone_id === midQc?.id) || false;
   const finalBlocked = blockLogs?.some((l: any) => l.milestone_id === finalQc?.id) || false;
