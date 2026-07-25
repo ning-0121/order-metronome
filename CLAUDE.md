@@ -201,9 +201,11 @@ npm run build && npm run check
    - [ ] 新增的 Server Action 有 auth + 角色检查
    - [ ] 不暴露价格信息给 production/merchandiser/admin_assistant 角色
 
-2. **数据库变更**
-   - [ ] 新 SQL 已同步追加到 `supabase/migrations/` 目录
-   - [ ] 通知用户在 Supabase SQL Editor 执行
+2. **数据库变更**（2026-07-24 起有自动化迁移运行器,别再手动粘贴）
+   - [ ] 新迁移写成独立 `.sql` 落 `supabase/migrations/`,**必须幂等**(`if not exists` / `add column if not exists` / `create or replace` / `drop policy if exists`)
+   - [ ] 用 `npm run db:migrate` 上生产(不再手动在 SQL Editor 粘贴);`npm run db:status` 看是否同步
+   - [ ] 迁移**必须能落生产才算数**——代码里的"缺列降级"是兜底不是常态([[schema-drift-lifecycle-columns]] 教训);别假设迁移已生效
+   - 详见 `scripts/db/README.md`(首次接入需粘一次 `scripts/db/bootstrap.sql` + `npm run db:baseline`)
 
 3. **不引入回归**
    - [ ] 修改评分逻辑时确认四个角色（业务/跟单/采购/财务）都正常
@@ -217,14 +219,15 @@ npm run build && npm run check
    - [ ] 修改里程碑时确认 schedule.ts TIMELINE 中有对应 key
    - [ ] 修改 Agent 时确认 Feature Flag 有对应开关
 
-### 数据库变更规范
+### 数据库变更规范（自动化迁移,2026-07-24）
 
-每次修改数据库结构时：
-```sql
--- 在 supabase/migration.sql 末尾追加，格式：
--- ===== [日期] [功能描述] =====
-ALTER TABLE orders ADD COLUMN xxx text;
+新迁移写成独立幂等 `.sql` 落 `supabase/migrations/`,然后:
+```bash
+npm run db:status          # 看已执行/待执行
+npm run db:migrate         # 自动 apply 未执行的迁移(service-role + exec_sql RPC,记录进 _app_migrations 防重复)
 ```
+迁移必须幂等(`add column if not exists` / `create or replace` / `drop policy if exists`)——单文件多语句非同一事务,失败重跑要能跳过已成功的。
+首次接入见 `scripts/db/README.md`(粘一次 `scripts/db/bootstrap.sql` + `npm run db:baseline`)。
 
 ---
 

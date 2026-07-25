@@ -20,6 +20,9 @@
     "test:ai-runtime": "node --import tsx --test lib/ai/runtime/__tests__/*.test.ts",
     "check:ai-boundaries": "node --import tsx scripts/check-ai-provider-boundaries.ts",
     "smoke:ai-runtime": "node --import tsx scripts/ai-runtime-smoke.ts",
+    "db:status": "node --import tsx scripts/db-migrate.mts status",
+    "db:baseline": "node --import tsx scripts/db-migrate.mts baseline",
+    "db:migrate": "node --import tsx scripts/db-migrate.mts migrate",
     "predeploy": "npm run build && npm run check",
     "prepare": "husky"
   },
