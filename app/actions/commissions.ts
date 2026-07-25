@@ -95,6 +95,21 @@ export async function calculateOrderScore(
       .filter(Boolean),
   );
 
+  // 统一评分申诉(2026-07-25 CEO 批 Q3):已批准的申诉也豁免对应扣分
+  //   node_overdue → 该节点不扣准时分;quality → 恢复对应质检分;po_overdue 走 orders.po_penalty_waived(裁决时已置)。
+  let qualityMidAppealed = false, qualityFinalAppealed = false;
+  try {
+    const { data: appeals } = await (supabase.from('score_appeals') as any)
+      .select('appeal_type, milestone_id, target_key, status').eq('order_id', orderId).eq('status', 'approved');
+    for (const ap of (appeals || []) as any[]) {
+      if (ap.appeal_type === 'node_overdue' && ap.milestone_id) exemptMilestones.add(ap.milestone_id);
+      else if (ap.appeal_type === 'quality') {
+        if (ap.target_key === 'mid_qc_check') qualityMidAppealed = true;
+        if (ap.target_key === 'final_qc_check') qualityFinalAppealed = true;
+      }
+    }
+  } catch { /* score_appeals 表未建 → 跳过,不影响评分 */ }
+
   // 获取 milestone_logs 中的阻塞记录
   const milestoneIds = milestones.map((m: any) => m.id);
   const { data: blockLogs } = await (supabase.from('milestone_logs') as any)
@@ -121,13 +136,14 @@ export async function calculateOrderScore(
   const finalBlocked = blockLogs?.some((l: any) => l.milestone_id === finalQc?.id) || false;
 
   let qualityScore = 15;
-  if (midBlocked) qualityScore -= 5;
-  if (finalBlocked) qualityScore -= 10;
+  if (midBlocked && !qualityMidAppealed) qualityScore -= 5;      // 质量申诉通过 → 不扣(Q3)
+  if (finalBlocked && !qualityFinalAppealed) qualityScore -= 10;
   qualityScore = Math.max(0, qualityScore);
 
   const qualityDetail = {
     score: qualityScore, max: 15 as const,
-    midPassed: !midBlocked, finalPassed: !finalBlocked,
+    midPassed: !midBlocked || qualityMidAppealed, finalPassed: !finalBlocked || qualityFinalAppealed,
+    midAppealed: qualityMidAppealed, finalAppealed: qualityFinalAppealed,
   };
 
   // 准时交付（共享）—— 按优先级取存在的出运/送仓节点

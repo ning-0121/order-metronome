@@ -72,6 +72,7 @@ import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
 import { knowledgeLayerCaptureVisible } from '@/lib/engine/featureFlags';
 import { RetrospectiveTab } from '@/components/tabs/RetrospectiveTab';
+import { ScoreAppealPanel } from '@/components/ScoreAppealPanel';
 import { RuntimeRiskCardSlot } from '@/components/RuntimeRiskCardSlot';
 import {
   isCustomerShipHoldFromOrder,
@@ -1213,9 +1214,13 @@ export default async function OrderDetailPage({
 
         {/* Tab: 执行评分 */}
         {activeTab === 'score' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">执行评分</h2>
-            <LiveScorePreview orderId={id} />
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-6">执行评分</h2>
+              <LiveScorePreview orderId={id} />
+            </div>
+            {/* 评分申诉(CEO 批 2026-07-25):非本人可控原因的扣分可申诉,证据必传+域路由审批 */}
+            <ScoreAppealPanel orderId={id} milestones={(milestones || []) as any} />
           </div>
         )}
 
