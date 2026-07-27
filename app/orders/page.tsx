@@ -4,6 +4,7 @@ import { formatDate } from '@/lib/utils/date';
 import { computeOrderStatus, getRedCulprits } from '@/lib/utils/order-status';
 import { RedOrderHealthPanel } from '@/components/RedOrderHealthPanel';
 import { OrderSearchBar } from '@/components/OrderSearchBar';
+import { OrderMonthFilter } from '@/components/OrderMonthFilter';
 import { ExportProductionSheetButton } from '@/components/ExportProductionSheetButton';
 import { LeftoverExportButton } from '@/components/LeftoverExportButton';
 import { InlineEditField } from '@/components/InlineEditField';
@@ -100,7 +101,7 @@ function getSearchDimensions(orders: any[]): {
   };
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string; ship_hold?: string }> }) {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string; ship_hold?: string; created_month?: string }> }) {
   const params = await searchParams;
   const statusFilter = params?.status || 'active';
   const purposeFilter = params?.purpose || 'production';
@@ -116,6 +117,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     | 'created_desc' | 'created_asc'
     | 'qty_desc' | 'qty_asc';
   const shipHoldFilter = params?.ship_hold === 'yes' || params?.ship_hold === 'stale' ? params.ship_hold : '';
+  const createdMonthFilter = (params?.created_month || '').slice(0, 7);   // 建单月筛选 YYYY-MM
 
   const { data: allOrders, error } = await getOrders();
 
@@ -167,6 +169,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     filteredOrders = filteredOrders.filter((o: any) => isCustomerShipHoldFromOrder(o));
   } else if (shipHoldFilter === 'stale') {
     filteredOrders = filteredOrders.filter((o: any) => isCustomerHoldStale(o));
+  }
+  // 建单月筛选:按系统创建日(created_at)的 YYYY-MM 命中。可选月份从当前状态页的订单里取(去重降序)。
+  const availableMonths = [...new Set(baseOrders.map((o: any) => String(o.created_at || '').slice(0, 7)).filter((m: string) => /^\d{4}-\d{2}$/.test(m)))].sort().reverse() as string[];
+  if (createdMonthFilter) {
+    filteredOrders = filteredOrders.filter((o: any) => String(o.created_at || '').slice(0, 7) === createdMonthFilter);
   }
 
   // 应用搜索
@@ -441,6 +448,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           if (merchandiserFilter) qsParts.push(`merchandiser=${encodeURIComponent(merchandiserFilter)}`);
           if (salesFilter) qsParts.push(`sales=${encodeURIComponent(salesFilter)}`);
           if (shipHoldFilter) qsParts.push(`ship_hold=${shipHoldFilter}`);
+          if (createdMonthFilter) qsParts.push(`created_month=${createdMonthFilter}`);
           const href = `/orders?${qsParts.join('&')}`;
           const active = sortOrder === opt.key;
           return (
@@ -458,6 +466,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             </Link>
           );
         })}
+        {/* 按建单月筛选 */}
+        {availableMonths.length > 0 && (
+          <span className="ml-2 pl-2 border-l border-gray-200">
+            <OrderMonthFilter months={availableMonths} current={createdMonthFilter} />
+          </span>
+        )}
       </div>
 
       {/* 搜索 + 维度筛选 */}
