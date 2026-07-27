@@ -320,7 +320,9 @@ export async function createOrder(
   }
 
   // ── STEP 3: insert order — 写入订单到数据库 ──
-  const dbOrderType = order_type || 'bulk';
+  // 打样单双轴一致(打样上线前审计):order_purpose='sample' 时 order_type 也置 'sample',
+  //   否则档期压缩/基线等只认 order_type==='sample' 的打样逻辑(gates/deliveryFeasibility)永不触发。
+  const dbOrderType = order_purpose === 'sample' ? 'sample' : (order_type || 'bulk');
 
   // 首单自动识别 + 手动覆盖
   // 翻单(repeat)类型的客户/工厂一定不是首单，跳过自动检测

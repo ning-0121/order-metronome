@@ -18,13 +18,15 @@ type Mode = 'po' | 'legacy';
 export function OrderIntakeModeSelector({ showPrice = false }: { showPrice?: boolean }) {
   const searchParams = useSearchParams();
   const initialPo = searchParams.get('po'); // P1a:从 PO 页「从此 PO 建单」带过来
-  const [mode, setMode] = useState<Mode>(initialPo ? 'po' : 'legacy'); // 带 ?po= 直接进 PO 模式,否则默认回退
+  // 打样单必须走 legacy 表单:POOrderForm 不识别 type=sample、会静默建成生产单(打样上线前审计)。
+  const isSample = searchParams.get('type') === 'sample';
+  const [mode, setMode] = useState<Mode>(initialPo && !isSample ? 'po' : 'legacy'); // 带 ?po= 进 PO 模式,打样/否则回退
   const [hasPo, setHasPo] = useState(false);
 
   useEffect(() => {
-    // 软 PO-first：存在 PO → 默认进 PO 模式（不阻断 legacy）
+    // 软 PO-first：存在 PO → 默认进 PO 模式（不阻断 legacy）。打样单不自动切 PO,固定 legacy。
     listCustomerPOsForIntake(1).then((r) => {
-      if ((r.data?.length || 0) > 0) { setHasPo(true); if (!initialPo) setMode('po'); }
+      if ((r.data?.length || 0) > 0) { setHasPo(true); if (!initialPo && !isSample) setMode('po'); }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
