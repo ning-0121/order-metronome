@@ -562,8 +562,8 @@ export async function createOrder(
         roleUserMap.merchandiser = uniqueByRole('merchandiser') || uniqueByRole('order_manager');
         roleUserMap.sales = uniqueByRole('sales');
       }
-      // 先匹配生产主管（用于固定步骤）
-      for (const roleToFind of ['procurement', 'finance', 'logistics', 'production_manager']) {
+      // 先匹配生产主管（用于固定步骤）。qc:节点V3 的中期/尾期验货独立节点 owner=qc,需自动派给 QC(骆淑娟)。
+      for (const roleToFind of ['procurement', 'finance', 'logistics', 'production_manager', 'qc']) {
         const matcher = (DEFAULT_ASSIGNEES as any)[roleToFind];
         if (matcher) {
           const userId = findAssigneeUserId(allProfiles as any, matcher);

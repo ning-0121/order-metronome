@@ -50,6 +50,12 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
     nameMatches: ['秦增超', 'zengchao'],
     emailContains: ['qzc@', 'qzc'],
   },
+  // 2026-07-27 节点V3:QC 独立节点(中期/尾期验货)→ 生产部跟单/QC 骆淑娟。匹配不上则回落"角色唯一 qc 用户"。
+  qc: {
+    displayName: '骆淑娟',
+    nameMatches: ['骆淑娟', 'luoshujuan', 'shujuan'],
+    emailContains: ['lsj@', 'lsj', 'luoshujuan'],
+  },
 };
 
 /**
