@@ -697,12 +697,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       {(() => {
                         const orderDate = (order as any).order_date;
                         const createdAt = (order as any).created_at;
-                        const dateStr = orderDate ? String(orderDate).slice(0, 10) : (createdAt ? String(createdAt).slice(0, 10) : null);
-                        let timeStr: string | null = null;
+                        const poDateStr = orderDate ? String(orderDate).slice(0, 10) : null;        // 客户 PO 下单日
+                        const createdDateStr = createdAt ? String(createdAt).slice(0, 10) : null;    // 系统建单日
+                        let createdTimeStr: string | null = null;
                         if (createdAt) {
                           const d = new Date(createdAt);
                           if (!isNaN(d.getTime())) {
-                            timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                            createdTimeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
                           }
                         }
                         const originalKeyDate = order.incoterm === 'DDP'
@@ -722,13 +723,17 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                         const holdStale = isCustomerHoldStale(order);
                         return (
                           <div className="leading-tight space-y-0.5">
-                            {/* 状态徽章 + 下单 同一行 */}
+                            {/* 状态徽章 + 下单(客户 PO 日)同一行 */}
                             <div className="flex items-center gap-2 whitespace-nowrap">
                               <span title={status.riskFactors.join('；') || undefined} className={`badge ${statusConfig.class} text-[10px]`}>{statusConfig.label}</span>
                               <span className="text-xs text-gray-500">
-                                下单 <span className="text-gray-700">{dateStr || '—'}</span>
-                                {timeStr && <span className="text-gray-400 ml-1">{timeStr}</span>}
+                                下单 <span className="text-gray-700">{poDateStr || '—'}</span>
                               </span>
+                            </div>
+                            {/* 建单(系统创建日)—— 考评生效日按此判定 */}
+                            <div className="text-xs text-gray-500 whitespace-nowrap" title="订单在系统里创建的日期(考评生效日按此判定)">
+                              建单 <span className="text-gray-700">{createdDateStr || '—'}</span>
+                              {createdTimeStr && <span className="text-gray-400 ml-1">{createdTimeStr}</span>}
                             </div>
                             {originalKeyDate ? (
                               <div className={`text-xs whitespace-nowrap ${isOverdue && !custHold ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
