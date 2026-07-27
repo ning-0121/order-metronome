@@ -53,13 +53,16 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const orderById = new Map<string, any>(((orders || []) as any[]).map((o) => [o.id, o]));
   const liveIds = liveOrders.map((o) => o.id);
   const { data: ms } = liveIds.length > 0
-    ? await supabase.from('milestones').select('name, status, due_at, actual_at, owner_role, owner_user_id, order_id').in('order_id', liveIds)
+    ? await supabase.from('milestones').select('id, name, status, due_at, actual_at, owner_role, owner_user_id, order_id').in('order_id', liveIds)
     : { data: [] };
   const milestones = (ms || []) as any[];
 
-  // 可疑延期:大额(≥21天)或同单反复(≥2条)——从 pending delay 拉
+  // 可疑延期:大额(≥21天)或同单反复(≥2条)——从 pending delay 拉。
+  // 同时收集"已申请延期(待批)的节点",逾期口径把它们剔除(与首页 dashboard 一致:责任人已行动不算逾期)。
   const { data: pendingDelays } = await supabase.from('delay_requests')
-    .select('order_id, delay_days, status').eq('status', 'pending').limit(300);
+    .select('order_id, milestone_id, delay_days, status').eq('status', 'pending').limit(300);
+  const pendingDelayMs = new Set<string>(((pendingDelays || []) as any[]).map((d) => d.milestone_id).filter(Boolean));
+  const isOverdue = (mm: any) => !!mm.due_at && new Date(mm.due_at).getTime() < now && !pendingDelayMs.has(mm.id);
   const byOrder = new Map<string, { count: number; maxDays: number }>();
   for (const d of ((pendingDelays || []) as any[])) {
     const cur = byOrder.get(d.order_id) || { count: 0, maxDays: 0 };
@@ -80,7 +83,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
     if (isDone(mm.status)) continue;
     deptAgg[dept].active += 1;
     if (st === 'blocked' || st === '卡单' || st === '卡住') deptAgg[dept].blocked += 1;
-    if (mm.due_at && new Date(mm.due_at).getTime() < now) deptAgg[dept].overdue += 1;
+    if (isOverdue(mm)) deptAgg[dept].overdue += 1;   // 已申请延期(待批)不计逾期
   }
   // 待审批延期按部门(粗口径:按 delay 所在订单当前部门略,统一挂"订单执行"监控)
   const B = DEPT_META.map((m) => ({ key: m.key, label: m.label, href: m.href, ...deptAgg[m.key] }));
@@ -130,7 +133,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
       if (mm.actual_at && mm.due_at) { a.onTimeTotal += 1; if (new Date(mm.actual_at).getTime() <= new Date(mm.due_at).getTime()) a.onTime += 1; }
     } else {
       a.active += 1;
-      if (mm.due_at && new Date(mm.due_at).getTime() < now) a.overdue += 1;
+      if (isOverdue(mm)) a.overdue += 1;   // 已申请延期(待批)不计逾期
     }
     empAgg.set(uid, a);
   }

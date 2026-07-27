@@ -154,13 +154,14 @@ export default async function AnalyticsPage() {
       {/* ===== 总览统计 + 风险 ===== */}
       <div className="bg-white rounded-2xl border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">订单总览</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-indigo-600">{totalOrders}</div>
+        {/* 4 列(md+):8 项排两行,7 位数「有效订单总件数」不再挤进隔壁客户数(2026-07-27 修显示粘连) */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="min-w-0 text-center">
+            <div className="text-2xl font-bold text-indigo-600 tabular-nums">{totalOrders}</div>
             <div className="text-xs text-gray-500 mt-1">总订单</div>
           </div>
-          <div className="text-center" title={effectiveQuantity.scopeHint}>
-            <div className="text-2xl font-bold text-blue-600">{effectiveQuantity.totalQuantity.toLocaleString()}</div>
+          <div className="min-w-0 text-center" title={effectiveQuantity.scopeHint}>
+            <div className="text-2xl font-bold text-blue-600 tabular-nums whitespace-nowrap">{effectiveQuantity.totalQuantity.toLocaleString()}</div>
             <div className="text-xs text-gray-500 mt-1">{effectiveQuantity.scopeLabel}</div>
             <div className="text-[10px] text-gray-400 mt-0.5">{effectiveQuantity.scopeHint}</div>
           </div>
