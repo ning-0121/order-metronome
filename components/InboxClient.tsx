@@ -89,6 +89,12 @@ function MailCard({ row, onMark, onBound, dim }: { row: DigestRow; onMark: (id: 
           ) : (
             !handled && <MailBinder mailId={row.id} onBound={onBound} />
           )}
+          {row.customer_name && (
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100">🏢 {row.customer_name}</span>
+          )}
+          {row.owner_name && (
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">👤 {row.owner_name}</span>
+          )}
         </div>
         <div className="text-sm text-gray-900 mt-1 leading-snug">
           {row.summary || row.subject}

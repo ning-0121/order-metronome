@@ -23,6 +23,8 @@ export interface DigestRow {
   order_id: string | null;
   order_no: string | null;
   customer_id: string | null;
+  customer_name: string | null;   // 客户名(绑定订单带出;无单则取邮件匹配客户),2026-07-27 CEO
+  owner_name: string | null;      // 业务执行负责人(邮件 assigned_exec_id 优先,回退订单 owner)
 }
 
 export interface MailDigestView {
@@ -48,7 +50,7 @@ export async function getMailDigest(days = 3): Promise<{ data?: MailDigestView; 
 
   const since = new Date(Date.now() - days * 86400000).toISOString();
   let q = (supabase.from('mail_inbox') as any)
-    .select('id, from_email, subject, summary, category, importance, needs_action, action_type, handled_status, received_at, order_id, customer_id, ai_tier')
+    .select('id, from_email, subject, summary, category, importance, needs_action, action_type, handled_status, received_at, order_id, customer_id, assigned_exec_id, ai_tier')
     .not('digested_at', 'is', null)
     .neq('category', '噪音')
     .gte('received_at', since)
@@ -61,13 +63,34 @@ export async function getMailDigest(days = 3): Promise<{ data?: MailDigestView; 
   if (error) return { error: error.message };
   const list = (rows || []) as DigestRow[];
 
-  // 富化订单号(有 order_id 的批量查)
+  // 富化订单号 + 客户名 + 业务执行负责人(有 order_id 的批量查;负责人优先取邮件 assigned_exec_id)
   const orderIds = [...new Set(list.map((r) => r.order_id).filter(Boolean))] as string[];
+  const noMap = new Map<string, string>(), custMap = new Map<string, string>(), orderOwnerMap = new Map<string, string>();
   if (orderIds.length > 0) {
     const { data: ords } = await (supabase.from('orders') as any)
-      .select('id, internal_order_no, order_no').in('id', orderIds);
-    const noMap = new Map((ords || []).map((o: any) => [o.id, o.internal_order_no || o.order_no]));
-    for (const r of list) if (r.order_id) r.order_no = (noMap.get(r.order_id) as string) || null;
+      .select('id, internal_order_no, order_no, customer_name, owner_user_id').in('id', orderIds);
+    for (const o of ((ords || []) as any[])) {
+      noMap.set(o.id, o.internal_order_no || o.order_no);
+      if (o.customer_name) custMap.set(o.id, o.customer_name);
+      if (o.owner_user_id) orderOwnerMap.set(o.id, o.owner_user_id);
+    }
+  }
+  // 解析负责人名:邮件 assigned_exec_id 优先,回退订单 owner_user_id
+  const ownerIdByRow = new Map<string, string>();
+  for (const r of list) {
+    const oid = (r as any).assigned_exec_id || (r.order_id ? orderOwnerMap.get(r.order_id) : null);
+    if (oid) ownerIdByRow.set(r.id, oid);
+  }
+  const nameById = new Map<string, string>();
+  const ownerIds = [...new Set([...ownerIdByRow.values()])];
+  if (ownerIds.length > 0) {
+    const { data: profs } = await (supabase.from('profiles') as any).select('user_id, name, email').in('user_id', ownerIds);
+    for (const p of ((profs || []) as any[])) nameById.set(p.user_id, p.name || (p.email ? String(p.email).split('@')[0] : ''));
+  }
+  for (const r of list) {
+    if (r.order_id) { r.order_no = noMap.get(r.order_id) || null; r.customer_name = custMap.get(r.order_id) || null; }
+    const oid = ownerIdByRow.get(r.id);
+    r.owner_name = oid ? (nameById.get(oid) || null) : null;
   }
 
   const unhandled = (r: DigestRow) => r.handled_status === 'unread' || r.handled_status === 'seen' || !r.handled_status;
