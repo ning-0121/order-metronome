@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getCrossOrderNetting } from '@/app/actions/procurement-netting';
+import { getCrossOrderNetting, dismissNettingLines } from '@/app/actions/procurement-netting';
 import { createPurchaseOrder } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import type { NettingGroup } from '@/lib/services/netting';
@@ -42,6 +42,24 @@ export function NettingClient() {
   const checkedGroups = groups.filter((g) => checked.has(g.key));
   const checkedLineIds = checkedGroups.flatMap((g) => g.line_ids);
   const crossOrderCount = groups.filter((g) => g.order_count > 1).length;
+
+  // 剔除(不采购):把选中的待归采行软作废,退出工作台。用于清掉老单遗留的陈旧行。
+  async function dismiss() {
+    setMsg(null);
+    if (checkedGroups.length === 0) { setMsg({ ok: false, text: '请勾选要剔除的物料' }); return; }
+    const ok = await confirm({
+      title: '剔除这些待归采行?',
+      message: `将 ${checkedGroups.length} 种物料(共 ${checkedLineIds.length} 行)标记为"不采购"、移出待采购工作台。\n用于清理老单遗留的陈旧行;已归到采购单的行不受影响。操作留痕、不可恢复(如需重新采购请回订单重新提交)。`,
+      confirmText: '剔除', danger: true,
+    });
+    if (!ok) return;
+    setSubmitting(true);
+    const res = await dismissNettingLines(checkedLineIds);
+    setSubmitting(false);
+    if (res.error) { setMsg({ ok: false, text: res.error }); return; }
+    setMsg({ ok: true, text: `已剔除 ${res.dismissed} 行。` });
+    load();
+  }
 
   async function build(mode: 'merge' | 'group') {
     setMsg(null);
@@ -129,6 +147,11 @@ export function NettingClient() {
       <div className="fixed bottom-0 left-0 right-0 sm:left-56 bg-white/95 backdrop-blur border-t border-gray-200 px-4 py-3 z-40">
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center gap-2">
           <span className="text-xs text-gray-500 flex-1">已选 <b>{checkedGroups.length}</b> 组 · {checkedLineIds.length} 行</span>
+          <button onClick={dismiss} disabled={submitting || checkedGroups.length === 0}
+            className="text-sm px-4 py-2 rounded-lg border border-red-300 text-red-600 bg-white hover:bg-red-50 font-medium disabled:opacity-40"
+            title="把选中的陈旧行标记为不采购,移出工作台(留痕)">
+            剔除(不采购)
+          </button>
           <button onClick={() => build('merge')} disabled={submitting || checkedGroups.length === 0}
             className="text-sm px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-50 font-medium disabled:opacity-40"
             title="仅同料同色同规格可合并成一行下单">

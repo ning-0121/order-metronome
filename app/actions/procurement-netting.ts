@@ -6,7 +6,9 @@
  * 只读，不写库；建单走 P1 createPurchaseOrder。netting 组不含价，天然无底价泄露。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
+import { requireRoleGroup } from '@/lib/domain/requireRole';
 import { aggregateLinesByKey, type NettingLine, type NettingGroup } from '@/lib/services/netting';
 
 export async function getCrossOrderNetting(): Promise<{ data?: NettingGroup[]; error?: string }> {
@@ -61,4 +63,27 @@ export async function getCrossOrderNetting(): Promise<{ data?: NettingGroup[]; e
   });
 
   return { data: aggregateLinesByKey(enriched) };
+}
+
+/**
+ * 剔除待归采行(2026-07-26 CEO:待归采里有以前的陈旧行,要能删掉)。
+ * 软作废(line_status='cancelled',留痕可追溯),仅对【未归单】(purchase_order_id IS NULL)的行生效 ——
+ * 已归到采购单的行不动(那要走作废采购单)。仅采购/采购经理/admin 可剔除。
+ */
+export async function dismissNettingLines(lineIds: string[]): Promise<{ ok?: boolean; dismissed?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const gate = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_PROCUREMENT_EXEC', '仅采购/采购经理/管理员可剔除待归采行');
+  if (gate) return { error: gate };
+  const ids = (lineIds || []).filter(Boolean);
+  if (ids.length === 0) return { ok: true, dismissed: 0 };
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('procurement_line_items') as any)
+    .update({ line_status: 'cancelled', updated_at: new Date().toISOString() })
+    .in('id', ids).is('purchase_order_id', null).neq('line_status', 'cancelled')
+    .select('id');
+  if (error) return { error: error.message };
+  revalidatePath('/procurement/netting');
+  return { ok: true, dismissed: (data || []).length };
 }
