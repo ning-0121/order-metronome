@@ -12,6 +12,7 @@ import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
 import { CeoInsightButton } from '@/components/CeoInsightButton';
 import { CustomerMattersPanel } from '@/components/CustomerMattersPanel';
+import { CeoCockpit } from '@/components/ceo/CeoCockpit';
 import { CollabRiskGroups } from '@/components/CollabRiskGroups';
 import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 // 邮件晨报（briefing.service / MorningBriefingCard）已下线 — 用户反馈"太费钱用处不大"
@@ -638,6 +639,9 @@ export default async function CEOWarRoom() {
           </div>
         );
       })()}
+
+      {/* ===== CEO 驾驶舱 A–E(2026-07-27:重建节拍——监控而非瓶颈)。置顶一屏,下方保留作战室明细。===== */}
+      <CeoCockpit userId={user.id} roles={ceoRoles} />
 
       {/* 状态概览卡片已下线（2026-04-27）— 用户反馈"风险/阻塞/完成率"统计应在数据分析页查看，首页只展示行动 */}
 
