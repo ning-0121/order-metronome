@@ -48,11 +48,15 @@ export async function getTradeBulkData(orderId: string): Promise<{
   if (!order) return { error: '订单不存在' };
   if ((order as any).order_purpose !== 'trade') return { isTrade: false };
 
-  const { data: liRows } = await (supabase.from('order_line_items') as any)
-    .select('style_no, color, qty_pcs, purchase_unit_cost, po_unit_price').eq('order_id', orderId);
+  // 修:order_line_items 的颜色列是 color_cn/color_en,没有 color 列 —— 原来 select 'color' 整条查询报
+  //   「column order_line_items.color does not exist」,error 被忽略 → 返 0 行 → 大货采购误显示"无成品款明细/未录进价"
+  //   (实际明细和进价都在)。改用真实列名,color 取中文优先回落英文。
+  const { data: liRows, error: liErr } = await (supabase.from('order_line_items') as any)
+    .select('style_no, color_cn, color_en, qty_pcs, purchase_unit_cost, po_unit_price').eq('order_id', orderId);
+  if (liErr) return { error: `读取逐款明细失败:${liErr.message}` };
   const lines: TradeBulkLine[] = ((liRows || []) as any[]).map((l) => ({
     style_no: l.style_no ?? null,
-    color: l.color ?? null,
+    color: l.color_cn || l.color_en || null,
     qty: Number(l.qty_pcs) || 0,
     purchase_unit_cost: canCost && l.purchase_unit_cost != null ? Number(l.purchase_unit_cost) : null,
     sale_unit_price: canSale && l.po_unit_price != null ? Number(l.po_unit_price) : null,
@@ -98,11 +102,13 @@ export async function createTradeBulkPurchaseOrder(orderId: string, input: {
   const activeExist = ((existPos || []) as any[]).some((p) => p.status !== 'cancelled');
   if (activeExist) return { error: '本单已有大货采购单(如需拆供应商/改单,请先作废原单再建)' };
 
-  // 读成品款(进价>0、数量>0 才入采购)
-  const { data: liRows } = await (svc.from('order_line_items') as any)
-    .select('style_no, color, qty_pcs, purchase_unit_cost').eq('order_id', orderId);
+  // 读成品款(进价>0、数量>0 才入采购)。修:颜色列是 color_cn/color_en,没有 color 列 ——
+  //   原来 select 'color' 报错被忽略 → buyable 恒空 → 误报"没有可采购的成品款"(实际明细/进价都在)。
+  const { data: liRows, error: liReadErr } = await (svc.from('order_line_items') as any)
+    .select('style_no, color_cn, color_en, qty_pcs, purchase_unit_cost').eq('order_id', orderId);
+  if (liReadErr) return { error: `读取逐款明细失败:${liReadErr.message}` };
   const buyable = ((liRows || []) as any[])
-    .map((l) => ({ style_no: l.style_no || '成品', color: l.color || null, qty: Number(l.qty_pcs) || 0, cost: l.purchase_unit_cost != null ? Number(l.purchase_unit_cost) : 0 }))
+    .map((l) => ({ style_no: l.style_no || '成品', color: l.color_cn || l.color_en || null, qty: Number(l.qty_pcs) || 0, cost: l.purchase_unit_cost != null ? Number(l.purchase_unit_cost) : 0 }))
     .filter((l) => l.qty > 0 && l.cost > 0);
   if (buyable.length === 0) return { error: '没有可采购的成品款:请先在订单逐款录入采购进价(purchase_unit_cost)和数量' };
 
