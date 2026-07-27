@@ -5,15 +5,17 @@
 //            采购=procurement / 生产=production
 // ============================================================
 
+// 2026-07-27 CEO「监控而非瓶颈」:延期审批一律【单层·由对口主管直接审】,不再多级逐级、不挂 CEO。
+//   可疑延期(大额/同单反复)另由 CEO 驾驶舱监控页汇总(不卡流程)。改这里即可调整"谁审"。
 export const DEFERRAL_ROUTING: Record<string, string[]> = {
-  procurement:  ['merchandiser', 'order_manager'], // 采购提交 → 业务执行审批 → 业务执行经理审批
-  merchandiser: ['sales'],                         // 业务执行延期 → 业务开发确认
-  production:   ['production_manager'],            // 生产执行延期 → 生产主管确认可行性
-  qc:           ['production_manager'],            // QC 延期 → 生产主管
-  logistics:    ['finance', 'order_manager'],      // 出运延期 → 财务把关 → 业务执行经理(2026-07-25 CEO:出运须财务)
-  finance:      ['order_manager'],                 // 财务节点延期 → 业务执行经理
-  sales:        ['sales_manager'],                 // PO确认(业务开发)延期 → 业务经理
-  _default:     ['admin'],                         // 兜底
+  procurement:  ['order_manager'],      // 采购延期(影响订单交期)→ 业务执行经理
+  merchandiser: ['order_manager'],      // 业务执行延期 → 业务执行经理
+  production:   ['production_manager'], // 生产延期 → 生产主管
+  qc:           ['production_manager'], // QC 延期 → 生产主管
+  logistics:    ['finance'],            // 出运延期 → 财务(2026-07-25 CEO:出运须财务)
+  finance:      ['order_manager'],      // 财务节点延期 → 业务执行经理
+  sales:        ['sales_manager'],      // PO确认(业务开发)延期 → 业务经理
+  _default:     ['order_manager'],      // 兜底走业务执行经理(不再默认挂 admin/CEO)
 };
 
 /** 全局延期审批人:可代任一步确认(与 pending-approvals GLOBAL_DELAY_APPROVERS、core CAN_APPROVE_DELAY 对齐)。 */

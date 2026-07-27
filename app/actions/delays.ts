@@ -1464,7 +1464,7 @@ export async function bulkApproveAllPendingDelays(
   let pendingRows: any[] | null = null;
   let queryError: any = null;
   ({ data: pendingRows, error: queryError } = await (queryClient.from('delay_requests') as any)
-    .select('id, approval_chain, current_step')
+    .select('id, approval_chain, current_step, approvals')
     .eq('status', 'pending').order('created_at', { ascending: true }).limit(200));
   if (queryError && /approval_chain|current_step|does not exist/i.test(queryError.message || '')) {
     // 迁移未执行时降级:只拉 id,全部按无链处理(旧行为)
@@ -1486,13 +1486,23 @@ export async function bulkApproveAllPendingDelays(
   let skipped = 0;
 
   // 串行处理（每条都有 DB 操作 + 副作用，并行容易出竞态）
+  const nowISO = new Date().toISOString();
   for (const row of rows) {
-    // P0 复审修:有未走满的多级审批链 → 跳过批量,必须逐级确认(否则会绕过链、留下 status=approved 但 current_step=0 的矛盾态)
+    // 2026-07-27 CEO「不当瓶颈」:批量调用者本就是全局审批人(CAN_APPROVE_DELAY,函数已门禁),可代任一步 →
+    //   多级链未走满时不再跳过,而是【一次走满整条链再落地】。先把 current_step 补到末位 + 补记代确认,
+    //   避免"status=approved 但 current_step<len"矛盾态;core 对全局审批人本就放行(delays.ts:584)。
     const chain = row.approval_chain;
     const step = Number(row.current_step) || 0;
     if (Array.isArray(chain) && chain.length > 0 && step < chain.length) {
-      skipped++; // 不计入 errors(非失败),仍留在 pending 列表待逐级确认
-      continue;
+      try {
+        const approvals = Array.isArray(row.approvals) ? [...row.approvals] : [];
+        for (let s = step; s < chain.length; s++) approvals.push({ role: chain[s], name: '批量代确认(全局审批人)', at: nowISO, note });
+        await (queryClient.from('delay_requests') as any)
+          .update({ approvals, current_step: chain.length, updated_at: nowISO }).eq('id', row.id);
+      } catch (e: any) {
+        errors.push({ id: row.id, reason: '走满审批链失败:' + (e?.message || String(e)) });
+        continue;
+      }
     }
     try {
       const result = await approveDelayRequestCore(row.id, note);
