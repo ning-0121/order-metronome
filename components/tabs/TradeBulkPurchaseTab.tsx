@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getTradeBulkData, createTradeBulkPurchaseOrder, uploadTradePoProof, type TradeBulkLine } from '@/app/actions/trade-purchase';
+import { getTradeBulkData, createTradeBulkPurchaseOrder, uploadTradePoProof, saveTradeLineCosts, type TradeBulkLine } from '@/app/actions/trade-purchase';
 import { placePurchaseOrder } from '@/app/actions/purchase-orders';
 
 const money = (n: number) => '¥' + (Math.round(n * 100) / 100).toLocaleString();
@@ -23,14 +23,36 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
   const [supplierId, setSupplierId] = useState('');
   const [terms, setTerms] = useState('月结');
   const [delivery, setDelivery] = useState('');
+  const [costEdits, setCostEdits] = useState<Record<string, string>>({});   // 行内进价编辑:line.id → 输入串
 
   async function load() {
     setLoading(true);
     const d = await getTradeBulkData(orderId);
     setData(d);
+    setCostEdits({});
     setLoading(false);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
+
+  // 有效进价(编辑优先,否则库里的);采购金额实时用它算
+  const effCost = (l: TradeBulkLine): number | null => {
+    const e = costEdits[l.id];
+    if (e !== undefined) { const n = e.trim() === '' ? null : Number(e); return n != null && Number.isFinite(n) ? n : null; }
+    return l.purchase_unit_cost;
+  };
+
+  async function saveCosts() {
+    const updates = Object.entries(costEdits).map(([id, v]) => ({
+      id, purchase_unit_cost: v.trim() === '' ? null : Number(v),
+    }));
+    if (updates.length === 0) return;
+    setBusy(true); setErr(''); setMsg('');
+    const res = await saveTradeLineCosts(orderId, updates);
+    setBusy(false);
+    if (res.error) { setErr(res.error); return; }
+    setMsg(`已保存 ${res.updated} 款进价。`);
+    load();
+  }
 
   if (loading) return <p className="text-sm text-gray-400 py-8 text-center">加载中…</p>;
   if (data?.error) return <p className="text-sm text-red-600 py-8 text-center">{data.error}</p>;
@@ -90,27 +112,54 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
             </tr>
           </thead>
           <tbody>
-            {lines.map((l, i) => (
-              <tr key={i} className="border-t border-gray-100">
+            {lines.map((l) => {
+              const c = effCost(l);
+              return (
+              <tr key={l.id} className="border-t border-gray-100">
                 <td className="px-3 py-2">{l.style_no || '—'}</td>
                 <td className="px-3 py-2">{l.color || '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{l.qty.toLocaleString()}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{l.purchase_unit_cost != null ? money(l.purchase_unit_cost) : <span className="text-amber-600">待录进价</span>}</td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium">{l.purchase_unit_cost != null ? money(l.purchase_unit_cost * l.qty) : '—'}</td>
+                <td className="px-3 py-2 text-right">
+                  {data?.canCost ? (
+                    <input type="number" min="0" step="0.01"
+                      value={costEdits[l.id] ?? (l.purchase_unit_cost ?? '')}
+                      onChange={(e) => setCostEdits((m) => ({ ...m, [l.id]: e.target.value }))}
+                      className="w-24 border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:border-blue-500 outline-none"
+                      placeholder="待录" />
+                  ) : (l.purchase_unit_cost != null ? money(l.purchase_unit_cost) : <span className="text-gray-400">—</span>)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-medium">{c != null ? money(c * l.qty) : '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-400">{l.sale_unit_price != null ? money(l.sale_unit_price) : '—'}</td>
               </tr>
-            ))}
+              );
+            })}
             {lines.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">本单无成品款明细</td></tr>}
           </tbody>
           {lines.length > 0 && (
             <tfoot><tr className="border-t border-gray-200 bg-gray-50 font-semibold">
               <td className="px-3 py-2" colSpan={4}>大货采购成本合计</td>
-              <td className="px-3 py-2 text-right tabular-nums" colSpan={2}>{money(data?.costTotal || 0)}</td>
+              <td className="px-3 py-2 text-right tabular-nums" colSpan={2}>{money(lines.reduce((s, l) => s + ((effCost(l) || 0) * l.qty), 0))}</td>
             </tr></tfoot>
           )}
         </table>
       </div>
-      {!hasCost && <p className="text-xs text-amber-600">⚠️ 还没录成品进价 —— 请到「🏭 生产任务单」tab 的逐款明细,在「进价」列填成品采购价并保存,再回来生成大货采购单。</p>}
+
+      {/* 行内录进价:保存按钮(有改动才出) */}
+      {data?.canCost && lines.length > 0 && Object.keys(costEdits).length > 0 && (
+        <div className="flex items-center gap-3">
+          <button onClick={saveCosts} disabled={busy}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+            {busy ? '保存中…' : '保存进价'}
+          </button>
+          <span className="text-xs text-gray-400">改了 {Object.keys(costEdits).length} 款进价,记得保存</span>
+        </div>
+      )}
+      {data?.canCost && lines.length > 0 && !hasCost && Object.keys(costEdits).length === 0 && (
+        <p className="text-xs text-amber-600">⚠️ 还没录成品进价 —— 直接在上面「进价」列填成品采购价、点「保存进价」,即可生成大货采购单。</p>
+      )}
+      {!data?.canCost && !hasCost && (
+        <p className="text-xs text-amber-600">⚠️ 还没录成品进价 —— 进价需采购/财务角色录入(你当前角色看不到底价)。</p>
+      )}
 
       {/* 建单(业务) */}
       {data?.canCreate && !activePo && hasCost && (

@@ -26,12 +26,12 @@ async function auth() {
   return { supabase, user, roles };
 }
 
-export interface TradeBulkLine { style_no: string | null; color: string | null; qty: number; purchase_unit_cost: number | null; sale_unit_price: number | null; }
+export interface TradeBulkLine { id: string; style_no: string | null; color: string | null; qty: number; purchase_unit_cost: number | null; sale_unit_price: number | null; }
 
 /** 经销单大货采购面板数据:成品款行 + 已建大货采购单 + 供应商 + 权限。 */
 export async function getTradeBulkData(orderId: string): Promise<{
   isTrade?: boolean; lines?: TradeBulkLine[]; pos?: any[]; suppliers?: any[];
-  canCreate?: boolean; canPlace?: boolean; costTotal?: number; error?: string;
+  canCreate?: boolean; canPlace?: boolean; canCost?: boolean; costTotal?: number; error?: string;
 }> {
   const { supabase, user, roles } = await auth();
   if (!user) return { error: '请先登录' };
@@ -52,9 +52,10 @@ export async function getTradeBulkData(orderId: string): Promise<{
   //   「column order_line_items.color does not exist」,error 被忽略 → 返 0 行 → 大货采购误显示"无成品款明细/未录进价"
   //   (实际明细和进价都在)。改用真实列名,color 取中文优先回落英文。
   const { data: liRows, error: liErr } = await (supabase.from('order_line_items') as any)
-    .select('style_no, color_cn, color_en, qty_pcs, purchase_unit_cost, po_unit_price').eq('order_id', orderId);
+    .select('id, style_no, color_cn, color_en, qty_pcs, purchase_unit_cost, po_unit_price').eq('order_id', orderId);
   if (liErr) return { error: `读取逐款明细失败:${liErr.message}` };
   const lines: TradeBulkLine[] = ((liRows || []) as any[]).map((l) => ({
+    id: l.id,
     style_no: l.style_no ?? null,
     color: l.color_cn || l.color_en || null,
     qty: Number(l.qty_pcs) || 0,
@@ -77,7 +78,44 @@ export async function getTradeBulkData(orderId: string): Promise<{
     suppliers,
     canCreate: roles.some((r) => CAN_CREATE.includes(r)),
     canPlace: roles.some((r) => CAN_PLACE.includes(r)),
+    canCost,   // 能看进价的角色(采购/财务/admin)→ 大货采购页可直接录进价
   };
+}
+
+/**
+ * 直接在大货采购页录/改逐款成品进价(2026-07-26 CEO:不该踢去生产任务单填)。
+ * 写 order_line_items.purchase_unit_cost;仅能看底价的角色(采购/财务/admin)可改。已建采购单不影响(改的是明细成本源)。
+ */
+export async function saveTradeLineCosts(
+  orderId: string,
+  updates: Array<{ id: string; purchase_unit_cost: number | null }>,
+): Promise<{ ok?: boolean; updated?: number; error?: string }> {
+  const { supabase, user, roles } = await auth();
+  if (!user) return { error: '请先登录' };
+  const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权操作此订单' };
+  const { hasRoleInGroup } = await import('@/lib/domain/roles');
+  const canCost = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR') || hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
+  if (!canCost) return { error: '仅采购/财务/管理员可录入成品进价' };
+  const clean = (updates || []).filter((u) => u && u.id);
+  if (clean.length === 0) return { ok: true, updated: 0 };
+  for (const u of clean) {
+    if (u.purchase_unit_cost != null && (!Number.isFinite(u.purchase_unit_cost) || u.purchase_unit_cost < 0)) {
+      return { error: '进价必须是 ≥0 的数字' };
+    }
+  }
+  // service-role 写(canCost 已门禁);逐行按 id+order_id 更新,防跨单误改
+  const svc = createServiceRoleClient();
+  let updated = 0;
+  for (const u of clean) {
+    const { data, error } = await (svc.from('order_line_items') as any)
+      .update({ purchase_unit_cost: u.purchase_unit_cost, updated_at: new Date().toISOString() })
+      .eq('id', u.id).eq('order_id', orderId).select('id');
+    if (error) return { error: `保存进价失败:${error.message}` };
+    updated += (data || []).length;
+  }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, updated };
 }
 
 /** 业务建大货采购单草稿:成品款→成品大货采购行 + 采购单(draft)。下达由采购走 placePurchaseOrder。 */
