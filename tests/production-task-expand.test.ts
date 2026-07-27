@@ -88,6 +88,26 @@ describe('生产任务单主表动态扩展(#4)', () => {
     expect(rb.worksheets[0].getImages().length).toBe(0);
   });
 
+  // 款号写入修复(2026-07-27):母版 A7:A10 合并大格(LU21 单款),多款订单每色款号不同,
+  // 合并会让循环写被最后空行清空 → 款号整列丢失。拆合并后每色各自带款号。
+  it('多款号:每个颜色行各自写入款号(不被 A7:A10 合并吞成空)', async () => {
+    const model: any = {
+      internalOrderNumber: '593', styleNumber: '15P02-48', quantityBasis: 'piece',
+      customerPackaging: 'standard', sizeChart: null, requirements: {}, fabrics: [],
+      colors: [
+        { styleNumber: '15P02-48', colorEn: 'Cadet', colorCn: '军蓝色', cartonCount: 0, quantity: 2640, sizes: { '1X': 1320, '2X': 880, '3X': 440 } },
+        { styleNumber: '15G02-00', colorEn: 'Jet Black', colorCn: '黑色', cartonCount: 0, quantity: 5184, sizes: { '1X': 2592, '2X': 1728, '3X': 864 } },
+      ],
+    };
+    const wb = await buildProductionTaskWorkbook(model);
+    const rb = new ExcelJS.Workbook(); await rb.xlsx.load((await wb.xlsx.writeBuffer()) as any);
+    const ws = rb.worksheets[0];
+    const v = (a: string) => String(ws.getCell(a).value ?? '');
+    expect(v('A7')).toBe('15P02-48');   // 第1色款号
+    expect(v('A8')).toBe('15G02-00');   // 第2色款号(合并未拆时这里会是空)
+    expect(v('B7')).toContain('军蓝色');
+  });
+
   it('零串味:finalize 后 sheet 标签名去 LU21、为通用名', async () => {
     const wb = await buildProductionTaskWorkbook(mk(2, ['S', 'M', 'L']) as any);
     finalizeProductionTaskSheetNames(wb);

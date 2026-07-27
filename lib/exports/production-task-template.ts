@@ -163,6 +163,11 @@ export async function buildProductionTaskWorkbook(model: ProductionTaskTemplateM
   let ex = { extraRows: 0, extraCols: 0, sizeCols: ['E', 'F', 'G'] as string[], packCol: 'H', lastCol: 'L' };
   try { ex = expandMainSheet(main, model.colors.length, sizes.length); }
   catch { mainSizes = baseSizes; ex = { extraRows: 0, extraCols: 0, sizeCols: ['E', 'F', 'G'], packCol: 'H', lastCol: 'L' }; }
+  // 款号列拆合并(2026-07-27):母版 A7:A10 是 LU21 单款旧单的合并大格(一个款号管4行)。
+  //   多款订单每色款号不同,但合并后下面循环 A7→A8→…→A10 都落到同一主格,最后一次(空颜色行)把它清空
+  //   → 款号整列丢失(用户截图 A7:A10 空)。拆掉合并,让每个颜色行各自写款号(单款订单则各行重复同款号,无害)。
+  //   (expandMainSheet 扩行时会按原 merges 重合 A7:A10,故须放在其后拆。)
+  try { main.unMergeCells('A7:A10'); } catch { /* 未合并/已拆则忽略 */ }
   // 插行/列后,原 C 映射固定格坐标要位移:列 ≥8 的 +extraCols,行 ≥11 的 +extraRows
   const shift = (addr: string) => {
     const x = /^([A-Z]+)(\d+)$/.exec(addr); if (!x) return addr;
