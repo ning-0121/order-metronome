@@ -63,6 +63,33 @@ export async function getMailDigest(days = 3): Promise<{ data?: MailDigestView; 
   if (error) return { error: error.message };
   const list = (rows || []) as DigestRow[];
 
+  // 自动绑单(2026-07-27 CEO):未绑单邮件按主题里的订单号/款号精确匹配库里订单 → 绑上(客户/负责人随之带出)。
+  //   匹配后持久化到 mail_inbox.order_id,自限:绑上的下次就不在 unbound、不再重算索引。
+  const unbound = list.filter((r) => !r.order_id);
+  if (unbound.length > 0) {
+    try {
+      const [{ data: allOrds }, { data: lis }] = await Promise.all([
+        (supabase.from('orders') as any).select('id, internal_order_no, order_no, created_at').limit(3000),
+        (supabase.from('order_line_items') as any).select('order_id, style_no').not('style_no', 'is', null).limit(8000),
+      ]);
+      const createdById = new Map<string, string>(((allOrds || []) as any[]).map((o) => [o.id, o.created_at || '']));
+      const refRows = [
+        ...((allOrds || []) as any[]),
+        ...((lis || []) as any[]).map((l: any) => ({ id: l.order_id, style_no: l.style_no, created_at: createdById.get(l.order_id) || '' })),
+      ];
+      const { buildOrderRefIndex, matchSubjectToOrder } = await import('@/lib/email/subjectOrderMatch');
+      const idx = buildOrderRefIndex(refRows);
+      const svc = createServiceRoleClient();   // 绕 RLS 写 order_id
+      for (const r of unbound) {
+        const oid = matchSubjectToOrder(r.subject, idx);
+        if (oid) {
+          r.order_id = oid;
+          void (svc.from('mail_inbox') as any).update({ order_id: oid }).eq('id', r.id).then(() => {}, () => {});
+        }
+      }
+    } catch (e) { console.warn('[mail-digest] 主题自动绑单失败(不阻断):', e instanceof Error ? e.message : e); }
+  }
+
   // 富化订单号 + 客户名 + 业务执行负责人(有 order_id 的批量查;负责人优先取邮件 assigned_exec_id)
   const orderIds = [...new Set(list.map((r) => r.order_id).filter(Boolean))] as string[];
   const noMap = new Map<string, string>(), custMap = new Map<string, string>(), orderOwnerMap = new Map<string, string>();
