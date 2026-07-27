@@ -172,6 +172,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   }
   // 建单月筛选:按系统创建日(created_at)的 YYYY-MM 命中。可选月份从当前状态页的订单里取(去重降序)。
   const availableMonths = [...new Set(baseOrders.map((o: any) => String(o.created_at || '').slice(0, 7)).filter((m: string) => /^\d{4}-\d{2}$/.test(m)))].sort().reverse() as string[];
+  // 本月新建单数:当前状态页(进行中/已完成)里建单月命中选定月的订单数(不受客户/搜索等其他筛选影响,是"当月新建"的真数)
+  const monthCount = createdMonthFilter
+    ? baseOrders.filter((o: any) => String(o.created_at || '').slice(0, 7) === createdMonthFilter).length
+    : 0;
   if (createdMonthFilter) {
     filteredOrders = filteredOrders.filter((o: any) => String(o.created_at || '').slice(0, 7) === createdMonthFilter);
   }
@@ -466,10 +470,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             </Link>
           );
         })}
-        {/* 按建单月筛选 */}
+        {/* 按建单月筛选 + 本月新建小计 */}
         {availableMonths.length > 0 && (
-          <span className="ml-2 pl-2 border-l border-gray-200">
+          <span className="ml-2 pl-2 border-l border-gray-200 inline-flex items-center gap-2">
             <OrderMonthFilter months={availableMonths} current={createdMonthFilter} />
+            {createdMonthFilter && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-medium whitespace-nowrap">
+                本月新建 {monthCount} 单
+              </span>
+            )}
           </span>
         )}
       </div>
