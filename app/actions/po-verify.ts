@@ -212,12 +212,23 @@ function compareExtractedDocuments(documents: { type: UploadDocument['type']; da
   for (const [field, label] of [['style_no', '款号'], ['quantity', '数量'], ['delivery_date', '交期'], ['color', '颜色'], ['size_ratio', '尺码配比'], ['packing', '包装方式'], ['craft_requirements', '工艺要求']] as const) {
     const present = values(field).filter(Boolean); if (new Set(present).size > 1) addDifference(field, field === 'quantity' || field === 'delivery_date' ? 'error' : 'warning', `${label}不一致`);
   }
-  for (const [field, label] of [['unit_price', '单价'], ['currency', '币种']] as const) {
-    const all = values(field); const present = all.filter(Boolean);
+  // 单价:三单都要有且一致(金额敏感,缺=硬错)。
+  {
+    const present = values('unit_price').filter(Boolean);
     if (present.length !== documents.length || new Set(present).size > 1) {
-      addDifference(field, 'error', present.length !== documents.length ? `${label}缺失，无法确认三单一致` : `${label}不一致`);
+      addDifference('unit_price', 'error', present.length !== documents.length ? '单价缺失，无法确认三单一致' : '单价不一致');
       const last = differences[differences.length - 1];
-      priceDiffs.push({ field, internalValue: last.internalValue, customerQuoteValue: last.customerQuoteValue, poValue: last.poValue, note: last.note });
+      priceDiffs.push({ field: 'unit_price', internalValue: last.internalValue, customerQuoteValue: last.customerQuoteValue, poValue: last.poValue, note: last.note });
+    }
+  }
+  // 币种:内销单常不写币种(默认人民币),三单都没写 = 一致(默认 CNY),不算差异 —— 别对每张内销单都误报「币种缺失」拦人工复核。
+  //   只有【明确写了且互相矛盾】(如一单 USD 一单 CNY)才报错。修:不再把"三单都缺币种"当硬错(节拍器检查项过严 bug)。
+  {
+    const present = values('currency').filter(Boolean);
+    if (new Set(present).size > 1) {
+      addDifference('currency', 'error', '币种不一致');
+      const last = differences[differences.length - 1];
+      priceDiffs.push({ field: 'currency', internalValue: last.internalValue, customerQuoteValue: last.customerQuoteValue, poValue: last.poValue, note: last.note });
     }
   }
   const risks = documents.flatMap(item => item.data.risks.map(risk => `${item.type}: ${risk.label} ${risk.detail}`));
