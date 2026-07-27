@@ -39,10 +39,12 @@ const PRODUCTION_QC = ['production', 'production_manager', 'qc', 'quality', 'mer
  * (mo_released 自动完成;procurement_order_placed / production_kickoff / payment_received 单方)
  */
 export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]> = {
-  // 1. PO审查确认 = 业务执行经理 + 财务 双审(2026-07-25 CEO 拍板:PO 必经业务执行经理审核 + 财务审核,预算单到财务)。硬闸。
+  // 1. PO审查确认 = 业务执行经理 + 财务 会签。2026-07-27 CEO 改回【软会签】(见 SOFT_CONFIRM_STEPS):
+  //    业务可独立完成,不被财务/主管不点卡死逾期;财务/业务执行经理仍在「多方确认」区看到可选确认(留痕+提醒)。
+  //    (2026-07-25 曾改硬闸,实操中催不动→责任人常年逾期,故回退)。
   po_confirmed: [
-    { key: 'exec_mgr', label: '业务执行经理', roles: ['order_manager', 'sales_manager'], hint: 'PO 内容/交期/要点/客户要求 审核通过' },
-    { key: 'finance', label: '财务', roles: FINANCE, hint: '价格/账期/额度审核 + 预算录入' },
+    { key: 'exec_mgr', label: '业务执行经理', roles: ['order_manager', 'sales_manager'], hint: 'PO 内容/交期/要点/客户要求 审核(可选会签)' },
+    { key: 'finance', label: '财务', roles: FINANCE, hint: '价格/账期/额度审核 + 预算录入(可选会签)' },
   ],
   // 产前样确认 = 采购(原辅料大货品质) + 业务执行(客户/自确认) 双确认
   pre_production_sample_approved: [
