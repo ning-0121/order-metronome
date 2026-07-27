@@ -91,7 +91,7 @@ export function NettingClient() {
     const res = await createPurchaseOrder({ supplierId, lineItemIds: checkedLineIds, mergeSameMaterials });
     setSubmitting(false);
     if (res.error) { setMsg({ ok: false, text: res.error }); return; }
-    setMsg({ ok: true, text: `✅ 已建采购单 ${res.poNo}` });
+    setMsg({ ok: true, text: `✅ 已建采购单 ${res.poNo}${res.budgetWarning ? '　' + res.budgetWarning : ''}` });
     setSupplierId('');
     load();
   }

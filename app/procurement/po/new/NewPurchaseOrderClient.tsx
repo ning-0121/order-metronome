@@ -67,6 +67,7 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
     const res = await createPurchaseOrder({ supplierId, lineItemIds, paymentTerms, deliveryDate: deliveryDate || undefined, mergeSameMaterials });
     setSaving(false);
     if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
+    if (res.budgetWarning) { await confirm({ title: res.budgetWarning, message: '草稿已建,可继续填价/备料;下达时须先过财务前置审批。', confirmText: '知道了' }); }
     router.push(`/procurement/po/${res.id}`);
   }
 

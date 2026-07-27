@@ -98,7 +98,7 @@ export async function createPurchaseOrder(input: {
   notes?: string;
   /** C:合并同料 —— 导出给供应商时同 consolidation_key 行并为一行;DB 行不合并(order_id peg 不丢) */
   mergeSameMaterials?: boolean;
-}): Promise<{ id?: string; poNo?: string; error?: string }> {
+}): Promise<{ id?: string; poNo?: string; budgetWarning?: string; error?: string }> {
   const { supabase, roles, userId } = await authRoles();
   if (!userId) return { error: '请先登录' };
   if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购可建采购单' };
@@ -153,19 +153,27 @@ export async function createPurchaseOrder(input: {
   const total = keepIds.reduce((s, id) => s + (amountById.get(id) || 0), 0);
   const orderIds = [...new Set(rows.filter((r) => keepIds.includes(r.id)).map((r) => r.order_id).filter(Boolean))];
 
-  // ── 预算确认硬闸门(2026-07-11 老板拍板) ──────────────────────────
-  // 财务完成 PO 审批(预算审批通过)回传 budget.confirmed 落 order_finance_events;
-  // 没收到确认的订单不得下采购(业务执行第一节点先过财务)。
-  // 紧急放行:环境变量 BUDGET_GATE_ENFORCE=false(默认开闸门)。
+  // ── 预算确认闸(2026-07-11 老板拍板;2026-07-27 降级为提醒)──────────────────
+  // 原为归采硬闸:自产单缺财务 budget.confirmed 连草稿都不给建 → 死锁(采购到不了下达,财务队列反而空着)。
+  // 老板 2026-07-27 拍板改为:归采只【提醒】不拦(采购能先建草稿/填价/备料);真正的硬卡放在【下达 placePurchaseOrder】——
+  //   下达时所有单一律强制走财务前置审批(threshold=0),单子这时才进财务队列 → 财务看得到、批得了,钱不失控。
+  // 成品采购(order_purpose='trade')单本就没面料预算这一口径,连提醒都不发(下达时同样走财务前置审批)。
+  // 紧急全关:环境变量 BUDGET_GATE_ENFORCE=false。
+  let budgetWarning: string | undefined;
   if (process.env.BUDGET_GATE_ENFORCE !== 'false' && orderIds.length > 0) {
-    const { data: evts } = await (svc.from('order_finance_events') as any)
-      .select('order_id').eq('event_type', 'budget.confirmed').in('order_id', orderIds);
-    const confirmed = new Set(((evts || []) as any[]).map((e) => e.order_id));
-    const missingBudget = orderIds.filter((id) => !confirmed.has(id));
-    if (missingBudget.length > 0) {
-      const { data: ords } = await (svc.from('orders') as any).select('id, order_no, internal_order_no').in('id', missingBudget);
-      const names = ((ords || []) as any[]).map((o) => o.internal_order_no || o.order_no || String(o.id).slice(0, 8)).join('、');
-      return { error: `财务未完成 PO 审批(预算未确认):${names || missingBudget.length + ' 个订单'} —— 请先在财务系统提交预算并审批通过,再下采购` };
+    const { data: ordsMeta } = await (svc.from('orders') as any)
+      .select('id, order_no, internal_order_no, order_purpose').in('id', orderIds);
+    const metaById = new Map<string, any>(((ordsMeta || []) as any[]).map((o) => [o.id, o]));
+    const gatedIds = orderIds.filter((id) => (metaById.get(id)?.order_purpose) !== 'trade');
+    if (gatedIds.length > 0) {
+      const { data: evts } = await (svc.from('order_finance_events') as any)
+        .select('order_id').eq('event_type', 'budget.confirmed').in('order_id', gatedIds);
+      const confirmed = new Set(((evts || []) as any[]).map((e) => e.order_id));
+      const missingBudget = gatedIds.filter((id) => !confirmed.has(id));
+      if (missingBudget.length > 0) {
+        const names = missingBudget.map((id) => { const o = metaById.get(id); return o?.internal_order_no || o?.order_no || String(id).slice(0, 8); }).join('、');
+        budgetWarning = `⚠️ 财务尚未确认预算:${names}。可先建草稿/填价/备料,但【下达】时须先过财务前置审批才能真正下单。`;
+      }
     }
   }
 
@@ -240,7 +248,7 @@ export async function createPurchaseOrder(input: {
   }
 
   revalidatePath('/procurement/po');
-  return { id: poId, poNo };
+  return { id: poId, poNo, budgetWarning };
 }
 
 /**
@@ -838,6 +846,47 @@ export async function updateProcurementLineSize(poId: string, lineId: string, si
   if (error) return { error: '保存尺码失败:' + error.message };
   revalidatePath(`/procurement/po/${poId}`);
   return { ok: true };
+}
+
+/**
+ * 手填/改采购行底价 unit_price(仅采购、仅草稿)。归料生成的草稿单常无底价(¥0)→ 采购点「去填价」进来补录。
+ * unit_price 列级封锁,走 service-role 写;ordered_amount 是 GENERATED 列(unit_price×ordered_qty)自动重算,
+ * 写完回算单头 total_amount(与删行同口径)。传 null/空 = 清空底价。
+ */
+export async function updateProcurementLineFloorPrice(poId: string, lineId: string, unitPrice: number | null): Promise<{ ok?: boolean; total?: number; error?: string }> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购/财务可填底价' };
+  const { data: po } = await (supabase.from('purchase_orders') as any).select('id, status').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') return { error: '仅「草稿」采购单可填底价;已下单/审批中的请先撤回。' };
+
+  let clean: number | null = null;
+  if (unitPrice !== null && unitPrice !== undefined && String(unitPrice).trim() !== '') {
+    const n = Number(unitPrice);
+    if (!Number.isFinite(n) || n < 0) return { error: '底价须为 ≥0 的数字' };
+    clean = Math.round(n * 10000) / 10000;
+  }
+
+  const svc = createServiceRoleClient();
+  const { data: line } = await (svc.from('procurement_line_items') as any).select('id, purchase_order_id').eq('id', lineId).maybeSingle();
+  if (!line || (line as any).purchase_order_id !== poId) return { error: '采购行不存在或不属于本单' };
+  const { error } = await (svc.from('procurement_line_items') as any)
+    .update({ unit_price: clean, updated_at: new Date().toISOString() }).eq('id', lineId).eq('purchase_order_id', poId);
+  if (error) return { error: '保存底价失败:' + error.message };
+
+  // 回算单头总额(剩余未取消行 ordered_amount 之和;GENERATED 列已按新底价重算)
+  const { data: rest } = await (svc.from('procurement_line_items') as any)
+    .select('ordered_amount, line_status').eq('purchase_order_id', poId);
+  const total = ((rest || []) as any[]).filter((l) => l.line_status !== 'cancelled')
+    .reduce((s, l) => s + (Number(l.ordered_amount) || 0), 0);
+  const total2 = Math.round(total * 100) / 100;
+  await (svc.from('purchase_orders') as any)
+    .update({ total_amount: total2, updated_at: new Date().toISOString() }).eq('id', poId);
+
+  revalidatePath(`/procurement/po/${poId}`);
+  revalidatePath('/procurement');
+  return { ok: true, total: total2 };
 }
 
 /**

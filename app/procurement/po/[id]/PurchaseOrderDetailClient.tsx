@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine, updateProcurementLineSize } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine, updateProcurementLineSize, updateProcurementLineFloorPrice } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { submitPurchaseDeposit } from '@/app/actions/procurement-payment';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -32,6 +32,34 @@ function EditableSizeCell({ poId, lineId, size, canEdit }: { poId: string; lineI
       placeholder="XS/S/M…" className="w-16 text-center text-[11px] border rounded px-1 py-0.5" />;
   }
   return <button onClick={() => setEditing(true)} className={`text-[10px] px-1.5 py-0.5 rounded-full ${size ? 'bg-teal-50 text-teal-700' : 'border border-dashed border-gray-300 text-gray-400'} hover:ring-1 hover:ring-teal-300`} title="点击改尺码">{saving ? '…' : (size || '+尺码')}</button>;
+}
+
+/** 采购行底价:草稿单采购/财务可点击手填(归料生成的草稿单常无价 ¥0);非草稿或无权只读展示。 */
+function EditableFloorPriceCell({ poId, lineId, unitPrice, canEdit }: { poId: string; lineId: string; unitPrice: number | null; canEdit: boolean }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(unitPrice != null ? String(unitPrice) : '');
+  const [saving, setSaving] = useState(false);
+  const display = unitPrice != null ? <span className="font-mono">{unitPrice}</span> : <span className="text-gray-300">—</span>;
+  if (!canEdit) return display;
+  async function save() {
+    setEditing(false);
+    const norm = (val || '').trim();
+    if (norm === (unitPrice != null ? String(unitPrice) : '')) return;
+    setSaving(true);
+    const res = await updateProcurementLineFloorPrice(poId, lineId, norm === '' ? null : Number(norm));
+    setSaving(false);
+    if (res.error) { alert(res.error); setVal(unitPrice != null ? String(unitPrice) : ''); return; }
+    router.refresh();
+  }
+  if (editing) {
+    return <input autoFocus type="number" min="0" step="0.0001" value={val} disabled={saving} onChange={e => setVal(e.target.value)}
+      onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setVal(unitPrice != null ? String(unitPrice) : ''); setEditing(false); } }}
+      placeholder="底价" className="w-20 text-right text-[11px] border rounded px-1 py-0.5" />;
+  }
+  return <button onClick={() => setEditing(true)} title="点击填/改底价"
+    className={`text-[11px] px-1.5 py-0.5 rounded ${unitPrice != null ? 'font-mono hover:ring-1 hover:ring-indigo-300' : 'border border-dashed border-gray-300 text-gray-400 hover:text-indigo-600 hover:border-indigo-300'}`}>
+    {saving ? '…' : (unitPrice != null ? unitPrice : '+填价')}</button>;
 }
 
 const REASON_LABELS: Record<string, string> = {
@@ -488,7 +516,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                         {(l.chase_count ?? 0) > 0 && <span className="block text-[10px] text-amber-600 mt-0.5">催{l.chase_count}次{l.last_chased_at ? ` ${String(l.last_chased_at).slice(5, 10)}` : ''}</span>}
                       </td>
                       <td className="px-3 py-2 text-right">{l.price_baseline ?? '—'}</td>
-                      {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.unit_price ?? '—'}</td>}
+                      {canSeeFloor && <td className="px-3 py-2 text-right"><EditableFloorPriceCell poId={po.id} lineId={l.id} unitPrice={l.unit_price ?? null} canEdit={!!canEditLines} /></td>}
                       {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.ordered_amount ?? '—'}</td>}
                       {canEditLines && (
                         <td className="px-3 py-2 text-center">
