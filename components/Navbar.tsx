@@ -13,6 +13,7 @@ interface NavbarProps {
   isProcurement?: boolean;
   isProduction?: boolean;
   isFinance?: boolean;
+  isSupervisor?: boolean;
   knowledgeLayer?: boolean;   // Knowledge Layer K1 学习中心（flag 灰度）
 }
 
@@ -28,7 +29,7 @@ interface NavSection {
   links: NavLink[];
 }
 
-export function Navbar({ isAdmin = false, isProcurement = false, isProduction = false, isFinance = false, knowledgeLayer = false }: NavbarProps) {
+export function Navbar({ isAdmin = false, isProcurement = false, isProduction = false, isFinance = false, isSupervisor = false, knowledgeLayer = false }: NavbarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingPriceCount, setPendingPriceCount] = useState(0);
@@ -64,6 +65,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/orders/from-araos', label: 'araos 待建单', icon: '📥' },
             { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
             { href: '/production', label: '生产中心', icon: '🏭' },
+            { href: '/supervision', label: '督办总览', icon: '🩺' },
             { href: '/analytics', label: '数据分析', icon: '📊' },
             ...(isFinance ? [{ href: '/api/finance-sso', label: '进入财务系统', icon: '💳', external: true }] : []),
           ],
@@ -121,6 +123,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
               ? { href: '/procurement', label: '采购中心', icon: '🛒' }
               : { href: '/briefing', label: '今日简报', icon: '📧' },
             ...(isProduction ? [{ href: '/production', label: '生产中心', icon: '🏭' }] : []),
+            ...(isSupervisor ? [{ href: '/supervision', label: '督办总览', icon: '🩺' }] : []),
             ...(isFinance ? [{ href: '/api/finance-sso', label: '进入财务系统', icon: '💳', external: true }] : []),
           ],
         },
