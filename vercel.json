@@ -34,6 +34,10 @@
       "schedule": "0,30 * * * *"
     },
     {
+      "path": "/api/cron/production-scheduling-reminder",
+      "schedule": "0 1 * * *"
+    },
+    {
       "path": "/api/cron/daily-briefing",
       "schedule": "0 0 * * *"
     },
