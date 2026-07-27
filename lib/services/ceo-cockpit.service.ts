@@ -26,11 +26,12 @@ export const DEPT_META: { key: string; label: string; href: string }[] = [
   { key: 'fin', label: '财务', href: '/dashboard' },
 ];
 
+export interface CeoOrderRef { orderNo: string; orderId: string; node: string; days?: number }
 export interface CeoCockpit {
-  A: { total: number; groups: { key: string; label: string; count: number }[]; suspiciousDelays: { orderNo: string; customer: string; days: number; reason: string }[] };
-  B: { key: string; label: string; href: string; active: number; overdue: number; blocked: number; pendingDelay: number }[];
-  C: { newOrders7d: number; newOrders30d: number; completed7d: number; sampleActive: number; newSuppliers7d: number; newFactories7d: number; recent: { orderNo: string; customer: string; at: string; purpose: string }[] };
-  D: { matters: { customer: string; title: string; severity: string; orderNo: string | null }[]; stuck: { orderNo: string; customer: string; node: string; days: number }[] };
+  A: { total: number; groups: { key: string; label: string; count: number }[]; suspiciousDelays: { orderNo: string; orderId: string; customer: string; days: number; reason: string }[] };
+  B: { key: string; label: string; href: string; active: number; overdue: number; blocked: number; pendingDelay: number; overdueOrders: CeoOrderRef[] }[];
+  C: { newOrders7d: number; newOrders30d: number; completed7d: number; sampleActive: number; newSuppliers7d: number; newFactories7d: number; recent: { orderNo: string; orderId: string; customer: string; at: string; purpose: string }[] };
+  D: { matters: { customer: string; title: string; severity: string; orderNo: string | null; orderId: string | null }[]; stuck: { orderNo: string; orderId: string; customer: string; node: string; days: number }[] };
   E: { name: string; deptLabel: string; active: number; overdue: number; done30d: number; onTimePct: number | null }[];
 }
 
@@ -70,12 +71,13 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
     byOrder.set(d.order_id, cur);
   }
   const suspiciousDelays = [...byOrder.entries()].filter(([, v]) => v.maxDays >= 21 || v.count >= 2)
-    .map(([oid, v]) => { const o = orderById.get(oid); return { orderNo: o?.internal_order_no || o?.order_no || String(oid).slice(0, 8), customer: o?.customer_name || '', days: v.maxDays, reason: v.count >= 2 ? `同单 ${v.count} 次延期` : `单次 ${v.maxDays} 天` }; })
+    .map(([oid, v]) => { const o = orderById.get(oid); return { orderNo: o?.internal_order_no || o?.order_no || String(oid).slice(0, 8), orderId: oid, customer: o?.customer_name || '', days: v.maxDays, reason: v.count >= 2 ? `同单 ${v.count} 次延期` : `单次 ${v.maxDays} 天` }; })
     .sort((a, b) => b.days - a.days).slice(0, 8);
 
-  // ── B:五部门健康/异常 ──
+  // ── B:五部门健康/异常(每部门收集逾期订单清单,供点开看详情)──
   const deptAgg: Record<string, { active: number; overdue: number; blocked: number; pendingDelay: number }> = {};
-  for (const m of DEPT_META) deptAgg[m.key] = { active: 0, overdue: 0, blocked: 0, pendingDelay: 0 };
+  const deptOverdue: Record<string, Map<string, { node: string; days: number }>> = {};
+  for (const m of DEPT_META) { deptAgg[m.key] = { active: 0, overdue: 0, blocked: 0, pendingDelay: 0 }; deptOverdue[m.key] = new Map(); }
   for (const mm of milestones) {
     const dept = DEPT_OF_ROLE[String(mm.owner_role || '').toLowerCase()];
     if (!dept || !deptAgg[dept]) continue;
@@ -83,10 +85,17 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
     if (isDone(mm.status)) continue;
     deptAgg[dept].active += 1;
     if (st === 'blocked' || st === '卡单' || st === '卡住') deptAgg[dept].blocked += 1;
-    if (isOverdue(mm)) deptAgg[dept].overdue += 1;   // 已申请延期(待批)不计逾期
+    if (isOverdue(mm)) {   // 已申请延期(待批)不计逾期
+      deptAgg[dept].overdue += 1;
+      const days = mm.due_at ? Math.max(0, Math.floor((now - new Date(mm.due_at).getTime()) / 86400000)) : 0;
+      const prev = deptOverdue[dept].get(mm.order_id);
+      if (!prev || days > prev.days) deptOverdue[dept].set(mm.order_id, { node: mm.name || '', days });  // 每单取最久逾期节点
+    }
   }
-  // 待审批延期按部门(粗口径:按 delay 所在订单当前部门略,统一挂"订单执行"监控)
-  const B = DEPT_META.map((m) => ({ key: m.key, label: m.label, href: m.href, ...deptAgg[m.key] }));
+  const B = DEPT_META.map((m) => ({
+    key: m.key, label: m.label, href: m.href, ...deptAgg[m.key],
+    overdueOrders: [...deptOverdue[m.key].entries()].map(([oid, v]) => { const o = orderById.get(oid); return { orderNo: o?.internal_order_no || o?.order_no || String(oid).slice(0, 8), orderId: oid, node: v.node, days: v.days }; }).sort((a, b) => b.days - a.days).slice(0, 20),
+  }));
 
   // ── C:新增情况 ──
   const newOrders7d = ((orders || []) as any[]).filter((o) => o.created_at >= d7).length;
@@ -96,13 +105,13 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   let newSuppliers7d = 0, newFactories7d = 0;
   try { const { count } = await supabase.from('suppliers').select('id', { count: 'exact', head: true }).gte('created_at', d7); newSuppliers7d = count || 0; } catch { /* 表/列缺失忽略 */ }
   try { const { count } = await supabase.from('factories').select('id', { count: 'exact', head: true }).gte('created_at', d7); newFactories7d = count || 0; } catch { /* 无 factories 表忽略 */ }
-  const recent = ((orders || []) as any[]).slice(0, 8).map((o) => ({ orderNo: o.internal_order_no || o.order_no, customer: o.customer_name || '', at: String(o.created_at || '').slice(0, 10), purpose: String(o.order_purpose || 'production') }));
+  const recent = ((orders || []) as any[]).slice(0, 8).map((o) => ({ orderNo: o.internal_order_no || o.order_no, orderId: o.id, customer: o.customer_name || '', at: String(o.created_at || '').slice(0, 10), purpose: String(o.order_purpose || 'production') }));
 
   // ── D:需关注客户/订单 ──
   let matters: CeoCockpit['D']['matters'] = [];
   try {
-    const { data: cm } = await supabase.from('customer_matters').select('customer_name, order_no, severity, title').order('detected_at', { ascending: false }).limit(10);
-    matters = ((cm || []) as any[]).map((r) => ({ customer: r.customer_name || '', title: r.title || '', severity: r.severity || 'info', orderNo: r.order_no || null }));
+    const { data: cm } = await supabase.from('customer_matters').select('customer_name, order_id, order_no, severity, title').order('detected_at', { ascending: false }).limit(10);
+    matters = ((cm || []) as any[]).map((r) => ({ customer: r.customer_name || '', title: r.title || '', severity: r.severity || 'info', orderNo: r.order_no || null, orderId: r.order_id || null }));
   } catch { /* 表缺失忽略 */ }
   // 卡住订单:有 blocked 里程碑
   const stuckMap = new Map<string, { node: string; days: number }>();
@@ -112,7 +121,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
       if (!stuckMap.has(mm.order_id)) stuckMap.set(mm.order_id, { node: mm.name || '', days: mm.due_at ? Math.max(0, Math.floor((now - new Date(mm.due_at).getTime()) / 86400000)) : 0 });
     }
   }
-  const stuck = [...stuckMap.entries()].map(([oid, v]) => { const o = orderById.get(oid); return { orderNo: o?.internal_order_no || o?.order_no || String(oid).slice(0, 8), customer: o?.customer_name || '', node: v.node, days: v.days }; }).sort((a, b) => b.days - a.days).slice(0, 8);
+  const stuck = [...stuckMap.entries()].map(([oid, v]) => { const o = orderById.get(oid); return { orderNo: o?.internal_order_no || o?.order_no || String(oid).slice(0, 8), orderId: oid, customer: o?.customer_name || '', node: v.node, days: v.days }; }).sort((a, b) => b.days - a.days).slice(0, 8);
 
   // ── E:员工工作报告 ──
   const empIds = [...new Set(milestones.map((m) => m.owner_user_id).filter(Boolean))] as string[];

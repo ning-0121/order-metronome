@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getCeoCockpit } from '@/lib/services/ceo-cockpit.service';
+import { CeoDeptBoard } from '@/components/ceo/CeoDeptBoard';
 
 /**
  * CEO 驾驶舱(2026-07-27):A 需我审批 · B 五部门异常 · C 新增 · D 需关注客户/订单 · E 员工报告。
@@ -52,7 +53,7 @@ export async function CeoCockpit({ userId, roles }: { userId: string; roles: str
               <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-2">
                 <div className="text-[11px] font-semibold text-amber-700 mb-1">⚠️ 可疑延期(大额/同单反复,建议我看一眼)</div>
                 <ul className="space-y-0.5 text-xs text-gray-700">
-                  {c.A.suspiciousDelays.map((d, i) => <li key={i}><b>{d.orderNo}</b> · {d.customer} — {d.reason}</li>)}
+                  {c.A.suspiciousDelays.map((d, i) => <li key={i}><Link href={`/orders/${d.orderId}`} className="hover:underline"><b className="text-indigo-700">{d.orderNo}</b> · {d.customer} — {d.reason} ›</Link></li>)}
                 </ul>
               </div>
             )}
@@ -60,24 +61,9 @@ export async function CeoCockpit({ userId, roles }: { userId: string; roles: str
         )}
       </Card>
 
-      {/* B 五部门 */}
-      <Card title="B · 五部门工作与异常" hint="按进度推进 · 红=逾期 橙=卡住">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
-          {c.B.map((d) => (
-            <Link key={d.key} href={d.href} className="rounded-xl border border-gray-100 bg-gray-50/50 p-3 hover:border-indigo-200 hover:bg-white">
-              <div className="text-xs font-semibold text-gray-700 mb-1">{d.label}</div>
-              <div className="flex items-end gap-2">
-                <span className="text-lg font-bold text-gray-800">{d.active}</span>
-                <span className="text-[10px] text-gray-400 mb-0.5">在办</span>
-              </div>
-              <div className="mt-1 flex gap-2 text-[11px]">
-                {d.overdue > 0 && <span className="text-rose-600">逾期 {d.overdue}</span>}
-                {d.blocked > 0 && <span className="text-amber-600">卡住 {d.blocked}</span>}
-                {d.overdue === 0 && d.blocked === 0 && <span className="text-emerald-600">正常</span>}
-              </div>
-            </Link>
-          ))}
-        </div>
+      {/* B 五部门 —— 点「逾期 N」展开看具体订单 */}
+      <Card title="B · 五部门工作与异常" hint="点「逾期 N」看具体订单 · 红=逾期 橙=卡住">
+        <CeoDeptBoard depts={c.B} />
       </Card>
 
       {/* C 新增情况 */}
@@ -93,7 +79,7 @@ export async function CeoCockpit({ userId, roles }: { userId: string; roles: str
         {c.C.recent.length > 0 && (
           <ul className="mt-2 divide-y divide-gray-100 text-xs">
             {c.C.recent.map((o, i) => (
-              <li key={i} className="flex justify-between py-1 text-gray-600"><span><b>{o.orderNo}</b> · {o.customer}{o.purpose !== 'production' ? ` · ${o.purpose === 'sample' ? '打样' : o.purpose === 'trade' ? '经销' : o.purpose}` : ''}</span><span className="text-gray-400">{o.at}</span></li>
+              <li key={i}><Link href={`/orders/${o.orderId}`} className="flex justify-between py-1 text-gray-600 hover:bg-gray-50 rounded px-1"><span><b className="text-indigo-700">{o.orderNo}</b> · {o.customer}{o.purpose !== 'production' ? ` · ${o.purpose === 'sample' ? '打样' : o.purpose === 'trade' ? '经销' : o.purpose}` : ''}</span><span className="text-gray-400">{o.at} ›</span></Link></li>
             ))}
           </ul>
         )}
@@ -109,12 +95,10 @@ export async function CeoCockpit({ userId, roles }: { userId: string; roles: str
               <div className="text-[11px] font-semibold text-gray-500 mb-1">客户事项</div>
               {c.D.matters.length === 0 ? <p className="text-xs text-gray-400">无</p> : (
                 <ul className="space-y-1 text-xs">
-                  {c.D.matters.map((m, i) => (
-                    <li key={i} className="flex items-start gap-1.5">
-                      <span className={`shrink-0 rounded px-1 text-[10px] ${m.severity === 'high' || m.severity === '高' ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-600'}`}>{m.customer || '客户'}</span>
-                      <span className="text-gray-700">{m.title}{m.orderNo ? ` · ${m.orderNo}` : ''}</span>
-                    </li>
-                  ))}
+                  {c.D.matters.map((m, i) => {
+                    const body = (<><span className={`shrink-0 rounded px-1 text-[10px] ${m.severity === 'high' || m.severity === '高' ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-600'}`}>{m.customer || '客户'}</span><span className="text-gray-700">{m.title}{m.orderNo ? ` · ${m.orderNo}` : ''}{m.orderId ? ' ›' : ''}</span></>);
+                    return <li key={i} className="flex items-start gap-1.5">{m.orderId ? <Link href={`/orders/${m.orderId}`} className="flex items-start gap-1.5 hover:bg-gray-50 rounded px-0.5">{body}</Link> : body}</li>;
+                  })}
                 </ul>
               )}
             </div>
@@ -123,7 +107,7 @@ export async function CeoCockpit({ userId, roles }: { userId: string; roles: str
               {c.D.stuck.length === 0 ? <p className="text-xs text-gray-400">无</p> : (
                 <ul className="space-y-1 text-xs">
                   {c.D.stuck.map((s, i) => (
-                    <li key={i} className="text-gray-700"><b>{s.orderNo}</b> · {s.customer} — {s.node}{s.days > 0 ? ` (卡 ${s.days} 天)` : ''}</li>
+                    <li key={i}><Link href={`/orders/${s.orderId}`} className="block text-gray-700 hover:bg-gray-50 rounded px-0.5"><b className="text-indigo-700">{s.orderNo}</b> · {s.customer} — {s.node}{s.days > 0 ? ` (卡 ${s.days} 天)` : ''} ›</Link></li>
                   ))}
                 </ul>
               )}

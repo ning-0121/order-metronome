@@ -76,7 +76,6 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/my-customers', label: '我的客户', icon: '👤' },
             { href: '/customers', label: '客户管理', icon: '🤝' },
             { href: '/sales-targets', label: '客户年度目标', icon: '🎯' },
-            { href: '/quoter', label: '报价员', icon: '💰' },
             { href: '/factories', label: '工厂管理', icon: '🏭' },
             { href: '/products', label: '产品款库', icon: '🧬' },
             { href: '/material-master', label: '物料主数据', icon: '🧱' },
@@ -88,18 +87,18 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
           links: [
             { href: '/ai-knowledge', label: 'AI 知识库', icon: '🧠' },
             ...(knowledgeLayer ? [{ href: '/learning', label: '学习中心', icon: '🎓' }] : []),
+            { href: '/quoter', label: 'AI 报价员', icon: '💰' },
             { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
           ],
         },
         {
+          // 治理精简(2026-07-27 CEO):删 逾期治理/延误排行榜(驾驶舱 B 区已覆盖)、今日邮件晨报(并入我的节拍/邮件归纳);
+          //   客户节奏→客户风格(学客户习惯)。价格审批暂留(仍是 CEO 建单价格闸)。
           label: '治理',
           links: [
             { href: '/admin/price-approvals', label: '价格审批', icon: '💰', badge: 'price' },
             { href: '/admin/system-health', label: '系统守护', icon: '🛡' },
-            { href: '/admin/overdue', label: '逾期治理', icon: '🚨' },
-            { href: '/admin/delay-hotspots', label: '延误排行榜', icon: '📉' },
-            { href: '/admin/customer-schedules', label: '客户节奏', icon: '🎼' },
-            { href: '/admin/mail-monitor', label: '今日邮件晨报', icon: '📧' },
+            { href: '/admin/customer-schedules', label: '客户风格', icon: '🎼' },
           ],
         },
         {
@@ -131,7 +130,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
           label: '工具',
           links: [
             { href: '/sales-targets', label: '年度目标', icon: '🎯' },
-            { href: '/quoter', label: '报价员', icon: '💰' },
+            { href: '/quoter', label: 'AI 报价员', icon: '💰' },
             { href: '/products', label: '产品款库', icon: '🧬' },
             { href: '/material-master', label: '物料主数据', icon: '🧱' },
             ...(knowledgeLayer ? [{ href: '/learning', label: '学习中心', icon: '🎓' }] : []),
