@@ -44,6 +44,7 @@ type WebhookEventType =
   | 'file.uploaded'
   | 'shipping_invoice.issued'
   | 'payable.created'
+  | 'receivable.created'   // 应收(先用于打样费;data.kind='sample_fee')。财务侧据此建应收账款,收款后回传 payment.completed
 
 interface WebhookPayload {
   event: WebhookEventType
@@ -207,6 +208,18 @@ export async function syncOrderToFinance(order: Record<string, unknown>, event: 
 /** 订单完成时通知财务系统 */
 export async function notifyOrderCompleted(order: Record<string, unknown>) {
   return sendToFinanceSystem('order.completed', order)
+}
+
+/**
+ * 打样费应收 → 推财务系统建应收账款(2026-07-27)。开关 SAMPLE_FEE_FINANCE_PUSH!=='on' 时不推(财务侧接口就绪前默认关,
+ * 避免未识别事件 dead-letter 告警)。财务收款后走 finance-callback 回传 payment.completed / collection.received 即可。
+ */
+export async function pushSampleFeeReceivable(payload: {
+  qimo_order_id: string; order_no?: string | null; internal_order_no?: string | null;
+  customer_name?: string | null; amount: number; currency?: string; bearer?: string | null;
+}) {
+  if (process.env.SAMPLE_FEE_FINANCE_PUSH !== 'on') return { success: true as const, skipped: true as const }
+  return sendToFinanceSystem('receivable.created', { kind: 'sample_fee', currency: 'CNY', ...payload })
 }
 
 /** 订单取消时通知财务系统 */

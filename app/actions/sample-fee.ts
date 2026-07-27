@@ -68,6 +68,10 @@ export async function saveSampleFee(orderId: string, amount: number | null, bear
         type: 'sample_fee_receivable', title: `💰 打样费应收 ¥${newReceivable}:${no}`,
         message: `打样单 ${no} 的打样费 ¥${newReceivable} 由客户承担,请开票并收款。`, relatedOrderId: orderId,
       });
+      // 推外部财务系统建应收账款(开关 SAMPLE_FEE_FINANCE_PUSH=on 时生效;财务侧接口就绪前默认关)
+      const { data: co } = await (svc.from('orders') as any).select('customer_name, order_no, internal_order_no').eq('id', orderId).maybeSingle();
+      const { pushSampleFeeReceivable } = await import('@/lib/integration/finance-sync');
+      await pushSampleFeeReceivable({ qimo_order_id: orderId, order_no: (co as any)?.order_no, internal_order_no: (co as any)?.internal_order_no, customer_name: (co as any)?.customer_name, amount: newReceivable, bearer: b });
     } catch (e) { console.warn('[sample-fee] 应收联动失败(不阻断):', e instanceof Error ? e.message : e); }
   }
 
