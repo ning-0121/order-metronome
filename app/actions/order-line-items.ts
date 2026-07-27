@@ -296,3 +296,48 @@ export async function saveOrderLineItems(orderId: string, styles: any[], sizeOrd
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, styles: (styles || []).length, lines: rows.length, total: rows.reduce((s, r) => s + (r.qty_pcs || 0), 0) };
 }
+
+/**
+ * PI 成交价快录(2026-07-27 CEO)——在 PI 节点表单就地录逐款客户成交价,免绕「生产任务单」tab。
+ * 只读/写 po_unit_price(款级同值);仅 CAN_SEE_FINANCIALS(财务/业务/admin)可见可写。返回按 style_no 去重的款列表。
+ */
+export async function getOrderDealPrices(orderId: string): Promise<{ canEdit?: boolean; styles?: Array<{ style_no: string; product_name: string; po_unit_price: string }>; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+  const { canSeeFin } = await financialsVisibility(supabase, user.id);
+  if (!canSeeFin) return { canEdit: false, styles: [] };   // 无财务口径 → 不渲染录价框(生产/QC 等)
+  const { data: li, error } = await (supabase.from('order_line_items') as any)
+    .select('style_no, product_name, po_unit_price, line_no').eq('order_id', orderId).order('line_no');
+  if (error) return { error: error.message };
+  const seen = new Map<string, { style_no: string; product_name: string; po_unit_price: string }>();
+  for (const r of (li || [])) {
+    const key = (r.style_no || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.set(key, { style_no: key, product_name: r.product_name || '', po_unit_price: r.po_unit_price != null ? String(r.po_unit_price) : '' });
+  }
+  return { canEdit: true, styles: [...seen.values()] };
+}
+
+/** 保存逐款成交价(款级同值写该款每行);仅 CAN_SEE_FINANCIALS。轻量 update,不动其它明细字段。 */
+export async function saveOrderDealPrices(orderId: string, updates: Array<{ style_no: string; po_unit_price: string | number | null }>): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权编辑此订单' };
+  const { canSeeFin } = await financialsVisibility(supabase, user.id);
+  if (!canSeeFin) return { error: '仅财务/业务/管理员可录成交价' };
+  for (const u of (updates || [])) {
+    const key = (u.style_no || '').trim();
+    if (!key) continue;
+    const raw = u.po_unit_price;
+    let val: number | null = null;
+    if (raw !== '' && raw != null) { const n = Number(raw); if (!Number.isFinite(n) || n < 0) return { error: `成交价须为 ≥0 的数字(款 ${key})` }; val = Math.round(n * 10000) / 10000; }
+    const { error } = await (supabase.from('order_line_items') as any)
+      .update({ po_unit_price: val }).eq('order_id', orderId).eq('style_no', key);
+    if (error) return { error: `保存成交价失败(款 ${key}):${error.message}` };
+  }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
