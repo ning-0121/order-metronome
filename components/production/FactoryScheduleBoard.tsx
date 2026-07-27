@@ -109,14 +109,14 @@ export function FactoryScheduleBoard() {
                     <tbody>
                       {f.dispatches.map((d: any) => (
                         <tr key={d.id} className="border-b border-gray-50">
-                          <td className="px-1.5 py-1 font-mono text-gray-700 whitespace-nowrap">{d.order?.internal_order_no || d.order?.order_no || '—'}</td>
-                          <td className="px-1.5 py-1 text-gray-600 whitespace-nowrap">{d.order?.customer_name || '—'}</td>
+                          <td className="px-1.5 py-1 font-mono text-gray-700 whitespace-nowrap">{d.internal_order_no || d.order_no || '—'}</td>
+                          <td className="px-1.5 py-1 text-gray-600 whitespace-nowrap">{d.customer_name || '—'}</td>
                           <td className="px-1.5 py-1 font-mono text-gray-800">{d.style_no || '(整单)'}</td>
                           <td className="px-1.5 py-1 text-gray-600">{d.color || '整款'}</td>
                           <td className="px-1.5 py-1 text-right text-gray-800">{d.planned_qty ?? '—'}</td>
                           <td className={`px-1.5 py-1 text-right font-medium ${d.planned_qty && d.done_qty >= d.planned_qty ? 'text-emerald-600' : d.done_qty > 0 ? 'text-indigo-600' : 'text-gray-400'}`}>{d.done_qty || 0}</td>
                           <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{d.planned_start ? `${String(d.planned_start).slice(5, 10)}~${String(d.planned_end || '').slice(5, 10)}` : '—'}</td>
-                          <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{d.order?.factory_date ? String(d.order.factory_date).slice(5, 10) : '—'}</td>
+                          <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{d.order_factory_date ? String(d.order_factory_date).slice(5, 10) : '—'}</td>
                           <td className="px-1.5 py-1"><span className={`rounded-full px-1.5 py-0.5 text-[10px] ${d.source === 'legacy' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{d.source === 'legacy' ? 'legacy' : 'dispatch'}</span></td>
                           <td className="px-1.5 py-1"><span className={d.status === 'in_production' ? 'text-emerald-700' : 'text-gray-600'}>{stCn[d.status] || d.status}</span></td>
                         </tr>
