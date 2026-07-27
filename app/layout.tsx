@@ -46,8 +46,9 @@ export default async function RootLayout({
   if (user && !isAdmin) {
     const { data: prof } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
     const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
-    isProcurement = roles.some(r => ['procurement', 'procurement_manager', 'admin'].includes(r));
-    isProduction = roles.some(r => ['production', 'production_manager', 'admin'].includes(r));
+    // admin_assistant(行政督导)给采购/生产中心入口 —— 督导要能看两个中心(只看不改,写操作另有门禁)
+    isProcurement = roles.some(r => ['procurement', 'procurement_manager', 'admin', 'admin_assistant'].includes(r));
+    isProduction = roles.some(r => ['production', 'production_manager', 'admin', 'admin_assistant'].includes(r));
     isFinance = roles.some(r => ['finance', 'admin'].includes(r));
   }
 
