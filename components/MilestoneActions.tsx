@@ -12,6 +12,7 @@ import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
 import { getNamingHint, getAcceptString, validateFileExt, getFileTypeForStep } from '@/lib/domain/fileNaming';
 import { FileNameCheck } from '@/components/FileNameCheck';
+import { OrderEmphasisPanel } from '@/components/OrderEmphasisPanel';
 import { isInspectionStep } from '@/lib/domain/inspectionWaiver';
 import { requiredPartiesFor, pendingParties, isSoftConfirm } from '@/lib/domain/confirmationParties';
 
@@ -1179,7 +1180,10 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
   }
 
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-3">
+    <div className="space-y-3">
+      {/* 客户强调事项:PO/邮件里强调的要求置顶,标来源防漏(空则不渲染) */}
+      <OrderEmphasisPanel orderId={orderId} />
+      <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-amber-900">📋 {config.title}</p>
         <button
@@ -1302,6 +1306,7 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
           </div>
         </div>
       ))}
+      </div>
     </div>
   );
 }
