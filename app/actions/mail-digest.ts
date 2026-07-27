@@ -138,6 +138,45 @@ export async function getOrderPOAttachments(orderId: string): Promise<{ data?: P
   return { data: (data || []) as POAttachmentRow[] };
 }
 
+/** 搜订单给「绑定到订单」下拉(按内部单号/客户/PO号/款号 ilike)。 */
+export async function searchOrdersForMailBind(q: string): Promise<{ id: string; label: string }[]> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const term = (q || '').trim();
+  let query = (supabase.from('orders') as any)
+    .select('id, internal_order_no, order_no, po_number, customer_name, style_no, owner_user_id, created_by')
+    .order('created_at', { ascending: false }).limit(20);
+  if (term) query = query.or(`internal_order_no.ilike.%${term}%,order_no.ilike.%${term}%,po_number.ilike.%${term}%,customer_name.ilike.%${term}%,style_no.ilike.%${term}%`);
+  const { data } = await query;
+  return ((data || []) as any[]).map((o) => ({
+    id: o.id,
+    label: [o.internal_order_no || o.order_no, o.po_number ? `PO ${o.po_number}` : null, o.customer_name, o.style_no].filter(Boolean).join(' · '),
+  }));
+}
+
+/**
+ * 手动把一封邮件绑定到订单(防漏防错核心:自动没匹配上的客户沟通,人工挂到目标 PO)。
+ * 设 order_id + 归属业务执行(订单负责人)→ 立刻出现在该订单「客户邮件信号」面板 + 该负责人看板。
+ */
+export async function bindMailToOrder(mailId: string, orderId: string): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!mailId || !orderId) return { error: '缺少参数' };
+  const svc = createServiceRoleClient();
+  // 取订单负责人(带出归属),顺带校验订单存在
+  const { data: ord } = await (svc.from('orders') as any)
+    .select('id, owner_user_id, created_by').eq('id', orderId).maybeSingle();
+  if (!ord) return { error: '订单不存在' };
+  const execId = (ord as any).owner_user_id || (ord as any).created_by || null;
+  const { data: updated, error } = await (svc.from('mail_inbox') as any)
+    .update({ order_id: orderId, assigned_exec_id: execId }).eq('id', mailId).select('id');
+  if (error) return { error: error.message };
+  if (!updated || updated.length === 0) return { error: '绑定失败:邮件不存在' };
+  return { ok: true };
+}
+
 /** 标记一封邮件的处理状态(看板勾选)。 */
 export async function markMailHandled(
   id: string, status: 'seen' | 'handled' | 'ignored' | 'unread',

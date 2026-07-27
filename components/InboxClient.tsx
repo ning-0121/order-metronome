@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { getMailDigest, markMailHandled, type MailDigestView, type DigestRow } from '@/app/actions/mail-digest';
+import { getMailDigest, markMailHandled, bindMailToOrder, searchOrdersForMailBind, type MailDigestView, type DigestRow } from '@/app/actions/mail-digest';
 
 const CAT_STYLE: Record<string, string> = {
   投诉: 'bg-red-100 text-red-700 border-red-200',
@@ -28,7 +28,46 @@ function fromName(addr: string) {
   return (m ? m[1] : addr).trim().slice(0, 28);
 }
 
-function MailCard({ row, onMark, dim }: { row: DigestRow; onMark: (id: string, s: 'handled' | 'ignored') => void; dim?: boolean }) {
+function MailBinder({ mailId, onBound }: { mailId: string; onBound: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<{ id: string; label: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const t = setTimeout(async () => {
+      const r = await searchOrdersForMailBind(q);
+      if (alive) setResults(r);
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q, open]);
+  if (!open) {
+    return <button onClick={() => setOpen(true)} className="text-[11px] px-1.5 py-0.5 rounded border border-dashed border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100">🔗 绑定订单</button>;
+  }
+  return (
+    <span className="inline-flex flex-col gap-1 relative">
+      <span className="inline-flex items-center gap-1">
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜 内部单号/PO/客户/款号"
+          className="w-48 text-[11px] border border-amber-300 rounded px-2 py-0.5 outline-none" />
+        <button onClick={() => setOpen(false)} className="text-[11px] text-gray-400 hover:text-gray-600">取消</button>
+      </span>
+      {results.length > 0 && (
+        <span className="absolute top-6 left-0 z-10 w-64 max-h-52 overflow-auto bg-white border border-gray-200 rounded-lg shadow flex flex-col">
+          {results.map((o) => (
+            <button key={o.id} disabled={busy}
+              onClick={async () => { setBusy(true); const res = await bindMailToOrder(mailId, o.id); setBusy(false); if (res.ok) onBound(); }}
+              className="text-left text-[11px] px-2.5 py-1.5 hover:bg-indigo-50 border-b border-gray-100 last:border-0 disabled:opacity-50">
+              {o.label}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function MailCard({ row, onMark, onBound, dim }: { row: DigestRow; onMark: (id: string, s: 'handled' | 'ignored') => void; onBound: () => void; dim?: boolean }) {
   const handled = row.handled_status === 'handled' || row.handled_status === 'ignored';
   return (
     <div className={`flex items-start gap-3 py-2.5 px-3 rounded-lg border ${handled ? 'opacity-45 border-gray-100 bg-gray-50' : 'border-gray-200 bg-white hover:border-gray-300'} transition-colors`}>
@@ -43,10 +82,12 @@ function MailCard({ row, onMark, dim }: { row: DigestRow; onMark: (id: string, s
           {row.needs_action && !handled && (
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">⚑ {row.action_type || '要处理'}</span>
           )}
-          {row.order_no && (
+          {row.order_no ? (
             <Link href={`/orders/${row.order_id}?tab=email_center`} className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100">
               #{row.order_no}
             </Link>
+          ) : (
+            !handled && <MailBinder mailId={row.id} onBound={onBound} />
           )}
         </div>
         <div className="text-sm text-gray-900 mt-1 leading-snug">
@@ -120,7 +161,7 @@ export function InboxClient() {
                 🔴 重点监控 <span className="text-xs font-normal text-gray-400">投诉 / 交期变更 / 紧急,未处理</span>
               </h2>
               <div className="flex flex-col gap-2 p-2 rounded-xl bg-red-50/50 border border-red-100">
-                {view.keyMonitor.map((r) => <MailCard key={r.id} row={r} onMark={onMark} />)}
+                {view.keyMonitor.map((r) => <MailCard key={r.id} row={r} onMark={onMark} onBound={load} />)}
               </div>
             </section>
           )}
@@ -132,7 +173,7 @@ export function InboxClient() {
                 <span className="text-xs font-normal text-gray-400">{g.rows.length} 封</span>
               </h2>
               <div className="flex flex-col gap-1.5">
-                {g.rows.map((r) => <MailCard key={r.id} row={r} onMark={onMark} />)}
+                {g.rows.map((r) => <MailCard key={r.id} row={r} onMark={onMark} onBound={load} />)}
               </div>
             </section>
           ))}
