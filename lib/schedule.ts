@@ -38,6 +38,7 @@ export const DDP_TRANSIT_DAYS = 25;
 
 // 标准周期天数
 const STANDARD_DAYS = 45;
+const SAMPLE_STANDARD_DAYS = 14;   // 打样单 8 节点按 14 天窗口设计;缩放基线用 14 而非 45,否则短周期挤成一堆(2026-07-27 CEO)
 
 /**
  * 中国法定节假日（2025-2027）
@@ -368,6 +369,7 @@ export function calcDueDates(params: CalcDueDatesParams) {
   const {
     orderDate, createdAt, incoterm,
     etd, warehouseDueDate, eta,
+    orderType,
     shippingSampleRequired = false,
     shippingSampleDeadline,
     sampleConfirmDaysOverride,
@@ -408,8 +410,8 @@ export function calcDueDates(params: CalcDueDatesParams) {
   // 实际可用天数
   const availableDays = Math.ceil((A.getTime() - T0.getTime()) / 86400000);
 
-  // 缩放比例（实际天数 / 标准45天）
-  const scale = availableDays / STANDARD_DAYS;
+  // 缩放比例（实际天数 / 标准窗口）。打样单用 14 天窗口(8 节点按 14 天设计),否则短周期节点全挤同一天。
+  const scale = availableDays / (orderType === 'sample' ? SAMPLE_STANDARD_DAYS : STANDARD_DAYS);
 
   // 按比例计算每个节点的日期
   const calc = (standardDay: number): Date => {

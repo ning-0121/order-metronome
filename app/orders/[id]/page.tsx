@@ -116,6 +116,20 @@ export default async function OrderDetailPage({
   const colorPending = isColorPending(orderData);
   const customerHoldStale = isCustomerHoldStale(orderData);
   const supabase = await createClient();
+
+  // 样转大货 反向溯源(2026-07-27):本单来源打样单(parent)+ 由本单(打样单)转出的大货单(child)
+  let parentRef: { id: string; no: string } | null = null;
+  let childRefs: { id: string; no: string }[] = [];
+  {
+    const { data: self } = await (supabase.from('orders') as any).select('parent_order_id').eq('id', id).maybeSingle();
+    const pid = (self as any)?.parent_order_id;
+    if (pid) {
+      const { data: p } = await (supabase.from('orders') as any).select('id, internal_order_no, order_no').eq('id', pid).maybeSingle();
+      if (p) parentRef = { id: (p as any).id, no: (p as any).internal_order_no || (p as any).order_no };
+    }
+    const { data: kids } = await (supabase.from('orders') as any).select('id, internal_order_no, order_no').eq('parent_order_id', id).limit(10);
+    childRefs = ((kids || []) as any[]).map((k) => ({ id: k.id, no: k.internal_order_no || k.order_no }));
+  }
   // 复审性能:getCurrentUserRole 已做 auth+profiles,直接复用它返回的 userId/roles,
   // 省掉此前额外的 auth.getUser() + profiles 查询(每开一张订单省 1 次鉴权往返 + 1 次角色查询)。
   const { role: currentRole, isAdmin, userId, roles: profileRoles } = await getCurrentUserRole(supabase);
@@ -228,6 +242,18 @@ export default async function OrderDetailPage({
 
       {/* 重排排期横幅（出厂日已过且未出运/送仓时显示给 admin/owner） */}
       <div className="max-w-7xl mx-auto px-6 pt-4 space-y-3">
+        {/* 样转大货 反向溯源横幅:本大货单由哪张打样单转来 / 本打样单已转出哪些大货单 */}
+        {parentRef && (
+          <a href={`/orders/${parentRef.id}`} className="flex items-center gap-2 rounded-xl border border-purple-200 bg-purple-50 px-4 py-2.5 text-sm text-purple-800 hover:bg-purple-100">
+            🔄 <span>本单由打样单 <b>{parentRef.no}</b> 转来 —— 点击查看来源打样单 ›</span>
+          </a>
+        )}
+        {childRefs.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-purple-200 bg-purple-50 px-4 py-2.5 text-sm text-purple-800">
+            🔄 <span>本打样单已转出大货单:</span>
+            {childRefs.map((c) => <a key={c.id} href={`/orders/${c.id}`} className="rounded bg-white px-2 py-0.5 font-medium hover:bg-purple-100 border border-purple-200"><b>{c.no}</b> ›</a>)}
+          </div>
+        )}
         {/* PO 逾期上传罚款 + 免罚审批闭环(2026-07-23)*/}
         {(orderData as any).po_overdue && (
           <PoOverdueWaiverPanel

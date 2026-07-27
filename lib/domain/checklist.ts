@@ -427,6 +427,21 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
     ],
   },
 
+  // 打样检验(2026-07-27 CEO:补结构化质检,不再只一张照片)。owner=production(骆淑娟)填;另强制上传样品照片。
+  sample_qc: {
+    title: '打样检验检查清单',
+    items: [
+      { key: 'size_measured', label: '尺寸已测量、与尺码表一致', type: 'checkbox', required: true, role: 'production', group: '尺寸' },
+      { key: 'workmanship_ok', label: '工艺/车缝合格(无跳线/断线/污渍/线头)', type: 'checkbox', required: true, role: 'production', group: '工艺' },
+      { key: 'fabric_color_match', label: '面料/颜色与客户要求一致', type: 'checkbox', required: true, role: 'production', group: '面料' },
+      { key: 'defect_level', label: '疵点检查', type: 'select', required: true, role: 'production', group: '疵点',
+        options: ['无疵点', '轻微(可寄样并说明)', '需返工'] },
+      { key: 'overall_result', label: '整体评价', type: 'select', required: true, role: 'production', group: '结论',
+        options: ['合格·可寄客户', '需修改后再检', '不合格·返工'] },
+      { key: 'qc_notes', label: '问题说明 / 客户需注意点', type: 'text', required: false, role: 'production', group: '结论' },
+    ],
+  },
+
   sample_shipping_arrange: {
     title: '寄样安排检查清单',
     items: [
