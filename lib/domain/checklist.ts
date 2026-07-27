@@ -221,8 +221,10 @@ export const CHECKLIST_MAP: Record<string, ChecklistConfig> = {
     title: '大货面料验收报告',
     items: [
       { key: 'arrival_date', label: '到货日期', type: 'text', required: true, role: 'merchandiser', group: '到货信息' },
-      { key: 'fabric_batch', label: '面料批号/缸号', type: 'text', required: true, role: 'merchandiser', group: '到货信息' },
-      { key: 'arrival_qty', label: '到货数量（米/公斤）', type: 'number', required: true, role: 'merchandiser', group: '到货信息' },
+      { key: 'fabric_batch', label: '面料批号/缸号', type: 'text', required: false, role: 'merchandiser', group: '到货信息',
+        helpText: '缸号是供应商细节,可不填' },
+      { key: 'arrival_qty', label: '到货数量（米/公斤）', type: 'number', required: false, role: 'merchandiser', group: '到货信息',
+        helpText: '可不填;短少时再记' },
       { key: 'color_match', label: '颜色对比', type: 'select', required: true, role: 'merchandiser', group: '品质检验',
         options: ['合格', '轻微偏差(可接受)', '不合格'] },
       { key: 'weight_check', label: '克重检测', type: 'select', required: true, role: 'merchandiser', group: '品质检验',
