@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
-import { buildProductionTaskWorkbook } from '@/lib/exports/production-task-template';
+import { buildProductionTaskWorkbook, finalizeProductionTaskSheetNames } from '@/lib/exports/production-task-template';
 
 const numToCol = (n: number) => { let s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
 // 旧单母版(LU21-SET)会残留的关键词,用于断言"零串味"
@@ -76,5 +76,25 @@ describe('生产任务单主表动态扩展(#4)', () => {
     expect(Array.from({ length: 6 }, (_, i) => val(`B${7 + i}`).includes(`色${i}`)).every(Boolean)).toBe(true);
     expect(val('A13')).toBe('总计');       // 总计下移 2(11→13)
     expect(leaks).toEqual([]);
+  });
+
+  // 母版串味修复(2026-07-27):sheet 标签名 + 主表嵌图 都不能带 LU21-SET 残留
+  it('零串味:主表无嵌图(母版粉色套装产品图已清)', async () => {
+    const wb = await buildProductionTaskWorkbook(mk(2, ['S', 'M', 'L']) as any);
+    // buildProductionTaskWorkbook 内已清主表嵌图
+    expect(wb.worksheets[0].getImages().length).toBe(0);
+    // 写出再读回,确认持久
+    const rb = new ExcelJS.Workbook(); await rb.xlsx.load((await wb.xlsx.writeBuffer()) as any);
+    expect(rb.worksheets[0].getImages().length).toBe(0);
+  });
+
+  it('零串味:finalize 后 sheet 标签名去 LU21、为通用名', async () => {
+    const wb = await buildProductionTaskWorkbook(mk(2, ['S', 'M', 'L']) as any);
+    finalizeProductionTaskSheetNames(wb);
+    const rb = new ExcelJS.Workbook(); await rb.xlsx.load((await wb.xlsx.writeBuffer()) as any);
+    const names = rb.worksheets.map(w => w.name);
+    expect(names.some(n => SAMPLE.test(n))).toBe(false);   // 无 LU21 等旧单关键词
+    expect(names[0]).toBe('生产任务单');
+    expect(names[1]).toBe('尺寸表');
   });
 });

@@ -11,7 +11,7 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
-import { buildProductionTaskWorkbook, overlayRawSizeChart, safeProductionTaskFilename } from '@/lib/exports/production-task-template';
+import { buildProductionTaskWorkbook, overlayRawSizeChart, safeProductionTaskFilename, finalizeProductionTaskSheetNames } from '@/lib/exports/production-task-template';
 import type { ProductionTaskTemplateModel } from '@/lib/exports/production-task-template-map';
 
 const MO_WRITE_MSG = '仅业务/跟单/生产/生产主管/管理员可编辑或推进生产任务单';
@@ -305,6 +305,8 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
         if (file) await overlayRawSizeChart(workbook, await file.arrayBuffer());
       }
     } catch { /* 无上传/读取失败 → 保留原尺寸表 */ }
+    // 清洗母版 LU21-SET 残留 sheet 名(须在 overlayRawSizeChart 之后:它按 LU21 名查尺寸表)
+    finalizeProductionTaskSheetNames(workbook);
     const buffer = await workbook.xlsx.writeBuffer();
     return { ok: true, base64: Buffer.from(buffer).toString('base64'), fileName: safeProductionTaskFilename(model.internalOrderNumber, styleNumber) };
   } catch (error) {

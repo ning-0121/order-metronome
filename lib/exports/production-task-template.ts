@@ -152,6 +152,9 @@ export async function buildProductionTaskWorkbook(model: ProductionTaskTemplateM
   const workbook = await loadProductionTaskTemplate(root);
   const main = workbook.getWorksheet(PRODUCTION_TASK_SHEETS.main)!;
   const sizeSheet = workbook.getWorksheet(PRODUCTION_TASK_SHEETS.size)!;
+  // ── 母版残留嵌图清洗(2026-07-27)── 母版取自真实旧单 LU21-SET,主表 col11/row5 烤死了一张粉色套装
+  //   产品图,任何款下载都会带出这张 LU21 的图(串味)。本(模板)路径不贴产品图,直接清空主表全部嵌图。
+  try { (main as unknown as { _media: unknown[] })._media = []; } catch { /* 忽略 */ }
   const sizes = orderSizeKeys(model.sizeOrder?.length ? model.sizeOrder : model.colors.flatMap(c => Object.keys(c.sizes || {}))).filter(Boolean);
   const baseSizes = sizes.slice(0, 3);   // 尺寸表 sheet 仍用前3码(#5:上传的尺码表会整张覆盖它)
 
@@ -240,6 +243,16 @@ export async function buildProductionTaskWorkbook(model: ProductionTaskTemplateM
   });
   addOverflowSheet(workbook, model, sizes);
   return workbook;
+}
+
+/**
+ * 清洗母版残留的 LU21-SET 工作表标签名 → 通用名(2026-07-27)。
+ * 母版取自真实旧单,两张 sheet 名硬编码为「LU21-SET 上衣 / LU21-SET尺寸表」,导出 tab 一直带 LU21。
+ * ⚠️ 必须在【所有按 PRODUCTION_TASK_SHEETS 名 getWorksheet 的操作(含 overlayRawSizeChart)之后】调,否则查不到表。
+ */
+export function finalizeProductionTaskSheetNames(workbook: ExcelJS.Workbook) {
+  const m = workbook.getWorksheet(PRODUCTION_TASK_SHEETS.main); if (m) m.name = '生产任务单';
+  const s = workbook.getWorksheet(PRODUCTION_TASK_SHEETS.size); if (s) s.name = '尺寸表';
 }
 
 export function safeProductionTaskFilename(internalOrderNumber?: string | null, styleNumber?: string | null) {
