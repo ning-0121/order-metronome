@@ -307,9 +307,37 @@ export async function markMilestoneDone(
   //   原本 mid_qc_sales_check 必须等 mid_qc_check，但业务可以独立验货
   //   两个角色的检查结果分别记录，无需强制顺序
   //   跨角色协调改用「催办+抄送 admin」机制，详见 /api/nudge
-  const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = {
-    // 暂留空。未来若发现真有不可绕过的依赖再加。
-  };
+  // V3 部门线判定(2026-07-27):订单含 V3 独有节点(pps_procurement_check/mid_qc_check/final_qc_check)= V3 单。
+  //   V3 硬前置 + 跳过多方会签 都只对 V3 单生效(签名判定);在途 V2/V1 单完全不受影响(在此之前建的没有这些节点)。
+  const { V3_SIGNATURE_STEPS } = await import('@/lib/milestoneTemplate');
+  let isV3Order = false;
+  try {
+    const { data: v3sig } = await (supabase.from('milestones') as any)
+      .select('id').eq('order_id', milestone.order_id).in('step_key', V3_SIGNATURE_STEPS as unknown as string[]).limit(1);
+    isV3Order = ((v3sig || []) as any[]).length > 0;
+  } catch { /* 查询失败 → 当非 V3(fail-safe:不误加硬前置) */ }
+
+  // V3 部门线硬前置(上游部门节点没 done → 下游不给完成)。只对 V3 单生效。缺失的前置(如送仓砍了 booking_done)
+  //   在下方查询里自然不计(无对应节点行),不误卡。核心链:PO审查→财务审核/PI→评审会→采购下单→…
+  const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = isV3Order ? {
+    finance_approval: ['po_confirmed'],
+    pi_confirmed: ['po_confirmed'],
+    production_order_upload: ['pi_confirmed'],
+    order_kickoff_meeting: ['production_order_upload'],
+    procurement_order_placed: ['finance_approval', 'order_kickoff_meeting'],
+    pre_production_sample_sent: ['procurement_order_placed'],
+    pps_procurement_check: ['pre_production_sample_sent'],
+    pre_production_sample_approved: ['pps_procurement_check'],
+    mid_qc_check: ['pre_production_sample_approved'],
+    packing_method_confirmed: ['mid_qc_check'],
+    final_qc_check: ['packing_method_confirmed'],
+    final_qc_sales_check: ['final_qc_check'],
+    shipping_sample_send: ['final_qc_sales_check'],
+    ci_made: ['final_qc_sales_check'],
+    booking_done: ['ci_made'],
+    shipment_execute: ['booking_done', 'ci_made'],   // 送仓砍了 booking_done → 退回 ci_made 兜底
+    payment_received: ['shipment_execute'],
+  } : {};
   const prerequisites = SEQUENTIAL_REQUIREMENTS[milestone.step_key];
   if (prerequisites && !isAdmin) {
     const { data: prereqRows } = await (supabase.from('milestones') as any)
@@ -550,7 +578,8 @@ export async function markMilestoneDone(
     const { requiredPartiesFor, pendingParties, isSoftConfirm } = await import('@/lib/domain/confirmationParties');
     const requiredParties = requiredPartiesFor(milestone.step_key);
     // 软会签节点(PO确认 / 产前样确认,2026-07-14):多方确认改可选,责任人可直接完成,不硬卡。
-    if (requiredParties.length > 0 && !isAdmin && !isSoftConfirm(milestone.step_key)) {
+    // V3 部门线(2026-07-27):跨部门审核已拆成各自独立节点 + 硬前置,不再多方会签 → V3 单一律跳过此门禁。
+    if (requiredParties.length > 0 && !isAdmin && !isSoftConfirm(milestone.step_key) && !isV3Order) {
       const { data: confs, error: confErr } = await (supabase.from('milestone_confirmations') as any)
         .select('party_key, status').eq('milestone_id', milestoneId);
       if (!confErr) {

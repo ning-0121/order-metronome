@@ -265,6 +265,68 @@ export const TRADE_MILESTONE_TEMPLATE: Array<{
 ];
 
 /**
+ * V3 标准生产模板 = 18 节点(2026-07-27 CEO 拍板:部门线 + 顺序审批流)
+ * 设计:docs/Designs/Milestone-V3-Department-Lines-Redesign.md
+ *
+ * 核心:每节点单一部门归属 + 单一完成权;跨部门"会签"改为"顺序节点 + 硬前置"
+ * (硬前置在 app/actions/milestones.ts SEQUENTIAL_REQUIREMENTS,只对 V3 订单生效)。
+ * 相对 V2(15 节点)新增/拆分独立部门节点:
+ *   - finance_approval(财务:订单审核·预算录入,复活为独立节点,采购前置)
+ *   - pps_procurement_check(采购:产前样大货原辅料品质核)
+ *   - mid_qc_check / final_qc_check(QC:中期/尾期验货独立节点,业务放行随后)
+ * ⚠ 新增 step_key 必须在 criticalNodes / stage.ts / schedule TIMELINE / pre-deploy-check 同步登记([[v1-v2-stepkey-drift]] 教训)。
+ * 仅新单生效(里程碑建单物化);在途 V2/V1 不动。
+ */
+export const MILESTONE_TEMPLATE_V3: Array<{
+  step_key: string;
+  name: string;
+  owner_role: OwnerRole;
+  is_critical: boolean;
+  evidence_required: boolean;
+  evidence_note?: string;
+}> = [
+  { step_key: "po_confirmed", name: "PO审查确认", owner_role: "merchandiser", is_critical: true, evidence_required: false,
+    evidence_note: "业务执行核对 PO 内容/交期/客户要求(部门线:业务执行独立完成)" },
+  { step_key: "finance_approval", name: "订单财务审核·预算录入", owner_role: "finance", is_critical: true, evidence_required: false,
+    evidence_note: "财务审核价格/账期/额度 + 录入预算(前置:PO审查确认)" },
+  { step_key: "pi_confirmed", name: "PI制作·客户确认", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "业务制作 PI 发客户确认;上传 PI(前置:PO审查确认)" },
+  { step_key: "production_order_upload", name: "生产单·原辅料单制作", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务制作生产单 + 原辅料单(前置:PI确认)" },
+  { step_key: "order_kickoff_meeting", name: "订单评审会", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "业务牵头,业务·生产·采购评审款式/面料/工艺/交期/成本(前置:生产单制作)" },
+  { step_key: "procurement_order_placed", name: "采购核料提交·下单", owner_role: "procurement", is_critical: true, evidence_required: true,
+    evidence_note: "采购下单;采购进度在【采购中心】跟(前置:财务审核 + 订单评审会)" },
+  { step_key: "pre_production_sample_sent", name: "产前样寄出", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务寄产前样给客户,填快递单号(前置:采购下单)" },
+  { step_key: "pps_procurement_check", name: "产前样·大货原辅料品质核", owner_role: "procurement", is_critical: false, evidence_required: false,
+    evidence_note: "采购确认大货原辅料品质与样一致(前置:产前样寄出)" },
+  { step_key: "pre_production_sample_approved", name: "产前样·客户确认", owner_role: "merchandiser", is_critical: true, evidence_required: false,
+    evidence_note: "业务确认客户通过/自确认(前置:采购品质核)" },
+  { step_key: "mid_qc_check", name: "中期验货·QC", owner_role: "qc", is_critical: false, evidence_required: true,
+    evidence_note: "QC 中期验货(前置:产前样确认)" },
+  { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务确认包装方式/唛头/装箱资料(前置:中期验货)" },
+  { step_key: "final_qc_check", name: "尾期验货·QC", owner_role: "qc", is_critical: true, evidence_required: true,
+    evidence_note: "QC 尾期验货合格(前置:包装方式确认)" },
+  { step_key: "final_qc_sales_check", name: "尾查·业务放行", owner_role: "merchandiser", is_critical: true, evidence_required: false,
+    evidence_note: "业务确认尾查结果可对客户交付(前置:尾期验货 QC)" },
+  { step_key: "shipping_sample_send", name: "船样准备·寄出", owner_role: "merchandiser", is_critical: false, evidence_required: true,
+    evidence_note: "业务准备并寄出船样(仅出口单;前置:尾查放行)" },
+  { step_key: "ci_made", name: "PackingList·CI·报关单制作", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "业务制作装箱单 + 商业发票 + 报关单;上传文件(前置:尾查放行)" },
+  { step_key: "booking_done", name: "订舱出货", owner_role: "merchandiser", is_critical: true, evidence_required: true,
+    evidence_note: "业务订舱安排(财务只喊停不硬卡;仅出口单;前置:CI制作)" },
+  { step_key: "shipment_execute", name: "发货出运", owner_role: "logistics", is_critical: true, evidence_required: false,
+    evidence_note: "物流出运(发货须财务放行 fail-closed;前置:订舱)" },
+  { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false,
+    evidence_note: "财务收款,按账期(前置:发货出运)" },
+];
+
+/** V3 独有节点(V1/V2/trade/sample/consign 都没有)——用于「这单是不是 V3」的运行时判定,给硬前置做版本作用域。 */
+export const V3_SIGNATURE_STEPS = ['pps_procurement_check', 'mid_qc_check', 'final_qc_check'] as const;
+
+/**
  * 根据订单类型和交付方式返回适用的里程碑模板
  *
  * 出运流程判定：deliveryType === 'export' → 走 DDP 出运流程
@@ -309,10 +371,11 @@ export function getApplicableMilestones(
     return consignBase;
   }
 
-  // 2026-07-09 用户拍板:标准生产单=业务执行节拍(出口 15 节点)。
-  //   送仓单也要船样(用户 2026-07-09 更正)→ 只砍「订舱出货」(送仓无海运订舱),保留船样 → 送仓 14 节点。
+  // 标准生产单 = V3 部门线(2026-07-27 CEO 拍板,出口 18 节点)。仅新单生效;在途 V2 单不动。
+  //   送仓单砍「订舱出货」(送仓无海运订舱),保留船样 → 送仓 17 节点。
+  //   (consign 委托加工仍用 V2:料由工厂自采,砍采购节点会让 V3 硬前置链断档,暂不迁 V3。)
   void samplePhase; void skipPreProductionSample;
-  const base = [...MILESTONE_TEMPLATE_V2];
+  const base = [...MILESTONE_TEMPLATE_V3];
   if (deliveryType !== 'export') {
     return base.filter(m => m.step_key !== 'booking_done');
   }

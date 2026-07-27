@@ -174,6 +174,7 @@ const TIMELINE = {
   procurement_order_placed:      9,   // 采购下单 — 工厂确认后立即下大货料
   pre_production_sample_ready:   14,
   pre_production_sample_sent:    15,
+  pps_procurement_check:         17,  // V3:采购核大货原辅料品质(产前样寄出后、客户确认前)
   pre_production_sample_approved: 19,
 
   // ── 阶段 5：原料到货 + 产前会（20-21 天）──
