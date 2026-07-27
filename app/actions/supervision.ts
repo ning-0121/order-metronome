@@ -16,16 +16,19 @@ import {
 } from '@/lib/production/stage';
 
 export type Tone = 'green' | 'amber' | 'red' | 'grey';
-export interface Segment { label: string; tone: Tone; }
+export interface Segment { label: string; tone: Tone; owner?: string | null; }   // owner=该段当前责任人名(督办可直接联系,2026-07-27)
 export interface SupervisionRow {
   order_id: string; order_no: string | null; internal_order_no: string | null;
   customer_name: string | null; factory_name: string | null; quantity: number | null;
+  order_date: string | null;   // 下单日期(业务执行在系统录的),2026-07-27 CEO
   factory_date: string | null;
   business: Segment; procurement: Segment; production: Segment;
   needsAttention: boolean;   // 任一段红 → 需督办
 }
 
 const BUSINESS_ROLES = new Set(['sales', 'sales_manager', 'order_manager', 'merchandiser']);
+const PROC_ROLES = new Set(['procurement', 'procurement_manager']);
+const PROD_ROLES = new Set(['production', 'production_manager', 'qc']);
 const DONE_LIFECYCLE = new Set(['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档']);
 
 export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[]; error?: string }> {
@@ -38,7 +41,7 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
 
   const svc = createServiceRoleClient();
   const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, incoterm, lifecycle_status, production_stage_manual, order_purpose')
+    .select('id, order_no, internal_order_no, customer_name, factory_name, quantity, order_date, factory_date, etd, incoterm, lifecycle_status, production_stage_manual, order_purpose')
     .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")');
   const list = ((orders || []) as any[]).filter((o) => (o.order_purpose || 'production') !== 'sample');
   if (list.length === 0) return { rows: [] };
@@ -50,7 +53,7 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
   for (let i = 0; i < ids.length; i += 200) {
     const slice = ids.slice(i, i + 200);
     const { data: ms } = await (svc.from('milestones') as any)
-      .select('order_id, step_key, status, due_at, owner_role').in('order_id', slice);
+      .select('order_id, step_key, status, due_at, owner_role, owner_user_id').in('order_id', slice);
     for (const m of (ms || [])) {
       allMs.set(m.order_id, [...(allMs.get(m.order_id) || []), m]);
       if ((STAGE_SIGNAL_STEP_KEYS as string[]).includes(m.step_key)) {
@@ -71,6 +74,24 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
       matByOrder.set(l.order_id, m);
     }
   }
+
+  // 责任人名解析(督办可直接联系):收集所有 owner_user_id → profiles 名
+  const ownerIds = new Set<string>();
+  for (const arr of allMs.values()) for (const m of arr) if (m.owner_user_id) ownerIds.add(m.owner_user_id);
+  const nameById = new Map<string, string>();
+  if (ownerIds.size > 0) {
+    const { data: profs } = await (svc.from('profiles') as any).select('user_id, name, email').in('user_id', [...ownerIds]);
+    for (const p of ((profs || []) as any[])) nameById.set(p.user_id, p.name || (p.email ? String(p.email).split('@')[0] : ''));
+  }
+  // 挑某段当前责任人:优先"超期未完成"、次"最早未完成"、兜底任一有主的节点;返回名。
+  const pickOwner = (ms: any[], roleSet: Set<string>, todayStr: string): string | null => {
+    const grp = ms.filter((m) => roleSet.has(m.owner_role || '') && m.owner_user_id);
+    if (grp.length === 0) return null;
+    const incomplete = grp.filter((m) => !isDoneStatus(m.status));
+    const overdue = incomplete.filter((m) => m.due_at && String(m.due_at).slice(0, 10) < todayStr);
+    const pick = overdue[0] || incomplete[0] || grp[0];
+    return pick ? (nameById.get(pick.owner_user_id) || null) : null;
+  };
 
   const today = new Date().toISOString().slice(0, 10);
   const rows: SupervisionRow[] = [];
@@ -122,10 +143,16 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
       business.tone = 'red'; business.label = `出厂已过 · ${business.label}`;
     }
 
+    // 每段当前责任人(督办直接联系):业务/采购/生产 各挑各的
+    business.owner = pickOwner(ms, BUSINESS_ROLES, today);
+    procurement.owner = pickOwner(ms, PROC_ROLES, today);
+    production.owner = pickOwner(ms, PROD_ROLES, today);
+
     const needsAttention = [business, procurement, production].some((s) => s.tone === 'red');
     rows.push({
       order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no,
       customer_name: o.customer_name, factory_name: o.factory_name, quantity: o.quantity,
+      order_date: o.order_date ? String(o.order_date).slice(0, 10) : null,
       factory_date: o.factory_date ? String(o.factory_date).slice(0, 10) : null,
       business, procurement, production, needsAttention,
     });

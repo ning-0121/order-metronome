@@ -10,7 +10,12 @@ const TONE: Record<Tone, string> = {
   grey: 'bg-gray-50 text-gray-400 border-gray-200',
 };
 function Pill({ seg }: { seg: Segment }) {
-  return <span className={`inline-block text-xs px-2 py-1 rounded-md border whitespace-nowrap ${TONE[seg.tone]}`}>{seg.label}</span>;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className={`inline-block w-fit text-xs px-2 py-1 rounded-md border whitespace-nowrap ${TONE[seg.tone]}`}>{seg.label}</span>
+      {seg.owner ? <span className="text-[11px] text-gray-500 whitespace-nowrap">👤 {seg.owner}</span> : (seg.tone !== 'grey' && <span className="text-[11px] text-gray-300">未指派</span>)}
+    </div>
+  );
 }
 
 export default async function SupervisionPage() {
@@ -39,6 +44,7 @@ export default async function SupervisionPage() {
           <thead className="bg-gray-50 text-gray-500 text-xs">
             <tr>
               <th className="text-left px-3 py-2.5">订单 / 客户 / 工厂</th>
+              <th className="text-left px-3 py-2.5">下单日</th>
               <th className="text-right px-3 py-2.5">数量</th>
               <th className="text-left px-3 py-2.5">出厂日</th>
               <th className="text-left px-3 py-2.5">业务段</th>
@@ -54,6 +60,7 @@ export default async function SupervisionPage() {
                   <div className="font-medium text-gray-900">{r.internal_order_no || r.order_no || '—'}</div>
                   <div className="text-xs text-gray-500">{r.customer_name || '—'} · {r.factory_name || '未指定'}</div>
                 </td>
+                <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{r.order_date || '—'}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{r.quantity != null ? r.quantity.toLocaleString() : '—'}</td>
                 <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{r.factory_date || '—'}</td>
                 <td className="px-3 py-2.5"><Pill seg={r.business} /></td>
@@ -64,7 +71,7 @@ export default async function SupervisionPage() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={7} className="px-3 py-10 text-center text-gray-400">当前无在产订单。</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={8} className="px-3 py-10 text-center text-gray-400">当前无在产订单。</td></tr>}
           </tbody>
         </table>
       </div>
