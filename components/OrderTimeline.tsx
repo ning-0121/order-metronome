@@ -105,6 +105,26 @@ const TRADE_MILESTONE_GROUPS = [
   },
 ];
 
+// 打样单(order_purpose='sample')专属分组:8 节点简化流程,3 段。此前打样单落生产分组、匹配不到任何 step_key
+// → 时间线整片空白、8 节点无法操作(2026-07-27 上线前审计 P0)。
+const SAMPLE_MILESTONE_GROUPS = [
+  {
+    key: 'stage1', emoji: '🟦',
+    titleCn: '阶段 1：打样确认 · 备料',
+    stepKeys: ['sample_confirm', 'sample_material'],
+  },
+  {
+    key: 'stage2', emoji: '🟨',
+    titleCn: '阶段 2：打样制作 · 检验',
+    stepKeys: ['sample_making', 'sample_qc'],
+  },
+  {
+    key: 'stage3', emoji: '🟩',
+    titleCn: '阶段 3：寄样 · 客户确认',
+    stepKeys: ['sample_shipping_arrange', 'sample_sent', 'sample_customer_confirm', 'sample_complete'],
+  },
+];
+
 // 统一状态判断：使用标准化函数
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
@@ -202,8 +222,9 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
 }
 
 export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false, inspectionWaived = false, orderPurpose }: OrderTimelineProps) {
-  // 经销单用专属阶段分组(不套生产/产前样标签,不跳号);其余走标准 5 段。
-  const ACTIVE_GROUPS = orderPurpose === 'trade' ? TRADE_MILESTONE_GROUPS : MILESTONE_GROUPS;
+  // 打样单 3 段 / 经销单专属 4 段 / 其余标准 5 段。
+  const ACTIVE_GROUPS = orderPurpose === 'sample' ? SAMPLE_MILESTONE_GROUPS
+    : orderPurpose === 'trade' ? TRADE_MILESTONE_GROUPS : MILESTONE_GROUPS;
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, any[]>>({});
   const [showPOParser, setShowPOParser] = useState(false);

@@ -541,6 +541,10 @@ export default async function OrderDetailPage({
             //   非经销单 → 隐藏「大货采购」tab。(生产任务单/原辅料和包装(含包装方式)/PI 等保留)
             ].filter(t => {
               const isTrade = (orderData as any).order_purpose === 'trade';
+              const isSample = (orderData as any).order_purpose === 'sample';
+              // 打样单 14 天流程,不生产/不采购原辅料/不走大货出货 → 只留 基本/进度/单据/评分,隐藏生产/采购/BOM/PI/质检/出货
+              //   (打样上线前审计:此前打样单全 tab 照显,诱导在打样单上录 BOM/核料/走生产)
+              if (isSample) return ['basic', 'progress'].includes(t.key);
               if (isTrade && t.key === 'procurement_items') return false;
               if (!isTrade && t.key === 'trade_purchase') return false;
               return true;

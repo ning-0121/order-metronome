@@ -89,6 +89,10 @@ export async function recomputeDeliveryConfidence(
     if (!fetched.ok) {
       return { ok: false, error: fetched.error };
     }
+    // 打样单不算交付置信度(打样上线前审计:引擎口径是自产/经销交付,打样不适用)——早退,不写 runtime_orders
+    if (String((fetched.order as any)?.order_purpose || '') === 'sample') {
+      return { ok: true, skipped: true, reason: 'sample_order' } as any;
+    }
 
     // ── Step 3: 算
     let computed: ConfidenceComputeOutput;

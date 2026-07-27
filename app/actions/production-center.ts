@@ -91,8 +91,8 @@ export async function getProductionCenter(): Promise<{
 
   // 建单即进(仅排除 已取消/已完成/归档;保留 draft/pending_approval/active)
   // production_stage_manual(20260708 迁移)未执行时降级不带该列(全按 auto 推算),否则整页变空(2026-07-08)
-  const OSEL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_id, factory_name, quantity, factory_date, etd, lifecycle_status, production_stage_manual';
-  const OSEL_NO_MANUAL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_id, factory_name, quantity, factory_date, etd, lifecycle_status';
+  const OSEL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_id, factory_name, quantity, factory_date, etd, lifecycle_status, order_purpose, production_stage_manual';
+  const OSEL_NO_MANUAL = 'id, order_no, internal_order_no, po_number, style_no, customer_name, factory_id, factory_name, quantity, factory_date, etd, lifecycle_status, order_purpose';
   const runOrders = (sel: string) => {
     let q = (svc.from('orders') as any)
       .select(sel)
@@ -104,7 +104,8 @@ export async function getProductionCenter(): Promise<{
   if (ordErr && /production_stage_manual|column .* does not exist|schema cache/i.test(ordErr.message || '')) {
     ({ data: orders, error: ordErr } = await runOrders(OSEL_NO_MANUAL));
   }
-  const list = (orders || []) as any[];
+  // 打样单不进生产中心(NULL 用途当 production;打样上线前审计:此前误入虚增在产/待采购噪音)
+  const list = ((orders || []) as any[]).filter((o) => (o.order_purpose || 'production') !== 'sample');
   let terminalQuery = (svc.from('orders') as any).select('id', { count: 'exact', head: true })
     .in('lifecycle_status', ['completed', '已完成', 'archived', '已归档']);
   if (allowedIds) terminalQuery = terminalQuery.in('id', Array.from(allowedIds));
@@ -237,12 +238,12 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
   const today = new Date().toISOString().slice(0, 10);
   // 滞留候选:工厂期已过 且 仍活跃(非 完成/取消/归档/草稿/待审)
   const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, created_at')
+    .select('id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, order_purpose, created_at')
     .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","draft","pending_approval")')
     .not('factory_date', 'is', null)
     .lt('factory_date', today)
     .order('factory_date', { ascending: true });
-  const list = (orders || []) as any[];
+  const list = ((orders || []) as any[]).filter((o) => (o.order_purpose || 'production') !== 'sample');   // 打样单不算生产滞留
   if (list.length === 0) return { error: '没有工厂期已过的滞留订单,无需核对' };
   const orderIds = list.map((o) => o.id);
 

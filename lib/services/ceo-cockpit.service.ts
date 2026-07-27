@@ -50,7 +50,11 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const { data: orders } = await supabase.from('orders')
     .select('id, order_no, internal_order_no, customer_name, order_purpose, lifecycle_status, created_at, factory_date')
     .order('created_at', { ascending: false }).limit(2000);
-  const liveOrders = ((orders || []) as any[]).filter((o) => !TERMINAL_LC.has(String(o.lifecycle_status || '').toLowerCase()) && !TERMINAL_LC.has(String(o.lifecycle_status || '')));
+  const notTerminal = (o: any) => !TERMINAL_LC.has(String(o.lifecycle_status || '').toLowerCase()) && !TERMINAL_LC.has(String(o.lifecycle_status || ''));
+  // 打样单不进 B(部门健康)/E(员工)/D(卡住)/里程碑逾期口径——避免打样延期污染部门健康度与员工准时率
+  //   (打样上线前审计)。C 段 sampleActive 另从全量单单独统计,不受影响。
+  const liveOrders = ((orders || []) as any[]).filter((o) => notTerminal(o) && (o.order_purpose || 'production') !== 'sample');
+  const sampleActiveCount = ((orders || []) as any[]).filter((o) => notTerminal(o) && String(o.order_purpose) === 'sample').length;
   const orderById = new Map<string, any>(((orders || []) as any[]).map((o) => [o.id, o]));
   const liveIds = liveOrders.map((o) => o.id);
   const { data: ms } = liveIds.length > 0
@@ -70,7 +74,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
     cur.count += 1; cur.maxDays = Math.max(cur.maxDays, Number(d.delay_days) || 0);
     byOrder.set(d.order_id, cur);
   }
-  const suspiciousDelays = [...byOrder.entries()].filter(([, v]) => v.maxDays >= 21 || v.count >= 2)
+  const suspiciousDelays = [...byOrder.entries()].filter(([oid, v]) => (v.maxDays >= 21 || v.count >= 2) && (orderById.get(oid)?.order_purpose || 'production') !== 'sample')
     .map(([oid, v]) => { const o = orderById.get(oid); return { orderNo: o?.internal_order_no || o?.order_no || String(oid).slice(0, 8), orderId: oid, customer: o?.customer_name || '', days: v.maxDays, reason: v.count >= 2 ? `同单 ${v.count} 次延期` : `单次 ${v.maxDays} 天` }; })
     .sort((a, b) => b.days - a.days).slice(0, 8);
 
@@ -101,7 +105,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const newOrders7d = ((orders || []) as any[]).filter((o) => o.created_at >= d7).length;
   const newOrders30d = ((orders || []) as any[]).filter((o) => o.created_at >= d30).length;
   const completed7d = ((orders || []) as any[]).filter((o) => TERMINAL_LC.has(String(o.lifecycle_status || '')) && o.created_at >= d30).length; // 近30天里已完成(粗)
-  const sampleActive = liveOrders.filter((o) => String(o.order_purpose) === 'sample').length;
+  const sampleActive = sampleActiveCount;   // 独立统计(liveOrders 已排除打样)
   let newSuppliers7d = 0, newFactories7d = 0;
   try { const { count } = await supabase.from('suppliers').select('id', { count: 'exact', head: true }).gte('created_at', d7); newSuppliers7d = count || 0; } catch { /* 表/列缺失忽略 */ }
   try { const { count } = await supabase.from('factories').select('id', { count: 'exact', head: true }).gte('created_at', d7); newFactories7d = count || 0; } catch { /* 无 factories 表忽略 */ }
