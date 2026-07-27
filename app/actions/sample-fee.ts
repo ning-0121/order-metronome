@@ -5,10 +5,13 @@
  * 读:登录+可访问订单;写:财务/业务/管理员(CAN_SEE_FINANCIALS)。只作用打样单。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { revalidatePath } from 'next/cache';
+
+/** 客户承担的打样费才是应收(公司承担/待确认不进应收)。 */
+const CUSTOMER_BORNE = new Set(['customer', 'fabric_customer']);
 
 export const SAMPLE_FEE_BEARERS: Record<string, string> = {
   company: '公司承担', customer: '客户承担', fabric_customer: '面料客户+加工公司', tbd: '待确认',
@@ -43,8 +46,31 @@ export async function saveSampleFee(orderId: string, amount: number | null, bear
     amt = Math.round(n * 100) / 100;
   }
   const b = bearer && SAMPLE_FEE_BEARERS[bearer] ? bearer : null;
+  // 旧值(去重:仅应收变化时才发财务事件/通知,避免重复保存刷屏)
+  const { data: old } = await (c.supabase.from('orders') as any).select('sample_fee, sample_fee_bearer, order_no, internal_order_no').eq('id', orderId).maybeSingle();
+  const oldReceivable = CUSTOMER_BORNE.has(String((old as any)?.sample_fee_bearer || '')) ? Number((old as any)?.sample_fee) || 0 : 0;
+  const newReceivable = (b && CUSTOMER_BORNE.has(b) && amt) ? amt : 0;
+
   const { error } = await (c.supabase.from('orders') as any).update({ sample_fee: amt, sample_fee_bearer: b }).eq('id', orderId);
   if (error) return { error: '保存失败:' + error.message };
+
+  // 应收联动:客户承担的打样费 → 记订单财务事件(显示在财务事件时间线)+ 通知财务开票收款。仅金额变化时发。
+  if (newReceivable > 0 && newReceivable !== oldReceivable) {
+    try {
+      const svc = createServiceRoleClient();
+      const no = (old as any)?.internal_order_no || (old as any)?.order_no || orderId;
+      await (svc.from('order_finance_events') as any).insert({
+        order_id: orderId, order_no: no, event_type: 'sample_fee.receivable',
+        amount: newReceivable, currency: 'CNY', note: `打样费应收(客户承担):¥${newReceivable}`, occurred_at: new Date().toISOString(),
+      });
+      const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+      await notifyUsersByRole(svc, ['finance'], {
+        type: 'sample_fee_receivable', title: `💰 打样费应收 ¥${newReceivable}:${no}`,
+        message: `打样单 ${no} 的打样费 ¥${newReceivable} 由客户承担,请开票并收款。`, relatedOrderId: orderId,
+      });
+    } catch (e) { console.warn('[sample-fee] 应收联动失败(不阻断):', e instanceof Error ? e.message : e); }
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }
