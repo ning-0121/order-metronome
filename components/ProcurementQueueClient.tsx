@@ -21,7 +21,7 @@ const LAMP: Record<string, string> = {
   red: 'bg-red-500', yellow: 'bg-yellow-400', green: 'bg-emerald-500',
 };
 const CAT: Record<string, string> = {
-  fabric: '面料', trim: '辅料', packing: '包装', print: '印花', other: '其他',
+  fabric: '面料', trim: '辅料', packing: '包装', print: '印花', other: '其他', '成品大货': '🛒成品大货',
 };
 const STATUS_LABEL: Record<string, string> = {
   pending_order: '待下单', ordered: '已下单', confirmed: '已确认',

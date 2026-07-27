@@ -1007,6 +1007,12 @@ export default async function OrderDetailPage({
         {activeTab === 'bom' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
             <h2 className="text-lg font-semibold text-gray-900">📋 原辅料和包装资料</h2>
+            {(orderData as any).order_purpose === 'trade' && (
+              <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                🛒 本单是<b>经销单(买成品)</b> —— 成品采购请走「<b>🛒 大货采购</b>」tab 逐款填进价、生成采购单;
+                <b>此处原辅料/BOM 仅供参考,不要在这里提交采购</b>(成品单不走面料采购流程)。
+              </div>
+            )}
             {/* BOM 结构化录入(2026-07-02 从底部折叠区提到顶部展开:业务找不到入口,以为没法填) */}
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">🧾 原辅料清单（BOM 录入 / 客户标准库带入）</h3>
