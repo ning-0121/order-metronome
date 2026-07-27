@@ -11,6 +11,8 @@ import { MyProcurementTrackingCard } from '@/components/MyProcurementTrackingCar
 import { ExportOrderSummaryButton } from '@/components/ExportOrderSummaryButton';
 import { getPendingApprovals, CATEGORY_META } from '@/lib/services/pending-approvals.service';
 import { loadUserProductionTodayTasks } from '@/lib/production/today-tasks';
+import { getMailBrief } from '@/app/actions/mail-digest';
+import { CATEGORY_LABEL } from '@/lib/email/classify';
 
 /** 角色中文名映射 */
 const ROLE_LABELS: Record<string, string> = {
@@ -120,6 +122,7 @@ export default async function DashboardPage() {
 
   // 生产今日待办(催料/排厂/首日/中查/尾查/包装/追踪问题);非生产跟单一般为空 → 卡片自动隐藏
   const prodTodayTasks = await loadUserProductionTodayTasks(supabase, user.id);
+  const mailBrief = await getMailBrief().catch(() => ({ keyMonitor: 0, unhandled: 0, top: [] as any[] }));
 
   // 获取用户角色列表
   const userRoles: string[] = (() => {
@@ -317,6 +320,35 @@ export default async function DashboardPage() {
           </div>
         </div>
         </div>
+      </div>
+
+      {/* 📧 今日邮件晨报 — 我范围内的重点未处理邮件(投诉/交期/紧急);完整看板去邮件归纳 */}
+      <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+            📧 今日邮件晨报
+            {mailBrief.keyMonitor > 0
+              ? <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">🔴 {mailBrief.keyMonitor} 封重点未处理</span>
+              : <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">✅ 无重点</span>}
+          </h2>
+          <Link href="/inbox" className="text-xs text-indigo-600 hover:underline">去邮件归纳 →</Link>
+        </div>
+        {mailBrief.top.length > 0 ? (
+          <ul className="divide-y divide-gray-100">
+            {mailBrief.top.map((m) => (
+              <li key={m.id} className="py-1.5">
+                <Link href="/inbox" className="flex items-center gap-2 text-xs hover:bg-gray-50 rounded px-1">
+                  {m.category && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{CATEGORY_LABEL[m.category] || m.category}</span>}
+                  <span className="flex-1 truncate text-gray-800">{m.subject}</span>
+                  {m.customer_name && <span className="shrink-0 text-[10px] text-emerald-700">🏢 {m.customer_name}</span>}
+                  {m.order_no && <span className="shrink-0 text-[10px] text-indigo-600">#{m.order_no}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-gray-400">近 3 天没有需要你处理的重点邮件。</p>
+        )}
       </div>
 
       {/* 🗓️ 我的今日待办 — 生产跟单该干的活(催料/排厂/首日/中查/尾查/包装/追踪问题;无则隐藏) */}

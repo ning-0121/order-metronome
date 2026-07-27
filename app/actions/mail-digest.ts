@@ -38,6 +38,48 @@ export interface MailDigestView {
 
 const CATEGORY_ORDER: MailCategory[] = ['投诉', '交期', '样品', 'PO', '报价', '物流', '其他', '噪音'];
 
+export interface MailBrief {
+  keyMonitor: number;   // 重点未处理(重点度≥3)
+  unhandled: number;    // 未处理总数
+  top: { id: string; subject: string; category: MailCategory | null; order_no: string | null; customer_name: string | null }[];
+}
+
+/**
+ * 今日邮件晨报(轻量,嵌工作台顶部 2026-07-27 CEO)。按用户范围(业务执行看自己 assigned_exec_id、
+ * 管理看全部),只算重点计数 + 前几条,不跑自动绑单/AI,快。完整看板去 /inbox。
+ */
+export async function getMailBrief(days = 3): Promise<MailBrief> {
+  const empty: MailBrief = { keyMonitor: 0, unhandled: 0, top: [] };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return empty;
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  const seeAll = hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS');
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  let q = (supabase.from('mail_inbox') as any)
+    .select('id, subject, category, importance, handled_status, order_id')
+    .not('digested_at', 'is', null).neq('category', '噪音').gte('received_at', since)
+    .order('importance', { ascending: false }).order('received_at', { ascending: false }).limit(120);
+  if (!seeAll) q = q.eq('assigned_exec_id', user.id);
+  const { data: rows } = await q;
+  const list = (rows || []) as any[];
+  const unhandled = (r: any) => r.handled_status === 'unread' || r.handled_status === 'seen' || !r.handled_status;
+  const key = list.filter((r) => (r.importance ?? 0) >= 3 && unhandled(r));
+  const top = key.slice(0, 5);
+  const oids = [...new Set(top.map((r) => r.order_id).filter(Boolean))] as string[];
+  const noMap = new Map<string, string>(), custMap = new Map<string, string>();
+  if (oids.length > 0) {
+    const { data: ords } = await (supabase.from('orders') as any).select('id, internal_order_no, order_no, customer_name').in('id', oids);
+    for (const o of ((ords || []) as any[])) { noMap.set(o.id, o.internal_order_no || o.order_no); if (o.customer_name) custMap.set(o.id, o.customer_name); }
+  }
+  return {
+    keyMonitor: key.length,
+    unhandled: list.filter(unhandled).length,
+    top: top.map((r) => ({ id: r.id, subject: r.subject, category: r.category, order_no: r.order_id ? (noMap.get(r.order_id) || null) : null, customer_name: r.order_id ? (custMap.get(r.order_id) || null) : null })),
+  };
+}
+
 /** 拉取当前用户可见的邮件归纳(默认近 3 天已归纳、非噪音)。 */
 export async function getMailDigest(days = 3): Promise<{ data?: MailDigestView; error?: string }> {
   const supabase = await createClient();
