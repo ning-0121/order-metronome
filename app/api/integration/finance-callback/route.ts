@@ -34,6 +34,31 @@ async function applyProcurementPayment(svc: any, prId: string, amount: number) {
   }).eq('id', pr.reconciliation_id)
 }
 
+/**
+ * 财务「改判」止血(2026-07-27 CEO)。财务批准后又撤销重审再驳回(或反之)→ 回传裁决与节拍器现状相悖。
+ * 状态闸(.eq status pending 等)本会静默跳过(防重放),但那样节拍器毫不知情、订单不被差回。
+ * 此处:现状与本次裁决**明确相悖**(非重放)→ 通知采购/业务/财务人工核撤(不自动硬撤副作用,避免误撤)。
+ * currentDecision 传已归一的 'approved'|'rejected'|null;null 或与 incoming 相同 → 视为重放/未处理,不报。
+ */
+async function flagFinanceReversal(svc: any, opts: {
+  approvalLabel: string; refNo: string; incoming: 'approved' | 'rejected';
+  currentDecision: 'approved' | 'rejected' | null; deciderName: string; note: string | null; relatedOrderId: string | null;
+}): Promise<boolean> {
+  const { approvalLabel, refNo, incoming, currentDecision, deciderName, note, relatedOrderId } = opts
+  if (!currentDecision || currentDecision === incoming) return false
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications')
+    await notifyUsersByRole(svc, ['procurement', 'procurement_manager', 'sales', 'merchandiser', 'order_manager', 'finance'], {
+      type: 'finance_reversal',
+      title: `⚠️ 财务改判${approvalLabel} ${refNo}:原${currentDecision === 'approved' ? '批准' : '驳回'}→现${incoming === 'approved' ? '批准' : '驳回'}`,
+      message: `财务(${deciderName})对已处理的${approvalLabel} ${refNo} 改判为「${incoming === 'approved' ? '批准' : '驳回'}」${note ? ':' + note : ''}。节拍器为防误撤未自动执行,请人工核对并处理(作废/恢复采购单、卡回/放行出货、差回订单等)。`,
+      relatedOrderId: relatedOrderId || undefined,
+    })
+    console.log(`[FinanceCallback] ⚠️ 改判止血通知已发:${approvalLabel} ${refNo} ${currentDecision}→${incoming}`)
+  } catch (e) { console.warn('[finance-callback] 改判通知失败:', e instanceof Error ? e.message : e) }
+  return true
+}
+
 interface ApprovalCallback {
   event: string
   timestamp: string
@@ -234,7 +259,14 @@ export async function POST(request: Request) {
         .update(patch)
         .eq('id', approval_id).eq('status', 'sales_signed').select('id')
       if (error) throw new Error(`Shipment approval update failed: ${error.message}`)
-      if (!rows || rows.length === 0) skipLog('shipment')
+      if (!rows || rows.length === 0) {
+        skipLog('shipment')
+        // 改判止血:当前 finance_decision 与本次相悖(如原批准放行、现驳回)→ 通知人工核撤
+        const { data: cur } = await (supabase.from('shipment_confirmations') as any)
+          .select('finance_decision, order_id').eq('id', approval_id).maybeSingle()
+        const curDec = (cur as any)?.finance_decision === 'approved' ? 'approved' : (cur as any)?.finance_decision === 'rejected' ? 'rejected' : null
+        await flagFinanceReversal(supabase, { approvalLabel: '出货审批', refNo: String(approval_id).slice(0, 8), incoming: decision, currentDecision: curDec, deciderName: decider_name, note: decision_note, relatedOrderId: (cur as any)?.order_id ?? null })
+      }
     }
 
     // 采购单审批(审计 B):approval_id=采购单 id。批准 → 自动下单(place core,emit purchase_order.placed);
@@ -253,6 +285,10 @@ export async function POST(request: Request) {
         if (upErr) throw new Error(`PO approve update failed: ${upErr.message}`)
         if (!gate || gate.length === 0) {
           console.log(`[FinanceCallback] purchase approve: PO ${approval_id} 非 pending,跳过下单(幂等)`)
+          // 改判止血:当前已驳回、现回传批准 → 通知人工核恢复
+          const { data: cur } = await (svc.from('purchase_orders') as any).select('approval_status, order_ids').eq('id', approval_id).maybeSingle()
+          const curDec = (cur as any)?.approval_status === 'approved' ? 'approved' : (cur as any)?.approval_status === 'rejected' ? 'rejected' : null
+          await flagFinanceReversal(svc, { approvalLabel: '采购单', refNo: poNo, incoming: 'approved', currentDecision: curDec, deciderName: decider_name, note: decision_note, relatedOrderId: ((cur as any)?.order_ids || [])[0] ?? null })
         } else {
           const { placePurchaseOrderCore } = await import('@/lib/procurement/placeCore')
           const pr = await placePurchaseOrderCore(svc, approval_id)
@@ -280,6 +316,11 @@ export async function POST(request: Request) {
               message: `采购单 ${poNo} 被财务驳回:${decision_note || '无原因'}。请调整后重新提交。`,
             })
           } catch { /* 通知失败不阻断 */ }
+        } else {
+          // 改判止血:当前已批准下单、现回传驳回(撤销重审后驳回)→ 通知人工作废采购单、差回订单
+          const { data: cur } = await (svc.from('purchase_orders') as any).select('approval_status, order_ids').eq('id', approval_id).maybeSingle()
+          const curDec = (cur as any)?.approval_status === 'approved' ? 'approved' : (cur as any)?.approval_status === 'rejected' ? 'rejected' : null
+          await flagFinanceReversal(svc, { approvalLabel: '采购单', refNo: poNo, incoming: 'rejected', currentDecision: curDec, deciderName: decider_name, note: decision_note, relatedOrderId: ((cur as any)?.order_ids || [])[0] ?? null })
         }
       }
     }
