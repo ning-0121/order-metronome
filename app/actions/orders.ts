@@ -694,6 +694,20 @@ export async function createOrder(
     console.warn('[createOrder] 通知生产主管失败（不影响订单创建）:', notifErr?.message);
   }
 
+  // ── STEP 5c: 经销单(trade)建单 → 通知采购去「大货采购」填成品进价 ──
+  // 业务/开发建经销单时看不到底价、填不了进价 → 必须推给采购填建议价,否则大货采购卡在"待录进价"没人管。
+  if (order_purpose === 'trade') {
+    try {
+      const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+      await notifyUsersByRole(supabase, ['procurement', 'procurement_manager'], {
+        type: 'trade_cost_needed',
+        title: `🛒 新经销单 ${orderData.order_no} 待录成品进价`,
+        message: `客户:${customer_name || '?'} · ${quantity || '?'} 件\n请到该订单「大货采购」tab 逐款填成品进价(建议价),再生成大货采购单。`,
+        relatedOrderId: orderData.id,
+      });
+    } catch (e: any) { console.warn('[createOrder] 通知采购填进价失败(不阻断):', e?.message); }
+  }
+
   // ── STEP 6: 历史导入模式处理 ──
   // CEO 2026-04-09：进行中订单创建需要 CEO 审批
   // → lifecycle_status 设为 'pending_approval'，不自动激活
