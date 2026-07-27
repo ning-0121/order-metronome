@@ -78,6 +78,13 @@ export const FILE_NAMING_BY_STEP: Record<
   shipment_execute:                { label: '提单',            example: 'QM-20260415-001_提单.pdf' },
   payment_received:                { label: '收款凭证',         example: 'QM-20260415-001_收款凭证.pdf' },
 
+  // ── 打样单节点(2026-07-27 CEO:补打样文档命名标准)──
+  sample_confirm:                  { label: '客户打样需求',     suffixHint: 'Tech Pack/参考图/尺码表/面料要求', example: 'QM-20260415-001_客户打样需求.pdf' },
+  sample_qc:                       { label: '样品照片',         suffixHint: '多张加 _正面/_背面/_细节/_尺寸', example: 'QM-20260415-001_样品照片_正面.jpg' },
+  sample_shipping_arrange:         { label: '寄样面单',         example: 'QM-20260415-001_寄样面单.jpg' },
+  sample_sent:                     { label: '寄样快递单',       example: 'QM-20260415-001_寄样快递单.jpg' },
+  sample_customer_confirm:         { label: '客户确认样品',     suffixHint: '客户确认邮件/消息截图', example: 'QM-20260415-001_客户确认样品.png' },
+
   // ── 虚拟 step key（不对应里程碑节点，仅用于命名校验路由）──
   // ⚠️ 重要：suggestFileName / validateFileName 都从本 map 查 label。
   // 之前误加到 FILE_NAMING_BY_DOC_TYPE 导致 fallback 到「凭证」label。2026-05-18 修复。

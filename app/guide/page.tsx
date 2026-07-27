@@ -929,10 +929,10 @@ export default function GuidePage() {
           <div className="rounded-xl border border-purple-200 bg-purple-50/30 p-4">
             <h3 className="text-sm font-bold text-purple-800 mb-2">🧪 样品单流程</h3>
             <ul className="text-sm text-gray-700 space-y-1.5">
-              <li>• 订单列表新增<strong>「样品单」</strong>tab，与订单分开管理</li>
-              <li>• 样品单使用7节点简化流程：打样确认→面料采购→打样制作→打样检验→样品寄出→客户确认→打样完成</li>
-              <li>• 样品单14天周期（vs 订单45天）</li>
-              <li>• 客户确认后可从样品单创建正式生产订单</li>
+              <li>• 订单列表新增<strong>「样品单」</strong>tab，与订单分开管理；打样单详情只显示 基本信息 + 执行进度</li>
+              <li>• 样品单使用<strong>8 节点</strong>简化流程：打样单确认→打样面料采购→打样制作→打样检验→寄样安排→样品寄出→客户确认样品→打样完成</li>
+              <li>• 样品单 14 天周期（vs 订单 45 天）；不进生产/采购中心、不计入交付置信度与部门统计</li>
+              <li>• 客户确认后可<strong>从样品单带出建正式生产大货单</strong>(自动关联,可溯源)</li>
             </ul>
           </div>
           <div className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-4">

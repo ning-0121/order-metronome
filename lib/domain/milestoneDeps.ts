@@ -25,6 +25,15 @@ export const MILESTONE_PREREQUISITES: Record<string, string[]> = {
   booking_done: ['ci_made'],
   shipment_execute: ['booking_done', 'ci_made'],              // 送仓无订舱时靠 ci_made 兜底
   payment_received: ['shipment_execute'],
+  // 打样链软门禁(2026-07-27 CEO):确认→备料→制作→检验→寄样安排→寄出→客户确认→完成。
+  //   软的:乱序点完成会警示+可强行。只作用于打样单(其它单没有 sample_* 节点,自动跳过)。
+  sample_material: ['sample_confirm'],
+  sample_making: ['sample_material'],
+  sample_qc: ['sample_making'],
+  sample_shipping_arrange: ['sample_qc'],
+  sample_sent: ['sample_shipping_arrange'],
+  sample_customer_confirm: ['sample_sent'],
+  sample_complete: ['sample_customer_confirm'],
 };
 
 /** 该节点未完成的前置(只算该订单里实际存在的前置节点;不存在的前置自动跳过)。 */
