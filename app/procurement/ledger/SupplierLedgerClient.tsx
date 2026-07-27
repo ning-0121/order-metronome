@@ -30,6 +30,8 @@ export function SupplierLedgerClient({
   const [batches, setBatches] = useState<LedgerImportBatch[]>([]);
   const [showBatches, setShowBatches] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const auxFileRef = useRef<HTMLInputElement>(null);
+  const [auxSupplier, setAuxSupplier] = useState('');   // 辅料导入:可手填供应商名(不填则从付款事由识别)
 
   useEffect(() => { listSuppliers().then((r) => setSuppliers((r.data || []).map((s: any) => ({ id: s.id, name: s.name })))); }, []);
   useEffect(() => { getLedgerImports().then(setBatches); }, []);
@@ -39,14 +41,18 @@ export function SupplierLedgerClient({
     setGroups(g); setTotalEx(grandTotalExTax); setTotalIncl(grandTotalInclTax); setBatches(b);
   }
 
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>, template: 'fabric' | 'aux' = 'fabric', supplierName = '') {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true); setResult(null);
-    const fd = new FormData(); fd.append('file', file);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('template', template);
+    if (supplierName) fd.append('supplierName', supplierName);
     const r = await importSupplierLedger(fd);
     setResult(r); setImporting(false);
     if (fileRef.current) fileRef.current.value = '';
+    if (auxFileRef.current) auxFileRef.current.value = '';
     if (r.ok) await reload();
   }
 
@@ -195,9 +201,22 @@ export function SupplierLedgerClient({
           <div className="text-sm font-semibold text-gray-800">导入《面料采购明细表汇总》</div>
           <div className="text-xs text-gray-500">.xlsx / .xls；每个 sheet 一家供应商。金额按不含税录入,税率后设。</div>
         </div>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} disabled={importing}
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={(e) => onFile(e, 'fabric')} disabled={importing}
           className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-white hover:file:bg-indigo-700 disabled:opacity-50" />
         {importing && <span className="text-sm text-indigo-600">导入中…</span>}
+      </div>
+
+      {/* 导入条 2:辅料付款对账单(制袋/绣花/印花等,单供应商:序号/摘要=订单号/金额/客户/月份)*/}
+      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-amber-300 bg-amber-50/50 p-4">
+        <div className="flex-1 min-w-[200px]">
+          <div className="text-sm font-semibold text-gray-800">导入《辅料付款对账单》<span className="ml-1 text-[11px] font-normal text-amber-700">制袋 / 绣花 / 印花…</span></div>
+          <div className="text-xs text-gray-500">.xlsx；单家供应商;表头含「摘要(=订单号)/金额」。金额按不含税录入,税率后设。供应商名不填则从「付款事由」识别,可到台账再关联。</div>
+        </div>
+        <input value={auxSupplier} onChange={(e) => setAuxSupplier(e.target.value)} placeholder="供应商名(可选)" disabled={importing}
+          className="w-40 border border-amber-300 rounded-md px-2 py-1.5 text-sm outline-none focus:border-amber-500 disabled:opacity-50" />
+        <input ref={auxFileRef} type="file" accept=".xlsx,.xls" onChange={(e) => onFile(e, 'aux', auxSupplier)} disabled={importing}
+          className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-amber-600 file:px-4 file:py-2 file:text-white hover:file:bg-amber-700 disabled:opacity-50" />
+        {importing && <span className="text-sm text-amber-600">导入中…</span>}
       </div>
 
       {/* 导入记录 / 删除重传 */}

@@ -14,6 +14,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 import { makeDailyBillNo } from '@/lib/utils/dailyBillNo';
 import { parseFabricLedger, type FabricLedgerRow } from '@/lib/services/fabric-ledger-parser';
+import { parseAuxPaymentLedger } from '@/lib/services/aux-payment-ledger-parser';
 
 const WRITE_MSG = '仅采购/采购经理/管理员可导入供应商账目';
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -45,9 +46,20 @@ export async function importSupplierLedger(formData: FormData): Promise<ImportRe
     if (!file) return { ok: false, error: '未收到文件' };
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    const parsed = parseFabricLedger(buffer);
+    // 模板:fabric=《面料采购明细表汇总》(每 sheet 一供应商);aux=辅料付款对账单(制袋/绣花等,序号/摘要/金额/客户/月份)
+    const template = String(formData.get('template') || 'fabric');
+    const supplierName = String(formData.get('supplierName') || '').trim();
+    const parsed = template === 'aux'
+      ? parseAuxPaymentLedger(buffer, supplierName || undefined)
+      : parseFabricLedger(buffer);
     if (!parsed.rows.length) {
-      return { ok: false, error: '未解析出任何明细行(检查是否是《面料采购明细表汇总》格式)', warnings: parsed.warnings };
+      return {
+        ok: false,
+        error: template === 'aux'
+          ? '未解析出任何明细行(检查是否含「摘要/金额」表头的辅料付款对账单)'
+          : '未解析出任何明细行(检查是否是《面料采购明细表汇总》格式)',
+        warnings: parsed.warnings,
+      };
     }
 
     const svc = createServiceRoleClient();
