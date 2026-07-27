@@ -211,35 +211,9 @@ export default async function DashboardPage() {
   const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
   const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);
 
-  // 我的逾期 = owner_user_id 严格等于当前用户
-  // 他人逾期 = 我参与的订单里、不是我的（admin 看全局）
-  // ⚠️ 2026-05-15：用 STRICTLY_PM_STEPS / PM_OR_FINANCE_STEPS 精细化过滤
-  //    STRICTLY_PM 节点：非 PM 用户不显示
-  //    PM_OR_FINANCE 节点：非 PM 且非 finance 用户不显示
-  //    其他节点：保持原 owner_user_id 严格匹配逻辑
-  const { STRICTLY_PM_STEPS, PM_OR_FINANCE_STEPS } = await import('@/lib/domain/default-assignees');
-  const userRolesLower = userRoles.map(r => String(r).toLowerCase());
-  const isPmUser = userRolesLower.includes('production_manager');
-  const isFinanceUser = userRolesLower.includes('finance');
-  const myOverdue = isAdmin
-    ? []
-    : filteredOverdue.filter((m: any) => {
-        if (m.owner_user_id !== user.id) return false;
-        // STRICTLY PM 节点：非 PM 不算我的
-        if (STRICTLY_PM_STEPS.includes(m.step_key) && !isPmUser) return false;
-        // PM 或财务节点：非 PM 且非财务不算我的
-        if (PM_OR_FINANCE_STEPS.includes(m.step_key) && !isPmUser && !isFinanceUser) return false;
-        return true;
-      });
-  const othersOverdue = isAdmin
-    ? filteredOverdue
-    : filteredOverdue.filter((m: any) =>
-        myOrderIds.has(m.order_id) && m.owner_user_id !== user.id
-      );
-
-  // 查询所有超期节点对应的延期申请状态
+  // 查询所有超期节点对应的延期申请状态(提前到逾期过滤前:pending 延期 = 责任人已申请待批,不再算作"逾期")
   const overdueMilestoneIds = filteredOverdue.map((m: any) => m.id);
-  let delayRequestMap: Record<string, string> = {}; // milestoneId → status
+  const delayRequestMap: Record<string, string> = {}; // milestoneId → status
   if (overdueMilestoneIds.length > 0) {
     const { data: delayReqs } = await (supabase.from('delay_requests') as any)
       .select('milestone_id, status')
@@ -255,6 +229,36 @@ export default async function DashboardPage() {
       }
     }
   }
+  // pending 延期 = 已申请待审批 → 从"逾期"桶剔除(责任人已行动,不该继续红牌;仍在延期审批队列里可见)。
+  // approved 不剔:批准会顺延 due_at,仍留在逾期列表的 = 顺延后又过期,属真逾期,照常显示。
+  const hasPendingDelay = (m: any) => isApprovalPending(delayRequestMap[m.id]);
+
+  // 我的逾期 = owner_user_id 严格等于当前用户
+  // 他人逾期 = 我参与的订单里、不是我的（admin 看全局）
+  // ⚠️ 2026-05-15：用 STRICTLY_PM_STEPS / PM_OR_FINANCE_STEPS 精细化过滤
+  //    STRICTLY_PM 节点：非 PM 用户不显示
+  //    PM_OR_FINANCE 节点：非 PM 且非 finance 用户不显示
+  //    其他节点：保持原 owner_user_id 严格匹配逻辑
+  const { STRICTLY_PM_STEPS, PM_OR_FINANCE_STEPS } = await import('@/lib/domain/default-assignees');
+  const userRolesLower = userRoles.map(r => String(r).toLowerCase());
+  const isPmUser = userRolesLower.includes('production_manager');
+  const isFinanceUser = userRolesLower.includes('finance');
+  const myOverdue = isAdmin
+    ? []
+    : filteredOverdue.filter((m: any) => {
+        if (m.owner_user_id !== user.id) return false;
+        if (hasPendingDelay(m)) return false;   // 已申请延期(待批)→ 不算逾期
+        // STRICTLY PM 节点：非 PM 不算我的
+        if (STRICTLY_PM_STEPS.includes(m.step_key) && !isPmUser) return false;
+        // PM 或财务节点：非 PM 且非财务不算我的
+        if (PM_OR_FINANCE_STEPS.includes(m.step_key) && !isPmUser && !isFinanceUser) return false;
+        return true;
+      });
+  const othersOverdue = (isAdmin
+    ? filteredOverdue
+    : filteredOverdue.filter((m: any) =>
+        myOrderIds.has(m.order_id) && m.owner_user_id !== user.id
+      )).filter((m: any) => !hasPendingDelay(m));   // 已申请延期(待批)→ 不算逾期
 
   // 获取逾期节点负责人姓名
   const ownerIds = [...new Set(filteredOverdue.map((m: any) => m.owner_user_id).filter(Boolean))];
