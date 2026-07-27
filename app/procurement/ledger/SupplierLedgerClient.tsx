@@ -42,18 +42,33 @@ export function SupplierLedgerClient({
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>, template: 'fabric' | 'aux' = 'fabric', supplierName = '') {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
+    // 体积门禁:超上限直接拦(多半是表里夹了开票截图等图片)。否则 server action 会拒/假死。
+    const MAX_MB = 9;
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setResult({ ok: false, error: `文件 ${(file.size / 1024 / 1024).toFixed(1)}MB,超过 ${MAX_MB}MB 上限。多半是表里夹了「开票截图」等图片 —— 请删掉截图 sheet(只留「序号/摘要/金额/客户/月份」对账数据)后另存再传,对账数据本身很小。` });
+      input.value = '';
+      return;
+    }
     setImporting(true); setResult(null);
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('template', template);
-    if (supplierName) fd.append('supplierName', supplierName);
-    const r = await importSupplierLedger(fd);
-    setResult(r); setImporting(false);
-    if (fileRef.current) fileRef.current.value = '';
-    if (auxFileRef.current) auxFileRef.current.value = '';
-    if (r.ok) await reload();
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('template', template);
+      if (supplierName) fd.append('supplierName', supplierName);
+      const r = await importSupplierLedger(fd);
+      setResult(r);
+      if (r.ok) await reload();
+    } catch (err: any) {
+      // 兜异常:失败后必复位「导入中」并明确报错,不再假死(server action 拒收大文件时会走这里)
+      setResult({ ok: false, error: `导入失败(文件可能过大或格式异常):${err?.message || String(err)}` });
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = '';
+      if (auxFileRef.current) auxFileRef.current.value = '';
+    }
   }
 
   async function onDeleteBatch(b: LedgerImportBatch) {
