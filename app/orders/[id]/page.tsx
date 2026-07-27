@@ -424,7 +424,11 @@ export default async function OrderDetailPage({
                 />
                 {/* 重算排期按钮已移除(2026-07-06 用户:不需要) */}
                 {(orderData.order_type === 'sample' || (orderData as any).order_purpose === 'sample') && (
-                  <ExportSampleRequestButton orderId={id} />
+                  <>
+                    <ExportSampleRequestButton orderId={id} />
+                    {/* 样转大货:从打样单带出建正式大货单(自动关联溯源) */}
+                    <a href={`/orders/new?from_sample=${id}`} className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700">🔄 从此打样单建大货单</a>
+                  </>
                 )}
               </div>
             </div>

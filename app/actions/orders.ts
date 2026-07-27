@@ -434,6 +434,7 @@ export async function createOrder(
     delivery_phone:          delivery_type === 'domestic' ? (delivery_phone?.trim() || null)          : null,
     delivery_required_at:    delivery_type === 'domestic' ? (delivery_required_at || null)            : null,
     order_purpose,
+    ...((formData.get('parent_order_id') as string) ? { parent_order_id: formData.get('parent_order_id') as string } : {}),   // 样转大货:关联来源打样单
     notes: (formData.get('notes') as string) || null,
     // AI 原始识别冻结底档(有 PO 解析才有):只读原文,纠错追溯用;工作版在 order_line_items
     ...(() => {

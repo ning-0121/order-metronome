@@ -172,6 +172,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   //   单PO/手工建单 = 空数组 → 服务端不写来源PO,行为不变(向后兼容)。
   const [customerPos, setCustomerPos] = useState<{ po_number: string; po_amount?: string }[]>([]);
   const isSampleOrder = searchParams.get('type') === 'sample';
+  const fromSampleId = searchParams.get('from_sample');   // 样转大货:从打样单带出建大货单
+  const [parentOrderId, setParentOrderId] = useState<string | null>(null);
+  const [fromSampleNo, setFromSampleNo] = useState<string | null>(null);
   const [orderType, setOrderType] = useState('');
   // 订单用途:production(默认) | trade(采购成品/贸易订单)。sample 由独立入口决定。
   const [orderPurpose, setOrderPurpose] = useState('production');
@@ -194,6 +197,22 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     };
     setN('total_quantity', total); setN('style_count', lineStyles.length); setN('color_count', colorCount);
   }, [lineStyles]);
+
+  // 样转大货:从打样单带出 → 预填客户 + 逐款明细,记 parent_order_id 关联(2026-07-27 CEO)
+  useEffect(() => {
+    if (!fromSampleId) return;
+    let alive = true;
+    import('@/app/actions/order-line-items').then(({ getSampleCloneData }) => getSampleCloneData(fromSampleId)).then((r) => {
+      if (!alive || !r || r.error) return;
+      setParentOrderId(fromSampleId);
+      setFromSampleNo(r.parentNo || null);
+      if (r.customer_id && r.customer_name) setSelectedCustomer(toSelectedCustomer({ id: r.customer_id, customer_name: r.customer_name }));
+      if (Array.isArray(r.styles) && r.styles.length > 0) setLineStyles(r.styles);
+    }).catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromSampleId]);
+
   // 追踪文件选择（用于命名检查）
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
 
@@ -1016,6 +1035,8 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
     } else if (orderPurpose === 'trade' || orderPurpose === 'consign') {
       rawFormData.set('order_purpose', orderPurpose);
     }
+    // 样转大货:关联来源打样单
+    if (parentOrderId) rawFormData.set('parent_order_id', parentOrderId);
     // 已批准的价格审批 ID 透传到服务端校验
     if (priceApprovalId) {
       rawFormData.set('price_approval_id', priceApprovalId);
@@ -1128,6 +1149,11 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
         <div className="rounded-xl border border-gray-200 bg-white p-8">
           <h2 className="text-xl font-bold text-gray-900 mb-1">{isSampleOrder ? '新建样品单' : '新建订单'}</h2>
           <p className="text-sm text-gray-500 mb-6">以客户 PO 为单位录入，系统将自动生成执行节拍</p>
+          {fromSampleNo && (
+            <div className="mb-6 rounded-xl border-2 border-purple-200 bg-purple-50 p-3 text-sm text-purple-800">
+              🔄 <b>从打样单 {fromSampleNo} 带出</b>——客户与逐款明细已预填,请核对并按大货数量调整后提交;新单将自动关联该打样单(可溯源)。
+            </div>
+          )}
 
           {/* 模板选择器 */}
           {templates.length > 0 && (

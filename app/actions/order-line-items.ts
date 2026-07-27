@@ -320,6 +320,26 @@ export async function getOrderDealPrices(orderId: string): Promise<{ canEdit?: b
   return { canEdit: true, styles: [...seen.values()] };
 }
 
+/**
+ * 样转大货:取打样单的客户 + 逐款明细,供"从打样单建大货单"预填(2026-07-27 CEO)。
+ * 只读、需可访问该打样单;来源必须是 order_purpose='sample'。styles 形状同 getOrderLineItems(直接喂富录入表)。
+ */
+export async function getSampleCloneData(sampleOrderId: string): Promise<{ customer_id?: string | null; customer_name?: string | null; product_description?: string | null; styles?: any[]; sizeOrder?: string[] | null; parentNo?: string | null; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  if (!(await canUserAccessOrder(supabase, user.id, sampleOrderId))) return { error: '无权访问该打样单' };
+  const { data: o } = await (supabase.from('orders') as any)
+    .select('id, customer_id, customer_name, product_description, order_purpose, internal_order_no, order_no').eq('id', sampleOrderId).maybeSingle();
+  if (!o) return { error: '打样单不存在' };
+  if ((o as any).order_purpose !== 'sample') return { error: '来源不是打样单' };
+  const li = await getOrderLineItems(sampleOrderId);
+  return {
+    customer_id: (o as any).customer_id, customer_name: (o as any).customer_name, product_description: (o as any).product_description,
+    styles: li.data || [], sizeOrder: li.sizeOrder || null, parentNo: (o as any).internal_order_no || (o as any).order_no,
+  };
+}
+
 /** 保存逐款成交价(款级同值写该款每行);仅 CAN_SEE_FINANCIALS。轻量 update,不动其它明细字段。 */
 export async function saveOrderDealPrices(orderId: string, updates: Array<{ style_no: string; po_unit_price: string | number | null }>): Promise<{ ok?: boolean; error?: string }> {
   const supabase = await createClient();
