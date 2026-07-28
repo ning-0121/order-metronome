@@ -47,19 +47,27 @@ export function ManufacturingOrderTab({ orderId, showPrice = false, showPurchase
   const { confirm, dialog } = useDialogs();
 
   const reload = async () => {
-    const res = await getManufacturingOrder(orderId);
-    if ((res as any).error) { setMsg((res as any).error); setLoading(false); return; }
-    const d = (res as any).data;
-    setData(d);
-    if (d.mo) {
-      setForm({
-        print_embroidery_requirements: d.mo.print_embroidery_requirements || '',
-        qc_focus: d.mo.qc_focus || '', special_requirements: d.mo.special_requirements || '',
-        risk_notes: d.mo.risk_notes || '', factory_packing_instructions: d.mo.factory_packing_instructions || '',
-        factory_notes: d.mo.factory_notes || '', carton_requirements: d.mo.carton_requirements || '',
-      });
+    setLoading(true); setMsg('');
+    try {
+      const res = await getManufacturingOrder(orderId);
+      if ((res as any).error) { setMsg((res as any).error); setLoading(false); return; }
+      const d = (res as any).data;
+      setData(d);
+      if (d.mo) {
+        setForm({
+          print_embroidery_requirements: d.mo.print_embroidery_requirements || '',
+          qc_focus: d.mo.qc_focus || '', special_requirements: d.mo.special_requirements || '',
+          risk_notes: d.mo.risk_notes || '', factory_packing_instructions: d.mo.factory_packing_instructions || '',
+          factory_notes: d.mo.factory_notes || '', carton_requirements: d.mo.carton_requirements || '',
+        });
+      }
+      setLoading(false);
+    } catch (e: any) {
+      // Server Action 调用在传输层失败(最常见:刚发新版本,旧页面的 action 引用失效)→ 不能永远卡"加载中",
+      // 给出可点的重试(此时新 JS 多半已就绪,一点即通)。2026-07-27 生产任务单卡加载事故后加。
+      setMsg('加载失败:' + (e?.message || '网络或版本刚更新') + '(可点重试或刷新页面)');
+      setLoading(false);
     }
-    setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [orderId]);
 
@@ -123,7 +131,14 @@ export function ManufacturingOrderTab({ orderId, showPrice = false, showPurchase
   }
 
   if (loading) return <div className="text-center py-8 text-gray-400">加载中...</div>;
-  if (!data) return <div className="text-center py-8 text-red-500">{msg || '加载失败'}</div>;
+  if (!data) return (
+    <div className="text-center py-8">
+      <p className="text-red-500 mb-3">{msg || '加载失败'}</p>
+      <button onClick={reload} className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 active:scale-95 transition">
+        🔄 重试
+      </button>
+    </div>
+  );
 
   const { mo, order, lineItems, bom } = data;
   const status = mo?.status || null;
