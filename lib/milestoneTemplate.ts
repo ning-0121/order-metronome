@@ -265,7 +265,7 @@ export const TRADE_MILESTONE_TEMPLATE: Array<{
 ];
 
 /**
- * V3 标准生产模板 = 18 节点(2026-07-27 CEO 拍板:部门线 + 顺序审批流)
+ * V3 标准生产模板 = 19 节点(2026-07-27 CEO 拍板:部门线 + 顺序审批流;含"初上线跟单确认")
  * 设计:docs/Designs/Milestone-V3-Department-Lines-Redesign.md
  *
  * 核心:每节点单一部门归属 + 单一完成权;跨部门"会签"改为"顺序节点 + 硬前置"
@@ -303,8 +303,10 @@ export const MILESTONE_TEMPLATE_V3: Array<{
     evidence_note: "采购确认大货原辅料品质与样一致(前置:产前样寄出)" },
   { step_key: "pre_production_sample_approved", name: "产前样·客户确认", owner_role: "merchandiser", is_critical: true, evidence_required: false,
     evidence_note: "业务确认客户通过/自确认(前置:采购品质核)" },
+  { step_key: "initial_line_check", name: "初上线·跟单确认", owner_role: "production", is_critical: false, evidence_required: false,
+    evidence_note: "开裁/首件上线,跟单到厂确认工艺、尺寸、颜色无误后放行大货(前置:产前样确认)" },
   { step_key: "mid_qc_check", name: "中期验货·QC", owner_role: "qc", is_critical: false, evidence_required: true,
-    evidence_note: "QC 中期验货(前置:产前样确认)" },
+    evidence_note: "QC 中期验货(前置:初上线跟单确认)" },
   { step_key: "packing_method_confirmed", name: "包装方式确认", owner_role: "merchandiser", is_critical: false, evidence_required: true,
     evidence_note: "业务确认包装方式/唛头/装箱资料(前置:中期验货)" },
   { step_key: "final_qc_check", name: "尾期验货·QC", owner_role: "qc", is_critical: true, evidence_required: true,
@@ -371,8 +373,8 @@ export function getApplicableMilestones(
     return consignBase;
   }
 
-  // 标准生产单 = V3 部门线(2026-07-27 CEO 拍板,出口 18 节点)。仅新单生效;在途 V2 单不动。
-  //   送仓单砍「订舱出货」(送仓无海运订舱),保留船样 → 送仓 17 节点。
+  // 标准生产单 = V3 部门线(2026-07-27 CEO 拍板,出口 19 节点,含初上线跟单确认)。仅新单生效;在途 V2 单不动。
+  //   送仓单砍「订舱出货」(送仓无海运订舱),保留船样 → 送仓 18 节点。
   //   (consign 委托加工仍用 V2:料由工厂自采,砍采购节点会让 V3 硬前置链断档,暂不迁 V3。)
   void samplePhase; void skipPreProductionSample;
   const base = [...MILESTONE_TEMPLATE_V3];

@@ -184,6 +184,7 @@ const TIMELINE = {
 
   // ── 阶段 6：开裁 + 中查 ──
   production_kickoff:            22,  // 生产启动/开裁
+  initial_line_check:           24,  // V3:初上线·跟单确认(开裁/首件上线放行大货)
   mid_qc_check:                  30,  // 跟单中查
   mid_qc_sales_check:            31,  // 业务中查（跟单后 1 天复核）
 

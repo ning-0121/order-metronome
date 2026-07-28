@@ -68,7 +68,7 @@ const MILESTONE_GROUPS = [
     key: 'stage4', emoji: '🟩',
     titleCn: '阶段 4：生产过程',
     // 业务盯:中期验货 → 包装方式确认 → 尾期验货(大货生产/QC 明细在生产中心);production_kickoff 等旧节点折入
-    stepKeys: ['production_kickoff', 'mid_qc_check', 'mid_qc_sales_check', 'packing_method_confirmed', 'final_qc_check', 'final_qc_sales_check', 'factory_completion', 'leftover_collection'],
+    stepKeys: ['production_kickoff', 'initial_line_check', 'mid_qc_check', 'mid_qc_sales_check', 'packing_method_confirmed', 'final_qc_check', 'final_qc_sales_check', 'factory_completion', 'leftover_collection'],
   },
   {
     key: 'stage5', emoji: '🟫',

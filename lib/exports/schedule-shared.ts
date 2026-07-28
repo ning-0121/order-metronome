@@ -16,7 +16,7 @@ export const STAGE_OF_STEP: Record<string, string> = {
   pre_production_sample_ready: '3·产前样', pre_production_sample_sent: '3·产前样',
   pps_procurement_check: '3·产前样', pre_production_sample_approved: '3·产前样',
   // 阶段4 生产过程
-  production_kickoff: '4·生产过程', mid_qc_check: '4·生产过程', mid_qc_sales_check: '4·生产过程',
+  production_kickoff: '4·生产过程', initial_line_check: '4·生产过程', mid_qc_check: '4·生产过程', mid_qc_sales_check: '4·生产过程',
   packing_method_confirmed: '4·生产过程', final_qc_check: '4·生产过程', final_qc_sales_check: '4·生产过程',
   factory_completion: '4·生产过程', leftover_collection: '4·生产过程',
   // 阶段5 出货与收款

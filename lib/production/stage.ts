@@ -50,7 +50,7 @@ export const NOT_SECURED = new Set(['draft', 'pending_order']);
 // V2 模板砍掉了 production_kickoff / factory_completion / final_qc_check,改由「产前样确认(大货启动)」
 // 与「尾期验货(完工)」承载。消费者(生产中心/进度分析/报告联动)按下面 key 组取信号:V1 优先、回落 V2,
 // 新旧单都能算。否则 V2 新单查不到旧 key → 阶段永卡、进度分析报错、报告联动失效。
-export const KICKOFF_KEYS = ['production_kickoff', 'pre_production_sample_approved'] as const;
+export const KICKOFF_KEYS = ['initial_line_check', 'production_kickoff', 'pre_production_sample_approved'] as const;
 export const FACTORY_DONE_KEYS = ['final_qc_check', 'factory_completion', 'final_qc_sales_check'] as const;
 export const MID_QC_KEYS = ['mid_qc_check', 'mid_qc_sales_check'] as const;
 

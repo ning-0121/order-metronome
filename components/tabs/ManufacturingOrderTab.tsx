@@ -134,9 +134,12 @@ export function ManufacturingOrderTab({ orderId, showPrice = false, showPurchase
   if (!data) return (
     <div className="text-center py-8">
       <p className="text-red-500 mb-3">{msg || '加载失败'}</p>
-      <button onClick={reload} className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 active:scale-95 transition">
-        🔄 重试
+      {/* 刷新整页(而非仅重调 action):版本刚更新时旧页面的 Server Action 引用已失效,
+          单纯重试还是用旧 JS 会继续失败,必须整页重载拿到新代码。2026-07-27。 */}
+      <button onClick={() => window.location.reload()} className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 active:scale-95 transition">
+        🔄 刷新页面重试
       </button>
+      <p className="mt-2 text-[11px] text-gray-400">(若刚更新过系统,请用此按钮或 Ctrl/⌘+Shift+R 强刷)</p>
     </div>
   );
 
