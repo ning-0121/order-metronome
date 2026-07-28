@@ -688,6 +688,21 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
               >
                 📎 选择文件
               </label>
+              {/* 现场拍照直调后置相机(2026-07-27 移动端):单独一个 image-only+capture 口,不影响上面的混合选择口 */}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFilesPicked}
+                className="hidden"
+                id="prod-report-camera"
+              />
+              <label
+                htmlFor="prod-report-camera"
+                className="px-3 py-1.5 border border-emerald-300 rounded-lg text-xs text-emerald-700 hover:bg-emerald-50 cursor-pointer sm:hidden"
+              >
+                📷 拍照
+              </label>
               <span className="text-xs text-gray-400">支持图片/PDF/Word/Excel — 图片可 AI 识别手写稿</span>
             </div>
             {formFiles.length > 0 && (

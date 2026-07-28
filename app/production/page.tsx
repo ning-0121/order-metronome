@@ -47,7 +47,10 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
       <section className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-indigo-900">🗓️ 我的今日待办{todayTasks.length > 0 ? ` · ${todayTasks.length}` : ''}</h2>
-          <Link href="/my-today" className="text-xs text-indigo-600 hover:underline">全部今日任务 →</Link>
+          <div className="flex items-center gap-3">
+            <Link href="/production/plan" className="text-xs font-medium text-indigo-700 hover:underline">📋 我的跟单计划 →</Link>
+            <Link href="/my-today" className="text-xs text-indigo-600 hover:underline">全部今日任务 →</Link>
+          </div>
         </div>
         {todayTasks.length === 0 ? (
           <p className="text-xs text-gray-500">今日暂无生产待办 ✅（催料 / 排厂 / 首日上线 / 中查 / 尾查 / 包装 / 追踪问题到点会自动出现在这里）</p>
