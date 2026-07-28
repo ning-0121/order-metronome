@@ -9,17 +9,21 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { OrderIntakeModeSelector } from '@/components/order/OrderIntakeModeSelector';
+import { SampleRequestForm } from '@/components/order/SampleRequestForm';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 
 const CAN_CREATE_ORDER = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'];
 
-export default async function NewOrderPage() {
+export default async function NewOrderPage({ searchParams }: { searchParams: Promise<{ type?: string }> }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
   if (!roles.some((r) => CAN_CREATE_ORDER.includes(r))) redirect('/dashboard');
+  // 打样单走专属「打样申请单」表单(2026-07-27),不再套大货单表单
+  const { type } = await searchParams;
+  if (type === 'sample') return <SampleRequestForm />;
   // 客户 PO 成交价仅 CAN_SEE_FINANCIALS 可见(merchandiser 能建单但不看价 → 红线)
   return <OrderIntakeModeSelector showPrice={hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')} />;
 }

@@ -15,16 +15,22 @@ export default async function MissingLineItemsPage() {
   if (!user) return <div className="max-w-5xl mx-auto p-8 text-center text-gray-400">请先登录</div>;
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
-  if (!hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS')) {
-    return <div className="max-w-5xl mx-auto p-8"><div className="rounded-xl bg-red-50 border border-red-200 p-6 text-center text-red-600">仅管理/督导可查看</div></div>;
+  // 2026-07-27 CEO:补明细是业务/跟单的活 → 放开给他们,但只看/补【自己负责的订单】;管理层看全部。
+  const canSeeAll = hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS');
+  const canSeeOwn = roles.some((r) => ['sales', 'merchandiser'].includes(r));
+  if (!canSeeAll && !canSeeOwn) {
+    return <div className="max-w-5xl mx-auto p-8"><div className="rounded-xl bg-red-50 border border-red-200 p-6 text-center text-red-600">仅管理/督导 或 业务/跟单 可查看</div></div>;
   }
 
   const svc = createServiceRoleClient();
   // 在办 + 已完成的真实订单(排除 取消/归档/样品);缺明细影响统计的就是这些
-  const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, quantity, quantity_unit, order_purpose, lifecycle_status, created_at')
+  let q = (svc.from('orders') as any)
+    .select('id, order_no, internal_order_no, customer_name, quantity, quantity_unit, order_purpose, lifecycle_status, created_at, owner_user_id, created_by')
     .not('lifecycle_status', 'in', '("cancelled","已取消","archived","已归档")')
     .order('created_at', { ascending: false }).limit(2000);
+  // 非管理层(业务/跟单)只看自己负责或建的单
+  if (!canSeeAll) q = q.or(`owner_user_id.eq.${user.id},created_by.eq.${user.id}`);
+  const { data: orders } = await q;
   const list = ((orders || []) as any[]).filter((o) => (o.order_purpose || 'production') !== 'sample');
 
   // 有明细的订单集合
@@ -44,7 +50,7 @@ export default async function MissingLineItemsPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       <div className="flex items-baseline justify-between flex-wrap gap-2 mb-1">
-        <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">🧩 缺逐款明细检查</h1>
+        <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">🧩 缺逐款明细检查{!canSeeAll && <span className="text-xs font-normal text-gray-400">(仅你负责的订单)</span>}</h1>
         <span className="text-sm text-gray-500">共 <b className="text-amber-600">{missing.length}</b> 单缺明细,其中 <b className="text-red-600">{setMissing}</b> 单是套装(统计会错)</span>
       </div>
       <p className="text-sm text-gray-500 mb-4">

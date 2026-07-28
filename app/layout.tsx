@@ -44,6 +44,7 @@ export default async function RootLayout({
   let isProduction = isAdmin;
   let isFinance = isAdmin; // H4:财务/管理员显示「进入财务系统」SSO 入口
   let isSupervisor = isAdmin;  // 督办总览可见性(管理/督导 = CAN_SEE_ALL_ORDERS)
+  let canCheckMissing = isAdmin;  // 缺明细检查入口(2026-07-27:管理层看全部 + 业务/跟单看自己的)
   if (user && !isAdmin) {
     const { data: prof } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
     const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
@@ -52,6 +53,7 @@ export default async function RootLayout({
     isProduction = roles.some(r => ['production', 'production_manager', 'admin', 'admin_assistant'].includes(r));
     isFinance = roles.some(r => ['finance', 'admin'].includes(r));
     isSupervisor = roles.some(r => ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r));
+    canCheckMissing = roles.some(r => ['sales', 'merchandiser', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r));
   }
 
   // Knowledge Layer K1:学习中心导航按 flag 灰度显示（off→不显示；admin→仅管理员；on→全员）
@@ -65,7 +67,7 @@ export default async function RootLayout({
         className="bg-white text-gray-900 antialiased font-sans min-h-screen"
       >
         <ChunkErrorReloader />
-        <Navbar isAdmin={isAdmin} isProcurement={isProcurement} isProduction={isProduction} isFinance={isFinance} isSupervisor={isSupervisor} knowledgeLayer={knowledgeLayer} />
+        <Navbar isAdmin={isAdmin} isProcurement={isProcurement} isProduction={isProduction} isFinance={isFinance} isSupervisor={isSupervisor} canCheckMissing={canCheckMissing} knowledgeLayer={knowledgeLayer} />
         <PWARegister />
         {/* 打开系统/闲置2小时后再打开 → 回角色工作台;工作中刷新不打扰;单据深链不劫持 */}
         <WorkbenchAnchor />
