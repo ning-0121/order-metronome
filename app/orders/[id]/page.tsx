@@ -39,7 +39,6 @@ import { OrderPurposeChanger } from '@/components/OrderPurposeChanger';
 import { PITab } from '@/components/tabs/PITab';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { SampleFeePanel } from '@/components/SampleFeePanel';
-import { SampleRequestExportButton } from '@/components/SampleRequestExportButton';
 import { RecalcButton } from '@/components/RecalcButton';
 import { RescheduleBanner } from '@/components/RescheduleBanner';
 import { OrderDelayPanel } from '@/components/OrderDelayPanel';
@@ -604,12 +603,9 @@ export default async function OrderDetailPage({
         {/* Tab: 基本信息 */}
         {activeTab === 'basic' && (
           <>
-          {/* 打样费(仅打样单):金额 + 承担方,财务据此对客户收/免 */}
+          {/* 打样费(仅打样单):金额 + 承担方,财务据此对客户收/免。导出打样申请单按钮在页头(ExportSampleRequestButton),此处不再重复。 */}
           {(orderData as any).order_purpose === 'sample' && (
-            <div className="mb-6 space-y-3">
-              <div className="flex justify-end"><SampleRequestExportButton orderId={id} /></div>
-              <SampleFeePanel orderId={id} />
-            </div>
+            <div className="mb-6"><SampleFeePanel orderId={id} /></div>
           )}
           {/* AI 风险评估/缺失资料检查侧栏 + 经营卡(利润/收款/风险/确认链)已移除
               (2026-07-09 用户:减少不必要的 AI 介入)。财务事件时间线保留。 */}
