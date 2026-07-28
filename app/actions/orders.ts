@@ -246,9 +246,9 @@ export async function createOrder(
     return { ok: false, error: `出厂日期 ${factory_date} 明显不对，请检查` };
   }
 
-  // 下单到出厂最少7天（面料采购+生产需要时间）
+  // 下单到出厂最少7天（面料采购+生产需要时间）。打样单短周期,豁免(2026-07-27)。
   const daysToFactory = Math.ceil((factoryDt.getTime() - orderDt.getTime()) / 86400000);
-  if (daysToFactory < 7) {
+  if (daysToFactory < 7 && order_purpose !== 'sample') {
     return { ok: false, error: `下单日到出厂日仅 ${daysToFactory} 天，最少需要 7 天（含采购和生产时间）。如确实是加急单请选择"加急订单"类型。` };
   }
 

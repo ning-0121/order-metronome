@@ -26,6 +26,7 @@ export function SampleRequestForm() {
   const [customerName, setCustomerName] = useState('');
 
   const [internalNo, setInternalNo] = useState('');
+  const [dueDate, setDueDate] = useState('');   // 打样交期(目标完成日)= 排期锚点 → factory_date
   const [sampleNature, setSampleNature] = useState(SAMPLE_NATURES[0]);
   const [styleNo, setStyleNo] = useState('');
   const [styleDesc, setStyleDesc] = useState('');
@@ -64,6 +65,7 @@ export function SampleRequestForm() {
     if (!orderNo) { setErr('系统单号还没生成,请稍候再试'); return; }
     if (!customerId) { setErr('请先选择客户'); return; }
     if (!internalNo.trim()) { setErr('请填写内部单号(订单册编号)'); return; }
+    if (!dueDate) { setErr('请填写打样交期(目标完成日)'); return; }
     if (!styleNo.trim() && !styleDesc.trim()) { setErr('请至少填款号或款式描述'); return; }
 
     const styleColors = colors
@@ -84,9 +86,13 @@ export function SampleRequestForm() {
     fd.set('sample_phase', 'confirmed'); // 走 8 节点打样流程
     fd.set('internal_order_no', internalNo.trim());
     fd.set('style_no', styleNo.trim());
+    fd.set('factory_date', dueDate);   // 打样交期作排期锚点(createOrder 必填)
     fd.set('product_description', styleDesc.trim());
     fd.set('sizes', sizes.join(','));
-    fd.set('quantity', String(totalQty));
+    fd.set('total_quantity', String(totalQty));   // createOrder 读 total_quantity(不是 quantity)
+    fd.set('quantity_unit', '件');                 // 打样按件
+    fd.set('style_count', '1');                    // 打样单一款
+    fd.set('color_count', String(styleColors.length || 1));  // 颜色行数
     fd.set('line_items', JSON.stringify(lineItems));
     fd.set('notes', notes.trim());
     fd.set('sample_request', JSON.stringify({
@@ -145,6 +151,15 @@ export function SampleRequestForm() {
           <div>
             <div className={label}>款号</div>
             <input value={styleNo} onChange={(e) => setStyleNo(e.target.value)} placeholder="款号 style#" className={`mt-1 ${input}`} />
+          </div>
+        </div>
+
+        {/* 打样交期(排期锚点) */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <div className={label}>打样交期(目标完成日) <span className="text-red-500">*</span></div>
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={`mt-1 ${input}`} />
+            <div className="mt-0.5 text-[11px] text-gray-400">样品什么时候要完成/寄出。8 个打样节点按这个日期倒排。</div>
           </div>
         </div>
 
