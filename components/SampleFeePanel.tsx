@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSampleFee, saveSampleFee, SAMPLE_FEE_BEARERS } from '@/app/actions/sample-fee';
+import { getSampleFee, saveSampleFee } from '@/app/actions/sample-fee';
+import { SAMPLE_FEE_BEARERS } from '@/lib/domain/sample-fee-constants';
 
 /** 打样费录入(2026-07-27 CEO):打样单专属,记金额+承担方。仅财务/业务/admin 可编辑;非打样单/无权不渲染。 */
 export function SampleFeePanel({ orderId }: { orderId: string }) {

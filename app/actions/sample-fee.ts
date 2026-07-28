@@ -9,13 +9,10 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { revalidatePath } from 'next/cache';
+import { SAMPLE_FEE_BEARERS } from '@/lib/domain/sample-fee-constants';
 
 /** 客户承担的打样费才是应收(公司承担/待确认不进应收)。 */
 const CUSTOMER_BORNE = new Set(['customer', 'fabric_customer']);
-
-export const SAMPLE_FEE_BEARERS: Record<string, string> = {
-  company: '公司承担', customer: '客户承担', fabric_customer: '面料客户+加工公司', tbd: '待确认',
-};
 
 async function ctx(orderId: string) {
   const supabase = await createClient();
