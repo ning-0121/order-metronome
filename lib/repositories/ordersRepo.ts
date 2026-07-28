@@ -50,6 +50,7 @@ const INSERT_WHITELIST = [
   'order_purpose',
   'parent_order_id',
   'sample_status',
+  'sample_request',   // 打样申请单结构化(样衣性质/面辅料/特殊要求/贴样),2026-07-27;不加白名单会被 sanitize 剔除
   'product_description',
   'target_price',
   'quote_stage',

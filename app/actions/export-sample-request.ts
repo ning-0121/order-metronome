@@ -53,10 +53,15 @@ export async function exportSampleRequest(orderId: string): Promise<ExportSample
   try {
     // ── 取数 ──
     const { data: order, error: orderErr } = await (supabase.from('orders') as any)
-      .select('id, order_no, customer_name, style_no, product_description, sizes, colors, quantity, owner_user_id, created_by, factory_date, etd, order_date, notes, order_type, order_purpose')
+      .select('id, order_no, customer_name, style_no, product_description, sizes, colors, quantity, owner_user_id, created_by, factory_date, etd, order_date, notes, order_type, order_purpose, sample_request')
       .eq('id', orderId)
       .single();
     if (orderErr || !order) return { ok: false, error: '订单不存在：' + (orderErr?.message || orderId) };
+
+    // 打样申请单结构化数据(样衣性质/面料含克重/辅料/特殊要求/贴样)——新建样品单表单存这里
+    const sr: any = (order.sample_request && typeof order.sample_request === 'object') ? order.sample_request : {};
+    const srFabrics: any[] = Array.isArray(sr.fabrics) ? sr.fabrics : [];
+    const srTrims: string[] = Array.isArray(sr.trims) ? sr.trims : [];
 
     // 仅样品单允许导出
     const isSample = order.order_type === 'sample' || order.order_purpose === 'sample';
@@ -135,7 +140,7 @@ export async function exportSampleRequest(orderId: string): Promise<ExportSample
     // ── R2: 客户 | 样衣性质 | 业务员 | 申请日期 ──
     sheet.getRow(2).height = 26;
     label(2, 1, '客户'); cell(2, 2, str(order.customer_name)); merge(2, 2, 2, 5);
-    label(2, 6, '样衣性质'); cell(2, 7, ''); merge(2, 7, 2, 10); // 留空手填
+    label(2, 6, '样衣性质'); cell(2, 7, str(sr.sample_nature)); merge(2, 7, 2, 10);
     label(2, 11, '业务员'); cell(2, 12, salesName); merge(2, 12, 2, 14);
     label(2, 15, '申请日期'); cell(2, 16, applyDate); merge(2, 16, 2, 17);
 
@@ -161,28 +166,31 @@ export async function exportSampleRequest(orderId: string): Promise<ExportSample
     cell(5, 16, '款式图', { bg: LABEL_BG, bold: true }); merge(5, 16, 5, 17);
 
     // ── R6-R11: 面辅料明细（左侧 A-H）；右侧 I-Q 为贴样/备注/款式图留空区 ──
+    // 面料/克重:优先打样申请单填的(sample_request.fabrics),回退 BOM
     const fabricLine = (r: number, idx: number) => {
+      const f = srFabrics[idx - 1] || {};
       label(r, 1, '面料' + idx);
-      cell(r, 2, str(fabrics[idx - 1]?.material_name)); merge(r, 2, r, 5);
+      cell(r, 2, str(f.name) || str(fabrics[idx - 1]?.material_name)); merge(r, 2, r, 5);
       label(r, 6, '克重');
-      cell(r, 7, str(fabrics[idx - 1]?.notes)); merge(r, 7, r, 8); // 克重无专列，取 notes 或留空
+      cell(r, 7, str(f.gsm) || str(fabrics[idx - 1]?.notes)); merge(r, 7, r, 8);
     };
     sheet.getRow(6).height = 24; fabricLine(6, 1);
     sheet.getRow(7).height = 24; fabricLine(7, 2);
 
     const trimLine = (r: number, idx: number) => {
       label(r, 1, '辅料' + idx);
-      cell(r, 2, str(trims[idx - 1]?.material_name)); merge(r, 2, r, 8);
+      cell(r, 2, str(srTrims[idx - 1]) || str(trims[idx - 1]?.material_name)); merge(r, 2, r, 8);
     };
     sheet.getRow(8).height = 24; trimLine(8, 1);
     sheet.getRow(9).height = 24; trimLine(9, 2);
     sheet.getRow(10).height = 24; trimLine(10, 3);
 
     sheet.getRow(11).height = 24;
-    label(11, 1, '特殊要求'); cell(11, 2, ''); merge(11, 2, 11, 8); // 留空手填
+    label(11, 1, '特殊要求'); cell(11, 2, str(sr.special_requirements), { align: 'left', wrap: true }); merge(11, 2, 11, 8);
 
-    // 右侧贴样处大区块（I6:N11 合并空白）+ 备注/款式图（O6:Q11 区）
+    // 右侧贴样处大区块(I6:N11 合并),有贴样说明就写进去
     border(6, 9, 11, 14); merge(6, 9, 11, 14);
+    if (sr.swatch_note) cell(6, 9, str(sr.swatch_note), { align: 'left', wrap: true });
     border(6, 15, 11, 17); merge(6, 15, 11, 17);
 
     // ── R12: 备注 | 此处写上一轮的修改意见 ──

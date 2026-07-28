@@ -390,12 +390,15 @@ export async function createOrder(
     price_approval_id: validatedApprovalId,
     skip_pre_production_sample: skip_pre_production_sample,
     ...(sample_phase ? { sample_phase } : {}),
-    // 打样申请单结构化(2026-07-27):样衣性质/面辅料/特殊要求/贴样 → sample_request jsonb。列缺失时下方降级剔除。
+    // 打样申请单结构化(2026-07-27):样衣性质/面辅料/特殊要求/贴样 → sample_request jsonb。
     ...(() => {
       const sr = formData.get('sample_request') as string | null;
       if (!sr) return {};
       try { const j = JSON.parse(sr); return j && typeof j === 'object' ? { sample_request: j } : {}; } catch { return {}; }
     })(),
+    // 款式描述/款号:表单(尤其打样申请单)在订单级填了就存(LegacyOrderForm 不传→保持 null,零影响)
+    ...(formData.get('product_description') ? { product_description: String(formData.get('product_description')) } : {}),
+    ...(formData.get('style_no') ? { style_no: String(formData.get('style_no')) } : {}),
     sample_confirm_days_override: sample_confirm_days_override && !isNaN(sample_confirm_days_override)
       ? sample_confirm_days_override
       : null,
