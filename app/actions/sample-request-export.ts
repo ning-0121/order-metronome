@@ -37,12 +37,7 @@ export async function exportSampleRequest(orderId: string): Promise<{ base64?: s
   const ws = wb.addWorksheet('打样申请单');
   ws.properties.defaultColWidth = 12;
   const totalCols = Math.max(6, 2 + sizeCols.length + 1);
-  const lastColLetter = String.fromCharCode(64 + Math.min(totalCols, 26));
 
-  const line = (a: string, b?: string) => {
-    const r = ws.addRow([a, b ?? '']);
-    return r;
-  };
   const merge = (row: number, from = 1, to = totalCols) =>
     ws.mergeCells(`${String.fromCharCode(64 + from)}${row}:${String.fromCharCode(64 + to)}${row}`);
 
@@ -52,52 +47,70 @@ export async function exportSampleRequest(orderId: string): Promise<{ base64?: s
   ws.getCell('A3').alignment = { horizontal: 'center' }; ws.getCell('A3').font = { size: 10, color: { argb: 'FF666666' } };
   ws.addRow([]);
 
-  const kv = (label: string, value: string) => {
-    const r = ws.addRow([label, value]);
-    r.getCell(1).font = { bold: true };
-    merge(r.number, 2, totalCols);
-    r.getCell(1).border = r.getCell(2).border = { bottom: { style: 'hair' } } as any;
-    return r;
+  // 与纸质模板对齐:2 列 键值块 + 固定「面料1/2(含克重)+辅料1/2/3」表格式 + 尺码行 + 贴样处 + 审核栏。
+  const colL = (n: number) => String.fromCharCode(64 + n);
+  const mid = Math.max(3, Math.ceil(totalCols / 2));
+  const cellBottom = { bottom: { style: 'hair' } } as any;
+  // 一行两组键值:标签1|值1(合并到 mid) 标签2|值2(合并到末列)
+  const kv2 = (l1: string, v1: string, l2: string, v2: string) => {
+    const r = ws.addRow([]); const n = r.number;
+    ws.getCell(`A${n}`).value = l1; ws.getCell(`A${n}`).font = { bold: true };
+    ws.mergeCells(`B${n}:${colL(mid)}${n}`); ws.getCell(`B${n}`).value = v1; ws.getCell(`B${n}`).border = cellBottom;
+    ws.getCell(`${colL(mid + 1)}${n}`).value = l2; ws.getCell(`${colL(mid + 1)}${n}`).font = { bold: true };
+    ws.mergeCells(`${colL(mid + 2)}${n}:${colL(totalCols)}${n}`); ws.getCell(`${colL(mid + 2)}${n}`).value = v2; ws.getCell(`${colL(mid + 2)}${n}`).border = cellBottom;
   };
-  kv('客    户', order.customer_name || '');
-  kv('样衣性质', sr.sample_nature || '');
-  kv('款式描述', order.product_description || '');
-  kv('款    号', order.style_no || '');
-  kv('总 数 量', String(order.quantity ?? ''));
+  // 一行单键值(值合并到末列)
+  const kv1 = (l: string, v: string) => {
+    const r = ws.addRow([l, v]); r.getCell(1).font = { bold: true };
+    ws.mergeCells(`B${r.number}:${colL(totalCols)}${r.number}`); r.getCell(2).border = cellBottom;
+  };
+  const sizeText = sizeCols.length > 0 ? sizeCols.join(' / ') : ((order as any).sizes || '');
+
+  kv2('客    户', order.customer_name || '', '样衣性质', sr.sample_nature || '');
+  kv2('款式描述', order.product_description || '', '款    号', order.style_no || '');
+  kv2('尺    码', String(sizeText), '总 数 量', String(order.quantity ?? ''));
   ws.addRow([]);
 
-  // 面辅料
-  ws.addRow(['面辅料信息如下']); ws.getCell(`A${ws.lastRow!.number}`).font = { bold: true };
+  // 面辅料信息如下(固定 2 面料含克重 + 3 辅料,空着也留位,对齐模板表单)
+  const hdr = ws.addRow(['面辅料信息如下']); ws.getCell(`A${hdr.number}`).font = { bold: true };
   const fabrics = Array.isArray(sr.fabrics) ? sr.fabrics : [];
-  fabrics.forEach((f: any, i: number) => { const r = ws.addRow([`面  料${i + 1}`, `${f.name || ''}`, '克重', `${f.gsm || ''}`]); r.getCell(1).font = { bold: true }; });
   const trims = Array.isArray(sr.trims) ? sr.trims : [];
-  trims.forEach((t: string, i: number) => { const r = ws.addRow([`辅  料${i + 1}`, t || '']); r.getCell(1).font = { bold: true }; merge(r.number, 2, totalCols); });
-  ws.addRow([]);
-
-  // 颜色×尺码 表
-  if (sizeCols.length > 0 && rows.length > 0) {
-    ws.addRow(['颜色 / 尺码分色数量']); ws.getCell(`A${ws.lastRow!.number}`).font = { bold: true }; merge(ws.lastRow!.number);
-    const header = ws.addRow(['颜色', ...sizeCols, '小计']);
-    header.font = { bold: true }; header.alignment = { horizontal: 'center' };
-    header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } }; c.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'hair' }, right: { style: 'hair' } }; });
-    for (const r of rows) {
-      const sub = sizeCols.reduce((s, sz) => s + (Number(r.sizes?.[sz]) || 0), 0);
-      const dr = ws.addRow([r.color_cn || '', ...sizeCols.map((sz) => Number(r.sizes?.[sz]) || ''), sub || '']);
-      dr.eachCell((c) => { c.alignment = { horizontal: 'center' }; c.border = { left: { style: 'hair' }, right: { style: 'hair' }, bottom: { style: 'hair' } }; });
-      dr.getCell(1).alignment = { horizontal: 'left' };
-    }
-    ws.addRow([]);
+  for (let i = 0; i < 2; i++) {
+    const f = fabrics[i] || {};
+    const r = ws.addRow([]); const n = r.number;
+    ws.getCell(`A${n}`).value = `面  料${i + 1}`; ws.getCell(`A${n}`).font = { bold: true };
+    ws.mergeCells(`B${n}:${colL(mid)}${n}`); ws.getCell(`B${n}`).value = f.name || ''; ws.getCell(`B${n}`).border = cellBottom;
+    ws.getCell(`${colL(mid + 1)}${n}`).value = '克重'; ws.getCell(`${colL(mid + 1)}${n}`).font = { bold: true };
+    ws.mergeCells(`${colL(mid + 2)}${n}:${colL(totalCols)}${n}`); ws.getCell(`${colL(mid + 2)}${n}`).value = f.gsm || ''; ws.getCell(`${colL(mid + 2)}${n}`).border = cellBottom;
   }
-
-  kv('特殊要求', sr.special_requirements || '');
-  kv('备    注', order.notes || '');
-  if (sr.swatch_note) kv('贴样说明', sr.swatch_note);
+  for (let i = 0; i < 3; i++) kv1(`辅  料${i + 1}`, trims[i] || '');
   ws.addRow([]);
-  const signRow = ws.addRow(['审核签名', '', '', '审核日期', '', '']);
-  signRow.getCell(1).font = signRow.getCell(4).font = { bold: true };
+
+  // 颜色×尺码 分色数量表(始终画表头结构;有数据填数据,无则留空行)
+  ws.addRow(['颜色 / 尺码分色数量']); ws.getCell(`A${ws.lastRow!.number}`).font = { bold: true }; merge(ws.lastRow!.number);
+  const tableSizes = sizeCols.length > 0 ? sizeCols : ['S', 'M', 'L'];
+  const header = ws.addRow(['颜色', ...tableSizes, '小计']);
+  header.font = { bold: true }; header.alignment = { horizontal: 'center' };
+  header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } }; c.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'hair' }, right: { style: 'hair' } }; });
+  const dataRows = rows.length > 0 ? rows : [{ color_cn: '', sizes: {} }];
+  for (const r of dataRows) {
+    const sub = tableSizes.reduce((s, sz) => s + (Number(r.sizes?.[sz]) || 0), 0);
+    const dr = ws.addRow([r.color_cn || '', ...tableSizes.map((sz) => Number(r.sizes?.[sz]) || ''), sub || '']);
+    dr.eachCell((c) => { c.alignment = { horizontal: 'center' }; c.border = { left: { style: 'hair' }, right: { style: 'hair' }, bottom: { style: 'hair' } }; });
+    dr.getCell(1).alignment = { horizontal: 'left' };
+  }
+  ws.addRow([]);
+
+  kv1('特殊要求', sr.special_requirements || '');
+  kv1('备    注', order.notes || '');
+  kv1('贴样处说明', sr.swatch_note || '');
+  ws.addRow([]);
+  const signRow = ws.addRow([]); const sn = signRow.number;
+  ws.getCell(`A${sn}`).value = '审核签名'; ws.getCell(`A${sn}`).font = { bold: true };
+  ws.getCell(`${colL(mid + 1)}${sn}`).value = '审核日期'; ws.getCell(`${colL(mid + 1)}${sn}`).font = { bold: true };
 
   ws.getColumn(1).width = 12;
-  for (let c = 2; c <= totalCols; c++) ws.getColumn(c).width = 10;
+  for (let c = 2; c <= totalCols; c++) ws.getColumn(c).width = 11;
 
   const buffer = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buffer as ArrayBuffer).toString('base64');

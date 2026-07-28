@@ -515,9 +515,12 @@ export function calcDueDates(params: CalcDueDatesParams) {
   // ══════ 四重校验 ══════
 
   // 校验1：可用天数不能太短（考虑节假日，实际工作日可能更少）
+  // 打样单短周期:CEO 要 1~14 天可选,最少 1 天即可(8 节点自动压缩);大货仍至少 7 天。
   const actualWorkdays = countWorkdays(T0, A);
-  if (availableDays < 7 || actualWorkdays < 5) {
-    throw new Error(`交期太近：下单日到${incoterm === 'DDP' ? '出运截止' : '交期'}仅 ${availableDays} 天（工作日 ${actualWorkdays} 天），最少需要 7 天`);
+  const minDays = orderType === 'sample' ? 1 : 7;
+  const minWorkdays = orderType === 'sample' ? 1 : 5;
+  if (availableDays < minDays || actualWorkdays < minWorkdays) {
+    throw new Error(`交期太近：下单日到${incoterm === 'DDP' ? '出运截止' : '交期'}仅 ${availableDays} 天（工作日 ${actualWorkdays} 天），最少需要 ${minDays} 天`);
   }
 
   // 校验2：日期有效性
