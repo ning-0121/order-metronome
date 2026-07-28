@@ -547,11 +547,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       {!orders || orders.length === 0 ? (
         <div className="empty-state rounded-2xl bg-white border border-gray-200">
           <div className="empty-state-icon">{hasFilters ? '🔍' : '📦'}</div>
-          <div className="empty-state-title">{hasFilters ? '没有找到匹配的订单' : '暂无订单'}</div>
+          <div className="empty-state-title">{hasFilters ? '没有找到匹配的订单' : (purposeFilter === 'sample' ? '暂无样品单' : '暂无订单')}</div>
           <p className="empty-state-desc mb-6">
             {hasFilters
               ? '试试调整搜索条件或筛选维度'
-              : '开始创建您的第一个订单，追踪执行进度'
+              : (purposeFilter === 'sample' ? '开始创建您的第一个样品单，走 8 节点打样流程' : '开始创建您的第一个订单，追踪执行进度')
             }
           </p>
           {hasFilters ? (
@@ -559,11 +559,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               清除筛选
             </Link>
           ) : (
-            <Link href="/orders/new" className="btn-primary inline-flex items-center gap-2">
+            <Link href={purposeFilter === 'sample' ? '/orders/new?type=sample' : '/orders/new'} className="btn-primary inline-flex items-center gap-2">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              创建订单
+              {purposeFilter === 'sample' ? '新建样品单' : '创建订单'}
             </Link>
           )}
         </div>
