@@ -87,7 +87,7 @@ export default function CustomerAnalyticsPage() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {[
               { label: '订单数', value: data.orderCount, color: 'text-indigo-600' },
-              { label: '总数量', value: `${data.totalQuantity}件`, color: 'text-gray-800' },
+              { label: '有效件数', value: `${data.totalQuantity.toLocaleString()}件`, color: 'text-gray-800' },
               { label: '准时率', value: `${data.onTimeRate}%`, color: data.onTimeRate >= 80 ? 'text-green-600' : 'text-red-600' },
               { label: '平均评分', value: data.avgScore || '—', color: data.avgScore >= 85 ? 'text-green-600' : 'text-amber-600' },
               { label: '不良率', value: `${data.avgDefectRate}%`, color: data.avgDefectRate > 3 ? 'text-red-600' : 'text-green-600' },

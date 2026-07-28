@@ -38,7 +38,7 @@ export async function getCustomerAnalytics(
 
   // 订单数据
   const { data: orders } = await (supabase.from('orders') as any)
-    .select('id, order_no, quantity, lifecycle_status, created_at')
+    .select('id, order_no, quantity, order_purpose, lifecycle_status, created_at')
     .eq('customer_name', customerName)
     .gte('created_at', since.toISOString())
     .order('created_at', { ascending: false });
@@ -46,7 +46,9 @@ export async function getCustomerAnalytics(
   const allOrders = orders || [];
   const orderIds = allOrders.map((o: any) => o.id);
   const orderCount = allOrders.length;
-  const totalQuantity = allOrders.reduce((s: number, o: any) => s + (o.quantity || 0), 0);
+  // 总数量对齐订单总览口径(2026-07-27:排除取消/贸易/样品单,避免含取消/贸易/经销/套件混算导致虚高、与订单总览对不上)
+  const { isEffectiveOrderQuantitySource } = await import('@/lib/services/analytics-metrics');
+  const totalQuantity = allOrders.filter((o: any) => isEffectiveOrderQuantitySource(o)).reduce((s: number, o: any) => s + (o.quantity || 0), 0);
   const completedCount = allOrders.filter((o: any) => o.lifecycle_status === 'completed' || o.lifecycle_status === '已完成').length;
   const activeCount = allOrders.filter((o: any) => !['completed', 'cancelled', '已完成', '已取消'].includes(o.lifecycle_status || '')).length;
   const cancelledCount = allOrders.filter((o: any) => o.lifecycle_status === 'cancelled' || o.lifecycle_status === '已取消').length;
@@ -133,7 +135,7 @@ export async function getCustomerAnalytics(
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     if (!monthMap[key]) monthMap[key] = { orders: 0, quantity: 0 };
     monthMap[key].orders++;
-    monthMap[key].quantity += o.quantity || 0;
+    if (isEffectiveOrderQuantitySource(o)) monthMap[key].quantity += o.quantity || 0;   // 件数口径对齐(排除取消/贸易/样品)
   }
   for (const [month, data] of Object.entries(monthMap).sort()) {
     monthlyTrend.push({ month, ...data });
@@ -141,7 +143,7 @@ export async function getCustomerAnalytics(
 
   // AI 总结（纯算法）
   const parts: string[] = [];
-  parts.push(`${customerName} ${period === 'year' ? '本年度' : period === 'quarter' ? '本季度' : '本月'}共 ${orderCount} 个订单，总数量 ${totalQuantity} 件。`);
+  parts.push(`${customerName} ${period === 'year' ? '本年度' : period === 'quarter' ? '本季度' : '本月'}共 ${orderCount} 个订单，有效件数 ${totalQuantity.toLocaleString()} 件(排除取消/贸易/样品)。`);
   if (completedCount > 0) parts.push(`已完成 ${completedCount} 个，准时交付率 ${onTimeRate}%。`);
   if (activeCount > 0) parts.push(`当前在执行 ${activeCount} 个。`);
   if (avgScore > 0) parts.push(`平均执行评分 ${avgScore} 分。`);
@@ -215,7 +217,7 @@ export async function getEmployeeAnalytics(
   let allOrders: any[] = [];
   if (orderIdSet.size > 0) {
     const { data } = await (supabase.from('orders') as any)
-      .select('id, quantity, lifecycle_status, created_at')
+      .select('id, quantity, order_purpose, lifecycle_status, created_at')
       .in('id', [...orderIdSet])
       .gte('created_at', since.toISOString());
     allOrders = data || [];
@@ -223,7 +225,8 @@ export async function getEmployeeAnalytics(
 
   const activeOrders = allOrders.filter((o: any) => !['completed', 'cancelled', '已完成', '已取消'].includes(o.lifecycle_status || '')).length;
   const completedOrders = allOrders.filter((o: any) => o.lifecycle_status === 'completed' || o.lifecycle_status === '已完成').length;
-  const totalQuantity = allOrders.reduce((s: number, o: any) => s + (o.quantity || 0), 0);
+  const { isEffectiveOrderQuantitySource: isEff2 } = await import('@/lib/services/analytics-metrics');
+  const totalQuantity = allOrders.filter((o: any) => isEff2(o)).reduce((s: number, o: any) => s + (o.quantity || 0), 0);   // 有效件数口径(排除取消/贸易/样品)
 
   // 评分数据
   const { data: commissions } = await (supabase.from('order_commissions') as any)

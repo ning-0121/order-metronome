@@ -164,7 +164,7 @@ export default function EmployeeAnalyticsPage() {
                     {[
                       { label: '在手订单', value: detail.activeOrders, color: 'text-blue-600' },
                       { label: '已完成', value: detail.completedOrders, color: 'text-green-600' },
-                      { label: '总数量', value: `${detail.totalQuantity}件`, color: 'text-gray-800' },
+                      { label: '有效件数', value: `${detail.totalQuantity.toLocaleString()}件`, color: 'text-gray-800' },
                       { label: '平均评分', value: detail.avgScore || '—', color: detail.avgScore >= 85 ? 'text-green-600' : 'text-amber-600' },
                       { label: '准时率', value: `${detail.onTimeRate}%`, color: detail.onTimeRate >= 80 ? 'text-green-600' : 'text-red-600' },
                       { label: '延期次数', value: detail.delayCount, color: detail.delayCount > 2 ? 'text-red-600' : 'text-gray-600' },
