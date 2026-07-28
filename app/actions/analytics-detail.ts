@@ -46,9 +46,16 @@ export async function getCustomerAnalytics(
   const allOrders = orders || [];
   const orderIds = allOrders.map((o: any) => o.id);
   const orderCount = allOrders.length;
-  // 总数量对齐订单总览口径(2026-07-27:排除取消/贸易/样品单,避免含取消/贸易/经销/套件混算导致虚高、与订单总览对不上)
-  const { isEffectiveOrderQuantitySource } = await import('@/lib/services/analytics-metrics');
-  const totalQuantity = allOrders.filter((o: any) => isEffectiveOrderQuantitySource(o)).reduce((s: number, o: any) => s + (o.quantity || 0), 0);
+  // 有效件数(2026-07-27 CEO):含生产/贸易/经销、排取消/样品;套→件按逐款明细 qty_pcs×set_multiplier 算(只动统计)。
+  const { isStatCountableOrder, orderStatPieces } = await import('@/lib/services/analytics-metrics');
+  const statOrders = allOrders.filter((o: any) => isStatCountableOrder(o));
+  const linesByOrder = new Map<string, any[]>();
+  if (statOrders.length > 0) {
+    const { data: liRows } = await (supabase.from('order_line_items') as any)
+      .select('order_id, qty_pcs, set_multiplier').in('order_id', statOrders.map((o: any) => o.id));
+    for (const r of ((liRows || []) as any[])) { const a = linesByOrder.get(r.order_id) || []; a.push(r); linesByOrder.set(r.order_id, a); }
+  }
+  const totalQuantity = statOrders.reduce((s: number, o: any) => s + orderStatPieces(o, linesByOrder.get(o.id)), 0);
   const completedCount = allOrders.filter((o: any) => o.lifecycle_status === 'completed' || o.lifecycle_status === '已完成').length;
   const activeCount = allOrders.filter((o: any) => !['completed', 'cancelled', '已完成', '已取消'].includes(o.lifecycle_status || '')).length;
   const cancelledCount = allOrders.filter((o: any) => o.lifecycle_status === 'cancelled' || o.lifecycle_status === '已取消').length;
@@ -135,7 +142,7 @@ export async function getCustomerAnalytics(
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     if (!monthMap[key]) monthMap[key] = { orders: 0, quantity: 0 };
     monthMap[key].orders++;
-    if (isEffectiveOrderQuantitySource(o)) monthMap[key].quantity += o.quantity || 0;   // 件数口径对齐(排除取消/贸易/样品)
+    if (isStatCountableOrder(o)) monthMap[key].quantity += orderStatPieces(o, linesByOrder.get(o.id));   // 有效件数(含贸易/经销,套→件)
   }
   for (const [month, data] of Object.entries(monthMap).sort()) {
     monthlyTrend.push({ month, ...data });
@@ -225,8 +232,15 @@ export async function getEmployeeAnalytics(
 
   const activeOrders = allOrders.filter((o: any) => !['completed', 'cancelled', '已完成', '已取消'].includes(o.lifecycle_status || '')).length;
   const completedOrders = allOrders.filter((o: any) => o.lifecycle_status === 'completed' || o.lifecycle_status === '已完成').length;
-  const { isEffectiveOrderQuantitySource: isEff2 } = await import('@/lib/services/analytics-metrics');
-  const totalQuantity = allOrders.filter((o: any) => isEff2(o)).reduce((s: number, o: any) => s + (o.quantity || 0), 0);   // 有效件数口径(排除取消/贸易/样品)
+  const { isStatCountableOrder: statOk2, orderStatPieces: pieces2 } = await import('@/lib/services/analytics-metrics');
+  const statOrders2 = allOrders.filter((o: any) => statOk2(o));
+  const linesByOrder2 = new Map<string, any[]>();
+  if (statOrders2.length > 0) {
+    const { data: liRows } = await (supabase.from('order_line_items') as any)
+      .select('order_id, qty_pcs, set_multiplier').in('order_id', statOrders2.map((o: any) => o.id));
+    for (const r of ((liRows || []) as any[])) { const a = linesByOrder2.get(r.order_id) || []; a.push(r); linesByOrder2.set(r.order_id, a); }
+  }
+  const totalQuantity = statOrders2.reduce((s: number, o: any) => s + pieces2(o, linesByOrder2.get(o.id)), 0);   // 有效件数(含贸易/经销,套→件)
 
   // 评分数据
   const { data: commissions } = await (supabase.from('order_commissions') as any)
