@@ -127,7 +127,7 @@ export const GATE_TEMPLATE_V2: GateTemplate[] = [
     gate_key: 'pre_production_sample_sent',
     name: '产前样寄出',
     stage: '生产',
-    owner_role: 'production',
+    owner_role: 'merchandiser',   // 2026-07-28 修:业务执行固定节点(与 milestoneTemplate/BUSINESS_EXECUTION_FIXED_STEPS 对齐);原 production 致 owner 落到骆淑娟、逾期归属错人
     required: true,
     depends_on: ['pre_production_sample'],
     days_before_target: -17,

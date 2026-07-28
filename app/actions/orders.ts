@@ -639,7 +639,10 @@ export async function createOrder(
     //   3. 角色唯一用户
     //   4. null（待管理员手动指定）
     const businessExecutionFixed = (BUSINESS_EXECUTION_FIXED_STEPS as readonly string[]).includes(template.step_key);
-    const autoAssign = businessExecutionFixed
+    // 打样单的 打样制作/打样检验:提交人自己验收(2026-07-28 CEO)——派给建单人,不再自动派给唯一 production 用户
+    //   (权限层 merchandiser/production/qc 本就互通,只改指派/显示归属)
+    const sampleSelfAccept = order_purpose === 'sample' && ['sample_making', 'sample_qc'].includes(template.step_key);
+    const autoAssign = (businessExecutionFixed || sampleSelfAccept)
       ? (orderData.owner_user_id || orderData.created_by || user.id)
       : (fixedStepOwnerMap[template.step_key] || roleUserMap[dbRole] || null);
     const safeDue = clampNotBeforeT0(ensureBusinessDay(dueAt));
@@ -1175,7 +1178,7 @@ export async function getOrders() {
   const isAdmin = roles.includes('admin');
 
   // 管理/生产主管/各经理/业务开发(只读全程) 看全部订单
-  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r)); // 2026-07:业务员(sales)移出,只看自己的单
+  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager', 'procurement'].includes(r)); // 2026-07:业务员(sales)移出,只看自己的单;2026-07-28 CEO:采购(吴彦洺/王一品)放开看单(列表无价格,核料/打样面料采购要用)
 
   // 辅助：把 delay_requests 按 order_id 分组合并进 orders
   async function attachDelayRequests(orderList: any[]): Promise<any[]> {
@@ -1284,7 +1287,7 @@ export async function getOrder(id: string) {
     const { getUserRoles } = await import('@/lib/utils/user-role');
     const { hasRoleInGroup } = await import('@/lib/domain/roles');
     const roles = await getUserRoles(supabase, user.id);
-    const canSeeAll = roles.includes('admin') || hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS');
+    const canSeeAll = roles.includes('admin') || hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS') || roles.includes('procurement');   // 2026-07-28:采购放开(详情价格另有 CAN_SEE_FINANCIALS 门)
     const isOwner = (order as any).created_by === user.id || (order as any).owner_user_id === user.id;
     let assigned = false;
     if (!canSeeAll && !isOwner) {

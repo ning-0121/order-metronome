@@ -105,8 +105,10 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
 
   async function handleSave(factoryId: string) {
     setSaving(true);
-    const supabase = createClient();
-    await (supabase.from('factories') as any).update({
+    // 2026-07-28 修「保存后消失」:改走 server action(service-role 写+返回 error),
+    // 原客户端直写被 RLS 拒绝时静默失败、刷新回旧值像"消失"。
+    const { updateFactory } = await import('@/app/actions/factories');
+    const res = await updateFactory(factoryId, {
       contact_name: form.contact_name || null,
       phone: form.phone || null,
       city: form.city || null,
@@ -120,9 +122,10 @@ export function FactoryManager({ factories, statsMap, canEdit }: {
       worker_count: form.worker_count ? parseInt(form.worker_count) : null,
       monthly_capacity: form.monthly_capacity ? parseInt(form.monthly_capacity) : null,
       notes: form.notes || null,
-    }).eq('id', factoryId);
-    setEditingId(null);
+    });
     setSaving(false);
+    if (!res.ok) { alert(res.error || '保存失败,请重试'); return; }
+    setEditingId(null);
     router.refresh();
   }
 

@@ -168,11 +168,11 @@ export default async function DashboardPage() {
     //   → 真正问题永远不解决。现在 blocked 节点保留在逾期列表里（仅 done 排除），
     //   SLA 继续累计，UI 上分到「卡住中」桶，blocked_reason 自动催 upstream。
     (supabase.from('milestones') as any)
-      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no, lifecycle_status)`)
+      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no, lifecycle_status, owner_user_id, created_by)`)
       .lt('due_at', `${today}T00:00:00`)
       .not('status', 'in', '("done","已完成","completed")')
-      // 复审性能:排除已终结订单的残留逾期节点(取消/完成的死单仍留旧逾期节点 → 结果集随历史无限增长)
-      .not('orders.lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","已复盘")')
+      // 复审性能:排除已终结订单的残留逾期节点;2026-07-28 CEO 质疑逾期数虚高 → 再排 草稿/待审批/暂停(非活跃订单不产生逾期)
+      .not('orders.lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","已复盘","draft","pending_approval","paused")')
       .order('due_at', { ascending: true })
       .limit(500),
     // 当前用户涉及的订单
@@ -212,7 +212,11 @@ export default async function DashboardPage() {
   const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r));
   const filterByMyOrders = (list: any[]) => canSeeAll ? list : list.filter((m: any) => myOrderIds.has(m.order_id));
   const filteredTodayDue = filterByMyOrders(todayDueMilestones || []);
-  const filteredOverdue = filterByMyOrders(allOverdueMilestones || []);
+  // 业务执行固定节点(产前样寄出/确认/包装确认/到货验收)归一化到订单业务负责人 —— 修 2026-07-28 CEO:
+  // 「产前样寄出」owner_user_id 落在生产跟单(骆淑娟)→ 业务(王一凡)的逾期少 2 个、他人逾期挂错人。
+  const { effectiveMilestoneOwner } = await import('@/lib/domain/milestone-owner');
+  const filteredOverdue = filterByMyOrders(allOverdueMilestones || []).map((m: any) =>
+    m.orders ? effectiveMilestoneOwner(m, m.orders) : m);
 
   // 查询所有超期节点对应的延期申请状态(提前到逾期过滤前:pending 延期 = 责任人已申请待批,不再算作"逾期")
   const overdueMilestoneIds = filteredOverdue.map((m: any) => m.id);

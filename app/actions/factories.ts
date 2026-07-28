@@ -1,8 +1,39 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { isAdminRole } from '@/lib/domain/roles';
+
+/**
+ * 更新工厂档案(2026-07-28 修「保存后消失」):此前 FactoryManager 用浏览器端 supabase 直接 update
+ * 且不查 error → RLS 拒绝时静默失败、刷新回旧数据像"消失"。改走 server action:角色门禁 +
+ * service-role 写(不吃 RLS)+ 返回 error 给 UI 显示。
+ */
+export async function updateFactory(
+  factoryId: string,
+  patch: Record<string, any>,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!factoryId) return { ok: false, error: '缺少工厂 ID' };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '请先登录' };
+  const { data: profile } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
+  const userRoles: string[] = (profile as any)?.roles?.length > 0 ? (profile as any).roles : [(profile as any)?.role].filter(Boolean);
+  if (!isAdminRole(userRoles) && !userRoles.some(r => ['production_manager', 'production', 'procurement', 'procurement_manager'].includes(r))) {
+    return { ok: false, error: '只有管理员/生产/采购可以编辑工厂' };
+  }
+  // 只允许档案字段(白名单),防误传
+  const ALLOWED = ['contact_name', 'phone', 'city', 'address', 'cooperation_status', 'product_categories',
+    'quality_grades', 'weave_types', 'can_package', 'order_capabilities', 'worker_count', 'monthly_capacity', 'notes'];
+  const clean: Record<string, any> = {};
+  for (const k of ALLOWED) if (k in patch) clean[k] = patch[k];
+  clean.updated_at = new Date().toISOString();
+  const svc = createServiceRoleClient();
+  const { error } = await (svc.from('factories') as any).update(clean).eq('id', factoryId);
+  if (error) return { ok: false, error: '保存失败:' + error.message };
+  revalidatePath('/factories');
+  return { ok: true };
+}
 
 /**
  * 更换订单工厂(2026-07-09 用户:生产主管要能改工厂)。仅 admin / 生产主管。
