@@ -85,12 +85,26 @@ export async function exportSampleRequest(orderId: string): Promise<ExportSample
     const fabrics = bomRows.filter(b => b.material_type === 'fabric');
     const trims = bomRows.filter(b => b.material_type !== 'fabric');
 
-    const colors: string[] = Array.isArray(order.colors)
-      ? order.colors.map(colorName).filter(Boolean)
-      : [];
-    const sizes: string[] = Array.isArray(order.sizes)
-      ? order.sizes.map((s: any) => str(s)).filter(Boolean)
-      : [];
+    // 颜色×尺码:新建样品单存进 order_line_items(color_cn + sizes jsonb {S:1} + qty_pcs),不是 orders.colors
+    const { data: lineItems } = await (supabase.from('order_line_items') as any)
+      .select('color_cn, color_en, sizes, qty_pcs, line_no')
+      .eq('order_id', orderId)
+      .order('line_no', { ascending: true });
+    const lineColors: Array<{ color: string; sizes: Record<string, any>; qty: number }> = (lineItems || []).map((li: any) => ({
+      color: str(li.color_cn) || str(li.color_en),
+      sizes: (li.sizes && typeof li.sizes === 'object') ? li.sizes : {},
+      qty: Number(li.qty_pcs) || 0,
+    }));
+
+    const colors: string[] = lineColors.length > 0
+      ? lineColors.map((l) => l.color).filter(Boolean)
+      : (Array.isArray(order.colors) ? order.colors.map(colorName).filter(Boolean) : []);
+    // 尺码行:优先用明细里出现过的码,回退 orders.sizes
+    const usedSizes = new Set<string>();
+    for (const l of lineColors) for (const k of Object.keys(l.sizes)) if (Number(l.sizes[k]) > 0) usedSizes.add(k);
+    const sizes: string[] = usedSizes.size > 0
+      ? [...usedSizes]
+      : (Array.isArray(order.sizes) ? order.sizes.map((s: any) => str(s)).filter(Boolean) : []);
 
     const deliveryDate = str(order.factory_date) || str(order.etd);
     const applyDate = new Date().toISOString().slice(0, 10);
@@ -207,15 +221,24 @@ export async function exportSampleRequest(orderId: string): Promise<ExportSample
     SIZE_COLS.forEach((s, i) => label(13, 3 + i, s)); // C..I (3..9)
     label(13, 10, '总数量'); merge(13, 10, 13, 17);
 
-    // ── R14+: 颜色行（每色一行，尺码数量留空供手填；首行总数量带订单总量）──
-    const colorRows = colors.length > 0 ? colors : [''];
+    // ── R14+: 颜色行（每色一行，尺码数量从 order_line_items 带出；首行样衣性质=样衣性质/初样）──
+    const sampleNature = str(sr.sample_nature) || '初样';
+    const rowsData = lineColors.length > 0
+      ? lineColors
+      : (colors.length > 0 ? colors.map((c) => ({ color: c, sizes: {} as Record<string, any>, qty: 0 })) : [{ color: '', sizes: {}, qty: 0 }]);
     let r = 14;
-    colorRows.forEach((cn, ci) => {
+    rowsData.forEach((lc, ci) => {
       sheet.getRow(r).height = 22;
-      cell(r, 1, ci === 0 ? '初样' : ''); // 样衣性质：默认首行「初样」，其余留空（可手改）
-      cell(r, 2, cn);
-      for (let i = 0; i < SIZE_COLS.length; i++) cell(r, 3 + i, ''); // 尺码配比留空手填
-      cell(r, 10, ci === 0 ? (order.quantity ?? '') : ''); merge(r, 10, r, 17);
+      cell(r, 1, ci === 0 ? sampleNature : '');
+      cell(r, 2, lc.color);
+      // 各尺码数量:该色 sizes[码] 带出,无则空
+      for (let i = 0; i < SIZE_COLS.length; i++) {
+        const q = Number(lc.sizes?.[SIZE_COLS[i]]) || '';
+        cell(r, 3 + i, q);
+      }
+      // 该色小计;没有明细时首行回退订单总量
+      const sub = SIZE_COLS.reduce((s, sz) => s + (Number(lc.sizes?.[sz]) || 0), 0);
+      cell(r, 10, sub || lc.qty || (ci === 0 ? (order.quantity ?? '') : '')); merge(r, 10, r, 17);
       r++;
     });
 
