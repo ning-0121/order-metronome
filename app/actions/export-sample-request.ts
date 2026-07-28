@@ -119,13 +119,20 @@ export async function exportSampleRequest(orderId: string): Promise<ExportSample
     const allBorder = { top: thin, left: thin, bottom: thin, right: thin };
     const LABEL_BG = 'FFF2F2F2'; // 标签浅灰底
 
-    // 17 列（A-Q），对齐模板
+    // 17 列（A-Q）。竖版 A4(2026-07-28 CEO:模板是竖版直接 A4 打印):列宽压窄(总宽≈97,配 fitToWidth 一页打完)
     sheet.columns = [
-      { width: 12 }, { width: 12 }, { width: 12 }, { width: 10 }, { width: 8 },
-      { width: 8 }, { width: 10 }, { width: 8 }, { width: 8 }, { width: 10 },
-      { width: 8 }, { width: 8 }, { width: 10 }, { width: 8 }, { width: 10 },
-      { width: 12 }, { width: 12 },
+      { width: 8 }, { width: 7.5 }, { width: 7.5 }, { width: 6 }, { width: 5 },
+      { width: 5 }, { width: 6 }, { width: 5 }, { width: 5 }, { width: 6 },
+      { width: 5 }, { width: 5 }, { width: 6 }, { width: 5 }, { width: 6 },
+      { width: 7 }, { width: 7 },
     ];
+    // A4 竖版打印:一页宽,水平居中,窄边距 → 打开即可直接打印
+    sheet.pageSetup = {
+      paperSize: 9, orientation: 'portrait',
+      fitToPage: true, fitToWidth: 1, fitToHeight: 1,
+      horizontalCentered: true,
+      margins: { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
+    };
 
     // 单元格样式辅助
     const cell = (
@@ -188,18 +195,18 @@ export async function exportSampleRequest(orderId: string): Promise<ExportSample
       label(r, 6, '克重');
       cell(r, 7, str(f.gsm) || str(fabrics[idx - 1]?.notes)); merge(r, 7, r, 8);
     };
-    sheet.getRow(6).height = 24; fabricLine(6, 1);
-    sheet.getRow(7).height = 24; fabricLine(7, 2);
+    sheet.getRow(6).height = 56; fabricLine(6, 1);   // 竖版模板:面料行高留手写/贴样空间
+    sheet.getRow(7).height = 56; fabricLine(7, 2);
 
     const trimLine = (r: number, idx: number) => {
       label(r, 1, '辅料' + idx);
       cell(r, 2, str(srTrims[idx - 1]) || str(trims[idx - 1]?.material_name)); merge(r, 2, r, 8);
     };
-    sheet.getRow(8).height = 24; trimLine(8, 1);
-    sheet.getRow(9).height = 24; trimLine(9, 2);
-    sheet.getRow(10).height = 24; trimLine(10, 3);
+    sheet.getRow(8).height = 44; trimLine(8, 1);
+    sheet.getRow(9).height = 44; trimLine(9, 2);
+    sheet.getRow(10).height = 44; trimLine(10, 3);
 
-    sheet.getRow(11).height = 24;
+    sheet.getRow(11).height = 44;
     label(11, 1, '特殊要求'); cell(11, 2, str(sr.special_requirements), { align: 'left', wrap: true }); merge(11, 2, 11, 8);
 
     // 右侧贴样处大区块(I6:N11 合并),有贴样说明就写进去
