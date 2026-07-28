@@ -378,6 +378,16 @@ export function SupplierLedgerClient({
                     {busy === `exp:${g.supplier_name_raw}` ? '…' : '📥 导出'}
                   </button>
                   <span className="text-sm text-gray-400">{g.lineCount} 行</span>
+                  {/* 行内快捷设税率(每家不一样):选完 含税=不含税×(1+税率) 自动重算。更多档/自定义在展开里。 */}
+                  <select disabled={busy === `tax:${g.supplier_name_raw}`} value=""
+                    onChange={(e) => { const v = e.target.value; if (v === '') return; applyTax(g.supplier_name_raw, v === 'clear' ? null : Number(v) / 100); }}
+                    title="设该供应商税率,含税自动算(每家可不同)"
+                    className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">
+                    <option value="">💲税率{(() => { const rs = g.orders.map((o) => o.taxRate); const uni = rs.length > 0 && rs.every((r) => r === rs[0]) ? rs[0] : null; return uni != null ? ` ${Math.round(uni * 100)}%` : '?'; })()}</option>
+                    <option value="0">0%</option><option value="1">1%</option><option value="3">3%</option>
+                    <option value="6">6%</option><option value="9">9%</option><option value="10">10%</option><option value="13">13%</option>
+                    <option value="clear">清空</option>
+                  </select>
                   <span className="w-28 text-right text-sm text-gray-500">不含税 {yuan(g.totalExTax)}</span>
                   <span className="w-32 text-right font-semibold text-indigo-700">含税 {yuan(g.totalInclTax)}</span>
                 </div>
