@@ -94,6 +94,7 @@ export async function syncShippingDocsToFinance(
     if (docs.length === 0) return { ok: true, sent, skipped };
 
     const customerName = order?.customer_name ?? null;
+    const pushedFiles: Array<{ id: string; file_name: string; file_type: string; file_size: number; file_url: string; doc_hint: 'bl' | 'ci' }> = [];
     for (const d of docs) {
       try {
         const scope = d.scopeBatchId ? `batch-${d.scopeBatchId}` : 'whole';
@@ -120,9 +121,38 @@ export async function syncShippingDocsToFinance(
           },
         });
         sent.push(d.kind);
+        // 出运档案候选文件:CI(契约 doc_hint 只认 bl/ci;PL/报关/PI 财务经 file.uploaded 已有)
+        if (d.kind === 'commercial_invoice') {
+          pushedFiles.push({ id: `ordoc-${deterministicDocId(orderId, d.kind, d.scopeBatchId)}`, file_name: d.fileName, file_type: 'excel', file_size: buf.length, file_url: pub.publicUrl, doc_hint: 'ci' });
+        }
       } catch (e: any) {
         skipped.push(`${d.kind}(异常:${e?.message || e})`);
       }
+    }
+
+    // ── 出运档案 shipment.recorded(契约 2026-07-28,财务 /shipments 页)──
+    // source_ref:整单=orderId、分批=orderId:batchId(每票一键,重推=更新);BL 提单从订单附件里找(物流上传),CI 用刚生成的。
+    try {
+      const blAtts: Array<{ id: string; file_name: string; file_type: string; file_size: number; file_url: string; doc_hint: 'bl' | 'ci' }> = [];
+      const { data: atts } = await (svc.from('order_attachments') as any)
+        .select('id, file_name, file_url, file_size').eq('order_id', orderId).limit(50);
+      for (const a of ((atts || []) as any[])) {
+        if (a.file_url && /提单|B\/?L\b|BILL.?OF.?LADING/i.test(String(a.file_name || ''))) {
+          const ext = String(a.file_name || '').toLowerCase();
+          blAtts.push({ id: `ordoc-${a.id}`, file_name: a.file_name, file_type: ext.endsWith('.pdf') ? 'pdf' : /\.(jpe?g|png)$/.test(ext) ? 'image' : 'excel', file_size: a.file_size || 0, file_url: a.file_url, doc_hint: 'bl' });
+        }
+      }
+      const { emitShipmentRecordedToFinance } = await import('@/lib/integration/finance-sync');
+      await emitShipmentRecordedToFinance({
+        source_ref: batchId ? `${orderId}:${batchId}` : orderId,
+        etd: order?.etd ? String(order.etd).slice(0, 10) : null,
+        status: 'shipped',
+        orders: [{ qimo_order_id: orderId, order_no: order?.order_no ?? null, internal_order_no: order?.internal_order_no ?? null }],
+        attachments: [...blAtts, ...pushedFiles],
+      });
+      sent.push('shipment.recorded');
+    } catch (e: any) {
+      skipped.push(`shipment.recorded(异常:${e?.message || e})`);
     }
     return { ok: true, sent, skipped };
   } catch (e: any) {

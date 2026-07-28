@@ -194,7 +194,13 @@ export async function POST(request: Request) {
         })
         .eq('id', approval_id).eq('status', 'pending').select('id')
       if (error) throw new Error(`Price approval update failed: ${error.message}`)
-      if (!rows || rows.length === 0) skipLog('price')
+      if (!rows || rows.length === 0) {
+        skipLog('price')
+        // 改判止血(2026-07-28 审计 P1-1):601B 场景——财务批准→撤销→驳回,第一次已落地则第二次改判被状态闸吞掉。
+        const { data: cur } = await supabase.from('pre_order_price_approvals').select('status').eq('id', approval_id).maybeSingle()
+        const curDec = (cur as any)?.status === 'approved' ? 'approved' as const : (cur as any)?.status === 'rejected' ? 'rejected' as const : null
+        await flagFinanceReversal(supabase, { approvalLabel: '价格审批', refNo: String(approval_id).slice(0, 8), incoming: decision, currentDecision: curDec, deciderName: decider_name, note: decision_note, relatedOrderId: null })
+      }
     }
 
     // (delay 审批回调已移除 2026-07-09:改期只走节拍器内部审批链,从不推财务→此分支永不触发,删幽灵能力)
@@ -209,6 +215,10 @@ export async function POST(request: Request) {
       const res = await decideCancel(approval_id, decision, noteTag, { supabase: svc, actorId: null })
       if (res.error) {
         console.log(`[FinanceCallback] cancel ${approval_id}: ${res.error}(幂等跳过)`)
+        // 改判止血(2026-07-28 审计 P1-1):已批准执行取消后财务又驳回(或反向)→ 通知人工核对
+        const { data: cur } = await (svc.from('cancel_requests') as any).select('status, order_id').eq('id', approval_id).maybeSingle()
+        const curDec = (cur as any)?.status === 'approved' ? 'approved' as const : (cur as any)?.status === 'rejected' ? 'rejected' as const : null
+        await flagFinanceReversal(svc, { approvalLabel: '取消审批', refNo: String(approval_id).slice(0, 8), incoming: decision, currentDecision: curDec, deciderName: decider_name, note: decision_note, relatedOrderId: (cur as any)?.order_id ?? null })
       } else if (decision === 'approved') {
         const oid = (res.data as any)?.cancelRequest?.order_id
         if (oid) await finalizeCancelledOrder(svc, oid)
@@ -227,8 +237,15 @@ export async function POST(request: Request) {
         })
         .eq('id', approval_id).not('status', 'in', '("已完成","done","completed")').select('id')
       if (error) throw new Error(`Milestone update failed: ${error.message}`)
-      if (!rows || rows.length === 0) skipLog('milestone')
-      else {
+      if (!rows || rows.length === 0) {
+        skipLog('milestone')
+        // 改判止血(2026-07-28 审计 P1-1):节点已完成后财务改判驳回 → 不自动差回,通知人工核对
+        if (decision === 'rejected') {
+          const { data: cur } = await supabase.from('milestones').select('order_id, name, status').eq('id', approval_id).maybeSingle()
+          const done = ['已完成', 'done', 'completed'].includes(String((cur as any)?.status || ''))
+          await flagFinanceReversal(supabase, { approvalLabel: `里程碑确认(${(cur as any)?.name || ''})`, refNo: String(approval_id).slice(0, 8), incoming: 'rejected', currentDecision: done ? 'approved' : null, deciderName: decider_name, note: decision_note, relatedOrderId: (cur as any)?.order_id ?? null })
+        }
+      } else {
         // 复审:此前财务确认里程碑直接写库、绕过 recompute 钩子 → 交付置信度滞后。补触发一次(fire-and-forget)。
         try {
           const { data: m } = await supabase.from('milestones').select('order_id').eq('id', approval_id).maybeSingle()
@@ -335,6 +352,11 @@ export async function POST(request: Request) {
         .select('id, order_id, to_purpose, reason, status').eq('id', approval_id).maybeSingle()
       if (!req || (req as any).status !== 'pending') {
         skipLog('order_purpose')
+        // 改判止血(2026-07-28 审计 P1-1):用途变更已裁决落地后财务改判 → 通知人工核对(不自动改回用途)
+        if (req) {
+          const curDec = (req as any).status === 'approved' ? 'approved' as const : (req as any).status === 'rejected' ? 'rejected' as const : null
+          await flagFinanceReversal(svc, { approvalLabel: '订单改用途', refNo: String(approval_id).slice(0, 8), incoming: decision, currentDecision: curDec, deciderName: decider_name, note: decision_note, relatedOrderId: (req as any).order_id ?? null })
+        }
       } else {
         const now = new Date().toISOString()
         const noteTag = decision_note

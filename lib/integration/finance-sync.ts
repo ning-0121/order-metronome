@@ -44,6 +44,7 @@ type WebhookEventType =
   | 'file.uploaded'
   | 'shipping_invoice.issued'
   | 'payable.created'
+  | 'shipment.recorded'   // 出运档案(提单/CI 文件推送,财务 /shipments 页;契约 2026-07-28)
   | 'receivable.created'   // 应收(先用于打样费;data.kind='sample_fee')。财务侧据此建应收账款,收款后回传 payment.completed
 
 interface WebhookPayload {
@@ -704,4 +705,18 @@ export async function checkFinanceSystemHealth(): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * 出运档案 → 财务 /shipments(契约 2026-07-28,财务侧已上线)。
+ * source_ref=节拍器出运标识(幂等键,重推=更新);orders[] 该票全部订单;attachments doc_hint 只认 bl/ci。
+ */
+export async function emitShipmentRecordedToFinance(data: {
+  source_ref: string; bl_no?: string | null; ci_no?: string | null;
+  shipping_port?: string | null; destination_port?: string | null; etd?: string | null;
+  carton_count?: number | null; status?: string; notes?: string;
+  orders: Array<{ qimo_order_id: string; order_no?: string | null; internal_order_no?: string | null }>;
+  attachments?: Array<{ id: string; file_name: string; file_type: string; file_size?: number | null; file_url: string; doc_hint: 'bl' | 'ci' }>;
+}) {
+  return sendToFinanceSystem('shipment.recorded', data as unknown as Record<string, unknown>)
 }

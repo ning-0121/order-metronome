@@ -121,7 +121,7 @@ async function generateMilestoneTasks(
       id, step_key, name, planned_at, status,
       owner_user_id,
       order_id,
-      orders!inner(order_no, customer_name, lifecycle_status)
+      orders!inner(order_no, customer_name, lifecycle_status, owner_user_id, created_by)
     `)
     .neq('status', 'done')
     .not('orders.lifecycle_status', 'in', TERMINAL_LIFECYCLE_FILTER)
@@ -133,7 +133,11 @@ async function generateMilestoneTasks(
     return { created, skipped, errors }
   }
 
-  for (const ms of milestones || []) {
+  // 业务执行固定节点(产前样寄出/确认/包装确认/到货验收)归一化到订单业务负责人(2026-07-28 审计 P1-3):
+  // 此前读原始 owner_user_id,legacy 单该字段为空/落生产 → 待办丢失或派错人。
+  const { effectiveMilestoneOwner } = await import('@/lib/domain/milestone-owner')
+  for (const raw of milestones || []) {
+    const ms: any = raw.orders ? effectiveMilestoneOwner(raw, raw.orders) : raw
     if (!ms.owner_user_id) continue
 
     const order = ms.orders

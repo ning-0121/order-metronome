@@ -48,7 +48,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
 
   // ── 订单 + 里程碑(B/C/D/E 共用一次拉) ──
   const { data: orders } = await supabase.from('orders')
-    .select('id, order_no, internal_order_no, customer_name, order_purpose, lifecycle_status, created_at, factory_date')
+    .select('id, order_no, internal_order_no, customer_name, order_purpose, lifecycle_status, created_at, factory_date, owner_user_id, created_by')
     .order('created_at', { ascending: false }).limit(2000);
   const notTerminal = (o: any) => !TERMINAL_LC.has(String(o.lifecycle_status || '').toLowerCase()) && !TERMINAL_LC.has(String(o.lifecycle_status || ''));
   // 打样单不进 B(部门健康)/E(员工)/D(卡住)/里程碑逾期口径——避免打样延期污染部门健康度与员工准时率
@@ -58,9 +58,15 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const orderById = new Map<string, any>(((orders || []) as any[]).map((o) => [o.id, o]));
   const liveIds = liveOrders.map((o) => o.id);
   const { data: ms } = liveIds.length > 0
-    ? await supabase.from('milestones').select('id, name, status, due_at, actual_at, owner_role, owner_user_id, order_id').in('order_id', liveIds)
+    ? await supabase.from('milestones').select('id, name, status, due_at, actual_at, owner_role, owner_user_id, order_id, step_key').in('order_id', liveIds)
     : { data: [] };
-  const milestones = (ms || []) as any[];
+  // 业务执行固定节点归一化到订单业务负责人(2026-07-28 审计 P1-3):B 部门计分/E 员工准时率不再把
+  // 产前样寄出/确认等节点算到生产头上(与工作台/订单详情同口径 effectiveMilestoneOwner)。
+  const { effectiveMilestoneOwner } = await import('@/lib/domain/milestone-owner');
+  const milestones = ((ms || []) as any[]).map((m) => {
+    const o = orderById.get(m.order_id);
+    return o ? effectiveMilestoneOwner(m, o) : m;
+  });
 
   // 可疑延期:大额(≥21天)或同单反复(≥2条)——从 pending delay 拉。
   // 同时收集"已申请延期(待批)的节点",逾期口径把它们剔除(与首页 dashboard 一致:责任人已行动不算逾期)。

@@ -342,23 +342,28 @@ async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
   const todayStr = now.toISOString();
 
   // 已逾期：in_progress + due_at < now
-  const { data: overdue } = await supabase
+  const { data: overdueRaw } = await supabase
     .from('milestones')
-    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name)')
+    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name, owner_user_id, created_by)')
     .in('status', ['in_progress', '进行中'])
     .lt('due_at', todayStr)
     .order('due_at', { ascending: true })
     .limit(50);
 
   // 即将逾期：未完成 + due_at 在未来 3 天内
-  const { data: soonOverdue } = await supabase
+  const { data: soonOverdueRaw } = await supabase
     .from('milestones')
-    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name)')
+    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name, owner_user_id, created_by)')
     .in('status', ['in_progress', '进行中', 'pending', '未开始'])
     .gte('due_at', todayStr)
     .lte('due_at', threeDaysLater)
     .order('due_at', { ascending: true })
     .limit(30);
+
+  // 业务执行固定节点归一化到订单业务负责人(2026-07-28 审计 P1-3):督办日报显示的责任人与看板一致
+  const { effectiveMilestoneOwner: normOwner } = await import('@/lib/domain/milestone-owner');
+  const overdue = ((overdueRaw || []) as any[]).map((m) => m.orders ? normOwner(m, m.orders) : m);
+  const soonOverdue = ((soonOverdueRaw || []) as any[]).map((m) => m.orders ? normOwner(m, m.orders) : m);
 
   const overdueList = (overdue || []) as any[];
   const soonList = (soonOverdue || []) as any[];
@@ -444,13 +449,17 @@ async function runEscalationChain(supabase: any): Promise<number> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com';
 
   // 查所有逾期的 in_progress 节点
-  const { data: overdue } = await supabase
+  const { data: overdueRawEsc } = await supabase
     .from('milestones')
-    .select('id, name, step_key, due_at, owner_user_id, owner_role, order_id, orders!inner(order_no, customer_name, created_by)')
+    .select('id, name, step_key, due_at, owner_user_id, owner_role, order_id, orders!inner(order_no, customer_name, created_by, owner_user_id)')
     .in('status', ['in_progress', '进行中'])
     .lt('due_at', now.toISOString())
     .order('due_at', { ascending: true })
     .limit(100);
+
+  // 业务执行固定节点归一化(2026-07-28 审计 P1-3):升级链催办要 @ 到订单业务负责人,不是原始(可能空/生产)owner
+  const { effectiveMilestoneOwner: normEscOwner } = await import('@/lib/domain/milestone-owner');
+  const overdue = ((overdueRawEsc || []) as any[]).map((m) => m.orders ? normEscOwner(m, m.orders) : m);
 
   if (!overdue || overdue.length === 0) return 0;
 
