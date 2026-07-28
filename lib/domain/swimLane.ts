@@ -56,6 +56,8 @@ const STEP_LANE_MAP: Record<string, SwimLane> = {
   materials_received_inspected:  'sales',   // 2026-07-24 用户:到货验收归业务执行,进业务泳道(责任人=建单人)
   pre_production_meeting:        'production',
   production_kickoff:            'production',
+  pps_procurement_check:         'production',   // V3 产前样·采购品质核(2026-07-28 审计补漏)
+  initial_line_check:            'production',   // V3 初上线·跟单确认(2026-07-28 审计补漏)
   mid_qc_check:                  'production',
   final_qc_check:                'production',
   factory_completion:            'production',

@@ -62,7 +62,8 @@ const MILESTONE_GROUPS = [
   {
     key: 'stage3', emoji: '🟧',
     titleCn: '阶段 3：产前样',
-    stepKeys: ['pre_production_sample_ready', 'pre_production_sample_sent', 'pre_production_sample_approved'],
+    // P0 修(2026-07-28 审计):pps_procurement_check 是 V3「产前样确认」的硬前置,漏在分组表 → 时间线不渲染、全系统无处完成 → V3 单卡死产前样
+    stepKeys: ['pre_production_sample_ready', 'pre_production_sample_sent', 'pps_procurement_check', 'pre_production_sample_approved'],
   },
   {
     key: 'stage4', emoji: '🟩',

@@ -238,6 +238,17 @@ assert(prodMilestones.some(m => m.step_key === 'booking_done'), 'export包含订
   }
 }
 
+// ── 模板×时间线分组覆盖(2026-07-28 P0 防线):pps_procurement_check 曾漏在 OrderTimeline 分组表
+//    → 节点不渲染、全系统无处完成、又是硬前置 → V3 单卡死产前样。强制:模板每个 step_key 必须
+//    出现在 OrderTimeline.tsx 源码里(分组表/映射),漏一个 push 不上去。
+{
+  const timelineSrc = readFileSync(join(process.cwd(), 'components/OrderTimeline.tsx'), 'utf8');
+  const sampleTpl = getApplicableMilestones('sample', false, 'domestic', 'sample') as any[];
+  for (const t of [...(prodMilestones as any[]), ...sampleTpl]) {
+    assert(timelineSrc.includes(`'${t.step_key}'`), `OrderTimeline 分组含 ${t.step_key}(否则时间线不渲染该节点)`);
+  }
+}
+
 const domesticMilestones = getApplicableMilestones('bulk', false, 'domestic');
 // 送仓单也要船样,只跳「订舱」(送仓无海运订舱)→ V3 19-1=18
 assert(domesticMilestones.length === 18, `domestic生产单 ${domesticMilestones.length} 节点 (=18,V3 只跳订舱,保留船样)`);
