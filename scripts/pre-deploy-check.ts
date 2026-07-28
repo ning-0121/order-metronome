@@ -5,6 +5,8 @@
  * 用法：npx tsx scripts/pre-deploy-check.ts
  */
 
+import { readFileSync, readdirSync, statSync } from 'fs';
+import { join } from 'path';
 import { MILESTONE_TEMPLATE_V1, MILESTONE_TEMPLATE_V2, SAMPLE_MILESTONE_TEMPLATE, TRADE_MILESTONE_TEMPLATE, getApplicableMilestones } from '../lib/milestoneTemplate';
 import { MILESTONE_CONFIRMATION_PARTIES } from '../lib/domain/confirmationParties';
 import { overReceiptCheck } from '../lib/domain/procurement';
@@ -482,6 +484,41 @@ const { FABRIC_RISKS, QUALITY_ISSUES, BEST_PRACTICES } = require('../lib/agent/i
 assert(Object.keys(FABRIC_RISKS).length >= 4, `面料风险 ${Object.keys(FABRIC_RISKS).length} 种 (≥4)`);
 assert(QUALITY_ISSUES.length >= 5, `品质问题 ${QUALITY_ISSUES.length} 种 (≥5)`);
 assert(!!BEST_PRACTICES.sampleTimeline, '最佳实践包含 sampleTimeline');
+
+// ════ 'use server' 文件只能导出 async 函数(2026-07-27 P0 事故防线)════
+// 事故:sample-fee.ts 里 export const 对象 → 通过 next build,但运行时 module-eval 报
+//   `A "use server" file can only export async functions, found object`,把整条 order 页 action chunk 打挂。
+// 这里静态扫描所有 'use server' 文件,任何非 `export async function` 的顶层导出(const/let/class/default/
+//   非async function)都拦下。type/interface 编译期擦除,允许。
+console.log('\n🛡  use-server 导出合规');
+function walkTsFiles(dir: string, out: string[] = []): string[] {
+  let entries: string[] = [];
+  try { entries = readdirSync(dir); } catch { return out; }
+  for (const name of entries) {
+    if (name === 'node_modules' || name === '.next' || name.startsWith('.')) continue;
+    const p = join(dir, name);
+    const st = statSync(p);
+    if (st.isDirectory()) walkTsFiles(p, out);
+    else if (/\.tsx?$/.test(name)) out.push(p);
+  }
+  return out;
+}
+const ROOT = process.cwd();
+const scanDirs = ['app', 'lib', 'components'].map((d) => join(ROOT, d));
+let useServerScanned = 0;
+for (const dir of scanDirs) {
+  for (const f of walkTsFiles(dir)) {
+    const src = readFileSync(f, 'utf8');
+    if (!/^\s*['"]use server['"]/.test(src)) continue;
+    useServerScanned++;
+    const bad = src.split('\n')
+      .map((l) => l.trim())
+      .filter((l) => /^export\s+(const|let|var|class|default|enum)\b/.test(l)
+        || (/^export\s+function\b/.test(l) && !/^export\s+async\s+function\b/.test(l)));
+    assert(bad.length === 0, `'use server' 文件不能有非 async 导出 → ${f.replace(ROOT + '/', '')}: ${bad[0] || ''}`);
+  }
+}
+assert(useServerScanned > 0, `扫到 ${useServerScanned} 个 'use server' 文件(应 >0)`);
 
 // ════ 结果 ════
 console.log(`\n${'═'.repeat(40)}`);
