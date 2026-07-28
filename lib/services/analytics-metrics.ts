@@ -1,4 +1,5 @@
 export interface AnalyticsOrderQuantityLike {
+  id?: string;
   quantity?: number | null;
   order_purpose?: string | null;
   lifecycle_status?: string | null;
@@ -41,7 +42,10 @@ export function orderStatPieces(order: { quantity?: number | null }, lines?: Arr
   return Number(order.quantity) || 0;
 }
 
-export function summarizeEffectiveOrderQuantity(orders: AnalyticsOrderQuantityLike[]): {
+export function summarizeEffectiveOrderQuantity(
+  orders: AnalyticsOrderQuantityLike[],
+  linesByOrder?: Map<string, Array<{ qty_pcs?: number | null; set_multiplier?: number | null }>>,   // 传入则套→件(每单按明细算),不传则按 quantity(向后兼容)
+): {
   orderCount: number;
   totalQuantity: number;
   scopeLabel: string;
@@ -50,8 +54,8 @@ export function summarizeEffectiveOrderQuantity(orders: AnalyticsOrderQuantityLi
   const effectiveOrders = (orders || []).filter(isEffectiveOrderQuantitySource);
   return {
     orderCount: effectiveOrders.length,
-    totalQuantity: effectiveOrders.reduce((sum, order) => sum + (Number(order.quantity) || 0), 0),
+    totalQuantity: effectiveOrders.reduce((sum, order) => sum + orderStatPieces(order, order.id ? linesByOrder?.get(order.id) : undefined), 0),
     scopeLabel: '有效订单总件数',
-    scopeHint: '口径：排除取消/关闭/贸易/样品订单，按有效订单件数汇总；与客户年度目标口径不同',
+    scopeHint: '口径：排除取消/关闭/贸易/样品订单，套装按每套2件(以明细为准)汇总；与客户年度目标口径不同',
   };
 }

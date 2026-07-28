@@ -38,7 +38,11 @@ export default async function AnalyticsPage() {
   // 总览统计
   const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity, created_at, order_purpose, lifecycle_status');
   const totalOrders = (allOrders || []).length;
-  const effectiveQuantity = summarizeEffectiveOrderQuantity(allOrders || []);
+  // 套→件:取逐款明细,有效订单总件数按每套2件(以明细 set_multiplier 为准)汇总(2026-07-27 CEO)
+  const { data: allLines } = await (supabase.from('order_line_items') as any).select('order_id, qty_pcs, set_multiplier');
+  const linesByOrder = new Map<string, any[]>();
+  for (const r of ((allLines || []) as any[])) { const a = linesByOrder.get(r.order_id) || []; a.push(r); linesByOrder.set(r.order_id, a); }
+  const effectiveQuantity = summarizeEffectiveOrderQuantity(allOrders || [], linesByOrder);
   const totalCustomers = new Set((allOrders || []).map((o: any) => o.customer_name).filter(Boolean)).size;
   const totalFactories = new Set((allOrders || []).map((o: any) => o.factory_name).filter(Boolean)).size;
 
