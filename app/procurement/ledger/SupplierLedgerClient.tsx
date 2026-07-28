@@ -465,21 +465,37 @@ export function SupplierLedgerClient({
   );
 }
 
-/** 设税率(供应商级,应用到该供应商所有未推行)。 */
+/** 设税率(供应商级,应用到该供应商所有未推行)。金额按不含税录入,设税率后含税=不含税×(1+税率)自动算。 */
 function TaxSetter({ supplierNameRaw, busy, onApply }: { supplierNameRaw: string; busy: boolean; onApply: (s: string, r: number | null) => void }) {
   const [val, setVal] = useState('13');
+  const [custom, setCustom] = useState('');
+  // 实际应用的税率:自定义时取手填,否则取下拉;clear→null
+  const rate: number | null = val === 'clear' ? null
+    : val === 'custom' ? (custom.trim() === '' ? null : Number(custom) / 100)
+    : Number(val) / 100;
+  const customBad = val === 'custom' && custom.trim() !== '' && (!Number.isFinite(Number(custom)) || Number(custom) < 0 || Number(custom) > 100);
   return (
-    <div className="flex items-center gap-2 text-xs text-gray-600">
-      <span>设税率(应用到该供应商未推财务的行):</span>
+    <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+      <span>设税率(不含税×(1+税率)=含税,自动算):</span>
       <select value={val} onChange={(e) => setVal(e.target.value)} className="rounded border border-gray-300 px-1.5 py-0.5">
         <option value="13">13%</option>
+        <option value="10">10%</option>
         <option value="9">9%</option>
         <option value="6">6%</option>
         <option value="3">3%</option>
+        <option value="1">1%</option>
         <option value="0">0%</option>
+        <option value="custom">自定义…</option>
         <option value="clear">清空</option>
       </select>
-      <button onClick={() => onApply(supplierNameRaw, val === 'clear' ? null : Number(val) / 100)} disabled={busy}
+      {val === 'custom' && (
+        <span className="flex items-center gap-1">
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="decimal" placeholder="税点"
+            className={`w-16 rounded border px-1.5 py-0.5 text-right ${customBad ? 'border-rose-400' : 'border-gray-300'}`} />
+          <span>%</span>
+        </span>
+      )}
+      <button onClick={() => onApply(supplierNameRaw, rate)} disabled={busy || customBad || (val === 'custom' && custom.trim() === '')}
         className="rounded bg-gray-800 px-2 py-0.5 text-white hover:bg-gray-700 disabled:opacity-50">
         {busy ? '…' : '应用'}
       </button>

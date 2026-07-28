@@ -5,6 +5,7 @@ import { getOrderCommissions } from '@/app/actions/commissions';
 import { formatDate } from '@/lib/utils/date';
 import { getOrderTypeBadge, getOrderTypeLabel } from '@/lib/theme/colors';
 import { OrderTimeline } from '@/components/OrderTimeline';
+import { OrderScheduleExportButton } from '@/components/schedule/OrderScheduleExportButton';
 import { DelayRequestsList } from '@/components/DelayRequestsList';
 import { OrderScoreCard } from '@/components/OrderScoreCard';
 import { MerchandiserAssign } from '@/components/MerchandiserAssign';
@@ -895,11 +896,14 @@ export default async function OrderDetailPage({
 
             {/* 执行进度概览 */}
             <div className="md:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                 <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide">进度概览</h2>
-                <Link href={`/orders/${id}?tab=progress`} className="text-sm text-indigo-600 hover:text-indigo-700">查看详情 →</Link>
+                <div className="flex items-center gap-3">
+                  <OrderScheduleExportButton orderId={id} />
+                  <Link href={`/orders/${id}?tab=progress`} className="text-sm text-indigo-600 hover:text-indigo-700">查看详情 →</Link>
+                </div>
               </div>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
                   { label: '总节点', value: milestones?.length || 0, color: 'text-gray-700' },
                   { label: '已完成', value: (milestones || []).filter((m: any) => normalizeMilestoneStatus(m.status) === '已完成').length, color: 'text-green-600' },

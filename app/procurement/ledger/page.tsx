@@ -9,8 +9,11 @@ import { GoodsReceiptsPanel } from './GoodsReceiptsPanel';
 
 // 供应商采购对账台账(面料账目导入,2026-07-11)。
 // 导入《面料采购明细表汇总》(每 sheet=一供应商)→ 按供应商×订单归集不含税应付,预埋财务对接锚点。
+const CAN_EDIT_RECEIPT_PRICE = ['admin', 'procurement', 'procurement_manager', 'finance'];
+
 export default async function SupplierLedgerPage() {
-  await requireProcurementPage();
+  const { roles } = await requireProcurementPage();
+  const canEditPrice = (roles || []).some((r) => CAN_EDIT_RECEIPT_PRICE.includes(r));
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
@@ -34,7 +37,7 @@ export default async function SupplierLedgerPage() {
       <SupplierLedgerClient initialGroups={groups} initialGrandTotalExTax={grandTotalExTax} initialGrandTotalInclTax={grandTotalInclTax} />
 
       {/* 收货记录台账:全部收货流水,按供应商/日期/物料名调取 */}
-      <GoodsReceiptsPanel rows={receiptsRes.data || []} />
+      <GoodsReceiptsPanel rows={receiptsRes.data || []} canEditPrice={canEditPrice} />
     </div>
   );
 }

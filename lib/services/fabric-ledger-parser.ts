@@ -146,6 +146,10 @@ export function parseFabricLedger(buffer: Buffer): FabricLedgerParseResult {
       const structText = `${rawOrder} ${rawFabric} ${color}`;
       if (rawOrder === '订单号' || /明细表汇总|采购数量|实到数量/.test(structText)) continue;  // 重复表头/标题
       if (/总金额|合计|小计|总计/.test(structText)) continue;                                    // 小计/合计
+      // 2026-07-27 bug 修:源表底部常有「开票金额(10%)/税额/税金」这类税/发票汇总行,
+      // 它落在订单号列、带一个金额 → 之前被当明细行计入应付,导致「税点金额重复算进需支付」。
+      // 这些是汇总口径不是采购明细,一律跳过(金额不含税已按明细逐行算,税点由「设税率」统一后算)。
+      if (/开票|发票金额|税额|税金|税点|税款|税费/.test(structText)) continue;                  // 税/发票汇总行
 
       // 纯空行(本行自身所有关键格都空)→ 跳过,不做填充
       if (!rawOrder && !rawFabric && !color && amountExTax == null && unitPriceExTax == null

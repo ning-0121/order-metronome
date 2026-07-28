@@ -7,7 +7,9 @@
  * 页面已有 requireProcurementPage 门禁;此处再校登录,数据走用户会话(RLS 管范围)。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
+import { receiptAmount } from '@/lib/procurement/receipt-amount';
 
 export interface GoodsReceiptRow {
   id: string;
@@ -25,6 +27,10 @@ export interface GoodsReceiptRow {
   po_no: string | null;
   purchase_order_id: string | null;
   order_label: string | null;   // 内部订单号 || 绮陌单号
+  // 收货补录价格(2026-07-27):开版费等前期无法预知的价,收货后补,导出带进对账
+  unit_price: number | null;    // 补录单价(不含税)
+  extra_fee: number | null;     // 附加费(开版费等一次性)
+  price_note: string | null;    // 价格备注
 }
 
 export async function listGoodsReceiptRecords(): Promise<{ data?: GoodsReceiptRow[]; error?: string }> {
@@ -32,10 +38,22 @@ export async function listGoodsReceiptRecords(): Promise<{ data?: GoodsReceiptRo
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
-  const { data: receipts, error } = await (supabase.from('goods_receipts') as any)
-    .select('id, line_item_id, order_id, received_qty, received_unit, received_at, inspection_result, defect_notes, return_status')
-    .order('received_at', { ascending: false })
-    .limit(2000);
+  const COLS_WITH_PRICE = 'id, line_item_id, order_id, received_qty, received_unit, received_at, inspection_result, defect_notes, return_status, unit_price, extra_fee, price_note';
+  const COLS_NO_PRICE = 'id, line_item_id, order_id, received_qty, received_unit, received_at, inspection_result, defect_notes, return_status';
+  let receipts: any[] | null = null;
+  let error: any = null;
+  {
+    const res = await (supabase.from('goods_receipts') as any)
+      .select(COLS_WITH_PRICE).order('received_at', { ascending: false }).limit(2000);
+    if (res.error && /column .*(unit_price|extra_fee|price_note)/i.test(res.error.message || '')) {
+      // 迁移未落生产的兜底:降级读无价列(补价功能暂不可用,但页面不白屏)
+      const res2 = await (supabase.from('goods_receipts') as any)
+        .select(COLS_NO_PRICE).order('received_at', { ascending: false }).limit(2000);
+      receipts = res2.data; error = res2.error;
+    } else {
+      receipts = res.data; error = res.error;
+    }
+  }
   if (error) return { error: error.message };
   const rs = (receipts || []) as any[];
   if (rs.length === 0) return { data: [] };
@@ -92,9 +110,54 @@ export async function listGoodsReceiptRecords(): Promise<{ data?: GoodsReceiptRo
       po_no: po.po_no ?? null,
       purchase_order_id: line.purchase_order_id ?? null,
       order_label: ord.internal_order_no || ord.order_no || null,
+      unit_price: r.unit_price ?? null,
+      extra_fee: r.extra_fee ?? null,
+      price_note: r.price_note ?? null,
     };
   });
   return { data: rows };
+}
+
+const CAN_EDIT_RECEIPT_PRICE = ['admin', 'procurement', 'procurement_manager', 'finance'];
+
+/**
+ * 补录/修改某条收货记录的价格(单价 / 附加费 / 备注)。仅采购/采购经理/财务/管理员。
+ * 空串=清空。列缺失(迁移未落)→ 提示先跑迁移。
+ */
+export async function updateGoodsReceiptPrice(
+  receiptId: string,
+  patch: { unit_price?: number | string | null; extra_fee?: number | string | null; price_note?: string | null },
+): Promise<{ ok?: boolean; amount?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!roles.some((r) => CAN_EDIT_RECEIPT_PRICE.includes(r))) return { error: '仅采购/财务/管理员可补录价格' };
+  if (!receiptId) return { error: '缺少收货记录' };
+
+  const cleanNum = (v: number | string | null | undefined): number | null => {
+    if (v === null || v === undefined || String(v).trim() === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return NaN as any; // 标记非法
+    return Math.round(n * 10000) / 10000;
+  };
+  const update: Record<string, any> = { price_filled_by: user.id, price_filled_at: new Date().toISOString() };
+  if ('unit_price' in patch) { const n = cleanNum(patch.unit_price); if (Number.isNaN(n)) return { error: '单价须为 ≥0 的数字' }; update.unit_price = n; }
+  if ('extra_fee' in patch) { const n = cleanNum(patch.extra_fee); if (Number.isNaN(n)) return { error: '附加费须为 ≥0 的数字' }; update.extra_fee = n; }
+  if ('price_note' in patch) { update.price_note = patch.price_note ? String(patch.price_note).slice(0, 300) : null; }
+
+  const svc = createServiceRoleClient();
+  const { data: row, error } = await (svc.from('goods_receipts') as any)
+    .update(update).eq('id', receiptId).select('received_qty, unit_price, extra_fee').maybeSingle();
+  if (error) {
+    if (/column .*(unit_price|extra_fee|price_note|price_filled)/i.test(error.message || ''))
+      return { error: '价格列尚未落库,请先执行迁移 npm run db:migrate' };
+    return { error: '保存失败:' + error.message };
+  }
+  revalidatePath('/procurement/ledger');
+  const amount = row ? receiptAmount(row as any) : undefined;
+  return { ok: true, amount };
 }
 
 /**
@@ -120,11 +183,13 @@ export async function exportGoodsReceiptRecords(
   ws.columns = [
     { header: '收货日期', width: 12 }, { header: '供应商', width: 18 }, { header: '物料', width: 22 },
     { header: '规格', width: 18 }, { header: '颜色', width: 12 }, { header: '尺码', width: 8 },
-    { header: '数量', width: 10 }, { header: '单位', width: 8 }, { header: '检验', width: 10 },
+    { header: '数量', width: 10 }, { header: '单位', width: 8 },
+    { header: '单价(不含税)', width: 13 }, { header: '附加费', width: 10 }, { header: '金额', width: 12 }, { header: '价格备注', width: 18 },
+    { header: '检验', width: 10 },
     { header: '退货', width: 8 }, { header: '质量备注', width: 20 }, { header: '采购单号', width: 18 }, { header: '关联订单', width: 12 },
   ];
-  ws.insertRow(1, [`收货记录台账${filterLabel ? ` · ${filterLabel}` : ''} · 共 ${list.length} 条`]);
-  ws.mergeCells('A1:M1');
+  ws.insertRow(1, [`收货记录对账表${filterLabel ? ` · ${filterLabel}` : ''} · 共 ${list.length} 条`]);
+  ws.mergeCells('A1:Q1');
   ws.getCell('A1').font = { bold: true, size: 13 };
   ws.getCell('A1').alignment = { horizontal: 'center' };
   ws.getRow(1).height = 22;
@@ -135,11 +200,16 @@ export async function exportGoodsReceiptRecords(
   });
 
   const unitTotals = new Map<string, number>();
+  let amountTotal = 0;
   for (const r of list) {
+    const amt = receiptAmount(r);
+    amountTotal += amt;
     ws.addRow([
       r.received_at ? String(r.received_at).slice(0, 10) : '', r.supplier_name || '', r.material_name || '',
       r.specification || '', r.color || '', r.size || '',
-      r.received_qty, r.unit || '', INSPECT_CN[r.inspection_result || ''] || r.inspection_result || '',
+      r.received_qty, r.unit || '',
+      r.unit_price ?? '', r.extra_fee ?? '', amt || '', r.price_note || '',
+      INSPECT_CN[r.inspection_result || ''] || r.inspection_result || '',
       r.return_status ? (RETURN_CN[r.return_status] || r.return_status) : '', r.defect_notes || '',
       r.po_no || '', r.order_label || '',
     ]);
@@ -148,7 +218,7 @@ export async function exportGoodsReceiptRecords(
   }
   const totalRow = ws.addRow(['合计', '', '', '', '', '',
     [...unitTotals.entries()].map(([u, n]) => `${Math.round(n * 1000) / 1000}${u === '—' ? '' : u}`).join(' + '),
-    '', '', '', '', '', '']);
+    '', '', '', Math.round(amountTotal * 100) / 100, '', '', '', '', '', '']);
   totalRow.font = { bold: true };
 
   const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');

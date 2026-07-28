@@ -4,6 +4,7 @@ import { getProductionCenter } from '@/app/actions/production-center';
 import { isStageInitOpen } from '@/app/actions/production-stage-init';
 import { ProductionCenterClient } from './ProductionCenterClient';
 import { ReconcileExportButton } from './ReconcileExportButton';
+import { WeeklyScheduleExportButton } from '@/components/schedule/WeeklyScheduleExportButton';
 import { buildProductionDashboard, type DashboardRole } from '@/lib/production/dashboard';
 import { createClient } from '@/lib/supabase/server';
 import { loadUserProductionTodayTasks } from '@/lib/production/today-tasks';
@@ -62,6 +63,11 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
             ))}
           </ul>
         )}
+      </section>
+
+      {/* 周日程导出 —— 当周到期节点,按天+跟单人排,给跟单当周作战图(可打印/手机看) */}
+      <section className="mb-3">
+        <WeeklyScheduleExportButton />
       </section>
 
       <ProductionCenterClient summary={summary} dashboard={dashboard} canManage={canManage} role={role} initialDetail={initialDetail} initialStage={params.stage || ''} />

@@ -415,11 +415,17 @@ export function buildPurchaseOrderSyncPayload(
   const headerSupplierName = (po.supplier_name as string | null | undefined)
     ?? ((lines ?? []).map((l) => (l as Record<string, any>)?.supplier_name).find(Boolean) as string | undefined)
     ?? null;
+  // 顶层客户名(2026-07-27):财务「采购单审批」页要在订单号旁显示客户,便于审批人一眼识别。
+  // 此前 customer_name 只藏在 order_refs[].customer_name 里,财务侧需下钻;顶层补一份,财务直接读 payload.customer_name。
+  const headerCustomerName = (po.customer_name as string | null | undefined)
+    ?? ((orderRefs ?? []).map((o) => (o as Record<string, any>)?.customer_name).find(Boolean) as string | undefined)
+    ?? null;
   return {
     po_no: po.po_no,
     purchase_order_id: po.id,
     supplier_id: po.supplier_id,
     supplier_name: headerSupplierName,
+    customer_name: headerCustomerName,
     total_amount: amountKnown ? rawAmount : null,
     amount_pending: !amountKnown,
     currency: po.currency ?? null,
