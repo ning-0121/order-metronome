@@ -455,11 +455,13 @@ export function calcDueDates(params: CalcDueDatesParams) {
     dev_sample_revision_confirm:   cap(calc(TIMELINE.dev_sample_revision_confirm)),
     pre_production_sample_ready:   cap(applyOverride('pre_production_sample_ready', calc(TIMELINE.pre_production_sample_ready))),
     pre_production_sample_sent:    cap(applyOverride('pre_production_sample_sent', calc(TIMELINE.pre_production_sample_sent))),
+    pps_procurement_check:         cap(applyOverride('pps_procurement_check', calc(TIMELINE.pps_procurement_check))),   // V3 采购品质核(P0 修:漏在此表→建单全挂)
     pre_production_sample_approved: cap(applyOverride('pre_production_sample_approved', calc(sampleConfirmDays))),
     procurement_order_placed:      cap(calc(TIMELINE.procurement_order_placed)),
     materials_received_inspected:  cap(calc(TIMELINE.materials_received_inspected)),
     pre_production_meeting:        cap(calc(TIMELINE.pre_production_meeting)),
     production_kickoff:            cap(calc(TIMELINE.production_kickoff)),
+    initial_line_check:            cap(applyOverride('initial_line_check', calc(TIMELINE.initial_line_check))),   // V3 初上线跟单确认(P0 修:同上漏表)
     mid_qc_check:                  cap(applyOverride('mid_qc_check', calc(TIMELINE.mid_qc_check))),
     mid_qc_sales_check:            cap(applyOverride('mid_qc_sales_check', calc(TIMELINE.mid_qc_sales_check))),   // V2 中查也吃客户 override
     final_qc_check:                cap(applyOverride('final_qc_check', calc(TIMELINE.final_qc_check))),

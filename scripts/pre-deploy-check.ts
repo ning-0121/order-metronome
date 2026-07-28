@@ -224,6 +224,20 @@ for (const m of prodMilestones as any[]) {
 assert(prodMilestones.some(m => m.step_key === 'shipment_execute'), 'export包含 shipment_execute');
 assert(prodMilestones.some(m => m.step_key === 'booking_done'), 'export包含订舱出货');
 
+// ── 模板×排期覆盖(2026-07-28 P0 防线):calcDueDates 的 result 是手写键值表,V3 加节点时
+//    pps_procurement_check/initial_line_check 进了 TIMELINE 却漏了 result → 建单全挂「里程碑排期缺失」。
+//    这里强制:生产/打样模板的每个 step_key 都必须能算出排期。
+{
+  const ddBulk: any = calcDueDates({ orderDate: '2026-07-01', createdAt: new Date('2026-07-01'), incoterm: 'FOB',
+    etd: '2026-09-01', warehouseDueDate: null, eta: null, orderType: 'bulk', shippingSampleRequired: false } as any);
+  for (const t of prodMilestones as any[]) assert(!!ddBulk[t.step_key], `calcDueDates 覆盖生产节点 ${t.step_key}`);
+  const ddSample: any = calcDueDates({ orderDate: '2026-07-01', createdAt: new Date('2026-07-01'), incoterm: 'FOB',
+    etd: '2026-07-14', warehouseDueDate: null, eta: null, orderType: 'sample', shippingSampleRequired: false } as any);
+  for (const t of getApplicableMilestones('sample', false, 'domestic', 'sample') as any[]) {
+    assert(!!ddSample[t.step_key], `calcDueDates 覆盖打样节点 ${t.step_key}`);
+  }
+}
+
 const domesticMilestones = getApplicableMilestones('bulk', false, 'domestic');
 // 送仓单也要船样,只跳「订舱」(送仓无海运订舱)→ V3 19-1=18
 assert(domesticMilestones.length === 18, `domestic生产单 ${domesticMilestones.length} 节点 (=18,V3 只跳订舱,保留船样)`);
