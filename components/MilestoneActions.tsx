@@ -406,6 +406,27 @@ export function MilestoneActions({
     setLoading(false);
   }
 
+  // ── 一键打卡完成(2026-07-27 移动端)──────────────────────────────
+  // 仅对「无检查清单 + 不要求凭证」的纯打卡节点显示;逻辑与「确认完成」同源(markMilestoneDone + 软门禁二次确认),
+  // 只是省掉展开表单那几步。所有硬门禁(角色/生命周期/前置/共同确认)仍由服务端 markMilestoneDone 把关。
+  const canQuickDone = !getChecklistForStep(milestone.step_key) && !milestone.evidence_required;
+  async function handleQuickDone() {
+    setLoading(true); setSubmitError('');
+    try {
+      let result = await markMilestoneDone(milestone.id, null);
+      if ((result as any).needsConfirm) {
+        if (window.confirm(`⚠ ${(result as any).warning}`)) {
+          result = await markMilestoneDone(milestone.id, null, undefined, true);
+        } else { setLoading(false); return; }
+      }
+      if (result.error) setSubmitError(result.error);
+      else router.refresh();
+    } catch (err: any) {
+      setSubmitError('打卡失败:' + (err?.message || '请重试'));
+    }
+    setLoading(false);
+  }
+
   // ── 已完成状态（支持补传文件）─────────────────────────────────────
   if (isDoneStatus(milestone.status)) {
     // 生产单上传节点：分卡上传（生产订单 + 包装资料）
@@ -484,12 +505,22 @@ export function MilestoneActions({
       {/* 操作按钮 — 前置未完成也允许操作，只显示警告 */}
       {canModify && (
         <div className="flex flex-wrap gap-2">
+          {/* 一键打卡完成:纯打卡节点(无清单+免凭证)一键完成,省去展开表单;硬门禁仍走服务端 */}
+          {canQuickDone && (
+            <button
+              onClick={handleQuickDone}
+              disabled={loading}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-3 sm:py-2 text-base sm:text-sm text-white font-medium hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 w-full sm:w-auto"
+            >
+              {loading ? '打卡中…' : '✓ 打卡完成'}
+            </button>
+          )}
           <button
             onClick={() => { setShowSubmitForm(!showSubmitForm); setShowBlockForm(false); }}
             disabled={loading}
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-3 sm:py-2 text-base sm:text-sm text-white font-medium hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 w-full sm:w-auto"
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-3 sm:py-2 text-base sm:text-sm font-medium disabled:opacity-50 w-full sm:w-auto ${canQuickDone ? 'border border-indigo-300 text-indigo-700 hover:bg-indigo-50' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800'}`}
           >
-            📤 去处理
+            📤 去处理{canQuickDone ? '(加备注/凭证)' : ''}
           </button>
           {/* 产前样客户确认：增加"未通过/需返样"按钮 */}
           {milestone.step_key === 'pre_production_sample_approved' && (
@@ -542,6 +573,13 @@ export function MilestoneActions({
           >
             🚧 申请延期
           </button>
+        </div>
+      )}
+
+      {/* 一键打卡失败时的错误(表单未展开也能看见) */}
+      {submitError && !showSubmitForm && canModify && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+          <p className="text-xs text-red-700 whitespace-pre-line">{submitError}</p>
         </div>
       )}
 
