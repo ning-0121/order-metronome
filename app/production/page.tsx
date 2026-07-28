@@ -49,6 +49,7 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
           <h2 className="text-sm font-semibold text-indigo-900">🗓️ 我的今日待办{todayTasks.length > 0 ? ` · ${todayTasks.length}` : ''}</h2>
           <div className="flex items-center gap-3">
             <Link href="/production/plan" className="text-xs font-medium text-indigo-700 hover:underline">📋 我的跟单计划 →</Link>
+            <Link href="/production/trips" className="text-xs font-medium text-indigo-700 hover:underline">🚗 出车行程 →</Link>
             <Link href="/my-today" className="text-xs text-indigo-600 hover:underline">全部今日任务 →</Link>
           </div>
         </div>
