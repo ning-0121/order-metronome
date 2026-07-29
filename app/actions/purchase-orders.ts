@@ -861,7 +861,9 @@ export async function updateProcurementLineFloorPrice(poId: string, lineId: stri
   if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '仅采购/财务可填底价' };
   const { data: po } = await (supabase.from('purchase_orders') as any).select('id, status').eq('id', poId).maybeSingle();
   if (!po) return { error: '采购单不存在' };
-  if ((po as any).status !== 'draft') return { error: '仅「草稿」采购单可填底价;已下单/审批中的请先撤回。' };
+  // 2026-07-29 CEO:已下单/在收也可手动改价(录错时纠正);改后自动重推财务,应付金额保持一致。
+  const PRICE_EDITABLE = ['draft', 'placed', 'receiving'];
+  if (!PRICE_EDITABLE.includes((po as any).status)) return { error: '仅 草稿/已下单/在收 状态可改底价(已收完/已取消不可改)。' };
 
   let clean: number | null = null;
   if (unitPrice !== null && unitPrice !== undefined && String(unitPrice).trim() !== '') {
@@ -885,6 +887,11 @@ export async function updateProcurementLineFloorPrice(poId: string, lineId: stri
   const total2 = Math.round(total * 100) / 100;
   await (svc.from('purchase_orders') as any)
     .update({ total_amount: total2, updated_at: new Date().toISOString() }).eq('id', poId);
+
+  // 非草稿改价 → 自动重推财务(placed 幂等按 po_no upsert),应付金额跟着纠正;失败不阻断(可手动重发)
+  if ((po as any).status !== 'draft') {
+    try { void resyncPurchaseOrderToFinance(poId); } catch { /* fire-and-forget */ }
+  }
 
   revalidatePath(`/procurement/po/${poId}`);
   revalidatePath('/procurement');

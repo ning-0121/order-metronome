@@ -235,6 +235,8 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
 
   const dualNo = `${po.po_no} · 订单 ${(orderRefs || []).map((o: any) => o.internal_order_no || o.order_no).join(' / ') || '—'}`;
   const canEditLines = canProcure && po.status === 'draft';   // 草稿单采购可删错行
+  // 2026-07-29 CEO:底价单独放开——已下单/在收也可手动改(录错纠正);服务端改后自动重推财务应付
+  const canEditPrice = canProcure && ['draft', 'placed', 'receiving'].includes(po.status);
 
   async function handleExport(withPrice: boolean) {
     setExporting(true);
@@ -518,7 +520,7 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                         {(l.chase_count ?? 0) > 0 && <span className="block text-[10px] text-amber-600 mt-0.5">催{l.chase_count}次{l.last_chased_at ? ` ${String(l.last_chased_at).slice(5, 10)}` : ''}</span>}
                       </td>
                       <td className="px-3 py-2 text-right">{l.price_baseline ?? '—'}</td>
-                      {canSeeFloor && <td className="px-3 py-2 text-right"><EditableFloorPriceCell poId={po.id} lineId={l.id} unitPrice={l.unit_price ?? null} canEdit={!!canEditLines} /></td>}
+                      {canSeeFloor && <td className="px-3 py-2 text-right"><EditableFloorPriceCell poId={po.id} lineId={l.id} unitPrice={l.unit_price ?? null} canEdit={!!canEditPrice} /></td>}
                       {canSeeFloor && <td className="px-3 py-2 text-right font-mono">{l.ordered_amount ?? '—'}</td>}
                       {canEditLines && (
                         <td className="px-3 py-2 text-center">
