@@ -678,3 +678,48 @@ export async function exportSupplierLedgerExcel(params?: { supplierNameRaw?: str
     return { data: { filename, base64 } };
   } catch (e: any) { return { error: e?.message || '导出失败' }; }
 }
+
+/**
+ * 幂等重发某笔已推付款申请(P1-2,2026-07-28 审计):从 supplier_ledger_payables + 关联台账行
+ * 重建与原始 pushLedgerGroupToFinance 完全同构的 payload → 同 request_id → 财务侧幂等去重。
+ * 场景:HTTP 首发成功但财务侧没落库(今天面料付款事故),杜绝手工构造 payload。只读+发送,不改台账。
+ */
+export async function resendLedgerPayable(billNo: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: '未登录' };
+    const gate = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_PROCUREMENT_EXEC', WRITE_MSG);
+    if (gate) return { ok: false, error: gate };
+    const svc = createServiceRoleClient();
+    const { data: p } = await (svc.from('supplier_ledger_payables') as any)
+      .select('*').eq('bill_no', billNo).maybeSingle();
+    if (!p) return { ok: false, error: `找不到付款申请 ${billNo}` };
+    const { data: lines } = await (svc.from('supplier_fabric_ledger') as any)
+      .select('fabric_name, color, ordered_kg, received_kg, unit_price_ex_tax, amount_ex_tax, amount_incl_tax')
+      .eq('payable_id', p.id);
+    const { emitProcurementPayableToFinance, fetchOrderRefs } = await import('@/lib/integration/finance-sync');
+    let orderRefs: unknown[] = [];
+    if (p.order_id) { try { orderRefs = (await fetchOrderRefs(svc, [p.order_id])) as unknown[]; } catch { /* ignore */ } }
+    const financeLines = ((lines || []) as any[]).map((l) => ({
+      material_name: l.fabric_name ?? null,
+      specification: l.color ?? null,
+      ordered_qty: Number(l.ordered_kg) || 0,
+      unit_price: Number(l.unit_price_ex_tax) || 0,
+      po_amount: round2(Number(l.amount_ex_tax) || 0),
+      received_qty: Number(l.received_kg) || 0,
+      supplier_amount: round2(Number(l.amount_ex_tax) || 0),
+      net_amount: round2(Number(l.amount_incl_tax) || 0),
+    }));
+    const r = await emitProcurementPayableToFinance({
+      source_ref: p.id, bill_no: p.bill_no,
+      supplier_name: p.supplier_name, supplier_id: p.supplier_id,
+      amount: Number(p.amount_incl_tax) || 0, currency: 'CNY',
+      description: `面料台账应付 · ${p.supplier_name} · ${p.order_no_raw || '未标订单'}${p.tax_rate != null ? ` · 税率${Math.round(Number(p.tax_rate) * 100)}%` : ' · 不含税'}`,
+      reconciliation_id: null, purchase_order_id: null, po_no: null,
+      order_refs: orderRefs, due_date: null, lines: financeLines,
+    } as any);
+    if (!r.success) return { ok: false, error: `发送失败:${r.error || '未知'}(已落发件箱自动重试)` };
+    return { ok: true };
+  } catch (e: any) { return { ok: false, error: e?.message || '重发失败' }; }
+}

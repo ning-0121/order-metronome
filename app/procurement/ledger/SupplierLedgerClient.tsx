@@ -420,7 +420,22 @@ export function SupplierLedgerClient({
                               <span className="w-24 text-right text-xs text-gray-500">{yuan(o.amountExTax)}</span>
                               <span className="w-28 text-right text-sm font-semibold text-gray-800">{yuan(o.amountInclTax)}</span>
                               {o.pushed
-                                ? <span className="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700 whitespace-nowrap" title="已推财务">✓ {o.payableBillNo}</span>
+                                ? <span className="flex items-center gap-1 whitespace-nowrap">
+                                    <span className="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700" title="已推财务">✓ {o.payableBillNo}</span>
+                                    {o.payableBillNo && (
+                                      <button onClick={async () => {
+                                        setBusy(`resend:${ordKey}`);
+                                        const { resendLedgerPayable } = await import('@/app/actions/supplier-ledger');
+                                        const r = await resendLedgerPayable(o.payableBillNo!);
+                                        setBusy(null);
+                                        await confirm({ title: r.ok ? '已重发' : '重发失败', message: r.ok ? `${o.payableBillNo} 已按原始 payload 幂等重发,请财务刷新应付账款确认。` : (r.error || ''), confirmText: '知道了' });
+                                      }} disabled={busy === `resend:${ordKey}`}
+                                        title="财务说没收到时点这个:按原始数据幂等重发,不会重复入账"
+                                        className="rounded border border-emerald-300 px-1.5 py-1 text-[11px] text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                                        {busy === `resend:${ordKey}` ? '…' : '重发'}
+                                      </button>
+                                    )}
+                                  </span>
                                 : <button onClick={() => doPush(g, o)} disabled={busy === `push:${ordKey}`}
                                     className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
                                     {busy === `push:${ordKey}` ? '推送中…' : '推财务'}
