@@ -532,6 +532,13 @@ export async function syncGoodsReceiptToFinance(payload: {
  * payable.created 建 payable_records(=付款申请)。source_ref=节拍器付款申请 id(入站幂等 +
  * 付款完成回带);bill_no=PR 单号((supplier_name,bill_no) 防重付)。财务侧需在 webhook 加分支。
  */
+/**
+ * 金额口径契约(与财务 2026-07-28 对齐,财务 webhook route.ts:1097/1139 实读):
+ *  - 顶层 amount     = 实付金额(含税,与银行水单一致)→ 财务 payable_records.amount,排款/付款全链用它
+ *  - lines[].net_amount     = 含税金额(全部单据统一含税;财务成本归集 Σnet_amount 进毛利/决算)
+ *  - lines[].po_amount / supplier_amount = 不含税金额(财务要不含税毛利口径时读这两个)
+ * ⚠ 改任何一个字段的含税语义都必须先和财务对齐,否则应付↔成本对账出系统性税额差。
+ */
 export async function emitProcurementPayableToFinance(payload: {
   source_ref: string; bill_no: string; supplier_name?: string | null; supplier_id?: string | null;
   amount: number; currency?: string | null; description?: string | null;

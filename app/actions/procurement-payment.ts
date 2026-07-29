@@ -143,7 +143,7 @@ export async function submitPaymentRequest(reconId: string, amount: any, opts?: 
           received_qty: num(l.received_qty),                 // 系统实收
           supplier_qty: l.supplier_qty != null ? num(l.supplier_qty) : null,      // 供应商对账数量(采购录)
           supplier_amount: l.supplier_amount != null ? num(l.supplier_amount) : null, // 供应商对账金额(采购录)
-          net_amount: l.net_amount != null ? num(l.net_amount) : null,            // 本行净应付
+          net_amount: l.net_amount != null ? num(l.net_amount) : null,            // 本行净应付(财务契约 2026-07-28:net_amount 一律=实付/含税口径,与银行水单一致;台账侧同口径 amount_incl_tax)
         };
       });
     } catch { /* 明细取失败不阻断,退回只有总额 */ }
