@@ -126,13 +126,14 @@ export function OrderDelayPanel({
         const supabase = createClient();
         const ext = evidenceFile.name.split('.').pop() || 'bin';
         const path = `delay-evidence/${orderId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-        const { error: upErr } = await supabase.storage.from('attachments').upload(path, evidenceFile);
+        // 桶名修(2026-07-29):'attachments' 桶不存在 → Bucket not found,整单延期带证据一直提交不了。用现有 order-docs。
+        const { error: upErr } = await supabase.storage.from('order-docs').upload(path, evidenceFile);
         if (upErr) {
           setError(`证据文件上传失败：${upErr.message}`);
           setSubmitting(false);
           return;
         }
-        const { data: pub } = supabase.storage.from('attachments').getPublicUrl(path);
+        const { data: pub } = supabase.storage.from('order-docs').getPublicUrl(path);
         evidenceUrl = pub.publicUrl;
       }
 

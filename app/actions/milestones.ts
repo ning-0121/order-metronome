@@ -330,8 +330,9 @@ export async function markMilestoneDone(
     pre_production_sample_approved: ['pps_procurement_check'],
     initial_line_check: ['pre_production_sample_approved'],
     mid_qc_check: ['initial_line_check'],
-    packing_method_confirmed: ['mid_qc_check'],
-    final_qc_check: ['packing_method_confirmed'],
+    // 2026-07-29 CEO:包装确认与中查解耦(可并行,不必等中查);尾查仍要求 中查+包装确认 都完成
+    packing_method_confirmed: ['pre_production_sample_approved'],
+    final_qc_check: ['mid_qc_check', 'packing_method_confirmed'],
     final_qc_sales_check: ['final_qc_check'],
     shipping_sample_send: ['final_qc_sales_check'],
     ci_made: ['final_qc_sales_check'],

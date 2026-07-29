@@ -22,7 +22,7 @@ export const MILESTONE_PREREQUISITES: Record<string, string[]> = {
   pps_procurement_check: ['pre_production_sample_sent'],
   initial_line_check: ['pre_production_sample_approved'],
   mid_qc_check: ['initial_line_check'],
-  final_qc_check: ['packing_method_confirmed'],
+  final_qc_check: ['mid_qc_check', 'packing_method_confirmed'],
   packing_method_confirmed: ['pre_production_sample_approved'],
   final_qc_sales_check: ['mid_qc_sales_check', 'packing_method_confirmed'],
   shipping_sample_send: ['final_qc_sales_check'],
