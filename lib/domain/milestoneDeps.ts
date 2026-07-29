@@ -18,6 +18,11 @@ export const MILESTONE_PREREQUISITES: Record<string, string[]> = {
   pre_production_sample_sent: ['procurement_order_placed'],   // 布料到货(跨系统)是下一步
   pre_production_sample_approved: ['pre_production_sample_sent'],
   mid_qc_sales_check: ['pre_production_sample_approved'],      // 大货开产(跨系统)是下一步
+  // V3 部门线节点软提示(P2-B 2026-07-28;V3 单另有硬前置 SEQUENTIAL_REQUIREMENTS 兜底,此处只管警示)
+  pps_procurement_check: ['pre_production_sample_sent'],
+  initial_line_check: ['pre_production_sample_approved'],
+  mid_qc_check: ['initial_line_check'],
+  final_qc_check: ['packing_method_confirmed'],
   packing_method_confirmed: ['pre_production_sample_approved'],
   final_qc_sales_check: ['mid_qc_sales_check', 'packing_method_confirmed'],
   shipping_sample_send: ['final_qc_sales_check'],

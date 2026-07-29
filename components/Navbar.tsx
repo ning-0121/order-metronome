@@ -101,6 +101,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/admin/system-health', label: '系统守护', icon: '🛡' },
             { href: '/admin/customer-schedules', label: '客户风格', icon: '🎼' },
             { href: '/admin/missing-line-items', label: '缺明细检查', icon: '🧩' },
+            { href: '/admin/customs-master', label: '报关主数据', icon: '🛃' },
           ],
         },
         {

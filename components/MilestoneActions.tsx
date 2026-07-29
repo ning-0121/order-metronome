@@ -494,6 +494,14 @@ export function MilestoneActions({
         </div>
       )}
 
+      {/* ci_made 直达(2026-07-28 报关4件套④):PL/CI/报关在「出货单据」区一键生成,系统生成的装箱单即凭证 */}
+      {milestone.step_key === 'ci_made' && !isDoneStatus(milestone.status) && (
+        <a href={`/orders/${orderId}?tab=shipment`}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100">
+          🚢 去出货单据:录装箱 → 一键生成 装箱单/CI/报关资料 →
+        </a>
+      )}
+
       {/* 凭证说明 */}
       {milestone.evidence_note && !showSubmitForm && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">

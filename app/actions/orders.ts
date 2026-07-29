@@ -649,7 +649,8 @@ export async function createOrder(
     milestonesData.push({
       step_key: template.step_key,
       name: template.name,
-      owner_role: businessExecutionFixed ? 'merchandiser' : dbRole,
+      // 打样自验收节点 owner_role 也归业务执行(P2-A:否则显示"生产"标签、负责人却是业务,标签/人对不上)
+      owner_role: (businessExecutionFixed || sampleSelfAccept) ? 'merchandiser' : dbRole,
       owner_user_id: autoAssign,
       planned_at: safeDue.toISOString(),
       due_at: safeDue.toISOString(),

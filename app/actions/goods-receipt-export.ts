@@ -15,6 +15,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 interface ReceiptRow {
   lineItemId: string;   // 采购执行行 id(导出时经 service-role 回查单价)
+  ownPrice?: number | null;   // 收货行补录单价(2026-07-28 P2-2:与补价台账口径统一,优先于 PO 底价)
+  extraFee?: number;          // 附加费(开版费等)
   supplierId: string | null;
   supplierName: string;
   material: string;
@@ -58,7 +60,7 @@ async function fetchInChunks(supabase: any, table: string, sel: string, ids: str
 
 /** 装配收货行:goods_receipts → 采购行 → 采购单 → 供应商。排除拒收(退货不计)。 */
 async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
-  const SEL = 'id, line_item_id, order_id, received_qty, received_unit, received_at, received_address, photos, inspection_result';
+  const SEL = 'id, line_item_id, order_id, received_qty, received_unit, received_at, received_address, photos, inspection_result, unit_price, extra_fee';
   let { data: grs, error } = await fetchAllReceipts(supabase, SEL);
   // P3-4 审计:received_address 列(20260711 迁移)未跑时,硬 select 会报错→整表返回空(误导「无记录」)。
   //   与写入路径同款降级:缺列则去掉该列重查(address 置空)。
@@ -111,6 +113,8 @@ async function loadReceiptRows(supabase: any): Promise<ReceiptRow[]> {
     const supplierName = (supplierId && supMap.get(supplierId)) || l.supplier_name || '(未关联供应商)';
     rows.push({
       lineItemId: r.line_item_id,
+      ownPrice: r.unit_price != null ? Number(r.unit_price) : null,   // 收货补录价(开版费等,优先于 PO 底价)
+      extraFee: Number(r.extra_fee) || 0,
       supplierId,
       supplierName,
       material: l.material_name || '',
@@ -172,7 +176,7 @@ export async function exportGoodsReceiptStatement(filters: {
         .select('id, unit_price').in('id', ids);
       const priceMap = new Map<string, number | null>(((priceLines || []) as any[])
         .map((l) => [l.id, l.unit_price != null ? Number(l.unit_price) : null]));
-      for (const r of rows) r.price = priceMap.get(r.lineItemId) ?? null;
+      for (const r of rows) r.price = (r as any).ownPrice ?? priceMap.get(r.lineItemId) ?? null;   // 补录价优先(P2-2 两份对账口径统一)
     }
   } catch { /* 取价失败 → 单价列留空,导出不阻断 */ }
 
@@ -236,7 +240,7 @@ export async function exportGoodsReceiptStatement(filters: {
     for (const r of list) {
       const slipUrls: string[] = [];
       for (const p of r.photos) { const u = await sign(p); if (u) slipUrls.push(u); }
-      const amount = r.price != null ? round2(r.qty * r.price) : null;   // 金额 = 收货数量 × 单价
+      const amount = r.price != null ? round2(r.qty * r.price + ((r as any).extraFee || 0)) : ((r as any).extraFee ? round2((r as any).extraFee) : null);   // 金额 = 数量×单价 + 附加费(开版费)
       const cells: any[] = [r.date, r.orderNo, r.material, r.spec, r.color, r.qty, r.unit, r.price ?? '', amount ?? '', r.address, slipUrls.length ? `码单(${slipUrls.length})` : ''];
       cells.forEach((v, i) => {
         const c = ws.getCell(tr, i + 1);

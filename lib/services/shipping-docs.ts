@@ -84,6 +84,48 @@ export async function loadShippingDocModel(
   }
 
   const docMeta = { currency: order.currency || 'USD', ...(pl.doc_meta || {}) };
+
+  // ── 报关主数据回填(2026-07-28 CEO 报关4件套)——只填空缺,业务手填的永远优先 ──
+  // ① HS/报关品名:customs_hs_catalog 按 款号前缀 或 品名关键词 匹配;② 境外收货人:customers 报关抬头;
+  // ③ 公司级默认(港口/运输/监管方式等):customs_defaults。全程 try/catch,主数据缺失不影响生成。
+  try {
+    const cz: any = (docMeta as any).customs = { ...((docMeta as any).customs || {}) };
+    cz.styles = { ...(cz.styles || {}) };
+    const { data: catalog } = await (supabase.from('customs_hs_catalog') as any)
+      .select('match_key, hs_code, customs_name, customs_spec, unit').order('sort');
+    const cat = (catalog || []) as any[];
+    if (cat.length > 0) {
+      for (const [styleNo, meta] of styleMeta.entries()) {
+        const cur = cz.styles[styleNo] || {};
+        if (cur.hs_code && cur.customs_name) continue;   // 已手填,跳过
+        const hay = `${styleNo} ${meta.description || ''}`.toLowerCase();
+        const hit = cat.find((c) => c.match_key && (styleNo.toLowerCase().startsWith(String(c.match_key).toLowerCase()) || hay.includes(String(c.match_key).toLowerCase())));
+        if (hit) {
+          cz.styles[styleNo] = {
+            ...cur,
+            hs_code: cur.hs_code || hit.hs_code || '', customs_name: cur.customs_name || hit.customs_name || '',
+            customs_spec: cur.customs_spec || hit.customs_spec || '', unit: cur.unit || hit.unit || '',
+          };
+        }
+      }
+    }
+    if ((!cz.overseas_buyer || !cz.overseas_addr) && order.customer_name) {
+      const { data: cust } = await (supabase.from('customers') as any)
+        .select('consignee_name_en, customs_address, tax_no').eq('customer_name', order.customer_name).maybeSingle();
+      if (cust) {
+        if (!cz.overseas_buyer && ((cust as any).consignee_name_en)) cz.overseas_buyer = (cust as any).consignee_name_en;
+        if (!cz.overseas_addr && ((cust as any).customs_address)) cz.overseas_addr = (cust as any).customs_address;
+        if (!cz.buyer_tax_no && ((cust as any).tax_no)) cz.buyer_tax_no = (cust as any).tax_no;
+      }
+    }
+    const { data: defRow } = await (supabase.from('customs_defaults') as any).select('data').eq('id', 1).maybeSingle();
+    const defaults = ((defRow as any)?.data || {}) as Record<string, any>;
+    for (const [k, v] of Object.entries(defaults)) {
+      if (k !== 'styles' && (cz[k] == null || cz[k] === '') && v != null && v !== '') cz[k] = v;
+    }
+  } catch (e: any) {
+    console.warn('[shipping-docs] 报关主数据回填失败(不影响生成):', e?.message);
+  }
   const cur = (CURRENCY as any)[docMeta.currency] || CURRENCY.USD;
   const unitWord = (u: string) => (u && (u.includes('套') || u.toLowerCase() === 'set') ? 'SETS' : 'PCS');
 
