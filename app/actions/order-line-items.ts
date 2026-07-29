@@ -306,8 +306,11 @@ export async function getOrderDealPrices(orderId: string): Promise<{ canEdit?: b
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
-  const { canSeeFin } = await financialsVisibility(supabase, user.id);
-  if (!canSeeFin) return { canEdit: false, styles: [] };   // 无财务口径 → 不渲染录价框(生产/QC 等)
+  const { canSeeFin, roles } = await financialsVisibility(supabase, user.id);
+  // 2026-07-29 CEO:PI 制作卡"先录成交价"却没入口——PI 由业务执行(merchandiser)制作、PI 文件本身含价,
+  // 故【仅此录价入口】对 merchandiser 放开(订单列表/详情等其他价格面仍按 CAN_SEE_FINANCIALS 红线不动)。
+  const canEditDeal = canSeeFin || roles.includes('merchandiser');
+  if (!canEditDeal) return { canEdit: false, styles: [] };   // 生产/QC/物流等仍不渲染录价框
   const { data: li, error } = await (supabase.from('order_line_items') as any)
     .select('style_no, product_name, po_unit_price, line_no').eq('order_id', orderId).order('line_no');
   if (error) return { error: error.message };
@@ -317,7 +320,14 @@ export async function getOrderDealPrices(orderId: string): Promise<{ canEdit?: b
     if (!key || seen.has(key)) continue;
     seen.set(key, { style_no: key, product_name: r.product_name || '', po_unit_price: r.po_unit_price != null ? String(r.po_unit_price) : '' });
   }
-  return { canEdit: true, styles: [...seen.values()] };
+  // 无逐款明细的兜底:返回订单级成交价(unit_price)供组件渲染"整单成交价"输入,不再因明细缺失而无入口
+  const { data: ord } = await (supabase.from('orders') as any)
+    .select('unit_price, quantity_unit').eq('id', orderId).maybeSingle();
+  return {
+    canEdit: true, styles: [...seen.values()],
+    orderUnitPrice: (ord as any)?.unit_price != null ? String((ord as any).unit_price) : '',
+    quantityUnit: (ord as any)?.quantity_unit || '件',
+  } as any;
 }
 
 /**
@@ -341,13 +351,17 @@ export async function getSampleCloneData(sampleOrderId: string): Promise<{ custo
 }
 
 /** 保存逐款成交价(款级同值写该款每行);仅 CAN_SEE_FINANCIALS。轻量 update,不动其它明细字段。 */
-export async function saveOrderDealPrices(orderId: string, updates: Array<{ style_no: string; po_unit_price: string | number | null }>): Promise<{ ok?: boolean; error?: string }> {
+export async function saveOrderDealPrices(
+  orderId: string,
+  updates: Array<{ style_no: string; po_unit_price: string | number | null }>,
+  orderPrice?: string | number | null,   // 无逐款明细时的整单成交价(¥/quantity_unit)→ 写 orders.unit_price
+): Promise<{ ok?: boolean; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权编辑此订单' };
-  const { canSeeFin } = await financialsVisibility(supabase, user.id);
-  if (!canSeeFin) return { error: '仅财务/业务/管理员可录成交价' };
+  const { canSeeFin, roles } = await financialsVisibility(supabase, user.id);
+  if (!canSeeFin && !roles.includes('merchandiser')) return { error: '仅财务/业务/业务执行/管理员可录成交价' };
   for (const u of (updates || [])) {
     const key = (u.style_no || '').trim();
     if (!key) continue;
@@ -357,6 +371,29 @@ export async function saveOrderDealPrices(orderId: string, updates: Array<{ styl
     const { error } = await (supabase.from('order_line_items') as any)
       .update({ po_unit_price: val }).eq('order_id', orderId).eq('style_no', key);
     if (error) return { error: `保存成交价失败(款 ${key}):${error.message}` };
+  }
+  // 整单成交价兜底(2026-07-29):无逐款明细的单在 PI 节点录整单价 → orders.unit_price +
+  // total_amount 按【套装口径】= 订单数量(套数)×单价(quantity 库存折合件数,须 ÷perSet,防翻倍),
+  // 并 fire-and-forget 同步财务(order.updated 走修正后的数量契约+自检)。
+  if (orderPrice !== undefined && orderPrice !== null && orderPrice !== '') {
+    const n = Number(orderPrice);
+    if (!Number.isFinite(n) || n < 0) return { error: '整单成交价须为 ≥0 的数字' };
+    const up = Math.round(n * 10000) / 10000;
+    const { createServiceRoleClient } = await import('@/lib/supabase/server');
+    const svc = createServiceRoleClient();
+    const { data: ord } = await (svc.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
+    const unitStr = String((ord as any)?.quantity_unit || '');
+    const perSet = unitStr === '套' ? 2 : unitStr === '三件套' ? 3 : 1;
+    const qtyInUnit = (ord as any)?.quantity != null ? Number((ord as any).quantity) / perSet : null;
+    const total = qtyInUnit != null ? Math.round(qtyInUnit * up * 100) / 100 : null;
+    const { error: upErr } = await (svc.from('orders') as any)
+      .update({ unit_price: up, ...(total != null ? { total_amount: total } : {}), updated_at: new Date().toISOString() })
+      .eq('id', orderId);
+    if (upErr) return { error: '保存整单成交价失败:' + upErr.message };
+    try {
+      const { data: full } = await (svc.from('orders') as any).select('*').eq('id', orderId).maybeSingle();
+      if (full) { const { syncOrderToFinance } = await import('@/lib/integration/finance-sync'); void syncOrderToFinance(full, 'order.updated'); }
+    } catch { /* fire-and-forget */ }
   }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };

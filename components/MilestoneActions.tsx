@@ -597,6 +597,9 @@ export function MilestoneActions({
           className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 space-y-4">
           <p className="text-sm font-semibold text-indigo-900">提交处理凭证</p>
 
+          {/* PI 客户确认:就地录成交价(2026-07-29 修:原挂在检查清单组件内,PI 无清单从不渲染 → "没有入口") */}
+          {milestone.step_key === 'pi_confirmed' && <PiDealPriceEntry orderId={orderId} />}
+
           {/* 本单免验货:出货前验货节点可免报告放行 */}
           {inspectionWaived && isInspectionStep(milestone.step_key) && (
             <div className="text-xs text-emerald-800 bg-emerald-50 rounded-lg p-2 border border-emerald-200">
@@ -1230,8 +1233,6 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
     <div className="space-y-3">
       {/* 客户强调事项:PO/邮件里强调的要求置顶,标来源防漏(空则不渲染) */}
       <OrderEmphasisPanel orderId={orderId} />
-      {/* PI 客户确认节点:就地录逐款成交价(免绕生产任务单 tab),填完即可完成 */}
-      {milestone.step_key === 'pi_confirmed' && <PiDealPriceEntry orderId={orderId} />}
       <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-amber-900">📋 {config.title}</p>

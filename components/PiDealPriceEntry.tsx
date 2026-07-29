@@ -15,14 +15,45 @@ export function PiDealPriceEntry({ orderId }: { orderId: string }) {
   const [canEdit, setCanEdit] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [orderPrice, setOrderPrice] = useState('');       // 无逐款明细时的整单成交价兜底
+  const [qtyUnit, setQtyUnit] = useState('件');
 
   useEffect(() => {
     let alive = true;
-    getOrderDealPrices(orderId).then((r) => { if (!alive) return; setCanEdit(!!r.canEdit); setStyles(r.styles || []); });
+    getOrderDealPrices(orderId).then((r: any) => {
+      if (!alive) return;
+      setCanEdit(!!r.canEdit); setStyles(r.styles || []);
+      setOrderPrice(r.orderUnitPrice || ''); setQtyUnit(r.quantityUnit || '件');
+    });
     return () => { alive = false; };
   }, [orderId]);
 
-  if (!canEdit || !styles || styles.length === 0) return null;
+  if (!canEdit || styles === null) return null;
+
+  // 兜底:订单没录逐款明细 → 录整单成交价(写 orders.unit_price,总额按套装口径自动算,门禁同样放行)
+  if (styles.length === 0) {
+    return (
+      <div className="rounded-xl border-2 border-blue-300 bg-blue-50 p-4 mb-4">
+        <div className="text-sm font-semibold text-blue-800 mb-2">💰 客户成交价(整单)
+          <span className="ml-2 text-xs font-normal text-blue-600">本单未录逐款明细 → 先按整单录:填客户单价(¥/{qtyUnit})保存即可完成 PI;逐款价可后补</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="number" min="0" step="0.01" value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)}
+            placeholder={`成交价 ¥/${qtyUnit}`} className="w-36 rounded border border-blue-300 px-2 py-1 text-sm" />
+          <button onClick={async () => {
+            setSaving(true); setMsg('');
+            const res = await saveOrderDealPrices(orderId, [], orderPrice === '' ? null : orderPrice);
+            setSaving(false);
+            if (res.error) { setMsg(res.error); return; }
+            setMsg('✅ 已保存,可点下方「确认完成」'); router.refresh();
+          }} disabled={saving || orderPrice === ''} className="text-xs px-3 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+            {saving ? '保存中…' : '保存成交价'}
+          </button>
+          {msg && <span className="text-xs text-gray-600">{msg}</span>}
+        </div>
+      </div>
+    );
+  }
 
   const allFilled = styles.every((s) => s.po_unit_price !== '' && Number(s.po_unit_price) > 0);
   const setPrice = (i: number, v: string) => setStyles((prev) => prev!.map((s, j) => (j === i ? { ...s, po_unit_price: v } : s)));
