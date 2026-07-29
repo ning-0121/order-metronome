@@ -138,6 +138,8 @@ async function generateMilestoneTasks(
   const { effectiveMilestoneOwner } = await import('@/lib/domain/milestone-owner')
   for (const raw of milestones || []) {
     const ms: any = raw.orders ? effectiveMilestoneOwner(raw, raw.orders) : raw
+    // 无人认领兜底(2026-07-28 审计:存量 400 节点 owner 空=催办盲区)→ 到期任务挂订单负责人/建单人
+    if (!ms.owner_user_id) ms.owner_user_id = raw.orders?.owner_user_id || raw.orders?.created_by || null
     if (!ms.owner_user_id) continue
 
     const order = ms.orders

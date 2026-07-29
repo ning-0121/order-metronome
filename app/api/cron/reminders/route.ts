@@ -459,7 +459,12 @@ async function runEscalationChain(supabase: any): Promise<number> {
 
   // 业务执行固定节点归一化(2026-07-28 审计 P1-3):升级链催办要 @ 到订单业务负责人,不是原始(可能空/生产)owner
   const { effectiveMilestoneOwner: normEscOwner } = await import('@/lib/domain/milestone-owner');
-  const overdue = ((overdueRawEsc || []) as any[]).map((m) => m.orders ? normEscOwner(m, m.orders) : m);
+  const overdue = ((overdueRawEsc || []) as any[]).map((m) => {
+    const n: any = m.orders ? normEscOwner(m, m.orders) : m;
+    // 无人认领兜底(存量 400 空 owner 节点=催办盲区)→ 催到订单负责人/建单人
+    if (!n.owner_user_id) n.owner_user_id = m.orders?.owner_user_id || m.orders?.created_by || null;
+    return n;
+  });
 
   if (!overdue || overdue.length === 0) return 0;
 

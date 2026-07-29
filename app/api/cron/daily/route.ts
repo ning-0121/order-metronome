@@ -105,15 +105,18 @@ export async function GET(req: NextRequest) {
     }
 
     const duration = Date.now() - startTime
-    log.push(`\n✅ Daily cron completed in ${duration}ms`)
+    // 不再静默成功(2026-07-28 审计 P1-2):任一步 ✗ 则 500,让 Vercel 面板标红可见,不再"全失败也绿灯"
+    const failedSteps = log.filter((l) => l.includes('✗'))
+    log.push(failedSteps.length > 0 ? `\n⚠ Daily cron 完成但 ${failedSteps.length} 步失败(${duration}ms)` : `\n✅ Daily cron completed in ${duration}ms`)
 
     console.log(log.join('\n'))
     return NextResponse.json({
-      ok: true,
+      ok: failedSteps.length === 0,
       date: today,
       duration,
+      failed_steps: failedSteps.length,
       log,
-    })
+    }, { status: failedSteps.length > 0 ? 500 : 200 })
   } catch (e: any) {
     console.error('Daily cron exception:', e)
     return NextResponse.json({

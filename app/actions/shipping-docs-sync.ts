@@ -102,7 +102,10 @@ export async function syncShippingDocsToFinance(
         const path = `shipping-docs/${orderId}/${scope}/${STORAGE_KEY[d.kind]}`;
         const { error: upErr } = await svc.storage.from('order-docs').upload(path, buf, { contentType: XLSX_MIME, upsert: true });
         if (upErr) { skipped.push(`${d.kind}(存储失败:${upErr.message})`); continue; }
-        const { data: pub } = svc.storage.from('order-docs').getPublicUrl(path);
+        // 2026-07-28 CEO 拍板(安全审计 P1-2 选 B):含价 CI/报关/PI 不再用持久公开 URL,改 1 年签名链接
+        // (财务契约要求"长期可用"——1 年满足;财务按确定性 id/(票,file_url) 去重,同 id 重推只更新)。
+        const { data: signed } = await svc.storage.from('order-docs').createSignedUrl(path, 31536000);
+        const pub = { publicUrl: signed?.signedUrl || svc.storage.from('order-docs').getPublicUrl(path).data.publicUrl };
         await syncFileToFinance({
           id: deterministicDocId(orderId, d.kind, d.scopeBatchId),
           file_name: d.fileName,

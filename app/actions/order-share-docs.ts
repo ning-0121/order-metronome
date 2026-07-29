@@ -15,7 +15,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
 const SHARE_TYPES = ['accessory_purchase_list', 'packing_method'];   // 'use server' 只能 export async,故不导出常量
-const BUCKET = 'product-images';                                     // 公开桶(排版稿同款,跨部门/供应商可直接开)
+const BUCKET = 'order-docs';   // 2026-07-28 CEO:product-images 只放图片;辅料采购清单常含价 → 挪 order-docs + 1年签名链接
 
 function okType(t: string): boolean { return SHARE_TYPES.includes(t); }
 
@@ -37,14 +37,15 @@ export async function uploadOrderShareDoc(orderId: string, fileType: string, for
   const path = `order-share/${orderId}/${fileType}/${Date.now()}-${rand}-${base}${ext}`;
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
   if (upErr) return { error: `上传失败:${upErr.message}` };
-  const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrl(path, 31536000);   // 1年签名链接(跨部门/供应商可开,不入公开桶)
+  const pub = { publicUrl: signed?.signedUrl || '' };
 
   const { data: attachment, error: insErr } = await (supabase.from('order_attachments') as any).insert({
     order_id: orderId,
     file_name: file.name || `${base}${ext}`,
     file_type: fileType,
     storage_path: path,
-    file_url: pub?.publicUrl || '',       // 永久公开 URL(跨部门/供应商可开)
+    file_url: pub?.publicUrl || '',       // 1年签名 URL(2026-07-28 起;历史行仍是 product-images 公开 URL,继续可用)
     mime_type: file.type || null,
     uploaded_by: user.id,
   }).select('id').single();
