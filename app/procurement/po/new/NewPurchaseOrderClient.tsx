@@ -16,6 +16,7 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
   const [paymentTerms, setPaymentTerms] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
   const [saving, setSaving] = useState(false);
+  const [offlineBackfill, setOfflineBackfill] = useState(false);   // 线下补录标签(2026-07-29)
 
   function toggle(id: string) {
     const n = new Set(checked);
@@ -64,7 +65,7 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
       .flatMap((l) => (Array.isArray(l.merged_ids) && l.merged_ids.length ? l.merged_ids : [l.id]));
 
     setSaving(true);
-    const res = await createPurchaseOrder({ supplierId, lineItemIds, paymentTerms, deliveryDate: deliveryDate || undefined, mergeSameMaterials });
+    const res = await createPurchaseOrder({ supplierId, lineItemIds, paymentTerms, deliveryDate: deliveryDate || undefined, mergeSameMaterials, offlineBackfill });
     setSaving(false);
     if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
     if (res.budgetWarning) { await confirm({ title: res.budgetWarning, message: '草稿已建,可继续填价/备料;下达时须先过财务前置审批。', confirmText: '知道了' }); }
@@ -88,6 +89,10 @@ export function NewPurchaseOrderClient({ suppliers, lines }: { suppliers: any[];
         <div>
           <label className="block text-xs text-gray-500 mb-1">交期</label>
           <input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <label className="mt-2 flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input type="checkbox" checked={offlineBackfill} onChange={(e) => setOfflineBackfill(e.target.checked)} />
+            <span>🏷 线下补录(事后补进系统的采购,财务审批时会看到标识)</span>
+          </label>
         </div>
       </section>
 

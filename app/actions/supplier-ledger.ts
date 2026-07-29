@@ -84,6 +84,23 @@ export async function importSupplierLedger(formData: FormData): Promise<ImportRe
 
     // --- P2-9 审计:重复导入无去重 → 数据翻倍(推财务加总重复行)。检测与已有台账的供应商重叠并告警,
     //     提示更正重传前先删旧批(UI「导入记录」有删除本批/清空)。此处只告警不阻断(首次导入/真新增合法)。---
+    // 防双重入账提醒(2026-07-29 线下补录②):匹配到的订单里已有非取消采购单 → 黄条提示
+    // 「同一笔钱只走一条道」——该订单的采购若已经/将要经采购单下达推财务应付,台账这边勿再对它推。
+    const poOverlapWarnings: string[] = [];
+    try {
+      const matchedIds = [...new Set([...orderMap.values()])];
+      if (matchedIds.length) {
+        const { data: pos } = await (svc.from('purchase_orders') as any)
+          .select('po_no, status, order_ids').neq('status', 'cancelled').overlaps('order_ids', matchedIds);
+        const idToNo = new Map<string, string>();
+        for (const [no, id] of orderMap.entries()) idToNo.set(id, no);
+        for (const p of ((pos || []) as any[])) {
+          const hit = (p.order_ids || []).filter((oid: string) => idToNo.has(oid)).map((oid: string) => idToNo.get(oid));
+          if (hit.length) poOverlapWarnings.push(`⚠ 订单 ${hit.join('/')} 已有采购单 ${p.po_no}(${p.status})——若这笔采购的钱已走采购单推财务,台账勿再对该订单推送,防双重入账`);
+        }
+      }
+    } catch { /* 提醒失败不影响导入 */ }
+
     const overlapWarnings: string[] = [];
     try {
       const { data: existing } = await (svc.from('supplier_fabric_ledger') as any)
@@ -155,7 +172,7 @@ export async function importSupplierLedger(formData: FormData): Promise<ImportRe
       matchedOrder,
       unmatchedSupplier: parsed.rows.length - matchedSupplier,
       unmatchedOrder: parsed.rows.length - matchedOrder,
-      warnings: [...overlapWarnings, ...(parsed.warnings || [])],
+      warnings: [...poOverlapWarnings, ...overlapWarnings, ...(parsed.warnings || [])],
     };
   } catch (e: any) {
     return { ok: false, error: e?.message || '导入失败' };

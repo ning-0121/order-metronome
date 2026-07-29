@@ -427,6 +427,7 @@ export function buildPurchaseOrderSyncPayload(
     supplier_id: po.supplier_id,
     supplier_name: headerSupplierName,
     customer_name: headerCustomerName,
+    offline_backfill: (po as any).offline_backfill ?? false,   // 线下补录标识(2026-07-29,财务审批队列识别)
     total_amount: amountKnown ? rawAmount : null,
     amount_pending: !amountKnown,
     currency: po.currency ?? null,

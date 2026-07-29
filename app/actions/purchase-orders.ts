@@ -98,6 +98,8 @@ export async function createPurchaseOrder(input: {
   notes?: string;
   /** C:合并同料 —— 导出给供应商时同 consolidation_key 行并为一行;DB 行不合并(order_id peg 不丢) */
   mergeSameMaterials?: boolean;
+  /** 线下补录(2026-07-29):事后补进系统的采购单,列表/详情/财务侧带标识 */
+  offlineBackfill?: boolean;
 }): Promise<{ id?: string; poNo?: string; budgetWarning?: string; error?: string }> {
   const { supabase, roles, userId } = await authRoles();
   if (!userId) return { error: '请先登录' };
@@ -199,7 +201,7 @@ export async function createPurchaseOrder(input: {
     poNo = await nextSeq(attempt);   // 每次重试重算最大值 + attempt 偏移,跳过并发被抢占的号
     const res = await (supabase.from('purchase_orders') as any)
       .insert({
-        po_no: poNo, supplier_id: input.supplierId, order_ids: orderIds, status: 'draft',
+        po_no: poNo, supplier_id: input.supplierId, order_ids: orderIds, status: 'draft', offline_backfill: !!input.offlineBackfill,
         total_amount: total, payment_terms: input.paymentTerms || null,
         delivery_date: input.deliveryDate || null, notes: input.notes || null, created_by: userId,
         merge_same_materials: input.mergeSameMaterials === true,

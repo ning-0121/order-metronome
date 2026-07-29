@@ -255,7 +255,9 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     <div className="space-y-5">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{po.po_no}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">{po.po_no}
+            {(po as any).offline_backfill && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 border border-amber-200" title="事后补进系统的线下采购">🏷 线下补录</span>}
+          </h1>
           <p className="text-sm text-gray-500 mt-1">{dualNo}</p>
           {/* 数据链:直达关联订单的生产任务单,采购核对用料/数量(2026-07-03 用户要求) */}
           {(orderRefs || []).length > 0 && (
