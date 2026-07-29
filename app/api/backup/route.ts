@@ -130,3 +130,6 @@ export async function POST(request: Request) {
 
 // Vercel Cron 配置（每天凌晨2点北京时间 = UTC 18:00）
 export const dynamic = 'force-dynamic';
+
+// P0 修(2026-07-28 cron 审计):Vercel Cron 用 GET 触发,本路由只有 POST → 405 → 每日备份从未运行过。
+export async function GET(req: Request) { return POST(req); }

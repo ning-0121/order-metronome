@@ -37,6 +37,12 @@ export async function listGoodsReceiptRecords(): Promise<{ data?: GoodsReceiptRo
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
+  // 价格红线(2026-07-28 安全审计 P1-1):补录单价/开版费是采购底价,admin_assistant 等能进对账页但
+  // 不在 CAN_SEE_PROCUREMENT_FLOOR → server 端剥离价格字段(与同页 getSupplierLedger 的底价门禁对齐)。
+  const { hasRoleInGroup } = await import('@/lib/domain/roles');
+  const { data: profR } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const rolesR: string[] = (profR as any)?.roles?.length ? (profR as any).roles : [(profR as any)?.role].filter(Boolean);
+  const canSeeFloor = hasRoleInGroup(rolesR, 'CAN_SEE_PROCUREMENT_FLOOR');
 
   const COLS_WITH_PRICE = 'id, line_item_id, order_id, received_qty, received_unit, received_at, inspection_result, defect_notes, return_status, unit_price, extra_fee, price_note';
   const COLS_NO_PRICE = 'id, line_item_id, order_id, received_qty, received_unit, received_at, inspection_result, defect_notes, return_status';
@@ -110,9 +116,9 @@ export async function listGoodsReceiptRecords(): Promise<{ data?: GoodsReceiptRo
       po_no: po.po_no ?? null,
       purchase_order_id: line.purchase_order_id ?? null,
       order_label: ord.internal_order_no || ord.order_no || null,
-      unit_price: r.unit_price ?? null,
-      extra_fee: r.extra_fee ?? null,
-      price_note: r.price_note ?? null,
+      unit_price: canSeeFloor ? (r.unit_price ?? null) : null,   // 非底价可见角色剥离(P1-1)
+      extra_fee: canSeeFloor ? (r.extra_fee ?? null) : null,
+      price_note: canSeeFloor ? (r.price_note ?? null) : null,
     };
   });
   return { data: rows };

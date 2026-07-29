@@ -246,10 +246,10 @@ export async function markMilestoneDone(
   }
 
   // ── 国内送仓信息硬阻塞 ──
-  // 创建订单时允许 5 个送货字段全部为空（部分客户尚未确认仓库地址），
-  // 但推进到「包装方式确认」/「国内送仓完成」节点前必须补齐。
-  // 这是工厂排包装、印唛头标签的前置依赖。
-  const DOMESTIC_DELIVERY_GATE_KEYS = new Set(['packing_method_confirmed', 'domestic_delivery']);
+  // 创建订单时允许 5 个送货字段全部为空（部分客户尚未确认仓库地址）。
+  // 2026-07-28 CEO:包装方式确认【不再】卡送仓信息(仓常常还没定,详情页也无处补,硬卡把业务堵死);
+  // 只保留「国内送仓完成」的检查——真送货必须有地址/联系人,否则物流无法执行。
+  const DOMESTIC_DELIVERY_GATE_KEYS = new Set(['domestic_delivery']);
   if (DOMESTIC_DELIVERY_GATE_KEYS.has(milestone.step_key) && !isAdmin) {
     const { data: orderForDelivery } = await (supabase.from('orders') as any)
       .select('delivery_type, delivery_warehouse_name, delivery_address, delivery_contact, delivery_phone, delivery_required_at')

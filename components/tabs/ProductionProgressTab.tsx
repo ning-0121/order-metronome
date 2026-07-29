@@ -904,7 +904,8 @@ function TimelineUploadBtn({ orderId, orderNo, milestoneId, stepKey, onUploaded 
         .limit(1);
       const msId = ms?.[0]?.id || null;
 
-      await (supabase.from('order_attachments') as any).insert({
+      // 必须查 error(2026-07-28 安全审计 P1-3):RLS 拒绝时此前静默失败还报"上传成功"=假成功
+      const { error: attErr } = await (supabase.from('order_attachments') as any).insert({
         order_id: orderId,
         milestone_id: msId,
         uploaded_by: user?.id || null,
@@ -914,6 +915,7 @@ function TimelineUploadBtn({ orderId, orderNo, milestoneId, stepKey, onUploaded 
         mime_type: finalFile.type || null,
         storage_path: path,
       });
+      if (attErr) { alert('❌ 附件记录保存失败:' + attErr.message + '(文件已传存储,请联系管理员补记录)'); return; }
       alert('✅ 上传成功: ' + finalFile.name);
       onUploaded();
     } catch (err: any) {

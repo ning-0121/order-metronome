@@ -1420,12 +1420,13 @@ function CompletedFileUpload({ milestoneId, orderId, orderNo, stepKey, isProduct
     if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
     const { data: { user } } = await supabase.auth.getUser();
-    await (supabase.from('order_attachments') as any).insert({
+    const { error: attErr1 } = await (supabase.from('order_attachments') as any).insert({
       order_id: orderId, milestone_id: milestoneId,
       uploaded_by: user?.id || null,
       file_name: finalFile.name, file_url: urlData?.publicUrl || path,
       file_type: fileType, mime_type: finalFile.type || null,
     });
+    if (attErr1) alert('❌ 附件记录保存失败:' + attErr1.message + '(文件已传存储,请联系管理员)');   // P1-3:不再静默吞 RLS 拒绝
     const { data } = await (supabase.from('order_attachments') as any)
       .select('id, file_name, file_url, file_type, created_at')
       .eq('order_id', orderId).eq('milestone_id', milestoneId).order('created_at', { ascending: false });
@@ -1570,13 +1571,14 @@ function SupplementaryUpload({ milestoneId, orderId, orderNo, stepKey }: { miles
     if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
     const { data: { user } } = await supabase.auth.getUser();
-    await (supabase.from('order_attachments') as any).insert({
+    const { error: attErr2 } = await (supabase.from('order_attachments') as any).insert({
       order_id: orderId, milestone_id: milestoneId,
       uploaded_by: user?.id || null,
       file_name: finalFile.name, file_url: urlData?.publicUrl || path,
       storage_path: path,
       file_type: fileType, mime_type: finalFile.type || null,
     });
+    if (attErr2) alert('❌ 附件记录保存失败:' + attErr2.message + '(文件已传存储,请联系管理员)');   // P1-3
     await loadFiles();
     setUploading(false);
     router.refresh();
