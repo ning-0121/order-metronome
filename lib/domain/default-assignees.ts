@@ -34,10 +34,11 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
     nameMatches: ['方圆', '方园', '方園', 'fangyuan', 'Fangyuan', 'Fang Yuan'],
     emailContains: ['fangyuan', 'fangy', 'fang.yuan', 'fy@'],
   },
+  // 2026-07-28 CEO:采购节点默认改派王一品(Helen 不常用系统;权限互通,Helen/吴彦洺仍可操作)
   procurement: {
-    displayName: 'Helen',
-    nameMatches: ['Helen', 'helen', '海莲', '海莉', '王海莲'],
-    emailContains: ['helen@', 'helen.'],
+    displayName: '王一品',
+    nameMatches: ['王一品', '一品', 'yipin'],
+    emailContains: ['pin@'],
   },
   production_manager: {
     displayName: '秦增福',   // 生产主管(名字福/富两种写法都兼容,防匹配不上→未分配)

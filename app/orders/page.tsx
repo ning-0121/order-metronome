@@ -1,4 +1,5 @@
 import { getOrders } from '@/app/actions/orders';
+import { ConfirmShippedBanner } from '@/components/ConfirmShippedBanner';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
 import { computeOrderStatus, getRedCulprits } from '@/lib/utils/order-status';
@@ -292,6 +293,21 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const trueOverdue = overdueOrders.filter(x => !x.pendingDelay);
   const pendingDelayOrders = overdueOrders.filter(x => x.pendingDelay);
 
+  // 出厂日已过确认区(2026-07-28 CEO):纯按 factory_date 逐单问"是否已出货"——不吃延期/红单口径,
+  // 谁过出厂日谁上榜(此前有些过期单因批准延期/非红而看不到提示)。出运节点已完成的不再问。
+  const todayYmd = new Date(now).toISOString().slice(0, 10);
+  const pastFactoryItems = (orders as any[])
+    .filter((o: any) => !DONE_LIFECYCLE.has(o.lifecycle_status || '')
+      && (o.order_purpose || 'production') !== 'sample'
+      && o.factory_date && String(o.factory_date).slice(0, 10) < todayYmd
+      && !(o.milestones || []).some((m: any) => SHIPPED_STEP_KEYS.has(m.step_key) && isDoneStatus(m.status)))
+    .map((o: any) => ({
+      id: o.id, no: o.internal_order_no || o.order_no || '—', customer: o.customer_name || '—',
+      factoryDate: String(o.factory_date).slice(0, 10),
+      daysOver: Math.max(1, Math.ceil((now - new Date(String(o.factory_date).slice(0, 10) + 'T23:59:59').getTime()) / 86400000)),
+    }))
+    .sort((a: any, b: any) => b.daysOver - a.daysOver);
+
   // 红单体检（方案 C·B）：把红单按「元凶节点 + 交期远近」归类，挑出「疑似没回填」给跟单补录
   const overdueIds = new Set(overdueOrders.map(x => x.order.id));
   const nowDate = new Date(now);
@@ -343,6 +359,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </Link>
         </div>
       </div>
+
+      {/* 出厂日已过确认区:逐单确认是否已出货,一键补录完成 */}
+      {purposeFilter !== 'sample' && <ConfirmShippedBanner items={pastFactoryItems} />}
 
       {/* 红单体检（方案 C·B）：一次看清每个红单被哪个节点拖红 + 疑似没回填给跟单补录 */}
       <RedOrderHealthPanel items={redItems} />
