@@ -291,10 +291,14 @@ export async function approveOrderAmendment(
       // 审计修(2026-07-04):改了 quantity/unit_price 要重算 total_amount,否则财务报表金额错。
       if ('quantity' in updates || 'unit_price' in updates) {
         const { data: curr } = await (supabase.from('orders') as any)
-          .select('quantity, unit_price').eq('id', amendment.order_id).maybeSingle();
+          .select('quantity, unit_price, quantity_unit').eq('id', amendment.order_id).maybeSingle();
         const q = Number(updates.quantity ?? (curr as any)?.quantity);
         const up = Number(updates.unit_price ?? (curr as any)?.unit_price);
-        if (Number.isFinite(q) && Number.isFinite(up)) updates.total_amount = Math.round(q * up * 100) / 100;
+        // 套装口径(2026-07-29 财务整改同款隐患):quantity 库存的是折合件数,unit_price 是每套价
+        // → 总额必须按【套数】算,否则套装单一改数量/单价总额翻倍。
+        const unitStr = String((curr as any)?.quantity_unit || '');
+        const perSet = unitStr === '套' ? 2 : unitStr === '三件套' ? 3 : 1;
+        if (Number.isFinite(q) && Number.isFinite(up)) updates.total_amount = Math.round((q / perSet) * up * 100) / 100;
       }
       await (supabase.from('orders') as any)
         .update(updates)

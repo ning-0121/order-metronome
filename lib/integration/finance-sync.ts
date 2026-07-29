@@ -179,6 +179,24 @@ export async function processFinanceOutbox(limit = 30): Promise<{ retried: numbe
 
 /** 订单创建/更新时同步到财务系统 */
 export async function syncOrderToFinance(order: Record<string, unknown>, event: 'order.created' | 'order.updated' | 'order.activated' | 'order.resync' = 'order.updated') {
+  // 套装数量口径修(2026-07-29 财务整改):orders.quantity 库里统一存【折合件数】(套×2/三件套×3),
+  // quantity_unit 却是"套" → 此前把 14400 当"14400 套"发给财务(实际 7200 套),单价校验/毛利全偏。
+  // 契约:quantity 必须与 quantity_unit 同口径(套数);折合件数另发 quantity_pieces,绝不覆盖 quantity。
+  const unitStr = String(order.quantity_unit || '');
+  const perSet = unitStr === '套' ? 2 : unitStr === '三件套' ? 3 : 1;
+  const pieces = order.quantity != null ? Number(order.quantity) : null;
+  const qtyInUnit = pieces != null && perSet > 1 ? Math.round(pieces / perSet) : pieces;
+  // 发送前自检(财务整改②):unit_price × quantity ≈ total_amount(容差 1%)。
+  // 不一致 → payload 打 quantity_check='mismatch' + 记错误日志(不整单拦发——订单彻底不同步比带标记更糟;财务侧有黄条防线)。
+  const upNum = Number(order.unit_price); const taNum = Number(order.total_amount);
+  let quantityCheck: string | undefined;
+  if (Number.isFinite(upNum) && upNum > 0 && Number.isFinite(taNum) && taNum > 0 && qtyInUnit) {
+    const diff = Math.abs(upNum * qtyInUnit - taNum) / taNum;
+    if (diff > 0.01) {
+      quantityCheck = 'mismatch';
+      console.error(`[FinanceSync] ${order.order_no} 数量口径自检不过:${upNum}×${qtyInUnit}=${Math.round(upNum * qtyInUnit)} ≠ total ${taNum}(偏差 ${(diff * 100).toFixed(1)}%),已标记 quantity_check=mismatch`);
+    }
+  }
   return sendToFinanceSystem(event, {
     id: order.id,
     order_no: order.order_no,
@@ -191,8 +209,10 @@ export async function syncOrderToFinance(order: Record<string, unknown>, event: 
     currency: order.currency || null,
     unit_price: order.unit_price || null,
     total_amount: order.total_amount || null,
-    quantity: order.quantity || null,
+    quantity: qtyInUnit,                       // 与 quantity_unit 同口径(套装=套数)
+    quantity_pieces: pieces,                   // 折合件数(财务需要件数口径时读这个)
     quantity_unit: order.quantity_unit || null,
+    ...(quantityCheck ? { quantity_check: quantityCheck } : {}),
     factory_name: order.factory_name || null,
     factory_date: order.factory_date || null,   // 审计#2:重排改的是工厂日,财务需看到新交期
     etd: order.etd || null,
