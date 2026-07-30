@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine, updateProcurementLineSize, updateProcurementLineFloorPrice } from '@/app/actions/purchase-orders';
+import { exportPurchaseOrder, placePurchaseOrder, approvePurchaseOrder, resubmitPurchaseOrderApproval, savePurchaseOrderProof, setPurchaseOrderPriceTbd, resyncPurchaseOrderToFinance, changePurchaseOrderSupplier, deletePurchaseOrderLine, updateProcurementLineSize, updateProcurementLineFloorPrice } from '@/app/actions/purchase-orders';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { submitPurchaseDeposit } from '@/app/actions/procurement-payment';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -194,6 +194,21 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
     if (res.pendingApproval) { await confirm({ title: '已转审批', message: '触发:' + (res.reasons || []).map((r: string) => REASON_LABELS[r] || r).join('、'), confirmText: '知道了' }); router.refresh(); return; }
     await confirm({ title: '✅ 已下单', confirmText: '知道了' }); router.refresh();
   }
+  // 被驳回 → 改完重新送审。清驳回态后复用标准下单流(会重跑价格/凭证/预算闸并置待审批)。
+  async function handleResubmit() {
+    if (!(await confirm({
+      title: '重新提交审批?',
+      message: '确认已按驳回原因改好(底价/数量/供应商等)。提交后本单重新进入财务审批队列,通过后才能下单。',
+      confirmText: '重新提交', cancelText: '取消',
+    }))) return;
+    setBusy('resubmit');
+    const res = await resubmitPurchaseOrderApproval(po.id);
+    setBusy('');
+    if (res.error) { await confirm({ title: res.error, confirmText: '知道了' }); return; }
+    if (res.pendingApproval) { await confirm({ title: '✅ 已重新提交审批', message: '等财务审批通过后即可下单。', confirmText: '知道了' }); router.refresh(); return; }
+    await confirm({ title: '✅ 已下单', confirmText: '知道了' }); router.refresh();
+  }
+
   async function handleApprove() {
     const v = await prompt({ title: '审批通过', fields: [{ name: 'note', label: '审批意见（可选）', type: 'textarea' }], confirmText: '审批通过' });
     if (!v) return;
@@ -384,6 +399,12 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
               </p>
             ) : po.approval_status === 'approved' ? (
               <p className="text-sm text-emerald-700 mt-1">✅ 已审批,可下单</p>
+            ) : po.approval_status === 'rejected' ? (
+              <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+                <p className="text-sm text-rose-700 font-medium">⛔ 已被财务驳回 —— 改好后需「重新提交审批」,通过才能下单</p>
+                {po.approval_note && <p className="text-xs text-rose-600 mt-1">驳回原因:{po.approval_note}</p>}
+                <p className="text-[11px] text-rose-500 mt-1">改底价/数量/供应商本身不会自动解除驳回,必须点右侧按钮重新送审。</p>
+              </div>
             ) : (
               <p className="text-sm text-gray-500 mt-1">草稿 · 点"下单"自动查风险:标准单直接下单,风险单转审批</p>
             )}
@@ -406,7 +427,14 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
                 {busy === 'approve' ? '审批中…' : '✅ 审批通过'}
               </button>
             ) : null}
-            {canProcure && po.approval_status !== 'pending' && (
+            {/* 驳回单不给「下单」死按钮(点了必被拦)—— 换成唯一出口「重新提交审批」 */}
+            {canProcure && po.approval_status === 'rejected' && (
+              <button onClick={handleResubmit} disabled={busy !== ''}
+                className="text-xs px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 font-medium disabled:opacity-50">
+                {busy === 'resubmit' ? '提交中…' : '🔄 重新提交审批'}
+              </button>
+            )}
+            {canProcure && po.approval_status !== 'pending' && po.approval_status !== 'rejected' && (
               <button onClick={handlePlace} disabled={busy !== '' || proofPaths.length === 0}
                 title={proofPaths.length === 0 ? '请先上传下单凭证' : ''}
                 className="text-xs px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium disabled:opacity-50">

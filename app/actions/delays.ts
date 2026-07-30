@@ -172,8 +172,12 @@ export async function createDelayRequest(
   // 保交期:不动交期,只带节点新日期,审批落地时把下游压进剩余窗口。
   let impactsFinalDelivery = categoryInfo.impactsFinalDeliveryDate;
   let rescheduleModeInit: 'push_delivery' | 'urgent' | null = null;
+  // 新锚点指向订单哪一列(见 resolveAnchorField):默认沿用历史口径 FOB→etd / DDP→warehouse_due_date;
+  // push_delivery 从哪个字段推算的就写回哪个(FOB 无 etd 时是从出厂日推的,必须写回 factory_date)。
+  let anchorField: AnchorField = orderData.incoterm === 'FOB' ? 'etd' : 'warehouse_due_date';
   if (mode === 'push_delivery') {
     const oldAnchor = orderData.incoterm === 'FOB' ? (orderData.etd || orderData.factory_date) : (orderData.warehouse_due_date || orderData.eta);
+    if (orderData.incoterm === 'FOB' && !orderData.etd && orderData.factory_date) anchorField = 'factory_date';
     if (oldAnchor && delayDays > 0) {
       const a = new Date(oldAnchor + 'T00:00:00+08:00');
       a.setDate(a.getDate() + delayDays);
@@ -204,6 +208,7 @@ export async function createDelayRequest(
     reason_category: category,
     reason_detail: reasonDetail,
     proposed_new_anchor_date: proposedNewAnchorDate || null,
+    anchor_field: proposedNewAnchorDate ? anchorField : null,
     proposed_new_due_at: proposedNewDueAt || null,
     requires_customer_approval: requiresCustomerApproval,
     delay_days: delayDays,
@@ -218,9 +223,9 @@ export async function createDelayRequest(
     .insert(insertPayload)
     .select()
     .single();
-  // 迁移未执行(缺 approval_chain 等列)→ 降级去掉链列重插,不 brick 申请
-  if (error && /approval_chain|current_step|column .* does not exist/i.test(error.message || '')) {
-    const { approval_chain, current_step, ...plain } = insertPayload;
+  // 迁移未执行(缺 approval_chain / anchor_field 等列)→ 降级去掉这些列重插,不 brick 申请
+  if (error && /approval_chain|current_step|anchor_field|column .* does not exist/i.test(error.message || '')) {
+    const { approval_chain, current_step, anchor_field, ...plain } = insertPayload;
     ({ data: delayRequest, error } = await (supabase.from('delay_requests') as any).insert(plain).select().single());
   }
 
@@ -506,6 +511,24 @@ export async function approveDeferralStep(delayRequestId: string, note?: string,
   return { ok: true, done: false, nextRole: chain[nextStep] };
 }
 
+/**
+ * proposed_new_anchor_date 该落到 orders 的哪一列(2026-07-30 修)。
+ *
+ * 同一列被两条流复用、语义不同:整单延期存的是新【出厂日】,节点延期 push_delivery 存的是从
+ * etd / ETA 推算的新锚点。历史上审批一律按 incoterm 写 etd / warehouse_due_date,从不写 factory_date,
+ * 而 FOB/人民币单头只显示 factory_date → 整单延期批准后出厂日永远是旧的(用户 2026-07-30 报障)。
+ * 现在创建时把语义写死进 anchor_field,审批按它落库。
+ *
+ * anchor_field 为 null = 迁移前的老行 → 回退到历史行为,既有语义不变。
+ */
+type AnchorField = 'factory_date' | 'etd' | 'warehouse_due_date';
+
+function resolveAnchorField(delayRequest: any, orderData: any): AnchorField {
+  const f = delayRequest?.anchor_field;
+  if (f === 'factory_date' || f === 'etd' || f === 'warehouse_due_date') return f;
+  return orderData?.incoterm === 'FOB' ? 'etd' : 'warehouse_due_date';
+}
+
 async function approveDelayRequestCore(
   delayRequestId: string,
   decisionNote?: string,
@@ -612,9 +635,7 @@ async function approveDelayRequestCore(
   if (delayRequestData.proposed_new_anchor_date) {
     try {
       const { validateDateChainWithUpdate, formatDateChainErrors } = await import('@/lib/domain/orderDates');
-      const chk: any = orderData.incoterm === 'FOB'
-        ? { etd: delayRequestData.proposed_new_anchor_date }
-        : { warehouse_due_date: delayRequestData.proposed_new_anchor_date };
+      const chk: any = { [resolveAnchorField(delayRequestData, orderData)]: delayRequestData.proposed_new_anchor_date };
       const violations = validateDateChainWithUpdate(
         {
           order_date: orderData.order_date, factory_date: orderData.factory_date, etd: orderData.etd,
@@ -926,12 +947,9 @@ async function recalculateSchedule(
 
   // If proposed_new_anchor_date is provided, update order and recalculate all milestones
   if (delayRequest.proposed_new_anchor_date) {
-    const updates: any = {};
-    if (orderData.incoterm === 'FOB') {
-      updates.etd = delayRequest.proposed_new_anchor_date;
-    } else {
-      updates.warehouse_due_date = delayRequest.proposed_new_anchor_date;
-    }
+    // 按创建时写死的语义落库(整单延期→factory_date;节点延期→etd/warehouse_due_date)。见 resolveAnchorField。
+    const anchorField = resolveAnchorField(delayRequest, orderData);
+    const updates: any = { [anchorField]: delayRequest.proposed_new_anchor_date };
 
     // ── 日期链 invariant 校验（SSOT, 2026-05-18）──
     // 延期审批是历史上 ETA<ETD 等异常数据的主要入口。在写库前 merge 现有日期校验。
@@ -974,9 +992,12 @@ async function recalculateSchedule(
       .eq('id', orderData.id);
 
     // Recalculate all milestones（需要锚点日期，缺少时跳过全量重算）
-    const newEtd = orderData.incoterm === 'FOB' ? delayRequest.proposed_new_anchor_date : orderData.etd;
-    const newWh = orderData.incoterm === 'DDP' ? delayRequest.proposed_new_anchor_date : orderData.warehouse_due_date;
-    const anchorAvailable = !!(newEtd || newWh || orderData.factory_date);
+    // 重算读「落库后」的日期,而不是只按 incoterm 猜:整单延期改的是 factory_date、etd 不动,
+    // 而 FOB/人民币单常无 etd —— 此时出厂日就是排期锚点。
+    const newFactory = anchorField === 'factory_date' ? delayRequest.proposed_new_anchor_date : orderData.factory_date;
+    const newEtd = anchorField === 'etd' ? delayRequest.proposed_new_anchor_date : orderData.etd;
+    const newWh = anchorField === 'warehouse_due_date' ? delayRequest.proposed_new_anchor_date : orderData.warehouse_due_date;
+    const anchorAvailable = !!(newEtd || newWh || newFactory);
 
     if (!anchorAvailable) {
       // 缺少锚点：只更新当前节点的 due_at，不做全量重算
@@ -987,7 +1008,7 @@ async function recalculateSchedule(
     }
 
     const createdAt = new Date(orderData.created_at);
-    const scheduleEtd = newEtd || orderData.factory_date; // FOB/RMB 用出厂日期兜底
+    const scheduleEtd = newEtd || newFactory; // FOB/RMB 用出厂日期兜底
     const dueMap = calcDueDates({
       createdAt,
       incoterm: orderData.incoterm as 'FOB' | 'DDP',
@@ -1101,7 +1122,7 @@ export async function getImpactedMilestones(delayRequestId: string) {
   // Get delay request with milestone and order info
   const { data: delayRequest } = await (supabase
     .from('delay_requests') as any)
-    .select('*, milestones!inner(id, order_id, due_at, step_key, name), orders!inner(id, incoterm, etd, warehouse_due_date, created_at)')
+    .select('*, milestones!inner(id, order_id, due_at, step_key, name), orders!inner(id, incoterm, factory_date, etd, warehouse_due_date, created_at)')
     .eq('id', delayRequestId)
     .single();
   
@@ -1124,9 +1145,12 @@ export async function getImpactedMilestones(delayRequestId: string) {
   
   // If anchor date change, all milestones are impacted
   if (delayRequestData.proposed_new_anchor_date) {
-    const newEtd = orderData.incoterm === 'FOB' ? delayRequestData.proposed_new_anchor_date : orderData.etd;
-    const newWh = orderData.incoterm === 'DDP' ? delayRequestData.proposed_new_anchor_date : orderData.warehouse_due_date;
-    const scheduleEtd = newEtd || orderData.factory_date;
+    // 与 recalculateSchedule 落地口径保持一致(按 anchor_field 决定改哪一列),否则预览会骗人
+    const previewAnchor = resolveAnchorField(delayRequestData, orderData);
+    const newFactory = previewAnchor === 'factory_date' ? delayRequestData.proposed_new_anchor_date : orderData.factory_date;
+    const newEtd = previewAnchor === 'etd' ? delayRequestData.proposed_new_anchor_date : orderData.etd;
+    const newWh = previewAnchor === 'warehouse_due_date' ? delayRequestData.proposed_new_anchor_date : orderData.warehouse_due_date;
+    const scheduleEtd = newEtd || newFactory;
     if (!scheduleEtd && !newWh) {
       // 缺少锚点日期，无法预览全量重算
       return { data: null, impactedMilestones: [], error: '订单缺少出厂日期/ETD，无法预览排期影响' };
@@ -1278,27 +1302,38 @@ export async function createOrderLevelDelayRequest(
 
   const { DELAY_CATEGORIES } = await import('@/lib/domain/delay-rules');
   const categoryInfo = DELAY_CATEGORIES[reasonCategory];
-  const currentAnchor = orderCheck.incoterm === 'FOB' ? (orderCheck.factory_date || orderCheck.etd) : orderCheck.warehouse_due_date;
+  // 整单延期改的是【出厂日】,延期天数的基线也必须取出厂日。
+  // 原按 incoterm 分叉(非 FOB 取 warehouse_due_date)→ RMB/DDP 单拿送仓日当基线,
+  // 出厂 8/7 延到 8/13 会算出 delay_days=0(实测 QM-20260710-005 就是 0),延期天数失真。
+  const currentAnchor = orderCheck.factory_date || orderCheck.etd || orderCheck.warehouse_due_date;
   const delayDays = currentAnchor
     ? Math.ceil((new Date(newFactoryDate).getTime() - new Date(currentAnchor).getTime()) / 86400000)
     : 0;
 
-  const { data: delayRequest, error: insertErr } = await (supabase.from('delay_requests') as any)
-    .insert({
-      order_id: orderId,
-      milestone_id: targetMilestone.id,
-      requested_by: user.id,
-      reason_type: reasonType,
-      reason_category: reasonCategory,
-      reason_detail: reasonDetail,
-      proposed_new_anchor_date: newFactoryDate,
-      proposed_new_due_at: null,
-      requires_customer_approval: categoryInfo.requiresCustomerApproval,
-      delay_days: delayDays,
-      impacts_final_delivery: true,
-      status: 'pending',
-    })
-    .select().single();
+  const orderDelayPayload: any = {
+    order_id: orderId,
+    milestone_id: targetMilestone.id,
+    requested_by: user.id,
+    reason_type: reasonType,
+    reason_category: reasonCategory,
+    reason_detail: reasonDetail,
+    proposed_new_anchor_date: newFactoryDate,
+    anchor_field: 'factory_date',   // 整单延期改的是【出厂日】,不是 ETD(见 resolveAnchorField)
+    proposed_new_due_at: null,
+    requires_customer_approval: categoryInfo.requiresCustomerApproval,
+    delay_days: delayDays,
+    impacts_final_delivery: true,
+    status: 'pending',
+  };
+  let { data: delayRequest, error: insertErr } = await (supabase.from('delay_requests') as any)
+    .insert(orderDelayPayload).select().single();
+  // 迁移未执行(缺 anchor_field)→ 降级去掉该列重插,不 brick 整单延期申请
+  // (降级后审批会回退到老口径写 etd —— 迁移落地前出厂日仍不会同步,所以迁移必须真正上生产)
+  if (insertErr && /anchor_field|column .* does not exist/i.test(insertErr.message || '')) {
+    const { anchor_field, ...plain } = orderDelayPayload;
+    ({ data: delayRequest, error: insertErr } = await (supabase.from('delay_requests') as any)
+      .insert(plain).select().single());
+  }
 
   if (insertErr) return { error: insertErr.message };
 

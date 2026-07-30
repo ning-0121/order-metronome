@@ -920,6 +920,43 @@ export async function setPurchaseOrderPriceTbd(poId: string, value: boolean): Pr
 }
 
 /**
+ * 被驳回的采购单改完后重新提交审批(2026-07-30 修)。
+ *
+ * 原本 approval_status='rejected' 是死局:全库没有任何路径能把它改回去 —— 改底价/改尺码只写行数据、
+ * 不碰 approval_status,而 placePurchaseOrder 见 rejected 就直接 return,永远走不到置 pending 的代码。
+ * 采购改完价点「下单」只会反复弹"请修改后重新提交审批",没有任何出口(用户 2026-07-30 报障)。
+ *
+ * 这里提供那个出口:清掉驳回态退回普通草稿,再走一遍标准下单/审批流(placePurchaseOrder 会重跑价格闸、
+ * 凭证闸、预算与风险评估,并置 pending + 通知财务)。驳回记录留在 approval_note 里不抹,便于审计追溯。
+ */
+export async function resubmitPurchaseOrderApproval(poId: string): Promise<{
+  error?: string; ok?: boolean; pendingApproval?: boolean; reasons?: string[];
+}> {
+  const { supabase, roles, userId } = await authRoles();
+  if (!userId) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PROCURE.includes(r))) return { error: '无采购权限' };
+
+  const { data: po } = await (supabase.from('purchase_orders') as any)
+    .select('status, approval_status, approval_note').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') return { error: '仅草稿可重新提交审批' };
+  if ((po as any).approval_status !== 'rejected') {
+    return { error: '该采购单不是被驳回状态,无需重新提交审批。' };
+  }
+
+  // 退回普通草稿:清驳回态 + 清上一轮的审批理由快照(下单时会按最新金额/风险重算)。
+  // approval_note 保留 —— 那是财务写的驳回原因,是审计痕迹。
+  const { error: clearErr } = await (supabase.from('purchase_orders') as any).update({
+    approval_status: null, approval_reasons: null, approval_required_by: null,
+    approved_by: null, approved_at: null, updated_at: new Date().toISOString(),
+  }).eq('id', poId).eq('approval_status', 'rejected');   // 并发保护:只有仍是 rejected 才清
+  if (clearErr) return { error: '重置驳回状态失败:' + clearErr.message };
+
+  // 复用标准下单流:重跑所有闸门,并把单子重新送进财务审批队列
+  return placePurchaseOrder(poId);
+}
+
+/**
  * 下单（P2a）：draft → placed。**始终跑风险闸**（无法绕过审批）。
  * 已 approved → 直接下单;否则评估:有风险 → 转 pending 并阻断;无风险 → 直接下单。
  */
@@ -978,7 +1015,7 @@ export async function placePurchaseOrder(poId: string): Promise<{
     return { error: '该采购单待审批,请先由采购经理/财务审批通过后再下单(不能绕过审批直接下单)。' };
   }
   if ((po as any).approval_status === 'rejected') {
-    return { error: '该采购单已被驳回,请修改后重新提交审批,通过后才能下单。' };
+    return { error: '该采购单已被驳回。请先按驳回原因改好(底价/数量/供应商等),再点「重新提交审批」,财务通过后才能下单。' };
   }
 
   // 财务前置审批(老板 2026-07-12 铁令:取消 ¥5000 门槛,**所有采购单一律须财务前置审批后才下单**)。
