@@ -36,10 +36,23 @@ export default async function AnalyticsPage() {
   const currentMonth = new Date().toISOString().slice(0, 7);
 
   // 总览统计
-  const { data: allOrders } = await (supabase.from('orders') as any).select('id, customer_name, factory_name, quantity, created_at, order_purpose, lifecycle_status');
+  // 显式翻页拉全量:PostgREST 默认只返 1000 行且【不报错】。订单/明细一旦过千,这里会静默少算,
+  // 而且明细被截断时 orderStatPieces 会悄悄回退 orders.quantity(套数),件数直接偏低、无人察觉。
+  async function fetchAll(table: string, cols: string): Promise<any[]> {
+    const out: any[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await (supabase.from(table) as any).select(cols).range(from, from + 999);
+      if (error) { console.error(`[AnalyticsPage] ${table} 分页拉取失败:`, error.message); break; }
+      out.push(...((data || []) as any[]));
+      if (!data || data.length < 1000) break;
+    }
+    return out;
+  }
+
+  const allOrders = await fetchAll('orders', 'id, customer_name, factory_name, quantity, created_at, order_purpose, lifecycle_status');
   const totalOrders = (allOrders || []).length;
   // 套→件:取逐款明细,有效订单总件数按每套2件(以明细 set_multiplier 为准)汇总(2026-07-27 CEO)
-  const { data: allLines } = await (supabase.from('order_line_items') as any).select('order_id, qty_pcs, set_multiplier');
+  const allLines = await fetchAll('order_line_items', 'order_id, qty_pcs, set_multiplier');
   const linesByOrder = new Map<string, any[]>();
   for (const r of ((allLines || []) as any[])) { const a = linesByOrder.get(r.order_id) || []; a.push(r); linesByOrder.set(r.order_id, a); }
   const effectiveQuantity = summarizeEffectiveOrderQuantity(allOrders || [], linesByOrder);

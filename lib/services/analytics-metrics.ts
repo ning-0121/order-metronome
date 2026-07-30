@@ -5,22 +5,18 @@ export interface AnalyticsOrderQuantityLike {
   lifecycle_status?: string | null;
 }
 
-const EXCLUDED_PURPOSES = new Set(['trade', 'sample', 'inquiry']);
 const EXCLUDED_STATUSES = new Set(['cancelled', '已取消', 'closed', '已关闭', 'archived', '已归档']);
 
 function normalize(value: string | null | undefined): string {
   return String(value || '').trim().toLowerCase();
 }
 
-export function isEffectiveOrderQuantitySource(order: AnalyticsOrderQuantityLike): boolean {
-  const purpose = normalize(order.order_purpose);
-  if (purpose && EXCLUDED_PURPOSES.has(purpose)) return false;
-  const status = String(order.lifecycle_status || '').trim();
-  if (status && EXCLUDED_STATUSES.has(status)) return false;
-  return true;
-}
-
-// 客户/员工统计口径(2026-07-27 CEO):含 生产/贸易/经销(都是该客户/员工真实业务),只排 取消/样品/询价。
+// 统计口径【单一真相源】(2026-07-27 CEO):含 生产/贸易/经销(都是真实业务),只排 取消/样品/询价。
+//
+// 2026-07-30:这里原本还有第二个判定 isEffectiveOrderQuantitySource(额外排 trade),总览走它、
+// 客户页走下面这个 → 同一个「有效件数」两套口径,总览把贸易单整个漏掉:
+// 总览 2,295,695(162 单) vs 客户页加总 2,620,821(183 单),差额 325,126 恰为 21 张未取消贸易单。
+// 已删掉那个分叉,全站只留这一个判定,避免再次各算各的。
 const STAT_EXCLUDED_PURPOSES = new Set(['sample', 'inquiry']);
 export function isStatCountableOrder(order: AnalyticsOrderQuantityLike): boolean {
   const purpose = normalize(order.order_purpose);
@@ -51,11 +47,11 @@ export function summarizeEffectiveOrderQuantity(
   scopeLabel: string;
   scopeHint: string;
 } {
-  const effectiveOrders = (orders || []).filter(isEffectiveOrderQuantitySource);
+  const effectiveOrders = (orders || []).filter(isStatCountableOrder);
   return {
     orderCount: effectiveOrders.length,
     totalQuantity: effectiveOrders.reduce((sum, order) => sum + orderStatPieces(order, order.id ? linesByOrder?.get(order.id) : undefined), 0),
     scopeLabel: '有效订单总件数',
-    scopeHint: '口径：排除取消/关闭/贸易/样品订单，套装按每套2件(以明细为准)汇总；与客户年度目标口径不同',
+    scopeHint: '口径：含生产/贸易/经销，排除取消/关闭/样品/询价，套装按每套2件(以明细为准)汇总；与客户页一致，与客户年度目标口径不同',
   };
 }

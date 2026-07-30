@@ -150,7 +150,7 @@ export async function getCustomerAnalytics(
 
   // AI 总结（纯算法）
   const parts: string[] = [];
-  parts.push(`${customerName} ${period === 'year' ? '本年度' : period === 'quarter' ? '本季度' : '本月'}共 ${orderCount} 个订单，有效件数 ${totalQuantity.toLocaleString()} 件(排除取消/贸易/样品)。`);
+  parts.push(`${customerName} ${period === 'year' ? '本年度' : period === 'quarter' ? '本季度' : '本月'}共 ${orderCount} 个订单，有效件数 ${totalQuantity.toLocaleString()} 件(含生产/贸易/经销,排除取消/样品/询价)。`);
   if (completedCount > 0) parts.push(`已完成 ${completedCount} 个，准时交付率 ${onTimeRate}%。`);
   if (activeCount > 0) parts.push(`当前在执行 ${activeCount} 个。`);
   if (avgScore > 0) parts.push(`平均执行评分 ${avgScore} 分。`);
