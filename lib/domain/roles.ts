@@ -156,6 +156,18 @@ export const ROLE_GROUPS = {
    *  ⚠️ 2026-07 用户拍板:业务员(sales) 只看自己创建/负责的订单,不再全程可见全部(推翻 6-15 的 sales 全程可见设定)。 */
   CAN_SEE_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'] as const,
 
+  /** 【只是能看见订单】= CAN_SEE_ALL_ORDERS + QC。
+   *
+   *  2026-07-30:QC 从生产部跟单中分离为独立角色,要对**所有订单**做上线审查/中查/尾查/加查,
+   *  所以必须跨负责人看见每一张单。但**不能**直接把 qc 塞进 CAN_SEE_ALL_ORDERS ——
+   *  那个组早已被当「管理/督导」在用,同时开着:全部待审批(含价格/财务)、所有客户邮件归纳、
+   *  督办总览入口、物流权限。QC 要的只是订单可见性,不该拿到这些。
+   *
+   *  所以拆出本组:**只用于订单可见性判定**(订单详情访问 / 订单列表 / 生产中心),
+   *  审批、邮件、督办、物流一律继续用 CAN_SEE_ALL_ORDERS。
+   *  注:qc 在部分库里落成 quality(见 DB_ROLE_MAP),两个都列。金额仍由 CAN_SEE_FINANCIALS 单独把关,QC 不在其中。 */
+  CAN_VIEW_ALL_ORDERS: ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager', 'qc', 'quality'] as const,
+
   /** 可看金额/利润等敏感财务数据：admin / finance / 业务开发 / 业务部经理 / 订单管理经理 */
   CAN_SEE_FINANCIALS: ['admin', 'finance', 'sales', 'sales_manager', 'order_manager'] as const,
 

@@ -10,6 +10,7 @@ import { AIAdviceBox } from '@/components/AIAdviceBox';
 import { getChecklistForStep, canEditChecklistItemRole, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
+import { isStaleServerActionError, STALE_SERVER_ACTION_MESSAGE } from '@/lib/order/create-order-resilience';
 import { getNamingHint, getAcceptString, validateFileExt, getFileTypeForStep } from '@/lib/domain/fileNaming';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { OrderEmphasisPanel } from '@/components/OrderEmphasisPanel';
@@ -395,15 +396,23 @@ export function MilestoneActions({
       return;
     }
     setLoading(true);
-    const result = await markMilestoneBlocked(milestone.id, blockReason);
-    if (!result.error) {
-      setShowBlockForm(false);
-      setBlockReason('');
-      router.refresh();
-    } else {
-      setBlockError(result.error);
+    // 同 handleSave:没有 try/catch 时 action reject 会把按钮永久卡在 loading 且无提示
+    try {
+      const result = await markMilestoneBlocked(milestone.id, blockReason);
+      if (!result.error) {
+        setShowBlockForm(false);
+        setBlockReason('');
+        router.refresh();
+      } else {
+        setBlockError(result.error);
+      }
+    } catch (err: any) {
+      setBlockError(isStaleServerActionError(err)
+        ? STALE_SERVER_ACTION_MESSAGE
+        : '上报阻塞失败:' + (err?.message || '未知错误'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   // ── 一键打卡完成(2026-07-27 移动端)──────────────────────────────
@@ -1207,14 +1216,25 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
       setSaving(false);
       return;
     }
-    const result = await saveChecklistData(milestone.id, data);
-    if (result.error) {
-      alert(result.error);
-    } else {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+    // 2026-07-30 用户报「一直保存中,试好多次了」:原来这里没有 try/catch —— server action 一旦
+    // reject(最常见是部署后 Server Action 换 ID、旧页面调不到),promise 抛出、setSaving(false)
+    // 永远执行不到 → 按钮永久卡在「保存中...」,而且一个字的提示都没有,用户只能反复点。
+    // 现在 finally 兜底解锁,并对「陈旧 action」给可执行的提示(刷新页面),不再静默。
+    try {
+      const result = await saveChecklistData(milestone.id, data);
+      if (result.error) {
+        alert(result.error);
+      } else {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      }
+    } catch (err: any) {
+      alert(isStaleServerActionError(err)
+        ? STALE_SERVER_ACTION_MESSAGE + '\n(你填的内容还在页面上,刷新后重填一次即可)'
+        : '保存清单失败:' + (err?.message || '未知错误') + '\n请重试;若反复失败请刷新页面。');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   // 按 group 分组

@@ -4,8 +4,11 @@
  * 用于:当某个读取要绕过 RLS(改走 service-role,如剥离底价列后)时,必须在
  * app 层显式补回订单范围鉴权,否则会引入跨订单越权。
  *
- * 放行:看全部订单的角色(admin/CAN_SEE_ALL_ORDERS) / 创建者 / 跟单负责人 /
+ * 放行:看全部订单的角色(admin/CAN_VIEW_ALL_ORDERS) / 创建者 / 跟单负责人 /
  *       被指派了该单里程碑的人。判定异常保守拒绝(安全侧)。
+ *
+ * 用 CAN_VIEW_ALL_ORDERS(含 QC)而非 CAN_SEE_ALL_ORDERS:QC 要对所有订单做验货,
+ * 必须看得见每一张单;但审批/邮件/督办仍走 CAN_SEE_ALL_ORDERS,QC 拿不到。
  */
 
 import { getUserRoles } from '@/lib/utils/user-role';
@@ -22,7 +25,7 @@ export async function canUserAccessOrder(
 ): Promise<boolean> {
   try {
     const roles = await getUserRoles(supabase, userId);
-    if (roles.includes('admin') || hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS')) return true;
+    if (roles.includes('admin') || hasRoleInGroup(roles, 'CAN_VIEW_ALL_ORDERS')) return true;
 
     const { data: order } = await (supabase.from('orders') as any)
       .select('created_by, owner_user_id').eq('id', orderId).maybeSingle();

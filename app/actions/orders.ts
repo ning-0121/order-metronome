@@ -1178,8 +1178,12 @@ export async function getOrders() {
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
   const isAdmin = roles.includes('admin');
 
-  // 管理/生产主管/各经理/业务开发(只读全程) 看全部订单
-  const canSeeAll = isAdmin || roles.some((r: string) => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager', 'procurement'].includes(r)); // 2026-07:业务员(sales)移出,只看自己的单;2026-07-28 CEO:采购(吴彦洺/王一品)放开看单(列表无价格,核料/打样面料采购要用)
+  // 管理/生产主管/各经理 + QC 看全部订单
+  // 2026-07-30:原来这里把角色名硬编码成一个数组,与 ROLE_GROUPS 各说各话(改组不改这里就静默漏人,
+  //   QC 就是这么被漏掉的 → 列表空白)。收敛到 CAN_VIEW_ALL_ORDERS(=管理层+QC,只管订单可见性)。
+  //   采购单独续上(2026-07-28 CEO:吴彦洺/王一品 核料/打样面料采购要看单;列表无价格)。
+  const { hasRoleInGroup: hasRoleInGroupList } = await import('@/lib/domain/roles');
+  const canSeeAll = isAdmin || hasRoleInGroupList(roles, 'CAN_VIEW_ALL_ORDERS') || roles.includes('procurement');
 
   // 辅助：把 delay_requests 按 order_id 分组合并进 orders
   async function attachDelayRequests(orderList: any[]): Promise<any[]> {
@@ -1288,7 +1292,9 @@ export async function getOrder(id: string) {
     const { getUserRoles } = await import('@/lib/utils/user-role');
     const { hasRoleInGroup } = await import('@/lib/domain/roles');
     const roles = await getUserRoles(supabase, user.id);
-    const canSeeAll = roles.includes('admin') || hasRoleInGroup(roles, 'CAN_SEE_ALL_ORDERS') || roles.includes('procurement');   // 2026-07-28:采购放开(详情价格另有 CAN_SEE_FINANCIALS 门)
+    // CAN_VIEW_ALL_ORDERS = 管理层 + QC(2026-07-30:QC 要对所有订单验货,须看得见每一张单;
+    // 审批/邮件/督办仍归 CAN_SEE_ALL_ORDERS,QC 拿不到)。价格另有 CAN_SEE_FINANCIALS 门,QC 不在其中。
+    const canSeeAll = roles.includes('admin') || hasRoleInGroup(roles, 'CAN_VIEW_ALL_ORDERS') || roles.includes('procurement');   // 2026-07-28:采购放开(详情价格另有 CAN_SEE_FINANCIALS 门)
     const isOwner = (order as any).created_by === user.id || (order as any).owner_user_id === user.id;
     let assigned = false;
     if (!canSeeAll && !isOwner) {
