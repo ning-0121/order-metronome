@@ -482,8 +482,13 @@ export function hasChecklistForStep(stepKey: string): boolean {
   return stepKey in CHECKLIST_MAP;
 }
 
-/** 安全解析 checklist_data（可能是 JSON 字符串或数组） */
-function parseChecklistData(data: unknown): ChecklistData {
+/** 安全解析 checklist_data（可能是 JSON 字符串或数组）
+ *
+ *  注意：生产库里这一列**实际存的全是 JSON 字符串**（写入侧 JSON.stringify，见
+ *  app/actions/milestones.ts 的 admin_update_milestone 调用）。任何直接 `Array.isArray(checklist_data)`
+ *  的判断在生产上都恒为 false → 分支静默死掉。读 checklist_data 一律走这个函数。
+ */
+export function parseChecklistData(data: unknown): ChecklistData {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   if (typeof data === 'string') {
@@ -493,6 +498,43 @@ function parseChecklistData(data: unknown): ChecklistData {
     } catch { return []; }
   }
   return [];
+}
+
+/** 尾查「结论」字段的 key —— 有历史漂移，必须全都认。
+ *
+ *  · `final_result`      现役清单定义（CHECKLIST_MAP.final_qc_check），生产库 17 条
+ *  · `final_qc_result`   更早的清单版本，生产库 2 条；出运门禁曾【只】查这一个 key，
+ *                        而现役清单从不写它 → 不合格拦截分支从上线起没对任何一单生效过（2026-07-30 修）
+ *  · `sales_opinion`     业务尾查节点（final_qc_sales_check）的判定字段；历史上 final_qc_check 里
+ *                        也写过（生产库 8 条），所以两个节点都要按两套字段判
+ *
+ *  改这里之前先想清楚：新增/改名结论字段 = 出运质量门禁失效。
+ */
+export const FINAL_QC_RESULT_KEYS = ['final_result', 'final_qc_result'] as const;
+export const FINAL_QC_OPINION_KEY = 'sales_opinion';
+
+/** 尾查结论是否为「不能出运」。
+ *
+ *  @param checklistData 尾查节点的 checklist_data（JSON 字符串或数组，两种都吃）
+ *  @returns 拦截原因（可直接给用户看）；通过/未填结论 → null
+ *
+ *  未填结论时返回 null（不拦）——节点能否完成由 validateChecklistComplete 管，
+ *  这里只负责「已经填了不合格却还想出运」。
+ */
+export function finalQcRejection(checklistData: unknown): string | null {
+  for (const item of parseChecklistData(checklistData)) {
+    const key = item?.key;
+    const val = String(item?.value ?? '');
+    if ((FINAL_QC_RESULT_KEYS as readonly string[]).includes(key)) {
+      if (val.includes('FAIL') || val.includes('不通过') || val.includes('不合格')) {
+        return '尾期验货结果为不合格，不能出运。请先处理质量问题后重新验货';
+      }
+    }
+    if (key === FINAL_QC_OPINION_KEY && val.includes('拒绝出货')) {
+      return '业务尾查结论为「拒绝出货」，不能出运。请先处理质量问题后重新验货';
+    }
+  }
+  return null;
 }
 
 /** 校验检查清单是否全部必填项已完成
