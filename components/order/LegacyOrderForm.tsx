@@ -23,6 +23,7 @@ import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { OrderDraftBar } from '@/components/order/OrderDraftBar';
+import { SectionHeader, RequiredProgressBar } from '@/components/order/FormSection';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
 import {
   customerSelectionLabel, selectedCustomerFromDraft, toSelectedCustomer,
@@ -1303,9 +1304,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
             {/* ── 录入方式:有PO / 没PO ── */}
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3 pb-2 border-b border-gray-100">
-                录入方式
-              </h3>
+              <SectionHeader num={1} title="录入方式" hint="先说清这单从哪来 —— 有客户 PO 就上传,系统自动读" />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
                 <button type="button" onClick={() => setPoMode('has_po')}
                   className={`text-left rounded-xl border-2 p-4 transition ${poMode === 'has_po' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200'}`}>
@@ -1329,9 +1328,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
             {/* ── 基本信息 ── */}
             <div className={poMode === null ? 'opacity-40 pointer-events-none' : ''}>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4 pb-2 border-b border-gray-100">
-                基本信息
-              </h3>
+              <SectionHeader num={2} title="基本信息" hint="客户、款式、数量 —— 建单的最小必要信息" />
               <div className="grid grid-cols-2 gap-4">
                 <div ref={customerSelectorRef}>
                   <CustomerSelect
@@ -1526,9 +1523,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
             {/* ── 贸易 & 航运 ── */}
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4 pb-2 border-b border-gray-100">
-                贸易 & 航运
-              </h3>
+              <SectionHeader num={3} title="贸易与航运" hint="只有出厂日期必填;船期未定可留空,之后在订单页补录" />
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1741,9 +1736,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
             {/* ── 风险标记 ── */}
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1 pb-2 border-b border-gray-100">
-                风险标记
-              </h3>
+              <SectionHeader num={4} title="风险标记" hint="全部选填 —— 勾了会在驾驶舱高亮提醒" collapsible defaultCollapsed />
               <p className="text-xs text-gray-400 mb-3">勾选适用项，系统将自动加强对应关卡的管控</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
@@ -1770,9 +1763,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
             {/* ── 客户备注 ── */}
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4 pb-2 border-b border-gray-100">
-                客户备注
-              </h3>
+              <SectionHeader num={5} title="客户备注" hint="全部选填 —— 给生产/采购看的额外说明" collapsible defaultCollapsed />
               <textarea name="notes" rows={3}
                 placeholder="填写客户的额外需求、特殊要求、注意事项等..."
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
@@ -1780,9 +1771,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
             {/* ── 文件上传 ── */}
             <div className={poMode === null ? 'opacity-40 pointer-events-none' : ''}>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2 pb-2 border-b border-gray-100">
-                文件上传
-              </h3>
+              <SectionHeader num={6} title="文件上传" hint="全部选填 —— 建单后仍可继续上传" collapsible defaultCollapsed />
               <p className="text-xs text-gray-500 mb-4">
                 {poMode === 'no_po'
                   ? <>没有 PO → PO/报价单不用传,「逐款明细」手工录款色码即可;尺码表可选。</>
@@ -1977,6 +1966,9 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 </div>
               </div>
             )}
+
+            {/* 底部常驻进度:新人最需要的是"我还差什么",不是再多一条提示 */}
+            <RequiredProgressBar formRef={stepOneFormRef} />
 
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => router.back()}
