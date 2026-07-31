@@ -529,33 +529,30 @@ export async function markMilestoneDone(
   if (SHIPMENT_GATES.includes(milestone.step_key)) {
     // 修 H1(2026-07-25):V1 尾查节点=final_qc_check、V2=final_qc_sales_check。此前只查 final_qc_check →
     //   所有 V2 新单查 0 行、QC 门禁被跳过,货可在尾查未过就出运。改为两种 key 都查。
-    const { data: qcMilestone } = await (supabase.from('milestones') as any)
-      .select('status, checklist_data')
+    // 修 H2(2026-07-30):此前 `.limit(1).maybeSingle()` 只取【任意一条】。V3 单两个尾查节点同时存在
+    //   (生产库 20 单),取到哪条全看 PostgREST 返回顺序 —— 门禁在掷骰子。改为全取,逐条判。
+    //   出运门禁 fail-closed:任一尾查节点未完成即拦。
+    const { data: qcMilestones, error: qcErr } = await (supabase.from('milestones') as any)
+      .select('step_key, status, checklist_data')
       .eq('order_id', (milestone as any).order_id)
-      .in('step_key', ['final_qc_check', 'final_qc_sales_check'])
-      .limit(1)
-      .maybeSingle();
-    if (qcMilestone) {
-      const qcStatus = normalizeMilestoneStatus(qcMilestone.status);
-      if (qcStatus !== '已完成') {
-        return { error: '尾期验货尚未完成，不能操作出运相关节点' };
+      .in('step_key', ['final_qc_check', 'final_qc_sales_check']);
+    if (qcErr) {
+      // 查询失败不能当成「没有尾查节点」放行(见 CLAUDE.md「先看 error 字段再下结论」)
+      console.error('[shipment-gate] 尾查节点查询失败:', qcErr.message);
+      return { error: '尾期验货状态查询失败，暂不能操作出运相关节点，请稍后重试' };
+    }
+    // 结论判定抽到 lib/domain/checklist.ts finalQcRejection(单一真相 + 有单测兜底 key 漂移)
+    const { finalQcRejection } = await import('@/lib/domain/checklist');
+    const QC_NODE_LABEL: Record<string, string> = {
+      final_qc_check: '尾期验货（QC）',
+      final_qc_sales_check: '尾查·业务放行',
+    };
+    for (const qcMilestone of ((qcMilestones || []) as any[])) {
+      if (normalizeMilestoneStatus(qcMilestone.status) !== '已完成') {
+        return { error: `${QC_NODE_LABEL[qcMilestone.step_key] || '尾期验货'}尚未完成，不能操作出运相关节点` };
       }
-      // 检查尾查结果是否为 FAIL
-      // checklist_data 存储为数组 [{key, value, ...}]，可能是 JSON 字符串
-      let qcItems: any[] = [];
-      const rawQc = qcMilestone.checklist_data;
-      if (Array.isArray(rawQc)) {
-        qcItems = rawQc;
-      } else if (typeof rawQc === 'string') {
-        try { const p = JSON.parse(rawQc); if (Array.isArray(p)) qcItems = p; } catch {}
-      }
-      const qcResultItem = qcItems.find((item: any) => item.key === 'final_qc_result');
-      if (qcResultItem) {
-        const val = String(qcResultItem.value || '');
-        if (val.includes('FAIL') || val.includes('不通过') || val === '不合格') {
-          return { error: '尾期验货结果为不合格，不能出运。请先处理质量问题后重新验货' };
-        }
-      }
+      const rejection = finalQcRejection(qcMilestone.checklist_data);
+      if (rejection) return { error: rejection };
     }
 
     // 红线1(2026-07-20 全链审计):放行判据不能只看里程碑手填清单,必须也读结构化质检表 qc_inspections。
