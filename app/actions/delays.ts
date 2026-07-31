@@ -33,7 +33,10 @@ async function logMilestoneAction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
-  await supabase.from('milestone_logs').insert({
+  // 失败不阻断主流程(延期本身已落库),但**必须冒出来** —— 2026-07-30 教训:
+  // 这里原来丢掉 error,payload 列在生产根本不存在(PGRST204),96 条延期申请/审批
+  // 一条审计日志都没写进去,合规留痕全空且无人知晓。静默吞 error 才是这次的真根因。
+  const { error } = await supabase.from('milestone_logs').insert({
     milestone_id: milestoneId,
     order_id: orderId,
     actor_user_id: user.id,
@@ -41,6 +44,7 @@ async function logMilestoneAction(
     note: note || null,
     payload: payload || null,
   });
+  if (error) console.error(`[delays] milestone_logs 写入失败 action=${action} milestone=${milestoneId}:`, error.message);
 }
 
 type DelayReasonType =

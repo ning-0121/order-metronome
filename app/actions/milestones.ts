@@ -81,7 +81,8 @@ async function logMilestoneAction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
-  await supabase.from('milestone_logs').insert({
+  // 失败不阻断主流程,但**必须冒出来**(同 delays.ts 助手,2026-07-30 payload 缺列事故)。
+  const { error } = await supabase.from('milestone_logs').insert({
     milestone_id: milestoneId,
     order_id: orderId,
     actor_user_id: user.id,
@@ -89,6 +90,7 @@ async function logMilestoneAction(
     note: note || null,
     payload: payload || null,
   });
+  if (error) console.error(`[milestones] milestone_logs 写入失败 action=${action} milestone=${milestoneId}:`, error.message);
 }
 
 export async function getMilestonesByOrder(orderId: string) {

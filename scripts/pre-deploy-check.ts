@@ -545,6 +545,57 @@ for (const dir of scanDirs) {
 }
 assert(useServerScanned > 0, `扫到 ${useServerScanned} 个 'use server' 文件(应 >0)`);
 
+// ── milestone_logs 列漂移防线(2026-07-30 P0):payload 列在生产从来没建出来过
+//    (两份 CREATE TABLE IF NOT EXISTS 抢建,带 payload 的那份静默跳过),而代码照着
+//    带 payload 的版本写 → PostgREST PGRST204 拒收,13 个 action、96 条延期审批
+//    的审计日志一行没落,且 error 被吞掉,几个月无人发现。
+//    这里锁死:凡往 milestone_logs 写的键,必须在下面这张【与生产一致】的列清单里。
+//    加新键 = 必须先写迁移并把列名加进来,否则 push 不上去。
+console.log('\n🧾 milestone_logs 列漂移防线');
+{
+  const MILESTONE_LOG_COLUMNS = new Set([
+    'id', 'milestone_id', 'order_id', 'actor_user_id', 'action',
+    'note', 'from_status', 'to_status', 'created_at',
+    'payload', // ← 20260730_milestone_logs_payload.sql 补建
+  ]);
+  let insertSitesScanned = 0;
+  for (const dir of scanDirs) { // app/ 已递归覆盖 app/api
+    for (const f of walkTsFiles(dir)) {
+      const src = readFileSync(f, 'utf8');
+      if (!src.includes('milestone_logs')) continue;
+      // 逐个 .from('milestone_logs') 出现点,向后找最近的 .insert({ ... }) 对象字面量
+      const re = /from\(\s*['"]milestone_logs['"]\s*\)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(src))) {
+        const tail = src.slice(m.index, m.index + 900);
+        const ins = /\.insert\(\s*(\[?\s*\{)/.exec(tail);
+        if (!ins) continue; // 只读查询,跳过
+        // 从对象 { 开始做括号配对,取出字面量正文
+        const start = m.index + ins.index + ins[0].length - 1;
+        let depth = 0, end = start;
+        for (let i = start; i < Math.min(src.length, start + 1200); i++) {
+          if (src[i] === '{') depth++;
+          else if (src[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+        }
+        const body = src.slice(start + 1, end);
+        insertSitesScanned++;
+        // 顶层键(忽略嵌套对象内部的键)
+        const unknown: string[] = [];
+        let d = 0;
+        for (const line of body.split('\n')) {
+          const key = d === 0 ? /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(line) : null;
+          if (key && !MILESTONE_LOG_COLUMNS.has(key[1])) unknown.push(key[1]);
+          for (const ch of line) { if (ch === '{' || ch === '[') d++; else if (ch === '}' || ch === ']') d--; }
+        }
+        const where = `${f.replace(ROOT + '/', '')}:${src.slice(0, start).split('\n').length}`;
+        assert(unknown.length === 0,
+          `milestone_logs 写入列均存在于生产 → ${where}${unknown.length ? ` 未知列: ${unknown.join(', ')}(要么写迁移建列,要么别写这个键)` : ''}`);
+      }
+    }
+  }
+  assert(insertSitesScanned > 0, `扫到 ${insertSitesScanned} 个 milestone_logs 写入点(应 >0,否则正则失效了)`);
+}
+
 // ════ 结果 ════
 console.log(`\n${'═'.repeat(40)}`);
 console.log(`✅ 通过: ${passed}`);
