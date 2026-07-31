@@ -61,6 +61,7 @@ import { ShipmentTab } from '@/components/tabs/ShipmentTab';
 import { QcTab } from '@/components/tabs/QcTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { InlineEditField } from '@/components/InlineEditField';
+import { ShippingDatesEdit } from '@/components/order/ShippingDatesEdit';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
 import { RootCausesPanel } from '@/components/RootCausesPanel';
@@ -621,9 +622,10 @@ export default async function OrderDetailPage({
                   { label: '内部订单号', value: '__INLINE_EDIT__' },
                   { label: '负责业务/理单', value: ownerName },
                   { label: '贸易条款', value: ({ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' } as any)[orderData.incoterm] || orderData.incoterm },
+                  // ETD/ETA 建单时可留空(船期未定),这里就地补录 —— 2026-07-30 之前这两个字段
+                  // 只读且无任何写入入口,留空就补不回来了
                   ...(orderData.incoterm === 'DDP' ? [
-                    { label: 'ETD', value: formatDate(orderData.etd) },
-                    { label: '到仓日期(ETA)', value: formatDate(orderData.warehouse_due_date) },
+                    { label: 'ETD / ETA(船期)', value: '__SHIPPING_DATES__' },
                   ] : []),
                   { label: '订单类型', value: ({ trial: '新品试单', bulk: '正常', repeat: '翻单', urgent: '加急订单', sample: '样品' } as Record<string,string>)[orderData.order_type] || orderData.order_type },
                   { label: '包装类型', value: orderData.packaging_type === 'standard' ? '标准' : '定制' },
@@ -631,7 +633,14 @@ export default async function OrderDetailPage({
                   <div key={label} className="flex justify-between items-center">
                     <dt className="text-sm text-gray-500">{label}</dt>
                     <dd className="text-sm font-medium text-gray-900">
-                      {value === '__INLINE_EDIT__' ? (
+                      {value === '__SHIPPING_DATES__' ? (
+                        <ShippingDatesEdit
+                          orderId={id}
+                          etd={orderData.etd}
+                          warehouseDueDate={orderData.warehouse_due_date}
+                          canEdit={isAdmin || isOrderOwner || currentRoles.some((r) => ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'logistics'].includes(r))}
+                        />
+                      ) : value === '__INLINE_EDIT__' ? (
                         <InlineEditField
                           orderId={id}
                           field="internal_order_no"

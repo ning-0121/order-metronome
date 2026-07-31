@@ -1322,6 +1322,68 @@ export async function getOrder(id: string) {
   return { data: order };
 }
 
+/**
+ * 补录/修改船期(ETD / ETA)—— 2026-07-30。
+ *
+ * 背景:同日把建单的 ETD/ETA 改成选填(「船期定了再填」),但当时**没有任何地方能后补**:
+ * 订单详情页这两个字段是纯展示;唯一能写它们的 updateOrder(id, formData) 全库零调用,
+ * 是个从没挂载过的孤儿 action(同 OutsourceTab 那类问题)。等于让人留空却补不回来。
+ *
+ * 这里给一条窄通道:只写这两列,不碰别的字段(updateOrder 那个大函数会顺带覆盖
+ * incoterm/factory_date 等,拿来做补录容易误伤)。
+ * 排期不自动重算 —— 补了 ETA 会把 DDP 的排期锚点从「出厂日兜底」换回 ETA,
+ * 全部节点日期都会挪,那是有感知的动作,交给用户在「重算排期」里显式做。
+ */
+export async function updateOrderShippingDates(
+  orderId: string,
+  input: { etd?: string | null; warehouseDueDate?: string | null },
+): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('id, created_by, owner_user_id, order_date, factory_date, etd, warehouse_due_date, eta, cancel_date')
+    .eq('id', orderId).maybeSingle();
+  if (!order) return { error: '订单不存在' };
+
+  const { getUserRoles } = await import('@/lib/utils/user-role');
+  const roles = await getUserRoles(supabase, user.id);
+  const isOwner = (order as any).created_by === user.id || (order as any).owner_user_id === user.id;
+  const canEdit = roles.includes('admin') || isOwner
+    || roles.some((r) => ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'logistics'].includes(r));
+  if (!canEdit) return { error: '无权修改船期(仅业务/理单/物流/负责人/管理员)' };
+
+  const norm = (v: string | null | undefined) => {
+    const s = String(v ?? '').trim();
+    return s === '' ? null : s;
+  };
+  const next: Record<string, any> = {};
+  if ('etd' in input) next.etd = norm(input.etd);
+  if ('warehouseDueDate' in input) next.warehouse_due_date = norm(input.warehouseDueDate);
+  if (Object.keys(next).length === 0) return { error: '没有要修改的内容' };
+
+  // 日期链 invariant(order_date ≤ 出厂 ≤ ETD ≤ ETA ≤ cancel):补录同样要守,别把链填反
+  const { validateDateChainWithUpdate, formatDateChainErrors } = await import('@/lib/domain/orderDates');
+  const violations = validateDateChainWithUpdate(
+    {
+      order_date: (order as any).order_date, factory_date: (order as any).factory_date,
+      etd: (order as any).etd, warehouse_due_date: (order as any).warehouse_due_date,
+      eta: (order as any).eta, cancel_date: (order as any).cancel_date,
+    },
+    next,
+  );
+  if (violations.length > 0) return { error: formatDateChainErrors(violations) };
+
+  const { error } = await (supabase.from('orders') as any)
+    .update({ ...next, updated_at: new Date().toISOString() }).eq('id', orderId);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/orders');
+  return { ok: true };
+}
+
 export async function updateOrder(id: string, formData: FormData) {
   const supabase = await createClient();
 
