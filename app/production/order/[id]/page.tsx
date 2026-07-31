@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireProductionPage } from '@/lib/utils/production-page-guard';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
 import { ProductionIssuesPanel } from '@/components/production/ProductionIssuesPanel';
+import { QcInspectionsPanel } from '@/components/production/QcInspectionsPanel';
 import { OutsourceTab } from '@/components/tabs/OutsourceTab';
 import { OrderScheduleExportButton } from '@/components/schedule/OrderScheduleExportButton';
 
@@ -50,6 +51,16 @@ export default async function ProductionOrderNodePage({ params }: { params: Prom
       </div>
       <ProductionProgressTab orderId={id} orderNo={(order as any).order_no || ''} isAdmin={isAdmin} canReport={canReport} />
       <ProductionIssuesPanel orderId={id} canWrite={canReport} />
+
+      {/* QC 检验台账 + 主管委派加查(2026-07-30)。
+          此前 QC 的检验台账(QcTab)只挂在 /orders/[id],而那个页面明确写着"生产/QC 请去生产中心"
+          —— QC 被指引来的页面上反而没有自己的台账。这里补上,并支持主管委派加查/上线审查。 */}
+      <QcInspectionsPanel
+        orderId={id}
+        canAssign={roles.some((r) => ['production_manager', 'admin'].includes(r))}
+        canReport={canReport}
+        currentUserId={user.id}
+      />
 
       {/* 外发 / 工厂协作:外发加工 + 临时调货(裁片跨厂救急)+ 包装归集(各厂成品汇集到包装厂)。
           之前 OutsourceTab 从未挂载,外发/裁片功能进不去 —— 一并在生产中心暴露(2026-07-24)。 */}
