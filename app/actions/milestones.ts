@@ -1968,7 +1968,10 @@ export async function saveChecklistData(
 
   // 获取当前 milestone
   const { data: milestone } = await (supabase.from('milestones') as any)
-    .select('id, order_id, step_key, checklist_data, due_at')
+    // owner_role:检查项权限以该单物化的节点归属为准(同一 step_key 跨模板归属不同,见 canEditChecklistItemRole)
+    // owner_user_id:被【显式指派】到该节点的人即使角色不匹配也能填(与 MilestoneActions.isExplicitOwner 同口径)——
+    //   2026-07-30 把在办单验货节点改归 qc 后,原先被指派在上面的跟单/主管不能因此填不了字
+    .select('id, order_id, step_key, checklist_data, due_at, owner_role, owner_user_id')
     .eq('id', milestoneId)
     .single();
   if (!milestone) return { error: '节点不存在' };
@@ -2005,7 +2008,9 @@ export async function saveChecklistData(
       }
       // 普通字段：admin 可代任何角色;并放行同组(生产/QC/跟单)—— 与 client 保存过滤、节点操作权限一致
       // 修:中查(mid_qc_check)字段标 merchandiser,实际由生产部QC填,以前被拒「需要merchandiser角色」
-      if (!isStrict && !isAdminUserCl && !canEditChecklistItemRole(itemDef.role, userRoles)) {
+      const isExplicitOwnerCl = !!(milestone as any).owner_user_id && (milestone as any).owner_user_id === user.id;
+      if (!isStrict && !isAdminUserCl && !isExplicitOwnerCl
+        && !canEditChecklistItemRole(itemDef.role, userRoles, (milestone as any).owner_role)) {
         return { error: `无权编辑「${itemDef.label}」（需要${itemDef.role}角色）` };
       }
     }

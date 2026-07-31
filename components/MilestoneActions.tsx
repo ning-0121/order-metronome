@@ -648,6 +648,7 @@ export function MilestoneActions({
             milestone={milestone}
             orderId={orderId || ''}
             currentRoles={allRoles}
+            currentUserId={currentUserId}
             onResponsesChange={(responses) => { checklistResponsesRef.current = responses; }}
             onReady={(fill) => { checklistFillRef.current = fill; }}
           />
@@ -1116,10 +1117,12 @@ export function MilestoneActions({
 
 // ══════ 检查清单子组件 ══════
 
-function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange, onReady }: {
+function ChecklistSection({ milestone, orderId, currentRoles, currentUserId, onResponsesChange, onReady }: {
   milestone: any;
   orderId: string;
   currentRoles: string[];
+  /** 被显式指派到该节点的人,即使角色不匹配也能填(与 canModify.isExplicitOwner 同口径) */
+  currentUserId?: string | null;
   onResponsesChange?: (responses: Record<string, { value: any; pending_date?: string }>) => void;
   /** 暴露一个 fill 函数给父组件，供「拍照解析」一键填表用 */
   onReady?: (fill: (fields: Record<string, any>) => void) => void;
@@ -1206,7 +1209,10 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
         const itemDef = config?.items.find(i => i.key === key);
         if (!itemDef) return true;
         // 生产/QC/跟单 同组可编(与节点操作权限、server 校验一致)—— 修 QC 填完中查却「没有可保存的字段」
-        return canEditChecklistItemRole(itemDef.role, currentRoles);
+        // 以该单物化的节点归属为准(同 step_key 跨模板归属不同),与 server 校验同口径;
+        // 被显式指派到本节点的人即使角色不匹配也放行(节点改归 QC 后原指派人不该被踢出)
+        if (currentUserId && milestone.owner_user_id === currentUserId) return true;
+        return canEditChecklistItemRole(itemDef.role, currentRoles, milestone.owner_role);
       })
       .map(([key, r]) => ({
         key, value: r.value, pending_date: r.pending_date,
@@ -1274,7 +1280,8 @@ function ChecklistSection({ milestone, orderId, currentRoles, onResponsesChange,
               // 双签：如果 item 有 role 限制，且当前用户角色不匹配 → 禁用
               const rolesLower = currentRoles.map(r => r.toLowerCase());
               const canEdit = rolesLower.includes('admin')
-                || canEditChecklistItemRole(item.role || '', currentRoles);
+                || (!!currentUserId && milestone.owner_user_id === currentUserId)
+                || canEditChecklistItemRole(item.role || '', currentRoles, milestone.owner_role);
               const roleRestricted = !canEdit;
               const alreadyDone = !!val?.value; // 别人已经勾了
               return (

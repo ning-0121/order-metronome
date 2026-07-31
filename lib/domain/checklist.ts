@@ -507,23 +507,65 @@ function parseChecklistData(data: unknown): ChecklistData {
  */
 /**
  * 用户能否编辑某检查项字段(单一真相,client 保存过滤 + server 校验 + 复选禁用 三处共用)。
- * 规则:精确同角色 → 可编;并保留历史互通:
- *  · 业务↔跟单(sales↔merchandiser,早期一人身兼);
- *  · 生产组同组:merchandiser/production/production_manager/qc/quality —— mid_qc_check 等节点字段
- *    历史标 role='merchandiser',实际由生产部QC/生产跟单填(org:production=生产跟单=QC,无独立qc角色),
- *    以前 client/server 只桥接 sales↔merchandiser,导致 QC 填完却「没有可保存的字段」;
- *  · 业务组同组:sales/sales_assistant/admin_assistant。
+ *
+ * 2026-07-30 重做 —— QC 从生产部跟单中分离为独立角色后,原来那个
+ * `merchGroup=[merchandiser,production,production_manager,qc,quality]`「组内互填」必须拆掉,
+ * 否则 QC 和跟单永远隔离不了。但**不能简单删掉**,原因是 step_key 跨模板语义漂移:
+ *
+ *   final_qc_check 在生产库里同时存在三种 owner_role —— merchandiser 59 / production 89 / qc 1
+ *   (V1「跟单尾查」=production、V2=merchandiser、V3「尾期验货·QC」=qc);mid_qc_check 同理。
+ *   而 CHECKLIST_MAP 只按 step_key 索引,字段上那个 role 是**全局写死**的一个值,
+ *   表达不了"这一单归谁"。历史上这些字段全标了 merchandiser,QC 能填纯粹靠 merchGroup 兜着。
+ *
+ * 所以改成:**以该订单里程碑行上物化的 owner_role 为准**(nodeOwnerRole),字段 role 退为补充。
+ *   · 你是这个节点的 owner 角色 → 可填(V1 单归 production、V3 单归 qc,各自都对,不用改历史数据)
+ *   · 你的角色 == 字段标注角色 → 可填(处理一个节点里嵌别部门字段的情况,
+ *     如 order_docs_bom_complete 同时有 procurement 和 sales 字段)
+ *   · 业务侧内部互通照旧(sales↔merchandiser、sales/sales_assistant/admin_assistant 同组)
+ *   · production_manager 监督跟单且自己也跟单 → 视同 production/merchandiser;
+ *     但**不含 qc** —— 验货结论要独立,主管委派加查而不是自己填 QC 结果
+ *   · admin 由调用方另行放行,不在本函数
+ *
  * 注:严格双签字段(如 order_kickoff_meeting.sales_signed)不走本函数,仍需精确角色。
+ *
+ * @param nodeOwnerRole 该订单该节点 milestones.owner_role(物化值)。传空则退化为只看字段 role。
  */
-export function canEditChecklistItemRole(itemRole: string, userRoles: string[]): boolean {
+export function canEditChecklistItemRole(
+  itemRole: string,
+  userRoles: string[],
+  nodeOwnerRole?: string | null,
+): boolean {
+  const ur = (userRoles || []).map(r => String(r || '').toLowerCase()).filter(Boolean);
+
+  // 两个「岛」:本次只把 QC 从跟单里切出来,跟单/生产/生产主管之间照旧互通
+  // (用户 2026-07-30 只要求分离 QC;把跟单和生产也切开会误伤大量在途单)。
+  const MERCH_ISLAND = ['merchandiser', 'production', 'production_manager'];
+  const QC_ISLAND = ['qc', 'quality'];   // quality 是 qc 在部分库里的旧落值,同义
+  const inMerch = ur.some(r => MERCH_ISLAND.includes(r));
+  const inQc = ur.some(r => QC_ISLAND.includes(r));
+
   const rr = String(itemRole || '').toLowerCase();
   if (!rr) return true;   // 未标角色的字段人人可填
-  const ur = (userRoles || []).map(r => String(r || '').toLowerCase());
+  const owner = String(nodeOwnerRole || '').toLowerCase();
+  const isExec = (r: string) => MERCH_ISLAND.includes(r) || QC_ISLAND.includes(r);
+
+  // 执行家族内部:字段上那个 role 是历史噪音(验货字段全标 merchandiser,实际归 QC 或跟单,
+  // 且同一 step_key 跨模板归属不同 —— 生产库实测 final_qc_check 同时有 merchandiser/production/qc
+  // 三种 owner)→ 一律**以该单物化的 owner_role 为准**,由它决定这是 QC 的节点还是跟单的节点。
+  if (owner && isExec(rr) && isExec(owner)) {
+    if (QC_ISLAND.includes(owner)) return inQc;                              // QC 的验货节点:只有 QC 能填
+    if (inMerch) return true;                                                // 跟单/生产的节点:跟单家族能填
+    if (ur.includes('sales')) return true;                                   // 业务↔跟单历史互通(早期一人身兼),本次不动
+    return false;                                                            // QC 填不了跟单的节点 → 双向隔离
+  }
+
+  // 家族外字段(finance / procurement / sales 等刻意的跨部门嵌字段,如 order_docs_bom_complete
+  // 里嵌 procurement 项):按标注精确判,不能因为"节点归你"就放行别部门的字段。
+  if (MERCH_ISLAND.includes(rr) && inMerch) return true;
+  if (QC_ISLAND.includes(rr) && inQc) return true;
   if (ur.includes(rr)) return true;
-  if (rr === 'sales' && ur.includes('merchandiser')) return true;
+  if (rr === 'sales' && inMerch) return true;
   if (rr === 'merchandiser' && ur.includes('sales')) return true;
-  const merchGroup = ['merchandiser', 'production', 'production_manager', 'qc', 'quality'];
-  if (merchGroup.includes(rr) && ur.some(r => merchGroup.includes(r))) return true;
   const salesGroup = ['sales', 'sales_assistant', 'admin_assistant'];
   if (salesGroup.includes(rr) && ur.some(r => salesGroup.includes(r))) return true;
   return false;
@@ -544,6 +586,13 @@ export function validateChecklistComplete(
   const responseMap = new Map(safeData.map(r => [r.key, r]));
 
   // 同组角色判断（与 MilestoneActions.canModify 一致）
+  //
+  // ⚠️ 2026-07-30 别把这里"顺手"改成 canEditChecklistItemRole 那套两岛隔离 —— 方向是反的:
+  //   canEditChecklistItemRole 判的是【谁可以填】(收紧=更安全);
+  //   本函数判的是【哪些必填项要参与完成校验】(收紧=**跳过校验**,更危险)。
+  // 若让 qc 与 merchandiser 在此不同组,则 QC 拥有的 mid_qc_check/final_qc_check 里那 13/16 个
+  // 标着 merchandiser 的必填项会被整体 `continue` 掉 → QC 一个字不填也能把中查/尾查标记完成。
+  // 所以这里必须保持宽口径。
   const sameRoleGroup = (a: string, b: string): boolean => {
     if (a === b) return true;
     const merchGroup = ['merchandiser', 'production', 'production_manager', 'qc', 'quality'];
