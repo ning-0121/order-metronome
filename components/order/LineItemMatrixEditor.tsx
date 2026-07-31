@@ -358,6 +358,36 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   const numCell = 'rounded border border-gray-300 px-1 py-1 text-xs text-center w-16 min-w-16 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
   return (
     <div className="space-y-3">
+      {/* 上传入口置顶(2026-07-30 用户:「手工录入需要增加表格上传」—— 其实早就有,
+          但两个按钮和「总量」挤在同一行、样式又淡,还排在尺码列下面,用户根本没注意到。
+          这里在最上方给一个显眼的召唤条,原按钮保留不动。) */}
+      {canEdit && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-indigo-900">📥 有客户订单表?直接上传,不用手敲</p>
+              <p className="text-[11px] text-indigo-700/80 mt-0.5">
+                尺码成列的 Excel 走「上传客户订单」(零 AI、最准);
+                版式复杂或只有图片/PDF、只给了配比(如 S:M:L=2:2:2)走「AI 解析配比」。
+                解析后会填进下面的表,<b>可以再改再保存</b>。
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <label className={`px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`}
+                title="尺码数量成列的客户订单/生产单 Excel(如伊彤数量表),零 token 解析,预览可改">
+                {parsing ? '解析中…' : '📄 上传客户订单表'}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleParseOrderFile} disabled={parsing} />
+              </label>
+              <label className={`px-3 py-2 rounded-lg border border-purple-300 bg-white text-purple-700 text-xs font-medium hover:bg-purple-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`}
+                title="复杂版式/尺码配比(如年年旺:S:M:L=2:2:2 + 每色总量,或图片/PDF)用 AI 读取,自动按配比摊成每码件数">
+                {parsing ? 'AI 解析中…' : '🤖 图片/PDF 用 AI 解析'}
+                <input type="file" accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleParseAI} disabled={parsing} />
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 顶部:尺码集 + 汇总 + 保存 */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-xl border border-gray-200 p-3">
         <div className="flex flex-wrap items-center gap-1.5">
