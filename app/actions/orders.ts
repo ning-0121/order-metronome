@@ -222,8 +222,9 @@ export async function createOrder(
       .maybeSingle();
     if (dupIno) return { ok: false, error: `内部单号「${internal_order_no.trim()}」已被订单 ${(dupIno as any).order_no} 占用。请勿重复导入;如需新单请换内部单号。` };
   }
-  if (!etd && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETD（离港日）' };
-  if (!warehouse_due_date && incoterm === 'DDP') return { ok: false, error: 'DDP 条款请填写 ETA（到港/到仓日）' };
+  // 2026-07-30 用户拍板:建单只强制【出厂日期】。DDP 的 ETD/ETA 改为选填 ——
+  // 建单时船期常常还没定,以前硬卡这两个字段逼业务填假日期,反而污染日期链和排期。
+  // 排期已支持无 ETA 时用出厂日兜底(见 lib/schedule.ts calcDueDates 的 factoryDate)。
   if (!factory_date) return { ok: false, error: '请填写出厂日期' };
   if (!quantity) return { ok: false, error: '请填写预估总数量' };
   if (!styleCount) return { ok: false, error: '请填写款数' };
@@ -510,6 +511,7 @@ export async function createOrder(
       etd: scheduleEtd,
       warehouseDueDate: warehouse_due_date,
       eta: eta,
+      factoryDate: factory_date,   // DDP 无 ETA 时的兜底锚点(建单只强制出厂日期)
       orderType: (order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
       shippingSampleRequired: shipping_sample_required,
       shippingSampleDeadline: shipping_sample_deadline,
@@ -2084,6 +2086,7 @@ async function applyOrderPurposeChange(
         orderDate: o.order_date, createdAt: o.created_at ? new Date(o.created_at) : undefined,
         incoterm: (incoterm === 'DDP' ? 'DDP' : 'FOB') as 'FOB' | 'DDP',
         etd: o.etd, warehouseDueDate: o.warehouse_due_date, eta: o.eta,
+        factoryDate: o.factory_date,   // DDP 无 ETA 时的兜底锚点
         orderType: (o.order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
         shippingSampleRequired: deliveryType === 'export',
         sampleConfirmDaysOverride: o.sample_confirm_days_override,

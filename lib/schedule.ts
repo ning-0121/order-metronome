@@ -234,6 +234,13 @@ export interface CalcDueDatesParams {
   etd?: string | null;
   warehouseDueDate?: string | null;
   eta?: string | null;
+  /**
+   * 出厂日期。DDP 单在 ETA/送仓日都为空时的兜底锚点(2026-07-30:建单只强制出厂日期,
+   * ETD/ETA 改为选填 → 没有 ETA 的 DDP 单以前会在这里直接 throw、整单排不出期)。
+   * ⚠️ 用它兜底时**不减 25 天海运**:出厂日本身就是"货离厂"的那天,而 ETA 是到港日,
+   * 两者差的正是海运时间。再减一次会把全部节点提前 25 天。
+   */
+  factoryDate?: string | null;
   orderType?: 'sample' | 'bulk' | 'repeat';
   shippingSampleRequired?: boolean;
   shippingSampleDeadline?: string | null;
@@ -369,7 +376,7 @@ export function monotonicRepairDueDates(
 export function calcDueDates(params: CalcDueDatesParams) {
   const {
     orderDate, createdAt, incoterm,
-    etd, warehouseDueDate, eta,
+    etd, warehouseDueDate, eta, factoryDate,
     orderType,
     shippingSampleRequired = false,
     shippingSampleDeadline,
@@ -382,20 +389,32 @@ export function calcDueDates(params: CalcDueDatesParams) {
 
   // 计算实际锚点
   // FOB/RMB: 锚点 = ETD 或 出厂日期（factory_date 通过 etd 参数传入）
-  // DDP: 锚点 = ETA - 25天海运
+  // DDP:     锚点 = ETA - 25天海运;ETA/送仓日都没有时兜底用出厂日(见下)
   let anchorStr: string | null | undefined;
+  let anchorIsFactoryDate = false;   // 兜底走的出厂日 → 不能再减海运
   if (incoterm === 'FOB') {
     anchorStr = etd; // etd 可能是真正的ETD，也可能是 factory_date（RMB/FOB统一传入）
+    if (!anchorStr) { anchorStr = factoryDate; anchorIsFactoryDate = true; }
   } else {
     anchorStr = eta || warehouseDueDate;
+    // 2026-07-30:建单改为只强制出厂日期,ETD/ETA 选填 → 没填 ETA 的 DDP 单以前在这里
+    // 直接 throw,整单排不出期。兜底用出厂日,并跳过 -25 天(出厂日已经是"货离厂"那天,
+    // 而 ETA 是到港日,两者差的正是海运时间;再减一次会把所有节点提前 25 天)。
+    if (!anchorStr && factoryDate) { anchorStr = factoryDate; anchorIsFactoryDate = true; }
   }
   if (!anchorStr) throw new Error('缺少锚点日期：请填写出厂日期');
 
   const rawAnchor = new Date(anchorStr + 'T00:00:00+08:00');
-  const etaDate = eta ? new Date(eta + 'T00:00:00+08:00') : null;
+  // DDP 下"到港日"的口径:正常情况 rawAnchor 就是 ETA;拿出厂日兜底时,隐含到港日 = 出厂日 + 海运天数。
+  // 以 ETA 为锚的东西(收款 payment_received、客户自定义节奏里 anchor:'eta')都必须用它,
+  // 否则会整整早 25 天。tests/schedule-ddp-no-eta.test.ts 锁死两条路径逐节点一致(51/51)。
+  const ddpEtaAnchor = anchorIsFactoryDate ? addDays(rawAnchor, DDP_TRANSIT_DAYS) : rawAnchor;
+  const etaDate = eta
+    ? new Date(eta + 'T00:00:00+08:00')
+    : (anchorIsFactoryDate && incoterm === 'DDP' ? new Date(ddpEtaAnchor) : null);
 
-  // DDP 需要减去海运时间得到实际出运截止日
-  const A = incoterm === 'DDP' ? addDays(rawAnchor, -DDP_TRANSIT_DAYS) : rawAnchor;
+  // DDP 需要减去海运时间得到实际出运截止日;若锚点本来就是出厂日,则它已是出运截止日,不再减
+  const A = (incoterm === 'DDP' && !anchorIsFactoryDate) ? addDays(rawAnchor, -DDP_TRANSIT_DAYS) : rawAnchor;
 
   /** 客户覆盖优先：若 step_key 有客户自定义节奏，直接按锚点+偏移计算 */
   const applyOverride = (stepKey: string, fallback: Date): Date => {
@@ -488,9 +507,11 @@ export function calcDueDates(params: CalcDueDatesParams) {
     sample_customer_confirm:       cap(calc(TIMELINE.sample_customer_confirm)),
     sample_complete:               cap(calc(TIMELINE.sample_complete)),
     // FOB：默认出货前付款（ETD当天）| DDP：到港后10天（ETA+10）
+    // DDP 用 ddpEtaAnchor 而非 rawAnchor:正常情况下两者相同(rawAnchor 就是 ETA);
+    // 但没填 ETA、拿出厂日兜底时 rawAnchor 是出厂日,直接 +10 会让收款日整整早 25 天。
     payment_received:              applyOverride(
       'payment_received',
-      incoterm === 'FOB' ? new Date(rawAnchor) : addDays(rawAnchor, 10),
+      incoterm === 'FOB' ? new Date(rawAnchor) : addDays(ddpEtaAnchor, 10),
     ),
   };
 

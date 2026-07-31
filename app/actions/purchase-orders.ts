@@ -946,8 +946,14 @@ export async function resubmitPurchaseOrderApproval(poId: string): Promise<{
 
   // 退回普通草稿:清驳回态 + 清上一轮的审批理由快照(下单时会按最新金额/风险重算)。
   // approval_note 保留 —— 那是财务写的驳回原因,是审计痕迹。
+  //
+  // ⚠️ 必须写 'not_required' 而不是 null:approval_status 是
+  // `text NOT NULL DEFAULT 'not_required' CHECK (IN ('not_required','pending','approved','rejected'))`
+  // (迁移 20260701_procurement_p2a_approval.sql:13-14)。写 null 会直接被 NOT NULL 约束拒绝,
+  // 报「重置驳回状态失败:null value in column "approval_status" ... violates not-null constraint」,
+  // 导致「重新提交审批」这个唯一出口本身也是死的(用户 2026-07-30 报障)。
   const { error: clearErr } = await (supabase.from('purchase_orders') as any).update({
-    approval_status: null, approval_reasons: null, approval_required_by: null,
+    approval_status: 'not_required', approval_reasons: null, approval_required_by: null,
     approved_by: null, approved_at: null, updated_at: new Date().toISOString(),
   }).eq('id', poId).eq('approval_status', 'rejected');   // 并发保护:只有仍是 rejected 才清
   if (clearErr) return { error: '重置驳回状态失败:' + clearErr.message };

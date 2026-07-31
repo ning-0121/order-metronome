@@ -1018,6 +1018,7 @@ async function recalculateSchedule(
       incoterm: orderData.incoterm as 'FOB' | 'DDP',
       etd: scheduleEtd,
       warehouseDueDate: newWh,
+      factoryDate: newFactory,   // DDP 无 ETA 时的兜底锚点(用落库后的出厂日)
     });
 
     // Get all milestones for this order
@@ -1166,6 +1167,7 @@ export async function getImpactedMilestones(delayRequestId: string) {
       incoterm: orderData.incoterm as 'FOB' | 'DDP',
       etd: scheduleEtd,
       warehouseDueDate: newWh,
+      factoryDate: newFactory,   // DDP 无 ETA 时的兜底锚点(用落库后的出厂日)
     });
     
     // Get all milestones

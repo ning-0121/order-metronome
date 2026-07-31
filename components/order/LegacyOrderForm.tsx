@@ -1653,22 +1653,29 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <input type="date" name="factory_date" required
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
-                {/* DDP 才需要 ETD 和 ETA */}
+                {/* DDP 的 ETD / ETA:2026-07-30 用户拍板改为【选填】—— 建单时船期常常还没定,
+                    以前硬性必填逼业务先填个假日期,反而污染日期链和排期。只有出厂日期是必填。
+                    没填 ETA 时排期用出厂日兜底(lib/schedule.ts calcDueDates 的 factoryDate)。 */}
                 {incoterm === 'DDP' && (
                   <>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        ETD（离港日）<span className="text-red-500">*</span>
+                        ETD（离港日）<span className="text-gray-400 text-[10px]">（船期定了再填)</span>
                       </label>
-                      <input type="date" name="etd" required
+                      <input type="date" name="etd"
                         className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        ETA（到港/到仓日）<span className="text-red-500">*</span>
+                        ETA（到港/到仓日）<span className="text-gray-400 text-[10px]">（船期定了再填)</span>
                       </label>
-                      <input type="date" name="warehouse_due_date" required
+                      <input type="date" name="warehouse_due_date"
                         className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                    </div>
+                    <div className="col-span-2 -mt-1">
+                      <p className="text-[11px] text-gray-400">
+                        💡 ETD/ETA 可留空,后续订舱确定后再补。留空时系统按<b>出厂日期</b>排期。
+                      </p>
                     </div>
                   </>
                 )}

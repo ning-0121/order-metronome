@@ -39,6 +39,7 @@ export async function recalcOrderMilestones(orderId: string) {
       etd: scheduleEtd,
       warehouseDueDate: order.warehouse_due_date,
       eta: order.eta,
+      factoryDate: order.factory_date,   // DDP 无 ETA 时的兜底锚点
       skipPreProductionSample: !!order.skip_pre_production_sample,
       sampleConfirmDaysOverride: order.sample_confirm_days_override ?? null,
     });

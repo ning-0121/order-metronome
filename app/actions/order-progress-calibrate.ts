@@ -160,6 +160,7 @@ export async function rebuildOrderMilestones(orderId: string): Promise<{ ok?: bo
       createdAt: o.created_at ? new Date(o.created_at) : undefined,
       incoterm: scheduleIncoterm as 'FOB' | 'DDP',
       etd: o.etd, warehouseDueDate: o.warehouse_due_date, eta: o.eta,
+      factoryDate: o.factory_date,   // DDP 无 ETA 时的兜底锚点
       orderType: (o.order_type as 'sample' | 'bulk' | 'repeat') || 'bulk',
       shippingSampleRequired: deliveryType === 'export',
       sampleConfirmDaysOverride: o.sample_confirm_days_override,

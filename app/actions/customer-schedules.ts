@@ -134,6 +134,7 @@ export async function batchRecalcCustomerMilestones(
         etd: order.etd,
         warehouseDueDate: order.warehouse_due_date,
         eta: order.eta,
+        factoryDate: order.factory_date,   // DDP 无 ETA 时的兜底锚点
         shippingSampleRequired: order.shipping_sample_required ?? false,
         shippingSampleDeadline: order.shipping_sample_deadline,
         skipPreProductionSample: order.skip_pre_production_sample ?? false,
