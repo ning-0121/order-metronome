@@ -5,6 +5,10 @@
  *
  * 触发：customer_name 选择 / 输入时实时查询
  * 行为：根据 CreditTier 显示对应颜色和文案，提醒业务采用合适付款条款
+ *
+ * 标题固定为「系统提醒」(2026-07-30 用户拍板):本卡是 lib/domain/customerCredit.ts 的
+ * 确定性规则算出来的，**不是 AI**。真走大模型的走 AIAdviceBox 的「AI 建议」，两者不混用 ——
+ * 免得业务把规则结论当 AI 猜测打折扣、或把 AI 建议当系统事实照做。
  */
 
 import { useEffect, useState } from 'react';
@@ -61,6 +65,12 @@ export function CustomerCreditBanner({ customerName }: Props) {
 
   return (
     <div className={`rounded-lg border ${c.border} ${c.bg} p-3 space-y-1.5`}>
+      {/* 卡片来源标题:规则算的挂「系统提醒」,与 AIAdviceBox 的「AI 建议」区分开 */}
+      <div className="flex items-center gap-1.5 pb-1.5 border-b border-current/10">
+        <span className={`text-[11px] font-semibold tracking-wide ${c.titleText}`}>🔔 系统提醒</span>
+        <span className="text-[10px] text-gray-500">· 按客户历史数据自动评估</span>
+      </div>
+
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className={`text-sm font-semibold ${c.titleText}`}>
           {info.label} · {info.customerName}

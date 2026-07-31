@@ -22,6 +22,7 @@ import type { OrderTemplate } from '@/app/actions/order-templates';
 import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
+import { OrderDraftBar } from '@/components/order/OrderDraftBar';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
 import {
   customerSelectionLabel, selectedCustomerFromDraft, toSelectedCustomer,
@@ -132,6 +133,8 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const [loading, setLoading] = useState(false);
   const [staleActionDetected, setStaleActionDetected] = useState(false);
   const stepOneFormRef = React.useRef<HTMLFormElement>(null);
+  // 正在编辑的 order_drafts 记录 id(存过一次后续保存即更新同一条;建单成功后删掉)
+  const [draftId, setDraftId] = React.useState<string | null>(null);
   const createSubmissionInFlight = React.useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -1064,6 +1067,15 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
       const newOrderId = result.orderId!;
       clearSafeOrderDraft();
+      // 单已建成 → 对应的显式草稿没用了,删掉免得列表里留一堆已下单的残draft。
+      // fire-and-forget:删失败不影响建单(用户也可在草稿列表手动删)。
+      if (draftId) {
+        const idToDrop = draftId;
+        setDraftId(null);
+        void import('@/app/actions/order-drafts')
+          .then((m) => m.deleteOrderDraft(idToDrop))
+          .catch(() => { /* 不阻断建单 */ });
+      }
       setOrderId(newOrderId);
 
       if (filesToUpload.length > 0) {
@@ -1261,6 +1273,16 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 })()}
               </div>
             )}
+          </div>
+
+          {/* 保存草稿 / 继续填写(跨设备)。放表单外壳内、字段之前,离开前随手能点到。 */}
+          <div className="mb-4">
+            <OrderDraftBar
+              formRef={stepOneFormRef}
+              draftId={draftId}
+              onDraftIdChange={setDraftId}
+              onRestored={(fields) => setSelectedCustomer(selectedCustomerFromDraft(fields))}
+            />
           </div>
 
           <form ref={stepOneFormRef} onSubmit={handleStep1Submit} className="space-y-8"
