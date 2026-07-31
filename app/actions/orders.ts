@@ -234,6 +234,10 @@ export async function createOrder(
   const colorPending = formData.get('color_pending') === 'true';
   {
     const { resolveOrderFormRules, findMissingRequired } = await import('@/lib/domain/formRules');
+    // 服务端必须读**同一份 DB 覆盖**,否则前端按覆盖渲染、后端按代码默认校验 → 又变回双真相源
+    // (典型症状:管理员把某字段配成选填,前端不再标星,提交却仍被后端拦住)
+    const { getOrderFormOverrides } = await import('@/app/actions/form-field-rules');
+    const ruleOverrides = await getOrderFormOverrides(formData.get('customer_id') as string | null);
     const rules = resolveOrderFormRules({
       poMode: (formData.get('po_mode') as any) || null,
       orderType: order_type,
@@ -242,7 +246,7 @@ export async function createOrder(
       shippingSampleRequired: formData.get('shipping_sample_required') === 'true',
       colorPending,
       isImport,
-    });
+    }, ruleOverrides);
     const missing = findMissingRequired({
       internal_order_no, factory_date, total_quantity: quantity, style_count: styleCount,
       color_count: colorCount, customer_po_number, order_date, order_type, incoterm,

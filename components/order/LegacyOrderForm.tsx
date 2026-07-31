@@ -25,7 +25,8 @@ import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { OrderDraftBar } from '@/components/order/OrderDraftBar';
 import { SectionHeader, RequiredProgressBar } from '@/components/order/FormSection';
 // 字段必填/可见性的单一真相源 —— 服务端 createOrder 读的是同一份,别在本文件写死 required
-import { resolveOrderFormRules } from '@/lib/domain/formRules';
+import { resolveOrderFormRules, type FieldRuleOverride } from '@/lib/domain/formRules';
+import { getOrderFormOverrides } from '@/app/actions/form-field-rules';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
 import {
   customerSelectionLabel, selectedCustomerFromDraft, toSelectedCustomer,
@@ -139,12 +140,23 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   // 正在编辑的 order_drafts 记录 id(存过一次后续保存即更新同一条;建单成功后删掉)
   const [draftId, setDraftId] = React.useState<string | null>(null);
 
+  // 字段规则的 DB 覆盖层(form_field_rules)。初始为空 = 代码默认 = 现状,所以不会闪。
+  // 拉取失败一律当"无覆盖"处理 —— 配置层挂了要退回默认行为,不能让建单页打不开。
+  const [ruleOverrides, setRuleOverrides] = React.useState<FieldRuleOverride[]>([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    getOrderFormOverrides(selectedCustomer?.id ?? null)
+      .then((ov) => { if (!cancelled) setRuleOverrides(ov || []); })
+      .catch(() => { /* 退回代码默认 */ });
+    return () => { cancelled = true; };
+  }, [selectedCustomer?.id]);
+
   // 字段必填规则:与服务端 createOrder 共用 lib/domain/formRules,避免前后端各写一套
   // (此前前端 12 个 required、后端 5 个 if,对不上;且 no_po 时仍强制填 PO 号)
   const fieldRules = React.useMemo(() => resolveOrderFormRules({
     poMode, orderType, incoterm, deliveryType,
     shippingSampleRequired, colorPending, isImport,
-  }), [poMode, orderType, incoterm, deliveryType, shippingSampleRequired, colorPending, isImport]);
+  }, ruleOverrides), [poMode, orderType, incoterm, deliveryType, shippingSampleRequired, colorPending, isImport, ruleOverrides]);
   const createSubmissionInFlight = React.useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
