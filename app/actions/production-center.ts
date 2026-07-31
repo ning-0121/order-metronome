@@ -106,8 +106,13 @@ export async function getProductionCenter(): Promise<{
   }
   // 打样单不进生产中心(NULL 用途当 production;打样上线前审计:此前误入虚增在产/待采购噪音)
   const list = ((orders || []) as any[]).filter((o) => (o.order_purpose || 'production') !== 'sample');
+  // 历史完成数必须与上面的在产口径**同样排除打样单**(2026-07-30 修):
+  // 这里原先是全表唯一没排 sample 的统计 —— 打样单从没在任何上游阶段出现过,
+  // 却会被算进「已发货/完成」的分子和完成率分母,凭空虚增完成率。
+  // (今天恰好 0 张已完成打样单,所以没暴露;属于埋着的雷。)
   let terminalQuery = (svc.from('orders') as any).select('id', { count: 'exact', head: true })
-    .in('lifecycle_status', ['completed', '已完成', 'archived', '已归档']);
+    .in('lifecycle_status', ['completed', '已完成', 'archived', '已归档'])
+    .or('order_purpose.is.null,order_purpose.neq.sample');
   if (allowedIds) terminalQuery = terminalQuery.in('id', Array.from(allowedIds));
   const { count: historicalCompletedCount } = await terminalQuery;
   if (list.length === 0) return { data: [], summary: { ...emptySummary(), completed: historicalCompletedCount || 0 } };
@@ -237,12 +242,21 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
   const svc = createServiceRoleClient();
   const today = new Date().toISOString().slice(0, 10);
   // 滞留候选:工厂期已过 且 仍活跃(非 完成/取消/归档/草稿/待审)
-  const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, order_purpose, created_at')
+  // production_stage_manual 必须取:界面用 effectiveStage(auto, 手动档),导出以前只用 auto,
+  // 手动调过阶段的单会出现「界面一个阶段、发给采购/生产核对的表另一个阶段」(2026-07-30 修)。
+  // 列缺失(迁移未跑)→ 降级去掉该列,只用 auto,不让整个导出报错。
+  const EXP_SEL = 'id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, order_purpose, created_at, production_stage_manual';
+  const EXP_SEL_NO_MANUAL = 'id, order_no, internal_order_no, customer_name, factory_name, quantity, factory_date, etd, lifecycle_status, order_purpose, created_at';
+  const runExpOrders = (sel: string) => (svc.from('orders') as any)
+    .select(sel)
     .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档","draft","pending_approval")')
     .not('factory_date', 'is', null)
     .lt('factory_date', today)
     .order('factory_date', { ascending: true });
+  let { data: orders, error: expErr } = await runExpOrders(EXP_SEL);
+  if (expErr && /production_stage_manual|column .* does not exist|schema cache/i.test(expErr.message || '')) {
+    ({ data: orders } = await runExpOrders(EXP_SEL_NO_MANUAL));
+  }
   const list = ((orders || []) as any[]).filter((o) => (o.order_purpose || 'production') !== 'sample');   // 打样单不算生产滞留
   if (list.length === 0) return { error: '没有工厂期已过的滞留订单,无需核对' };
   const orderIds = list.map((o) => o.id);
@@ -300,7 +314,9 @@ export async function exportProductionReconciliation(): Promise<{ base64?: strin
     const factoryDone = pickStageSignal(mo, FACTORY_DONE_KEYS);   // 尾查/工厂完成;V2:回落尾期验货(完工)
     const shipped = mo['shipment_execute'] || null;                                // 发货出运=出运信号(出运才离开生产中心)
     const completion = factoryDone || shipped; // 展示「工厂完成」列
-    const stage = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
+    // 与界面同口径:手动档做下限(effectiveStage),否则导出的阶段会和界面对不上
+    const autoStage = computeStage(m, kickoff, factoryDone, shipped, mo['procurement_order_placed'] || null);
+    const stage = effectiveStage(autoStage, (o.production_stage_manual as ProductionStage | 'done' | null) || null);
     const matText = m.total === 0 ? '未起料' : `到 ${m.received}/${m.total}${m.pending > 0 ? ` · 未下单${m.pending}` : ''}`;
     ws.addRow([
       o.internal_order_no || o.order_no || o.id, o.customer_name || '', o.quantity ?? '',

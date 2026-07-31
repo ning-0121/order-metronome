@@ -28,6 +28,8 @@ const PHASE_KEYS = [
   { label: '物流收款', keys: ['booking_done', 'customs_export', 'payment_received'] },
 ];
 import { isActiveStatus, isBlockedStatus, isDoneStatus, isApprovalPending } from '@/lib/domain/types';
+// 订单分组(进行中/已完成/已取消)与「不用再管了」集合的单一真相源 —— 别在本文件再内联一份
+import { classifyOrderGroup, DONE_LIFECYCLE } from '@/lib/domain/orderGrouping';
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
 const _isBlocked = (s: string) => isBlockedStatus(s);
@@ -142,18 +144,19 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const totalProduction = (allOrders || []).filter((o: any) => (o.order_purpose || 'production') !== 'sample').length;
   const totalSample = (allOrders || []).filter((o: any) => o.order_purpose === 'sample').length;
 
-  // lifecycle_status 完成/取消集合（统一放这里，后面超期计算也用）
-  const DONE_LIFECYCLE = new Set(['completed', 'cancelled', '已完成', '已取消']);
-
-  // 按完成状态分组：milestone 全完成 OR lifecycle_status 已完成/已取消 → 都算完成
-  const completedOrders = purposeOrders.filter((o: any) => {
-    const ms = o.milestones || [];
-    const allMsDone = ms.length > 0 && ms.every((m: any) => _isDone(m.status));
-    const lifecycleDone = DONE_LIFECYCLE.has(o.lifecycle_status || '');
-    return allMsDone || lifecycleDone;
-  });
-  const activeOrders = purposeOrders.filter((o: any) => !completedOrders.includes(o));
-  const baseOrders = statusFilter === 'completed' ? completedOrders : activeOrders;
+  // 2026-07-30 修:原来「已完成」把 cancelled/已取消 也算了进去 —— 13 张客户砍掉的单被计成"完成",
+  // 完成率虚高、复盘失真(取消 ≠ 交付)。现在取消单独立成组:
+  //   已完成 = 节点全完成 OR lifecycle 已完成(**不含取消**)
+  //   已取消 = lifecycle 已取消(单独一组,仍看得到,不会消失)
+  // 对账:改前「已完成」90 = 真完成 77 + 取消 13;改后 已完成 77 / 已取消 13,
+  //       与生产中心的「历史完成 77」精确对上。
+  // 分组规则抽到 lib/domain/orderGrouping.ts(可测、别再内联抄),见该文件顶部说明
+  const cancelledOrders = purposeOrders.filter((o: any) => classifyOrderGroup(o, o.milestones) === 'cancelled');
+  const completedOrders = purposeOrders.filter((o: any) => classifyOrderGroup(o, o.milestones) === 'completed');
+  const activeOrders = purposeOrders.filter((o: any) => classifyOrderGroup(o, o.milestones) === 'active');
+  const baseOrders = statusFilter === 'completed' ? completedOrders
+    : statusFilter === 'cancelled' ? cancelledOrders
+    : activeOrders;
 
   const shipHoldCount = baseOrders.filter((o: any) => isCustomerShipHoldFromOrder(o)).length;
   const shipHoldStaleCount = baseOrders.filter((o: any) => isCustomerHoldStale(o)).length;
@@ -391,6 +394,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         {[
           { key: 'active', label: '进行中', count: activeOrders.length },
           { key: 'completed', label: '已完成', count: completedOrders.length },
+          // 取消单独立成组(2026-07-30):此前混在「已完成」里,让完成率虚高
+          { key: 'cancelled', label: '已取消', count: cancelledOrders.length },
         ].map(tab => (
           <Link
             key={tab.key}
