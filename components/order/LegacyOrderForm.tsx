@@ -139,6 +139,8 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const stepOneFormRef = React.useRef<HTMLFormElement>(null);
   // 正在编辑的 order_drafts 记录 id(存过一次后续保存即更新同一条;建单成功后删掉)
   const [draftId, setDraftId] = React.useState<string | null>(null);
+  // 贸易区里三个少用项(Cancel Date / AQL / Shipping Sample)的折叠开关
+  const [showTradeExtras, setShowTradeExtras] = React.useState(false);
 
   // 字段规则的 DB 覆盖层(form_field_rules)。初始为空 = 代码默认 = 现状,所以不会闪。
   // 拉取失败一律当"无覆盖"处理 —— 配置层挂了要退回默认行为,不能让建单页打不开。
@@ -1589,26 +1591,6 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 </div>
 
                 {/* 国内送仓 — 客户指定仓库信息（仅 domestic 显示） */}
-                {/* AQL 验货标准 — 合同条款，订单创建时锁定 */}
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    AQL 验货标准 <span className="text-gray-400 text-xs">（合同条款，下游尾查 prefill）</span>
-                  </label>
-                  <select
-                    name="aql_standard"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    defaultValue=""
-                  >
-                    <option value="">— 未指定（建议根据 PO 条款选择）—</option>
-                    <option value="1.5">AQL 1.5（严格，多用于高端/品牌客户）</option>
-                    <option value="2.5">AQL 2.5（标准，最常用）</option>
-                    <option value="4.0">AQL 4.0（宽松，价格敏感订单）</option>
-                    <option value="customer_specified">客户指定其他标准</option>
-                  </select>
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    💡 AQL 决定工厂排产时的容差，订单创建时确定可避免尾查时才发现标准不对
-                  </p>
-                </div>
                 {deliveryType === 'domestic' && (
                   <div className="col-span-2 rounded-lg bg-amber-50 border border-amber-200 p-4 space-y-3">
                     <div className="flex items-center gap-2">
@@ -1662,11 +1644,6 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                 )}
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Cancel Date</label>
-                  <input type="date" name="cancel_date"
-                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
-                </div>
-                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     出厂日期 <span className="text-red-500">*</span>
                   </label>
@@ -1699,18 +1676,6 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                     </div>
                   </>
                 )}
-                <div className="col-span-2">
-                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50">
-                    <input type="checkbox" name="shipping_sample_required" value="true"
-                      checked={shippingSampleRequired}
-                      onChange={(e) => setShippingSampleRequired(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 text-indigo-600" />
-                    <div>
-                      <span className="text-sm font-medium text-gray-900">需要 Shipping Sample</span>
-                      <p className="text-xs text-gray-500 mt-0.5">勾选后需填写截止日期</p>
-                    </div>
-                  </label>
-                </div>
 
                 {/* 样品阶段选择 */}
                 <div className="col-span-2">
@@ -1741,6 +1706,58 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                     某些客户产前样确认要将近 1 个月 — 提前设置可让排期更真实
                   </p>
                 </div>
+                {/* 少用项收进折叠(2026-07-31 审计):这三块的实测使用率 ——
+                    Cancel Date 0/202、AQL 4/202(2%)、需要 Shipping Sample 0/202。
+                    以前它们和出厂日期、ETD/ETA 平铺在一起,新人分不清哪些非填不可。
+                    ⚠️ 折叠用 hidden 而非条件渲染,字段照常提交(见 FormSection.tsx 顶部说明)。 */}
+                <div className="col-span-2">
+                  <button type="button" onClick={() => setShowTradeExtras((v) => !v)}
+                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1.5 py-1">
+                    <span>{showTradeExtras ? '－' : '＋'}</span>
+                    <span>Cancel Date · AQL 验货标准 · Shipping Sample</span>
+                    <span className="text-gray-400 font-normal">(都是选填,很少用)</span>
+                  </button>
+                </div>
+                <div className="col-span-2 grid grid-cols-2 gap-4" hidden={!showTradeExtras}>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Cancel Date</label>
+                  <input type="date" name="cancel_date"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
+                </div>
+                {/* AQL 验货标准 — 合同条款，订单创建时锁定 */}
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    AQL 验货标准 <span className="text-gray-400 text-xs">（合同条款，下游尾查 prefill）</span>
+                  </label>
+                  <select
+                    name="aql_standard"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    defaultValue=""
+                  >
+                    <option value="">— 未指定（建议根据 PO 条款选择）—</option>
+                    <option value="1.5">AQL 1.5（严格，多用于高端/品牌客户）</option>
+                    <option value="2.5">AQL 2.5（标准，最常用）</option>
+                    <option value="4.0">AQL 4.0（宽松，价格敏感订单）</option>
+                    <option value="customer_specified">客户指定其他标准</option>
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    💡 AQL 决定工厂排产时的容差，订单创建时确定可避免尾查时才发现标准不对
+                  </p>
+                </div>
+                <div className="col-span-2">
+                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50">
+                    <input type="checkbox" name="shipping_sample_required" value="true"
+                      checked={shippingSampleRequired}
+                      onChange={(e) => setShippingSampleRequired(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600" />
+                    <div>
+                      <span className="text-sm font-medium text-gray-900">需要 Shipping Sample</span>
+                      <p className="text-xs text-gray-500 mt-0.5">勾选后需填写截止日期</p>
+                    </div>
+                  </label>
+                </div>
+                </div>
+
                 {shippingSampleRequired && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
