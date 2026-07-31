@@ -225,16 +225,42 @@ export async function createOrder(
   // 2026-07-30 用户拍板:建单只强制【出厂日期】。DDP 的 ETD/ETA 改为选填 ——
   // 建单时船期常常还没定,以前硬卡这两个字段逼业务填假日期,反而污染日期链和排期。
   // 排期已支持无 ETA 时用出厂日兜底(见 lib/schedule.ts calcDueDates 的 factoryDate)。
-  if (!factory_date) return { ok: false, error: '请填写出厂日期' };
-  if (!quantity) return { ok: false, error: '请填写预估总数量' };
-  if (!styleCount) return { ok: false, error: '请填写款数' };
+  //
+  // 必填校验统一读 lib/domain/formRules 的规则表(2026-07-31,L2 第一步)——
+  // 此前前端 12 个 required、后端 5 个 if,两份各不相干、靠"前端先拦住"维持表面一致。
+  // 后果:① 一旦按客户隐藏字段,这里的硬编码立刻露馅,提交必然失败;
+  //       ② 已藏 bug —— 选「没有客户 PO」仍强制填 PO 号(前端卡、后端不管),业务只能瞎填。
+  // 现在两端读同一份;接 DB 覆盖层时也只需覆盖那一份。
+  const colorPending = formData.get('color_pending') === 'true';
+  {
+    const { resolveOrderFormRules, findMissingRequired } = await import('@/lib/domain/formRules');
+    const rules = resolveOrderFormRules({
+      poMode: (formData.get('po_mode') as any) || null,
+      orderType: order_type,
+      incoterm,
+      deliveryType: delivery_type,
+      shippingSampleRequired: formData.get('shipping_sample_required') === 'true',
+      colorPending,
+      isImport,
+    });
+    const missing = findMissingRequired({
+      internal_order_no, factory_date, total_quantity: quantity, style_count: styleCount,
+      color_count: colorCount, customer_po_number, order_date, order_type, incoterm,
+      quantity_unit: formData.get('quantity_unit'),
+      repeat_issues: formData.get('repeat_issues'),
+      shipping_sample_deadline,
+    }, rules);
+    if (missing.length) {
+      // 颜色数单独给引导文案(原文案里的"勾颜色待定"是业务真的会用的出口)
+      const hint = missing.includes('颜色数') ? '(颜色还没定?勾「颜色待定」即可先建单,后期补)' : '';
+      return { ok: false, error: `请填写:${missing.join('、')}${hint}` };
+    }
+  }
 
   // 国内送仓校验：创建时允许全部为空（部分客户尚未确认仓库/地址/联系人/送达日期）。
   // 推进到「包装方式确认」节点前必须补齐 → 见 app/actions/milestones.ts hard-block。
   // 14 天后仍缺失则由 missing_info 任务自动催办 → 见 generateMissingInfoTasks。
   // 颜色待定:颜色还没定就能先建单(勾了「颜色待定」免填颜色数),后期到订单明细补齐并取消标签。
-  const colorPending = formData.get('color_pending') === 'true';
-  if (!colorCount && !colorPending) return { ok: false, error: '请填写颜色数（颜色还没定?勾「颜色待定」即可先建单,后期补）' };
 
   // ── 日期合理性校验 ──
   const today = new Date();

@@ -24,6 +24,8 @@ import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { OrderDraftBar } from '@/components/order/OrderDraftBar';
 import { SectionHeader, RequiredProgressBar } from '@/components/order/FormSection';
+// 字段必填/可见性的单一真相源 —— 服务端 createOrder 读的是同一份,别在本文件写死 required
+import { resolveOrderFormRules } from '@/lib/domain/formRules';
 import { validateFileName, STEP_KEY_BY_FILE_TYPE } from '@/lib/domain/fileNaming';
 import {
   customerSelectionLabel, selectedCustomerFromDraft, toSelectedCustomer,
@@ -136,6 +138,13 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const stepOneFormRef = React.useRef<HTMLFormElement>(null);
   // 正在编辑的 order_drafts 记录 id(存过一次后续保存即更新同一条;建单成功后删掉)
   const [draftId, setDraftId] = React.useState<string | null>(null);
+
+  // 字段必填规则:与服务端 createOrder 共用 lib/domain/formRules,避免前后端各写一套
+  // (此前前端 12 个 required、后端 5 个 if,对不上;且 no_po 时仍强制填 PO 号)
+  const fieldRules = React.useMemo(() => resolveOrderFormRules({
+    poMode, orderType, incoterm, deliveryType,
+    shippingSampleRequired, colorPending, isImport,
+  }), [poMode, orderType, incoterm, deliveryType, shippingSampleRequired, colorPending, isImport]);
   const createSubmissionInFlight = React.useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -1302,6 +1311,10 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
             }}
           >
 
+            {/* 录入方式要带到服务端:必填规则里「没有客户 PO 就不强制填 PO 号」依赖它。
+                此前 poMode 只活在前端 state,服务端拿不到 → 规则判不出情境。 */}
+            <input type="hidden" name="po_mode" value={poMode ?? ''} />
+
             {/* ── 录入方式:有PO / 没PO ── */}
             <div>
               <SectionHeader num={1} title="录入方式" hint="先说清这单从哪来 —— 有客户 PO 就上传,系统自动读" />
@@ -1356,7 +1369,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     客户 PO 号 <span className="text-red-500">*</span>
                   </label>
-                  <input type="text" name="customer_po_number" required
+                  <input type="text" name="customer_po_number" required={fieldRules.customer_po_number.required}
                     placeholder="客户采购单号"
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                   {customerPos.length >= 2 && (
@@ -1391,7 +1404,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     内部订单号（订单册编号）<span className="text-red-500">*</span>
                   </label>
-                  <input type="text" name="internal_order_no" required
+                  <input type="text" name="internal_order_no" required={fieldRules.internal_order_no.required}
                     placeholder="订单册编号（必填）"
                     onChange={e => setInternalOrderNoLive(e.target.value)}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
@@ -1401,7 +1414,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     订单日期 <span className="text-red-500">*</span>
                   </label>
-                  <input type="date" name="order_date" required
+                  <input type="date" name="order_date" required={fieldRules.order_date.required}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
                 {/* 订单用途:生产订单 vs 采购成品/贸易订单(trade)。样品单由独立入口,不在此选。
@@ -1430,7 +1443,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     订单类型 <span className="text-red-500">*</span>
                   </label>
-                  <select name="order_type" required value={orderType}
+                  <select name="order_type" required={fieldRules.order_type.required} value={orderType}
                     onChange={e => setOrderType(e.target.value)}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                     <option value="">请选择</option>
@@ -1454,7 +1467,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                     </div>
                     <div>
                       <label className="text-xs text-gray-600">上一单存在的问题 <span className="text-red-500">*</span></label>
-                      <textarea name="repeat_issues" required rows={2} placeholder="如：面料缩水率偏高、交期延了5天、客户对颜色不满意..."
+                      <textarea name="repeat_issues" required={fieldRules.repeat_issues.required} rows={2} placeholder="如：面料缩水率偏高、交期延了5天、客户对颜色不满意..."
                         className="mt-1 block w-full rounded-lg border border-amber-300 px-3 py-2 text-sm bg-white" />
                     </div>
                     <div>
@@ -1470,10 +1483,10 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                     预估总数量 <span className="text-red-500">*</span>
                   </label>
                   <div className="flex gap-2">
-                    <input type="number" name="total_quantity" min="1" required
+                    <input type="number" name="total_quantity" min="1" required={fieldRules.total_quantity.required}
                       placeholder="数量"
                       className="block flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                    <select name="quantity_unit" required
+                    <select name="quantity_unit" required={fieldRules.quantity_unit.required}
                       className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none">
                       <option value="件">件</option>
                       <option value="套">套（2件）</option>
@@ -1488,7 +1501,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     款数 <span className="text-red-500">*</span>
                   </label>
-                  <input type="number" name="style_count" min="1" required
+                  <input type="number" name="style_count" min="1" required={fieldRules.style_count.required}
                     placeholder="此 PO 涉及款数"
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
@@ -1500,7 +1513,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                       ⏳ 颜色待定(后期补)
                     </label>
                   </label>
-                  <input type="number" name="color_count" min="1" required={!colorPending} disabled={colorPending}
+                  <input type="number" name="color_count" min="1" required={fieldRules.color_count.required} disabled={colorPending}
                     placeholder={colorPending ? '颜色待定 · 免填,后期到订单明细补齐' : '此 PO 共计颜色数'}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-amber-50 disabled:text-amber-500 disabled:cursor-not-allowed" />
                   <input type="hidden" name="color_pending" value={colorPending ? 'true' : 'false'} />
@@ -1529,7 +1542,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     贸易条款 <span className="text-red-500">*</span>
                   </label>
-                  <select name="incoterm" required value={incoterm}
+                  <select name="incoterm" required={fieldRules.incoterm.required} value={incoterm}
                     onChange={(e) => {
                       const v = e.target.value;
                       setIncoterm(v);
@@ -1721,7 +1734,7 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Shipping Sample 截止日 <span className="text-red-500">*</span>
                     </label>
-                    <input type="date" name="shipping_sample_deadline" required
+                    <input type="date" name="shipping_sample_deadline" required={fieldRules.shipping_sample_deadline.required}
                       className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                   </div>
                 )}
