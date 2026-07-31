@@ -39,9 +39,9 @@ const PRODUCTION_QC = ['production', 'production_manager', 'qc', 'quality', 'mer
  * (mo_released 自动完成;procurement_order_placed / production_kickoff / payment_received 单方)
  */
 export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]> = {
-  // 1. PO审查确认 = 业务执行经理 + 财务 会签。2026-07-27 CEO 改回【软会签】(见 SOFT_CONFIRM_STEPS):
+  // 1. PO审查确认 = 业务执行经理 + 财务 会签。CEO 于 2026-07-27 拍板【软会签】,
+  //    但代码直到 2026-07-30 才真正落地(见 SOFT_CONFIRM_STEPS 的历史说明)。
   //    业务可独立完成,不被财务/主管不点卡死逾期;财务/业务执行经理仍在「多方确认」区看到可选确认(留痕+提醒)。
-  //    (2026-07-25 曾改硬闸,实操中催不动→责任人常年逾期,故回退)。
   po_confirmed: [
     { key: 'exec_mgr', label: '业务执行经理', roles: ['order_manager', 'sales_manager'], hint: 'PO 内容/交期/要点/客户要求 审核(可选会签)' },
     { key: 'finance', label: '财务', roles: FINANCE, hint: '价格/账期/额度审核 + 预算录入(可选会签)' },
@@ -73,10 +73,20 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
  * 「软会签」节点(2026-07-14 用户拍板):多方确认改为可选会签(仍可点、仍发提醒),
  * 但责任人可直接完成、不被硬卡——避免催不动别人时节点卡死逾期。
  *  - pre_production_sample_approved:产前样确认(采购/业务执行会签可选)。
- * 硬卡全确认的节点:po_confirmed(2026-07-25 CEO 改硬:PO必经业务执行经理+财务)、
- *   尾期验货 final_qc_sales_check、订舱 booking_done、发货出运 shipment_execute。
+ *  - po_confirmed:PO审查确认(业务执行经理/财务会签可选)。
+ *
+ * ⚠️ po_confirmed 的历史(别再改错):
+ *   2026-07-14 软会签 → 07-25 CEO 改硬闸 → 07-27 CEO 拍板改回软会签。
+ *   但 07-27 那次提交(302a662「fix(PO确认): 改回软会签」)**只改了注释和 hint 文案,
+ *   没有把 po_confirmed 加回本集合** —— 硬闸实际一直生效到 2026-07-30。
+ *   后果:业务在 UI 上连「确认完成」按钮都看不到(MilestoneActions 的 isMultiPartyNode),
+ *   而 po_confirmed 的 due = 下单当天(schedule.ts TIMELINE.po_confirmed = 0),
+ *   于是 CEO 驾驶舱「订单开发」部门常年 46 在办 / 27 逾期,逾期天数 = 下单至今天数。
+ *   本次(2026-07-30)真正落地该修复。改动此集合前请先看 pre-deploy-check 的断言。
+ *
+ * 仍硬卡全确认的节点:尾期验货 final_qc_sales_check、订舱 booking_done、发货出运 shipment_execute。
  */
-export const SOFT_CONFIRM_STEPS = new Set(['pre_production_sample_approved']);
+export const SOFT_CONFIRM_STEPS = new Set(['po_confirmed', 'pre_production_sample_approved']);
 export function isSoftConfirm(stepKey: string | null | undefined): boolean {
   return !!stepKey && SOFT_CONFIRM_STEPS.has(stepKey);
 }

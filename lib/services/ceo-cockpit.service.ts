@@ -7,7 +7,24 @@
 import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
 
 const DONE = new Set(['done', '已完成', 'completed']);
+/** 已终结的订单(真的走完/作废了)。用于"近30天完成数"这类**产出统计**。 */
 const TERMINAL_LC = new Set(['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档', '已复盘']);
+
+/**
+ * 不计逾期的订单生命周期 = 已终结 ∪ **尚未激活**。
+ *
+ * 未激活的三种:draft(草稿) / pending_approval(待审批) / paused(暂停) —— 这些单还没真正开跑,
+ * 却因为 po_confirmed 的 due = 下单当天(schedule.ts TIMELINE.po_confirmed = 0),
+ * 一建出来就天天累计逾期,把 CEO 驾驶舱的数字顶得很高。
+ *
+ * ⚠️ 必须与工作台 app/dashboard/page.tsx 的 `.not('orders.lifecycle_status', 'in', ...)`
+ * 保持同一份名单 —— 2026-07-28 CEO 质疑"逾期数虚高"时只改了工作台、漏了驾驶舱,
+ * 同一批单在两个页面显示不同的逾期数(2026-07-30 对齐)。改一处必须改另一处。
+ *
+ * ⚠️ 别把这三种并进 TERMINAL_LC:那个集合被"近30天完成数"用着,
+ * 并进去会把草稿/暂停单统计成"已完成"。两个集合各司其职,不要合并。
+ */
+const NO_OVERDUE_LC = new Set([...TERMINAL_LC, 'draft', 'pending_approval', 'paused']);
 const isDone = (s: any) => DONE.has(String(s || '').toLowerCase()) || DONE.has(String(s || ''));
 
 /** owner_role → 五部门 */
@@ -50,7 +67,8 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const { data: orders } = await supabase.from('orders')
     .select('id, order_no, internal_order_no, customer_name, order_purpose, lifecycle_status, created_at, factory_date, owner_user_id, created_by')
     .order('created_at', { ascending: false }).limit(2000);
-  const notTerminal = (o: any) => !TERMINAL_LC.has(String(o.lifecycle_status || '').toLowerCase()) && !TERMINAL_LC.has(String(o.lifecycle_status || ''));
+  // "在办/计逾期"的口径:排除已终结 **和** 尚未激活(草稿/待审批/暂停)的订单,与工作台对齐。
+  const notTerminal = (o: any) => !NO_OVERDUE_LC.has(String(o.lifecycle_status || '').toLowerCase()) && !NO_OVERDUE_LC.has(String(o.lifecycle_status || ''));
   // 打样单不进 B(部门健康)/E(员工)/D(卡住)/里程碑逾期口径——避免打样延期污染部门健康度与员工准时率
   //   (打样上线前审计)。C 段 sampleActive 另从全量单单独统计,不受影响。
   const liveOrders = ((orders || []) as any[]).filter((o) => notTerminal(o) && (o.order_purpose || 'production') !== 'sample');

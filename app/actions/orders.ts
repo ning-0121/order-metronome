@@ -777,14 +777,24 @@ export async function createOrder(
         .eq('id', orderData.id);
 
       // 6b. 里程碑激活(原 approveImportOrder 逻辑内联):已过步骤 done、当前步骤 in_progress
+      //
+      // ⚠️ 2026-07-30 修:原来是在 MILESTONE_TEMPLATE_V1 里 findIndex 求序号,但订单实际物化的
+      // 可能是 V2(15节点)/V3(19节点)/trade 模板 —— 两个后果:
+      //   ① importCurrentStep 若是 V1 里没有的步骤 → findIndex = -1 → **整段回填被静默跳过**,
+      //      所有节点(含 po_confirmed)留 pending,而导入单的 order_date 是过去的日期,
+      //      于是一建出来就已逾期几十天(CEO 驾驶舱「订单开发」逾期的来源之一);
+      //   ② 即使找得到,V1 的下标也对不上实际里程碑的 sequence_number → 标错节点。
+      // 正确做法:直接在**这张订单自己的里程碑**里按 step_key 找当前步,用它真实的 sequence_number。
       try {
-        const templates = (await import('@/lib/milestoneTemplate')).MILESTONE_TEMPLATE_V1;
-        const currentIndex = templates.findIndex(t => t.step_key === importCurrentStep);
-        if (currentIndex >= 0) {
-          const { data: milestones } = await (supabase.from('milestones') as any)
-            .select('id, sequence_number, due_at').eq('order_id', orderData.id).order('sequence_number', { ascending: true });
-          const currentSeq = currentIndex + 1;
-          for (const ms of (milestones || []) as any[]) {
+        const { data: milestones } = await (supabase.from('milestones') as any)
+          .select('id, step_key, sequence_number, due_at').eq('order_id', orderData.id).order('sequence_number', { ascending: true });
+        const rows = (milestones || []) as any[];
+        const current = rows.find((m) => m.step_key === importCurrentStep);
+        if (!current) {
+          console.warn(`[createOrder] 导入步骤 ${importCurrentStep} 不在该订单的里程碑里,跳过回填(订单 ${orderData.id})`);
+        } else {
+          const currentSeq = current.sequence_number;
+          for (const ms of rows) {
             const updates: any = {};
             if (ms.sequence_number < currentSeq) { updates.status = 'done'; updates.actual_at = ms.due_at || new Date().toISOString(); }
             else if (ms.sequence_number === currentSeq) { updates.status = 'in_progress'; }
@@ -1797,18 +1807,26 @@ export async function approveImportOrder(orderId: string): Promise<{ error?: str
   }
 
   // 获取所有里程碑，标记已过步骤为 done，当前步骤为 in_progress
-  const templates = (await import('@/lib/milestoneTemplate')).MILESTONE_TEMPLATE_V1;
-  const currentIndex = templates.findIndex(t => t.step_key === importCurrentStep);
-
-  if (currentIndex >= 0) {
+  //
+  // ⚠️ 2026-07-30 修:原来用 MILESTONE_TEMPLATE_V1 的下标当序号,但订单实际可能是 V2/V3/trade
+  // 模板 —— 步骤不在 V1 里就 findIndex = -1 → 整段回填静默跳过(所有节点留 pending,
+  // 而导入单 order_date 在过去 → 一建出来就已逾期几十天);即便找到,V1 下标也对不上真实
+  // sequence_number → 标错节点。改为在这张订单**自己的**里程碑里按 step_key 定位。
+  // 同时补上 select 的 due_at:下面用了 ms.due_at,原来没查出来 → 永远回落 now(),
+  // 把历史单的完成时间写成今天。
+  {
     const { data: milestones } = await (supabase.from('milestones') as any)
-      .select('id, step_key, sequence_number')
+      .select('id, step_key, sequence_number, due_at')
       .eq('order_id', orderId)
       .order('sequence_number', { ascending: true });
 
-    if (milestones) {
-      const currentSeq = currentIndex + 1;
-      for (const ms of milestones as any[]) {
+    const rows = (milestones || []) as any[];
+    const current = rows.find((m) => m.step_key === importCurrentStep);
+    if (!current) {
+      console.warn(`[approveImportedOrder] 导入步骤 ${importCurrentStep} 不在该订单里程碑中,跳过回填(订单 ${orderId})`);
+    } else {
+      const currentSeq = current.sequence_number;
+      for (const ms of rows) {
         const updates: any = {};
         if (ms.sequence_number < currentSeq) {
           updates.status = 'done';

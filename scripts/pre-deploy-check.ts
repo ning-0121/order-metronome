@@ -8,7 +8,7 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { MILESTONE_TEMPLATE_V1, MILESTONE_TEMPLATE_V2, SAMPLE_MILESTONE_TEMPLATE, TRADE_MILESTONE_TEMPLATE, getApplicableMilestones } from '../lib/milestoneTemplate';
-import { MILESTONE_CONFIRMATION_PARTIES } from '../lib/domain/confirmationParties';
+import { MILESTONE_CONFIRMATION_PARTIES, isSoftConfirm } from '../lib/domain/confirmationParties';
 import { overReceiptCheck } from '../lib/domain/procurement';
 import { computeSuggestedPurchaseQty } from '../lib/services/procurement-consolidation';
 import { matchBaseline, checkOverBaseline, checkTrimTotalOverBudget } from '../lib/domain/cost-baseline';
@@ -78,6 +78,11 @@ console.log('\n🤝 多方确认');
     assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `多方确认节点 ${step} 在 V2 模板里`);
     assert(parties.every(p => p.roles.length > 0 && p.key && p.label), `${step} 各确认方 key/label/roles 完整`);
   }
+  // 软/硬会签必须显式断言 —— 2026-07-27 有一次提交号称把 po_confirmed 改回软会签,
+  // 实际只改了注释,硬闸又生效了 5 天(业务连完成按钮都看不到,PO 节点常年逾期),
+  // 而当时这里只校验"确认方数量",完全没拦住。别删这两条。
+  assert(isSoftConfirm('po_confirmed'), 'po_confirmed 必须是软会签(业务可独立完成,否则 PO 节点全员卡死逾期)');
+  assert(isSoftConfirm('pre_production_sample_approved'), 'pre_production_sample_approved 必须是软会签');
   // 配置里不能出现 V2 模板没有的节点(防拼写漂移)
   for (const step of Object.keys(MILESTONE_CONFIRMATION_PARTIES)) {
     assert(MILESTONE_TEMPLATE_V2.some(m => m.step_key === step), `确认配置的 ${step} 存在于 V2 模板`);
