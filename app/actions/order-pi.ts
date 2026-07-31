@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { buildPIWorkbook } from '@/lib/services/shipping-doc-builders';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { orderSizeKeys } from '@/lib/utils/size-sort';
 
 const CAN_EDIT_PI = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'];
 
@@ -104,7 +105,7 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
   const seePrice = canSeePIPrice(roles);   // 无权看客户成交价 → 下方两个返回都抹价
 
   const { data: order, error: oErr } = await (supabase.from('orders') as any)
-    .select('order_no, customer_name, po_number, factory_date, currency, eta').eq('id', orderId).maybeSingle();
+    .select('order_no, customer_name, po_number, factory_date, currency, eta, size_order').eq('id', orderId).maybeSingle();
   if (oErr) return { error: `读取订单失败:${oErr.message}` };
   if (!order) return { error: '订单不存在' };
 
@@ -117,7 +118,7 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
 
   // 现算草稿:按款号归组(多颜色行并入一款)
   const { data: lis } = await (supabase.from('order_line_items') as any)
-    .select('style_no, product_name, product_name_en, color_cn, color_en, sizes, unit, qty_pcs, fabric_name, fabric_width, carton_count, po_unit_price, remark, line_no')
+    .select('style_no, product_name, product_name_en, color_cn, color_en, sizes, unit, qty_pcs, set_multiplier, fabric_name, fabric_width, carton_count, po_unit_price, remark, line_no')
     .eq('order_id', orderId).order('line_no', { ascending: true });
 
   // 面料 BOM(克重/成分自动带过去):materials_bom 里 material_type=fabric/lining 行的 spec = 成分/克重/纱支
@@ -141,7 +142,12 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
   }
   const lines: PILine[] = [...groups.values()].map((rows) => {
     const first = rows[0];
-    const unitLabel = first.unit && !/pcs|件/i.test(first.unit) ? 'SETS' : 'PCS';
+    // 套装判定看 set_multiplier,不能看 unit 列 —— saveOrderLineItems 把 unit 硬编码成 'pcs',
+    // 原写法的 SETS 分支永远不可达:套装单 10200 套会被印成「10200 PCS」,数量单位对不上,
+    // 客户按件理解直接差一半(2026-07-31 实测 QM-20260729-001 中招)。
+    // qty_pcs 在套装单里存的是套数(见 orderStatPieces 同口径),所以数量本身没错,只是单位标签错。
+    const isSet = rows.some((l) => Number(l.set_multiplier) > 1);
+    const unitLabel = isSet || (first.unit && !/pcs|件/i.test(first.unit)) ? 'SETS' : 'PCS';
     const totalQty = rows.reduce((s, l) => s + qtyOf(l), 0);
     const totalCarton = rows.reduce((s, l) => s + (Number(l.carton_count) || 0), 0);
     // 按款×色合并(客户加单同款×色多行 → 合并求和,PI 不出 BLACK(500)\nBLACK(300))
@@ -155,7 +161,14 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
     }
     const mergedColors = [..._colorMap.values()];
     const color = mergedColors.map((m) => m.qty ? `${m.nm}(${m.qty}${unitLabel})` : m.nm).filter(Boolean).join('\n');
-    const sizeKeys = Object.keys(mergedColors.reduce((acc, m) => { for (const k of Object.keys(m.sizes)) acc[k] = 1; return acc; }, {} as Record<string, number>));
+    // 尺码必须排序后再印:sizes 是 jsonb,Object.keys 出来的是**写入顺序**不是码序 ——
+    // 实测 QM-20260729-001 印成「L-M-S-XL」,这种一眼可见的乱序最伤 PI 的专业度(2026-07-31 领导开始看格式)。
+    // 走 lib/utils/size-sort 的 orderSizeKeys(优先该单自定义码序 orders.size_order,否则标准码序),
+    // 那个文件顶上就写着「下游别再自造 SIZE_ORDER」,PI 之前恰恰绕过了它。
+    const sizeKeys = orderSizeKeys(
+      Object.keys(mergedColors.reduce((acc, m) => { for (const k of Object.keys(m.sizes)) acc[k] = 1; return acc; }, {} as Record<string, number>)),
+      (order as any).size_order,
+    );
     const fab = fabByStyle.get(first.style_no || '') || fabByStyle.get('');
     return {
       po_no: poNo,
@@ -174,8 +187,8 @@ export async function getPI(orderId: string): Promise<{ data?: PIBundle; error?:
     };
   });
 
-  const now = new Date();
-  const issueDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // 开票日期按中国时区取(服务器在 Vercel 是 UTC:国内早上 8 点前生成的 PI 会写成前一天的日期)
+  const issueDate = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
   const draft: PIData = {
     buyer_name: (order as any).customer_name || '',
     buyer_address: '', buyer_tel: '',
@@ -203,16 +216,25 @@ export async function savePI(orderId: string, data: PIData): Promise<{ ok?: bool
 }
 
 /** 导出 PI Excel(严格贴模板版式:14 列 A–N)。base64 供前端下载。 */
-export async function exportPI(orderId: string): Promise<{ base64?: string; fileName?: string; error?: string }> {
+export async function exportPI(orderId: string): Promise<{ base64?: string; fileName?: string; warning?: string; error?: string }> {
   const { userId } = await auth();
   if (!userId) return { error: '请先登录' };
   const res = await getPI(orderId);
   if ((res as any).error || !res.data) return { error: (res as any).error || 'PI 数据为空' };
   const pi = res.data;
 
+  // 出门前体检(2026-07-31,领导开始按 PI 格式考核):单价 0 / AMOUNT 0 的 PI 发给客户
+  // 比版式难看严重得多。不拦导出(有先发无价 PI 的场景),但把问题明确说出来。
+  const unpriced = pi.lines.filter((l) => (Number(l.qty) || 0) > 0 && !(Number(l.unit_price) > 0));
+  const warning = pi.price_masked
+    ? '你的角色看不到客户成交价,导出的 PI 单价/金额全为 0 —— 请由业务/理单导出正式版。'
+    : unpriced.length
+      ? `有 ${unpriced.length} 款未填单价(${unpriced.map((l) => l.style_no || '?').slice(0, 4).join('、')}),对应 AMOUNT 为 0。发客户前请先在 PI 页补上成交价。`
+      : undefined;
+
   const wb = await buildPIWorkbook(pi);
   const buf = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buf as ArrayBuffer).toString('base64');
   const fileName = `PI-${res.data.order_no || orderId}-${pi.invoice_no || pi.lines[0]?.po_no || ''}.xlsx`.replace(/[^\w.\-]/g, '_');
-  return { base64, fileName };
+  return { base64, fileName, warning };
 }

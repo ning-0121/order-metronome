@@ -394,8 +394,12 @@ export async function buildPIWorkbook(pi: PIData, orderNoForName?: string | null
   for (const ln of pi.lines) {
     const amount = Math.round((Number(ln.qty) || 0) * (Number(ln.unit_price) || 0) * 100) / 100;
     sumCarton += Number(ln.total_carton) || 0; sumQty += Number(ln.qty) || 0; sumAmount += amount;
+    // 未知的箱数/单价留空,不要印 0 —— 正式发票上「0」是一个断言(零箱、零单价),
+    // 而实际含义是「还没填」。印 0 会让客户以为报价为零(2026-07-31 领导开始按格式考核)。
+    // QTY 保留 0:数量本就该有值,是 0 说明数据有问题,应该看得见。
+    const blank0 = (v: any) => (Number(v) > 0 ? Number(v) : '');
     const vals: any[] = [ln.po_no, ln.style_no, ln.style, ln.size, ln.color, ln.description, ln.composition, ln.fabric_weight,
-      Number(ln.total_carton) || 0, Number(ln.unit_per_carton) || 0, Number(ln.qty) || 0, Number(ln.unit_price) || 0, amount, ln.notes];
+      blank0(ln.total_carton), blank0(ln.unit_per_carton), Number(ln.qty) || 0, blank0(ln.unit_price), amount > 0 ? amount : '', ln.notes];
     vals.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v; c.alignment = { vertical: 'middle', wrapText: true }; c.border = box; });
     const maxLines = Math.max(1, ...[ln.color, ln.description, ln.size, ln.composition].map((t) => String(t || '').split('\n').length));
     ws.getRow(r).height = Math.max(20, maxLines * 15);
@@ -403,7 +407,7 @@ export async function buildPIWorkbook(pi: PIData, orderNoForName?: string | null
   }
   sumAmount = Math.round(sumAmount * 100) / 100;
   ws.getCell(r, 1).value = 'TOTAL'; ws.getCell(r, 1).font = bold;
-  const totalMap: Record<number, number> = { 9: sumCarton, 11: sumQty, 13: sumAmount };
+  const totalMap: Record<number, any> = { 9: sumCarton > 0 ? sumCarton : '', 11: sumQty, 13: sumAmount > 0 ? sumAmount : '' };
   for (const col of [9, 11, 13]) { const c = ws.getCell(r, col); c.value = totalMap[col]; c.font = bold; }
   for (let col = 1; col <= 14; col++) ws.getCell(r, col).border = box;
   r++;

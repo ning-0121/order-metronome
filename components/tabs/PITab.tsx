@@ -72,6 +72,8 @@ export function PITab({ orderId }: { orderId: string }) {
     const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a');
     a.href = url; a.download = r.fileName || 'PI.xlsx'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    // 出门体检结果(未填价/被抹价):文件照下,但把问题亮出来,别让 AMOUNT=0 的 PI 就这么发给客户
+    if ((r as any).warning) setMsg('⚠️ ' + (r as any).warning);
   }
 
   if (loading) return <div className="text-center py-8 text-gray-400 text-sm">加载 PI…</div>;
