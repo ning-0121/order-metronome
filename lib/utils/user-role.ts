@@ -1,19 +1,19 @@
 /**
  * V1 Minimal Role Permissions
- * 
+ *
  * Role determination:
- * - Admin allowlist: alex@qimoclothing.com, su@qimoclothing.com => role=admin
+ * - Admin allowlist: 见 lib/config/brand.ts 的 ADMIN_EMAILS（可用 env ADMIN_EMAILS 覆盖）
  * - Others: default role=sales (V1)
- * 
+ *
  * TODO: Later add user_roles table for proper role management
  */
 
-export type UserRole = 'admin' | 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics';
+// 名单收口到 lib/config/brand.ts（L1，2026-08-01）。
+// 此前这份名单和 lib/utils/admin-route-guard.ts 里的 ADMIN_EMAILS 是**两份各自维护的副本**，
+// 改一处漏一处就是权限口子 —— 一边认了管理员、另一边不认。
+import { ADMIN_EMAILS as ADMIN_ALLOWLIST } from '@/lib/config/brand';
 
-const ADMIN_ALLOWLIST = [
-  'alex@qimoclothing.com',
-  'su@qimoclothing.com',
-];
+export type UserRole = 'admin' | 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics';
 
 /**
  * Determine user role from email

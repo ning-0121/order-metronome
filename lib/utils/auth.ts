@@ -1,5 +1,7 @@
+import { EMAIL_DOMAIN_SUFFIX, isTenantEmail } from '@/lib/config/brand';
+
 export function isAllowedEmailDomain(email: string): boolean {
-  return email.toLowerCase().endsWith('@qimoclothing.com');
+  return isTenantEmail(email);
 }
 
 export function isValidEmail(email: string): boolean {
@@ -15,7 +17,7 @@ export function validateEmail(email: string): { valid: boolean; error?: string }
     return { valid: false, error: '邮箱格式不正确' };
   }
   if (!isAllowedEmailDomain(email)) {
-    return { valid: false, error: '仅允许 @qimoclothing.com 邮箱登录' };
+    return { valid: false, error: `仅允许 ${EMAIL_DOMAIN_SUFFIX} 邮箱登录` };
   }
   return { valid: true };
 }

@@ -3,6 +3,7 @@ import { useState, Suspense } from 'react';
 import { signIn, signUp } from '@/app/actions/auth';
 import { sendPasswordResetEmail } from '@/app/actions/reset-password';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { EMAIL_DOMAIN_SUFFIX } from '@/lib/config/brand';
 
 type Mode = 'login' | 'register' | 'forgot';
 
@@ -17,7 +18,7 @@ function LoginForm() {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(
-    error ? { type: 'error', text: '邮箱域名不在允许范围内，请使用 @qimoclothing.com 邮箱' } : null
+    error ? { type: 'error', text: `邮箱域名不在允许范围内，请使用 ${EMAIL_DOMAIN_SUFFIX} 邮箱` } : null
   );
 
   async function handleSubmit(e: React.FormEvent) {
@@ -68,8 +69,8 @@ function LoginForm() {
       setLoading(false);
       return;
     }
-    if (!email.endsWith('@qimoclothing.com')) {
-      setMessage({ type: 'error', text: '仅允许 @qimoclothing.com 邮箱' });
+    if (!email.endsWith(EMAIL_DOMAIN_SUFFIX)) {
+      setMessage({ type: 'error', text: `仅允许 ${EMAIL_DOMAIN_SUFFIX} 邮箱` });
       setLoading(false);
       return;
     }
@@ -108,7 +109,7 @@ function LoginForm() {
           </div>
           <p className="text-xs text-gray-400 mb-1">卡风险，而不是走流程</p>
           <p className="text-sm font-medium text-gray-600">{titles[mode]}</p>
-          <p className="text-xs text-gray-400 mt-1">仅限 @qimoclothing.com 邮箱</p>
+          <p className="text-xs text-gray-400 mt-1">仅限 {EMAIL_DOMAIN_SUFFIX} 邮箱</p>
         </div>
 
         {/* 消息提示 */}
@@ -141,7 +142,7 @@ function LoginForm() {
             <input
               type="email" required value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="your.name@qimoclothing.com"
+              placeholder={`your.name${EMAIL_DOMAIN_SUFFIX}`}
               autoComplete="email"
               className="block w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />

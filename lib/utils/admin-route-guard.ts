@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { isAdminRole } from '@/lib/domain/roles';
+// 与 lib/utils/user-role.ts 共用同一份名单（L1，2026-08-01 收口，此前是两份各自维护的副本）
+import { ADMIN_EMAILS } from '@/lib/config/brand';
 
 /**
  * 管理/回填/导入类 API 路由统一鉴权守卫（fail-closed）。
@@ -11,7 +13,6 @@ import { isAdminRole } from '@/lib/domain/roles';
  * 背景：多个 service-role 写接口此前要么完全不校验、要么 CRON_SECRET 没设时短路、
  * 要么任意登录用户即放行（2026-06-19 审计）。统一收口到这里。
  */
-const ADMIN_EMAILS = ['alex@qimoclothing.com', 'su@qimoclothing.com'];
 
 export async function guardAdminRoute(
   req: Request,
