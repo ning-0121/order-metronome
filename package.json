@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts && node --import tsx scripts/test-keep90-invariants.ts && npm run test",
+    "check": "npm run lint:tdz && node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts && node --import tsx scripts/test-keep90-invariants.ts && npm run test",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:runtime": "node --import tsx scripts/test-runtime-confidence.ts",
@@ -26,7 +26,8 @@
     "db:baseline": "node --import tsx scripts/db-migrate.mts baseline",
     "db:migrate": "node --import tsx scripts/db-migrate.mts migrate",
     "predeploy": "npm run build && npm run check",
-    "prepare": "husky"
+    "prepare": "husky",
+    "lint:tdz": "node scripts/check-tdz.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

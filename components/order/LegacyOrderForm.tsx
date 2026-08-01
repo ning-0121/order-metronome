@@ -142,23 +142,6 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   // 贸易区里三个少用项(Cancel Date / AQL / Shipping Sample)的折叠开关
   const [showTradeExtras, setShowTradeExtras] = React.useState(false);
 
-  // 字段规则的 DB 覆盖层(form_field_rules)。初始为空 = 代码默认 = 现状,所以不会闪。
-  // 拉取失败一律当"无覆盖"处理 —— 配置层挂了要退回默认行为,不能让建单页打不开。
-  const [ruleOverrides, setRuleOverrides] = React.useState<FieldRuleOverride[]>([]);
-  React.useEffect(() => {
-    let cancelled = false;
-    getOrderFormOverrides(selectedCustomer?.id ?? null)
-      .then((ov) => { if (!cancelled) setRuleOverrides(ov || []); })
-      .catch(() => { /* 退回代码默认 */ });
-    return () => { cancelled = true; };
-  }, [selectedCustomer?.id]);
-
-  // 字段必填规则:与服务端 createOrder 共用 lib/domain/formRules,避免前后端各写一套
-  // (此前前端 12 个 required、后端 5 个 if,对不上;且 no_po 时仍强制填 PO 号)
-  const fieldRules = React.useMemo(() => resolveOrderFormRules({
-    poMode, orderType, incoterm, deliveryType,
-    shippingSampleRequired, colorPending, isImport,
-  }, ruleOverrides), [poMode, orderType, incoterm, deliveryType, shippingSampleRequired, colorPending, isImport, ruleOverrides]);
   const createSubmissionInFlight = React.useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -205,6 +188,30 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
   const [orderType, setOrderType] = useState('');
   // 订单用途:production(默认) | trade(采购成品/贸易订单)。sample 由独立入口决定。
   const [orderPurpose, setOrderPurpose] = useState('production');
+
+  // ⚠️ 以下两块**必须放在它们依赖的所有 useState 之后**。
+  // 2026-07-31 事故:原本插在 draftId 后面(第 ~147 行),而 incoterm/poMode/orderType 等
+  // 声明在 166~205 行 —— const 有暂时性死区(TDZ),运行时报
+  // `Cannot access 'xx' before initialization`,建单页整页白屏打不开。
+  // 构建期不会报错(TDZ 是运行时的),别再往上挪。
+  //
+  // 字段规则的 DB 覆盖层(form_field_rules)。初始为空 = 代码默认 = 现状,所以不会闪。
+  // 拉取失败一律当"无覆盖"处理 —— 配置层挂了要退回默认行为,不能让建单页打不开。
+  const [ruleOverrides, setRuleOverrides] = React.useState<FieldRuleOverride[]>([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    getOrderFormOverrides(selectedCustomer?.id ?? null)
+      .then((ov) => { if (!cancelled) setRuleOverrides(ov || []); })
+      .catch(() => { /* 退回代码默认 */ });
+    return () => { cancelled = true; };
+  }, [selectedCustomer?.id]);
+
+  // 字段必填规则:与服务端 createOrder 共用 lib/domain/formRules,避免前后端各写一套
+  // (此前前端 12 个 required、后端 5 个 if,对不上;且 no_po 时仍强制填 PO 号)
+  const fieldRules = React.useMemo(() => resolveOrderFormRules({
+    poMode, orderType, incoterm, deliveryType,
+    shippingSampleRequired, colorPending, isImport,
+  }, ruleOverrides), [poMode, orderType, incoterm, deliveryType, shippingSampleRequired, colorPending, isImport, ruleOverrides]);
 
   // 模板相关状态
   const [templates, setTemplates] = useState<OrderTemplate[]>([]);
