@@ -1424,6 +1424,59 @@ export async function updateOrderShippingDates(
   return { ok: true };
 }
 
+/**
+ * 补录/修改国内送仓信息(2026-07-31)。
+ *
+ * 和 ETD/ETA 是同一个病:建单时仓库常常还没定(CEO 2026-07-28 已因此撤掉「包装方式确认」
+ * 前的硬卡),但**建单之后全库再没有第二处能写这 5 列** —— createOrder 是唯一写入点。
+ * 详情页那条黄条还写着"请在「订单基本信息」编辑区域补充",而那个编辑区域并不存在。
+ * 结果:48 张单卡在「国内送仓完成」pending,完成它要送仓信息,却无处可填。
+ *
+ * 这里补上那条通道。只写这 5 列,不碰别的字段。
+ */
+export async function updateOrderDeliveryInfo(
+  orderId: string,
+  input: {
+    warehouseName?: string | null; address?: string | null;
+    contact?: string | null; phone?: string | null; requiredAt?: string | null;
+  },
+): Promise<{ ok?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+
+  const { data: order } = await (supabase.from('orders') as any)
+    .select('id, created_by, owner_user_id, delivery_type').eq('id', orderId).maybeSingle();
+  if (!order) return { error: '订单不存在' };
+  if ((order as any).delivery_type !== 'domestic') return { error: '仅国内送仓订单需要填送仓信息' };
+
+  const { getUserRoles } = await import('@/lib/utils/user-role');
+  const roles = await getUserRoles(supabase, user.id);
+  const isOwner = (order as any).created_by === user.id || (order as any).owner_user_id === user.id;
+  const canEdit = roles.includes('admin') || isOwner
+    || roles.some((r) => ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'logistics'].includes(r));
+  if (!canEdit) return { error: '无权修改送仓信息(仅业务/理单/物流/负责人/管理员)' };
+
+  const norm = (v: string | null | undefined) => {
+    const t = String(v ?? '').trim();
+    return t === '' ? null : t;
+  };
+  const next: Record<string, any> = {};
+  if ('warehouseName' in input) next.delivery_warehouse_name = norm(input.warehouseName);
+  if ('address' in input)       next.delivery_address        = norm(input.address);
+  if ('contact' in input)       next.delivery_contact        = norm(input.contact);
+  if ('phone' in input)         next.delivery_phone          = norm(input.phone);
+  if ('requiredAt' in input)    next.delivery_required_at    = norm(input.requiredAt);
+  if (Object.keys(next).length === 0) return { error: '没有要修改的内容' };
+
+  const { error } = await (supabase.from('orders') as any)
+    .update({ ...next, updated_at: new Date().toISOString() }).eq('id', orderId);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
 export async function updateOrder(id: string, formData: FormData) {
   const supabase = await createClient();
 

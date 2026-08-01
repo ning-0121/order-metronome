@@ -62,6 +62,7 @@ import { QcTab } from '@/components/tabs/QcTab';
 import { PackingFilesSection } from '@/components/PackingFilesSection';
 import { InlineEditField } from '@/components/InlineEditField';
 import { ShippingDatesEdit } from '@/components/order/ShippingDatesEdit';
+import { DeliveryInfoEdit } from '@/components/order/DeliveryInfoEdit';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
 import { RootCausesPanel } from '@/components/RootCausesPanel';
@@ -289,9 +290,20 @@ export default async function OrderDetailPage({
               <div className="text-sm">
                 <p className="font-semibold text-amber-900">国内送仓信息待补齐：{missing.join('、')}</p>
                 <p className="text-amber-800 mt-1">
-                  创建订单时允许暂空，但<strong className="text-amber-900">「包装方式确认」节点完成前必须补齐</strong>（包装/唛头依赖送货地址）。
-                  请在「订单基本信息」编辑区域补充，或与客户确认后填入。
+                  创建订单时允许暂空，但<strong className="text-amber-900">「国内送仓完成」节点前必须补齐</strong>（物流要靠它送货）。
                 </p>
+                {/* 就地补录(2026-07-31):此前这里写"请在「订单基本信息」编辑区域补充",
+                    但那个编辑区域并不存在 —— createOrder 是全库唯一能写这 5 列的地方,
+                    建单后想补也没入口,导致 48 张单卡在「国内送仓完成」pending。 */}
+                <DeliveryInfoEdit
+                  orderId={id}
+                  warehouseName={o.delivery_warehouse_name}
+                  address={o.delivery_address}
+                  contact={o.delivery_contact}
+                  phone={o.delivery_phone}
+                  requiredAt={o.delivery_required_at}
+                  canEdit={isAdmin || isOrderOwner || currentRoles.some((r) => ['sales', 'sales_manager', 'order_manager', 'merchandiser', 'logistics'].includes(r))}
+                />
               </div>
             </div>
           );
