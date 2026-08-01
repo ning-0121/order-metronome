@@ -44,8 +44,6 @@ export const MILESTONE_TEMPLATE_V1: Array<{
   { step_key: "factory_completion", name: "工厂完成", owner_role: "production", is_critical: true, evidence_required: false },
   { step_key: "inspection_release", name: "验货/放行", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "booking_done", name: "订舱完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "shipment_execute", name: "出运", owner_role: "logistics", is_critical: true, evidence_required: true },
-  { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false },
 ];
 
 /**
@@ -106,10 +104,6 @@ export const MILESTONE_TEMPLATE_V2: Array<{
     evidence_note: "业务制作装箱单 + 商业发票 + 报关单;上传文件" },
   { step_key: "booking_done", name: "订舱出货", owner_role: "merchandiser", is_critical: true, evidence_required: true,
     evidence_note: "业务订舱安排(仅出口单)" },
-  { step_key: "shipment_execute", name: "发货出运", owner_role: "logistics", is_critical: true, evidence_required: false,
-    evidence_note: "业务/采购/财务三方确认后出运(填 BL/船名即可,免凭证)" },
-  { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false,
-    evidence_note: "按账期(发货日 + 账期天数);财务系统回传可自动完成" },
 ];
 
 /**
@@ -259,9 +253,7 @@ export const TRADE_MILESTONE_TEMPLATE: Array<{
   // ── 出运三件(EXPORT_ONLY,domestic 会被过滤) ──
   { step_key: "booking_done", name: "订舱完成", owner_role: "merchandiser", is_critical: true, evidence_required: true },
   { step_key: "customs_export", name: "报关安排出运", owner_role: "merchandiser", is_critical: true, evidence_required: true },
-  { step_key: "shipment_execute", name: "出运", owner_role: "logistics", is_critical: true, evidence_required: true },
   // ── 回款 ──
-  { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false },
 ];
 
 /**
@@ -319,10 +311,6 @@ export const MILESTONE_TEMPLATE_V3: Array<{
     evidence_note: "业务制作装箱单 + 商业发票 + 报关单;上传文件(前置:尾查放行)" },
   { step_key: "booking_done", name: "订舱出货", owner_role: "merchandiser", is_critical: true, evidence_required: true,
     evidence_note: "业务订舱安排(财务只喊停不硬卡;仅出口单;前置:CI制作)" },
-  { step_key: "shipment_execute", name: "发货出运", owner_role: "logistics", is_critical: true, evidence_required: false,
-    evidence_note: "物流出运(发货须财务放行 fail-closed;前置:订舱)" },
-  { step_key: "payment_received", name: "收款完成", owner_role: "finance", is_critical: true, evidence_required: false,
-    evidence_note: "财务收款,按账期(前置:发货出运)" },
 ];
 
 /** V3 独有节点(V1/V2/trade/sample/consign 都没有)——用于「这单是不是 V3」的运行时判定,给硬前置做版本作用域。 */

@@ -36,7 +36,7 @@ const PRODUCTION_QC = ['production', 'production_manager', 'qc', 'quality', 'mer
 
 /**
  * V2 节点 → 要求确认方。不在此表的节点 = 单责任方,走原有完成流程。
- * (mo_released 自动完成;procurement_order_placed / production_kickoff / payment_received 单方)
+ * (mo_released 自动完成;procurement_order_placed / production_kickoff 单方)
  */
 export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]> = {
   // 1. PO审查确认 = 业务执行经理 + 财务 会签。CEO 于 2026-07-27 拍板【软会签】,
@@ -61,12 +61,9 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
     { key: 'sales_exec', label: '业务执行', roles: BIZ_EXEC, hint: '订舱信息/舱位/单据齐' },
     { key: 'finance', label: '财务', roles: FINANCE, hint: '订舱前款项/账期条件满足' },
   ],
-  // 8. 发货出运 = 业务执行 + 采购(尾料清点归库) + 财务 三方
-  shipment_execute: [
-    { key: 'sales_exec', label: '业务执行', roles: BIZ_EXEC, hint: '出运安排/单据齐' },
-    { key: 'procurement', label: '采购部', roles: PROCUREMENT, hint: '尾货尾料清点完成并归库' },
-    { key: 'finance', label: '财务', roles: FINANCE, hint: '出货前款项条件满足' },
-  ],
+  // 8. 发货出运的三方会签已随节点一起移除(2026-07-31)——
+  //    系统不掌握「货发出去了」这个事实(出货确认单 3 条、物流子任务 6 条、人工放货 0 次),
+  //    留着会签只是让三个人为一件系统外发生的事各点一次。
 };
 
 /**
@@ -84,7 +81,8 @@ export const MILESTONE_CONFIRMATION_PARTIES: Record<string, ConfirmationParty[]>
  *   于是 CEO 驾驶舱「订单开发」部门常年 46 在办 / 27 逾期,逾期天数 = 下单至今天数。
  *   本次(2026-07-30)真正落地该修复。改动此集合前请先看 pre-deploy-check 的断言。
  *
- * 仍硬卡全确认的节点:尾期验货 final_qc_sales_check、订舱 booking_done、发货出运 shipment_execute。
+ * 仍硬卡全确认的节点:尾期验货 final_qc_sales_check、订舱 booking_done。
+ * (发货出运 shipment_execute 已于 2026-07-31 随节点移除。)
  */
 export const SOFT_CONFIRM_STEPS = new Set(['po_confirmed', 'pre_production_sample_approved']);
 export function isSoftConfirm(stepKey: string | null | undefined): boolean {
