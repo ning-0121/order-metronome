@@ -14,10 +14,10 @@
  */
 import { ESLint } from 'eslint';
 
+// POOrderForm 已随报价器整条下线删除(2026-08-01),不再守护。
 const FILES = [
   'components/order/LegacyOrderForm.tsx',
   'components/order/FormSection.tsx',
-  'components/order/POOrderForm.tsx',
 ];
 const RULE = '@typescript-eslint/no-use-before-define';
 

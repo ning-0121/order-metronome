@@ -95,14 +95,10 @@ export async function POST(req: Request) {
       .delete()
       .lt('ran_at', ninetyDaysAgo);
 
-    // 5. 报价员自动学习：从完成订单导入训练数据
-    let trainingSync = { imported: 0, skipped: 0 };
-    try {
-      const { syncOrdersToTraining } = await import('@/app/actions/quoter-training');
-      trainingSync = await syncOrdersToTraining();
-    } catch (e: any) {
-      console.error('[nightly-maintenance] training sync error:', e?.message);
-    }
+    // 5. ~~报价员自动学习~~ —— 报价器 2026-08-01 下线(CEO 拍板),此步随之移除。
+    //    原逻辑:从完成订单导入 quoter_training_feedback。该表 0 行,报价器四张表全空、
+    //    四个页面零使用,整条报价链已删除。保留字段名只为让返回结构不变(下游可能在看)。
+    const trainingSync = { imported: 0, skipped: 0 };
 
     return NextResponse.json({
       success: true,
