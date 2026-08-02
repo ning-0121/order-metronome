@@ -632,7 +632,8 @@ export default async function OrderDetailPage({
                   { label: '客户', value: orderData.customer_name },
                   { label: '客户PO号', value: orderData.po_number },
                   { label: '内部订单号', value: '__INLINE_EDIT__' },
-                  { label: '负责业务/理单', value: ownerName },
+                  // 「负责业务/理单」不在这里渲染 —— 它和下面原来的「理单跟单」是同一个人,
+                  // 同屏摆两个是重复项(CEO 2026-08-01)。合并到下方那一行,保留可改派能力。
                   { label: '贸易条款', value: ({ FOB: 'FOB', DDP: 'DDP', RMB_EX_TAX: '人民币不含税', RMB_INC_TAX: '人民币含税' } as any)[orderData.incoterm] || orderData.incoterm },
                   // ETD/ETA 建单时可留空(船期未定),这里就地补录 —— 2026-07-30 之前这两个字段
                   // 只读且无任何写入入口,留空就补不回来了
@@ -665,15 +666,22 @@ export default async function OrderDetailPage({
                     </dd>
                   </div>
                 ))}
-                {/* 跟单负责人 — 理单(业务执行)/ 生产跟单 两组分开(2026-07-10 派单分工):
-                    业务执行由业务执行部主管(order_manager)派;生产跟单由生产主管派;admin 两者都可 */}
+                {/* 负责业务/理单 —— 2026-08-01 CEO:这一格此前是两格。
+                    上面基础信息里有只读的「负责业务/理单」(orders.owner_user_id),这里又有个
+                    「理单跟单」下拉(派 merchandiser 节点),同屏两个选项、指的是同一个人。
+                    核过数据:199 张有归属的单里 106 张两者本就相同,余下 93 张的"不同"绝大多数是
+                    同一个人 + 秦增富混进来(欧璐→秦增富/欧璐、Winnie→秦增富/Winnie…),
+                    真正派给别人的只有 9 张(Winnie→王海莲)。确属重复项,合并成这一格。
+                    显示口径取里程碑归属(谁真正收任务/被催办/被计分),回落到订单负责人。
+                    生产跟单是另一个人,保持独立(2026-07-10 派单分工:业务执行部主管派理单,
+                    生产主管派生产跟单,admin 两者都可)。 */}
                 <div className="flex justify-between items-center">
-                  <dt className="text-sm text-gray-500">理单跟单</dt>
+                  <dt className="text-sm text-gray-500">负责业务/理单</dt>
                   <dd className="text-sm font-medium">
                     {(isAdmin || currentRoles.includes('order_manager')) ? (
-                      <MerchandiserAssign orderId={id} currentMerchandiserName={merchandiserName} kind="merchandiser" />
+                      <MerchandiserAssign orderId={id} currentMerchandiserName={merchandiserName || ownerName} kind="merchandiser" />
                     ) : (
-                      <span className="text-gray-900">{merchandiserName || '未指定'}</span>
+                      <span className="text-gray-900">{merchandiserName || ownerName || '未指定'}</span>
                     )}
                   </dd>
                 </div>
