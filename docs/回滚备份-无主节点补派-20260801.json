@@ -1,0 +1,1411 @@
+{
+ "at": "2026-08-02T02:38:32.772Z",
+ "reason": "CEO 2026-08-01 定人:merchandiser→订单创建人 / production→骆淑娟(生产跟单·QC) / logistics→秦增超",
+ "count": 156,
+ "rows": [
+  {
+   "id": "e5036381-0a94-4135-8bcf-43a3940ed479",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260709-003",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "cc7e9a3a-a4b6-4065-8481-368216d802d8",
+   "to": "e79909b9-3e8e-42d7-9307-6ea6b39776bb",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260623-002",
+   "_assignee_name": "小英",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "edfc3b04-3be2-49d8-b986-6b8d2f93f8ac",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260623-002",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "a96acd72-34ea-4f77-b06e-221ed6946d78",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260709-004",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "c1cb1065-0013-4350-97ac-d327166b54c1",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260709-007",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "1cfdca89-cfb9-4337-aecb-16846893ff2a",
+   "to": "4ceaceb2-873a-43f8-bd9a-09ce49df9c41",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260516-005",
+   "_assignee_name": "欧璐",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "c1eacb1a-c062-4ecd-8741-bda10e93c8d9",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "shipping_sample_send",
+   "order_no": "QM-20260618-002",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "86428f9c-d572-4c00-bf00-7a27e08d6985",
+   "to": "c6d924a8-2d09-4c2c-80bd-15d97071fd8d",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260516-002",
+   "_assignee_name": "铭文-Grace",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "a800c6af-d739-4cbb-a46f-b43a63d1fa98",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260516-002",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0463a1a4-2df6-401f-82de-3a634b8148ab",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260703-013",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "7d3be316-4ccd-46b0-b4d7-c2cf5ee44f44",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260703-013",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d0a41f15-47d0-4bd5-8313-68845617f102",
+   "to": "5d7f9931-6b47-41b9-b3e4-d8f955c451e1",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260703-013",
+   "_assignee_name": "灵珑",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "3378c305-af1e-4e2b-986d-1cdad0bf8a7f",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260703-013",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "e0131ddc-0ffc-46a1-ab89-8864422796cb",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260618-002",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "13ae481f-74b6-44fb-be97-c76a67439ee9",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "booking_done",
+   "order_no": "QM-20260618-002",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "9ad41658-ae0e-4426-914e-06647f5ef1b4",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260703-016",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "ff6b0603-e6d7-4124-9dae-18691e84987a",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260703-016",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "4e31d031-8cdd-444f-947c-3178fd12306f",
+   "to": "5d7f9931-6b47-41b9-b3e4-d8f955c451e1",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260703-016",
+   "_assignee_name": "灵珑",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "c071143a-1e31-4b9b-af78-83af34e1408a",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260703-016",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "73580715-b796-4cce-8231-2a92561a637e",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260703-018",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d3ed48fe-c66c-47aa-9663-d64387b6fba6",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260703-018",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "1a152479-8b80-4c44-a162-76b244013035",
+   "to": "5d7f9931-6b47-41b9-b3e4-d8f955c451e1",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260703-018",
+   "_assignee_name": "灵珑",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "b0d0a303-2215-4053-9027-ca9f95b93402",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260703-018",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0a024b9f-8d61-4a3d-8c52-5f50b3dc34a1",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260703-019",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "843f1468-1594-4aac-9af6-ff0cf26eef1b",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260703-019",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "79be282e-890a-459c-b6bf-a809cbf429f5",
+   "to": "c6d924a8-2d09-4c2c-80bd-15d97071fd8d",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260516-002",
+   "_assignee_name": "铭文-Grace",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "8e16dc3a-1f16-444f-9dee-431826a5563c",
+   "to": "5d7f9931-6b47-41b9-b3e4-d8f955c451e1",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260703-019",
+   "_assignee_name": "灵珑",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "400c4030-bd0c-4c9f-8b8e-3f77fe1b35d8",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260703-019",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "acf47b6a-d517-4e66-86db-f7b084016d01",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260703-021",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "3dcd8ccd-e0e8-43bd-8058-bc545eba7449",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260703-021",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "6f0b9e09-b08c-4a64-8a06-d186a5d58e2a",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260703-021",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "a325e74b-3c01-4c9d-9dae-b96a1505aae5",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260703-021",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "2537906c-1e9a-47d4-8c58-bcef1cd0c045",
+   "to": "6ed801e6-dffc-4837-b298-071749c40e79",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260516-003",
+   "_assignee_name": "陈陈",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "62cabc32-684f-440b-a889-8290c5c23ec8",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260418-002",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "e3c6ec69-5712-4d63-8e06-ddd73dedc189",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260618-002",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "bafd3eb9-349a-4d58-9f7c-b813534ebbc3",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "customs_export",
+   "order_no": "QM-20260618-002",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d8ffcadc-d80c-48c1-9fb9-f4f11faf6e2f",
+   "to": "4ceaceb2-873a-43f8-bd9a-09ce49df9c41",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260516-006",
+   "_assignee_name": "欧璐",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "66714d37-96ce-4428-b9d1-bf11231048f6",
+   "to": "4ceaceb2-873a-43f8-bd9a-09ce49df9c41",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260516-007",
+   "_assignee_name": "欧璐",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "eab8b885-a68c-4353-a248-faa52e76848d",
+   "to": "4ceaceb2-873a-43f8-bd9a-09ce49df9c41",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260516-007",
+   "_assignee_name": "欧璐",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "bd159910-7c75-4c53-9e7f-2478f5575f9d",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260605-003",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "77672f75-172a-4f09-817e-49e36b0564dc",
+   "to": "4ceaceb2-873a-43f8-bd9a-09ce49df9c41",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260516-004",
+   "_assignee_name": "欧璐",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "bf4f415c-5fa2-4973-b5f9-c68e23f631e9",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260516-002",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "b049416e-3bf9-4e3c-982b-e1d2ac299750",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260516-002",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "81eee407-7288-498d-8b4e-99ec3c9a361c",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260618-004",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "ec53db77-5714-43ec-9179-d592ac690318",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "shipping_sample_send",
+   "order_no": "QM-20260618-004",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "be5194fa-6bb7-4102-bbcc-47ca66742c8a",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260618-004",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "8869a936-cb2f-4cc4-b63a-f4290dc336c0",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260618-004",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "88cf3ba4-ed10-447d-983c-dfd9abe44d2f",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260516-009",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "39e2fe1b-58f3-4232-a1fd-436db86e92e5",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "booking_done",
+   "order_no": "QM-20260618-004",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "f2246c9d-1677-4042-9feb-880902d312fc",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260516-003",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "13c18205-b2cf-4149-9fdf-61c31d134dd9",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260516-003",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "f5a9c0c8-b9ba-494d-9fe4-75a39f95888a",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260618-007",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d62f8662-3eca-40d3-9b3b-36742703e194",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "shipping_sample_send",
+   "order_no": "QM-20260618-007",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "45cbf55f-51c5-4764-af5c-f8f12bbaaec2",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260618-007",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0a2c3970-b13e-4a01-98fb-5396ded4b340",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260618-007",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "6ddfe2f1-1604-4b67-b931-dcb3430fe6cf",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "booking_done",
+   "order_no": "QM-20260618-007",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "1f336d92-d002-4911-9301-6779ca5547a4",
+   "to": "6ed801e6-dffc-4837-b298-071749c40e79",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260516-003",
+   "_assignee_name": "陈陈",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "5274d29a-fc02-479c-90a3-fdab3c4a56c9",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260518-008",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d064ee51-4698-443a-8dc9-7ec1c91a745a",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260618-008",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "61f1d2ab-7a53-42bb-952c-bc38ac14d7c3",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260618-009",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "863e14c0-2b7e-46a1-b712-0a8b29f31749",
+   "to": "03b18a4c-5068-41bd-a155-2e3e6f3fb717",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260618-009",
+   "_assignee_name": "王海莲",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "eda50423-829f-42e6-ab14-a24a0d939ca1",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260618-009",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d61fc412-4e82-43a6-ac14-d720a550b8ed",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-005",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "5c5988ec-85f3-4a71-92cd-215131a20142",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-005",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "c5c43ad2-6cbd-4af7-887c-ed3dbd6203a6",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-005",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "f743d598-5e70-4683-8d9f-7fb541424623",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-006",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0b381d01-956b-4d0a-a4de-d28bdd7e7c81",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-007",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "f1671669-7b35-4064-950f-502099239bdc",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-008",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "ef24a4b9-b4a3-45d2-aa89-20daa6cf51c0",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260618-010",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "318dd65c-f625-403c-b158-eb1a15c794fe",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "shipping_sample_send",
+   "order_no": "QM-20260618-010",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0411ba15-254f-4640-9f0f-83edf270c201",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260618-010",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0caf5424-6270-4239-85dd-ff9fdd6b069a",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260618-010",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "3ceff8a5-b393-474b-8a4a-869dc9ce2d6c",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "booking_done",
+   "order_no": "QM-20260618-010",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "eebb41bf-4e3b-459a-9832-4895f476428a",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-009",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "a1f2eeb0-e81d-4c81-8d16-2afa3282928a",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-009",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "cd8a5739-1b2e-4b4c-b8ec-393576aab1bd",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-010",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0d7ef247-3e5f-43ea-b817-bb395b5acf45",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-010",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d5c44844-fd04-4e3a-9fb6-cd910623ba89",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-010",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "5dc7b33b-895e-4221-ab8a-b456693f2212",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-011",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "3f7ad8b7-93e8-4b65-b08d-5ef69c537589",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-011",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "1a9246bb-f56d-46fd-8d28-95120ae558be",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-012",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "07e0b989-35e5-48d7-ad11-e6b71fc1282f",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260618-011",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "6e349843-11f3-4128-ad14-3aeafd058989",
+   "to": "6ed801e6-dffc-4837-b298-071749c40e79",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260618-011",
+   "_assignee_name": "陈陈",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "6817ef05-60b6-4480-accd-aa8ee1bab02c",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260618-011",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "267073af-58b1-48a7-a970-afbe1d243c52",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260618-011",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "3f168507-6434-4b6f-af66-825723ef78bb",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260516-006",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "af92a571-e144-4d97-8a4b-b16ece013de6",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-016",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "1a62ec37-7f74-4e65-8c4b-e68e0cfc85b3",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260516-006",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "241f32e4-5af6-4f1f-8c07-9c4a4a1f2af1",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-018",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "b3f7ae61-1f1e-4dc8-a2b6-9eddd27ec7ba",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260618-013",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "1a8a3e22-edd8-4712-9f15-23d9e37d1c4b",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260618-013",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "f6e83c3d-ea49-4417-b754-4148f84cab4d",
+   "to": "6ed801e6-dffc-4837-b298-071749c40e79",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260618-013",
+   "_assignee_name": "陈陈",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "c6adc842-298f-45fa-96e0-8b3f6590a8a5",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260618-013",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "8379da42-e9f3-44d6-8ff3-eed6601b381c",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260519-020",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "bc6b99ca-af1e-43a9-85cc-8b2f59c20e0a",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260516-007",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "cc156933-ade3-4546-b752-06e28ab192d1",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260516-007",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "770872c5-5a99-45dc-a98d-cac5d201f337",
+   "to": "e79909b9-3e8e-42d7-9307-6ea6b39776bb",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260621-001",
+   "_assignee_name": "小英",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "f996fa5f-ae5d-4bd3-b868-0148b3e1b573",
+   "to": "ee25d37b-db68-4534-a7a5-bc551d547f55",
+   "role": "logistics",
+   "step": "domestic_delivery",
+   "order_no": "QM-20260621-001",
+   "_assignee_name": "秦增超",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "72743842-a362-4f65-8215-c7e17a037c06",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260520-008",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "6205120f-11f3-4993-9c82-b3b80867778f",
+   "to": "4ceaceb2-873a-43f8-bd9a-09ce49df9c41",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260516-006",
+   "_assignee_name": "欧璐",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "fc29e8ed-2c9a-49fc-ab65-2f19921da225",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260522-006",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "bfb2e15e-db58-4ab8-8b76-d8f4d075d940",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260522-004",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "15e1af52-1d3c-4b86-8077-dc05ae36528b",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260516-004",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "58d55026-9406-4967-b727-08ecdb1abbaf",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "inspection_release",
+   "order_no": "QM-20260522-008",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "11788caa-fbc7-4c01-a318-77dd060cddd0",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260516-005",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "07aa3722-407c-4b3b-bc4f-ad298cdd54f6",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260516-005",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "71d71e5c-45e0-48ee-bb30-ce1dc6ab2535",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260516-009",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "52a46bb3-130b-4cc2-a71f-686f5165e44a",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260516-009",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "54d04b42-29be-4d97-98f8-bc92ca799155",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-005",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "173ad2f8-1e80-4aa6-b18b-ade65bbf50cb",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-006",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0998b0e5-742c-434e-96fb-5bc5eedfbe55",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-006",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "df77dada-c4a8-4dcb-9e77-ba4e629fcb4d",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-007",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "eb824bc0-c815-4710-910c-08882f7d9977",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-007",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "cecac47d-254a-46f2-9103-4923407b9b63",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-008",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "009c93a2-5507-456f-bc3d-8fe458ea7ac4",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-008",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "c9ba04fe-75b2-40e7-b4bd-7cd23971988d",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-009",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "38bb99f3-c809-4ec6-8875-7c6c0daee857",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-011",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "45a6d465-6347-4d2d-b0f3-05f77c3bec42",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-012",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "85e28e97-4921-410f-96f9-6c648f142708",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-012",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "2807fea8-d086-441b-bd64-2ea967c768ff",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-016",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "ffd711eb-ee55-471d-bf77-94bd1eef511b",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-016",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "8f9b54ce-a606-4191-add5-3c427cde99b0",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260519-020",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "3849eaa2-8e61-45e0-8a14-b07cb512b3bd",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260519-020",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "8bb06683-bf98-4bce-8327-aedace733409",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260520-008",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "985eae41-e849-492b-bc84-0335f04bd5fc",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260520-008",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "f2c5aa1a-f1b8-4ea2-800e-73d5b5114803",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260522-006",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "070c9d91-5ab6-44a7-9e57-60f021086319",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260522-004",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "081c9f67-a2bb-4ff3-b4d5-e9e5bbf826b8",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260522-004",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "98e99451-4742-456c-b1d2-03a4718ce38f",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260522-006",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "c630755a-bdbe-437f-8623-5d90c28f8f1c",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "production_kickoff",
+   "order_no": "QM-20260522-008",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "bde2da86-3e99-4c11-b97e-738dbb0f2b34",
+   "to": "fd8184db-9348-4f12-9a59-a7a68325ae57",
+   "role": "production",
+   "step": "factory_completion",
+   "order_no": "QM-20260522-008",
+   "_assignee_name": "骆淑娟",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "be8db69d-29c1-47fb-965c-b9ff7d0c1142",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "pre_production_sample_sent",
+   "order_no": "QM-20260618-002",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "1ce08f8b-a4e8-4206-ad15-8d8185c62cb1",
+   "to": "4ceaceb2-873a-43f8-bd9a-09ce49df9c41",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260516-005",
+   "_assignee_name": "欧璐",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "625d260c-3134-43e9-b7ee-44875211ed51",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260618-004",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "275a3de9-fd8b-448a-a278-0bafae0e5f5c",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260516-009",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "35d3b86d-743e-4774-861d-54e9ee72ea2b",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "customs_export",
+   "order_no": "QM-20260618-004",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "98f79ce5-d7cd-445e-923b-b5bbcc442c9d",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260618-007",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "b1c70e56-5bbd-42ad-be9d-594b84cd62ba",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "customs_export",
+   "order_no": "QM-20260618-007",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "292fb3f9-00f8-4399-a502-e4f27e009cc5",
+   "to": "03b18a4c-5068-41bd-a155-2e3e6f3fb717",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260618-008",
+   "_assignee_name": "王海莲",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d6d20e12-0910-4842-8a6c-884884222791",
+   "to": "03b18a4c-5068-41bd-a155-2e3e6f3fb717",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260618-009",
+   "_assignee_name": "王海莲",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0e016613-591c-400a-87ee-b6269b283f46",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-006",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "dd3ead4e-5be0-492c-aa8a-57eb676a2157",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-007",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "dc7fadd6-ef85-40cc-a427-70902e6df724",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-008",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "acf7f0d2-82a9-45ee-9f0d-7d99d98afd12",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260618-010",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "5baf2525-7c5f-40ba-8084-3e0493d02d55",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-009",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d244109b-f779-4de6-9572-17580a64033f",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "customs_export",
+   "order_no": "QM-20260618-010",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "447d4402-bec6-47c8-8881-b503031e1d33",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-010",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "52bcbb88-6c11-4c88-bcee-7469b76e7623",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-018",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "2639dd30-2a22-41e2-9e1c-58ecd8a0252d",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-011",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "ab2b709c-0254-4e53-89a3-e42ae80ebdda",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-012",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "ceec05f3-0d34-403c-b44b-845da63f2df5",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-016",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "74ba80a9-858a-4bc9-8e8c-4508141f8666",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260519-020",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "3324621f-39a8-41d7-a5dc-fcf85a1932fa",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260520-008",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "0798cbe6-df16-451a-9e85-f354434a4ec0",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260522-004",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "148856e5-1521-4892-b782-d07170b363ca",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260522-006",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  },
+  {
+   "id": "d0e28abd-69a0-4c37-b3d6-afb6ab7582d1",
+   "to": "a312a776-91bd-4bf2-9291-ba599985b708",
+   "role": "merchandiser",
+   "step": "packing_method_confirmed",
+   "order_no": "QM-20260522-008",
+   "_assignee_name": "菁菁",
+   "_prev_owner_user_id": null
+  }
+ ]
+}

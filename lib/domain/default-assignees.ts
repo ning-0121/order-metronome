@@ -57,6 +57,25 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
     nameMatches: ['骆淑娟', 'luoshujuan', 'shujuan'],
     emailContains: ['lsj@', 'lsj', 'luoshujuan'],
   },
+  // 2026-08-01 CEO 定人:owner_role='production' 的节点(开裁/工厂完成/打样制作/打样检验)
+  // 归**生产跟单**,也就是 QC 那个人 —— 骆淑娟,与上面的 qc 同一人。
+  //
+  // 补这一项之前,这里**压根没有 production 条目**。createOrder 的自动分配循环遍历到
+  // 'production' 找不到 matcher,就退到兜底「该角色全公司只有一人才自动派」——
+  // 而 production 有两个人(潘盛、骆淑娟),兜底不成立 → **节点一出生就是无主的**。
+  // 生产中心 65 个在途无主节点(开裁 33 + 工厂完成 32)就是这么攒出来的。
+  //
+  // 注意别和 production_manager 混:秦增福是生产主管,他那摊活由 production_manager
+  // 那条单独负责(STRICTLY_PM_STEPS:生产预评估/工厂匹配确认/产前样准备完成,
+  // 加 PM_OR_FINANCE_STEPS 的加工费确认),两个角色、两拨节点。
+  //
+  // 存量已同日按此口径补派(见 docs/回滚备份-无主节点补派-20260801.json);
+  // 这条规则让新单跟上,否则新老单归属分叉。
+  production: {
+    displayName: '骆淑娟',
+    nameMatches: ['骆淑娟', 'luoshujuan', 'shujuan'],
+    emailContains: ['lsj@', 'lsj', 'luoshujuan'],
+  },
 };
 
 /**
