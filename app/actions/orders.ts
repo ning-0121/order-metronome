@@ -15,7 +15,6 @@ import {
   requestCancel,
   decideCancel,
   completeOrder,
-  submitRetrospective,
 } from '@/lib/repositories/ordersRepo';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
 import { normalizeStyleFabrics, primaryFabricColumns } from '@/lib/services/style-fabrics';
@@ -2035,63 +2034,7 @@ export async function forceCompleteOrderAction(orderId: string): Promise<{ error
   return { data: { order_no: order.order_no } };
 }
 
-/**
- * 提交复盘
- */
-export async function submitRetrospectiveAction(
-  orderId: string,
-  formData: FormData
-) {
-  const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: '请先登录' };
-  }
-
-  // 权限：仅订单创建者或管理员可提交复盘
-  const { data: retroOrder } = await (supabase.from('orders') as any)
-    .select('created_by')
-    .eq('id', orderId)
-    .single();
-  if (!retroOrder) return { error: '订单不存在' };
-  const { isAdmin: isRetroAdmin } = await getCurrentUserRole(supabase);
-  if (retroOrder.created_by !== user.id && !isRetroAdmin) {
-    return { error: '仅订单创建者或管理员可提交复盘' };
-  }
-
-  const payload = {
-    on_time_delivery: formData.get('on_time_delivery') === 'true' ? true : 
-                     formData.get('on_time_delivery') === 'false' ? false : null,
-    major_delay_reason: formData.get('major_delay_reason') as string | null,
-    key_issue: formData.get('key_issue') as string,
-    root_cause: formData.get('root_cause') as string,
-    what_worked: formData.get('what_worked') as string,
-    improvement_actions: JSON.parse(formData.get('improvement_actions') as string || '[]'),
-  };
-  
-  // 验证必填字段
-  if (!payload.key_issue || !payload.root_cause || !payload.what_worked) {
-    return { error: '关键问题、根本原因、做得好的地方为必填项' };
-  }
-  
-  if (!Array.isArray(payload.improvement_actions) || payload.improvement_actions.length === 0) {
-    return { error: '至少需要添加一条改进措施' };
-  }
-  
-  const result = await submitRetrospective(orderId, payload);
-  
-  if (result.error) {
-    return { error: result.error };
-  }
-  
-  revalidatePath(`/orders/${orderId}`);
-  revalidatePath(`/orders/${orderId}/retrospective`);
-  revalidatePath('/orders');
-  revalidatePath('/dashboard');
-  
-  return { data: result.data };
-}
+// ~~submitRetrospectiveAction~~ 已删除:复盘 2026-08-01 下线,唯一调用方(复盘页/Tab)已删。
 
 /**
  * 获取订单日志
@@ -2164,26 +2107,7 @@ export async function getCancelRequests(orderId: string) {
 /**
  * 获取复盘记录
  */
-export async function getRetrospective(orderId: string) {
-  const supabase = await createClient();
-  
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: '请先登录' };
-  }
-  
-  const { data: retrospective, error } = await supabase
-    .from('order_retrospectives')
-    .select('*')
-    .eq('order_id', orderId)
-    .single();
-  
-  if (error && error.code !== 'PGRST116') { // PGRST116 = not found
-    return { error: error.message };
-  }
-
-  return { data: retrospective || null };
-}
+// ~~getRetrospective~~ 已删除:订单复盘 2026-08-01 下线(CEO 定不用),且本函数零调用方。
 
 const PURPOSE_CHANGEABLE = ['production', 'trade', 'consign'];
 

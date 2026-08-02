@@ -27,7 +27,7 @@ interface NavLink {
   /**
    * 休眠入口:功能上线至今**零使用**,先从导航收起来,减少界面噪音。
    * 2026-07-31 审计实测(生产库主表行数):
-   *   备忘录 user_memos 0 · 产品款库 products 1/variants 0
+   *   产品款库 products 1/variants 0
    *   (AI 报价员已于 2026-08-01 整条下线删除,不再列此)
    *   报关主数据 customs_hs_catalog 0 · 工厂出差 factory_trips 0
    *   采购对账 procurement_reconciliations 0 · 库存预留 inventory_reservation 0
@@ -91,7 +91,6 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/factories', label: '工厂管理', icon: '🏭' },
             { dormant: true, href: '/products', label: '产品款库', icon: '🧬' },
             { href: '/material-master', label: '物料主数据', icon: '🧱' },
-            { dormant: true, href: '/memos', label: '备忘录', icon: '📝' },
           ],
         },
         {
@@ -148,7 +147,6 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/material-master', label: '物料主数据', icon: '🧱' },
             ...(canCheckMissing ? [{ href: '/admin/missing-line-items', label: '缺明细检查', icon: '🧩' }] : []),
             ...(knowledgeLayer ? [{ href: '/learning', label: '学习中心', icon: '🎓' }] : []),
-            { dormant: true, href: '/memos', label: '备忘录', icon: '📝' },
             { href: '/my-assistant', label: 'AI 助手', icon: '🤖' },
             { href: '/guide', label: '操作说明', icon: '📖' },
           ],

@@ -549,10 +549,7 @@ export default async function DashboardPage() {
             </>
           )}
 
-          {/* 通用 */}
-          <Link href="/memos" className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 text-sm text-gray-700 transition-colors">
-            <span>📝</span> 备忘录
-          </Link>
+          {/* 「备忘录」入口已随个人备忘功能一同下线(CEO 2026-08-01:用不上)。user_memos 上线至今 0 条。 */}
         </div>
       </div>
 

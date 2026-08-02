@@ -75,7 +75,6 @@ import { BackButton } from '@/components/BackButton';
 import { OrderDecisionPanel } from '@/components/OrderDecisionPanel';
 import { businessDecisionEngineEnabled } from '@/lib/engine/featureFlags';
 import { knowledgeLayerCaptureVisible } from '@/lib/engine/featureFlags';
-import { RetrospectiveTab } from '@/components/tabs/RetrospectiveTab';
 import { ScoreAppealPanel } from '@/components/ScoreAppealPanel';
 import { RuntimeRiskCardSlot } from '@/components/RuntimeRiskCardSlot';
 import {
@@ -108,7 +107,7 @@ export default async function OrderDetailPage({
     redirect(`/orders/${id}?tab=basic`);
   }
   // 2026-07-08 用户拍板:弃用「成本控制」+「报价基线/报价单识别」(布料名对不上采购)。预算/成本真相全走「采购核料」。
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'trade_purchase', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score', 'retrospective'];
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'trade_purchase', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -1337,15 +1336,8 @@ export default async function OrderDetailPage({
           </div>
         )}
 
-        {activeTab === 'retrospective' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <RetrospectiveTab
-              orderId={id}
-              orderNo={orderData.order_no}
-              isOwnerOrAdmin={isAdmin || isOrderOwner}
-            />
-          </div>
-        )}
+        {/* 订单复盘页签已删除(CEO 2026-08-01:不用了)。order_retrospectives 上线至今 0 行,
+            页签本就没有按钮、只能靠 ?tab=retrospective 进,独立复盘页也无任何入口链接。 */}
 
         {activeTab === 'root_causes' && isAdmin && rootCauseEngineEnabled() && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">

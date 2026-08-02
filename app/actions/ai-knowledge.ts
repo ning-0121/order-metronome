@@ -342,34 +342,7 @@ async function collectFromProductionReports(supabase: any, tags: any, userId: st
 // ──────────────────────────────────────────────
 // 采集器 6：员工备忘录 → 员工效率 + 流程优化
 // ──────────────────────────────────────────────
-async function collectFromMemos(supabase: any, tags: any, userId: string): Promise<CollectResult> {
-  const { data: memos } = await (supabase.from('user_memos') as any)
-    .select('id, content, user_id, order_id, is_done, created_at')
-    .not('content', 'is', null);
-
-  if (!memos || memos.length === 0) return { source: 'memo', scanned: 0, ingested: 0, skipped: 0 };
-
-  // 只采集有实质内容的备忘录（>20字符）
-  const meaningful = memos.filter((m: any) => m.content && m.content.length > 20);
-
-  const entries = meaningful.map((m: any) => ({
-    knowledge_type: 'employee' as KnowledgeType,
-    category: m.is_done ? 'completed_task' : 'open_task',
-    title: `员工备忘：${m.content.slice(0, 50)}`,
-    content: m.content,
-    structured_data: { is_done: m.is_done },
-    source_type: 'memo' as KnowledgeSource,
-    source_id: m.id,
-    source_table: 'user_memos',
-    order_id: m.order_id,
-    confidence: 'low',
-    impact_level: 'low',
-    is_actionable: !m.is_done,
-  }));
-
-  const ingested = await ingestEntries(supabase, entries, tags, userId);
-  return { source: 'memo', scanned: memos.length, ingested, skipped: entries.length - ingested };
-}
+// ~~采集器 6:员工备忘录~~ 已删除:个人备忘 2026-08-01 下线,user_memos 从来是空的,这个采集器一直在空跑。
 
 // ══════════════════════════════════════════════
 // 公开 API
@@ -396,7 +369,6 @@ export async function runCollectionPipeline(): Promise<{ data?: CollectResult[];
     { fn: collectFromMilestoneLogs, source: 'milestone_log' },
     { fn: collectFromDelayRequests, source: 'delay_request' },
     { fn: collectFromProductionReports, source: 'production_report' },
-    { fn: collectFromMemos, source: 'memo' },
   ];
 
   for (const { fn: collector, source } of collectors) {

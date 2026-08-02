@@ -449,77 +449,8 @@ async function generateAlertTasks(
 
 // ─────────────────────────────────────────────────────────────
 // generateRetrospectiveTasks
-// 订单完成 3 天后仍无复盘记录 → 给订单 owner 生成 decision_required 任务
 // ─────────────────────────────────────────────────────────────
-async function generateRetrospectiveTasks(
-  supabase: SupabaseClient,
-  targetDate: string
-): Promise<TaskGenerationResult> {
-  let created = 0
-  let skipped = 0
-  const errors: string[] = []
-
-  const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
-
-  // 找已完成、终止时间超过 3 天的订单
-  const { data: orders, error } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, created_by, owner_user_id, terminated_at')
-    .in('lifecycle_status', ['completed', '已完成', '待复盘'])
-    .lt('terminated_at', threeDaysAgo + 'T00:00:00')
-    .not('terminated_at', 'is', null)
-    .limit(100)
-
-  if (error) {
-    errors.push(`fetchCompletedOrders: ${error.message}`)
-    return { created, skipped, errors }
-  }
-
-  if (!orders || orders.length === 0) return { created, skipped, errors }
-
-  // 批量查已有复盘
-  const orderIds = orders.map((o: any) => o.id)
-  const { data: retros } = await (supabase.from('order_retrospectives') as any)
-    .select('order_id, key_issue')
-    .in('order_id', orderIds)
-  const retroDone = new Set((retros || [])
-    .filter((r: any) => r.key_issue && r.key_issue.length > 0)
-    .map((r: any) => r.order_id))
-
-  for (const order of orders) {
-    if (retroDone.has(order.id)) continue  // 已有完整复盘，跳过
-
-    const owner = order.owner_user_id || order.created_by
-    if (!owner) continue
-
-    const daysSince = Math.floor(
-      (Date.now() - new Date(order.terminated_at).getTime()) / 86400000
-    )
-
-    const result = await upsertTask(supabase, {
-      assignedTo: owner,
-      taskDate: targetDate,
-      taskType: 'decision_required',
-      priority: computeTaskPriority(daysSince, 7),
-      title: `${order.order_no} 待复盘（完成 ${daysSince} 天）`,
-      description: `订单已完成 ${daysSince} 天，尚未填写复盘。记录问题与改进措施有助于下次做得更好。`,
-      actionUrl: `/orders/${order.id}?tab=retrospective`,
-      actionLabel: '去复盘',
-      relatedOrderId: order.id,
-      relatedCustomer: order.customer_name,
-      sourceType: 'retrospective_pending',
-      sourceId: order.id,
-    })
-
-    if (result.ok) {
-      if (result.data.created) created++
-      else skipped++
-    } else {
-      errors.push(`order ${order.id}: ${result.error}`)
-    }
-  }
-
-  return { created, skipped, errors }
-}
+// ~~generateRetrospectiveTasks~~ 已删除:订单复盘 2026-08-01 下线,不再给 owner 生成「待复盘」待办。
 
 // ─────────────────────────────────────────────────────────────
 // generateMissingInfoTasks
@@ -915,7 +846,6 @@ export async function generateDailyTasks(
         generateProfitWarningTasks(supabase, targetDate),
         generateAlertTasks(supabase, targetDate),
         generateMissingInfoTasks(supabase, targetDate),
-        generateRetrospectiveTasks(supabase, targetDate),
         generateProductionTasks(supabase, targetDate),
         generateProductionIssueTasks(supabase, targetDate),
       ])

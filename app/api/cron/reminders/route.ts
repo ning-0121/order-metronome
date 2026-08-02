@@ -1,4 +1,4 @@
-import { checkAndSendReminders, checkDeliveryDeadlines, checkLinkedMemoReminders } from '@/app/actions/notifications';
+import { checkAndSendReminders, checkDeliveryDeadlines } from '@/app/actions/notifications';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -10,10 +10,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [reminderResult, deliveryResult, memoReminderResult] = await Promise.all([
+    // 备忘提醒已随个人备忘功能一同下线(2026-08-01)
+    const [reminderResult, deliveryResult] = await Promise.all([
       checkAndSendReminders(),
       checkDeliveryDeadlines(),
-      checkLinkedMemoReminders(),
     ]);
 
     // ── 跟单未指定 24h 升级检查 ──
@@ -82,7 +82,6 @@ export async function GET(request: Request) {
       success: true,
       reminders: reminderResult,
       delivery_alerts: deliveryResult,
-      memo_reminders: memoReminderResult,
       merchandiser_escalated: escalated,
       supervisor_alerts: supervisorAlerts,
       auto_escalated: autoEscalated,

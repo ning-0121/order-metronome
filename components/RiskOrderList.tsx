@@ -25,7 +25,7 @@ interface RiskOrder {
 }
 
 export function RiskOrderList({ orders }: { orders: RiskOrder[] }) {
-  const [memoOrder, setMemoOrder] = useState<RiskOrder | null>(null);
+  // 「加入备忘录」按钮与弹窗已随个人备忘功能下线(CEO 2026-08-01:用不上;user_memos 上线至今 0 条)
   const pathname = usePathname();
   const fromParam = encodeURIComponent(pathname);
 
@@ -106,137 +106,13 @@ export function RiskOrderList({ orders }: { orders: RiskOrder[] }) {
                 >
                   📋 处理
                 </Link>
-                <button
-                  onClick={() => setMemoOrder(o)}
-                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-300 text-amber-700 px-4 py-2 text-sm font-medium hover:bg-amber-50"
-                >
-                  ⏰ 加入备忘录
-                </button>
               </div>
             </div>
           </div>
         );
       })}
 
-      {memoOrder && <MemoModal order={memoOrder} onClose={() => setMemoOrder(null)} />}
     </div>
   );
 }
 
-function MemoModal({ order, onClose }: { order: RiskOrder; onClose: () => void }) {
-  const [content, setContent] = useState(
-    `跟进 ${order.orderNo}（${order.customerName}）— ${order.overdueCount > 0 ? `${order.overdueCount}个逾期` : ''}${order.blockedCount > 0 ? ` ${order.blockedCount}个阻塞` : ''}`
-  );
-  const [remindAt, setRemindAt] = useState(() => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
-    return tomorrow.toISOString().slice(0, 16);
-  });
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState(false);
-
-  async function handleSave() {
-    setSaving(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setSaving(false);
-      alert('请先登录');
-      return;
-    }
-
-    const { error } = await (supabase.from('user_memos') as any).insert({
-      user_id: user.id,
-      content,
-      remind_at: remindAt ? new Date(remindAt).toISOString() : null,
-      is_done: false,
-    });
-
-    if (error) {
-      alert('保存失败：' + error.message);
-      setSaving(false);
-      return;
-    }
-
-    setSuccess(true);
-    setSaving(false);
-    setTimeout(() => onClose(), 1500);
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-gray-900">⏰ 加入备忘录</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
-        </div>
-
-        {success ? (
-          <div className="text-center py-6">
-            <div className="text-4xl mb-2">✅</div>
-            <p className="text-sm text-gray-600">已加入备忘录，到时会提醒你</p>
-          </div>
-        ) : (
-          <>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">备忘内容</label>
-              <textarea
-                value={content}
-                onChange={e => setContent(e.target.value)}
-                rows={3}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">提醒时间</label>
-              <input
-                type="datetime-local"
-                value={remindAt}
-                onChange={e => setRemindAt(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
-              />
-              <div className="flex gap-2 mt-2">
-                {[
-                  { label: '1小时后', hours: 1 },
-                  { label: '今晚18:00', custom: () => { const d = new Date(); d.setHours(18, 0, 0, 0); return d; } },
-                  { label: '明天上午', custom: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; } },
-                  { label: '后天上午', custom: () => { const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(9, 0, 0, 0); return d; } },
-                ].map(preset => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => {
-                      const d = preset.custom ? preset.custom() : new Date(Date.now() + (preset.hours || 0) * 3600000);
-                      setRemindAt(d.toISOString().slice(0, 16));
-                    }}
-                    className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50"
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={handleSave}
-                disabled={saving || !content.trim()}
-                className="flex-1 rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {saving ? '保存中...' : '保存到备忘录'}
-              </button>
-              <button
-                onClick={onClose}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
-              >
-                取消
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
