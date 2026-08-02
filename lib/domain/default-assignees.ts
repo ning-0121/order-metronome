@@ -41,11 +41,13 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
     emailContains: ['pin@'],
   },
   production_manager: {
-    displayName: '秦增福',   // 生产主管(名字福/富两种写法都兼容,防匹配不上→未分配)
-    nameMatches: ['秦增福', '秦增富', 'zengfu'],
+    // 生产主管。正名是「秦增富」(CEO 2026-08-01 更正;库里 qzf@ 的 name 也是「富」)。
+    // 「秦增福」是此前代码里的误写,留在 nameMatches 里仅作兜底,防历史数据匹配不上→节点无主。
+    displayName: '秦增富',
+    nameMatches: ['秦增富', '秦增福', 'zengfu'],
     emailContains: ['qzf@', 'qzf'],
   },
-  // 2026-07-25 CEO:发货出运=物流部,责任人物流主管 秦增超(与生产主管秦增福是两个人,勿混)
+  // 2026-07-25 CEO:发货出运=物流部,责任人物流主管 秦增超(与生产主管秦增富是两个人,勿混)
   logistics: {
     displayName: '秦增超',
     nameMatches: ['秦增超', 'zengchao'],
@@ -65,7 +67,7 @@ export const DEFAULT_ASSIGNEES: Record<string, AssigneeMatcher> = {
   // 而 production 有两个人(潘盛、骆淑娟),兜底不成立 → **节点一出生就是无主的**。
   // 生产中心 65 个在途无主节点(开裁 33 + 工厂完成 32)就是这么攒出来的。
   //
-  // 注意别和 production_manager 混:秦增福是生产主管,他那摊活由 production_manager
+  // 注意别和 production_manager 混:秦增富是生产主管,他那摊活由 production_manager
   // 那条单独负责(STRICTLY_PM_STEPS:生产预评估/工厂匹配确认/产前样准备完成,
   // 加 PM_OR_FINANCE_STEPS 的加工费确认),两个角色、两拨节点。
   //

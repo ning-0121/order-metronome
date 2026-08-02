@@ -18,7 +18,7 @@ const ROLES_RESOLVED_AT_CREATE = ['procurement', 'finance', 'logistics', 'produc
 const PROFILES = [
   { user_id: 'u-fy', name: '方园', email: 'fy@qimoclothing.com' },
   { user_id: 'u-pin', name: '王一品', email: 'pin@qimoclothing.com' },
-  { user_id: 'u-qzf', name: '秦增富', email: 'qzf@qimoclothing.com' },   // 生产主管(福/富两种写法)
+  { user_id: 'u-qzf', name: '秦增富', email: 'qzf@qimoclothing.com' },   // 生产主管(正名「富」)
   { user_id: 'u-qzc', name: '秦增超', email: 'qzc@qimoclothing.com' },   // 物流主管
   { user_id: 'u-lsj', name: '骆淑娟', email: 'lsj@qimoclothing.com' },   // 生产跟单 / QC
   { user_id: 'u-ps', name: '潘盛', email: 'ps@qimoclothing.com' },       // 第二个 production 持有者
@@ -48,7 +48,7 @@ describe('关键角色派到对的人', () => {
     expect(who('production_manager')).not.toBe(who('production'));
   });
 
-  it('物流 = 秦增超,别和生产主管秦增福混(名字太像)', () => {
+  it('物流 = 秦增超,别和生产主管秦增富混(名字太像)', () => {
     expect(who('logistics')).toBe('u-qzc');
     expect(who('logistics')).not.toBe(who('production_manager'));
   });
@@ -58,7 +58,7 @@ describe('关键角色派到对的人', () => {
     expect(who('procurement')).toBe('u-pin');
   });
 
-  it('秦增福写成「秦增富」也能匹配上(防匹配失败→无主)', () => {
+  it('历史误写「秦增福」也能匹配上(正名是秦增富,防匹配失败→无主)', () => {
     expect(findAssigneeUserId(
       [{ user_id: 'u-x', name: '秦增福', email: 'other@qimoclothing.com' }],
       DEFAULT_ASSIGNEES.production_manager,
