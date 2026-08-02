@@ -5,10 +5,11 @@ import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { listTargets, listAllCustomersForTarget } from '@/app/actions/sales-targets';
 import { getCurrentLunarYear, getLunarYearRange } from '@/lib/services/sales-targets.service';
 import { TargetEditor } from '@/components/TargetEditor';
+import { BRAND } from '@/lib/config/brand';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: '客户年度销售目标 — QIMO OS' };
+export const metadata = { title: `客户年度销售目标 — ${BRAND.productName}` };
 
 interface PageProps {
   searchParams?: Promise<{ year?: string }>;

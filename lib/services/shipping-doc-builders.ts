@@ -7,13 +7,9 @@ import type { Workbook } from 'exceljs';
 import type { ShippingDocModel } from './shipping-docs';
 import type { PIData } from '@/app/actions/order-pi';
 
-// PI 开票方固定抬头 · 义乌市绮陌服饰有限公司(与 order-pi.ts 同一常量,统一在此)
-export const PI_ISSUER = {
-  company: 'YIWU QIMO CLOTHING CO.,LTD（义乌市绮陌服饰有限公司）',
-  address: '2108 Room, Global Building, No.168 Financial 6th Street, Yiwu City, Zhejiang Province, China',
-  contact: 'CONTACT: ALEX QIN    TEL: 86-15924281155    FAX: 0579-81548728    EMAIL: ALEX@QIMOCLOTHING.COM',
-  title: 'PROFORMA INVOICE',
-};
+// PI 开票方固定抬头 —— 与 order-pi.ts 共用同一份(2026-08-01 真正收口;
+// 此前两处各存一份逐字副本,注释虽写着"统一在此"却没做完)。
+import { PI_ISSUER } from '@/lib/domain/document-templates';
 
 /** Packing List(款×色逐行,箱数/毛重/体积按实发)。 */
 export async function buildPackingListWorkbook(m: ShippingDocModel): Promise<Workbook> {

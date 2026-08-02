@@ -249,7 +249,11 @@ export async function createOrder(
     }, ruleOverrides);
     const missing = findMissingRequired({
       internal_order_no, factory_date, total_quantity: quantity, style_count: styleCount,
-      color_count: colorCount, customer_po_number, order_date, order_type, incoterm,
+      // 规则表的键叫 customer_po_number(和表单 input 同名),但本文件里承接它的变量叫 po_number
+      // (第 148 行 `const po_number = formData.get('customer_po_number')`)。
+      // 2026-07-31 加这段校验时误写成简写 `customer_po_number`,引用了一个不存在的标识符 →
+      // 每次建单必抛 ReferenceError。ignoreBuildErrors=true 让它一路溜到生产(2026-08-01 修)。
+      color_count: colorCount, customer_po_number: po_number, order_date, order_type, incoterm,
       quantity_unit: formData.get('quantity_unit'),
       repeat_issues: formData.get('repeat_issues'),
       shipping_sample_deadline,

@@ -18,6 +18,7 @@ import { compareSizeKeys } from '@/lib/utils/size-sort';
 import { evaluateProcurementApproval, evaluateBudgetGate, reasonsCn, topRequiredScope, type ApprovalScope } from '@/lib/procurement/approval';
 import { syncPurchaseOrderToFinance } from '@/lib/integration/finance-sync';
 import { placePurchaseOrderCore } from '@/lib/procurement/placeCore';
+import { BRAND } from '@/lib/config/brand';
 
 const CAN_PROCURE = ['admin', 'procurement', 'procurement_manager'];
 
@@ -1282,7 +1283,7 @@ export async function exportPurchaseOrder(id: string, opts: { withPrice?: boolea
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = 'QIMO OS · 义乌市绮陌服饰有限公司';
+  wb.creator = `${BRAND.productName} · ${BRAND.legalNameZh}`;
   // ── 采购申请单(主表;版式对齐用户模板:辅料图示/尺寸/STYLE/SIZE/订单数量/单价/金额,款×码拆行,图片内嵌)──
   const customerName = (ords || []).map((o: any) => o.customer_name).filter(Boolean)[0] || '';
   // 业务员名(订单负责人):首张订单 owner/created_by → profiles.name(取不到不阻断)

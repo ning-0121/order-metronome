@@ -5,11 +5,12 @@ import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib
 import { getUserRoleFromEmail } from '@/lib/utils/user-role';
 import { BulkApproveDelaysButton } from '@/components/BulkApproveDelaysButton';
 import { BulkApproveAmendmentsButton } from '@/components/BulkApproveAmendmentsButton';
+import { BRAND } from '@/lib/config/brand';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata = {
-  title: '待审批中心 — QIMO OS',
+  title: `待审批中心 — ${BRAND.productName}`,
 };
 
 interface PageProps {

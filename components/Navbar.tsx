@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
 import { NotificationBell } from '@/components/NotificationBell';
 import { getPendingPriceApprovalsCount } from '@/app/actions/price-approvals';
-import { PRODUCT_NAME } from '@/lib/branding/constants';
+import { BRAND } from '@/lib/config/brand';
 
 interface NavbarProps {
   isAdmin?: boolean;
@@ -193,7 +193,7 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
         Q
       </div>
       <span className="text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-        {PRODUCT_NAME}
+        {BRAND.productName}
       </span>
     </Link>
   );

@@ -10,6 +10,7 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { receiptAmount } from '@/lib/procurement/receipt-amount';
+import { BRAND } from '@/lib/config/brand';
 
 export interface GoodsReceiptRow {
   id: string;
@@ -184,7 +185,7 @@ export async function exportGoodsReceiptRecords(
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = 'QIMO OS · 义乌市绮陌服饰有限公司';
+  wb.creator = `${BRAND.productName} · ${BRAND.legalNameZh}`;
   const ws = wb.addWorksheet('收货记录');
   ws.columns = [
     { header: '收货日期', width: 12 }, { header: '供应商', width: 18 }, { header: '物料', width: 22 },

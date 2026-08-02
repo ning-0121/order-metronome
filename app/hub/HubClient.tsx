@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { BRAND } from '@/lib/config/brand';
 
 interface Card {
   id: string;
@@ -20,7 +21,7 @@ export function HubClient({ cards, userName, roles }: { cards: Card[]; userName:
           🧭
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">QIMO OS 统一入口</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{BRAND.productName} 统一入口</h1>
           <p className="text-sm text-gray-500">
             {userName} · 可进入 {cards.length} 个系统
             {roles.length > 0 && <span className="text-gray-400"> · {roles.join(' / ')}</span>}

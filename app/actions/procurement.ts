@@ -42,6 +42,7 @@ import { orderSizeKeys } from '@/lib/utils/size-sort';
 import { fetchOrderSizeOrder } from '@/lib/services/orderSizeOrder';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
+import { BRAND } from '@/lib/config/brand';
 
 export interface ProcurementLineItem {
   id: string;
@@ -622,7 +623,7 @@ export async function exportReconciliationSheet(orderId: string): Promise<{
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = 'QIMO OS';
+  wb.creator = BRAND.productName;
   const ws = wb.addWorksheet('采购对账单', { views: [{ state: 'frozen', ySplit: 3 }] });
 
   // 标题

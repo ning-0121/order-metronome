@@ -26,13 +26,10 @@ function maskPIPrices<T extends { lines?: PILine[]; deposit?: string }>(d: T): T
   return { ...d, deposit: '', lines: (d.lines || []).map((l) => ({ ...l, unit_price: 0 })) };
 }
 
-// 开票方固定抬头 · 义乌市绮陌服饰有限公司(2026-07-09 用户拍板,统一用此抬头)
-const ISSUER = {
-  company: 'YIWU QIMO CLOTHING CO.,LTD（义乌市绮陌服饰有限公司）',
-  address: '2108 Room, Global Building, No.168 Financial 6th Street, Yiwu City, Zhejiang Province, China',
-  contact: 'CONTACT: ALEX QIN    TEL: 86-15924281155    FAX: 0579-81548728    EMAIL: ALEX@QIMOCLOTHING.COM',
-  title: 'PROFORMA INVOICE',
-};
+// 开票方固定抬头 · 义乌市绮陌服饰有限公司(2026-07-09 用户拍板,统一用此抬头)。
+// 2026-08-01:此前这里和 shipping-doc-builders.ts 各存一份逐字相同的副本,改一处另一处不动
+// → PI 预览和导出的装箱单抬头会对不上。统一取 document-templates.ts。
+import { PI_ISSUER as ISSUER } from '@/lib/domain/document-templates';
 
 // 从「规格/面料名」抠出克重(如 280GSM)。规格文本形如 "85%P 15%S 280g 纱支…"。
 function parseGsm(...texts: string[]): string {

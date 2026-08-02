@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ShipmentDistributionChart } from '@/components/ShipmentDistributionChart';
 import { SchedulingPanel } from '@/components/SchedulingPanel';
 import { summarizeEffectiveOrderQuantity } from '@/lib/services/analytics-metrics';
+import { BRAND } from '@/lib/config/brand';
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
@@ -344,7 +345,7 @@ export default async function AnalyticsPage() {
       {/* 底部 slogan */}
       <div className="text-center py-4">
         <p className="text-sm text-gray-400">
-          卡风险，而不是走流程 — QIMO OS让交期管理从被动响应转变为主动预防
+          卡风险，而不是走流程 — {BRAND.productName}让交期管理从被动响应转变为主动预防
         </p>
       </div>
       {/* ===== 系统价值（底部） — 重新设计：聚焦实际业务价值 ===== */}
@@ -354,7 +355,7 @@ export default async function AnalyticsPage() {
             <span>🚀</span>
             <span>系统价值实证</span>
           </div>
-          <h2 className="text-2xl md:text-3xl font-bold">QIMO OS — 让交期管理更可控</h2>
+          <h2 className="text-2xl md:text-3xl font-bold">{BRAND.productName} — 让交期管理更可控</h2>
           <p className="text-indigo-300 text-sm mt-2">
             基于 {summary.totalOrders} 个订单、{summary.totalMilestones} 个控制节点的实际运行数据
           </p>

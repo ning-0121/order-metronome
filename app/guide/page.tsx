@@ -2,6 +2,7 @@ import { MILESTONE_TEMPLATE_V1 } from '@/lib/milestoneTemplate';
 import { SOP_MAP } from '@/lib/domain/sop';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { FILE_NAMING_FORMAT, FILE_NAMING_RULES, FILE_NAMING_BY_STEP } from '@/lib/domain/fileNaming';
+import { BRAND } from '@/lib/config/brand';
 
 /* ── 阶段定义（与 milestone template 完全对应） ── */
 const STAGE_NAMES: Record<string, string> = {
@@ -160,7 +161,7 @@ export default function GuidePage() {
       {/* 标题 */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">操作说明 & SOP</h1>
-        <p className="text-sm text-gray-500 mt-1">QIMO OS — 员工操作手册</p>
+        <p className="text-sm text-gray-500 mt-1">{BRAND.productName} — 员工操作手册</p>
       </div>
 
       {/* 目录导航 */}
@@ -1019,7 +1020,7 @@ export default function GuidePage() {
 
       {/* 页脚 */}
       <div className="text-center py-6 border-t border-gray-200">
-        <p className="text-xs text-gray-400">QIMO OS | 访问 order.qimoactivewear.com | 如有问题请联系管理员</p>
+        <p className="text-xs text-gray-400">{BRAND.productName} | 访问 {BRAND.siteDomain} | 如有问题请联系管理员</p>
       </div>
     </div>
   );

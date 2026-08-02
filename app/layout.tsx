@@ -7,14 +7,14 @@ import { WorkbenchAnchor } from "@/components/WorkbenchAnchor";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRoleFromEmail } from "@/lib/utils/user-role";
 import { knowledgeLayerCaptureVisible } from "@/lib/engine/featureFlags";
-import { PRODUCT_NAME, PRODUCT_DESC, PRODUCT_TAGLINE_EN } from "@/lib/branding/constants";
+import { BRAND } from "@/lib/config/brand";
 
 // 去掉 Google Fonts — Vercel 构建时经常拉不到导致部署失败
 // 改用系统字体栈，视觉差异极小但部署 100% 稳定
 
 export const metadata: Metadata = {
-  title: PRODUCT_NAME,
-  description: PRODUCT_DESC,
+  title: BRAND.productName,
+  description: BRAND.description,
   // 内部系统，禁止搜索引擎收录（防止"搜绮陌服饰能搜到节拍器"）
   robots: { index: false, follow: false, nocache: true },
   manifest: "/manifest.json",
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: PRODUCT_NAME,
+    title: BRAND.productName,
   },
   other: {
     "mobile-web-app-capable": "yes",
@@ -80,9 +80,9 @@ export default async function RootLayout({
           <div className="container mx-auto px-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs text-gray-500">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-gray-700">{PRODUCT_NAME}</span>
+                <span className="font-semibold text-gray-700">{BRAND.productName}</span>
                 <span className="text-gray-400">·</span>
-                <span>{PRODUCT_TAGLINE_EN}</span>
+                <span>{BRAND.taglineEn}</span>
               </div>
               <div className="flex items-center gap-4">
                 <span>© {currentYear} 义乌绮陌服饰有限公司</span>

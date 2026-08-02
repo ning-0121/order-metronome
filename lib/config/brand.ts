@@ -26,11 +26,21 @@ export const BRAND = {
   /** 产品名,出现在页脚、邮件标题、导出文件抬头 */
   productName: env(process.env.NEXT_PUBLIC_BRAND_PRODUCT_NAME, 'QIMO OS'),
 
+  /** 产品副标题(中/英)与描述 —— 用于 <title>/OG/页脚
+   *  2026-08-01 从 lib/branding/constants.ts 并过来:那个文件也自称"单一真相源",
+   *  于是同一个产品名有了两个真相源。只有 2 处引用,直接合并、删掉那个文件。 */
+  tagline: env(process.env.NEXT_PUBLIC_BRAND_TAGLINE, 'AI 企业操作系统'),
+  taglineEn: env(process.env.NEXT_PUBLIC_BRAND_TAGLINE_EN, 'AI Enterprise Operating System'),
+  description: env(process.env.NEXT_PUBLIC_BRAND_DESC, 'QIMO OS — 服装 OEM/ODM 的 AI 企业操作系统'),
+
   /** 法人全称(中文)—— 采购单、收货单、生产任务单的落款主体 */
   legalNameZh: env(process.env.NEXT_PUBLIC_BRAND_LEGAL_NAME_ZH, '义乌市绮陌服饰有限公司'),
 
-  /** 法人全称(英文)—— 报价单、PI、出口单据抬头 */
-  legalNameEn: env(process.env.NEXT_PUBLIC_BRAND_LEGAL_NAME_EN, 'QIMO CLOTHING CO., LTD'),
+  /** 法人全称(英文)—— 报价单、PI、出口单据抬头。
+   *  注意带 YIWU 前缀:2026-08-01 我第一版漏了它(grep 输出被左侧截断只看到后半截),
+   *  全库实际用的是 YIWU QIMO CLOTHING CO.,LTD(报价单/PI/装箱单/EXPORT_SELLER 四处)。
+   *  这是报关抬头,错了是真会出事的字段。 */
+  legalNameEn: env(process.env.NEXT_PUBLIC_BRAND_LEGAL_NAME_EN, 'YIWU QIMO CLOTHING CO.,LTD'),
 
   /** 简称(中文),正文里提到公司时用 */
   shortNameZh: env(process.env.NEXT_PUBLIC_BRAND_SHORT_NAME_ZH, '绮陌'),

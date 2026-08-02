@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getUnreadNotifications, markNotificationRead, markAllNotificationsRead } from '@/app/actions/notification-queries';
 import Link from 'next/link';
+import { BRAND } from '@/lib/config/brand';
 
 /** dropUp:面板向上+向右展开(用于左侧栏底部的铃铛,否则面板会掉到屏幕底以下看不见);
  *  默认向下+向右对齐(用于移动端顶栏)。 */
@@ -20,7 +21,7 @@ export function NotificationBell({ dropUp = false }: { dropUp?: boolean }) {
       // 浏览器弹窗：有新通知时触发
       if (hasPermission && data && data.length > prev && prev > 0) {
         const latest = data[0];
-        new Notification('QIMO OS', {
+        new Notification(BRAND.productName, {
           body: latest.title || latest.message,
           icon: '/icon-192.png',
         });

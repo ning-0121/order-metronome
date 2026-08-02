@@ -9,6 +9,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
+import { BRAND } from '@/lib/config/brand';
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -200,7 +201,7 @@ export async function exportGoodsReceiptStatement(filters: {
 
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = 'QIMO OS · 义乌市绮陌服饰有限公司';
+  wb.creator = `${BRAND.productName} · ${BRAND.legalNameZh}`;
   const usedNames = new Set<string>();
   const safeName = (raw: string) => {
     let n = (raw || '收货').replace(/[\\/\?\*\[\]:]/g, ' ').slice(0, 28) || '收货';

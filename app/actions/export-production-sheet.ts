@@ -13,6 +13,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { BRAND } from '@/lib/config/brand';
 
 interface ExportRow {
   order_no: string;
@@ -122,7 +123,7 @@ export async function exportProductionTrackingSheet(): Promise<{
   // 生成 Excel
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = 'QIMO OS';
+  wb.creator = BRAND.productName;
   wb.created = new Date();
   const ws = wb.addWorksheet('生产订单一览', { views: [{ state: 'frozen', ySplit: 2 }] });
 

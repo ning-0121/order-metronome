@@ -3,6 +3,7 @@
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { BRAND } from '@/lib/config/brand';
 
 // Use a dedicated secret for HMAC signing. Falls back to service role key (server-only, never public).
 const SECRET = process.env.RESET_TOKEN_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -102,7 +103,7 @@ export async function sendPasswordResetEmail(email: string): Promise<{ error?: s
     await transporter.sendMail({
       from: process.env.SMTP_FROM || smtpUser,
       to: email,
-      subject: '【QIMO OS】密码重置',
+      subject: `【${BRAND.productName}】密码重置`,
       html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
         <div style="text-align: center; margin-bottom: 24px;">

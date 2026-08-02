@@ -2,10 +2,11 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getMyDashboard } from '@/app/actions/my-customers';
+import { BRAND } from '@/lib/config/brand';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: '我的客户面板 — QIMO OS' };
+export const metadata = { title: `我的客户面板 — ${BRAND.productName}` };
 
 const fmtWan = (n: number) => n >= 10000 ? `${(n / 10000).toFixed(1)} 万件` : `${n.toLocaleString('zh-CN')} 件`;
 

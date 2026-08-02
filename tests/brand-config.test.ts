@@ -19,12 +19,38 @@ describe('品牌配置默认值 = 绮陌线上现值', () => {
   it('对外展示的抬头没被改动', () => {
     expect(BRAND.productName).toBe('QIMO OS');
     expect(BRAND.legalNameZh).toBe('义乌市绮陌服饰有限公司');
-    expect(BRAND.legalNameEn).toBe('QIMO CLOTHING CO., LTD');
+    // 报关抬头,带 YIWU 前缀。全库四处(报价单/PI/装箱单/EXPORT_SELLER)都是这个。
+    expect(BRAND.legalNameEn).toBe('YIWU QIMO CLOTHING CO.,LTD');
     expect(BRAND.siteDomain).toBe('order.qimoactivewear.com');
   });
 
   it('管理员白名单仍是那两个人(此前分散在 user-role 和 admin-route-guard 两份副本)', () => {
     expect([...ADMIN_EMAILS].sort()).toEqual(['alex@qimoclothing.com', 'su@qimoclothing.com']);
+  });
+});
+
+describe('单据抬头收口后逐字不变', () => {
+  // PI 抬头此前在 order-pi.ts 和 shipping-doc-builders.ts 各存一份副本,2026-08-01 合并成一份。
+  // 这是报关/发票上的字,合并时错一个字符都是事故 —— 逐字锁死合并前的原值。
+  it('PI_ISSUER 与合并前逐字相同', async () => {
+    const { PI_ISSUER } = await import('@/lib/domain/document-templates');
+    expect(PI_ISSUER.company).toBe('YIWU QIMO CLOTHING CO.,LTD（义乌市绮陌服饰有限公司）');
+    expect(PI_ISSUER.address).toBe('2108 Room, Global Building, No.168 Financial 6th Street, Yiwu City, Zhejiang Province, China');
+    expect(PI_ISSUER.contact).toBe('CONTACT: ALEX QIN    TEL: 86-15924281155    FAX: 0579-81548728    EMAIL: ALEX@QIMOCLOTHING.COM');
+    expect(PI_ISSUER.title).toBe('PROFORMA INVOICE');
+  });
+
+  it('EXPORT_SELLER 出口抬头与收口前逐字相同', async () => {
+    const { EXPORT_SELLER } = await import('@/lib/domain/document-templates');
+    expect(EXPORT_SELLER.name_cn).toBe('义乌市绮陌服饰有限公司');
+    expect(EXPORT_SELLER.name_en).toBe('YIWU QIMO CLOTHING CO.,LTD');
+    expect(EXPORT_SELLER.email).toBe('alex@qimoclothing.com');
+  });
+
+  it('广州主体没被误并进义乌主体(两个法人,不是重复)', async () => {
+    const { COMPANY_INFO, EXPORT_SELLER } = await import('@/lib/domain/document-templates');
+    expect(COMPANY_INFO.name).toBe('绮陌服饰科技（广州）有限公司');
+    expect(COMPANY_INFO.name).not.toBe(EXPORT_SELLER.name_cn);
   });
 });
 

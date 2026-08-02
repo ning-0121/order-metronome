@@ -15,6 +15,7 @@ import { requireRoleGroup } from '@/lib/domain/requireRole';
 import { makeDailyBillNo } from '@/lib/utils/dailyBillNo';
 import { parseFabricLedger, type FabricLedgerRow } from '@/lib/services/fabric-ledger-parser';
 import { parseAuxPaymentLedger } from '@/lib/services/aux-payment-ledger-parser';
+import { BRAND } from '@/lib/config/brand';
 
 const WRITE_MSG = '仅采购/采购经理/管理员可导入供应商账目';
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -610,7 +611,7 @@ export async function exportSupplierLedgerExcel(params?: { supplierNameRaw?: str
 
     const ExcelJS = await import('exceljs');
     const wb = new ExcelJS.default.Workbook();
-    wb.creator = 'QIMO OS · 义乌市绮陌服饰有限公司';
+    wb.creator = `${BRAND.productName} · ${BRAND.legalNameZh}`;
     const used = new Set<string>();
     const safeName = (raw: string) => {
       let n = (raw || '台账').replace(/[\\/\?\*\[\]:]/g, ' ').slice(0, 28) || '台账';

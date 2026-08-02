@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { CalibrateClient } from './CalibrateClient';
+import { BRAND } from '@/lib/config/brand';
 
-export const metadata = { title: '批量进度校准 — QIMO OS' };
+export const metadata = { title: `批量进度校准 — ${BRAND.productName}` };
 
 export default async function ProgressCalibratePage() {
   const supabase = await createClient();

@@ -3,11 +3,12 @@ import { createClient } from '@/lib/supabase/server';
 import { getDailyTasks, getTasksSummary, generateDailyTasks } from '@/lib/services/daily-tasks.service';
 import { getPendingApprovalsCount } from '@/lib/services/pending-approvals.service';
 import { TaskList } from '@/components/TaskList';
+import { BRAND } from '@/lib/config/brand';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata = {
-  title: '今日任务 — QIMO OS',
+  title: `今日任务 — ${BRAND.productName}`,
 };
 
 const DAILY_QUOTES = [
