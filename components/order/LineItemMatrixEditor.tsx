@@ -73,11 +73,24 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   const [ratios, setRatios] = useState<Record<number, Record<string, number>>>({});   // 每款尺码配比(UI 助手,不入库)
   const [colorTotals, setColorTotals] = useState<Record<string, string>>({});          // 每色总量输入,key=`si-ci`
 
-  // 步骤2b:上传客户订单 Excel → 零 token 解析 → 归组追加进富录入表(预览可改,再保存)
-  async function handleParseOrderFile(e: React.ChangeEvent<HTMLInputElement>) {
+  // 唯一上传入口(2026-08-01 CEO「Excel 输入要简化」)。
+  //
+  // 此前同样的两个功能各存在两份、共 4 个按钮:顶部召唤条一对(「上传客户订单表」「图片/PDF 用 AI 解析」)
+  // + 工具栏一对(「上传客户订单」「AI 解析配比」),handler 完全相同、名字却不一样,看着像 4 个不同功能。
+  //
+  // 而且这两者对用户根本不该是个选择题:Excel 走零 token 代码解析读不出逐码数量时,
+  // 本来就会自动兜底转 AI(2026-07-23 已实现)。真实差别只有**文件类型** ——
+  // 代码解析读不了图片/PDF。那就按扩展名自动分流,用户不用知道有两种解析器。
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';   // 允许重复选同一文件
     if (!file) return;
+    if (/\.(xlsx|xls|xlsm)$/i.test(file.name)) await parseExcelFile(file);
+    else await runAIParse(file);   // 图片/PDF:代码解析读不了,直接走 AI
+  }
+
+  // 步骤2b:客户订单 Excel → 零 token 解析 → 归组追加进富录入表(预览可改,再保存)
+  async function parseExcelFile(file: File) {
     setParsing(true); setMsg('');
     try {
       const buf = await file.arrayBuffer();
@@ -118,15 +131,9 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
     setParsing(false);
   }
 
-  // 步骤2c:复杂版式/尺码配比(如「S:M:L=2:2:2」+每色总量,零token代码解析读不出)→ 走 AI 解析。
+  // AI 解析核心 —— 图片/PDF 直接走这里;Excel 代码解析读不出逐码数量时自动兜底转到这里(2026-07-23)。
+  // 复杂版式/尺码配比(如「S:M:L=2:2:2」+每色总量)零 token 代码解析读不出,只能靠 AI。
   // AI 已把配比按比例摊成每码件数(sizes 是件数不是比例);解析→并入富录入表→人核对→保存冻结。
-  async function handleParseAI(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    await runAIParse(file);
-  }
-  // AI 解析核心 —— 供「🤖 AI 解析配比」按钮 + 「上传客户订单」读不出逐码数量时自动兜底调用(2026-07-23)
   async function runAIParse(file: File) {
     setParsing(true); setMsg('🤖 AI 正在读取配比/复杂版式…(约 10-20 秒)');
     try {
@@ -147,7 +154,7 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       }));
       if (aiStyles.length === 0) {
         // 复杂版式(合并单元格/图片/配比散在备注)Excel 转文本常读不全 → 引导截图当图片传(vision 更稳)
-        setMsg(`❌ AI 没解析到款${notes ? `（AI:${notes}）` : ''}。${isImg ? '这张图 AI 也没读到,请换更清晰/更完整的截图。' : '年年旺这类复杂版式建议:把这张表截图(含款号/颜色数量/配比 S:M:L)当图片传给「🤖 AI 解析配比」,vision 比 Excel 转文本准得多。'}`);
+        setMsg(`❌ AI 没解析到款${notes ? `（AI:${notes}）` : ''}。${isImg ? '这张图 AI 也没读到,请换更清晰/更完整的截图。' : '年年旺这类复杂版式建议:把这张表截图(含款号/颜色数量/配比 S:M:L),再用同一个「📄 上传客户订单表」把截图传上来 —— vision 比 Excel 转文本准得多。'}`);
         return;
       }
       // 提示 sizes 是否空(配比没摊出来)
@@ -358,35 +365,43 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   const numCell = 'rounded border border-gray-300 px-1 py-1 text-xs text-center w-16 min-w-16 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
   return (
     <div className="space-y-3">
-      {/* 上传入口置顶(2026-07-30 用户:「手工录入需要增加表格上传」—— 其实早就有,
-          但两个按钮和「总量」挤在同一行、样式又淡,还排在尺码列下面,用户根本没注意到。
-          这里在最上方给一个显眼的召唤条,原按钮保留不动。) */}
-      {canEdit && (
+      {/* 唯一上传入口(2026-08-01 CEO「Excel 输入要简化」)。
+          此前是 4 个按钮:这条召唤条里两个 + 下面工具栏里两个,两两 handler 相同、名字却不一样
+          (「上传客户订单表」/「上传客户订单」、「图片/PDF 用 AI 解析」/「AI 解析配比」),
+          看着像 4 个不同功能。而选哪种解析器本来就不该问用户 —— 现在按文件类型自动分流,
+          说明文字也跟着从「怎么选」缩成「传什么」。 */}
+      {canEdit && (styles.length === 0 ? (
+        // 明细还空着 —— 大声喊:这时候上传最省事
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-indigo-900">📥 有客户订单表?直接上传,不用手敲</p>
               <p className="text-[11px] text-indigo-700/80 mt-0.5">
-                尺码成列的 Excel 走「上传客户订单」(零 AI、最准);
-                版式复杂或只有图片/PDF、只给了配比(如 S:M:L=2:2:2)走「AI 解析配比」。
-                解析后会填进下面的表,<b>可以再改再保存</b>。
+                Excel、PDF、截图都行,系统自己判断怎么读。解析后会填进下面的表,<b>可以再改再保存</b>。
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <label className={`px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`}
-                title="尺码数量成列的客户订单/生产单 Excel(如伊彤数量表),零 token 解析,预览可改">
-                {parsing ? '解析中…' : '📄 上传客户订单表'}
-                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleParseOrderFile} disabled={parsing} />
-              </label>
-              <label className={`px-3 py-2 rounded-lg border border-purple-300 bg-white text-purple-700 text-xs font-medium hover:bg-purple-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`}
-                title="复杂版式/尺码配比(如年年旺:S:M:L=2:2:2 + 每色总量,或图片/PDF)用 AI 读取,自动按配比摊成每码件数">
-                {parsing ? 'AI 解析中…' : '🤖 图片/PDF 用 AI 解析'}
-                <input type="file" accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleParseAI} disabled={parsing} />
-              </label>
-            </div>
+            <label className={`px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 cursor-pointer shrink-0 ${parsing ? 'opacity-50 pointer-events-none' : ''}`}
+              title="Excel 走零 token 代码解析(最准);读不出逐码数量、或传的是图片/PDF 时自动改用 AI,按配比摊成每码件数">
+              {parsing ? '解析中…' : '📄 上传客户订单表'}
+              <input type="file" accept=".xlsx,.xls,.xlsm,.pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleUpload} disabled={parsing} />
+            </label>
           </div>
         </div>
-      )}
+      ) : (
+        // 已经有明细(多半是上传客户 PO 时自动预填的)—— 缩成一行小字。
+        // 建单页此前同屏有两个 Excel 入口:第 6 段的「客户 PO」上传会自动预填这张表,
+        // 这里的上传只是 PO 没读全时的补救。业务看到两个上传不知道用哪个 ——
+        // 现在填好了就不再大声喊,只留一句说明白关系的补录入口(2026-08-01 CEO「Excel 输入要简化」)。
+        <p className="text-[11px] text-gray-500">
+          明细已填(上传客户 PO 时会自动预填这里)。读得不全?
+          <label className={`ml-1 text-indigo-600 font-medium underline cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`}
+            title="Excel 走零 token 代码解析;读不出逐码数量、或传的是图片/PDF 时自动改用 AI">
+            {parsing ? '解析中…' : '再传一份订单表补录'}
+            <input type="file" accept=".xlsx,.xls,.xlsm,.pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleUpload} disabled={parsing} />
+          </label>
+          (会并进现有明细,不覆盖)
+        </p>
+      ))}
 
       {/* 顶部:尺码集 + 汇总 + 保存 */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-xl border border-gray-200 p-3">
@@ -417,18 +432,8 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-600">总量 <b className="text-gray-900">{orderTotal}</b> {hasSet ? '套' : '件'}{hasSet && <> · 折合 <b className="text-gray-900">{orderPieces}</b> 件</>} · <b>{styles.length}</b> 款 · <b>{colorRows}</b> 颜色行</span>
-          {canEdit && (
-            <label className={`px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 text-xs font-medium hover:bg-indigo-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="尺码数量成列的客户订单/生产单 Excel(如伊彤数量表),零 token 解析,预览可改">
-              {parsing ? '解析中…' : '📄 上传客户订单'}
-              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleParseOrderFile} disabled={parsing} />
-            </label>
-          )}
-          {canEdit && (
-            <label className={`px-3 py-1.5 rounded-lg border border-purple-200 text-purple-600 text-xs font-medium hover:bg-purple-50 cursor-pointer ${parsing ? 'opacity-50 pointer-events-none' : ''}`} title="复杂版式/尺码配比(如年年旺:S:M:L=2:2:2 + 每色总量,或图片/PDF)用 AI 读取,自动按配比摊成每码件数">
-              {parsing ? 'AI 解析中…' : '🤖 AI 解析配比'}
-              <input type="file" accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleParseAI} disabled={parsing} />
-            </label>
-          )}
+          {/* 这里原本还有两个上传按钮,与顶部召唤条那对 handler 完全相同(2026-08-01 删)。
+              工具栏只留「尺码列 / 总量 / 保存明细」,上传统一走顶部那唯一入口。 */}
           {canEdit && !controlled && <button onClick={save} disabled={saving} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">{saving ? '保存中…' : '💾 保存明细'}</button>}
         </div>
       </div>
