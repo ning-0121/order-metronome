@@ -153,7 +153,7 @@ export default async function OrderDetailPage({
   const canEnterBudget = canSeeFinancials || currentRoles.some((r) => ['merchandiser', 'procurement', 'procurement_manager'].includes(r));
 
   // ── 并行加载 5 个独立查询（owner profile 之前是串行额外查询，2026-05-19 合并到并行池）──
-  const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult, ownerProfileResult, customerPoHistoryResult] = await Promise.all([
+  const [milestonesResult, delayRequestsResult, logsResult, attachmentsResult, ownerProfileResult, customerPoHistoryResult, procurementLineCountResult, procurementTrackingCountResult] = await Promise.all([
     getMilestonesByOrder(id),
     getDelayRequestsByOrder(id),
     getOrderLogs(id),
@@ -168,7 +168,15 @@ export default async function OrderDetailPage({
           .single()
       : Promise.resolve({ data: null }),
     getCustomerPoHistory(id),
+    // 采购数据落在哪张表 —— 决定「采购进度」页签怎么排(2026-08-01 审计,见下方页签处注释)
+    (supabase.from('procurement_line_items') as any)
+      .select('id', { count: 'exact', head: true }).eq('order_id', id),
+    (supabase.from('procurement_tracking') as any)
+      .select('id', { count: 'exact', head: true }).eq('order_id', id),
   ]);
+  // 本单的采购执行行 / 手工台账行各有多少(取不到就当 0,只影响排版不影响功能)
+  const supplyChainRows = (procurementLineCountResult as any)?.count ?? 0;
+  const trackingRows = (procurementTrackingCountResult as any)?.count ?? 0;
   let { data: milestones } = milestonesResult;
   // Final display projection consumed by OrderTimeline. Historical database rows may still carry
   // a production follow-up, but customer-facing confirmations belong to the order business owner.
@@ -1238,14 +1246,36 @@ export default async function OrderDetailPage({
         {/* Tab: 采购进度（共享表 + 对账） */}
         {activeTab === 'procurement' && (
           <div className="space-y-4">
-            {/* 真实采购执行进度(实时投影,采购在采购中心下单/催货/收货即刻反映;单一真相)*/}
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <SupplyChainTab orderId={id} />
-            </div>
-            {/* 手工协作备注(非实时·仅补充说明,默认收起;真实进度以上方为准)*/}
-            <details className="bg-white rounded-xl border border-gray-200 p-4 group">
+            {/* 采购进度两块的排序按**本单数据实际在哪张表**决定(2026-08-01 全面审计)。
+
+                原先是写死的:SupplyChainTab(procurement_line_items)置顶并标注「单一真相」,
+                ProcurementTrackingTab(procurement_tracking)默认折叠、标注「仅补充说明,真实进度以上方为准」。
+                生产数据说反了 ——
+                  procurement_line_items  37 行 / 覆盖 6 张单 / 末次写入 7-27
+                  procurement_tracking   349 行 / 覆盖 87 张单 / 今天仍在写,近 30 天新增 64
+                也就是 87 张单里有 81 张,跟单点开这里看到的是一个**空的「真相」面板**,
+                真数据被折叠在下面当「备注」。这和建单页把没建过单的 PO 模式标成「主路径」是同一个毛病。
+
+                新采购流水线(核料 → 执行)是更完整的设计,只是试点 5-6 张单后停了。
+                所以这里不替谁站队,只按本单实情排版:哪块有数据,哪块在上面、默认展开。
+                等采购流程定了方向,再把另一块收掉。 */}
+            {supplyChainRows === 0 && trackingRows > 0 && (
+              <p className="text-xs text-gray-500 px-1">
+                本单采购记录在下方「采购台账」中({trackingRows} 条)。
+                采购中心的核料/下单流程本单未启用,故上方执行明细为空。
+              </p>
+            )}
+            {(supplyChainRows > 0 || trackingRows === 0) && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6">
+                <SupplyChainTab orderId={id} />
+              </div>
+            )}
+            <details
+              open={trackingRows > 0}
+              className="bg-white rounded-xl border border-gray-200 p-4 group"
+            >
               <summary className="cursor-pointer text-sm font-medium text-gray-600 select-none">
-                📝 手工协作备注（非实时·仅补充说明,点开展开）
+                📝 采购台账{trackingRows > 0 ? `（${trackingRows} 条）` : '（暂无记录，点开可添加）'}
               </summary>
               <div className="mt-4">
                 <ProcurementTrackingTab
@@ -1255,6 +1285,11 @@ export default async function OrderDetailPage({
                 />
               </div>
             </details>
+            {supplyChainRows > 0 && trackingRows > 0 && (
+              <p className="text-xs text-amber-700 px-1">
+                ⚠️ 本单在「采购执行明细」和「采购台账」里都有记录,两处口径可能不一致,请以采购中心的执行明细为准。
+              </p>
+            )}
             {/* 采购对账 */}
             <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">采购对账</h2>

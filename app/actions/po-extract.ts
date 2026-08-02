@@ -309,45 +309,13 @@ export async function getOrderExtraction(
 }
 
 /**
- * 更新采购明细行（任意角色可更新对应字段）
+ * ~~updateProcurementItem~~ 已删除(2026-08-01 全面审计)。
+ *
+ * 它写的是 procurement_sheet_items —— 生产库 0 行,且全仓**无任何调用方**。
+ * 更麻烦的是它和 procurement-items.ts 的 updateProcurementItem **同名不同表**
+ * (那个写 procurement_items),是采购三张表在认知上糊成一团的最后一处撞名。
+ * 本文件其余两个导出(extractPOFromAttachment / getOrderExtraction)是活的,不受影响。
  */
-export async function updateProcurementItem(
-  itemId: string,
-  updates: Partial<{
-    material_name: string;
-    specification: string;
-    quantity: number;
-    unit_price: number;
-    supplier: string;
-    required_date: string;
-    order_placed_date: string;
-    expected_arrival: string;
-    actual_arrival: string;
-    arrival_qty: number;
-    arrival_status: string;
-    procurement_notes: string;
-    qc_notes: string;
-    warehouse_notes: string;
-    sales_notes: string;
-  }>,
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { ok: false, error: '请先登录' };
-    // P1 修:原注释"任意角色可更新"→ 含 unit_price。收紧到采购执行角色。
-    { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_PROCUREMENT_EXEC', '仅采购/采购经理/管理员可改采购明细'); if (err) return { ok: false, error: err }; }
-
-    const { error } = await (supabase.from('procurement_sheet_items') as any)
-      .update({ ...updates, last_updated_by: user.id, last_updated_at: new Date().toISOString() })
-      .eq('id', itemId);
-
-    if (error) return { ok: false, error: error.message };
-    return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err?.message };
-  }
-}
 
 // ── 工具函数 ──────────────────────────────────────────────────────
 

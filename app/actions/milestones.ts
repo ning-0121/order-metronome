@@ -1091,8 +1091,8 @@ export async function markMilestoneDone(
   // 采购单下达完成 → 自动初始化采购进度共享表
   if (milestoneData.step_key === 'procurement_order_placed') {
     try {
-      const { initDefaultProcurementItems } = await import('@/app/actions/procurement-tracking');
-      await initDefaultProcurementItems(milestoneData.order_id);
+      const { initDefaultProcurementTrackingRows } = await import('@/app/actions/procurement-tracking');
+      await initDefaultProcurementTrackingRows(milestoneData.order_id);
     } catch (e: any) { console.warn(`[milestones] 初始化失败不阻断:`, e?.message); }
   }
 

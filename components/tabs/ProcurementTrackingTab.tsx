@@ -12,13 +12,13 @@
 
 import { useState, useEffect } from 'react';
 import {
-  getProcurementItems,
-  addProcurementItem,
+  getProcurementTrackingRows,
+  addProcurementTrackingRow,
   submitSupplementRequest,
   approveSupplementRequest,
-  updateProcurementItem,
-  deleteProcurementItem,
-  initDefaultProcurementItems,
+  updateProcurementTrackingRow,
+  deleteProcurementTrackingRow,
+  initDefaultProcurementTrackingRows,
   type ProcurementItem,
 } from '@/app/actions/procurement-tracking';
 import { createClient } from '@/lib/supabase/client';
@@ -68,7 +68,7 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
 
   async function loadData() {
     setLoading(true);
-    const res = await getProcurementItems(orderId);
+    const res = await getProcurementTrackingRows(orderId);
     const currentItems = res.data || [];
     setItems(currentItems);
 
@@ -99,8 +99,8 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
     // 自动初始化：有采购文件 + 无跟踪条目
     if (fileFound && currentItems.length === 0) {
       try {
-        await initDefaultProcurementItems(orderId);
-        const res2 = await getProcurementItems(orderId);
+        await initDefaultProcurementTrackingRows(orderId);
+        const res2 = await getProcurementTrackingRows(orderId);
         if (res2.data) setItems(res2.data);
       } catch {}
     }
@@ -109,7 +109,7 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
 
   async function handleInit() {
     setSaving(true);
-    await initDefaultProcurementItems(orderId);
+    await initDefaultProcurementTrackingRows(orderId);
     await loadData();
     setSaving(false);
   }
@@ -149,7 +149,7 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
   async function handleUpdate(id: string, field: string, value: string | boolean | null) {
     // offline_paid 是布尔(false 要保留,不能被 || null 吞成 null);其余空串→null。
     const payloadValue = typeof value === 'boolean' ? value : (value || null);
-    const res = await updateProcurementItem(id, { [field]: payloadValue } as any);
+    const res = await updateProcurementTrackingRow(id, { [field]: payloadValue } as any);
     if (res.error) { await confirm({ title: '保存失败', message: res.error, confirmText: '知道了' }); return; }
     setItems(prev => prev.map(item =>
       item.id === id ? { ...item, [field]: payloadValue, updated_at: new Date().toISOString() } : item
@@ -158,7 +158,7 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
 
   async function handleDelete(id: string) {
     if (!(await confirm({ title: '确定删除此采购项？', danger: true, confirmText: '删除' }))) return;
-    const res = await deleteProcurementItem(id);
+    const res = await deleteProcurementTrackingRow(id);
     if (res.error) { await confirm({ title: '删除失败', message: res.error, confirmText: '知道了' }); return; }
     setItems(prev => prev.filter(item => item.id !== id));
   }
@@ -358,7 +358,7 @@ export function ProcurementTrackingTab({ orderId, canEdit, canApprove }: Props) 
                                     const v = await prompt({ title: '拆分批次', fields: [{ name: 'batch', label: '批次名（如颜色：黑色、白色）', type: 'text', required: true }], confirmText: '拆分' });
                                     if (!v) return;
                                     const batch = v.batch;
-                                    await addProcurementItem(orderId, { category: item.category, item_name: `${item.item_name}-${batch.trim()}`, supplier: item.supplier || undefined });
+                                    await addProcurementTrackingRow(orderId, { category: item.category, item_name: `${item.item_name}-${batch.trim()}`, supplier: item.supplier || undefined });
                                     await loadData();
                                   }}
                                   className="text-xs text-indigo-500 hover:text-indigo-700 shrink-0">+批</button>

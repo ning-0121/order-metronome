@@ -1,6 +1,24 @@
 'use server';
 
 /**
+ * 采购台账(procurement_tracking)—— 最简的「谁、什么料、几号到」逐行记录。
+ *
+ * ⚠️ 采购域有三张表,别搞混(2026-08-01 全面审计后正名):
+ *   procurement_items       核料/归集层(71 列:算需求、找供应商、报价、财务审批)→ procurement-items.ts
+ *   procurement_line_items  采购执行层(47 列:实际下单、到货、催货)          → procurement.ts / supply-chain.ts
+ *   procurement_tracking    采购台账  (21 列:本文件)
+ *
+ * 本文件原来的函数叫 getProcurementItems / addProcurementItem / updateProcurementItem /
+ * deleteProcurementItem —— 名字指向 procurement_items,实际操作的却是 procurement_tracking;
+ * 而 procurement.ts 里有一组**同名**函数,操作的是 procurement_line_items。
+ * 同名不同表,是这三张表在认知上糊成一团的直接原因。已按实际操作对象改名为 *TrackingRow*。
+ *
+ * 使用现状(2026-08-01 生产数据):台账 349 行 / 覆盖 87 张单 / 今天仍在写;
+ * 而更完整的核料→执行流水线只试点了 5-6 张单就停了。也就是说**这张最简的表才是当前主力**。
+ * 采购流程要往哪个方向收,是业务决策,不在本文件解决。
+ */
+
+/**
  * 采购进度共享表 — 实时协作 + 补充采购申请流
  *
  * 所有角色可查看，采购/业务/跟单/管理员可编辑
@@ -41,7 +59,7 @@ export interface ProcurementItem {
 }
 
 /** 获取订单的采购跟踪列表 */
-export async function getProcurementItems(orderId: string): Promise<{
+export async function getProcurementTrackingRows(orderId: string): Promise<{
   data?: ProcurementItem[];
   error?: string;
 }> {
@@ -59,7 +77,7 @@ export async function getProcurementItems(orderId: string): Promise<{
 }
 
 /** 添加普通采购项（原始采购单已下达前使用）*/
-export async function addProcurementItem(
+export async function addProcurementTrackingRow(
   orderId: string,
   item: {
     category: string;
@@ -271,7 +289,7 @@ export async function approveSupplementRequest(itemId: string): Promise<{ error?
 }
 
 /** 更新采购项（任何可编辑字段）*/
-export async function updateProcurementItem(
+export async function updateProcurementTrackingRow(
   itemId: string,
   updates: {
     item_name?: string;
@@ -312,7 +330,7 @@ export async function updateProcurementItem(
 }
 
 /** 删除采购项 */
-export async function deleteProcurementItem(itemId: string): Promise<{ error?: string }> {
+export async function deleteProcurementTrackingRow(itemId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -330,7 +348,7 @@ export async function deleteProcurementItem(itemId: string): Promise<{ error?: s
 }
 
 /** 快速初始化：为订单创建默认采购项（面料+辅料+包装）*/
-export async function initDefaultProcurementItems(orderId: string): Promise<{ error?: string }> {
+export async function initDefaultProcurementTrackingRows(orderId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
