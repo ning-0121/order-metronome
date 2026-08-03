@@ -1068,7 +1068,15 @@ export async function createOrder(
             color_en: c?.color_en || null,
             sizes: c?.sizes || {},
             unit: 'pcs',
-            set_multiplier: 1,
+            // ⚠️ 2026-08-03 修:这里原本硬编码 1,把表单传来的逐款「件/套」直接扔掉。
+            //    富录入表的口径是:尺码格里录的是**套数**,物理件数 = 套数 × 件/套
+            //    (LineItemMatrixEditor 的 setMulOf,款级有输入框)。qty_pcs 存的就是套数。
+            //    倍率丢成 1 之后 Σ(qty_pcs × set_multiplier) 得到的是套数而不是件数,
+            //    而订单头 quantity 存的是件数 → 套装单永远差整整一个倍数:
+            //      QM-20260711-004「套」头 3360 / 明细 1680、QM-20260710-016 头 1200 / 明细 600。
+            //    后果有两层:① /admin/missing-line-items 对所有套装单误报「缺一半明细」;
+            //    ② 任何拿 Σ(qty_pcs×mul) 当件数的下游(算料/采购/装箱)会少备一半到三分之二的料。
+            set_multiplier: Number(st?.set_multiplier) > 0 ? Number(st.set_multiplier) : 1,
             qty_pcs: qty || null,
             qty_raw: qty || null,
             carton_count: cartons != null && !isNaN(cartons) ? cartons : null,

@@ -1,0 +1,26 @@
+{
+ "at": "2026-08-03T05:37:09.959Z",
+ "reason": "createOrder 曾把 order_line_items.set_multiplier 硬编码为1,套装单件数少算;按订单单位回填",
+ "plan": [
+  {
+   "order_no": "QM-20260711-004",
+   "quantity": 3360,
+   "unit": "套",
+   "mul": 2,
+   "line_ids": [
+    "ebf0337d-5f8b-48ce-99e1-5a097f84d7ef"
+   ],
+   "_prev_set_multiplier": 1
+  },
+  {
+   "order_no": "QM-20260710-016",
+   "quantity": 1200,
+   "unit": "套",
+   "mul": 2,
+   "line_ids": [
+    "3984ab56-543b-4bbc-bfd4-d491ae5b1c55"
+   ],
+   "_prev_set_multiplier": 1
+  }
+ ]
+}
