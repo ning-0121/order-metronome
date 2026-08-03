@@ -145,6 +145,11 @@ export async function createOrder(
   const customer_email = formData.get('customer_email') as string | null;
   // ⚠️ 必须在 line 171 校验之前提取（否则 const TDZ → Cannot access 'xx' before initialization）
   const po_number = formData.get('customer_po_number') as string | null;
+  // ⚠️ 必须在这里读:下方第 ~247 行的必填规则校验会用到 isImport。
+  //    2026-08-01 事故:它原本声明在 STEP 6(第 ~767 行),而校验在 247 行就引用了 →
+  //    暂时性死区,建单必崩「Cannot access 'aO' before initialization」。
+  //    构建期完全不报错(ignoreBuildErrors=true),线上才炸。别再往回挪。
+  const isImport = formData.get('is_import') === 'true';
   const internal_order_no = formData.get('internal_order_no') as string | null;
   // 翻单回顾
   const repeat_prev_order_no = formData.get('repeat_prev_order_no') as string | null;
@@ -764,7 +769,7 @@ export async function createOrder(
   // CEO 2026-04-09：进行中订单创建需要 CEO 审批
   // → lifecycle_status 设为 'pending_approval'，不自动激活
   // → 通知 CEO，等审批通过后再变 active
-  const isImport = formData.get('is_import') === 'true';
+  // isImport 已上移到文件前部(必填规则校验要用),见那里的注释
   const importCurrentStep = formData.get('import_current_step') as string | null;
   const importReason = formData.get('import_reason') as string | null;
 
