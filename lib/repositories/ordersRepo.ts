@@ -80,6 +80,12 @@ const INSERT_WHITELIST = [
   'po_penalty_amount',
   'po_penalty_waived',
   'po_baseline_date',
+  // ⚠️ 2026-08-03 修 P0 回归:createOrder 明写 lifecycle_status:'active',但这个白名单没收它,
+  //    于是被 sanitizePayload **静默丢弃**,落到 DB 默认值 'draft' → **新单一出生就是草稿**。
+  //    草稿单不进 AI 巡检/晨报/日报三大风险面板 —— 卡风险的命门直接失效,而且不报错。
+  //    orders.ts:447 的注释记着 2026-07-06 修过同一个 bug(那次是"没显式设状态"),
+  //    这次是"设了但被白名单吃掉",症状一模一样。白名单漏字段是**静默**的,所以特别难发现。
+  'lifecycle_status',
 ] as const;
 
 const UPDATE_WHITELIST = [

@@ -1,0 +1,30 @@
+{
+ "at": "2026-08-03T04:56:38.769Z",
+ "reason": "INSERT_WHITELIST 漏 lifecycle_status 致新单生来草稿;这三张是真实单,恢复为 active",
+ "rows": [
+  {
+   "id": "87620cd2-ca76-4a45-bf95-0e55debaee9b",
+   "order_no": "QM-20260711-004",
+   "customer_name": "伊彤",
+   "quantity": 3360,
+   "lifecycle_status": "draft",
+   "_prev_lifecycle_status": "draft"
+  },
+  {
+   "id": "b039e61e-518f-4021-9d60-25859232465d",
+   "order_no": "QM-20260711-005",
+   "customer_name": "天辉集团",
+   "quantity": 4800,
+   "lifecycle_status": "draft",
+   "_prev_lifecycle_status": "draft"
+  },
+  {
+   "id": "f50f46aa-a9ec-4d26-9504-77e4d53e2697",
+   "order_no": "QM-20260803-003",
+   "customer_name": "EHL",
+   "quantity": 816,
+   "lifecycle_status": "draft",
+   "_prev_lifecycle_status": "draft"
+  }
+ ]
+}

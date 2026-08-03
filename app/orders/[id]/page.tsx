@@ -35,6 +35,7 @@ import { getCustomerPoHistory } from '@/app/actions/customer-po';
 import { OrderActions } from '@/components/OrderActions';
 import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
 import { BackfillProgressButton } from '@/components/BackfillProgressButton';
+import { ConfirmShippedInline } from '@/components/order/ConfirmShippedInline';
 import { OrderPurposeChanger } from '@/components/OrderPurposeChanger';
 import { PITab } from '@/components/tabs/PITab';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
@@ -216,6 +217,26 @@ export default async function OrderDetailPage({
       !(role === 'production' && pmFixedSteps.has(x.step_key)));
     return m ? (m.owner_user.name || m.owner_user.email || null) : null;
   };
+  // 是否该在详情页问「已出货了吗」—— 与订单列表「出厂日已过确认区」同一口径,避免两处判断分叉:
+  //   未终结 + 非打样 + 出厂日已过 + 没有任何已完成的出运节点
+  // 注:出运关键节点原本含 shipment_execute,CEO 2026-08-01 已把该节点从模板移除,
+  //     新单只剩 customs_export / booking_done,这里跟着只认这三个里实际存在的。
+  const shippedPrompt = (() => {
+    const SHIPPED_STEPS = new Set(['shipment_execute', 'customs_export', 'booking_done']);
+    const ls = String((orderData as any).lifecycle_status || '');
+    if (['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档'].includes(ls)) return null;
+    if (((orderData as any).order_purpose || 'production') === 'sample') return null;
+    const fd = (orderData as any).factory_date ? String((orderData as any).factory_date).slice(0, 10) : null;
+    if (!fd) return null;
+    const todayYmd = new Date().toISOString().slice(0, 10);
+    if (fd >= todayYmd) return null;
+    const shipped = ((milestones as any[]) || []).some((m: any) =>
+      SHIPPED_STEPS.has(m.step_key) && ['done', 'completed', '已完成'].includes(String(m.status || '').toLowerCase()));
+    if (shipped) return null;
+    const daysOver = Math.max(1, Math.ceil((Date.now() - new Date(fd + 'T23:59:59').getTime()) / 86400000));
+    return { factoryDate: fd, daysOver };
+  })();
+
   const merchandiserName = followUpOwnerName('merchandiser');   // 理单跟单
   const productionFollowName = followUpOwnerName('production');  // 生产跟单
 
@@ -716,6 +737,23 @@ export default async function OrderDetailPage({
                   <div className="flex justify-between items-center gap-2 flex-wrap">
                     <dt className="text-sm text-gray-500">补录进度</dt>
                     <BackfillProgressButton orderId={id} />
+                  </div>
+                )}
+                {/* 确认已出货(2026-08-03 CEO 反馈):此前这个动作**只在订单列表页的横幅上**,
+                    在详情页补录完想标已出货找不到入口。而「一键补录到当前进度」帮不上忙 ——
+                    它只补「当前在办节点之前」的欠点,历史单所有节点都还 pending、"之前"没有欠点,
+                    点了等于没点。判定口径与列表页横幅一致(出厂日已过 + 未终结 + 无已完成出运节点)。 */}
+                {shippedPrompt && (
+                  <div className="flex justify-between items-start gap-2 flex-wrap">
+                    <dt className="text-sm text-gray-500 pt-1">出货确认</dt>
+                    <dd className="text-sm font-medium">
+                      <ConfirmShippedInline
+                        orderId={id}
+                        orderNo={orderData.internal_order_no || orderData.order_no}
+                        factoryDate={shippedPrompt.factoryDate}
+                        daysOver={shippedPrompt.daysOver}
+                      />
+                    </dd>
                   </div>
                 )}
                 <div className="flex justify-between items-center">
