@@ -264,6 +264,23 @@ export async function parsePO(
       }
     } catch { /* 兜底本身绝不阻断解析 */ }
 
+    // 数量自洽自检(2026-08-03 事故后加)——纯逻辑在 lib/domain/po-quantity-check.ts。
+    //
+    // prompt 里虽然要求 AI「自检 各尺码之和 = 该色总数量」,但那只是**请求**,没有代码兜底。
+    // 实际发生的:EHL PO 79042 的 31407BA,AI 自己声明 total_qty=306,
+    // 却只给出黑色 184 + 酒红 92 = 276 —— 它的输出自己前后矛盾,系统一路照单全收。
+    // 只告警不改数:谁对谁错要人对着 PO 判,但必须让人**当场看见**。
+    try {
+      const { checkPOQuantityConsistency } = await import('@/lib/domain/po-quantity-check');
+      const qtyNotes = checkPOQuantityConsistency((parsed as any)?.styles);
+      if (qtyNotes.length > 0) {
+        (parsed as any).confidence_notes = [
+          ...qtyNotes,   // 放最前面:这类问题直接传导到算料/采购/装箱,比其它备注要紧
+          ...(Array.isArray((parsed as any).confidence_notes) ? (parsed as any).confidence_notes : []),
+        ];
+      }
+    } catch { /* 自检本身绝不阻断解析 */ }
+
     logAICall('po_parse', orderId || null, 'success', Date.now() - startedAt,
       `${result.metadata.provider}/${result.metadata.model}; fallback=${result.metadata.fallbackUsed}; trace=${result.metadata.traceId}`).catch(() => {});
 
