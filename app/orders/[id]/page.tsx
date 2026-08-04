@@ -36,6 +36,7 @@ import { OrderActions } from '@/components/OrderActions';
 import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
 import { BackfillProgressButton } from '@/components/BackfillProgressButton';
 import { ConfirmShippedInline } from '@/components/order/ConfirmShippedInline';
+import { MaterialResupplyPanel } from '@/components/order/MaterialResupplyPanel';
 import { OrderPurposeChanger } from '@/components/OrderPurposeChanger';
 import { PITab } from '@/components/tabs/PITab';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
@@ -1122,6 +1123,16 @@ export default async function OrderDetailPage({
         )}
         {/* Tab: 原辅料和包装 —— BOM 录入是主体(喂 MRP/采购核料/生产任务单用料),文件只是佐证 */}
         {activeTab === 'bom' && (
+          <div className="space-y-4">
+          {/* 补料申请(CEO 2026-08-04):生产部提请 → 采购审 → 财务审 → 方能补料。
+              放在「原辅料和包装」下 —— 补料就是原辅料的事,人在这儿发现缺料,入口就该在这儿。
+              三种角色共用一个面板:按状态 + 角色决定露哪个按钮,不拆页,免得审的人少看一样东西。 */}
+          <MaterialResupplyPanel
+            orderId={id}
+            canRequest={hasRoleInGroup(currentRoles as any, 'CAN_REQUEST_RESUPPLY')}
+            canReviewProcurement={hasRoleInGroup(currentRoles as any, 'CAN_EDIT_PROCUREMENT_EXEC')}
+            canReviewFinance={canSeeFinancials}
+          />
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
             <h2 className="text-lg font-semibold text-gray-900">📋 原辅料和包装资料</h2>
             {(orderData as any).order_purpose === 'trade' && (
@@ -1140,6 +1151,7 @@ export default async function OrderDetailPage({
             </div>
             {/* 「包装资料/原辅料单(文件)」两块已移除(2026-07-08):空状态指向已删除的「生产单上传」节点;
                 历史文件仍可在「基本信息」tab 附件列表查看,不丢失。 */}
+          </div>
           </div>
         )}
         {/* Tab: 生产任务单（Manufacturing Order）*/}
