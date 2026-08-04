@@ -14,6 +14,7 @@
 
 import type { ServiceResult } from './types';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { hasRoleInGroup } from '@/lib/domain/roles';
 
 /**
  * 当用户是 admin 时返回 service-role 客户端绕过 RLS。
@@ -302,6 +303,15 @@ async function collectPriceApprovals(
   ctx: UserContext,
 ): Promise<PendingApprovalItem[]> {
   const client = clientFor(ctx, supabase);
+  // 价格防线(2026-08-04 CEO:「对于价格,她看不到才对」)。
+  //
+  // 报价审批条目带 summary 自由文本,现在装的是「发现 4 项差异,请人工复核」这类,
+  // 但那是个**自由字段**,哪天写进单价/金额就直接漏给了看不到财务的人
+  // (行政督办有 CAN_SEE_ALL_ORDERS 所以能看全部待审批,却不在 CAN_SEE_FINANCIALS)。
+  // 这里按「能不能看财务」直接掐掉整个价格类目 —— 不是掩码 summary,是压根不返回,
+  // 免得以后有人往 title/subtitle 里加字段又漏一次。
+  if (!hasRoleInGroup(ctx.roles as any, 'CAN_SEE_FINANCIALS')) return [];
+
   const { data } = await (client.from('pre_order_price_approvals') as any)
     .select('id, customer_name, po_number, summary, status, created_at, expires_at, requested_by')
     .eq('status', 'pending')

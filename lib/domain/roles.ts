@@ -150,7 +150,13 @@ export const ROLE_GROUPS = {
 
   /** 可编辑/推进生产任务单：执行类 + 建单业务(业务在建单时填「工厂执行说明」,生产再细化)。
    *  2026-07-11:原来用 EXECUTION 门禁,把建单的业务(sales/业务部经理/业务执行经理/行政)挡在门外→创建生产任务单报无权限。*/
-  CAN_EDIT_MO: ['merchandiser', 'production', 'qc', 'quality', 'production_manager', 'sales', 'sales_manager', 'order_manager', 'admin_assistant'] as const,
+
+  //  ⚠️ 2026-08-04 CEO 定调:**行政督办(admin_assistant)只核实和推动,不改业务数据。**
+  //     原话:「价格、数量、明细、日期永远由责任部门自己改。她替填了,责任就转到她身上,
+  //     而且填错了没人知道。督办的价值在信息准确,不在代劳。」
+  //     所以从下面三个编辑组里移除 admin_assistant —— 光在工作指南里写「不要改」没用,
+  //     系统上就得改不了。她保留 MANAGEMENT(改派责任人)与只读的全订单可见性。
+  CAN_EDIT_MO: ['merchandiser', 'production', 'qc', 'quality', 'production_manager', 'sales', 'sales_manager', 'order_manager'] as const,
 
   /** 可看所有订单（跨负责人）：管理类 + 生产主管 + 业务部经理 + 订单管理经理 + 采购经理。
    *  ⚠️ 2026-07 用户拍板:业务员(sales) 只看自己创建/负责的订单,不再全程可见全部(推翻 6-15 的 sales 全程可见设定)。 */
@@ -208,11 +214,13 @@ export const ROLE_GROUPS = {
   CAN_EDIT_PROCUREMENT_EXEC: ['admin', 'procurement', 'procurement_manager'] as const,
 
   /** 可增删改物料清单(BOM):业务+采购+管理 —— 生产/QC/物流/财务不碰料单(2026-07-10 审计 #5) */
-  CAN_EDIT_BOM: ['admin', 'sales', 'sales_manager', 'order_manager', 'merchandiser', 'admin_assistant', 'procurement', 'procurement_manager'] as const,
+  //  admin_assistant 已移除(2026-08-04,见 CAN_EDIT_MO 上方说明):督办不改料单明细。
+  CAN_EDIT_BOM: ['admin', 'sales', 'sales_manager', 'order_manager', 'merchandiser', 'procurement', 'procurement_manager'] as const,
 
   /** 可维护客户主数据(联系邮箱/邮箱域名映射):业务+理单+管理 —— 直接影响「邮件→客户/订单」归集路由,
    *  生产/QC/采购/物流/财务不碰(2026-07-20 全链审计:此前仅验登录,任意角色可污染归集路由) */
-  CAN_EDIT_CUSTOMER: ['admin', 'sales', 'sales_manager', 'order_manager', 'merchandiser', 'admin_assistant'] as const,
+  //  admin_assistant 已移除(2026-08-04):督办不改客户主数据,发现要改的转业务执行主管。
+  CAN_EDIT_CUSTOMER: ['admin', 'sales', 'sales_manager', 'order_manager', 'merchandiser'] as const,
 } as const;
 
 export type RoleGroupKey = keyof typeof ROLE_GROUPS;
