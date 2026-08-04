@@ -62,7 +62,16 @@ export function sizeComparator(explicit?: string[] | null): (a: string, b: strin
   };
 }
 
-/** 有显式顺序按它排(未列出的码标准序附末尾);无则回落标准自动排序。 */
+/**
+ * 有显式顺序按它排(未列出的码标准序附末尾);无则回落标准自动排序。
+ *
+ * **会去重** —— 2026-08-04 事故:生产单导出把 10 个颜色行的尺码键
+ * `colors.flatMap(c => Object.keys(c.sizes))` 直接传进来(10 行 × 5 码 = 50 个),
+ * 这里当时只排序不去重,排完重复的正好挤在一起 → 导出的生产单变成
+ * 「S S S S S S S S S S M M M …」50 列(CEO 报障:1022978 圣安娜)。
+ * 「排列尺码键」这件事本身就不该返回重复,所以在根上去重,而不是让每个调用方各自记得去重
+ * (其余 8 处调用传的都是 Set 展开、本来就唯一,加这层零影响)。
+ */
 export function orderSizeKeys(keys: string[], explicit?: string[] | null): string[] {
-  return [...keys].sort(sizeComparator(explicit));
+  return [...new Set(keys)].sort(sizeComparator(explicit));
 }

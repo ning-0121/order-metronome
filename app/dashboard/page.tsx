@@ -250,11 +250,22 @@ export default async function DashboardPage() {
   const userRolesLower = userRoles.map(r => String(r).toLowerCase());
   const isPmUser = userRolesLower.includes('production_manager');
   const isFinanceUser = userRolesLower.includes('finance');
+  // 卡单节点不再重复计进「逾期」桶(CEO 2026-08-04:「申请延期、申请阻塞的节点,
+  // 也会同时出现在逾期里,有点不合理」)。
+  //
+  // ⚠️ 这不是回到 2026-05-06 那次「排除 blocked」—— 那次之所以出事(block-and-forget),
+  // 是因为排掉之后节点**彻底消失、没人再看见**。现在同一页上「阻塞中」既有统计卡(stat)
+  // 又有完整列表区,而且下面会给每条标出已逾期多少天,SLA 照样看得见、照样催 upstream。
+  // 所以是**从逾期桶挪到卡单桶**,不是让它消失。
+  const isBlockedMs = (m: any) => ['blocked', '卡单', '卡住'].includes(String(m.status || '').toLowerCase())
+    || ['卡单', '卡住'].includes(String(m.status || ''));
+
   const myOverdue = isAdmin
     ? []
     : filteredOverdue.filter((m: any) => {
         if (m.owner_user_id !== user.id) return false;
         if (hasPendingDelay(m)) return false;   // 已申请延期(待批)→ 不算逾期
+        if (isBlockedMs(m)) return false;       // 卡单 → 归「阻塞中」桶,不重复计逾期
         // STRICTLY PM 节点：非 PM 不算我的
         if (STRICTLY_PM_STEPS.includes(m.step_key) && !isPmUser) return false;
         // PM 或财务节点：非 PM 且非财务不算我的
@@ -265,7 +276,7 @@ export default async function DashboardPage() {
     ? filteredOverdue
     : filteredOverdue.filter((m: any) =>
         myOrderIds.has(m.order_id) && m.owner_user_id !== user.id
-      )).filter((m: any) => !hasPendingDelay(m));   // 已申请延期(待批)→ 不算逾期
+      )).filter((m: any) => !hasPendingDelay(m) && !isBlockedMs(m));   // 已申请延期/卡单 → 不算逾期
 
   // 获取逾期节点负责人姓名
   const ownerIds = [...new Set(filteredOverdue.map((m: any) => m.owner_user_id).filter(Boolean))];
@@ -658,7 +669,7 @@ export default async function DashboardPage() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900">阻塞中</h2>
-              <p className="text-sm text-gray-500">{blockedMilestones.length} 个节点被阻塞</p>
+              <p className="text-sm text-gray-500">{blockedMilestones.length} 个节点被阻塞 · 已从「逾期」中分出,按卡住天数排查</p>
             </div>
           </div>
           <div className="space-y-3">
@@ -793,6 +804,19 @@ function BlockedMilestoneCard({ milestone }: { milestone: any }) {
             <span className="font-medium text-gray-900 truncate">{order?.order_no}</span>
             {order?.internal_order_no && <span className="text-xs text-gray-500">({order.internal_order_no})</span>}
             <span className="badge badge-warning">阻塞</span>
+            {/* SLA 照常累计并显示 —— 卡单节点已从「逾期」桶挪到这里(CEO 2026-08-04),
+                但**不能让它看起来无害**:2026-05-06 那次把 blocked 从逾期里排掉、又没在别处
+                标出超期天数,结果 block-and-forget(标个卡单原因就没人管了)。这条天数就是防它。 */}
+            {(() => {
+              if (!milestone.due_at) return null;
+              const days = Math.floor((Date.now() - new Date(milestone.due_at).getTime()) / 86400000);
+              if (days <= 0) return null;
+              return (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${days >= 14 ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700'}`}>
+                  已卡 {days} 天
+                </span>
+              );
+            })()}
           </div>
           <p className="text-sm text-gray-700">{milestone.name} · {order?.customer_name}</p>
           <div className="text-xs text-orange-700 bg-orange-50 rounded-lg px-3 py-2">
