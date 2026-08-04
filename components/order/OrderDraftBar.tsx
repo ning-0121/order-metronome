@@ -12,7 +12,7 @@
  * 所以恢复后必须提示重新选文件 —— 与崩溃恢复那条提示同口径。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   serializeSafeOrderDraft, restoreSafeOrderDraft, type SafeOrderDraft,
 } from '@/lib/order/create-order-resilience';
@@ -27,6 +27,14 @@ interface Props {
   onDraftIdChange: (id: string | null) => void;
   /** 回填后通知父组件同步受控字段(客户选择等 DOM 之外的 state) */
   onRestored: (fields: Array<[string, string]>) => void;
+  /** 从订单中心「继续填写」带过来的草稿 id(?draft=xxx)—— 进页面自动回填一次。
+   *  2026-08-04 CEO:「订单中心里应该有每个人做一半的草稿,被打断了可以点进去接着做」。
+   *  此前草稿只能在建单页内部的下拉里找,离开页面就再也回不去 —— 这是 order_drafts
+   *  上线至今 0 行的直接原因:能存,但没有回到它的路。 */
+  autoRestoreDraftId?: string | null;
+  /** 只做「带 ?draft= 自动回填」,不渲染任何界面。
+   *  保存按钮已移到页面底部(OrderDraftSaveButton),这里不再占版面。 */
+  hideUI?: boolean;
 }
 
 function fmt(ts: string): string {
@@ -43,7 +51,7 @@ function labelFrom(fields: Array<[string, string]>): string {
   return parts.join(' · ') || '未命名草稿';
 }
 
-export function OrderDraftBar({ formRef, draftId, onDraftIdChange, onRestored }: Props) {
+export function OrderDraftBar({ formRef, draftId, onDraftIdChange, onRestored, autoRestoreDraftId, hideUI }: Props) {
   const [drafts, setDrafts] = useState<OrderDraftRow[]>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string>('');
@@ -55,6 +63,15 @@ export function OrderDraftBar({ formRef, draftId, onDraftIdChange, onRestored }:
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // 带 ?draft= 进来 → 自动回填一次(只做一次,回填后 draftId 已被设上,不会重复触发)
+  const autoDone = useRef(false);
+  useEffect(() => {
+    if (!autoRestoreDraftId || autoDone.current) return;
+    autoDone.current = true;
+    void handleRestore(autoRestoreDraftId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRestoreDraftId]);
 
   async function handleSave() {
     const form = formRef.current;
@@ -99,6 +116,9 @@ export function OrderDraftBar({ formRef, draftId, onDraftIdChange, onRestored }:
     if (draftId === id) onDraftIdChange(null);
     void refresh();
   }
+
+  // 只当回填器用:副作用(上面的 useEffect)照跑,界面不渲染
+  if (hideUI) return null;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 space-y-2">

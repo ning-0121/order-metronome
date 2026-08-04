@@ -14,7 +14,7 @@ import { hasRoleInGroup } from '@/lib/domain/roles';
 
 const CAN_CREATE_ORDER = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin'];
 
-export default async function NewOrderPage({ searchParams }: { searchParams: Promise<{ type?: string }> }) {
+export default async function NewOrderPage({ searchParams }: { searchParams: Promise<{ type?: string; draft?: string }> }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
@@ -22,8 +22,8 @@ export default async function NewOrderPage({ searchParams }: { searchParams: Pro
   const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
   if (!roles.some((r) => CAN_CREATE_ORDER.includes(r))) redirect('/dashboard');
   // 打样单走专属「打样申请单」表单(2026-07-27),不再套大货单表单
-  const { type } = await searchParams;
+  const { type, draft } = await searchParams;
   if (type === 'sample') return <SampleRequestForm />;
   // 客户 PO 成交价仅 CAN_SEE_FINANCIALS 可见(merchandiser 能建单但不看价 → 红线)
-  return <OrderIntakeModeSelector showPrice={hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')} />;
+  return <OrderIntakeModeSelector showPrice={hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS')} initialDraftId={draft || null} />;
 }

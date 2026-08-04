@@ -1,4 +1,5 @@
 import { getOrders } from '@/app/actions/orders';
+import { MyDraftsStrip } from '@/components/order/MyDraftsStrip';
 import { ConfirmShippedBanner } from '@/components/ConfirmShippedBanner';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/date';
@@ -363,6 +364,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         </div>
       </div>
 
+      {/* 我的未完成草稿(2026-08-04 CEO:填一半被打断的,回订单中心能接着做)*/}
+      <MyDraftsStrip />
       {/* 出厂日已过确认区:逐单确认是否已出货,一键补录完成 */}
       {purposeFilter !== 'sample' && <ConfirmShippedBanner items={pastFactoryItems} />}
 

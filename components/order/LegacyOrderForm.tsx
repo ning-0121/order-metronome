@@ -23,6 +23,7 @@ import { LineItemMatrixEditor } from '@/components/order/LineItemMatrixEditor';
 import { FileNameCheck } from '@/components/FileNameCheck';
 import { CustomerCreditBanner } from '@/components/CustomerCreditBanner';
 import { OrderDraftBar } from '@/components/order/OrderDraftBar';
+import { OrderDraftSaveButton } from '@/components/order/OrderDraftSaveButton';
 import { SectionHeader, RequiredProgressBar } from '@/components/order/FormSection';
 // 字段必填/可见性的单一真相源 —— 服务端 createOrder 读的是同一份,别在本文件写死 required
 import { resolveOrderFormRules, type FieldRuleOverride } from '@/lib/domain/formRules';
@@ -130,7 +131,7 @@ async function uploadFilesToStorage(
 
 type Step = 1 | 2 | 3 | 4;
 
-function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
+function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPrice?: boolean; initialDraftId?: string | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState<Step>(1);
@@ -1306,15 +1307,18 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
             )}
           </div>
 
-          {/* 保存草稿 / 继续填写(跨设备)。放表单外壳内、字段之前,离开前随手能点到。 */}
-          <div className="mb-4">
-            <OrderDraftBar
-              formRef={stepOneFormRef}
-              draftId={draftId}
-              onDraftIdChange={setDraftId}
-              onRestored={(fields) => setSelectedCustomer(selectedCustomerFromDraft(fields))}
-            />
-          </div>
+          {/* 草稿回填器(2026-08-04 CEO:「保存草稿按钮不要放在中间,放在页面最下面」)。
+              这里只保留**带 ?draft= 进来时自动回填**的能力,不再占版面;
+              「保存草稿」按钮已挪到页面最底部,与「创建订单」并排 —— 要么提交,要么存草稿。
+              「继续填写」的入口在订单中心「我的未完成草稿」,那是进来之前的动作。 */}
+          <OrderDraftBar
+            formRef={stepOneFormRef}
+            draftId={draftId}
+            onDraftIdChange={setDraftId}
+            onRestored={(fields) => setSelectedCustomer(selectedCustomerFromDraft(fields))}
+            autoRestoreDraftId={initialDraftId}
+            hideUI
+          />
 
           <form ref={stepOneFormRef} onSubmit={handleStep1Submit} className="space-y-8"
             onKeyDown={(e) => {
@@ -2019,11 +2023,13 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
             {/* 底部常驻进度:新人最需要的是"我还差什么",不是再多一条提示 */}
             <RequiredProgressBar formRef={stepOneFormRef} />
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+            <div className="flex flex-wrap justify-end items-center gap-3 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => router.back()}
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                 取消
               </button>
+              {/* 两个出口并排:要么存草稿回头接着填,要么直接提交(2026-08-04 CEO) */}
+              <OrderDraftSaveButton formRef={stepOneFormRef} draftId={draftId} onDraftIdChange={setDraftId} />
               <button type="submit" disabled={loading || verifying || !preGeneratedOrderNo || orderNoLoading || (isImport && !importCurrentStep)}
                 className="rounded-lg bg-indigo-600 px-6 py-2 text-sm text-white hover:bg-indigo-700 disabled:opacity-50 font-medium">
                 {verifying ? '正在比对PO...' : loading ? '创建中...' : isImport ? '导入订单 →' : '创建订单 →'}
@@ -2406,10 +2412,10 @@ function NewOrderWizard({ showPrice = false }: { showPrice?: boolean }) {
 
 // 移动自 app/orders/new/page.tsx —— 逻辑逐字不变（Order Intake dual-mode 收敛）。
 // 仅把默认导出改为命名导出 LegacyOrderForm，供模式选择器条件渲染。
-export function LegacyOrderForm({ showPrice = false }: { showPrice?: boolean } = {}) {
+export function LegacyOrderForm({ showPrice = false, initialDraftId = null }: { showPrice?: boolean; initialDraftId?: string | null } = {}) {
   return (
     <Suspense fallback={<div className="mx-auto max-w-3xl p-6 text-gray-400">加载中...</div>}>
-      <NewOrderWizard showPrice={showPrice} />
+      <NewOrderWizard showPrice={showPrice} initialDraftId={initialDraftId} />
     </Suspense>
   );
 }

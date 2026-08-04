@@ -21,7 +21,7 @@
 
 import { LegacyOrderForm } from './LegacyOrderForm';
 
-export function OrderIntakeModeSelector({ showPrice }: { showPrice: boolean }) {
+export function OrderIntakeModeSelector({ showPrice, initialDraftId = null }: { showPrice: boolean; initialDraftId?: string | null }) {
   return (
     <div className="space-y-3">
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -29,7 +29,7 @@ export function OrderIntakeModeSelector({ showPrice }: { showPrice: boolean }) {
         或把单位选「<b>套(2件)</b>」。系统一律按<b>件数</b>驱动采购/生产/装箱,
         <b>选错会少备一半料</b>。
       </div>
-      <LegacyOrderForm showPrice={showPrice} />
+      <LegacyOrderForm showPrice={showPrice} initialDraftId={initialDraftId} />
     </div>
   );
 }
