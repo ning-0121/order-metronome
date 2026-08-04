@@ -44,7 +44,7 @@ export async function addQcInspection(orderId: string, rec: {
   return {};
 }
 
-export async function updateQcResult(id: string, orderId: string, result: 'pass' | 'fail' | 'conditional') {
+export async function updateQcResult(id: string, orderId: string, result: 'pass' | 'fail' | 'conditional' | 'rework') {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -70,24 +70,30 @@ export async function updateQcResult(id: string, orderId: string, result: 'pass'
   // ⚠️ 不传 amount:验货这一刻我们并不知道该扣多少。按治理红线,金额与扣不扣
   // 一律由财务在自己 UI 里确认并记真实 auth.uid() —— 节拍器不替财务核销。
   // fire-and-forget:验货结论本身绝不能因为财务不通而失败。
-  if (result === 'fail' && prevResult !== 'fail') {
+  // 「不合格」与「要求返工」都算工厂担责事件,推同一条链(event_ref 相同,财务侧幂等)。
+  // 区别只在 reason —— fail 是这批有问题,rework 是还能救但要返工,追偿的钱不一样。
+  const FAULT = new Set(['fail', 'rework']);
+  if (FAULT.has(result) && !FAULT.has(String(prevResult))) {
     void (async () => {
       try {
         const { createServiceRoleClient } = await import('@/lib/supabase/server');
         const svc = createServiceRoleClient();
         const { data: o } = await (svc.from('orders') as any)
           .select('id, order_no, internal_order_no, factory_name, factory_id').eq('id', orderId).maybeSingle();
-        const { emitQcFailed } = await import('@/lib/integration/supplier-deduction');
-        await emitQcFailed({
+        const { emitQcFailed, emitReworkRecorded } = await import('@/lib/integration/supplier-deduction');
+        const emit = result === 'rework' ? emitReworkRecorded : emitQcFailed;
+        await emit({
           eventRef: `QC-${id}`,                     // 稳定锚点:复检合格时按它撤销
           supplierName: (o as any)?.factory_name ?? null,
           supplierId: (o as any)?.factory_id ?? null,
           orderId,
           orderNo: (o as any)?.order_no ?? null,
           internalOrderNo: (o as any)?.internal_order_no ?? null,
-          liableParty: 'factory',                   // 验货不合格 = 工厂担责
+          liableParty: 'factory',                   // 验货不合格/返工 = 工厂担责
           amount: null,                             // 建议值留空,由财务定
-          reason: `验货不合格${(prev as any)?.qty_fail ? `,不合格 ${(prev as any).qty_fail} 件` : ''}`,
+          reason: result === 'rework'
+            ? `QC 要求返工${(prev as any)?.qty_fail ? `,不合格 ${(prev as any).qty_fail} 件` : ''}(向供应商追偿返工费用)`
+            : `验货不合格${(prev as any)?.qty_fail ? `,不合格 ${(prev as any).qty_fail} 件` : ''}`,
           detail: {
             inspection_id: id,
             inspection_type: (prev as any)?.inspection_type ?? null,
@@ -99,8 +105,34 @@ export async function updateQcResult(id: string, orderId: string, result: 'pass'
     })();
   }
 
+  // 判返工 → **自动派一条复检任务**(CEO 2026-08-04:「返工后去重新验货」)。
+  // 不自动建的话,「返工完了谁去复检」全靠人记得 —— 这正是本轮要根治的那类漏洞。
+  // 复检沿用同一个 QC(谁判的返工谁复检,口径一致),rework_of 指回本次,便于追「返了几次」。
+  if (result === 'rework' && prevResult !== 'rework') {
+    try {
+      const svc2 = (await import('@/lib/supabase/server')).createServiceRoleClient();
+      // 已经有针对本次的复检就不重复建(改判来回切时防刷)
+      const { data: exist } = await (svc2.from('qc_inspections') as any)
+        .select('id').eq('rework_of', id).limit(1);
+      if (!exist?.length) {
+        const src: any = prev || {};
+        await (svc2.from('qc_inspections') as any).insert({
+          order_id: orderId,
+          inspection_type: 're-inspection',
+          result: 'pending',
+          task_status: 'assigned',
+          rework_of: id,
+          assigned_to: src.assigned_to ?? null,
+          assigned_by: user.id,
+          assigned_at: new Date().toISOString(),
+          assignment_note: `返工后复检(源自第 ${String(id).slice(0, 8)} 次检验的返工要求)`,
+        });
+      }
+    } catch (e: any) { console.error('[QC] 复检任务自动创建失败(不阻断):', e?.message); }
+  }
+
   // 复检合格 / 改判放行 → 撤销之前那条待扣款(财务侧只撤 pending;已扣的钱要人工红冲)
-  if (prevResult === 'fail' && result !== 'fail') {
+  if (FAULT.has(String(prevResult)) && !FAULT.has(result)) {
     void (async () => {
       try {
         const { emitDeductionCancelled } = await import('@/lib/integration/supplier-deduction');

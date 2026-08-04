@@ -207,6 +207,12 @@ export const ROLE_GROUPS = {
   /** 可审批采购单（财务视角:付得起/账期/信用）：admin + 财务 */
   CAN_APPROVE_PROC_FINANCE: ['admin', 'finance'] as const,
 
+  /** 可提请补料(CEO 2026-08-04:「补料,由生产部提请采购部补料」)。
+   *  只给生产线 —— 补料要当场做**责任认定**并上传签字认定书,谁在现场谁认定;
+   *  业务/理单发现缺料应告知生产部提请,而不是自己提 —— 否则责任认定会失焦。
+   *  后续两道审批各有其组:采购 CAN_EDIT_PROCUREMENT_EXEC、财务 CAN_SEE_FINANCIALS。 */
+  CAN_REQUEST_RESUPPLY: ['admin', 'production', 'production_manager', 'qc', 'quality'] as const,
+
   /** 可录领料/退料(发料出库):生产/物流/采购/admin —— 谁管发料谁录 */
   CAN_ISSUE_MATERIAL: ['admin', 'production', 'production_manager', 'logistics', 'procurement', 'procurement_manager'] as const,
 
