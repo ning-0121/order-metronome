@@ -999,6 +999,23 @@ export async function placePurchaseOrder(poId: string): Promise<{
       const names = [...new Set(unpriced.map((l) => l.material_name).filter(Boolean))].slice(0, 4).join('、');
       return { error: `下单前必须先给每行填单价(底价):还有 ${unpriced.length} 行未填价${names ? `（${names}…）` : ''}、合计 ¥0。若确为「先下单后议价」,可在采购单页勾「价格待定」;否则请把单价填好再下单。` };
     }
+
+    // 配平硬闸(财务契约 v1,2026-08-03):单头金额必须 === 明细合计,容差 0.01 元。
+    //
+    // 2026-08-02 事故:对账单金额与供应商汇总不一致 → 海莲签字、圆圆没发现 → 一路批过。
+    // 财务侧已把闸门做硬(Σlines ≠ total 就禁用「批准放行」),这里是**源头闸**:
+    // 不配平的单根本送不出去,采购当场改到一致 —— 而不是提了再被驳、来回扯。
+    //
+    // 老板决策:金额对不上绝对不能过。谈好的折让也必须落成一条**具名明细行**,
+    // 不接受"点确认放过"—— 差额不能消失在一句「差 ¥156」里。
+    {
+      const { reconcilePoAmount } = await import('@/lib/procurement/po-reconcile');
+      const { data: amtLines } = await (createServiceRoleClient().from('procurement_line_items') as any)
+        .select('ordered_amount, ordered_qty, unit_price, line_status').eq('purchase_order_id', poId);
+      const activeLines = ((amtLines || []) as any[]).filter((l) => l.line_status !== 'cancelled');
+      const rec = reconcilePoAmount((po as any).total_amount, activeLines, { priceTbd });
+      if (!rec.ok) return { error: rec.message || '采购单金额未配平,无法下单。' };
+    }
   }
 
   // 下单强制凭证(2026-07-04 用户拍板):没上传下单凭证不允许下单。

@@ -50,9 +50,64 @@ export async function updateQcResult(id: string, orderId: string, result: 'pass'
   if (!user) return { error: '请先登录' };
   { const err = await requireRoleGroup(supabase, user.id, 'EXECUTION', QC_WRITE_MSG); if (err) return { error: err }; }
 
+  // 改结论前先读旧值 —— 「fail → pass」是复检合格,要去财务撤销待扣款(见下方)
+  const { data: prev } = await (supabase.from('qc_inspections') as any)
+    .select('result, inspection_type, qty_fail, notes').eq('id', id).maybeSingle();
+  const prevResult = (prev as any)?.result ?? null;
+
   const { error } = await (supabase.from('qc_inspections') as any)
     .update({ result, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) return { error: error.message };
+
+  // ── 事件驱动扣款(财务契约 v1,2026-08-03)────────────────────────────────
+  // 老板洞察:「工厂有扣款,一定是之前有验货的问题?…这个一定是有事件引发的,
+  // 所以我们要看看如何通过事件来锁死工厂扣款这个事情。」
+  //
+  // 2026-08-02 事故:要扣加工厂几笔费用(合计 ¥1500)圆圆忘了登记。
+  // 勾选框只能防「忘了填」,防不住「不知道有」—— 所以把因果链锁上:
+  // 验货判不合格 → 财务当场建「待扣款」→ 对账审批时未处理就卡住。
+  //
+  // ⚠️ 不传 amount:验货这一刻我们并不知道该扣多少。按治理红线,金额与扣不扣
+  // 一律由财务在自己 UI 里确认并记真实 auth.uid() —— 节拍器不替财务核销。
+  // fire-and-forget:验货结论本身绝不能因为财务不通而失败。
+  if (result === 'fail' && prevResult !== 'fail') {
+    void (async () => {
+      try {
+        const { createServiceRoleClient } = await import('@/lib/supabase/server');
+        const svc = createServiceRoleClient();
+        const { data: o } = await (svc.from('orders') as any)
+          .select('id, order_no, internal_order_no, factory_name, factory_id').eq('id', orderId).maybeSingle();
+        const { emitQcFailed } = await import('@/lib/integration/supplier-deduction');
+        await emitQcFailed({
+          eventRef: `QC-${id}`,                     // 稳定锚点:复检合格时按它撤销
+          supplierName: (o as any)?.factory_name ?? null,
+          supplierId: (o as any)?.factory_id ?? null,
+          orderId,
+          orderNo: (o as any)?.order_no ?? null,
+          internalOrderNo: (o as any)?.internal_order_no ?? null,
+          liableParty: 'factory',                   // 验货不合格 = 工厂担责
+          amount: null,                             // 建议值留空,由财务定
+          reason: `验货不合格${(prev as any)?.qty_fail ? `,不合格 ${(prev as any).qty_fail} 件` : ''}`,
+          detail: {
+            inspection_id: id,
+            inspection_type: (prev as any)?.inspection_type ?? null,
+            defect_qty: (prev as any)?.qty_fail ?? null,
+            notes: (prev as any)?.notes ?? null,
+          },
+        });
+      } catch (e: any) { console.error('[QC] qc.failed 推送失败(不阻断):', e?.message); }
+    })();
+  }
+
+  // 复检合格 / 改判放行 → 撤销之前那条待扣款(财务侧只撤 pending;已扣的钱要人工红冲)
+  if (prevResult === 'fail' && result !== 'fail') {
+    void (async () => {
+      try {
+        const { emitDeductionCancelled } = await import('@/lib/integration/supplier-deduction');
+        await emitDeductionCancelled(`QC-${id}`, result === 'pass' ? '复检合格' : '改判为有条件接受');
+      } catch (e: any) { console.error('[QC] deduction.cancelled 推送失败(不阻断):', e?.message); }
+    })();
+  }
 
   // 部门考核 hook(2026-07-25 CEO B 方案):QC 判 pass → 落一条生产部(QC)考核记录,目标日取尾查节点 due。
   if (result === 'pass') {

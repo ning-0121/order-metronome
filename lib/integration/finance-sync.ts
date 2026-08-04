@@ -46,6 +46,13 @@ type WebhookEventType =
   | 'payable.created'
   | 'shipment.recorded'   // 出运档案(提单/CI 文件推送,财务 /shipments 页;契约 2026-07-28)
   | 'receivable.created'   // 应收(先用于打样费;data.kind='sample_fee')。财务侧据此建应收账款,收款后回传 payment.completed
+  // ── 事件驱动扣款(财务契约 v1,2026-08-03)。发起端见 lib/integration/supplier-deduction.ts ──
+  // 根治「忘记登记扣款」:让财务**先于人**知道该扣钱,而不是靠人记得填。
+  // liable_party 非 supplier/factory 时财务侧不建扣款(如客户改单导致的补料)。
+  | 'qc.failed'             // 验货不合格
+  | 'material.resupplied'   // 补原辅料
+  | 'rework.recorded'       // 返工
+  | 'deduction.cancelled'   // 误报/复检合格 → 撤销 pending 待扣款(已处理的不动)
 
 interface WebhookPayload {
   event: WebhookEventType
@@ -114,7 +121,7 @@ async function enqueueFinanceOutbox(event: WebhookEventType, data: Record<string
 }
 
 // --- 通用 Webhook 发送:首发失败 → 落 outbox 待重试(不再静默丢单) ---
-async function sendToFinanceSystem(
+export async function sendToFinanceSystem(
   event: WebhookEventType,
   data: Record<string, unknown>
 ): Promise<{ success: boolean; error?: string }> {
