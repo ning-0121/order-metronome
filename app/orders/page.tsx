@@ -30,7 +30,7 @@ const PHASE_KEYS = [
 ];
 import { isActiveStatus, isBlockedStatus, isDoneStatus, isApprovalPending } from '@/lib/domain/types';
 // 订单分组(进行中/已完成/已取消)与「不用再管了」集合的单一真相源 —— 别在本文件再内联一份
-import { classifyOrderGroup, DONE_LIFECYCLE } from '@/lib/domain/orderGrouping';
+import { classifyOrderGroup, DONE_LIFECYCLE, CANCELLED_LIFECYCLE } from '@/lib/domain/orderGrouping';
 const _isDone = (s: string) => isDoneStatus(s);
 const _isActive = (s: string) => isActiveStatus(s);
 const _isBlocked = (s: string) => isBlockedStatus(s);
@@ -103,6 +103,32 @@ function getSearchDimensions(orders: any[]): {
     merchandisers: Object.entries(merchMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
     salespeople: Object.entries(salesMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
   };
+}
+
+/** 列表上的状态徽章。
+ *  ⚠️ computeOrderStatus 只看节点、**不看订单生命周期** —— 于是已取消的单照样被算出
+ *  「风险 / 注意」(2026-08-04 CEO 看 已取消 页签时发现:14 张取消单全挂着红黄标)。
+ *  取消/完成的单没有"风险"可言,这里按生命周期短路,只有真正在跑的单才算节点风险。 */
+function orderBadge(order: any, milestones: any[], style: 'mobile' | 'desktop') {
+  const ls = String(order?.lifecycle_status || '');
+  if (CANCELLED_LIFECYCLE.has(ls)) {
+    return style === 'mobile'
+      ? { label: '已取消', class: 'bg-gray-100 text-gray-500' }
+      : { label: '已取消', class: 'badge-neutral' };
+  }
+  if (DONE_LIFECYCLE.has(ls)) {
+    return style === 'mobile'
+      ? { label: '已完成', class: 'bg-green-100 text-green-700' }
+      : { label: '已完成', class: 'badge-success' };
+  }
+  const color = computeOrderStatus(milestones).color;
+  return style === 'mobile'
+    ? { GREEN: { label: '正常', class: 'bg-green-100 text-green-700' },
+        YELLOW: { label: '注意', class: 'bg-yellow-100 text-yellow-700' },
+        RED: { label: '风险', class: 'bg-red-100 text-red-700' } }[color]
+    : { GREEN: { label: '正常', class: 'badge-success' },
+        YELLOW: { label: '注意', class: 'badge-warning' },
+        RED: { label: '风险', class: 'badge-danger' } }[color];
 }
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string; ship_hold?: string; created_month?: string }> }) {
@@ -600,12 +626,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         <div className="md:hidden space-y-3">
           {orders.map((order: any) => {
             const milestones = (order as any).milestones || [];
-            const status = computeOrderStatus(milestones);
-            const statusConfig = {
-              GREEN: { label: '正常', class: 'bg-green-100 text-green-700' },
-              YELLOW: { label: '注意', class: 'bg-yellow-100 text-yellow-700' },
-              RED: { label: '风险', class: 'bg-red-100 text-red-700' },
-            }[status.color];
+            const statusConfig = orderBadge(order, milestones, 'mobile');
             const phases = computePhases(milestones);
             const dateStr = order.incoterm === 'FOB' ? formatDate(order.etd) : formatDate(order.warehouse_due_date);
             const mobHold = isCustomerShipHoldFromOrder(order);
@@ -665,12 +686,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             <tbody>
               {orders.map((order: any) => {
                 const milestones = (order as any).milestones || [];
-                const status = computeOrderStatus(milestones);
-                const statusConfig = {
-                  GREEN: { label: '正常', class: 'badge-success' },
-                  YELLOW: { label: '注意', class: 'badge-warning' },
-                  RED: { label: '风险', class: 'badge-danger' },
-                }[status.color];
+                const statusConfig = orderBadge(order, milestones, 'desktop');
 
                 // 类型映射统一走 lib/theme/colors（避免 orders/page 和 orders/[id] 重复维护）
                 const typeLabels = ORDER_TYPE_LABELS;
