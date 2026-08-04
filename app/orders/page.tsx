@@ -111,24 +111,31 @@ function getSearchDimensions(orders: any[]): {
  *  取消/完成的单没有"风险"可言,这里按生命周期短路,只有真正在跑的单才算节点风险。 */
 function orderBadge(order: any, milestones: any[], style: 'mobile' | 'desktop') {
   const ls = String(order?.lifecycle_status || '');
+  // riskFactors 必须一起返回 —— 徽章的 title 要用。
+  // 2026-08-04 事故:我把 `const status = computeOrderStatus(...)` 删了却漏改两处
+  // `status.riskFactors.join(...)`,运行时 status 落到浏览器全局 window.status(空串),
+  // `"".riskFactors` 是 undefined → .join() 抛 TypeError → **整个订单列表白屏**。
+  // lint:undef 抓不到:status 是合法的浏览器全局,不算「找不到标识符」。
   if (CANCELLED_LIFECYCLE.has(ls)) {
     return style === 'mobile'
-      ? { label: '已取消', class: 'bg-gray-100 text-gray-500' }
-      : { label: '已取消', class: 'badge-neutral' };
+      ? { label: '已取消', class: 'bg-gray-100 text-gray-500', riskFactors: [] as string[] }
+      : { label: '已取消', class: 'badge-neutral', riskFactors: [] as string[] };
   }
   if (DONE_LIFECYCLE.has(ls)) {
     return style === 'mobile'
-      ? { label: '已完成', class: 'bg-green-100 text-green-700' }
-      : { label: '已完成', class: 'badge-success' };
+      ? { label: '已完成', class: 'bg-green-100 text-green-700', riskFactors: [] as string[] }
+      : { label: '已完成', class: 'badge-success', riskFactors: [] as string[] };
   }
-  const color = computeOrderStatus(milestones).color;
-  return style === 'mobile'
+  const st = computeOrderStatus(milestones);
+  const riskFactors = Array.isArray(st?.riskFactors) ? st.riskFactors : [];
+  const cfg = style === 'mobile'
     ? { GREEN: { label: '正常', class: 'bg-green-100 text-green-700' },
         YELLOW: { label: '注意', class: 'bg-yellow-100 text-yellow-700' },
-        RED: { label: '风险', class: 'bg-red-100 text-red-700' } }[color]
+        RED: { label: '风险', class: 'bg-red-100 text-red-700' } }[st.color]
     : { GREEN: { label: '正常', class: 'badge-success' },
         YELLOW: { label: '注意', class: 'badge-warning' },
-        RED: { label: '风险', class: 'badge-danger' } }[color];
+        RED: { label: '风险', class: 'badge-danger' } }[st.color];
+  return { ...cfg, riskFactors };
 }
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; customer?: string; factory?: string; incoterm?: string; type?: string; purpose?: string; sort?: string; merchandiser?: string; sales?: string; ship_hold?: string; created_month?: string }> }) {
@@ -640,7 +647,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     <div className="text-xs text-gray-500 mt-0.5">{order.customer_name}{(order as any).factory_name ? ` · ${(order as any).factory_name}` : ''}</div>
                     {(order as any).po_number && <div className="text-xs text-gray-400 mt-0.5">PO: {(order as any).po_number}</div>}
                   </div>
-                  <span title={status.riskFactors.join('；') || undefined} className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusConfig.class}`}>{statusConfig.label}</span>
+                  <span title={statusConfig.riskFactors.join('；') || undefined} className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusConfig.class}`}>{statusConfig.label}</span>
                 </div>
                 {(mobHold || mobStale) && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
@@ -791,7 +798,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                           <div className="leading-tight space-y-0.5">
                             {/* 状态徽章 + 下单(客户 PO 日)同一行 */}
                             <div className="flex items-center gap-2 whitespace-nowrap">
-                              <span title={status.riskFactors.join('；') || undefined} className={`badge ${statusConfig.class} text-[10px]`}>{statusConfig.label}</span>
+                              <span title={statusConfig.riskFactors.join('；') || undefined} className={`badge ${statusConfig.class} text-[10px]`}>{statusConfig.label}</span>
                               <span className="text-xs text-gray-500">
                                 下单 <span className="text-gray-700">{poDateStr || '—'}</span>
                               </span>
