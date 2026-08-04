@@ -14,6 +14,7 @@ import {
   RECEIVED, IN_TRANSIT, NOT_SECURED,
   KICKOFF_KEYS, FACTORY_DONE_KEYS, STAGE_SIGNAL_STEP_KEYS, pickStageSignal,
 } from '@/lib/production/stage';
+import { triageStaleOrder, explainVerdict, type StaleVerdict } from '@/lib/services/stale-order-triage';
 
 export type Tone = 'green' | 'amber' | 'red' | 'grey';
 export interface Segment { label: string; tone: Tone; owner?: string | null; }   // owner=该段当前责任人名(督办可直接联系,2026-07-27)
@@ -24,6 +25,13 @@ export interface SupervisionRow {
   factory_date: string | null;
   business: Segment; procurement: Segment; production: Segment;
   needsAttention: boolean;   // 任一段红 → 需督办
+  /** 僵尸单分诊(2026-08-04 CEO:出厂日已过的要让行政督办看见、去核实) */
+  triage: StaleVerdict;
+  pastFactoryDays: number | null;
+  idleDays: number | null;
+  neverTouched: boolean;
+  overdueCount: number;
+  triageWhy: string;
 }
 
 const BUSINESS_ROLES = new Set(['sales', 'sales_manager', 'order_manager', 'merchandiser']);
@@ -53,7 +61,7 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
   for (let i = 0; i < ids.length; i += 200) {
     const slice = ids.slice(i, i + 200);
     const { data: ms } = await (svc.from('milestones') as any)
-      .select('order_id, step_key, status, due_at, owner_role, owner_user_id').in('order_id', slice);
+      .select('order_id, step_key, status, due_at, actual_at, owner_role, owner_user_id').in('order_id', slice);
     for (const m of (ms || [])) {
       allMs.set(m.order_id, [...(allMs.get(m.order_id) || []), m]);
       if ((STAGE_SIGNAL_STEP_KEYS as string[]).includes(m.step_key)) {
@@ -149,12 +157,29 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
     production.owner = pickOwner(ms, PROD_ROLES, today);
 
     const needsAttention = [business, procurement, production].some((s) => s.tone === 'red');
+
+    // 僵尸单分诊(2026-08-04 CEO):出厂日已过的分成两类交给不同的人 ——
+    //   suspected_shipped(长期无人推进,疑似货已出没维护)→ 行政督办去**核实实际情况**
+    //   stalled(近期还有人在推)                        → 真延误,催责任人
+    // 判活跃只用 actual_at(节点真被点完成),不能用 updated_at:批量维护会刷新后者。
+    const nowMs = Date.now();
+    const overdueCount = ms.filter((m: any) =>
+      !isDoneStatus(m.status) && m.due_at && new Date(m.due_at).getTime() < nowMs).length;
+    const tri = triageStaleOrder({
+      factoryDate: o.factory_date ? String(o.factory_date).slice(0, 10) : null,
+      actualAts: ms.map((m: any) => m.actual_at),
+      overdueCount,
+      now: nowMs,
+    });
+
     rows.push({
       order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no,
       customer_name: o.customer_name, factory_name: o.factory_name, quantity: o.quantity,
       order_date: o.order_date ? String(o.order_date).slice(0, 10) : null,
       factory_date: o.factory_date ? String(o.factory_date).slice(0, 10) : null,
       business, procurement, production, needsAttention,
+      triage: tri.verdict, pastFactoryDays: tri.pastFactoryDays, idleDays: tri.idleDays,
+      neverTouched: tri.neverTouched, overdueCount: tri.overdueCount, triageWhy: explainVerdict(tri),
     });
   }
 

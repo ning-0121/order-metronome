@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getSupervisionOverview, type Tone, type Segment } from '@/app/actions/supervision';
+import { ZombieOrderPanel, type ZombieRow } from '@/components/supervision/ZombieOrderPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,26 @@ export default async function SupervisionPage() {
   const rows = res.rows || [];
   const attn = rows.filter((r) => r.needsAttention).length;
 
+  // 僵尸单分诊(2026-08-04 CEO):出厂日已过的提到最前面交给行政督办。
+  // 分两类给两种动作 —— 疑似已出货没维护 → 核实后收尾;真晚了还在推 → 催责任人。
+  const toZombie = (r: typeof rows[number]): ZombieRow => ({
+    order_id: r.order_id,
+    no: r.internal_order_no || r.order_no || r.order_id.slice(0, 8),
+    customer: r.customer_name,
+    factory_date: r.factory_date,
+    pastFactoryDays: r.pastFactoryDays,
+    idleDays: r.idleDays,
+    neverTouched: r.neverTouched,
+    overdueCount: r.overdueCount,
+    why: r.triageWhy,
+    // 责任人取三段里第一个有人的(督办要知道找谁)
+    owner: r.business.owner || r.production.owner || r.procurement.owner || null,
+  });
+  const bySeverity = (a: ZombieRow, b: ZombieRow) =>
+    (b.pastFactoryDays ?? 0) - (a.pastFactoryDays ?? 0) || b.overdueCount - a.overdueCount;
+  const suspected = rows.filter((r) => r.triage === 'suspected_shipped').map(toZombie).sort(bySeverity);
+  const stalled = rows.filter((r) => r.triage === 'stalled').map(toZombie).sort(bySeverity);
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
       <div className="flex items-baseline justify-between flex-wrap gap-2 mb-1">
@@ -38,6 +59,7 @@ export default async function SupervisionPage() {
         <span className="text-sm text-gray-500">共 {rows.length} 单在产 · <b className="text-red-600">{attn}</b> 单需督办</span>
       </div>
       <p className="text-sm text-gray-500 mb-4">一屏看每单的 <b>业务 / 采购 / 生产</b> 三段进度。<span className="text-red-600">红=卡点需督办</span>、黄=进行中、绿=正常、灰=无该环节。需督办的排在最上。</p>
+      <ZombieOrderPanel suspected={suspected} stalled={stalled} />
 
       <div className="rounded-xl border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">

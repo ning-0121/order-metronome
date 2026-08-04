@@ -91,7 +91,43 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const { data: pendingDelays } = await supabase.from('delay_requests')
     .select('order_id, milestone_id, delay_days, status').eq('status', 'pending').limit(300);
   const pendingDelayMs = new Set<string>(((pendingDelays || []) as any[]).map((d) => d.milestone_id).filter(Boolean));
-  const isOverdue = (mm: any) => !!mm.due_at && new Date(mm.due_at).getTime() < now && !pendingDelayMs.has(mm.id);
+
+  // ── 待收尾单:出厂日已过 + 长期没人点过任何节点 → 逾期不计入预警(CEO 2026-08-04)──
+  //
+  // CEO 原话:「历史的逾期,已经出货了或者已经解决了,但是一直显示在这里,
+  // 影响了判断的敏锐度,系统就没有预警意义了。」
+  //
+  // 实测:372 个逾期节点里 **164 个(44%)** 落在「出厂日已过 + 14 天没有任何节点被点完成」
+  // 的 21 张单上。这类单绝大多数是货已出、只是没人回来维护节拍器;
+  // 还有一类是**补录历史单** —— 出厂日在过去,一建出来所有节点 due_at 就全过期
+  // (如 1022919 建单当天即 15 个逾期)。两者都不是"正在晚",却把真正要盯的 33% 淹了。
+  //
+  // 判活跃用 actual_at(节点真被点完成的时刻),**不能用 updated_at** ——
+  // 后者会被批量维护操作(改负责人、补倍率等)刷新,看上去人人都在动。
+  //
+  // 处理方式是**拆分不是隐藏**:这些单单独进 staleOrders 一栏,提示去「确认整单已出货」
+  // (订单详情页那个按钮,一键把出运前节点补齐)。收尾后它们自然消失。
+  const STALE_IDLE_DAYS = 14;
+  const staleOrderIds = new Set<string>();
+  {
+    const lastActBy = new Map<string, number>();
+    for (const mm of milestones) {
+      const t = mm.actual_at ? new Date(mm.actual_at).getTime() : 0;
+      if (t > (lastActBy.get(mm.order_id) || 0)) lastActBy.set(mm.order_id, t);
+    }
+    for (const [oid, o] of orderById) {
+      const fd = (o as any)?.factory_date ? String((o as any).factory_date).slice(0, 10) : null;
+      if (!fd) continue;
+      if (new Date(fd + 'T23:59:59').getTime() >= now) continue;          // 出厂日还没到 → 正常在途
+      const last = lastActBy.get(oid) || 0;
+      const idleDays = last ? Math.floor((now - last) / 86400000) : Infinity;   // 从没点过 → 视为最不活跃
+      if (idleDays > STALE_IDLE_DAYS) staleOrderIds.add(oid);
+    }
+  }
+
+  const isOverdue = (mm: any) => !!mm.due_at && new Date(mm.due_at).getTime() < now
+    && !pendingDelayMs.has(mm.id)
+    && !staleOrderIds.has(mm.order_id);   // 待收尾单不计入预警,另立一栏
   const byOrder = new Map<string, { count: number; maxDays: number }>();
   for (const d of ((pendingDelays || []) as any[])) {
     const cur = byOrder.get(d.order_id) || { count: 0, maxDays: 0 };

@@ -787,6 +787,96 @@ async function generateProductionTasks(
 // 让跟单每天盯之前记的问题有没有落地。到提醒日的、或没设提醒但仍未解决的都上。
 // production_issues 表未建(migration 未跑)时查询报错 → 计入 errors,非致命。
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// generateZombieOrderTasks —— 每早扫「出厂日已过 + 长期无人推进」的单,派给行政督办核实
+//
+// CEO 2026-08-04:「每天早上系统过一遍这样的订单,对于逾期和出厂日期过的订单进行排查,
+// 有疑问的安排给行政督办来摸清实际情况进行反馈,然后就可以处理。」
+//
+// 为什么要专门生成任务而不是只在督办页列出来:列表要人主动去看,任务会推到工作台上。
+// 实测这类单占了全部逾期节点的 44%,不主动清就会一直淹没真正的预警。
+//
+// 只派 suspected_shipped(疑似货已出没维护)—— stalled(真晚了还在推)属于催责任人,
+// 不该占督办的核实清单。判活跃用 actual_at,不能用 updated_at(批量维护会刷新它)。
+// ─────────────────────────────────────────────────────────────
+async function generateZombieOrderTasks(
+  supabase: SupabaseClient,
+  targetDate: string
+): Promise<TaskGenerationResult> {
+  let created = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  const { triageStaleOrder, explainVerdict } = await import('@/lib/services/stale-order-triage')
+
+  const { data: orders, error } = await (supabase.from('orders') as any)
+    .select('id, order_no, internal_order_no, customer_name, factory_date, lifecycle_status, order_purpose')
+    .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")')
+    .not('factory_date', 'is', null)
+  if (error) {
+    errors.push(`fetchOrders: ${error.message}`)
+    return { created, skipped, errors }
+  }
+  const live = ((orders || []) as any[]).filter((o) => (o.order_purpose || 'production') !== 'sample')
+  if (live.length === 0) return { created, skipped, errors }
+
+  // 只取出厂日已过的,减少里程碑扫描量
+  const today = targetDate
+  const candidates = live.filter((o) => String(o.factory_date).slice(0, 10) < today)
+  if (candidates.length === 0) return { created, skipped, errors }
+
+  const msByOrder = new Map<string, any[]>()
+  const ids = candidates.map((o) => o.id)
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: ms } = await (supabase.from('milestones') as any)
+      .select('order_id, status, due_at, actual_at').in('order_id', ids.slice(i, i + 200))
+    for (const m of (ms || [])) msByOrder.set(m.order_id, [...(msByOrder.get(m.order_id) || []), m])
+  }
+
+  const supervisors = await getUsersByRole(supabase, ['admin_assistant'])
+  if (supervisors.length === 0) {
+    errors.push('无 admin_assistant(行政督办)用户,僵尸单核实任务未派发')
+    return { created, skipped, errors }
+  }
+
+  const DONE = new Set(['done', 'completed', '已完成'])
+  const now = Date.now()
+  for (const o of candidates) {
+    const ms = msByOrder.get(o.id) || []
+    const overdueCount = ms.filter((m: any) =>
+      !DONE.has(String(m.status || '').toLowerCase()) && m.due_at && new Date(m.due_at).getTime() < now).length
+    const tri = triageStaleOrder({
+      factoryDate: String(o.factory_date).slice(0, 10),
+      actualAts: ms.map((m: any) => m.actual_at),
+      overdueCount,
+      now,
+    })
+    if (tri.verdict !== 'suspected_shipped') continue
+
+    const no = o.internal_order_no || o.order_no || String(o.id).slice(0, 8)
+    for (const userId of supervisors) {
+      const result = await upsertTask(supabase, {
+        assignedTo: userId,
+        taskDate: targetDate,
+        taskType: 'decision_required',
+        // 出厂过 30 天以上按最高优先级——拖越久越可能是早就出货了、白占预警位
+        priority: (tri.pastFactoryDays ?? 0) > 30 ? 1 : 2,
+        title: `核实 ${no}(${o.customer_name || '—'})是否已出货 · 出厂过 ${tri.pastFactoryDays} 天`,
+        description: explainVerdict(tri),
+        actionUrl: `/supervision`,
+        actionLabel: '去督办核实',
+        relatedOrderId: o.id,
+        relatedCustomer: o.customer_name || undefined,
+        sourceType: 'zombie_order',
+        sourceId: o.id,
+      })
+      if (result.ok) { if (result.data.created) created++; else skipped++ }
+      else errors.push(`zombie ${no}: ${result.error}`)
+    }
+  }
+  return { created, skipped, errors }
+}
+
 async function generateProductionIssueTasks(
   supabase: SupabaseClient,
   targetDate: string
@@ -839,17 +929,28 @@ export async function generateDailyTasks(
 
     if (trigger.trigger === 'daily_cron') {
       // 全量生成：所有来源并行跑（含 missing_info + 轻升级）
-      const [ms, cr, da, pw, al, mi, rt, pr, pi] = await Promise.all([
-        generateMilestoneTasks(supabase, targetDate),
-        generateCustomerFollowupTasks(supabase, targetDate),
-        generateDelayApprovalTasks(supabase, targetDate),
-        generateProfitWarningTasks(supabase, targetDate),
-        generateAlertTasks(supabase, targetDate),
-        generateMissingInfoTasks(supabase, targetDate),
-        generateProductionTasks(supabase, targetDate),
-        generateProductionIssueTasks(supabase, targetDate),
-      ])
-      merge(ms); merge(cr); merge(da); merge(pw); merge(al); merge(mi); merge(rt); merge(pr); merge(pi)
+      // ⚠️ 用「名字 → 生成器」的数组,不要再写位置解构。
+      //    2026-08-01 删掉复盘生成器时少了一个 promise、却没减少解构变量名,
+      //    末位变量拿到 undefined → merge(undefined) 抛 TypeError → **整个晨扫从那天起就挂了**
+      //    (daily_tasks 停在 2026-07-31,8/1~8/4 一条没生成)。位置解构错一位不报错,只在运行时炸。
+      const GENERATORS: Array<[string, Promise<TaskGenerationResult>]> = [
+        ['milestone', generateMilestoneTasks(supabase, targetDate)],
+        ['customer_followup', generateCustomerFollowupTasks(supabase, targetDate)],
+        ['delay_approval', generateDelayApprovalTasks(supabase, targetDate)],
+        ['profit_warning', generateProfitWarningTasks(supabase, targetDate)],
+        ['alert', generateAlertTasks(supabase, targetDate)],
+        ['missing_info', generateMissingInfoTasks(supabase, targetDate)],
+        ['production', generateProductionTasks(supabase, targetDate)],
+        ['production_issue', generateProductionIssueTasks(supabase, targetDate)],
+        ['zombie_order', generateZombieOrderTasks(supabase, targetDate)],
+      ]
+      const settled = await Promise.allSettled(GENERATORS.map(([, p]) => p))
+      settled.forEach((r, i) => {
+        const name = GENERATORS[i][0]
+        // 单个生成器炸掉不再连累其余(此前 Promise.all 一挂全挂)
+        if (r.status === 'fulfilled' && r.value) merge(r.value)
+        else allErrors.push(`${name}: ${r.status === 'rejected' ? String((r as PromiseRejectedResult).reason) : '返回空'}`)
+      })
       // 轻升级：fire-and-forget，不阻塞主流程
       void escalateStaleTasks(supabase).catch(() => {})
 
