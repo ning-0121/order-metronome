@@ -492,11 +492,22 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                           {m.is_critical && !isDone && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">关键</span>
                           )}
-                          {overdue && !isDone && !isBlocked && (() => {
+                          {overdue && !isDone && (() => {
                             // 严格按 owner_user_id 判断 — 否则同 role 的同事会被误标成"我的逾期"
                             // 改动：pending（未开始）但已过截止日期也要显示逾期 badge，让责任人能看到
+                            //
+                            // 2026-08-04 修:这里原本还有个 `&& !isBlocked`,把**卡单节点的逾期徽章藏了**。
+                            // 于是同一个节点,首页报「我的逾期 已超 37 天」、详情页却一点红都没有
+                            // (CEO 报障:QM-20260516-005「原辅料到货验收」)。
+                            // 首页含 blocked 是**深思熟虑过的**:2026-05-06 曾排除过,导致 block-and-forget
+                            // ——采购标卡单+原因「业务没下单」→ 节点从逾期列表消失 → 业务收不到提醒 →
+                            // 真问题永远不解决;2026-05-18 已回滚恢复。所以该改的是这里,不是首页。
+                            // 卡单单独标注,让人一眼看出「晚了,但不是责任人在拖」。
                             const isMineOverdue = !isAdmin && !!currentUserId && (m as any).owner_user_id === currentUserId;
                             const roleName = getRoleLabel(m.owner_role);
+                            if (isBlocked) {
+                              return <span className="text-xs px-2 py-0.5 rounded-full bg-orange-200 text-orange-900 font-medium">⛔ 卡单·已逾期</span>;
+                            }
                             return isMineOverdue
                               ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">🔴 我的逾期</span>
                               : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">⚠ {roleName}逾期</span>;
@@ -524,7 +535,8 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                           {isAdmin && (m as any).owner_source && <span className="text-[10px] text-indigo-600">诊断：stored={((m as any).stored_owner_name || '—')} · effective={((m as any).effective_owner_name || (m as any).display_owner_name || '—')} · source={((m as any).owner_source || '—')}</span>}
                           {m.deadline_hint && <span>时限：{m.deadline_hint}</span>}
                           {m.due_at && (() => {
-                            if (!overdue || isDone || isBlocked) return (
+                            // 同上(2026-08-04):卡单节点的截止日也要标出来,别让它看着像正常
+                            if (!overdue || isDone) return (
                               <span title={`截止：${formatDateTime(m.due_at)}`}>截止：{formatDate(m.due_at)}</span>
                             );
                             const isMineOverdue = !isAdmin && !!currentUserId && (m as any).owner_user_id === currentUserId;
