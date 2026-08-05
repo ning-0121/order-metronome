@@ -1222,6 +1222,18 @@ export async function createOrder(
  *  超过后再做分页 / 归档/ filter 下推。当前规模 ~1000 单远低于此。 */
 const ORDERS_HARD_LIMIT = 2000;
 
+/**
+ * 订单列表数据源。
+ *
+ * ⚠️ 嵌套的 milestones **只取列表页真正用到的 6 个字段**,别顺手加回去。
+ * 2026-08-05 实测:原来带 id/owner_role/owner_user_id/sequence_number 共 10 个字段时,
+ * 这一条查询就是 **1334 KB / 513ms**(204 张单 × 3843 个节点);精简后 805 KB / 336ms,**省 40%**。
+ * 而列表页只用 status/step_key,辅助函数(computeOrderStatus / computePhases / getRedCulprits)
+ * 只要 name/due_at/actual_at/planned_at/status —— 其余四个字段拉过来一次都没用上。
+ *
+ * 这条查询对中国同事影响尤其大:函数跑在 iad1(美东),数据从库里到函数、再渲染成 HTML 发回国内,
+ * 每一段都按体积收费(时间上的)。列表页是打开频率最高的页面,省下来的是每个人每天几十次。
+ */
 export async function getOrders() {
   const supabase = await createClient();
 
@@ -1260,7 +1272,7 @@ export async function getOrders() {
 
   if (canSeeAll) {
     const { data: orders, error } = await (supabase.from('orders') as any)
-      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id, sequence_number)')
+      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(name, step_key, status, due_at, planned_at, actual_at)')
       .order('created_at', { ascending: false })
       .limit(ORDERS_HARD_LIMIT);
     if (error) return { error: error.message };
@@ -1315,7 +1327,7 @@ export async function getOrders() {
   if (myOrderIds.length === 0) return { data: [] };
 
   const { data: orders, error } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, milestones(id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id, sequence_number)')
+    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, milestones(name, step_key, status, due_at, planned_at, actual_at)')
     .in('id', myOrderIds)
     .order('created_at', { ascending: false })
     .limit(ORDERS_HARD_LIMIT);
