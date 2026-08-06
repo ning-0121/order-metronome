@@ -16,6 +16,9 @@ interface Target { key: string; label: string; url: string; note: string }
 
 const TARGETS: Target[] = [
   { key: 'this-app', label: '本系统(Vercel 边缘)', url: '/manifest.json', note: '你到系统前门的距离(边缘缓存,不含函数)' },
+  // 动态端点必过函数(美东 iad1),401 也照样执行 —— 这行 ≈ 每次点按钮/提交的真实来回。
+  // 迁移后它应从 300-500ms 掉到边缘值+30ms 左右,是迁移成效的**精确前后对照**。
+  { key: 'this-fn', label: '本系统·美东函数(每次操作的真实来回)', url: '/api/cron/reminders', note: '迁移要优化的就是这个数' },
   { key: 'db-now', label: '现数据库·美东弗吉尼亚', url: 'https://scrtebexbxablybqpdla.supabase.co/auth/v1/health', note: '现状 Supabase(走 Cloudflare)' },
   { key: 'aws-use1', label: 'AWS 美东弗吉尼亚', url: 'https://s3.us-east-1.amazonaws.com/', note: '现库所在 AWS 区(裸区域对照)' },
   { key: 'aws-tokyo', label: 'AWS 东京', url: 'https://s3.ap-northeast-1.amazonaws.com/', note: '候选区 ①' },
