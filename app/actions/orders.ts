@@ -1241,7 +1241,66 @@ const ORDERS_HARD_LIMIT = 2000;
  * 这条查询对中国同事影响尤其大:函数跑在 iad1(美东),数据从库里到函数、再渲染成 HTML 发回国内,
  * 每一段都按体积收费(时间上的)。列表页是打开频率最高的页面,省下来的是每个人每天几十次。
  */
-export async function getOrders() {
+/** 终结生命周期 —— 与 lib/domain/orderGrouping 的 DONE/CANCELLED 口径一致 */
+const TERMINAL_LIFECYCLE = ['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档'];
+
+/**
+ * 按需给订单挂节点(2026-08-05 性能)。
+ *
+ * 【为什么不用 PostgREST 的嵌套 join】
+ * 一是它依赖 FK schema 缓存,缓存一掉整条查询静默 fail(CLAUDE.md 血泪教训);
+ * 二是嵌套写法**没法只给一部分订单带节点** —— 而这正是省量的关键。
+ *
+ * 【为什么终结单默认不拉节点】
+ * 实测:全部单带全部节点 835 KB / 472ms;拆成「在途单带节点 + 终结单不带」= 340 KB,**省 59%**。
+ * 终结单(已完成/已取消)的节点只有两个用途,都用不上:
+ *   · 分组:classifyOrderGroup 对终结生命周期**直接按状态早返回,根本不看节点**
+ *   · 横幅:出厂日已过 / 红单体检 / 超期区 全都跳过终结单
+ * 唯一真需要的是它们**自己那个页签**里的「阶段进度」小圆点 —— 所以切到
+ * 「已完成/已取消」时才传 withTerminal=true 补拉;默认「进行中」页签根本不渲染它们。
+ *
+ * ⚠️ 字段清单别再砍(2026-08-05 已栽过一次):
+ *   name/due_at/actual_at/planned_at/status → computeOrderStatus / getRedCulprits
+ *   status/step_key                        → 页面 + computePhases
+ *   owner_role/owner_user_id               → getOrders 内部解析 merchandiser_name(「跟单」筛选器)
+ * 上次只 grep 了页面、漏了本文件内部的消费者,把「跟单」筛选下拉砍空了。
+ */
+async function attachMilestones(supabase: any, orders: any[], withTerminal: boolean): Promise<void> {
+  if (!orders.length) return;
+  const need = withTerminal
+    ? orders
+    : orders.filter((o) => !TERMINAL_LIFECYCLE.includes(String(o?.lifecycle_status || '')));
+  // 先给所有单一个空数组,免得下游拿到 undefined
+  for (const o of orders) o.milestones = [];
+  if (!need.length) return;
+
+  const ids = need.map((o) => o.id);
+  const byOrder = new Map<string, any[]>();
+  const COLS = 'order_id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id';
+  const PAGE = 1000;
+  // 两层循环缺一不可:
+  //   外层按 order_id 分批 —— in() 参数太多会把 URL 打爆(200 一批是本仓库既有惯例);
+  //   内层按 range 翻页 —— **PostgREST 单次最多返回 1000 行**,不翻页会被静默截断。
+  // 2026-08-05 我第一版只做了外层,84 张在途单约 1600 个节点只回来 1000 个 ——
+  // 不报错、不告警,表现是「有些单的阶段进度莫名少几个点、状态算错」。这类静默截断最难查。
+  for (let i = 0; i < ids.length; i += 200) {
+    const slice = ids.slice(i, i + 200);
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await (supabase.from('milestones') as any)
+        .select(COLS).in('order_id', slice).range(from, from + PAGE - 1);
+      if (error) { console.error('[getOrders] 节点查询失败:', error.message); return; }
+      const rows = data || [];
+      for (const m of rows) {
+        const arr = byOrder.get(m.order_id);
+        if (arr) arr.push(m); else byOrder.set(m.order_id, [m]);
+      }
+      if (rows.length < PAGE) break;   // 不满一页 = 取完了
+    }
+  }
+  for (const o of need) o.milestones = byOrder.get(o.id) || [];
+}
+
+export async function getOrders(opts?: { withTerminalMilestones?: boolean }) {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -1279,10 +1338,11 @@ export async function getOrders() {
 
   if (canSeeAll) {
     const { data: orders, error } = await (supabase.from('orders') as any)
-      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by, milestones(name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id)')
+      .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, owner_user_id, created_by')
       .order('created_at', { ascending: false })
       .limit(ORDERS_HARD_LIMIT);
     if (error) return { error: error.message };
+    await attachMilestones(supabase, orders || [], opts?.withTerminalMilestones === true);
     // 解析跟单和业务员名称
     const userIds = new Set<string>();
     for (const o of (orders || []) as any[]) {
@@ -1334,12 +1394,13 @@ export async function getOrders() {
   if (myOrderIds.length === 0) return { data: [] };
 
   const { data: orders, error } = await (supabase.from('orders') as any)
-    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags, milestones(name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id)')
+    .select('id, order_no, customer_name, factory_name, factory_id, incoterm, etd, warehouse_due_date, lifecycle_status, order_type, order_purpose, packaging_type, notes, created_at, style_no, po_number, internal_order_no, quantity, quantity_unit, cancel_date, order_date, factory_date, special_tags')
     .in('id', myOrderIds)
     .order('created_at', { ascending: false })
     .limit(ORDERS_HARD_LIMIT);
 
   if (error) return { error: error.message };
+  await attachMilestones(supabase, orders || [], opts?.withTerminalMilestones === true);
   const enriched = await attachDelayRequests(orders || []);
   return { data: enriched };
 }

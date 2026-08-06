@@ -156,7 +156,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const shipHoldFilter = params?.ship_hold === 'yes' || params?.ship_hold === 'stale' ? params.ship_hold : '';
   const createdMonthFilter = (params?.created_month || '').slice(0, 7);   // 建单月筛选 YYYY-MM
 
-  const { data: allOrders, error } = await getOrders();
+  // 只有切到「已完成/已取消」页签时才补拉终结单的节点(2026-08-05 性能:默认视图省 59%)。
+  // 「进行中」页签根本不渲染终结单,而分组判定与各横幅对终结单都按 lifecycle_status 早返回、不看节点。
+  const { data: allOrders, error } = await getOrders({ withTerminalMilestones: statusFilter !== 'active' });
 
   if (error) {
     return (
