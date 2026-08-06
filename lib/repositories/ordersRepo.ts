@@ -328,12 +328,16 @@ export async function createOrder(
     sanitized.packaging_type = 'standard';
   }
   
-  // Incoterm 特定验证：DDP需要ETD和ETA，其他只需要出厂日期
-  if (sanitized.incoterm === 'DDP' && !sanitized.etd) {
-    return { error: 'DDP订单必须填写ETD' };
-  }
-  if (sanitized.incoterm === 'DDP' && !sanitized.warehouse_due_date) {
-    return { error: 'DDP订单必须填写ETA（到仓日期）' };
+  // DDP 的 ETD/ETA 是【选填】(CEO 2026-07-30 拍板):建单时船期常常还没定,
+  // 硬性必填逼业务先填假日期,反而污染日期链。留空时排期按出厂日期兜底
+  // (lib/schedule.ts calcDueDates 已处理),船期定了再补。
+  //
+  // ⚠️ 2026-08-06 事故:表单 7-30 就改成选填了,但这里的老硬校验一直没删 ——
+  // 表单说"船期定了再填",写入层回"DDP订单必须填写ETD",业务被夹在中间建不了单。
+  // 规则改动必须**表单 + 写入层一起改**,只改一层就是给用户挖坑。
+  // 真正必填的锚点是出厂日期(所有贸易条款一致):
+  if (!sanitized.factory_date) {
+    return { error: '必须填写出厂日期(排期锚点,所有贸易条款一致)' };
   }
   
   // 默认值填充
@@ -381,19 +385,9 @@ export async function updateOrder(
     return { error: 'No valid fields to update' };
   }
   
-  // Incoterm 特定验证（DDP需要ETD，FOB/RMB不需要）
-  
-  if (sanitized.incoterm === 'DDP' && !sanitized.warehouse_due_date) {
-    const { data: current } = await (supabase
-      .from('orders') as any)
-      .select('warehouse_due_date')
-      .eq('id', id)
-      .single();
-
-    if (!current?.warehouse_due_date) {
-      return { error: 'Warehouse Due Date is required for DDP orders' };
-    }
-  }
+  // DDP 的 ETD/ETA 是【选填】(CEO 2026-07-30 拍板,与 insert 路径同口径,2026-08-06 一并清):
+  // 此处原来还留着"改成 DDP 必须已有 ETA"的老校验 —— 船期没定的单连贸易条款都改不了。
+  // 排期锚点是出厂日期,ETD/ETA 船期定了再补。
 
   // ── quantity / total_amount 守恒（2026-05-19）──
   // 之前 quantity 和 total_amount 都在 UPDATE_WHITELIST 里独立可改，
