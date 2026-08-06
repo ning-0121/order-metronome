@@ -5,7 +5,9 @@
  *
  * 方法:每个目标先发 1 次冷请求(含 DNS+TLS 握手,最接近"第一次打开"的体感),
  * 再连发 4 次热请求取中位数(连接复用,最接近"页面内每次操作")。
- * S3 各区域端点用 no-cors(拿不到响应体,但计时有效);丢包/超时按 8s 截断记为失败。
+ * AWS 各区域端点用 DynamoDB(直接回 400,无重定向)—— 第一版用的 S3 根路径会
+ * 307 跳到 aws.amazon.com 营销页,把每行都多算一次亚马逊官网的耗时,数值全部虚高
+ * (2026-08-06 CEO 觉得不对,是对的)。no-cors 拿不到响应体,但计时有效;8s 超时记失败。
  *
  * ⚠️ 结果解读:比的是**相对差距**,不是绝对值。哪个区中位数低、失败少,迁哪个。
  */
@@ -20,10 +22,10 @@ const TARGETS: Target[] = [
   // 迁移后它应从 300-500ms 掉到边缘值+30ms 左右,是迁移成效的**精确前后对照**。
   { key: 'this-fn', label: '本系统·美东函数(每次操作的真实来回)', url: '/api/cron/reminders', note: '迁移要优化的就是这个数' },
   { key: 'db-now', label: '现数据库·美东弗吉尼亚', url: 'https://scrtebexbxablybqpdla.supabase.co/auth/v1/health', note: '现状 Supabase(走 Cloudflare)' },
-  { key: 'aws-use1', label: 'AWS 美东弗吉尼亚', url: 'https://s3.us-east-1.amazonaws.com/', note: '现库所在 AWS 区(裸区域对照)' },
-  { key: 'aws-tokyo', label: 'AWS 东京', url: 'https://s3.ap-northeast-1.amazonaws.com/', note: '候选区 ①' },
-  { key: 'aws-sg', label: 'AWS 新加坡', url: 'https://s3.ap-southeast-1.amazonaws.com/', note: '候选区 ②' },
-  { key: 'aws-seoul', label: 'AWS 首尔', url: 'https://s3.ap-northeast-2.amazonaws.com/', note: '候选区 ③' },
+  { key: 'aws-use1', label: 'AWS 美东弗吉尼亚', url: 'https://dynamodb.us-east-1.amazonaws.com/', note: '现库所在 AWS 区(裸区域对照)' },
+  { key: 'aws-tokyo', label: 'AWS 东京', url: 'https://dynamodb.ap-northeast-1.amazonaws.com/', note: '候选区 ①' },
+  { key: 'aws-sg', label: 'AWS 新加坡', url: 'https://dynamodb.ap-southeast-1.amazonaws.com/', note: '候选区 ②' },
+  { key: 'aws-seoul', label: 'AWS 首尔', url: 'https://dynamodb.ap-northeast-2.amazonaws.com/', note: '候选区 ③' },
 ];
 
 const ROUNDS = 4;
