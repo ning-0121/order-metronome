@@ -11,10 +11,14 @@ interface CustomerSelectProps {
   initialName?: string;
   selectedValue?: { id: string; name: string } | null;
   suggestedName?: string;
+  /** 服务端预取的客户列表(2026-08-06 性能):建单页等场景由 RSC 一次取好随页面送达,
+   *  组件不再发 Server Action —— 同页多个组件的 action 会被 Next **排队串行**,
+   *  从义乌到美东每个 300-500ms,攒起来就是「打开表单转半天」。不传则保持自取。 */
+  initialOptions?: Customer[];
 }
 
-export function CustomerSelect({ onSelect, initialName, selectedValue, suggestedName }: CustomerSelectProps = {}) {
-  const [customers, setCustomers] = useState<Customer[]>([]);
+export function CustomerSelect({ onSelect, initialName, selectedValue, suggestedName, initialOptions }: CustomerSelectProps = {}) {
+  const [customers, setCustomers] = useState<Customer[]>(initialOptions ?? []);
   const [selected, setSelected] = useState<Customer | null>(null);
   const [query, setQuery] = useState(initialName ?? '');
   const [open, setOpen] = useState(false);
@@ -33,6 +37,7 @@ export function CustomerSelect({ onSelect, initialName, selectedValue, suggested
   const effectiveName = controlled ? selectedValue?.name || '' : selected?.customer_name || '';
 
   useEffect(() => {
+    if (initialOptions) { setLoading(false); return; }   // 预取命中,零请求
     getCustomers()
       .then(({ data, error }) => {
         if (error) {

@@ -133,7 +133,19 @@ async function uploadFilesToStorage(
 
 type Step = 1 | 2 | 3 | 4;
 
-function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPrice?: boolean; initialDraftId?: string | null }) {
+/** 服务端预取包(2026-08-06 性能):RSC 一次并行取好随页面送达。
+ *  为什么必须这么做:本表单挂载时原来要发 6 个 Server Action(客户/工厂×2/模板/规则/订单号),
+ *  而 Next 对同页 action 是**排队串行**的 —— 义乌→美东每个 300-500ms,6 个就是 3~6 秒转圈。
+ *  预取后挂载零请求。字段全部可选:别的入口不传时,组件保持原来的自取行为。 */
+export interface OrderFormPrefetch {
+  customers?: any[];
+  factories?: any[];
+  templates?: OrderTemplate[];
+  overrides?: FieldRuleOverride[];
+  orderNo?: string | null;
+}
+
+function NewOrderWizard({ showPrice = false, initialDraftId = null, prefetch }: { showPrice?: boolean; initialDraftId?: string | null; prefetch?: OrderFormPrefetch }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState<Step>(1);
@@ -152,10 +164,10 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
   const [incoterm, setIncoterm] = useState<string>('');
   const [deliveryType, setDeliveryType] = useState<string>('');
   const [shippingSampleRequired, setShippingSampleRequired] = useState(false);
-  const [preGeneratedOrderNo, setPreGeneratedOrderNo] = useState<string | null>(null);
+  const [preGeneratedOrderNo, setPreGeneratedOrderNo] = useState<string | null>(prefetch?.orderNo ?? null);
   // 手工录入子模式:有PO(上传预录) / 无PO(直接手工填)。null=未选,先让业务选
   const [poMode, setPoMode] = useState<'has_po' | 'no_po' | null>(null);
-  const [orderNoLoading, setOrderNoLoading] = useState(true);
+  const [orderNoLoading, setOrderNoLoading] = useState(!prefetch?.orderNo);
   const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
   const [poVerifyResult, setPoVerifyResult] = useState<POVerifyResult | null>(null);
   const [showVerifyDialog, setShowVerifyDialog] = useState(false);
@@ -200,9 +212,11 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
   //
   // 字段规则的 DB 覆盖层(form_field_rules)。初始为空 = 代码默认 = 现状,所以不会闪。
   // 拉取失败一律当"无覆盖"处理 —— 配置层挂了要退回默认行为,不能让建单页打不开。
-  const [ruleOverrides, setRuleOverrides] = React.useState<FieldRuleOverride[]>([]);
+  const [ruleOverrides, setRuleOverrides] = React.useState<FieldRuleOverride[]>(prefetch?.overrides ?? []);
   React.useEffect(() => {
     let cancelled = false;
+    // 未选客户的首跑已由服务端预取覆盖;选了客户仍要按客户重取
+    if (!selectedCustomer?.id && prefetch?.overrides) return;
     getOrderFormOverrides(selectedCustomer?.id ?? null)
       .then((ov) => { if (!cancelled) setRuleOverrides(ov || []); })
       .catch(() => { /* 退回代码默认 */ });
@@ -217,7 +231,7 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
   }, ruleOverrides), [poMode, orderType, incoterm, deliveryType, shippingSampleRequired, colorPending, isImport, ruleOverrides]);
 
   // 模板相关状态
-  const [templates, setTemplates] = useState<OrderTemplate[]>([]);
+  const [templates, setTemplates] = useState<OrderTemplate[]>(prefetch?.templates ?? []);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   // S1b 富录入表:逐款明细(款/色/码×件数)。录了自动填 总量/款数/颜色数;提交时落 line_items。
   const [lineStyles, setLineStyles] = useState<any[]>([]);
@@ -265,6 +279,7 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
 
   // 加载模板列表
   useEffect(() => {
+    if (prefetch?.templates) return;   // 预取命中
     getActiveOrderTemplates().then(res => {
       if (res.data) setTemplates(res.data);
     });
@@ -1387,6 +1402,7 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
               <div className="grid grid-cols-2 gap-4">
                 <div ref={customerSelectorRef}>
                   <CustomerSelect
+                    initialOptions={prefetch?.customers}
                     selectedValue={selectedCustomer}
                     suggestedName={aiRecognizedCustomerName}
                     onSelect={(customer) => setSelectedCustomer(toSelectedCustomer(customer || {}))}
@@ -1396,7 +1412,7 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
                   </p>
                 </div>
                 <div>
-                  <FactorySelect />
+                  <FactorySelect initialOptions={prefetch?.factories} />
                 </div>
                 {/* 客户信用风险 banner — 选客户后实时查询 customer_rhythm 评估 */}
                 {selectedCustomer && selectedCustomer.name.length >= 2 && (
@@ -1405,7 +1421,7 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
                   </div>
                 )}
                 <div className="col-span-2">
-                  <MultiFactorySelect />
+                  <MultiFactorySelect initialOptions={prefetch?.factories} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2429,10 +2445,10 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
 
 // 移动自 app/orders/new/page.tsx —— 逻辑逐字不变（Order Intake dual-mode 收敛）。
 // 仅把默认导出改为命名导出 LegacyOrderForm，供模式选择器条件渲染。
-export function LegacyOrderForm({ showPrice = false, initialDraftId = null }: { showPrice?: boolean; initialDraftId?: string | null } = {}) {
+export function LegacyOrderForm({ showPrice = false, initialDraftId = null, prefetch }: { showPrice?: boolean; initialDraftId?: string | null; prefetch?: OrderFormPrefetch } = {}) {
   return (
     <Suspense fallback={<div className="mx-auto max-w-3xl p-6 text-gray-400">加载中...</div>}>
-      <NewOrderWizard showPrice={showPrice} initialDraftId={initialDraftId} />
+      <NewOrderWizard showPrice={showPrice} initialDraftId={initialDraftId} prefetch={prefetch} />
     </Suspense>
   );
 }

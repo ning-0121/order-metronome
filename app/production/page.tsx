@@ -13,10 +13,21 @@ export const dynamic = 'force-dynamic';
 
 export default async function ProductionCenterPage({ searchParams }: { searchParams: Promise<{ detail?: string; stage?: string; q?: string }> }) {
   const params = await searchParams;
+  // 门禁必须最先跑(要 redirect);其后三路互不依赖 —— 生产总览/初始化开关/今日待办,
+  // 原来串着等四轮,2026-08-06 改并行(「打开生产中心转半天」的一部分)。
+  // auth 已有请求级缓存,门禁里验过这里命中,不再多一次网络往返。
   const { roles } = await requireProductionPage();
-  const result = await getProductionCenter();
   const canManage = roles.includes('admin') || roles.includes('production_manager');
-  const showInit = canManage && (await isStageInitOpen());
+  const supa = await createClient();
+  const [result, showInitOpen, todayTasks] = await Promise.all([
+    getProductionCenter(),
+    canManage ? isStageInitOpen() : Promise.resolve(false),
+    (async () => {
+      const { data: { user } } = await supa.auth.getUser();
+      return user ? loadUserProductionTodayTasks(supa, user.id) : [];
+    })(),
+  ]);
+  const showInit = canManage && showInitOpen;
 
   if (result.error) return <div className="mx-auto max-w-3xl px-4 py-12 text-center"><h1 className="text-xl font-bold">生产中心</h1><p className="mt-2 text-gray-500">{result.error}</p></div>;
 
@@ -26,9 +37,6 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
     : roles.some((item) => ['qc', 'quality'].includes(item)) ? 'qc'
     : canManage ? 'supervisor' : 'follow_up';
   const dashboard = buildProductionDashboard(rows, summary, role);
-  const supa = await createClient();
-  const { data: { user } } = await supa.auth.getUser();
-  const todayTasks = user ? await loadUserProductionTodayTasks(supa, user.id) : [];
   const initialDetail = params.q || params.detail || '';
   const updatedAt = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(new Date());
 

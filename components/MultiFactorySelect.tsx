@@ -13,14 +13,15 @@ import { getFactories, type Factory } from '@/app/actions/factories';
  * 注意：主工厂仍由 <FactorySelect /> 维护（factory_id / factory_name），
  * 多工厂作为补充信息存储，便于产能 / 验货分组。
  */
-export function MultiFactorySelect() {
-  const [factories, setFactories] = useState<Factory[]>([]);
+export function MultiFactorySelect({ initialOptions }: { initialOptions?: Factory[] } = {}) {
+  const [factories, setFactories] = useState<Factory[]>(initialOptions ?? []);
   const [selected, setSelected] = useState<Factory[]>([]);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (initialOptions) return;   // 服务端预取命中(见 CustomerSelect 注释)
     getFactories().then(({ data }) => setFactories(data || []));
   }, []);
 

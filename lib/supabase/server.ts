@@ -52,12 +52,20 @@ export const createClient = cache(async () => {
     }
   );
 
-  // 同一请求内,无参 getUser() 只发一次网络请求(见文件头)
+  // 同一请求内,无参 getUser() 只发一次网络请求(见文件头)。
+  // ⚠️ 失败不能被缓存:原来 4 路独立调用,1 路网络抖动其余 3 路还能成功;
+  //    单飞后如果把一次瞬时失败钉进 memo,整个请求内所有权限检查跟着全挂。
+  //    所以拿到 error(或 reject)就清掉 memo,让同请求内的下一个调用方重试。
   const origGetUser = client.auth.getUser.bind(client.auth);
   let memo: ReturnType<typeof origGetUser> | null = null;
   client.auth.getUser = ((jwt?: string) => {
     if (jwt) return origGetUser(jwt);
-    if (!memo) memo = origGetUser();
+    if (!memo) {
+      memo = origGetUser().then(
+        (r) => { if ((r as any)?.error) memo = null; return r; },
+        (err) => { memo = null; throw err; },
+      ) as ReturnType<typeof origGetUser>;
+    }
     return memo;
   }) as typeof client.auth.getUser;
 

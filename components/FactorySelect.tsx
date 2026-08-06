@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { getFactories, createFactory, type Factory } from '@/app/actions/factories';
 import { PRODUCT_CATEGORIES } from '@/lib/constants/factory';
 
-export function FactorySelect() {
-  const [factories, setFactories] = useState<Factory[]>([]);
+export function FactorySelect({ initialOptions }: { initialOptions?: Factory[] } = {}) {
+  const [factories, setFactories] = useState<Factory[]>(initialOptions ?? []);
   const [selected, setSelected] = useState<Factory | null>(null);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -22,6 +22,7 @@ export function FactorySelect() {
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (initialOptions) { setLoading(false); return; }   // 服务端预取命中(见 CustomerSelect 注释)
     // 2026-05-19：加 .catch — 之前 server crash 时 promise reject 后
     // setLoading(false) 永不执行，下拉框永久 loading。
     getFactories()
