@@ -6,6 +6,7 @@ import {
   clearSafeOrderDraft, isStaleServerActionError, loadSafeOrderDraft, restoreSafeOrderDraft,
   saveSafeOrderDraft, STALE_SERVER_ACTION_MESSAGE,
 } from '@/lib/order/create-order-resilience';
+import { checkPoFileSize } from '@/lib/order/po-upload-limits';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { CustomerSelect } from '@/components/CustomerSelect';
@@ -351,6 +352,9 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
       const results = await Promise.all(
         files.map(async (file) => {
           try {
+            // 超过 4.5MB 的请求 Vercel 平台直接 413,函数不会执行 —— 必须在这里拦(见 po-upload-limits)
+            const tooBig = checkPoFileSize(file);
+            if (tooBig) return { ok: false as const, error: tooBig, fileName: file.name };
             const fd = new FormData();
             fd.append('file', file);
             const res = await parsePO(fd);
@@ -1903,7 +1907,7 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 mt-2">支持 PDF、Excel、Word、JPG、PNG，单文件 ≤ 20MB（文件直传云存储，不影响订单创建）</p>
+              <p className="text-xs text-gray-400 mt-2">支持 PDF、Excel、Word、JPG、PNG，单文件 ≤ 20MB（附件直传云存储，不影响订单创建）。注：用于「AI 识别 PO」的文件需 ≤ 4MB，超了请压缩或截图。</p>
               <p className="text-xs text-amber-600 mt-1">
                 💡 <strong>多个同类文件</strong>请用后缀互相区分（例：<code className="bg-amber-50 px-1">_PO12345</code> / <code className="bg-amber-50 px-1">_款号A</code> / <code className="bg-amber-50 px-1">_v1</code> / <code className="bg-amber-50 px-1">_v2</code>）。
                 同名文件会被存储覆盖，必须改成互不相同的文件名再上传。

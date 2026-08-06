@@ -3,9 +3,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { qimoAI, AIRuntimeError, type FileInput, type ImageInput } from '@/lib/ai/runtime';
 import { poParsedSchema } from '@/lib/ai/scenes/po-schema';
+import { PO_PARSE_MAX_BYTES } from '@/lib/order/po-upload-limits';
 
 /** 上传文件最大字节数：10MB。超过后拒绝读入内存。 */
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+// 与浏览器端那道闸同源 —— 真正的天花板是 Vercel 平台的 4.5MB 请求体上限,
+// 不是我们配的。写 10MB 只会让这段检查永远等不到大文件(见 lib/order/po-upload-limits)。
+const MAX_FILE_SIZE_BYTES = PO_PARSE_MAX_BYTES;
 /** 草稿恢复时间窗：超过此分钟数视为陈旧不展示。 */
 const DRAFT_FRESH_MINUTES = 30;
 

@@ -18,7 +18,11 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: {
-      bodySizeLimit: '10mb',
+      // ⚠️ 这个值不能大于 Vercel 平台的请求体硬上限 4.5MB。
+      // 原来写 10mb 是自欺:4.5MB 以上平台直接返 413 FUNCTION_PAYLOAD_TOO_LARGE,
+      // 函数根本不执行,Next 这层的限制形同虚设,用户只看到一句英文传输错误。
+      // 实测生产:4MB 能到应用,5MB/8MB 一律 413。详见 lib/order/po-upload-limits。
+      bodySizeLimit: '4mb',
     },
   },
 };

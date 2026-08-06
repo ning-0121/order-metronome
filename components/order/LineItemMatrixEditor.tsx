@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { getOrderLineItems, saveOrderLineItems, parseOrderFile } from '@/app/actions/order-line-items';
 import { parsePO } from '@/app/actions/po-parser';
 import { isStaleServerActionError, STALE_SERVER_ACTION_MESSAGE } from '@/lib/order/create-order-resilience';
+import { checkPoFileSize } from '@/lib/order/po-upload-limits';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys, orderSizeKeys } from '@/lib/utils/size-sort';
@@ -138,6 +139,10 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   // 复杂版式/尺码配比(如「S:M:L=2:2:2」+每色总量)零 token 代码解析读不出,只能靠 AI。
   // AI 已把配比按比例摊成每码件数(sizes 是件数不是比例);解析→并入富录入表→人核对→保存冻结。
   async function runAIParse(file: File) {
+    // 必须在调 Server Action **之前**拦:超过 4.5MB 的请求被 Vercel 平台直接 413 掉,
+    // 函数根本不会执行,服务端那句友好提示永远没机会跑(2026-08-05 CEO 撞到的就是这个)。
+    const tooBig = checkPoFileSize(file);
+    if (tooBig) { setMsg('❌ ' + tooBig); return; }
     setParsing(true); setMsg('🤖 AI 正在读取配比/复杂版式…(约 10-20 秒)');
     try {
       const fd = new FormData();
