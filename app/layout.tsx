@@ -5,7 +5,7 @@ import { PWARegister } from "@/components/PWARegister";
 import { ChunkErrorReloader } from "@/components/ChunkErrorReloader";
 import { WorkbenchAnchor } from "@/components/WorkbenchAnchor";
 import { createClient } from "@/lib/supabase/server";
-import { getUserRoleFromEmail } from "@/lib/utils/user-role";
+import { getCurrentUserRole } from "@/lib/utils/user-role";
 import { knowledgeLayerCaptureVisible } from "@/lib/engine/featureFlags";
 import { BRAND } from "@/lib/config/brand";
 
@@ -35,19 +35,22 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const role = user ? getUserRoleFromEmail(user.email) : undefined;
-  const isAdmin = role === 'admin';
+  // 改用请求级缓存的 getCurrentUserRole(2026-08-05 性能):布局在每个页面都渲染,
+  // 原来这里自己跑一遍 getUser + profiles,页面/action 里又各跑一遍 —— 全是重复。
+  // 现在整个请求里这套 auth+profiles 只发一次,谁先调谁付钱,其余全部命中缓存。
+  // 口径不变:getCurrentUserRole 的邮箱白名单保底 admin 与原 getUserRoleFromEmail 一致,
+  // profiles 的 roles 判定逻辑也与原内联版相同(它本来就是从这里抄出去统一的)。
+  const { isAdmin, userId, roles: profileRoles } = await getCurrentUserRole(supabase);
+  const user = userId ? { id: userId } : null;
+  const roles: string[] = profileRoles || [];
 
-  // 采购/生产/财务 导航可见性（轻量 profile 角色查询，单次索引命中，共用一次查询）
+  // 采购/生产/财务 导航可见性
   let isProcurement = isAdmin;
   let isProduction = isAdmin;
   let isFinance = isAdmin; // H4:财务/管理员显示「进入财务系统」SSO 入口
   let isSupervisor = isAdmin;  // 督办总览可见性(管理/督导 = CAN_SEE_ALL_ORDERS)
   let canCheckMissing = isAdmin;  // 缺明细检查入口(2026-07-27:管理层看全部 + 业务/跟单看自己的)
   if (user && !isAdmin) {
-    const { data: prof } = await supabase.from('profiles').select('role, roles').eq('user_id', user.id).single();
-    const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
     // admin_assistant(行政督导)给采购/生产中心入口 —— 督导要能看两个中心(只看不改,写操作另有门禁)
     isProcurement = roles.some(r => ['procurement', 'procurement_manager', 'admin', 'admin_assistant'].includes(r));
     isProduction = roles.some(r => ['production', 'production_manager', 'admin', 'admin_assistant'].includes(r));

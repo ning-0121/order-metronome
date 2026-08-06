@@ -11,6 +11,7 @@
 // 名单收口到 lib/config/brand.ts（L1，2026-08-01）。
 // 此前这份名单和 lib/utils/admin-route-guard.ts 里的 ADMIN_EMAILS 是**两份各自维护的副本**，
 // 改一处漏一处就是权限口子 —— 一边认了管理员、另一边不认。
+import { cache } from 'react';
 import { ADMIN_EMAILS as ADMIN_ALLOWLIST } from '@/lib/config/brand';
 
 export type UserRole = 'admin' | 'sales' | 'merchandiser' | 'finance' | 'procurement' | 'production' | 'qc' | 'logistics';
@@ -56,8 +57,14 @@ export function isAdmin(email: string | null | undefined): boolean {
  * 配置了 admin/finance/logistics 等角色、但邮箱不在白名单的用户，
  * 之前一律被错判为 isAdmin=false / role='sales'，在订单详情页、仓库页
  * 等处功能受限或被错误重定向（如延期审批按钮不显示）。
+ *
+ * 【请求级缓存,2026-08-05】包了 React cache():同一请求内同一个 supabase 实例
+ * 只查一次(订单详情页原来把这套 auth+profiles 跑了 4 遍)。cache() 按参数区分,
+ * 参数是对象时走 WeakMap —— 这依赖 createClient() 本身也是请求级缓存的
+ * (lib/supabase/server.ts),否则每个调用点拿到的实例不同、永远 miss。
+ * 没有请求作用域(cron/脚本)时 cache() 直接透传,行为与从前一致。
  */
-export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRole; isAdmin: boolean; userId?: string | null; roles?: string[] }> {
+export const getCurrentUserRole = cache(async (supabase: any): Promise<{ role: UserRole; isAdmin: boolean; userId?: string | null; roles?: string[] }> => {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user || !user.email) {
@@ -99,7 +106,7 @@ export async function getCurrentUserRole(supabase: any): Promise<{ role: UserRol
 
   // 复审性能:一并返回 userId + roles(本函数已查过 auth+profiles),调用方无需再各查一次
   return { role, isAdmin, userId: user.id, roles: profileRoles };
-}
+});
 
 /**
  * 获取用户的多角色列表（从 profiles 表）
