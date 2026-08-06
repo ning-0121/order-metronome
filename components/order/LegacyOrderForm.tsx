@@ -7,6 +7,7 @@ import {
   saveSafeOrderDraft, STALE_SERVER_ACTION_MESSAGE,
 } from '@/lib/order/create-order-resilience';
 import { checkPoFileSize } from '@/lib/order/po-upload-limits';
+import { uploadPoForParse } from '@/lib/order/po-parse-upload';
 import { getMilestonesByOrder } from '@/app/actions/milestones';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { CustomerSelect } from '@/components/CustomerSelect';
@@ -352,11 +353,18 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
       const results = await Promise.all(
         files.map(async (file) => {
           try {
-            // 超过 4.5MB 的请求 Vercel 平台直接 413,函数不会执行 —— 必须在这里拦(见 po-upload-limits)
-            const tooBig = checkPoFileSize(file);
-            if (tooBig) return { ok: false as const, error: tooBig, fileName: file.name };
+            // 首选直传通道(绕开 Vercel 4.5MB 硬限 + 跨境大 POST 被掐,见 po-parse-upload);
+            // 直传失败回退直接带文件,此时才受 4.5MB 约束,先拦
             const fd = new FormData();
-            fd.append('file', file);
+            const up = await uploadPoForParse(file);
+            if (up.ok && up.path) {
+              fd.append('storage_path', up.path);
+              fd.append('file_name', file.name);
+            } else {
+              const tooBig = checkPoFileSize(file);
+              if (tooBig) return { ok: false as const, error: tooBig, fileName: file.name };
+              fd.append('file', file);
+            }
             const res = await parsePO(fd);
             return res.ok && res.data ? { ok: true as const, data: res.data, fileName: file.name } : { ok: false as const, error: res.error || '解析失败', fileName: file.name };
           } catch (err: any) {

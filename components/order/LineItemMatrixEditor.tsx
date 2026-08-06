@@ -11,6 +11,7 @@ import { getOrderLineItems, saveOrderLineItems, parseOrderFile } from '@/app/act
 import { parsePO } from '@/app/actions/po-parser';
 import { isStaleServerActionError, STALE_SERVER_ACTION_MESSAGE } from '@/lib/order/create-order-resilience';
 import { checkPoFileSize } from '@/lib/order/po-upload-limits';
+import { uploadPoForParse } from '@/lib/order/po-parse-upload';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys, orderSizeKeys } from '@/lib/utils/size-sort';
@@ -139,14 +140,22 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   // 复杂版式/尺码配比(如「S:M:L=2:2:2」+每色总量)零 token 代码解析读不出,只能靠 AI。
   // AI 已把配比按比例摊成每码件数(sizes 是件数不是比例);解析→并入富录入表→人核对→保存冻结。
   async function runAIParse(file: File) {
-    // 必须在调 Server Action **之前**拦:超过 4.5MB 的请求被 Vercel 平台直接 413 掉,
-    // 函数根本不会执行,服务端那句友好提示永远没机会跑(2026-08-05 CEO 撞到的就是这个)。
-    const tooBig = checkPoFileSize(file);
-    if (tooBig) { setMsg('❌ ' + tooBig); return; }
     setParsing(true); setMsg('🤖 AI 正在读取配比/复杂版式…(约 10-20 秒)');
     try {
+      // 首选直传通道:文件先传云存储,Server Action 只收路径(几十字节)。
+      // 绕开两个坑:Vercel 4.5MB 请求体硬限;跨境链路掐"浏览器→Vercel 的大 POST"
+      // (2026-08-05/06 CEO 的 PDF 连续两天到不了函数,同办公室附件直传却全成功)。
       const fd = new FormData();
-      fd.append('file', file);
+      const up = await uploadPoForParse(file);
+      if (up.ok && up.path) {
+        fd.append('storage_path', up.path);
+        fd.append('file_name', file.name);
+      } else {
+        // 直传失败 → 回退老路直接带文件,此时才受 Vercel 4.5MB 约束,先拦
+        const tooBig = checkPoFileSize(file);
+        if (tooBig) { setMsg('❌ ' + tooBig); return; }
+        fd.append('file', file);
+      }
       // 详情模式带 orderId:解析成功后服务端把 AI 原文冻结到 orders.po_parse_snapshot(首冻,别处提取用)
       const res = await parsePO(fd, orderId);
       if (!res.ok || !res.data) { setMsg('❌ ' + (res.error || 'AI 解析失败')); return; }

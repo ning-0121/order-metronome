@@ -178,15 +178,40 @@ export async function parsePO(
   const guard = await guardAICall('po_parse', orderId);
   if (!guard.ok) return { ok: false, error: guard.error };
 
-  const file = formData.get('file') as File | null;
+  // 两条进件通道(2026-08-06):
+  //   A. storage_path —— 浏览器先直传 order-docs 桶,这里只收路径,服务端取回。
+  //      **首选**。POST 体几十字节,绕开 Vercel 4.5MB 硬限 + 跨境大 POST 被掐
+  //      (CEO 的 PDF 连续两天到不了函数,而同办公室附件直传全成功 → 照抄那条通的路)。
+  //   B. file —— 老路,直接带文件,留作直传失败的回退。受 4MB 闸约束。
+  const storagePath = String(formData.get('storage_path') || '');
+  let file = formData.get('file') as File | null;
+
+  if (storagePath) {
+    // 路径必须锁死在专用前缀内 —— 否则拿到 service-role 下载能力的这段代码
+    // 会变成"任意读桶内文件"的口子(比如别的订单的凭证)
+    if (!/^po-parse-inbox\/[A-Za-z0-9_]+\.[a-z0-9]+$/.test(storagePath)) {
+      return { ok: false, error: '非法的文件路径' };
+    }
+    const svc = (await import('@/lib/supabase/server')).createServiceRoleClient();
+    const { data: blob, error: dlErr } = await svc.storage.from('order-docs').download(storagePath);
+    if (dlErr || !blob) return { ok: false, error: `云存储取件失败:${dlErr?.message || '文件不存在'}。请重试或改用手工填写。` };
+    // 真实文件名从表单带过来(仅用于判断类型/展示),内容以存储里的为准
+    const realName = String(formData.get('file_name') || storagePath.split('/').pop() || 'file');
+    file = new File([blob], realName, { type: blob.type || 'application/octet-stream' });
+    // 阅后即焚:解析草稿会另行冻结,收件箱里的原件没有二次用途,留着只会攒垃圾
+    void svc.storage.from('order-docs').remove([storagePath]).catch(() => {});
+  }
+
   if (!file) return { ok: false, error: '请上传文件' };
 
-  // P0-3: 文件大小限制 —— 避免大文件 OOM + AI token 爆炸
-  if (file.size > MAX_FILE_SIZE_BYTES) {
+  // 大小限制 —— 避免大文件 OOM + AI token 爆炸。
+  // 直传通道放宽到 10MB(不过 Vercel 函数体,限制只剩内存/AI);直接 POST 仍是 4MB。
+  const sizeCap = storagePath ? 10 * 1024 * 1024 : MAX_FILE_SIZE_BYTES;
+  if (file.size > sizeCap) {
     const mb = (file.size / 1024 / 1024).toFixed(1);
     return {
       ok: false,
-      error: `文件 ${mb}MB 超出 ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB 上限。请压缩后重传，或拍图上传。`,
+      error: `文件 ${mb}MB 超出 ${sizeCap / 1024 / 1024}MB 上限。请压缩后重传，或拍图上传。`,
     };
   }
 
