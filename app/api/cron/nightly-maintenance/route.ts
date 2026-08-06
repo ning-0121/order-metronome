@@ -95,6 +95,35 @@ export async function POST(req: Request) {
       .delete()
       .lt('ran_at', ninetyDaysAgo);
 
+    // 4b. 通知保留期 —— notifications 表建库以来只进不出，2026-08-05 已涨到
+    //     53,543 条 / 31 MB（全库最大），其中 86% 是早就删掉的功能刷出来的死数据。
+    //     清完一次不算完，没有保留期一定复发，所以变成每晚例行。详见 lib 文件头。
+    let retention: any = null;
+    try {
+      const { runNotificationRetention, formatRetentionResult } =
+        await import('@/lib/maintenance/notification-retention');
+      const rr = await runNotificationRetention(supabase);
+      retention = rr;
+      // 只有刷屏或出错才打扰 admin，日常静默
+      if (rr.flooding || rr.errors.length) {
+        const { data: admins } = await supabase
+          .from('profiles').select('user_id').or('role.eq.admin,roles.cs.{admin}');
+        for (const a of (admins || []) as any[]) {
+          await supabase.from('notifications').insert({
+            user_id: a.user_id,
+            type: 'system_health',
+            title: rr.flooding ? '⚠️ 通知表异常增长' : '通知清理出错',
+            message: formatRetentionResult(rr).slice(0, 1000),
+            status: 'unread',
+          });
+        }
+      }
+      console.log('[nightly-maintenance] 通知保留期:', formatRetentionResult(rr));
+    } catch (e: any) {
+      // 清理失败不能把整个夜间维护带崩
+      console.error('[nightly-maintenance] 通知保留期失败（不阻断）:', e?.message);
+    }
+
     // 5. ~~报价员自动学习~~ —— 报价器 2026-08-01 下线(CEO 拍板),此步随之移除。
     //    原逻辑:从完成订单导入 quoter_training_feedback。该表 0 行,报价器四张表全空、
     //    四个页面零使用,整条报价链已删除。保留字段名只为让返回结构不变(下游可能在看)。
@@ -111,6 +140,7 @@ export async function POST(req: Request) {
         autoFixed: report.autoFixedCount,
         metaReview: report.metaReview?.summary,
       },
+      retention,
     });
   } catch (err: any) {
     console.error('[nightly-maintenance]', err?.message);
