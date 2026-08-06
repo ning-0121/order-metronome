@@ -8,6 +8,7 @@
  * 那才是「很卡」的真凶。这个数只能在函数里量,本机量的是我到库的距离,没有参考价值。
  *
  * ⚠️ 用完即删。只读、不碰业务数据,查的是 profiles 的 count。
+ * 放在 /api/cron/ 下是为了走已有的 CRON_SECRET 鉴权,不额外开公开端点。
  */
 
 import { NextResponse } from 'next/server';
@@ -16,7 +17,12 @@ import { createClient } from '@supabase/supabase-js';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-export async function GET() {
+export async function GET(req: Request) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'missing env' }, { status: 500 });
