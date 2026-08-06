@@ -343,7 +343,7 @@ async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
   // 已逾期：in_progress + due_at < now
   const { data: overdueRaw } = await supabase
     .from('milestones')
-    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name, owner_user_id, created_by)')
+    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name, owner_user_id, created_by, special_tags, notes)')
     .in('status', ['in_progress', '进行中'])
     .lt('due_at', todayStr)
     .order('due_at', { ascending: true })
@@ -352,17 +352,21 @@ async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
   // 即将逾期：未完成 + due_at 在未来 3 天内
   const { data: soonOverdueRaw } = await supabase
     .from('milestones')
-    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name, owner_user_id, created_by)')
+    .select('id, name, step_key, due_at, owner_role, owner_user_id, orders!inner(order_no, customer_name, owner_user_id, created_by, special_tags, notes)')
     .in('status', ['in_progress', '进行中', 'pending', '未开始'])
     .gte('due_at', todayStr)
     .lte('due_at', threeDaysLater)
     .order('due_at', { ascending: true })
     .limit(30);
 
+  // 「待客户指令出运」豁免(2026-08-06):客户暂停的单,逾期是暂停的表象不是延误,
+  // 不进督办日报、不催责任人 —— 否则 1022945/1022946 这类单每天被点名"业务逾期"。
+  // 跟进提醒走订单列表的 holdStale 黄灯(超14天未更新),不在这里刷屏。
+  const { isCustomerShipHoldFromOrder: isHold } = await import('@/lib/domain/customerShipHold');
   // 业务执行固定节点归一化到订单业务负责人(2026-07-28 审计 P1-3):督办日报显示的责任人与看板一致
   const { effectiveMilestoneOwner: normOwner } = await import('@/lib/domain/milestone-owner');
-  const overdue = ((overdueRaw || []) as any[]).map((m) => m.orders ? normOwner(m, m.orders) : m);
-  const soonOverdue = ((soonOverdueRaw || []) as any[]).map((m) => m.orders ? normOwner(m, m.orders) : m);
+  const overdue = ((overdueRaw || []) as any[]).filter((m) => !m.orders || !isHold(m.orders)).map((m) => m.orders ? normOwner(m, m.orders) : m);
+  const soonOverdue = ((soonOverdueRaw || []) as any[]).filter((m) => !m.orders || !isHold(m.orders)).map((m) => m.orders ? normOwner(m, m.orders) : m);
 
   const overdueList = (overdue || []) as any[];
   const soonList = (soonOverdue || []) as any[];
@@ -450,15 +454,17 @@ async function runEscalationChain(supabase: any): Promise<number> {
   // 查所有逾期的 in_progress 节点
   const { data: overdueRawEsc } = await supabase
     .from('milestones')
-    .select('id, name, step_key, due_at, owner_user_id, owner_role, order_id, orders!inner(order_no, customer_name, created_by, owner_user_id)')
+    .select('id, name, step_key, due_at, owner_user_id, owner_role, order_id, orders!inner(order_no, customer_name, created_by, owner_user_id, special_tags, notes)')
     .in('status', ['in_progress', '进行中'])
     .lt('due_at', now.toISOString())
     .order('due_at', { ascending: true })
     .limit(100);
 
+  // 「待客户指令出运」豁免(2026-08-06,与督办日报同口径):客户暂停不进升级链
+  const { isCustomerShipHoldFromOrder: isHoldEsc } = await import('@/lib/domain/customerShipHold');
   // 业务执行固定节点归一化(2026-07-28 审计 P1-3):升级链催办要 @ 到订单业务负责人,不是原始(可能空/生产)owner
   const { effectiveMilestoneOwner: normEscOwner } = await import('@/lib/domain/milestone-owner');
-  const overdue = ((overdueRawEsc || []) as any[]).map((m) => {
+  const overdue = ((overdueRawEsc || []) as any[]).filter((m) => !m.orders || !isHoldEsc(m.orders)).map((m) => {
     const n: any = m.orders ? normEscOwner(m, m.orders) : m;
     // 无人认领兜底(存量 400 空 owner 节点=催办盲区)→ 催到订单负责人/建单人
     if (!n.owner_user_id) n.owner_user_id = m.orders?.owner_user_id || m.orders?.created_by || null;

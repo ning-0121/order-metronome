@@ -126,7 +126,8 @@ function orderBadge(order: any, milestones: any[], style: 'mobile' | 'desktop') 
       ? { label: '已完成', class: 'bg-green-100 text-green-700', riskFactors: [] as string[] }
       : { label: '已完成', class: 'badge-success', riskFactors: [] as string[] };
   }
-  const st = computeOrderStatus(milestones);
+  // 「待客户指令出运」豁免:货妥待运的单不判红(2026-08-06,1022945/1022946 误报业务逾期)
+  const st = computeOrderStatus(milestones, { customerShipHold: isCustomerShipHoldFromOrder(order), holdStale: isCustomerHoldStale(order) });
   const riskFactors = Array.isArray(st?.riskFactors) ? st.riskFactors : [];
   const cfg = style === 'mobile'
     ? { GREEN: { label: '正常', class: 'bg-green-100 text-green-700' },
@@ -352,7 +353,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const nowDate = new Date(now);
   const redItems = (orders as any[]).reduce((acc: any[], o: any) => {
     if (DONE_LIFECYCLE.has(o.lifecycle_status || '')) return acc;
-    if (computeOrderStatus(o.milestones || []).color !== 'RED') return acc;
+    if (computeOrderStatus(o.milestones || [], { customerShipHold: isCustomerShipHoldFromOrder(o), holdStale: isCustomerHoldStale(o) }).color !== 'RED') return acc;
     const culprits = getRedCulprits(o.milestones || [], nowDate);
     const { date: deliveryDate } = getEffectiveDeliveryDate(o);
     const daysToDelivery = deliveryDate ? Math.ceil((new Date(deliveryDate + 'T23:59:59').getTime() - now) / 86400000) : null;

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { isCustomerShipHoldFromOrder, isCustomerHoldStale } from '@/lib/domain/customerShipHold';
 import { computeOrderStatus } from '@/lib/utils/order-status';
 import { isOverdue } from '@/lib/utils/date';
 import { isActiveStatus, isBlockedStatus } from '@/lib/domain/types';
@@ -64,15 +65,18 @@ export default async function RiskOrdersPage({
   if (type === 'red' || type === 'yellow' || type === 'green') {
     const targetColor = type.toUpperCase();
     filteredOrders = sourceOrders.filter(o => {
-      const status = computeOrderStatus(o.milestones || []);
+      const status = computeOrderStatus(o.milestones || [], { customerShipHold: isCustomerShipHoldFromOrder(o), holdStale: isCustomerHoldStale(o) });
       return status?.color === targetColor;
     });
   } else if (type === 'blocked') {
+    // 待客户指令出运的单:阻塞/逾期是客户暂停的表象,不进督办清单(同 computeOrderStatus 豁免口径)
     filteredOrders = sourceOrders.filter(o =>
+      !isCustomerShipHoldFromOrder(o) &&
       (o.milestones || []).some((m: any) => isBlockedStatus(m.status))
     );
   } else if (type === 'overdue') {
     filteredOrders = sourceOrders.filter(o =>
+      !isCustomerShipHoldFromOrder(o) &&
       (o.milestones || []).some((m: any) => isActiveStatus(m.status) && m.due_at && isOverdue(m.due_at))
     );
   } else if (type === 'pending') {
@@ -89,7 +93,7 @@ export default async function RiskOrdersPage({
     const milestones = o.milestones || [];
     const overdue = milestones.filter((m: any) => isActiveStatus(m.status) && m.due_at && isOverdue(m.due_at));
     const blocked = milestones.filter((m: any) => isBlockedStatus(m.status));
-    const status = computeOrderStatus(milestones);
+    const status = computeOrderStatus(milestones, { customerShipHold: isCustomerShipHoldFromOrder(o), holdStale: isCustomerHoldStale(o) });
     // 找到优先处理的节点：阻塞 > 最久逾期
     const focusMilestone = blocked[0] || overdue.sort((a: any, b: any) =>
       new Date(a.due_at).getTime() - new Date(b.due_at).getTime()

@@ -61,9 +61,37 @@ export function getRedCulprits(milestones: Milestone[], now: Date = new Date()):
  * 🟢 GREEN（正常）：
  *   - 以上条件都不满足
  */
-export function computeOrderStatus(milestones: Milestone[]): OrderStatus {
+/**
+ * 可选的订单上下文 —— 「待客户指令出运」豁免(2026-08-06)。
+ *
+ * CEO:1022945/1022946 货已备好、因客户原因不能出,系统却一直报逾期。
+ * 机制其实早就有(special_tags「待客户指令出运」+ 交付置信度引擎已轻扣分),
+ * 但这个**老三色灯从来不认识它** —— 列表红牌/风险页/CEO 页全走这里,标了也白标。
+ *
+ * 规则:hold 生效 → 阻塞/超期不再判红(那不是团队的延误,是客户的暂停);
+ * 但 hold 超过 14 天没更新(holdStale)→ 黄灯提醒业务去更新预计出运日 ——
+ * 豁免不能变成黑洞,否则「挂个标签就永远不红」会被滥用。
+ */
+export interface OrderStatusContext {
+  customerShipHold?: boolean;
+  holdStale?: boolean;
+}
+
+export function computeOrderStatus(milestones: Milestone[], ctx?: OrderStatusContext): OrderStatus {
   if (!milestones || milestones.length === 0) {
     return { color: 'GREEN', reason: '暂无执行节点', riskFactors: [] };
+  }
+
+  // 客户暂停出货:整单等客户指令,阻塞/超期是暂停的表象而非延误 → 不进红黄判定
+  if (ctx?.customerShipHold) {
+    if (ctx.holdStale) {
+      return {
+        color: 'YELLOW',
+        reason: '⏸ 待客户指令出运已超 14 天,请更新预计出运日或复核状态',
+        riskFactors: ['待客户指令出运超期未更新(黄灯是提醒业务跟进客户,不是延误)'],
+      };
+    }
+    return { color: 'GREEN', reason: '⏸ 货妥,待客户指令出运(客户原因,非延误)', riskFactors: [] };
   }
 
   const now = new Date();

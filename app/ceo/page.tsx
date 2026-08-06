@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { formatDate, isOverdue } from '@/lib/utils/date';
+import { isCustomerShipHoldFromOrder, isCustomerHoldStale } from '@/lib/domain/customerShipHold';
 import { computeOrderStatus } from '@/lib/utils/order-status';
 import Link from 'next/link';
 import { DelayRequestActions } from '@/components/DelayRequestActions';
@@ -136,7 +137,7 @@ export default async function CEOWarRoom() {
   // 风险分类（带详细原因）
   const orderStatusMap = new Map<string, ReturnType<typeof computeOrderStatus>>();
   for (const o of ordersWithMilestones) {
-    orderStatusMap.set(o.id, computeOrderStatus(o.milestones || []));
+    orderStatusMap.set(o.id, computeOrderStatus(o.milestones || [], { customerShipHold: isCustomerShipHoldFromOrder(o), holdStale: isCustomerHoldStale(o) }));
   }
   const riskRed = ordersWithMilestones.filter(o => !doneOrShippedOrderIds.has(o.id) && orderStatusMap.get(o.id)?.color === 'RED');
   const riskYellow = ordersWithMilestones.filter(o => !doneOrShippedOrderIds.has(o.id) && orderStatusMap.get(o.id)?.color === 'YELLOW');
