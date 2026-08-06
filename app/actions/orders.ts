@@ -17,6 +17,7 @@ import {
   completeOrder,
 } from '@/lib/repositories/ordersRepo';
 import { normalizeMilestoneStatus } from '@/lib/domain/types';
+import { pickMerchandiser } from '@/lib/domain/merchandiser';
 import { normalizeStyleFabrics, primaryFabricColumns } from '@/lib/services/style-fabrics';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import type { IncotermType, OrderType, PackagingType } from '@/lib/types';
@@ -1265,6 +1266,60 @@ const TERMINAL_LIFECYCLE = ['completed', '已完成', 'cancelled', '已取消', 
  *   owner_role/owner_user_id               → getOrders 内部解析 merchandiser_name(「跟单」筛选器)
  * 上次只 grep 了页面、漏了本文件内部的消费者,把「跟单」筛选下拉砍空了。
  */
+const PAGE = 1000;
+
+/**
+ * 按 order_id 批量取从表,分块并发(2026-08-05 性能)。
+ *
+ * 【为什么要分块】两个上限,各自都会静默出事:
+ *   · URL 长度 —— in() 里塞太多 id 会把请求行打爆(2000 张单 ≈ 74 KB 的 URL)
+ *   · 行数上限 —— **PostgREST 单次最多返回 1000 行**,超了不报错、直接截断
+ * 2026-08-05 我第一版只做了分块没做翻页,84 张在途单约 1600 个节点只回来 1000 个,
+ * 表现是「有些单的阶段进度莫名少几个点、状态算错」。这类静默截断最难查。
+ *
+ * 【为什么要并发】实测生产上函数↔库单次往返中位数 58ms,且与数据量几乎无关
+ * (空 count 58ms,1000 行 89ms)。各块之间互不依赖,串着等纯属白等 ——
+ * 204 张单原本 5 次串行往返(约 1.5s),并发后只花一次的时间。
+ *
+ * chunk 要按「每单大约多少行」反推,让一块正好吃不满 1000 行、不用翻第二页:
+ * 节点约 19 行/单 → chunk 40(≈760 行);翻页循环留着当兜底,极端单不会漏。
+ */
+async function fetchByOrderIds(
+  supabase: any, table: string, cols: string, ids: string[],
+  chunk: number, concurrency = 8,
+): Promise<{ rows: any[]; error?: string }> {
+  if (!ids.length) return { rows: [] };
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += chunk) chunks.push(ids.slice(i, i + chunk));
+
+  const fetchChunk = async (slice: string[]): Promise<any[]> => {
+    const out: any[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await (supabase.from(table) as any)
+        .select(cols).in('order_id', slice).range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const rows = data || [];
+      out.push(...rows);
+      if (rows.length < PAGE) break;   // 不满一页 = 取完了
+    }
+    return out;
+  };
+
+  const rows: any[] = [];
+  try {
+    // 分轮并发:块少时一轮打完;2000 张单的极端情况也不会一次甩出 50 个请求
+    for (let i = 0; i < chunks.length; i += concurrency) {
+      const round = await Promise.all(chunks.slice(i, i + concurrency).map(fetchChunk));
+      for (const r of round) rows.push(...r);
+    }
+  } catch (e: any) {
+    // 失败一律当全空处理 —— 半截数据比没数据更危险(会让订单状态算错)
+    console.error(`[getOrders] ${table} 查询失败:`, e?.message);
+    return { rows: [], error: e?.message };
+  }
+  return { rows };
+}
+
 async function attachMilestones(supabase: any, orders: any[], withTerminal: boolean): Promise<void> {
   if (!orders.length) return;
   const need = withTerminal
@@ -1274,28 +1329,16 @@ async function attachMilestones(supabase: any, orders: any[], withTerminal: bool
   for (const o of orders) o.milestones = [];
   if (!need.length) return;
 
-  const ids = need.map((o) => o.id);
-  const byOrder = new Map<string, any[]>();
   const COLS = 'order_id, name, step_key, status, due_at, planned_at, actual_at, owner_role, owner_user_id';
-  const PAGE = 1000;
-  // 两层循环缺一不可:
-  //   外层按 order_id 分批 —— in() 参数太多会把 URL 打爆(200 一批是本仓库既有惯例);
-  //   内层按 range 翻页 —— **PostgREST 单次最多返回 1000 行**,不翻页会被静默截断。
-  // 2026-08-05 我第一版只做了外层,84 张在途单约 1600 个节点只回来 1000 个 ——
-  // 不报错、不告警,表现是「有些单的阶段进度莫名少几个点、状态算错」。这类静默截断最难查。
-  for (let i = 0; i < ids.length; i += 200) {
-    const slice = ids.slice(i, i + 200);
-    for (let from = 0; ; from += PAGE) {
-      const { data, error } = await (supabase.from('milestones') as any)
-        .select(COLS).in('order_id', slice).range(from, from + PAGE - 1);
-      if (error) { console.error('[getOrders] 节点查询失败:', error.message); return; }
-      const rows = data || [];
-      for (const m of rows) {
-        const arr = byOrder.get(m.order_id);
-        if (arr) arr.push(m); else byOrder.set(m.order_id, [m]);
-      }
-      if (rows.length < PAGE) break;   // 不满一页 = 取完了
-    }
+  const { rows, error } = await fetchByOrderIds(
+    supabase, 'milestones', COLS, need.map((o) => o.id), 40,
+  );
+  if (error) return;   // 已在 helper 里记了日志,节点保持空数组
+
+  const byOrder = new Map<string, any[]>();
+  for (const m of rows) {
+    const arr = byOrder.get(m.order_id);
+    if (arr) arr.push(m); else byOrder.set(m.order_id, [m]);
   }
   for (const o of need) o.milestones = byOrder.get(o.id) || [];
 }
@@ -1308,9 +1351,28 @@ export async function getOrders(opts?: { withTerminalMilestones?: boolean }) {
     return { error: '请先登录' };
   }
 
-  // 判断是否管理员
-  const { data: profile } = await (supabase.from('profiles') as any)
-    .select('role, roles').eq('user_id', user.id).single();
+  // 一次取全表 profiles(2026-08-05 性能):同时拿到「当前用户角色」和「全员人名映射」。
+  //
+  // 原来这是两次串行往返 —— 先 .eq(user_id) 拿角色,后面再 .in(userIds) 拿人名,
+  // 而后者还卡在节点查询之后(人名要从 milestones.owner_user_id 里找),硬生生多出一波。
+  // 但 profiles 只有 28 行,整表取回来跟取一行的开销几乎一样(实测往返 58ms 与数据量无关),
+  // 于是那一整波直接消失,人名解析变成纯内存计算。
+  //
+  // RLS 安全性:去掉 .in() 过滤不会看到更多东西 —— 策略是按行判定的,
+  // 无过滤返回的正是策略允许的那些行,与逐个 id 查的结果一致。
+  const { data: allProfiles } = await (supabase.from('profiles') as any)
+    .select('user_id, name, email, role, roles');
+  let profile = (allProfiles || []).find((p: any) => p.user_id === user.id);
+  // 兜底:万一 RLS 收紧到看不见自己那行,退回原来的单行查询,别把所有人锁在门外
+  if (!profile) {
+    const { data: self } = await (supabase.from('profiles') as any)
+      .select('role, roles').eq('user_id', user.id).single();
+    profile = self;
+  }
+  const nameMap: Record<string, string> = {};
+  for (const p of (allProfiles || []) as any[]) {
+    nameMap[p.user_id] = p.name || p.email?.split('@')[0] || '';
+  }
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
   const isAdmin = roles.includes('admin');
 
@@ -1321,15 +1383,25 @@ export async function getOrders(opts?: { withTerminalMilestones?: boolean }) {
   const { hasRoleInGroup: hasRoleInGroupList } = await import('@/lib/domain/roles');
   const canSeeAll = isAdmin || hasRoleInGroupList(roles, 'CAN_VIEW_ALL_ORDERS') || roles.includes('procurement');
 
-  // 辅助：把 delay_requests 按 order_id 分组合并进 orders
-  async function attachDelayRequests(orderList: any[]): Promise<any[]> {
+  /**
+   * 节点 + 延期申请一起取(2026-08-05 性能)。
+   *
+   * 这两者都只依赖订单 id、彼此毫无关系,原来却是一前一后串着等 ——
+   * 生产上一次往返 58ms,白等一整轮。并行后取节点的时间把取延期的时间盖住了。
+   * 节点在 attachMilestones 里挂到订单对象上(就地改),延期返回 map 再合并。
+   */
+  async function attachMilestonesAndDelays(orderList: any[]): Promise<any[]> {
     if (!orderList || orderList.length === 0) return orderList;
-    const orderIds = orderList.map((o: any) => o.id);
-    const { data: delayRows } = await (supabase.from('delay_requests') as any)
-      .select('id, order_id, status, proposed_new_anchor_date, created_at')
-      .in('order_id', orderIds);
+    const [, delays] = await Promise.all([
+      attachMilestones(supabase, orderList, opts?.withTerminalMilestones === true),
+      fetchByOrderIds(
+        supabase, 'delay_requests',
+        'id, order_id, status, proposed_new_anchor_date, created_at',
+        orderList.map((o: any) => o.id), 200,
+      ),
+    ]);
     const delayMap: Record<string, any[]> = {};
-    for (const d of (delayRows || [])) {
+    for (const d of delays.rows) {
       if (!delayMap[d.order_id]) delayMap[d.order_id] = [];
       delayMap[d.order_id].push(d);
     }
@@ -1342,53 +1414,33 @@ export async function getOrders(opts?: { withTerminalMilestones?: boolean }) {
       .order('created_at', { ascending: false })
       .limit(ORDERS_HARD_LIMIT);
     if (error) return { error: error.message };
-    await attachMilestones(supabase, orders || [], opts?.withTerminalMilestones === true);
-    // 解析跟单和业务员名称
-    const userIds = new Set<string>();
-    for (const o of (orders || []) as any[]) {
-      if (o.owner_user_id) userIds.add(o.owner_user_id);
-      if (o.created_by) userIds.add(o.created_by);
-      // 从 milestones 里找跟单负责人
-      for (const m of (o.milestones || [])) {
-        if (m.owner_user_id) userIds.add(m.owner_user_id);
-      }
-    }
-    let nameMap: Record<string, string> = {};
-    if (userIds.size > 0) {
-      const { data: profiles } = await (supabase.from('profiles') as any)
-        .select('user_id, name, email').in('user_id', Array.from(userIds));
-      nameMap = (profiles || []).reduce((m: any, p: any) => {
-        m[p.user_id] = p.name || p.email?.split('@')[0] || '';
-        return m;
-      }, {} as Record<string, string>);
-    }
-    const withNames = (orders || []).map((o: any) => {
-      const merchMilestone = (o.milestones || []).find((m: any) =>
-        m.owner_role === 'merchandiser' && m.owner_user_id
-      );
-      const merchUserId = merchMilestone?.owner_user_id;
-      return {
-        ...o,
-        merchandiser_name: merchUserId ? nameMap[merchUserId] || null : null,
-        sales_name: o.created_by ? nameMap[o.created_by] || null : null,
-      };
-    });
-    const enriched = await attachDelayRequests(withNames);
-    return { data: enriched };
+    const enriched = await attachMilestonesAndDelays(orders || []);
+    // 人名解析已是纯内存计算(nameMap 在函数开头随角色一并取回),不再多一次往返
+    return {
+      data: enriched.map((o: any) => {
+        const merchUserId = pickMerchandiser(o.milestones);
+        return {
+          ...o,
+          merchandiser_name: merchUserId ? nameMap[merchUserId] || null : null,
+          sales_name: o.created_by ? nameMap[o.created_by] || null : null,
+        };
+      }),
+    };
   }
 
-  // 普通员工(含业务员):只看自己创建的 + 自己负责的 + 被分配了关卡的订单
-  const { data: ownedOrders } = await (supabase.from('orders') as any)
-    .select('id').eq('owner_user_id', user.id);
-  const { data: createdOrders } = await (supabase.from('orders') as any)
-    .select('id').eq('created_by', user.id); // 2026-07:补 created_by,业务员看得到自己建的单
-  const { data: assignedMilestones } = await (supabase.from('milestones') as any)
-    .select('order_id').eq('owner_user_id', user.id);
+  // 普通员工(含业务员):只看自己创建的 + 自己负责的 + 被分配了关卡的订单。
+  // 三个来源互不依赖,并发取(原来串了三轮往返,纯属白等)。
+  const [ownedRes, createdRes, assignedRes] = await Promise.all([
+    (supabase.from('orders') as any).select('id').eq('owner_user_id', user.id),
+    // 2026-07:补 created_by,业务员看得到自己建的单
+    (supabase.from('orders') as any).select('id').eq('created_by', user.id),
+    (supabase.from('milestones') as any).select('order_id').eq('owner_user_id', user.id),
+  ]);
 
   const myOrderIds = [...new Set([
-    ...(ownedOrders || []).map((o: any) => o.id),
-    ...(createdOrders || []).map((o: any) => o.id),
-    ...(assignedMilestones || []).map((m: any) => m.order_id),
+    ...(ownedRes?.data || []).map((o: any) => o.id),
+    ...(createdRes?.data || []).map((o: any) => o.id),
+    ...(assignedRes?.data || []).map((m: any) => m.order_id),
   ])];
 
   if (myOrderIds.length === 0) return { data: [] };
@@ -1400,8 +1452,7 @@ export async function getOrders(opts?: { withTerminalMilestones?: boolean }) {
     .limit(ORDERS_HARD_LIMIT);
 
   if (error) return { error: error.message };
-  await attachMilestones(supabase, orders || [], opts?.withTerminalMilestones === true);
-  const enriched = await attachDelayRequests(orders || []);
+  const enriched = await attachMilestonesAndDelays(orders || []);
   return { data: enriched };
 }
 

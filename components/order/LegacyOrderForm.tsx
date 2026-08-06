@@ -356,7 +356,12 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null }: { showPric
             const res = await parsePO(fd);
             return res.ok && res.data ? { ok: true as const, data: res.data, fileName: file.name } : { ok: false as const, error: res.error || '解析失败', fileName: file.name };
           } catch (err: any) {
-            return { ok: false as const, error: err?.message || '解析异常', fileName: file.name };
+            // 页面 JS 过期(部署换了 Server Action ID)抛的是 Next.js 传输层报文,与 PO 内容无关。
+            // 不翻译的话用户会以为是自己的 PDF 有问题,反复换文件重传 —— 只有刷新整页才有用。
+            return {
+              ok: false as const, fileName: file.name,
+              error: isStaleServerActionError(err) ? STALE_SERVER_ACTION_MESSAGE : (err?.message || '解析异常'),
+            };
           }
         }),
       );

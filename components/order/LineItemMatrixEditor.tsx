@@ -9,6 +9,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { getOrderLineItems, saveOrderLineItems, parseOrderFile } from '@/app/actions/order-line-items';
 import { parsePO } from '@/app/actions/po-parser';
+import { isStaleServerActionError, STALE_SERVER_ACTION_MESSAGE } from '@/lib/order/create-order-resilience';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { sortSizeKeys, orderSizeKeys } from '@/lib/utils/size-sort';
@@ -126,7 +127,9 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       const note = (res as any).note ? ` ⚠ ${(res as any).note}` : '';
       setMsg(`✅ 已解析 ${parsed.length} 款 / ${nColors} 颜色行,请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}${note}`);
     } catch (err: any) {
-      setMsg('❌ 读取失败:' + (err?.message || String(err)));
+      setMsg(isStaleServerActionError(err)
+        ? '❌ ' + STALE_SERVER_ACTION_MESSAGE
+        : '❌ 读取失败:' + (err?.message || String(err)));
     }
     setParsing(false);
   }
@@ -174,7 +177,11 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       const sizeWarn = noSizeStyles > 0 ? ` ⚠ 有 ${noSizeStyles} 款没摊出尺码(配比没读到),请手动补尺码或截图当图片重传` : '';
       setMsg(`✅ AI 解析 ${aiStyles.length} 款 / ${nColors} 颜色行(配比已按比例摊成每码件数),请核对数量后${controlled ? '提交建单' : '点「💾 保存明细」'}${sizeWarn}`);
     } catch (err: any) {
-      setMsg('❌ AI 解析失败:' + (err?.message || String(err)));
+      // 页面 JS 过期(部署换了 Server Action ID)会抛 Next.js 的传输层报文,不是 AI 的错。
+      // 直接把英文原文甩给用户,他们只会反复点重试 —— 而重试用的还是旧 JS,永远好不了。
+      setMsg(isStaleServerActionError(err)
+        ? '❌ ' + STALE_SERVER_ACTION_MESSAGE
+        : '❌ AI 解析失败:' + (err?.message || String(err)));
     } finally {
       setParsing(false);
     }
