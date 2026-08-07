@@ -124,6 +124,16 @@ export async function POST(req: Request) {
       console.error('[nightly-maintenance] 通知保留期失败（不阻断）:', e?.message);
     }
 
+    // 4c. 备份健康哨兵(R1-A,2026-08-07)—— 旧备份空转数月无人发现的根治:
+    //     每晚验产物(24h 内有成功运行 + 最新文件回读非空非 0 行),非 healthy 直接告警 admin。
+    let backupHealth: any = null;
+    try {
+      const { runBackupHealthSentinel } = await import('@/lib/maintenance/backup-health');
+      backupHealth = await runBackupHealthSentinel(supabase);
+    } catch (e: any) {
+      console.error('[nightly-maintenance] 备份哨兵失败（不阻断）:', e?.message);
+    }
+
     // 5. ~~报价员自动学习~~ —— 报价器 2026-08-01 下线(CEO 拍板),此步随之移除。
     //    原逻辑:从完成订单导入 quoter_training_feedback。该表 0 行,报价器四张表全空、
     //    四个页面零使用,整条报价链已删除。保留字段名只为让返回结构不变(下游可能在看)。
@@ -141,6 +151,7 @@ export async function POST(req: Request) {
         metaReview: report.metaReview?.summary,
       },
       retention,
+      backupHealth,
     });
   } catch (err: any) {
     console.error('[nightly-maintenance]', err?.message);
