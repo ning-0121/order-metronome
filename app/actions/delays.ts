@@ -2,6 +2,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { safeMutation, safeCriticalMutation } from '@/lib/db/safe-mutation';
 import { calcDueDates, compressRemainingIntoWindow, monotonicRepairDueDates } from '@/lib/schedule';
 import { MANAGER_CC_EMAILS, escapeHtml, insertNotifications } from '@/lib/utils/notifications';
 // updateMilestone/updateMilestones 不再在 recalculateSchedule 中使用
@@ -487,13 +488,19 @@ export async function approveDeferralStep(delayRequestId: string, note?: string,
       // 转紧急:链追加 采购+生产 确认下游压缩,标 reschedule_mode,暂不落地
       const ext = [...chain];
       for (const r of ['procurement', 'production']) if (!ext.includes(r)) ext.push(r);
-      await (svc.from('delay_requests') as any)
-        .update({ approvals, current_step: nextStep, approval_chain: ext, reschedule_mode: 'urgent', updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+      const wUrg = await safeMutation({ client: svc, table: 'delay_requests', operation: 'update',
+        payload: { approvals, current_step: nextStep, approval_chain: ext, reschedule_mode: 'urgent', updated_at: new Date().toISOString() },
+        predicate: { id: delayRequestId } });
+      if (!wUrg.ok) return { error: `链推进未生效(${wUrg.status}):${wUrg.error}` };   // 失败不通知下一级
       await notify(ext[nextStep], `已选「转紧急·不退交期」,请你(${roleCn(ext[nextStep])})确认下游能压缩到原交期。`);
       return { ok: true, done: false, urgent: true, nextRole: ext[nextStep] };
     }
     // 真正落地:push_delivery(退交期) 或 urgent 追加链已确认完 或 不影响交期
-    await (svc.from('delay_requests') as any).update({ approvals, current_step: nextStep, updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+    {
+      const wFin = await safeMutation({ client: svc, table: 'delay_requests', operation: 'update',
+        payload: { approvals, current_step: nextStep, updated_at: new Date().toISOString() }, predicate: { id: delayRequestId } });
+      if (!wFin.ok) return { error: `链落地推进未生效(${wFin.status}):${wFin.error}` };
+    }
     if ((dr as any).reschedule_mode === 'urgent') {
       // 转紧急落地:不推整体交期(impacts_final_delivery=false)+ 订单标「交期紧急」
       await (svc.from('delay_requests') as any).update({ impacts_final_delivery: false }).eq('id', delayRequestId);
@@ -509,8 +516,12 @@ export async function approveDeferralStep(delayRequestId: string, note?: string,
     if ((res as any).error) return { error: (res as any).error };
     return { ok: true, done: true };
   }
-  // 未到末位 → 推进 + 通知下一级
-  await (svc.from('delay_requests') as any).update({ approvals, current_step: nextStep, updated_at: new Date().toISOString() }).eq('id', delayRequestId);
+  // 未到末位 → 推进(断言生效)→ 才通知下一级(R1-C:写没落库就喊下一级 = 审批链静默卡死)
+  {
+    const wNext = await safeMutation({ client: svc, table: 'delay_requests', operation: 'update',
+      payload: { approvals, current_step: nextStep, updated_at: new Date().toISOString() }, predicate: { id: delayRequestId } });
+    if (!wNext.ok) return { error: `链推进未生效(${wNext.status}):${wNext.error}` };
+  }
   await notify(chain[nextStep], `上一级已确认,请你(${roleCn(chain[nextStep])})接续确认此改期申请。`);
   return { ok: true, done: false, nextRole: chain[nextStep] };
 }
@@ -862,16 +873,16 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
     approved_at: new Date().toISOString(),
     decision_note: decisionNote,
   };
-  const { data: updatedRequest, error } = await (supabase
-    .from('delay_requests') as any)
-    .update(updatePayload)
-    .eq('id', delayRequestId)
-    .select()
-    .single();
-
-  if (error) {
-    return { error: error.message };
+  // R1-C:代码鉴权(canActOnDeferralStep)已过 → service-role 写 + 断言。
+  // 旧写法用 session:非 admin 的对口经理被 RLS 滤成 0 行 → PGRST116 晦涩报错,
+  // 「生产主管驳回生产延期」永远失败,只有 Alex 驳回得动 —— command-based 权限在代码层。
+  const rejSvc = createServiceRoleClient();
+  const wRej = await safeMutation({ client: rejSvc, table: 'delay_requests', operation: 'update',
+    payload: updatePayload, predicate: { id: delayRequestId, status: 'pending' } });   // CAS:已处理的不重复驳
+  if (!wRej.ok) {
+    return { error: wRej.status === 'zero_rows' ? '该申请已被处理(或状态已变),请刷新查看' : `驳回未生效(${wRej.status}):${wRej.error}` };
   }
+  const updatedRequest = wRej.data?.[0];
 
   // Get milestone for logging
   const { data: milestone } = await supabase
@@ -990,10 +1001,25 @@ async function recalculateSchedule(
       console.error('[approveDelayRequest] 日期链校验异常:', err?.message);
     }
 
-    await supabase
-      .from('orders')
-      .update(updates)
-      .eq('id', orderData.id);
+    // R1-C:锚点是节点重算的唯一依据 —— 写失败还继续重算 = 「头旧节点新」的错位半状态
+    // (逾期判红/交付置信度/报表全部错位,申请人还收到了"已通过")。断言 + 回读,失败即停。
+    {
+      const w = await safeCriticalMutation({
+        client: supabase, table: 'orders', operation: 'update',
+        payload: updates, predicate: { id: orderData.id },
+        auditOrderId: orderData.id,
+        ctx: { actor: 'system', reason: `延期批准落锚点 #${(delayRequest as any)?.id || ''}`, riskLevel: 'delivery', decisionId: (delayRequest as any)?.id, verifyFields: updates },
+      });
+      if (!w.ok) {
+        await (supabase.from('milestone_logs') as any).insert({
+          milestone_id: (milestone as any)?.id ?? null, order_id: orderData.id, actor_user_id: null,
+          action: 'delay_anchor_write_failed',
+          note: `延期已批但订单锚点写入失败(${w.status}): ${w.error}。已禁止节点重算,防止头旧节点新的错位 —— 请人工重放锚点或联系管理员。`,
+        }).select('id');
+        console.error('[approveDelayRequest] 锚点写入失败,跳过节点重算:', w.error);
+        return;   // 禁止继续重算
+      }
+    }
 
     // Recalculate all milestones（需要锚点日期，缺少时跳过全量重算）
     // 重算读「落库后」的日期,而不是只按 incoterm 猜:整单延期改的是 factory_date、etd 不动,
@@ -1535,14 +1561,13 @@ export async function bulkApproveAllPendingDelays(
     const chain = row.approval_chain;
     const step = Number(row.current_step) || 0;
     if (Array.isArray(chain) && chain.length > 0 && step < chain.length) {
-      try {
+      {
         const approvals = Array.isArray(row.approvals) ? [...row.approvals] : [];
         for (let s = step; s < chain.length; s++) approvals.push({ role: chain[s], name: '批量代确认(全局审批人)', at: nowISO, note });
-        await (queryClient.from('delay_requests') as any)
-          .update({ approvals, current_step: chain.length, updated_at: nowISO }).eq('id', row.id);
-      } catch (e: any) {
-        errors.push({ id: row.id, reason: '走满审批链失败:' + (e?.message || String(e)) });
-        continue;
+        // R1-C:supabase error 不 throw,旧 try/catch 接不住 —— 断言行数
+        const wBulk = await safeMutation({ client: queryClient, table: 'delay_requests', operation: 'update',
+          payload: { approvals, current_step: chain.length, updated_at: nowISO }, predicate: { id: row.id } });
+        if (!wBulk.ok) { errors.push({ id: row.id, reason: `走满审批链未生效(${wBulk.status}):${wBulk.error}` }); continue; }
       }
     }
     try {

@@ -1,6 +1,7 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 
 /**
@@ -83,11 +84,12 @@ export async function enableSplitShipment(
   }
 
   // 4. 全部成功后才标记订单为分批出货（失败时订单不会被错误标记）
-  const { error: orderError } = await (supabase.from('orders') as any)
-    .update({ is_split_shipment: true, total_batches: batches.length })
-    .eq('id', orderId);
-  if (orderError) {
-    return { error: `批次已创建，但订单标记更新失败：${orderError.message}` };
+  // R1-C 策略 B:物流建分批(单常是别人建的),session 被 RLS 滤 0 行 → 批次建了、
+  // 订单永不标 is_split_shipment(两轨打架)。svc + 断言。
+  const wSp = await safeMutation({ client: createServiceRoleClient(), table: 'orders', operation: 'update',
+    payload: { is_split_shipment: true, total_batches: batches.length }, predicate: { id: orderId } });
+  if (!wSp.ok) {
+    return { error: `批次已创建,但订单分批标记未生效(${wSp.status}):${wSp.error}` };
   }
 
   revalidatePath(`/orders/${orderId}`);

@@ -14,7 +14,8 @@
  * 权限：仅 admin
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { insertNotifications } from '@/lib/utils/notifications';
@@ -248,10 +249,10 @@ export async function transferOrderOwner(
     .select('user_id, name').eq('user_id', newOwnerUserId).single();
   if (!newProfile) return { error: '新负责人不存在' };
 
-  const { error: updErr } = await (supabase.from('orders') as any)
-    .update({ owner_user_id: newOwnerUserId, updated_at: new Date().toISOString() })
-    .eq('id', orderId);
-  if (updErr) return { error: updErr.message };
+  // R1-C 策略 B:经理转派别人建的单,session 被 RLS 滤 0 行静默 → svc + 断言
+  const wTr = await safeMutation({ client: createServiceRoleClient(), table: 'orders', operation: 'update',
+    payload: { owner_user_id: newOwnerUserId, updated_at: new Date().toISOString() }, predicate: { id: orderId } });
+  if (!wTr.ok) return { error: `转派未生效(${wTr.status}):${wTr.error}` };
 
   // 审计（复用 milestone_logs，order_id 非 null 即可）
   await (supabase.from('milestone_logs') as any).insert({

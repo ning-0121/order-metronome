@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import { isDoneStatus } from '@/lib/domain/types';
@@ -370,14 +371,17 @@ export async function calculateOrderScore(
     // 找采购负责人
     const procUser = procurementMilestones.find((m: any) => m.owner_user_id);
     if (procUser?.owner_user_id) {
-      await (supabase.from('order_commissions') as any).upsert({
-        order_id: orderId, user_id: procUser.owner_user_id, role: 'procurement',
-        score_ontime: procDetail.ontime.score, score_no_block: procDetail.noBlock.score,
-        score_no_delay: procDetail.noDelay.score, score_quality: procDetail.quality.score,
-        score_delivery: procDetail.delivery.score, total_score: procTotal,
-        grade: vetoed ? 'D' : procGrade.grade, vetoed, detail_json: procDetail,
-        calculated_at: new Date().toISOString(),
-      }, { onConflict: 'order_id,user_id' });
+      // R1-C:此前唯一没查 error 的角色评分写入 —— 采购分静默缺失,只有业务有分,考核不公
+      const wProc = await safeMutation({ client: supabase, table: 'order_commissions', operation: 'upsert',
+        payload: {
+          order_id: orderId, user_id: procUser.owner_user_id, role: 'procurement',
+          score_ontime: procDetail.ontime.score, score_no_block: procDetail.noBlock.score,
+          score_no_delay: procDetail.noDelay.score, score_quality: procDetail.quality.score,
+          score_delivery: procDetail.delivery.score, total_score: procTotal,
+          grade: vetoed ? 'D' : procGrade.grade, vetoed, detail_json: procDetail,
+          calculated_at: new Date().toISOString(),
+        }, expectedRows: 'any' });
+      if (!wProc.ok) console.error('[commissions] 采购评分写入失败:', wProc.error);
     }
     result.procurementScore = { total_score: procTotal, grade: vetoed ? 'D' : procGrade.grade, detail_json: procDetail,
       userName: procUser?.owner_user_id ? '采购' : null };

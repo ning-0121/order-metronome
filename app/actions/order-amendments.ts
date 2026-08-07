@@ -11,6 +11,7 @@ import {
 } from '@/lib/domain/amendment-policy';
 import { recalcOrderMilestones } from './recalc-milestones';
 import { insertNotifications } from '@/lib/utils/notifications';
+import { safeMutation, safeCriticalMutation } from '@/lib/db/safe-mutation';
 
 /** 加载订单已完成的 step_key 集合（用于变更窗口判定） */
 async function loadDoneStepKeys(supabase: any, orderId: string): Promise<Set<string>> {
@@ -214,10 +215,13 @@ export async function approveOrderAmendment(
       if (!checkAmendmentAllowed(field, doneNow).allowed) closed.push(field);
     }
     if (closed.length > 0) {
-      await (supabase.from('order_amendments') as any).update({
-        status: 'rejected', reviewed_by: user!.id, reviewed_at: new Date().toISOString(),
-        admin_note: (adminNote ? adminNote + '\n' : '') + `⛔ 提交后订单已推进关键节点,以下变更窗口已关闭,不能批准:${closed.join('、')}。请走专门流程(追加子订单/延期申请)。`,
-      }).eq('id', amendmentId);
+      const rej = await safeMutation({
+        client: createServiceRoleClient(), table: 'order_amendments', operation: 'update',
+        payload: { status: 'rejected', reviewed_by: user!.id, reviewed_at: new Date().toISOString(),
+          admin_note: (adminNote ? adminNote + '\n' : '') + `⛔ 提交后订单已推进关键节点,以下变更窗口已关闭,不能批准:${closed.join('、')}。请走专门流程(追加子订单/延期申请)。` },
+        predicate: { id: amendmentId },
+      });
+      if (!rej.ok) return { error: `窗口已关闭且自动驳回落库失败(${rej.status}),请重试:${rej.error}` };
       revalidatePath(`/orders/${amendment.order_id}`);
       return { error: `变更窗口已关闭(${closed.join('、')})—— 提交后订单已推进关键节点,已自动驳回,请走专门流程。` };
     }
@@ -227,10 +231,13 @@ export async function approveOrderAmendment(
   if (approved && (amendment as any).po_operation) {
     const doneNow = await loadDoneStepKeys(supabase, amendment.order_id);
     if (!checkAmendmentAllowed('quantity_decrease', doneNow).allowed) {
-      await (supabase.from('order_amendments') as any).update({
-        status: 'rejected', reviewed_by: user!.id, reviewed_at: new Date().toISOString(),
-        admin_note: (adminNote ? adminNote + '\n' : '') + '⛔ 提交后订单已开裁,PO取消/减量窗口已关闭,已自动驳回。开裁后请走整单取消或线下处理。',
-      }).eq('id', amendmentId);
+      const rej2 = await safeMutation({
+        client: createServiceRoleClient(), table: 'order_amendments', operation: 'update',
+        payload: { status: 'rejected', reviewed_by: user!.id, reviewed_at: new Date().toISOString(),
+          admin_note: (adminNote ? adminNote + '\n' : '') + '⛔ 提交后订单已开裁,PO取消/减量窗口已关闭,已自动驳回。开裁后请走整单取消或线下处理。' },
+        predicate: { id: amendmentId },
+      });
+      if (!rej2.ok) return { error: `窗口已关闭且自动驳回落库失败(${rej2.status}),请重试:${rej2.error}` };
       revalidatePath(`/orders/${amendment.order_id}`);
       return { error: 'PO取消/减量窗口已关闭(已开裁)—— 已自动驳回。' };
     }
@@ -258,18 +265,38 @@ export async function approveOrderAmendment(
     }
   }
 
-  // 更新申请状态(门禁已过)
-  await (supabase.from('order_amendments') as any)
-    .update({
-      status: approved ? 'approved' : 'rejected',
-      reviewed_by: user!.id,
-      reviewed_at: new Date().toISOString(),
-      admin_note: adminNote || null,
-    })
-    .eq('id', amendmentId);
+  // ═══ R1-C Execution Integrity(2026-08-08)═══
+  // 旧链是「先标 approved → 再改 orders(裸写)」:orders 写失败(RLS 滤 0 行无 error)
+  // = 幽灵批准 —— 申请显示已批、按钮消失,订单还是旧价旧量,财务同步旧值。
+  // 新链钉死顺序:改 orders(断言+回读验证)→ 才标 approved(CAS)→ 副作用 → 财务同步 → 通知垫底。
+  // 任何一步失败,不进入下一步;通知永远最后 —— 一旦说了"批准成功",人的世界已经开始行动。
+  const svc = createServiceRoleClient();
 
-  // 如果批准，自动应用修改到订单 + 触发副作用 + 收集提醒
+  // ── 驳回:一步写清,断言生效后才通知 ──
+  if (!approved) {
+    const rj = await safeMutation({
+      client: svc, table: 'order_amendments', operation: 'update',
+      payload: { status: 'rejected', reviewed_by: user!.id, reviewed_at: new Date().toISOString(), admin_note: adminNote || null },
+      predicate: { id: amendmentId, status: amendment.status },   // CAS:防并发重复处理
+    });
+    if (!rj.ok) return { error: `驳回未生效(${rj.status}):${rj.error}` };
+    try {
+      const requesterId = (amendment as any).requested_by;
+      if (requesterId && requesterId !== user!.id) {
+        await insertNotifications({
+          user_id: requesterId, type: 'amendment_rejected', title: '❌ 你的改单被驳回',
+          message: `改单被驳回${adminNote ? ':' + adminNote : ',请查看原因或调整后重新提交'}`,
+          related_order_id: amendment.order_id,
+        });
+      }
+    } catch (e: any) { console.warn('[approveOrderAmendment] 驳回通知失败(不阻断):', e?.message); }
+    revalidatePath(`/orders/${amendment.order_id}`);
+    return { success: true };
+  }
+
+  // ── 批准:orders 先行 ──
   const reminders: string[] = [];
+  let amendmentMarkedApproved = false;
   if (approved && amendment.fields_to_change) {
     const fieldsObj = amendment.fields_to_change as Record<string, { to: string }>;
     const updates: Record<string, any> = {};
@@ -301,12 +328,37 @@ export async function approveOrderAmendment(
         const perSet = unitStr === '套' ? 2 : unitStr === '三件套' ? 3 : 1;
         if (Number.isFinite(q) && Number.isFinite(up)) updates.total_amount = Math.round((q / perSet) * up * 100) / 100;
       }
-      await (supabase.from('orders') as any)
-        .update(updates)
-        .eq('id', amendment.order_id);
+      const w = await safeCriticalMutation({
+        client: svc, table: 'orders', operation: 'update',
+        payload: updates, predicate: { id: amendment.order_id },
+        auditOrderId: amendment.order_id,
+        ctx: {
+          actor: user!.id, reason: `改单批准 #${amendmentId}`, riskLevel: 'money',
+          decisionId: amendmentId, verifyFields: updates,
+        },
+      });
+      if (!w.ok) {
+        // 主写未生效:申请保持 pending(可重批),不发通知、不同步财务、不执行副作用
+        return { error: `订单写入未生效(${w.status}):${w.error}。申请保持待审,未标记批准。` };
+      }
     }
 
-    // ── 副作用执行 ──
+    // ── 订单已验证生效 → 才把申请标为 approved(CAS 防并发)──
+    {
+      const mk = await safeMutation({
+        client: svc, table: 'order_amendments', operation: 'update',
+        payload: { status: 'approved', reviewed_by: user!.id, reviewed_at: new Date().toISOString(), admin_note: adminNote || null },
+        predicate: { id: amendmentId, status: amendment.status },
+      });
+      if (!mk.ok) {
+        // 订单已改并验证,状态标记失败 → 明确降级返回,不装全成功;
+        // 重新批准会以同值幂等重放,不会二次改动(verifyFields 同值直接通过)
+        return { error: `订单修改已生效,但申请状态标记失败(${mk.status}):${mk.error}。请重新点击批准完成收尾(幂等,不会重复改单)。` };
+      }
+      amendmentMarkedApproved = true;
+    }
+
+    // ── 副作用执行(仅在主写+状态均验证后)──
     await executeSideEffects(supabase, amendment.order_id, sideEffects, user!.id, reminders);
 
     // 审计修(2026-07-04):改单动了金额/数量/条款 → 重发 order.updated 给财务,否则财务应收停在改前值。
@@ -320,6 +372,17 @@ export async function approveOrderAmendment(
         }
       }
     } catch (e: any) { console.warn('[approveOrderAmendment] 改单财务同步失败(不阻断):', e?.message); }
+  }
+
+  // 纯加单/PO操作类改单(无 fields_to_change)此前还没标 approved → 此处补标(同样断言)
+  if (approved && !amendmentMarkedApproved) {
+    const mk2 = await safeMutation({
+      client: svc, table: 'order_amendments', operation: 'update',
+      payload: { status: 'approved', reviewed_by: user!.id, reviewed_at: new Date().toISOString(), admin_note: adminNote || null },
+      predicate: { id: amendmentId, status: amendment.status },
+    });
+    if (!mk2.ok) return { error: `批准未生效(${mk2.status}):${mk2.error}` };
+    amendmentMarkedApproved = true;
   }
 
   // ── 客户加单:批准 → 追加增量明细 + 同步采购/财务/生产(line_items_delta 非空即加单)──
@@ -351,13 +414,12 @@ export async function approveOrderAmendment(
   try {
     const requesterId = (amendment as any).requested_by;
     if (requesterId && requesterId !== user!.id) {
+      // R1-C:能走到这里 = orders 已回读验证 + 状态已断言 —— 通知永远垫底
       await insertNotifications({
         user_id: requesterId,
-        type: approved ? 'amendment_approved' : 'amendment_rejected',
-        title: approved ? '✅ 你的改单已批准' : '❌ 你的改单被驳回',
-        message: approved
-          ? `改单已批准并应用${reminders.length ? ':\n' + reminders.join('\n') : ''}`
-          : `改单被驳回${adminNote ? ':' + adminNote : ',请查看原因或调整后重新提交'}`,
+        type: 'amendment_approved',
+        title: '✅ 你的改单已批准',
+        message: `改单已批准并应用${reminders.length ? ':\n' + reminders.join('\n') : ''}`,
         related_order_id: amendment.order_id,
       });
     }

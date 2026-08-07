@@ -6,6 +6,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { revalidatePath } from 'next/cache';
@@ -48,8 +49,12 @@ export async function saveSampleFee(orderId: string, amount: number | null, bear
   const oldReceivable = CUSTOMER_BORNE.has(String((old as any)?.sample_fee_bearer || '')) ? Number((old as any)?.sample_fee) || 0 : 0;
   const newReceivable = (b && CUSTOMER_BORNE.has(b) && amt) ? amt : 0;
 
-  const { error } = await (c.supabase.from('orders') as any).update({ sample_fee: amt, sample_fee_bearer: b }).eq('id', orderId);
-  if (error) return { error: '保存失败:' + error.message };
+  // R1-C:旧写法只查 error 防不住 RLS 0 行 —— 财务给别人建的打样单录费,orders 没写进去,
+  // 下游 order_finance_events(svc)却照发 → 通知说有应收、订单上查无此费,账实分叉(体检实锤)。
+  // svc + 断言:主写确认后才允许发财务事件。
+  const wFee = await safeMutation({ client: createServiceRoleClient(), table: 'orders', operation: 'update',
+    payload: { sample_fee: amt, sample_fee_bearer: b }, predicate: { id: orderId } });
+  if (!wFee.ok) return { error: `打样费保存未生效(${wFee.status}):${wFee.error}` };
 
   // 应收联动:客户承担的打样费 → 记订单财务事件(显示在财务事件时间线)+ 通知财务开票收款。仅金额变化时发。
   if (newReceivable > 0 && newReceivable !== oldReceivable) {

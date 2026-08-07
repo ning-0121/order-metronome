@@ -10,6 +10,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup, isAdminRole } from '@/lib/domain/roles';
 import { maskFloorForLines, maskSupplierFinance } from '@/lib/procurement/purchaseOrder';
@@ -821,8 +822,12 @@ export async function deletePurchaseOrderLine(poId: string, lineId: string): Pro
     .filter((l) => l.line_status !== 'cancelled')
     .reduce((s, l) => s + (Number(l.ordered_amount) || 0), 0);
   const total2 = Math.round(total * 100) / 100;
-  await (svc.from('purchase_orders') as any)
-    .update({ total_amount: total2, updated_at: new Date().toISOString() }).eq('id', poId);
+  // R1-C:总额回写断言 —— 失败即对账单总额≠行明细
+  {
+    const wTot = await safeMutation({ client: svc, table: 'purchase_orders', operation: 'update',
+      payload: { total_amount: total2, updated_at: new Date().toISOString() }, predicate: { id: poId } });
+    if (!wTot.ok) return { error: `采购单总额回写未生效(${wTot.status}):${wTot.error}` };
+  }
 
   revalidatePath(`/procurement/po/${poId}`);
   revalidatePath('/procurement');
@@ -886,8 +891,12 @@ export async function updateProcurementLineFloorPrice(poId: string, lineId: stri
   const total = ((rest || []) as any[]).filter((l) => l.line_status !== 'cancelled')
     .reduce((s, l) => s + (Number(l.ordered_amount) || 0), 0);
   const total2 = Math.round(total * 100) / 100;
-  await (svc.from('purchase_orders') as any)
-    .update({ total_amount: total2, updated_at: new Date().toISOString() }).eq('id', poId);
+  // R1-C:总额回写断言 —— 失败即对账单总额≠行明细
+  {
+    const wTot = await safeMutation({ client: svc, table: 'purchase_orders', operation: 'update',
+      payload: { total_amount: total2, updated_at: new Date().toISOString() }, predicate: { id: poId } });
+    if (!wTot.ok) return { error: `采购单总额回写未生效(${wTot.status}):${wTot.error}` };
+  }
 
   // 非草稿改价 → 自动重推财务(placed 幂等按 po_no upsert),应付金额跟着纠正;失败不阻断(可手动重发)
   if ((po as any).status !== 'draft') {

@@ -1,6 +1,7 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 import {
   INSPECTION_WAIVED_TAG,
@@ -47,9 +48,11 @@ export async function setInspectionWaiver(orderId: string, waived: boolean, reas
     ? [...tags, INSPECTION_WAIVED_TAG]
     : tags.filter((t) => t !== INSPECTION_WAIVED_TAG);
 
-  const { error: upErr } = await (supabase.from('orders') as any)
-    .update({ special_tags: next, updated_at: new Date().toISOString() }).eq('id', orderId);
-  if (upErr) return { error: upErr.message };
+  // R1-C 策略 B:代码鉴权已过 → svc 写 + 断言。旧 session 写:QC 主管给别人建的单标免验
+  // 被 RLS 滤 0 行且无 error —— 界面成功、tag 没写上、验货节点照卡(体检实锤)。
+  const wWv = await safeMutation({ client: createServiceRoleClient(), table: 'orders', operation: 'update',
+    payload: { special_tags: next, updated_at: new Date().toISOString() }, predicate: { id: orderId } });
+  if (!wWv.ok) return { error: `免验标记未生效(${wWv.status}):${wWv.error}` };
 
   try {
     await (supabase.from('order_logs') as any).insert({

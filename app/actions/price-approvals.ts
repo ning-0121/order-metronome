@@ -1,6 +1,7 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { friendlyError } from '@/lib/utils/db-error';
 import { isApprovalPending } from '@/lib/domain/types';
 import { revalidatePath } from 'next/cache';
@@ -122,16 +123,17 @@ export async function approvePriceApproval(
     if (!pRoles.includes('admin')) return { error: '不能审批自己提交的价格申请' };
   }
 
-  const { error } = await (supabase.from('pre_order_price_approvals') as any)
-    .update({
-      status: decision,
-      reviewed_by: user.id,
-      reviewed_at: new Date().toISOString(),
-      review_note: note || null,
-    })
-    .eq('id', approvalId);
-
-  if (error) return { error: friendlyError(error) };
+  // R1-C 策略 B(command-based,明确记录):代码鉴权 canApprovePrice(admin/CEO/业务经理)已过
+  // → service-role 写 + 断言 1 行。旧写法用 session:RLS 只认 admin,经理点批准
+  // UI 成功、库里永远 pending(0 行无 error)。CAS 谓词防并发重复审批。
+  const w = await safeMutation({
+    client: createServiceRoleClient(), table: 'pre_order_price_approvals', operation: 'update',
+    payload: { status: decision, reviewed_by: user.id, reviewed_at: new Date().toISOString(), review_note: note || null },
+    predicate: { id: approvalId, status: row.status },
+  });
+  if (!w.ok) {
+    return { error: w.status === 'zero_rows' ? '该申请状态已变(可能已被他人处理),请刷新' : `审批未生效(${w.status}):${w.error}` };
+  }
 
   // ── 通知申请人 ──
   const requesterId = (row as any).requested_by;

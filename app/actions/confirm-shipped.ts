@@ -7,6 +7,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 
 const CAN_CONFIRM = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin', 'admin_assistant'];
@@ -51,7 +52,10 @@ export async function confirmOrderShipped(orderId: string): Promise<{ ok: boolea
   const pay = ((ms || []) as any[]).find((m) => m.step_key === 'payment_received');
   const payDone = !pay || DONE.has(String(pay.status));
   if (payDone) {
-    await (svc.from('orders') as any).update({ lifecycle_status: 'completed', updated_at: nowIso }).eq('id', orderId);
+    // R1-C:completed 写断言 —— 失败还返回 completed:true = 界面说完结、订单还在跑
+    const wDone = await safeMutation({ client: svc, table: 'orders', operation: 'update',
+      payload: { lifecycle_status: 'completed', updated_at: nowIso }, predicate: { id: orderId } });
+    if (!wDone.ok) return { ok: false, error: `订单完结未生效(${wDone.status}):${wDone.error}(节点已补录,可重试)` };
   }
   try {
     await (svc.from('order_logs') as any).insert({

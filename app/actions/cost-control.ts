@@ -10,6 +10,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 import { calculateProfitSnapshot } from '@/lib/services/profit.service';
 import {
@@ -269,11 +270,11 @@ export async function saveCostBaselineManual(
       sale_currency: isDomestic ? 'CNY' : 'USD',
       updated_at: new Date().toISOString(),
     };
-    if (fin) {
-      await (supabase.from('order_financials') as any).update(finPayload).eq('order_id', orderId);
-    } else {
-      await (supabase.from('order_financials') as any).insert({ order_id: orderId, ...finPayload });
-    }
+    // R1-C:售价静默丢失 = 成本基线有、售价没同步 → 利润快照/应收按空售价算(错账)
+    const wFin = fin
+      ? await safeMutation({ client: supabase, table: 'order_financials', operation: 'update', payload: finPayload, predicate: { order_id: orderId } })
+      : await safeMutation({ client: supabase, table: 'order_financials', operation: 'insert', payload: { order_id: orderId, ...finPayload } });
+    if (!wFin.ok) return { error: `售价同步 order_financials 未生效(${wFin.status}):${wFin.error}` };
   }
 
   // 重算利润快照（失败不阻断）
