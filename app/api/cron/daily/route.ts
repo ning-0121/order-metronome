@@ -1,128 +1,109 @@
 // ============================================================
-// Cron: /api/cron/daily
-// 每天早上 8:00 执行（Vercel Cron 配置在 vercel.json）
-// 串行执行所有日常任务，防止资源竞争
-// 鉴权：CRON_SECRET 环境变量（Vercel 自动注入）
+// Cron: /api/cron/daily — R1-B 重写(2026-08-08)
+//
+// 【旧版为什么空转数月】Step 1-4 用 `await createClient()`(无登录态的
+// session 客户端):cron 环境下每张表被 RLS 拒读/拒写,各 service 读到
+// 0 个对象 → "处理 0 个,成功" → HTTP 200 绿灯。客户节奏/P&L 永远空表、
+// 每日任务从不自主生成(全靠用户碰巧打开 /my-today)。Step 5/6 自己注释
+// 都写了"必须 service-role",前四步却没人跟着改 —— 双标数月无人发现。
+//
+// 【本版】全步 service-role;经 runAutomationJob 统一契约:
+// 每步单独记 eligible/processed/written/failed/duration,核心步骤
+// eligible>0 且产出 0 → 整个 job 至少 degraded;关键 DB error → failed。
+// CRON SUCCESS != HTTP 200 —— 状态由业务产出决定,并与 automation_runs 一致。
+// 幂等:daily_tasks 有 UNIQUE(assigned_to,source_type,source_id,task_date);
+// rhythm/PnL/matters 均为按主键 upsert/重建 —— 重试安全。
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { syncAllCustomerRhythms, rebuildAllCustomerRhythmPnl } from '@/lib/services/customer-rhythm.service'
 import { resolveStaleAlerts } from '@/lib/services/alerts.service'
 import { generateDailyTasks } from '@/lib/services/daily-tasks.service'
 import { materializeCustomerMatters } from '@/lib/services/customer-matters.service'
 import { materializeProcurementMatters } from '@/lib/services/procurement-matters.service'
+import { runAutomationJob, type JobStepResult } from '@/lib/automation/run-job'
+
+export const maxDuration = 60
 
 export async function GET(req: NextRequest) {
-  // Vercel Cron 鉴权（生产环境必须）
   const authHeader = req.headers.get('authorization')
   if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const startTime = Date.now()
-  const log: string[] = []
-
-  try {
-    const supabase = await createClient()
+  const r = await runAutomationJob('daily', { trigger: 'cron' }, async (svc) => {
     const today = new Date().toISOString().split('T')[0]
+    const steps: JobStepResult[] = []
+    let rowsWritten = 0
 
-    // Step 1: 同步客户节奏
-    log.push('→ Syncing customer rhythms...')
-    const rhythmResult = await syncAllCustomerRhythms(supabase)
-    if (rhythmResult.ok) {
-      log.push(`  ✓ Rhythms: ${rhythmResult.data.updated} updated, ${rhythmResult.data.errors.length} errors`)
-    } else {
-      log.push(`  ✗ Rhythms failed: ${rhythmResult.error}`)
-    }
-
-    // Step 2: 物化客户 P&L 画像（在 rhythm sync 之后，确保行已存在）
-    log.push('→ Rebuilding customer P&L profiles...')
-    const pnlResult = await rebuildAllCustomerRhythmPnl(supabase)
-    if (pnlResult.ok) {
-      log.push(`  ✓ PnL: ${pnlResult.data.updated} updated, ${pnlResult.data.skipped} skipped, ${pnlResult.data.errors.length} errors`)
-      if (pnlResult.data.errors.length > 0) {
-        log.push(`  ! PnL errors: ${pnlResult.data.errors.slice(0, 3).join(', ')}`)
+    const timed = async (step: string, critical: boolean, run: () => Promise<Partial<JobStepResult>>) => {
+      const t0 = Date.now()
+      try {
+        const res = await run()
+        steps.push({ step, critical, duration_ms: Date.now() - t0, ...res })
+      } catch (e: any) {
+        steps.push({ step, critical, duration_ms: Date.now() - t0, error: e?.message || String(e) })
       }
-    } else {
-      log.push(`  ✗ PnL failed: ${pnlResult.error}`)
     }
 
-    // Step 3: 清理过期告警
-    log.push('→ Resolving stale alerts...')
-    const alertResult = await resolveStaleAlerts(supabase)
-    if (alertResult.ok) {
-      log.push(`  ✓ Alerts: ${alertResult.data} resolved`)
-    } else {
-      log.push(`  ✗ Alerts failed: ${alertResult.error}`)
-    }
+    // eligible 基数:客户总数(rhythm/PnL 的处理对象)
+    const { count: customerCount } = await (svc.from('customers') as any).select('*', { count: 'exact', head: true })
 
-    // Step 4: 生成今日任务
-    log.push('→ Generating daily tasks...')
-    const taskResult = await generateDailyTasks(supabase, {
-      trigger: 'daily_cron',
-      date: today,
+    // Step 1: 客户节奏(关键)
+    await timed('customer_rhythm', true, async () => {
+      const res = await syncAllCustomerRhythms(svc)
+      if (!res.ok) return { error: res.error }
+      rowsWritten += res.data.updated
+      return { eligible: customerCount ?? null, written: res.data.updated, failed: res.data.errors.length }
     })
-    if (taskResult.ok) {
-      log.push(`  ✓ Tasks: ${taskResult.data.created} created, ${taskResult.data.skipped} skipped`)
-      if (taskResult.data.errors.length > 0) {
-        log.push(`  ! Task errors: ${taskResult.data.errors.join(', ')}`)
+
+    // Step 2: 客户 P&L 画像(关键;在 rhythm 之后,行已存在)
+    await timed('customer_pnl', true, async () => {
+      const res = await rebuildAllCustomerRhythmPnl(svc)
+      if (!res.ok) return { error: res.error }
+      rowsWritten += res.data.updated
+      return { eligible: customerCount ?? null, written: res.data.updated, failed: res.data.errors.length }
+    })
+
+    // Step 3: 清理过期告警(清理类:0 是常态,eligible 不设 —— 别把"没垃圾可扫"当失败)
+    await timed('stale_alerts', false, async () => {
+      const res = await resolveStaleAlerts(svc)
+      if (!res.ok) return { error: res.error }
+      return { written: res.data }
+    })
+
+    // Step 4: 生成今日任务(关键;eligible = created+skipped,skipped=幂等命中已存在)
+    await timed('daily_tasks', true, async () => {
+      const res = await generateDailyTasks(svc, { trigger: 'daily_cron', date: today })
+      if (!res.ok) return { error: res.error }
+      rowsWritten += res.data.created
+      return {
+        eligible: res.data.created + res.data.skipped,
+        processed: res.data.created + res.data.skipped,
+        written: res.data.created,
+        failed: res.data.errors.length,
       }
-    } else {
-      log.push(`  ✗ Tasks failed: ${taskResult.error}`)
-    }
+    })
 
-    // Step 5: 物化 CEO 客户事项分级（customer_matters，零 AI 纯规则）
-    // 表无 authenticated 写策略 → 必须 service-role；失败不阻断其余 cron 步骤
-    log.push('→ Materializing customer matters...')
-    try {
-      const svc = createServiceRoleClient()
-      const mattersResult = await materializeCustomerMatters(svc as any, { mode: 'execute' })
-      if (mattersResult.ok) {
-        const s = mattersResult.data.stats
-        log.push(`  ✓ Matters: ${s.written ?? 0} written, ${s.deleted ?? 0} stale removed (${s.customers} customers)`)
-      } else {
-        log.push(`  ✗ Matters failed: ${mattersResult.error}`)
-      }
-    } catch (e: any) {
-      log.push(`  ✗ Matters exception: ${e?.message}`)
-    }
+    // Step 5/6: CEO 客户事项 / 采购风险事项(原本就是 service-role,并入统一记账)
+    await timed('customer_matters', false, async () => {
+      const res = await materializeCustomerMatters(svc as any, { mode: 'execute' })
+      if (!res.ok) return { error: res.error }
+      rowsWritten += res.data.stats.written ?? 0
+      return { written: res.data.stats.written ?? 0 }
+    })
+    await timed('procurement_matters', false, async () => {
+      const res = await materializeProcurementMatters(svc as any, { mode: 'execute' })
+      if (!res.ok) return { error: res.error }
+      rowsWritten += res.data.stats.written ?? 0
+      return { written: res.data.stats.written ?? 0 }
+    })
 
-    // Step 6: 物化采购风险事项（procurement_matters，零 AI 纯规则）
-    // 同 customer_matters：service-role 写；失败不阻断其余 cron 步骤
-    log.push('→ Materializing procurement matters...')
-    try {
-      const svc = createServiceRoleClient()
-      const procResult = await materializeProcurementMatters(svc as any, { mode: 'execute' })
-      if (procResult.ok) {
-        const s = procResult.data.stats
-        log.push(`  ✓ Procurement matters: ${s.written ?? 0} written, ${s.deleted ?? 0} stale removed (${s.orders_affected} orders, ${s.suppliers_affected} suppliers)`)
-      } else {
-        log.push(`  ✗ Procurement matters failed: ${procResult.error}`)
-      }
-    } catch (e: any) {
-      log.push(`  ✗ Procurement matters exception: ${e?.message}`)
-    }
+    return { steps, rowsWritten, metadata: { date: today } }
+  })
 
-    const duration = Date.now() - startTime
-    // 不再静默成功(2026-07-28 审计 P1-2):任一步 ✗ 则 500,让 Vercel 面板标红可见,不再"全失败也绿灯"
-    const failedSteps = log.filter((l) => l.includes('✗'))
-    log.push(failedSteps.length > 0 ? `\n⚠ Daily cron 完成但 ${failedSteps.length} 步失败(${duration}ms)` : `\n✅ Daily cron completed in ${duration}ms`)
-
-    console.log(log.join('\n'))
-    return NextResponse.json({
-      ok: failedSteps.length === 0,
-      date: today,
-      duration,
-      failed_steps: failedSteps.length,
-      log,
-    }, { status: failedSteps.length > 0 ? 500 : 200 })
-  } catch (e: any) {
-    console.error('Daily cron exception:', e)
-    return NextResponse.json({
-      ok: false,
-      error: e?.message,
-      log,
-    }, { status: 500 })
-  }
+  return NextResponse.json({
+    ok: r.status !== 'failed', status: r.status, health: r.health,
+    run_id: r.runId, reasons: r.reasons, steps: r.outcome.steps,
+  }, { status: r.httpStatus })
 }

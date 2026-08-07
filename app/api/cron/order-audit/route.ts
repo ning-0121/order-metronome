@@ -14,39 +14,42 @@
 
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
+import { runAutomationJob } from '@/lib/automation/run-job';
 import { NextResponse } from 'next/server';
 
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
-  try {
-    // 支持两种认证：Cron secret 或浏览器登录态
-    const authHeader = req.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-    const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
+  // 鉴权:Cron secret 或浏览器管理员登录态(数据读写一律 service-role,session 只用来验人)
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  const isCron = !!cronSecret && authHeader === `Bearer ${cronSecret}`;
+  if (!isCron) {
+    const session = await createClient();
+    const { data: { user } } = await session.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Please login first' }, { status: 401 });
+  }
 
-    let supabase: any;
-    if (isCron) {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (!url || !serviceKey) return NextResponse.json({ error: 'Missing config' }, { status: 500 });
-      supabase = createServiceClient(url, serviceKey);
-    } else {
-      // 浏览器访问：用登录态
-      supabase = await createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return NextResponse.json({ error: 'Please login first' }, { status: 401 });
-    }
+  const r = await runAutomationJob('order-audit', { trigger: isCron ? 'cron' : 'manual' }, runAudit);
+  return NextResponse.json({
+    ok: r.status !== 'failed', status: r.status, health: r.health,
+    run_id: r.runId, reasons: r.reasons, ...(r.outcome.metadata || {}),
+  }, { status: r.httpStatus });
+}
+
+async function runAudit(supabase: any) {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
     // 查所有进行中订单（含创建者和跟单）
-    const { data: orders } = await (supabase.from('orders') as any)
+    const { data: orders, error: ordersErr } = await (supabase.from('orders') as any)
       .select('id, order_no, customer_name, factory_name, internal_order_no, quantity, factory_date, owner_user_id, created_by, lifecycle_status, updated_at, incoterm')
       .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")');
+    if (ordersErr) return { errorCode: 'ORDERS_READ_FAILED', errorMessage: ordersErr.message };
 
     if (!orders || orders.length === 0) {
-      return NextResponse.json({ success: true, issues: 0 });
+      // 全库零在途单在本业务里不可能 —— 读到 0 视为读取异常,不是 no_work
+      return { errorCode: 'ZERO_ORDERS', errorMessage: '在途订单读到 0 张,判定读取异常' };
     }
 
     interface AuditIssue {
@@ -192,55 +195,54 @@ export async function POST(req: Request) {
       }
     }
 
-    // 发通知给管理员
-    if (issues.length > 0) {
+    // ── 发通知给管理员(R1-B:结果必须核对 —— 该段的前身停发了 73 天没人知道:
+    //    notifications.payload 列生产不存在,插入失败被吞,cron 天天 200。
+    //    列已由 20260808 迁移补上;这里四项账让 audit_hits 与 notifications_created 可对账)──
+    let notificationsAttempted = 0, notificationsCreated = 0, notificationsFailed = 0;
+    // 幂等:同一天已发过 daily_audit 就不重复发(重试/手动补跑不会刷屏)
+    const { data: dupToday } = await supabase.from('notifications')
+      .select('id').eq('type', 'daily_audit').gte('created_at', today + 'T00:00:00').limit(1);
+    if (issues.length > 0 && !(dupToday || []).length) {
       const highCount = issues.filter(i => i.severity === 'high').length;
       const mediumCount = issues.filter(i => i.severity === 'medium').length;
-
       const summary = issues.slice(0, 10).map(i =>
         `[${i.severity === 'high' ? '🔴' : '🟡'}] ${i.order_no}: ${i.issue}`
       ).join('\n');
-
-      // 通知所有 admin
-      const { data: admins } = await supabase
-        .from('profiles')
-        .select('user_id')
-        .or("role.eq.admin,roles.cs.{admin}");
-
-      // 手动(浏览器登录态)触发时,session 客户端给其他 admin 插通知会被 RLS 拒 → 统一入口(2026-08-06 审计)
+      const { data: admins } = await supabase.from('profiles')
+        .select('user_id').or("role.eq.admin,roles.cs.{admin}");
       const { insertNotifications } = await import('@/lib/utils/notifications');
-      for (const admin of (admins || []) as any[]) {
-        await insertNotifications({
-          user_id: admin.user_id,
-          type: 'daily_audit',
-          title: `📋 每日审计：${highCount} 个严重问题，${mediumCount} 个需关注`,
-          message: `扫描 ${orders.length} 个订单，发现 ${issues.length} 个问题：\n${summary}${issues.length > 10 ? `\n...还有 ${issues.length - 10} 个问题` : ''}`,
-          status: 'unread',
-          // 把全部 issues 存进 payload，点击通知后跳详情页展示完整列表
-          payload: {
-            scanned_at: now.toISOString(),
-            total_scanned: orders.length,
-            total_issues: issues.length,
-            high_count: highCount,
-            medium_count: mediumCount,
-            issues,
-          },
-        });
-      }
+      const rows = ((admins || []) as any[]).map((admin) => ({
+        user_id: admin.user_id, type: 'daily_audit',
+        title: `📋 每日审计：${highCount} 个严重问题，${mediumCount} 个需关注`,
+        message: `扫描 ${orders.length} 个订单，发现 ${issues.length} 个问题：\n${summary}${issues.length > 10 ? `\n...还有 ${issues.length - 10} 个问题` : ''}`,
+        status: 'unread',
+        payload: {
+          scanned_at: now.toISOString(), total_scanned: orders.length, total_issues: issues.length,
+          high_count: highCount, medium_count: mediumCount, issues,
+        },
+      }));
+      notificationsAttempted = rows.length;
+      const res = await insertNotifications(rows as any);
+      if (res.ok) notificationsCreated = rows.length;
+      else { notificationsFailed = rows.length; console.error('[order-audit] 通知写入失败:', res.error); }
     }
 
-    return NextResponse.json({
-      success: true,
-      orders_scanned: orders.length,
-      issues_found: issues.length,
-      high: issues.filter(i => i.severity === 'high').length,
-      medium: issues.filter(i => i.severity === 'medium').length,
-      details: issues,
-    });
-  } catch (err: any) {
-    console.error('[order-audit]', err?.message);
-    return NextResponse.json({ error: err?.message }, { status: 500 });
-  }
+    return {
+      eligible: issues.length,
+      processed: issues.length > 0 ? ((dupToday || []).length ? issues.length : notificationsCreated > 0 ? issues.length : 0) : 0,
+      rowsRead: orders.length,
+      notificationsCreated,
+      failedItems: notificationsFailed,
+      metadata: {
+        audit_hits: issues.length,
+        notifications_attempted: notificationsAttempted,
+        notifications_created: notificationsCreated,
+        notifications_failed: notificationsFailed,
+        dedupe_hit: (dupToday || []).length > 0,
+        high: issues.filter(i => i.severity === 'high').length,
+        medium: issues.filter(i => i.severity === 'medium').length,
+      },
+    };
 }
 
 export async function GET(req: Request) {
