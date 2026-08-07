@@ -55,10 +55,12 @@ export async function POST(req: Request) {
     let generated = 0, pushed = 0, failed = 0, notifCreated = 0;
     const perUser: Array<{ name: string; ok: boolean; reason?: string }> = [];
 
-    for (const user of (owners || []) as any[]) {
+    // 并行生成(2026-08-08 生产实测:7 人串行 AI 调用超 60s 函数上限 → 整批被杀。
+    // 各人完全独立,upsert/去重保证幂等,并行安全;整批耗时 = 最慢一人 ≈ 25s)
+    await Promise.all(((owners || []) as any[]).map(async (user) => {
       try {
         const result = await generateBriefingForUser(svc, user.user_id, user.name || user.email || '');
-        if (!result) { failed++; perUser.push({ name: user.name, ok: false, reason: 'generator 返回空(该 owner 有单,不该为空)' }); continue; }
+        if (!result) { failed++; perUser.push({ name: user.name, ok: false, reason: 'generator 返回空(该 owner 有单,不该为空)' }); return; }
 
         // 幂等落库:UNIQUE(user_id, briefing_date)
         const { error: insertError } = await (svc.from('daily_briefings') as any).upsert({
@@ -66,7 +68,7 @@ export async function POST(req: Request) {
           content: result.content, summary_text: result.summaryText,
           total_emails: result.totalEmails, urgent_count: result.urgentCount, compliance_count: result.complianceCount,
         }, { onConflict: 'user_id,briefing_date' });
-        if (insertError) { failed++; perUser.push({ name: user.name, ok: false, reason: insertError.message }); continue; }
+        if (insertError) { failed++; perUser.push({ name: user.name, ok: false, reason: insertError.message }); return; }
         generated++;
 
         // 站内通知(当日去重,重试不刷屏)
@@ -96,7 +98,7 @@ export async function POST(req: Request) {
       } catch (e: any) {
         failed++; perUser.push({ name: user.name, ok: false, reason: e?.message });
       }
-    }
+    }));
 
     return {
       eligible: ownerIds.length, processed: generated,
