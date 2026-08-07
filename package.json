@@ -32,7 +32,7 @@
     "lint:notif": "node scripts/check-notification-inserts.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.91.1",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.90.1",
     "@types/mailparser": "^3.4.6",
