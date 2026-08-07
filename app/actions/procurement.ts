@@ -28,7 +28,7 @@ async function notifyFinanceOverReceipt(supabase: any, line: any, gate: { ordere
     const { data: order } = await (supabase.from('orders') as any).select('order_no, internal_order_no').eq('id', line.order_id).maybeSingle();
     const { data: profs } = await (supabase.from('profiles') as any).select('user_id, role, roles');
     const fin = (profs || []).filter((p: any) => { const rs = p.roles?.length ? p.roles : [p.role]; return rs.includes('finance'); });
-    if (fin.length) await (supabase.from('notifications') as any).insert(fin.map((f: any) => ({
+    if (fin.length) await insertNotifications(fin.map((f: any) => ({
       user_id: f.user_id, type: 'over_receipt',
       title: `⚠ 超量收货待处理:${order?.internal_order_no || order?.order_no || ''}`,
       message: `「${line.material_name || ''}」累计收货 ${gate.projected}${line.ordered_unit || ''} 将超采购量 ${gate.ordered} 的 10%(上限 ${gate.cap})。请裁决:审批放行 / 退回布行 / 布行补足 / 超出搁置。`,
@@ -43,6 +43,7 @@ import { fetchOrderSizeOrder } from '@/lib/services/orderSizeOrder';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 import { BRAND } from '@/lib/config/brand';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 export interface ProcurementLineItem {
   id: string;
@@ -966,7 +967,7 @@ export async function chaseProcurementLine(
       const { data: admins } = await (supabase.from('profiles') as any)
         .select('user_id').or('role.eq.admin,roles.cs.{admin}');
       for (const a of admins || []) {
-        await (supabase.from('notifications') as any).insert({
+        await insertNotifications({
           user_id: a.user_id,
           type: 'procurement_chase_escalation',
           title: `⚠️ 催货 ${newCount} 次未果：${line.material_name}`,

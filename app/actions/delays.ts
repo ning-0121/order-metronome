@@ -3,7 +3,7 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { calcDueDates, compressRemainingIntoWindow, monotonicRepairDueDates } from '@/lib/schedule';
-import { MANAGER_CC_EMAILS, escapeHtml } from '@/lib/utils/notifications';
+import { MANAGER_CC_EMAILS, escapeHtml, insertNotifications } from '@/lib/utils/notifications';
 // updateMilestone/updateMilestones 不再在 recalculateSchedule 中使用
 // （系统级联操作直接走 supabase，避免 repo 层权限校验干扰）
 import { sendEmailNotification } from '@/lib/utils/notifications';
@@ -386,7 +386,7 @@ export async function createDelayRequest(
     .select('user_id').or("role.eq.admin,roles.cs.{admin}");
   const adminUserIds: string[] = [];
   for (const admin of admins || []) {
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: admin.user_id,
       type: 'delay_request',
       title: `${requesterName}（${requesterRoleLabel}）申请延期：${milestoneData.name}`,
@@ -757,7 +757,7 @@ async function approveDelayRequestCore(
 
   // 通知申请人铃铛：延期已通过
   if (delayRequestData.requested_by) {
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: delayRequestData.requested_by,
       type: 'delay_approved',
       title: `延期已通过：${milestoneData.name}`,
@@ -895,7 +895,7 @@ export async function rejectDelayRequest(delayRequestId: string, decisionNote: s
   // 通知申请人铃铛+邮件：延期被驳回
   if (delayRequestData.requested_by) {
     const milestoneData2 = milestone as any;
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: delayRequestData.requested_by,
       type: 'delay_rejected',
       title: `延期被驳回：${milestoneData2?.name || ''}`,
@@ -1379,7 +1379,7 @@ export async function createOrderLevelDelayRequest(
   const { data: admins } = await (supabase.from('profiles') as any).select('user_id').or('role.eq.admin,roles.cs.{admin}');
   const adminUserIds: string[] = [];
   for (const admin of admins || []) {
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: admin.user_id,
       type: 'delay_request',
       title: `${requesterName} 申请二次延期：${orderCheck.order_no}`,

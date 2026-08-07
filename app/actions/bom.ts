@@ -15,6 +15,7 @@ import {
 import { classifyBomEdit, classifyBomDelete, toSnapshot, toContext } from '@/lib/knowledge/policy';
 import { captureMaterialDecision } from '@/app/actions/material-decisions';
 import type { EvidenceRef, ReasonCode } from '@/lib/knowledge/types';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 // Knowledge Layer K1：BomTab 关键编辑时随行传入（可选）；flag=off 或未传 → 零影响
 export interface BomDecisionInput { reasonCode: ReasonCode; reasonNote?: string; evidenceRefs?: EvidenceRef[]; }
@@ -1004,7 +1005,7 @@ export async function submitBomToProcurement(
     const ids = Array.from(new Set(((procs || []) as any[]).map(p => p.user_id).filter(Boolean)));
     const submitter = (profile as any)?.name || user.email?.split('@')[0] || '业务';
     for (const uid of ids) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: uid,
         type: 'bom_submitted_to_procurement',
         title: `🧵 原辅料单已提交 — ${order.order_no || ''}`,

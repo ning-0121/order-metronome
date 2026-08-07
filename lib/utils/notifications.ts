@@ -213,3 +213,52 @@ export async function sendNotification(
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+// 站内通知统一写入口(2026-08-06 全面审计后新增)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 【为什么必须走这里,不许再用 session 客户端直插 notifications】
+// notifications 的 RLS INSERT 策略是 `auth.uid() = user_id` —— 登录用户
+// **只能给自己发通知**。而全站 36 处审批/催办代码都在用申请人的 session
+// 给审批人插通知:全部被 RLS 静默拒收,`.insert()` 的 error 又没人检查。
+//
+// 后果(2026-08-06 CEO 撞破):菁菁提交 PO 免罚申请,通知 0 条发出,
+// CEO 查了一下午"没收到" —— 延期/价格/改单/采购各审批链的通知同病。
+// 通知发不出去,审批就只能靠审批人自己碰巧翻到页面。
+//
+// 这里用 service-role 写(服务端 action 本身就是可信边界),并且**必查 error**。
+// 静态闸 scripts/check-notification-inserts.mjs 拦"绕过本入口直插"的回潮。
+
+export interface NotificationRow {
+  user_id: string;
+  type: string;
+  title: string;
+  message?: string | null;
+  related_order_id?: string | null;
+  related_milestone_id?: string | null;
+  status?: string;
+}
+
+/** 站内通知统一写入(service-role)。失败返回 error 并打日志,绝不静默。 */
+export async function insertNotifications(
+  rows: NotificationRow | NotificationRow[],
+): Promise<{ ok: boolean; error?: string }> {
+  const list = (Array.isArray(rows) ? rows : [rows])
+    .filter((r) => r && r.user_id)
+    .map((r) => ({ status: 'unread', ...r }));
+  if (!list.length) return { ok: true };
+  try {
+    const { createServiceRoleClient } = await import('../supabase/server');
+    const svc = createServiceRoleClient();
+    const { error } = await (svc.from('notifications') as any).insert(list);
+    if (error) {
+      console.error('[insertNotifications] 写入失败:', error.message, '| 首条:', list[0]?.type, list[0]?.title?.slice(0, 40));
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    console.error('[insertNotifications] 异常:', e?.message);
+    return { ok: false, error: e?.message };
+  }
+}

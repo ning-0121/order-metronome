@@ -13,6 +13,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { friendlyError } from '@/lib/utils/db-error';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 /** 可提交补料申请的角色(业务执行 + 管理员;生产发现缺料也由业务执行代提,保持单一入口) */
 const REQUEST_ROLES = ['sales', 'sales_manager', 'order_manager', 'admin'];
@@ -40,7 +41,7 @@ export async function notifyFinanceSupplement(supabase: any, orderId: string, it
       return rs.includes('finance');
     });
     if (targets.length === 0) return;
-    await (supabase.from('notifications') as any).insert(targets.map((t: any) => ({
+    await insertNotifications(targets.map((t: any) => ({
       user_id: t.user_id,
       type: 'supplement_approval',
       title: `🟠 补采购待审批:${order?.order_no || ''}`,

@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { CIRCUIT_BREAKER } from '@/lib/agent/types';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 /**
  * 执行 Agent 建议
@@ -141,7 +142,7 @@ export async function executeAgentAction(actionId: string): Promise<{ error?: st
         const { data: admins } = await (supabase.from('profiles') as any)
           .select('user_id').or("role.eq.admin,roles.cs.{admin}");
         for (const admin of admins || []) {
-          await (supabase.from('notifications') as any).insert({
+          await insertNotifications({
             user_id: admin.user_id,
             type: 'agent_escalation',
             title: `🚨 Agent 升级：${action.title}`,
@@ -157,7 +158,7 @@ export async function executeAgentAction(actionId: string): Promise<{ error?: st
       case 'remind_missing_doc': {
         const targetUserId = payload.target_user_id;
         if (targetUserId) {
-          await (supabase.from('notifications') as any).insert({
+          await insertNotifications({
             user_id: targetUserId,
             type: action.action_type === 'notify_next' ? 'agent_notify' : 'agent_remind',
             title: action.title,

@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 // 常量放纯模块:'use server' 文件只能导出 async function(见 lib/domain/qcInspection.ts 顶部注释)
 import { QC_TYPE_LABELS } from '@/lib/domain/qcInspection';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 // QC 抽检是放行依据 → 写入(增/改判/删)限执行组(生产/QC/跟单/生产主管/admin),不再任意登录用户可篡改
 const QC_WRITE_MSG = '仅生产/QC/跟单/管理员可录入或修改质检结果';
@@ -222,7 +223,7 @@ export async function assignQcInspection(input: {
     const { data: ord } = await (supabase.from('orders') as any)
       .select('order_no, internal_order_no').eq('id', input.orderId).maybeSingle();
     const no = (ord as any)?.internal_order_no || (ord as any)?.order_no || '订单';
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: input.assignedTo,
       type: 'qc_task_assigned',
       title: `新的${QC_TYPE_LABELS[type]}任务 · ${no}`,

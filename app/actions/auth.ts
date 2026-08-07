@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { validateEmail } from '@/lib/utils/auth';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 export async function signUp(email: string, password: string, name: string) {
   const validation = validateEmail(email);
@@ -53,7 +54,7 @@ export async function signUp(email: string, password: string, name: string) {
       .select('user_id')
       .or("role.eq.admin,roles.cs.{admin}");
     for (const admin of admins || []) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: admin.user_id,
         type: 'new_user',
         title: `新员工注册：${name}`,

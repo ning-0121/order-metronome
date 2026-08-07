@@ -17,6 +17,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 export interface OverdueRow {
   order_id: string;
@@ -261,7 +262,7 @@ export async function transferOrderOwner(
   }).catch(() => {});
 
   // 通知新负责人
-  await (supabase.from('notifications') as any).insert({
+  await insertNotifications({
     user_id: newOwnerUserId,
     type: 'order_transferred',
     title: `🔄 订单已转派给你 — ${(order as any).order_no}`,

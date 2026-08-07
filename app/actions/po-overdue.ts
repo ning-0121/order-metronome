@@ -10,6 +10,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 export interface PoWaiver {
   id: string;
@@ -78,7 +79,7 @@ export async function requestPoOverdueWaiver(orderId: string, reason: string): P
     const title = `📝 PO 逾期免罚申请待审 — ${label}`;
     const message = `${cname} 为 ${order.customer_name}·PO ${order.po_number || '—'}(逾期${order.po_overdue_days}天)申请免罚。理由:${reason.trim()}。需业务执行经理+财务两方通过(或老板批准)。到订单页审批。`;
     if (ids.length) {
-      await (supabase.from('notifications') as any).insert(ids.map((uid) => ({ user_id: uid, type: 'po_waiver_request', title, message, related_order_id: orderId, status: 'unread' })));
+      await insertNotifications(ids.map((uid) => ({ user_id: uid, type: 'po_waiver_request', title, message, related_order_id: orderId, status: 'unread' })));
       try { const { pushToUsers } = await import('@/lib/utils/wechat-push'); await pushToUsers(supabase, ids, title, message); } catch { /* 企微失败不阻断 */ }
     }
   } catch (e: any) { console.warn('[po-overdue] 申请通知失败不阻断:', e?.message); }
@@ -137,7 +138,7 @@ export async function reviewPoOverdueWaiver(waiverId: string, decision: 'approve
     else if (r.status === 'rejected') { title = `❌ PO 逾期免罚被驳回 — ${label}`; message = `${who}驳回了免罚申请,罚款保留。${note ? '原因:' + note : ''}`; }
     else { title = `📝 PO 免罚:${who}已${decision === 'approved' ? '通过' : '驳回'} — ${label}`; message = `${who}已${decision === 'approved' ? '通过' : '驳回'},等另一方会签。${note ? '备注:' + note : ''}`; }
     if (recipients.size) {
-      await (supabase.from('notifications') as any).insert([...recipients].map((uid) => ({ user_id: uid, type: 'po_waiver_result', title, message, related_order_id: w.order_id, status: 'unread' })));
+      await insertNotifications([...recipients].map((uid) => ({ user_id: uid, type: 'po_waiver_result', title, message, related_order_id: w.order_id, status: 'unread' })));
       try { const { pushToUsers } = await import('@/lib/utils/wechat-push'); await pushToUsers(supabase, [...recipients], title, message); } catch { /* 企微失败不阻断 */ }
     }
   } catch (e: any) { console.warn('[po-overdue] 审批通知失败不阻断:', e?.message); }

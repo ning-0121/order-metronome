@@ -33,6 +33,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 export interface ProcurementItem {
   id: string;
@@ -206,7 +207,7 @@ export async function submitSupplementRequest(
     notifyUserIds.delete(user.id);
 
     for (const userId of notifyUserIds) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: userId,
         type: 'procurement_supplement',
         title: `📦 补充采购申请待确认 — ${orderNo}`,
@@ -272,7 +273,7 @@ export async function approveSupplementRequest(itemId: string): Promise<{ error?
     const { data: procUsers } = await (supabase.from('profiles') as any)
       .select('user_id, role, roles').or('role.eq.procurement');
     for (const u of procUsers || []) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: u.user_id,
         type: 'procurement_supplement_approved',
         title: `✅ 补充采购已确认 — ${orderNo}`,

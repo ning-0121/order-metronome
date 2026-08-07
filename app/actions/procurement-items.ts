@@ -24,6 +24,7 @@ import {
 } from '@/lib/services/procurement-execution';
 import { overrideToSegments } from '@/lib/procurement/sizeOverride';
 import { getOrderLeftover } from '@/app/actions/inventory';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 const num = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
 
@@ -1616,7 +1617,7 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
               const { data: order } = await (supabase.from('orders') as any).select('order_no, internal_order_no').eq('id', orderId).maybeSingle();
               const { data: profs } = await (supabase.from('profiles') as any).select('user_id, role, roles');
               const fin = (profs || []).filter((p: any) => { const rs = p.roles?.length ? p.roles : [p.role]; return rs.includes('finance') || rs.includes('admin'); });
-              if (fin.length) await (supabase.from('notifications') as any).insert(fin.map((f: any) => ({
+              if (fin.length) await insertNotifications(fin.map((f: any) => ({
                 user_id: f.user_id, type: 'baseline_over',
                 title: `🔴 超预算待审批:${(order as any)?.internal_order_no || (order as any)?.order_no || ''}`,
                 message: `「${(bi as any).material_name || ''}${(bi as any).color ? ' · ' + (bi as any).color : ''}」${note}。需财务审批后采购才能确认。`,
@@ -1654,7 +1655,7 @@ export async function updateProcurementItemStatus(itemId: string, orderId: strin
         return rs.includes('procurement_manager') || rs.includes('admin');
       });
       if (managers.length > 0) {
-        await (supabase.from('notifications') as any).insert(managers.map((m: any) => ({
+        await insertNotifications(managers.map((m: any) => ({
           user_id: m.user_id,
           type: 'procurement_review',
           title: `⏳ 核料待复核:${(order as any)?.order_no || ''}`,

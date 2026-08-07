@@ -5,6 +5,7 @@ import { friendlyError } from '@/lib/utils/db-error';
 import { isApprovalPending } from '@/lib/domain/types';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 /**
  * 价格审批权限（基于角色，非邮箱白名单）：admin / 业务部经理
@@ -144,7 +145,7 @@ export async function approvePriceApproval(
 
   // 站内通知
   try {
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: requesterId,
       type: 'price_approval',
       title,

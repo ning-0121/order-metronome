@@ -21,6 +21,7 @@ import { pickMerchandiser } from '@/lib/domain/merchandiser';
 import { normalizeStyleFabrics, primaryFabricColumns } from '@/lib/services/style-fabrics';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import type { IncotermType, OrderType, PackagingType } from '@/lib/types';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 /**
  * ⚠️ 系统级函数：预生成订单号（用于向导预生成）
@@ -730,7 +731,7 @@ export async function createOrder(
     if (hasUnassignedMerch) {
       const pmUserId = roleUserMap['production_manager'];
       if (pmUserId) {
-        await (supabase.from('notifications') as any).insert({
+        await insertNotifications({
           user_id: pmUserId,
           type: 'unassigned_merchandiser',
           title: `📋 新订单 ${orderData.order_no} 还没有指定跟单`,
@@ -840,7 +841,7 @@ export async function createOrder(
     const { data: admins } = await (supabase.from('profiles') as any)
       .select('user_id').or("role.eq.admin,roles.cs.{admin}");
     for (const admin of admins || []) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: admin.user_id,
         type: 'new_order',
         title: `${name} 创建了新订单 ${preGeneratedOrderNo}`,
@@ -864,7 +865,7 @@ export async function createOrder(
       const title = `⚠️ PO 逾期上传·罚款¥${PO_OVERDUE_PENALTY} — ${preGeneratedOrderNo}`;
       const message = `${cname} 建单 ${customer_name}·PO ${po_number || '—'};客户下达日 ${baselineStr},逾期 ${poOverdueDays} 天才上传。已记罚款¥${PO_OVERDUE_PENALTY} + 扣绩效。业务可在订单里申请免罚(业务执行经理 + 财务两方通过、或老板批准后撤销)。`;
       if (ids.length) {
-        await (supabase.from('notifications') as any).insert(ids.map((uid) => ({ user_id: uid, type: 'po_overdue', title, message, related_order_id: orderData.id, status: 'unread' })));
+        await insertNotifications(ids.map((uid) => ({ user_id: uid, type: 'po_overdue', title, message, related_order_id: orderData.id, status: 'unread' })));
         try { const { pushToUsers } = await import('@/lib/utils/wechat-push'); await pushToUsers(supabase, ids, title, message); } catch { /* 企微失败不阻断 */ }
       }
     } catch (e: any) { console.warn('[orders] PO逾期上报失败不阻断:', e?.message); }
@@ -1145,7 +1146,7 @@ export async function createOrder(
         `碎单工艺/排产成本高,若按大货价报价恐亏损,请评估报价或与客户协商起订量。`;
 
       for (const uid of recipientIds) {
-        await (supabase.from('notifications') as any).insert({
+        await insertNotifications({
           user_id: uid,
           type: 'small_batch_warning',
           title,
@@ -2062,7 +2063,7 @@ export async function approveImportOrder(orderId: string): Promise<{ error?: str
   }
 
   // 通知创建者
-  await (supabase.from('notifications') as any).insert({
+  await insertNotifications({
     user_id: order.created_by || user.id,
     type: 'import_order_approved',
     title: `✅ 进行中订单已批准 — ${order.order_no}`,
@@ -2106,7 +2107,7 @@ export async function rejectImportOrder(orderId: string, reason?: string): Promi
     .eq('id', orderId);
 
   // 通知创建者
-  await (supabase.from('notifications') as any).insert({
+  await insertNotifications({
     user_id: order.created_by,
     type: 'import_order_rejected',
     title: `❌ 进行中订单被拒绝 — ${order.order_no}`,

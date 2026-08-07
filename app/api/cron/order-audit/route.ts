@@ -207,8 +207,10 @@ export async function POST(req: Request) {
         .select('user_id')
         .or("role.eq.admin,roles.cs.{admin}");
 
+      // 手动(浏览器登录态)触发时,session 客户端给其他 admin 插通知会被 RLS 拒 → 统一入口(2026-08-06 审计)
+      const { insertNotifications } = await import('@/lib/utils/notifications');
       for (const admin of (admins || []) as any[]) {
-        await supabase.from('notifications').insert({
+        await insertNotifications({
           user_id: admin.user_id,
           type: 'daily_audit',
           title: `📋 每日审计：${highCount} 个严重问题，${mediumCount} 个需关注`,

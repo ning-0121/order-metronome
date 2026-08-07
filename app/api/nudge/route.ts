@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { sendEmailNotification, escapeHtml } from '@/lib/utils/notifications';
+import { sendEmailNotification, escapeHtml, insertNotifications } from '@/lib/utils/notifications';
 import { pushToUsers } from '@/lib/utils/wechat-push';
 import { getCurrentUserRole, isAdmin } from '@/lib/utils/user-role';
 
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
       : `订单 ${orderData.order_no}（${orderData.customer_name}）的「${milestoneData.name}」已逾期，请尽快处理`;
 
     if (milestoneData.owner_user_id) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: milestoneData.owner_user_id,
         type: 'nudge',
         title: `${senderName} 催你处理「${milestoneData.name}」`,
@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
         // 给 admin 写入应用内通知
         for (const a of adminList) {
           if (a.user_id === user.id) continue; // 不通知发起人自己
-          await (supabase.from('notifications') as any).insert({
+          await insertNotifications({
             user_id: a.user_id,
             type: 'cross_role_nudge',
             title: `[抄送] ${senderName} 催 ${milestoneData.name}`,

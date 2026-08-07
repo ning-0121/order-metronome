@@ -191,7 +191,16 @@ export async function pushToUsers(
 ): Promise<number> {
   if (userIds.length === 0) return 0;
 
-  const { data: profiles } = await supabase
+  // 读收件人的推送凭据必须用 service-role(2026-08-06 审计):
+  // 调用方传进来的常是**申请人的 session 客户端**,RLS 下读不到别人的
+  // wechat_push_key/wecom_userid → 列表为空 → 推送静默变零。与站内通知同病。
+  // 传入的 supabase 仅作兜底(service key 缺失的极端环境)。
+  let reader = supabase;
+  try {
+    const { createServiceRoleClient } = await import('../supabase/server');
+    reader = createServiceRoleClient();
+  } catch { /* 无 service key 时退回调用方客户端 */ }
+  const { data: profiles } = await reader
     .from('profiles')
     .select('user_id, email, wechat_push_key, wecom_userid')
     .in('user_id', userIds);

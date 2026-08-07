@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { sendEmailNotification, MANAGER_CC_EMAILS } from '@/lib/utils/notifications';
+import { sendEmailNotification, MANAGER_CC_EMAILS, insertNotifications } from '@/lib/utils/notifications';
 import { isDoneStatus } from '@/lib/domain/types';
 import { differenceInHours } from 'date-fns';
 import { shouldSendEmail } from '@/lib/domain/notification-policy';
@@ -241,9 +241,7 @@ async function checkAndSendNotification(
   }
 
   // Create notification record
-  const { error: notifError } = await supabase
-    .from('notifications')
-    .insert({
+  const { error: notifError } = await insertNotifications({
       milestone_id: milestoneId,
       order_id: orderId,
       kind,
@@ -484,7 +482,7 @@ export async function sendBlockedNotification(
   // Create notifications + 写应用内 notifications 表 + WeChat push
   const { pushToUsers } = await import('@/lib/utils/wechat-push');
   for (const r of toNotify) {
-    await supabase.from('notifications').insert({
+    await insertNotifications({
       milestone_id: milestoneId,
       order_id: orderId,
       kind: 'blocked',
@@ -593,7 +591,7 @@ export async function sendDeliveryDelayAlert(
   if (existing) return { data: { already_sent: true } };
 
   // 写入通知记录
-  await supabase.from('notifications').insert({
+  await insertNotifications({
     milestone_id: milestoneId,
     order_id: orderId,
     kind,

@@ -16,6 +16,7 @@ import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { milestoneOwnerRoleMatches } from '@/lib/domain/milestonePerm';
 import { isBatchAwareStep } from '@/lib/domain/batchAwareSteps';
 import { isInspectionStep, isInspectionWaived, roleAllowed, CAN_RELEASE_WITHOUT_INSPECTION } from '@/lib/domain/inspectionWaiver';
+import { insertNotifications } from '@/lib/utils/notifications';
 // TODO(Sprint-1): merchGroup (~L180) 应迁移到 ROLE_GROUPS.EXECUTION，但 EXECUTION 含 production_manager
 //                 而原 merchGroup 不含，直接迁移会改变权限（属 P0 候选 bug），等 P0 评估后再动
 
@@ -877,7 +878,7 @@ export async function markMilestoneDone(
         const title = `⏰ 节点逾期 ${overdueDays} 天完成 — ${orderForNotif.order_no}`;
         const message = `${orderForNotif.customer_name} 订单的「${(milestone as any).name}」已完成，但比计划晚 ${overdueDays} 天。会进入订单评分。`;
         for (const userId of targets) {
-          await (supabase.from('notifications') as any).insert({
+          await insertNotifications({
             user_id: userId,
             type: 'milestone_overdue_done',
             title,
@@ -1004,7 +1005,7 @@ export async function markMilestoneDone(
             .select('user_id')
             .or('role.eq.admin,roles.cs.{admin}');
           for (const admin of (adminProfiles || [])) {
-            await (supabase.from('notifications') as any).insert({
+            await insertNotifications({
               user_id: admin.user_id,
               type: 'delivery_risk',
               title: `🚨 交期风险预警：${(orderData as any).order_no}`,
@@ -1356,7 +1357,7 @@ async function notifyFinanceBudgetEntry(
     `录入/确认预算（成本、售价、面料预算），系统会自动算出利润。`;
 
   for (const uid of recipientIds) {
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: uid,
       type: 'finance_budget_entry',
       title,

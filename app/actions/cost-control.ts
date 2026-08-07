@@ -20,6 +20,7 @@ import {
   type CostSheetRow,
 } from '@/lib/finance/costSheetParser';
 import { hasRoleInGroup } from '@/lib/domain/roles';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 /** 价格红线：仅可见财务的角色能读成本数据 */
 async function assertCanSeeFinancials(supabase: any, userId: string): Promise<boolean> {
@@ -424,7 +425,7 @@ export async function sendCostAlert(
 
   // 发通知
   for (const userId of recipientIds) {
-    await (supabase.from('notifications') as any).insert({
+    await insertNotifications({
       user_id: userId,
       type: 'cost_alert',
       title,

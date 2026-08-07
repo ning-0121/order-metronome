@@ -10,6 +10,7 @@ import {
   type AmendmentSideEffect,
 } from '@/lib/domain/amendment-policy';
 import { recalcOrderMilestones } from './recalc-milestones';
+import { insertNotifications } from '@/lib/utils/notifications';
 
 /** 加载订单已完成的 step_key 集合（用于变更窗口判定） */
 async function loadDoneStepKeys(supabase: any, orderId: string): Promise<Set<string>> {
@@ -350,7 +351,7 @@ export async function approveOrderAmendment(
   try {
     const requesterId = (amendment as any).requested_by;
     if (requesterId && requesterId !== user!.id) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: requesterId,
         type: approved ? 'amendment_approved' : 'amendment_rejected',
         title: approved ? '✅ 你的改单已批准' : '❌ 你的改单被驳回',
@@ -813,7 +814,7 @@ async function executeSideEffects(
       return rs.includes(role);
     });
     for (const t of targets) {
-      await (supabase.from('notifications') as any).insert({
+      await insertNotifications({
         user_id: t.user_id,
         type: 'order_amendment',
         title: `订单变更通知（${label}）`,
