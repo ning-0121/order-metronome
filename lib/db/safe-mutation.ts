@@ -162,11 +162,12 @@ export async function safeCriticalMutation<T = any>(
       const { error: logErr } = await client.from('order_logs').insert({
         order_id: args.auditOrderId,
         action: `critical_mutation:${table}`,
-        operator_id: ctx.actor === 'system' ? null : ctx.actor,
-        detail: JSON.stringify({
+        actor_user_id: ctx.actor === 'system' ? null : ctx.actor,
+        note: ctx.reason.slice(0, 200),
+        payload: {
           reason: ctx.reason, risk: ctx.riskLevel, decision_id: ctx.decisionId || null,
           before: pickFields(before, snapFields), after: pickFields(after, snapFields),
-        }).slice(0, 2000),
+        },
       }).select('id');
       if (logErr) console.error(`[safeCriticalMutation] 审计写入失败(主写已验证,不回滚): ${logErr.message}`);
     } catch (e: any) {
