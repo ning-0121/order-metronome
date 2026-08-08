@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { captureCeoInput, parseCapture } from '@/app/actions/exec-capture';
-import { prepareDelegationDrafts, getCeoDelegations, getMyDelegations, submitDelegation, verifyDelegation } from '@/app/actions/exec-delegation';
+import { prepareDelegationDrafts, getCeoDelegations, getMyDelegations, submitDelegation, verifyDelegation, abandonCapture } from '@/app/actions/exec-delegation';
 import { DelegationConfirmCard, type DraftItem } from './DelegationConfirmCard';
 
 export function ExecutiveConsole({ isCeo }: { isCeo: boolean }) {
@@ -56,7 +56,10 @@ export function ExecutiveConsole({ isCeo }: { isCeo: boolean }) {
             {msg && <span className="text-sm text-gray-500">{msg}</span>}
           </div>
           {drafts.map((d) => (
-            <DelegationConfirmCard key={d.id} draft={d} onDone={() => { setDrafts((p) => p.filter((x) => x.id !== d.id)); refresh(); }} />
+            <DelegationConfirmCard key={d.id} draft={d} onDone={(confirmed) => {
+              if (!confirmed) void abandonCapture(d.captureId);
+              setDrafts((p) => p.filter((x) => x.id !== d.id)); refresh();
+            }} />
           ))}
         </section>
       )}

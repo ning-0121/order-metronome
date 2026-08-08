@@ -45,6 +45,7 @@ export interface ConfirmInput {
   counterpartyId?: string | null;
   why?: string | null;
   priority?: number;
+  correctionCount?: number;   // TS1 telemetry:CEO 在确认卡上改了几个字段
 }
 
 /** S3:CEO 确认 → 建委托(真相源)。deadline 必须已是绝对时间;owner 必须真实存在。 */
@@ -110,8 +111,27 @@ export async function confirmDelegation(input: ConfirmInput): Promise<{ delegati
     });
   } catch (e: any) { console.error('[confirmDelegation] 通知失败(不阻断):', e?.message); }
 
+  // TS1 dogfood telemetry:确认 → 回填 outcome + CEO 修改字段数
+  try {
+    const { data: ev } = await (svc.from('exec_validation_events') as any).select('id').eq('capture_id', input.captureId).maybeSingle();
+    if (ev) await (svc.from('exec_validation_events') as any)
+      .update({ outcome: 'confirmed', ceo_correction_count: input.correctionCount ?? null }).eq('id', (ev as any).id);
+  } catch (e: any) { console.error('[telemetry] confirm 记录失败(不阻断):', e?.message); }
+
   revalidatePath('/ceo');
   return { delegationId };
+}
+
+/** TS1:CEO 放弃某次捕获(确认卡点关闭/只记录)→ 记 abandoned */
+export async function abandonCapture(captureId: string): Promise<{ ok?: boolean }> {
+  const auth = await me();
+  if ('error' in auth || !auth.isAdmin) return { ok: false };
+  const svc = createServiceRoleClient();
+  try {
+    const { data: ev } = await (svc.from('exec_validation_events') as any).select('id, outcome').eq('capture_id', captureId).maybeSingle();
+    if (ev && !(ev as any).outcome) await (svc.from('exec_validation_events') as any).update({ outcome: 'abandoned' }).eq('id', (ev as any).id);
+  } catch { /* 不阻断 */ }
+  return { ok: true };
 }
 
 /** S4a:员工提交(不信自报 —— 只记提交,验证另走)。 */

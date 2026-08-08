@@ -29,7 +29,7 @@ export interface DraftItem {
   counterpartyResolved?: boolean;
 }
 
-export function DelegationConfirmCard({ draft, onDone }: { draft: DraftItem; onDone: () => void }) {
+export function DelegationConfirmCard({ draft, onDone }: { draft: DraftItem; onDone: (confirmed: boolean) => void }) {
   const [ownerId, setOwnerId] = useState(draft.ownerResolved?.user_id || '');
   const [deadline, setDeadline] = useState(draft.deadlineAbsolute || '');   // datetime-local
   const [busy, setBusy] = useState(false);
@@ -47,6 +47,10 @@ export function DelegationConfirmCard({ draft, onDone }: { draft: DraftItem; onD
     if (!deadline) { setErr('请确认截止时间(必须是明确的日期时间)'); return; }
     setBusy(true);
     const absIso = new Date(deadline).toISOString();
+    // TS1 telemetry:CEO 相对 AI 草案改了几处(owner 未被 AI 唯一命中而手选 / deadline 必手填算 1)
+    let corrections = 0;
+    if (!draft.ownerResolved) corrections++;              // AI 没唯一确定 owner,CEO 手选
+    if (!draft.deadlineAbsolute) corrections++;           // AI 未给绝对时间,CEO 手填
     const res = await confirmDelegation({
       captureId: draft.captureId, captureItemId: draft.id,
       title: draft.title, instruction: draft.instruction,
@@ -55,10 +59,11 @@ export function DelegationConfirmCard({ draft, onDone }: { draft: DraftItem; onD
       acceptanceCriteria: draft.acceptanceCriteria || null, constraints: draft.constraints || null,
       counterpartyName: draft.counterpartyName || null,
       counterpartyId: null,   // 修正③:不自动建客户;tentative 交后端
+      correctionCount: corrections,
     });
     setBusy(false);
     if (res.error) { setErr(res.error); return; }
-    onDone();
+    onDone(true);
   }
 
   const ownerOpts = draft.ownerCandidates?.length ? draft.ownerCandidates : (draft.ownerResolved ? [draft.ownerResolved] : []);
@@ -105,7 +110,7 @@ export function DelegationConfirmCard({ draft, onDone }: { draft: DraftItem; onD
           className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700 disabled:opacity-50">
           {busy ? '分配中…' : '确认并分配'}
         </button>
-        <button onClick={onDone} disabled={busy} className="rounded-lg border px-4 py-2 text-sm text-gray-600">只记录/关闭</button>
+        <button onClick={() => onDone(false)} disabled={busy} className="rounded-lg border px-4 py-2 text-sm text-gray-600">只记录/关闭</button>
       </div>
     </div>
   );

@@ -77,6 +77,7 @@ export async function parseCapture(captureId: string): Promise<{ items?: Capture
 
   await (svc.from('executive_captures') as any).update({ processing_status: 'parsing' }).eq('id', captureId);
 
+  const parseStart = Date.now();
   let items: any[] = [];
   try {
     const { qimoAI } = await import('@/lib/ai/runtime');
@@ -104,6 +105,16 @@ export async function parseCapture(captureId: string): Promise<{ items?: Capture
     if (!ins.ok) return { error: `草案落库失败(${ins.status}):${ins.error}` };
   }
   await (svc.from('executive_captures') as any).update({ processing_status: 'parsed' }).eq('id', captureId);
+
+  // TS1 dogfood telemetry:只记延迟+抽到的字段结构(非原文),幂等 upsert 到该 capture
+  try {
+    const fields = items.map((it) => ({ item_type: it.item_type, keys: Object.keys(it).filter((k) => k !== 'confidence') }));
+    const { data: ev } = await (svc.from('exec_validation_events') as any).select('id').eq('capture_id', captureId).maybeSingle();
+    if (!ev) await (svc.from('exec_validation_events') as any).insert({
+      capture_id: captureId, extraction_latency_ms: Date.now() - parseStart, extracted_fields: fields, retry_count: 0,
+    });
+    else await (svc.from('exec_validation_events') as any).update({ retry_count: ((ev as any).retry_count || 0) + 1, extraction_latency_ms: Date.now() - parseStart, extracted_fields: fields }).eq('id', (ev as any).id);
+  } catch (e: any) { console.error('[telemetry] parse 记录失败(不阻断):', e?.message); }
 
   const { data: saved } = await (svc.from('executive_capture_items') as any)
     .select('id, item_type, structured_payload, confidence, confirmation_status').eq('capture_id', captureId);

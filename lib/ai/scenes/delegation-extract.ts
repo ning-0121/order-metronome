@@ -20,8 +20,8 @@ export interface ExtractedItem {
   owner_hint?: string;          // 原话里的负责人名(如"欧璐")
   action?: string;              // 要做什么
   deadline_text?: string;       // 原文时间短语(如"明天下午前"),后端解析
-  person?: string;              // 提到的人(如"Gregory")
-  customer_hint?: string;       // 提到的客户/公司
+  person?: string;              // 自然人姓名(如"Gregory")—— 只放人
+  customer_hint?: string;       // 公司/组织名 —— 只放公司,人名不进这里,判断不了就留空
   tentative?: boolean;          // "可能/也许/大概" → true
   constraint_type?: string;     // 如 min_margin
   constraint_value?: number;    // 如 15
@@ -91,7 +91,11 @@ export const DELEGATION_EXTRACT_SYSTEM = `你是绮陌 CEO 的委托理解助手
 1. 区分【事实】与【可能】:出现"可能/也许/大概/在考虑"等 → tentative=true,绝不写成已确认。
 2. owner_hint 只填 CEO 原话里明确提到的负责人名字;没提到就不填,不要猜、不要补默认人。
 3. deadline_text 只保留原文时间短语(如"明天下午前""周二"),**不要自己换算成具体日期**。
-4. 提到的客户/人只填 person / customer_hint 名字,不判断是否已在系统里。
+4. 严格区分自然人与公司:
+   - person = 自然人姓名(如 Gregory、欧璐、王海莲);
+   - customer_hint = 公司/组织名(如"绮陌""RAG"这类品牌/客户公司);
+   - 无明确公司名时 customer_hint **留空**,**绝不用联系人名字去猜公司**(如只说"Gregory"就不要把 customer_hint 也填 Gregory);
+   - 都不判断是否已在系统里,消歧交后端。
 5. 约束类(如"利润低于15%不要发")→ item_type=constraint, constraint_type=min_margin,
    constraint_value=15, restrict=send。
 6. 每条给 confidence(0-1),拿不准就调低,不要编造字段。
