@@ -80,7 +80,7 @@ export function validateDelegationExtraction(value: unknown): DelegationExtracti
 }
 
 export const delegationExtractValidator: SchemaValidator<DelegationExtraction> = {
-  name: 'exec.delegation.extract',
+  name: 'exec_delegation_extract_v1',   // Anthropic 工具名不许含点号(必须 ^[a-zA-Z0-9_-]+$)
   jsonSchema: delegationExtractJsonSchema,
   parse: validateDelegationExtraction,
 };
