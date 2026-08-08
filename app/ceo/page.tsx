@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { fetchAllPages } from '@/lib/db/truth-query';
 import { redirect } from 'next/navigation';
 import { formatDate, isOverdue } from '@/lib/utils/date';
 import { isCustomerShipHoldFromOrder, isCustomerHoldStale } from '@/lib/domain/customerShipHold';
@@ -144,9 +145,12 @@ export default async function CEOWarRoom() {
   const riskGreen = ordersWithMilestones.filter(o => orderStatusMap.get(o.id)?.color === 'GREEN');
 
   // 所有超期/卡住里程碑
-  const { data: allMilestonesWithOrders } = await (supabase.from('milestones') as any)
-    .select(`id, order_id, name, step_key, is_critical, owner_role, owner_user_id, due_at, status, orders!inner(id, order_no, customer_name, internal_order_no)`)
-    .order('due_at', { ascending: true });
+  // R1-E:原裸 select 按 due_at 升序截断在 1000 行 → 2026-04-14 之后到期的节点全部隐身,
+  // CEO 每天看到的"超期/阻塞"全是 4 个月前的僵尸,最新风险系统性缺失(体检 P0)。分页取全量。
+  const { rows: allMilestonesWithOrders } = await fetchAllPages((from, to) =>
+    (supabase.from('milestones') as any)
+      .select(`id, order_id, name, step_key, is_critical, owner_role, owner_user_id, due_at, status, orders!inner(id, order_no, customer_name, internal_order_no)`)
+      .order('due_at', { ascending: true }).range(from, to));
 
   const overdueMilestones = (allMilestonesWithOrders || [])
     .filter((m: any) =>

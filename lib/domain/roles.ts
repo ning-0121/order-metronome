@@ -250,3 +250,16 @@ export function hasRoleInGroup(userRoles: string[] | null | undefined, group: Ro
 export function isAdminRole(userRoles: string[] | null | undefined): boolean {
   return hasRoleInGroup(userRoles, 'ALL_ADMIN');
 }
+
+
+/**
+ * 角色的唯一读取口径 —— R1-E(2026-08-09)。
+ * 系统同时存在 profiles.role(单列,旧)与 profiles.roles[](多角色,新):
+ * 权限判断**只许**经这里归一,新代码禁止直接 `profile.role === 'x'`(lint:role 盯防)。
+ * 规则与全站既有惯例一致:roles[] 非空为准,否则回退单列。
+ */
+export function canonicalRoles(profile: { role?: string | null; roles?: string[] | null } | null | undefined): string[] {
+  if (!profile) return [];
+  if (Array.isArray(profile.roles) && profile.roles.length > 0) return profile.roles.filter(Boolean) as string[];
+  return profile.role ? [profile.role] : [];
+}

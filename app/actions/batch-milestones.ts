@@ -183,6 +183,7 @@ export async function markBatchMilestoneStep(
         .eq('id', mainMilestone.id);
       autoPromoted = true;
 
+      void import('@/lib/services/daily-task-cleanup').then(({ cleanMilestoneDailyTasks }) => cleanMilestoneDailyTasks(mainMilestone.id));
       await writeAuditEvent({
         eventType: 'auto_promote_from_batches', level: 'A1', riskLevel: 'delivery',
         actor: { actorType: 'system', actorId: 'batch-milestones', onBehalfOfUserId: user.id },

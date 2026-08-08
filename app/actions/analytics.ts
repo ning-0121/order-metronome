@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { fetchAllPages } from '@/lib/db/truth-query';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { isActiveStatus, isBlockedStatus, isDoneStatus } from '@/lib/domain/types';
 import { KICKOFF_KEYS } from '@/lib/production/stage';
@@ -83,10 +84,12 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   if (totalOrdersErr) throw new Error(`加载订单数失败: ${totalOrdersErr.message}`);
 
   // 所有生产订单的里程碑（orders!inner + order_purpose='production' 过滤；带order_id用于按订单聚合）
-  const { data: allMilestones, error: msErr } = await (supabase.from('milestones') as any)
-    .select('id, order_id, status, due_at, actual_at, updated_at, step_key, orders!inner(order_purpose)')
-    .eq('orders.order_purpose', 'production');
-  if (msErr) throw new Error(`加载里程碑失败: ${msErr.message}`);
+  // R1-E:原裸 select 截断在 1000/3793 条 → 完成率虚高约 4pp、准时率失真(体检 P0)。分页取全量。
+  const { rows: allMilestones, error: msErr } = await fetchAllPages((from, to) =>
+    (supabase.from('milestones') as any)
+      .select('id, order_id, status, due_at, actual_at, updated_at, step_key, orders!inner(order_purpose)')
+      .eq('orders.order_purpose', 'production').range(from, to));
+  if (msErr) throw new Error(`加载里程碑失败: ${msErr}`);
   const milestones = allMilestones || [];
   const totalMilestones = milestones.length;
   const completedMilestones = milestones.filter(m => _isDone((m as any).status)).length;
@@ -175,15 +178,18 @@ export async function getRoleEfficiency(): Promise<RoleEfficiency[]> {
   const { isBlockedStatus } = await import('@/lib/domain/types');
 
   // 加载所有里程碑（含 order_id 用于按订单聚合）
-  const { data: roleMilestones, error: msErr } = await (supabase.from('milestones') as any)
-    .select('id, order_id, status, due_at, actual_at, updated_at, owner_role, name, orders!inner(order_purpose)')
-    .eq('orders.order_purpose', 'production');
-  if (msErr) throw new Error(`加载里程碑失败: ${msErr.message}`);
+  // R1-E:四角色评分原来只吃到 26% 样本(1000/3793,物理序偏老数据)→ 排名不可信(体检 P0)。分页取全量。
+  const { rows: roleMilestones, error: msErr } = await fetchAllPages((from, to) =>
+    (supabase.from('milestones') as any)
+      .select('id, order_id, status, due_at, actual_at, updated_at, owner_role, name, orders!inner(order_purpose)')
+      .eq('orders.order_purpose', 'production').range(from, to));
+  if (msErr) throw new Error(`加载里程碑失败: ${msErr}`);
 
   // 加载所有延期申请（用于扣分）
-  const { data: allDelays, error: delayErr } = await (supabase.from('delay_requests') as any)
-    .select('milestone_id, status').in('status', ['pending', 'approved']);
-  if (delayErr) throw new Error(`加载延期申请失败: ${delayErr.message}`);
+  const { rows: allDelays, error: delayErr } = await fetchAllPages((from, to) =>
+    (supabase.from('delay_requests') as any)
+      .select('milestone_id, status').in('status', ['pending', 'approved']).range(from, to));
+  if (delayErr) throw new Error(`加载延期申请失败: ${delayErr}`);
 
   // 加载阻塞日志（实际有过被阻塞历史的节点）
   const { data: blockLogs, error: blockErr } = await (supabase.from('milestone_logs') as any)

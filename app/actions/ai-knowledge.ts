@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { fetchAllPages } from '@/lib/db/truth-query';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import Anthropic from '@anthropic-ai/sdk';
 import type { KnowledgeType, KnowledgeSource, KnowledgeEntry, KnowledgeStats, CompanyProfile, CollectionLog } from '@/lib/domain/ai-knowledge';
@@ -407,9 +408,11 @@ export async function getKnowledgeStats(): Promise<{ data?: KnowledgeStats; erro
     .eq('status', 'active');
 
   // 按类型统计
-  const { data: allEntries } = await (supabase.from('ai_knowledge_base') as any)
-    .select('knowledge_type, source_type, industry_tag')
-    .eq('status', 'active');
+  // R1-E:分布只统计 1000/1385 条,28% 最新知识不计入(体检 P2)。分页取全量。
+  const { rows: allEntries } = await fetchAllPages((from, to) =>
+    (supabase.from('ai_knowledge_base') as any)
+      .select('knowledge_type, source_type, industry_tag')
+      .eq('status', 'active').range(from, to));
 
   const byType: Record<string, number> = {};
   const bySource: Record<string, number> = {};

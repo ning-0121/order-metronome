@@ -898,21 +898,8 @@ export async function markMilestoneDone(
   // 用户事后完成（含补登）后，my-today 还能看到几天前的"逾期 5 天"卡片。
   // status enum 是 pending/done/snoozed/dismissed，用 done 标记完成。
   // fire-and-forget，失败不影响主链路。
-  // R1-C:必须 service-role —— 完成人≠被派人时(经理代完成/补登/改派),session 被 RLS
-  // 滤成 0 行且无 error,「逾期 5 天」僵尸卡永远留在被派人的 my-today(体检实锤 300+ 张)。
-  // 0 行合法(节点可能本来就没生成待办);fire-and-forget 但失败要有痕。
-  void (async () => {
-    try {
-      const svcClean = createServiceRoleClient();
-      const { error } = await (svcClean.from('daily_tasks') as any)
-        .update({ status: 'done', completed_at: new Date().toISOString() })
-        .eq('related_milestone_id', milestoneId)
-        .in('task_type', ['milestone_overdue', 'milestone_due_today'])
-        .eq('status', 'pending')
-        .select('id');
-      if (error) console.error('[markMilestoneDone] clean daily_tasks failed:', error.message);
-    } catch (e: any) { console.error('[markMilestoneDone] clean daily_tasks exception:', e?.message); }
-  })();
+  // R1-E:清理逻辑统一到 lib/services/daily-task-cleanup(三条完成路径共用)
+  void import('@/lib/services/daily-task-cleanup').then(({ cleanMilestoneDailyTasks }) => cleanMilestoneDailyTasks(milestoneId));
 
   const updatedMilestone = directUpdate;
   const milestoneData = milestone as any;

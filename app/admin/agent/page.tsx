@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { fetchAllPages } from '@/lib/db/truth-query';
 import { redirect } from 'next/navigation';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { formatDate } from '@/lib/utils/date';
@@ -38,8 +39,9 @@ export default async function AgentDashboardPage() {
   const execRate = (executed + dismissed) > 0 ? Math.round((executed / (executed + dismissed)) * 100) : 0;
 
   // 按类型统计
-  const { data: byType } = await (supabase.from('agent_actions') as any)
-    .select('action_type, status');
+  // R1-E:头部 count=2927 而下方分布只合计 1000 自相矛盾(体检 P2)。分页取全量。
+  const { rows: byType } = await fetchAllPages((from, to) =>
+    (supabase.from('agent_actions') as any).select('action_type, status').range(from, to));
   const typeStats: Record<string, { total: number; executed: number; dismissed: number }> = {};
   for (const a of byType || []) {
     if (!typeStats[a.action_type]) typeStats[a.action_type] = { total: 0, executed: 0, dismissed: 0 };

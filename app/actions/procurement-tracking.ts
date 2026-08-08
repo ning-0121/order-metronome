@@ -68,8 +68,18 @@ export async function getProcurementTrackingRows(orderId: string): Promise<{
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
 
+  // R1-E server-side 投影(体检 P2-9):采购金额是红线,归 CAN_SEE_PROCUREMENT_FLOOR 管。
+  // 原来 select('*') 把 amount/offline_paid 发给任何登录角色(生产/QC/物流打开采购
+  // 跟踪 tab 即见每笔线下采购花了多少钱)——UI 不显示不算保护,必须在 server 层剥。
+  const { hasRoleInGroup } = await import('@/lib/domain/roles');
+  const { getUserRoles } = await import('@/lib/utils/user-role');
+  const roles = await getUserRoles(supabase, user.id);
+  const canSeeAmounts = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
+  const SAFE_COLS = 'id, order_id, category, item_name, supplier, quantity, order_date, expected_arrival, actual_arrival, status, notes, updated_by, updated_by_name, created_at, updated_at, is_supplement, supplement_reason, approved_by_name, approved_at';
+  const COLS = canSeeAmounts ? SAFE_COLS + ', amount, offline_paid' : SAFE_COLS;
+
   const { data, error } = await (supabase.from('procurement_tracking') as any)
-    .select('*')
+    .select(COLS)
     .eq('order_id', orderId)
     .order('created_at', { ascending: true });
 
