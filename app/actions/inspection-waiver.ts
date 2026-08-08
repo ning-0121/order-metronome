@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 import {
@@ -55,14 +56,14 @@ export async function setInspectionWaiver(orderId: string, waived: boolean, reas
   if (!wWv.ok) return { error: `免验标记未生效(${wWv.status}):${wWv.error}` };
 
   try {
-    await (supabase.from('order_logs') as any).insert({
-      order_id: orderId,
-      actor_user_id: user.id,
-      action: 'inspection_waiver',
+    await writeAuditEvent({
+      eventType: 'inspection_waiver', level: 'A1', riskLevel: 'delivery',
+      actor: { actorType: 'user', actorId: user.id },
+      entity: { entityType: 'order', entityId: orderId, orderId },
+      commandName: 'setInspectionWaiver',
       note: waived
         ? `标记「${INSPECTION_WAIVED_TAG}」:${reason.trim()}`
         : `取消「${INSPECTION_WAIVED_TAG}」(改为需正常验货报告)`,
-      created_at: new Date().toISOString(),
     });
   } catch { /* 审计日志失败不阻断主流程 */ }
 

@@ -12,6 +12,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { revalidatePath } from 'next/cache';
 import {
   requiredPartiesFor, canConfirmParty, pendingParties,
@@ -190,12 +191,13 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
   }
 
   // 审计日志
-  await (supabase.from('milestone_logs') as any).insert({
-    milestone_id: milestoneId,
-    order_id: (ms as any).order_id,
-    action: 'party_confirmed',
+  await writeAuditEvent({
+    eventType: 'party_confirmed', level: 'A1', riskLevel: 'delivery',
+    actor: { actorType: 'user', actorId: auth.userId },
+    entity: { entityType: 'milestone', entityId: milestoneId, orderId: (ms as any).order_id },
+    commandName: 'confirmMilestoneParty',
     note: `「${party.label}」确认${proxyTag}${note?.trim() ? ':' + note.trim() : ''}`,
-    payload: { party_key: partyKey, by: auth.userId, admin_proxy: isAdminProxy, biz_owner: bizOwner && !roleMatched },
+    metadata: { party_key: partyKey, admin_proxy: isAdminProxy, biz_owner: bizOwner && !roleMatched },
   });
 
   // 全齐了吗?
@@ -221,12 +223,13 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
     .update({ status: 'done', completed_at: now, actual_at: now, updated_at: now })
     .eq('id', milestoneId);
   if (!doneErr) {
-    await (supabase.from('milestone_logs') as any).insert({
-      milestone_id: milestoneId,
-      order_id: (ms as any).order_id,
-      action: 'status_transition',
+    await writeAuditEvent({
+      eventType: 'status_transition', level: 'A1', riskLevel: 'delivery',
+      actor: { actorType: 'system', actorId: 'milestone-confirmations' },
+      entity: { entityType: 'milestone', entityId: milestoneId, orderId: (ms as any).order_id },
+      commandName: 'confirmMilestoneParty.autoComplete',
       note: `多方确认全部完成 → 系统自动完成「${(ms as any).name || stepKey}」`,
-      payload: { auto: true, source: 'milestone_confirmations.all_confirmed' },
+      metadata: { auto: true, source: 'milestone_confirmations.all_confirmed' },
     });
     // fire-and-forget:交付置信度重算(内部已 catch 所有错)
     void (async () => {

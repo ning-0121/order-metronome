@@ -79,19 +79,19 @@ async function logMilestoneAction(
   note?: string,
   payload?: any
 ) {
+  // R1-D:内部改走统一审计层 writeAuditEvent(service-role + 断言 + 失败分级告警)。
+  // 调用点签名不变,覆盖面一次收口 —— 96 条审计丢失那类事故的结构性了断。
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  // 失败不阻断主流程,但**必须冒出来**(同 delays.ts 助手,2026-07-30 payload 缺列事故)。
-  const { error } = await supabase.from('milestone_logs').insert({
-    milestone_id: milestoneId,
-    order_id: orderId,
-    actor_user_id: user.id,
-    action,
-    note: note || null,
-    payload: payload || null,
+  const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
+  await writeAuditEvent({
+    eventType: action,
+    actor: user
+      ? { actorType: 'user', actorId: user.id }
+      : { actorType: 'system', actorId: 'unknown-session' },
+    entity: { entityType: 'milestone', entityId: milestoneId, orderId },
+    note, level: 'A1',
+    metadata: payload || undefined,
   });
-  if (error) console.error(`[milestones] milestone_logs 写入失败 action=${action} milestone=${milestoneId}:`, error.message);
 }
 
 export async function getMilestonesByOrder(orderId: string) {

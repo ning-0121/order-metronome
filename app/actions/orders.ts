@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { revalidatePath } from 'next/cache';
 // 动态导入：避免模块初始化顺序问题（修复 Cannot access '_' before initialization）
 // import { MILESTONE_TEMPLATE_V1, getApplicableMilestones } from '@/lib/milestoneTemplate';
@@ -2160,10 +2161,11 @@ export async function forceCompleteOrderAction(orderId: string): Promise<{ error
   }
 
   // 日志
-  await (supabase.from('milestone_logs') as any).insert({
-    order_id: orderId,
-    actor_user_id: user.id,
-    action: 'force_complete',
+  await writeAuditEvent({
+    eventType: 'force_complete', level: 'A2', riskLevel: 'delivery',
+    actor: { actorType: 'user', actorId: user.id },
+    entity: { entityType: 'milestone', entityId: null, orderId },
+    commandName: 'forceCompleteOrderAction',
     note: `CEO 强制标记订单 ${order.order_no} 为已完成`,
   });
 

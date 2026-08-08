@@ -105,6 +105,9 @@ export interface CriticalContext {
 export interface CriticalMutationResult<T = any> extends MutationResult<T> {
   before?: Record<string, any> | null;
   after?: Record<string, any> | null;
+  /** A2(money)审计失败时 false:主写已验证但证据缺失 —— 调用方必须按
+   *  completed_unverified 处理(不得宣称完全成功;admin 已被 writeAuditEvent 告警) */
+  auditVerified?: boolean;
 }
 
 /**
@@ -156,26 +159,26 @@ export async function safeCriticalMutation<T = any>(
     }
   }
 
-  // ④ 审计留痕(现有能力;失败不阻断已验证主写,但必须留下失败痕迹)
+  // ④ 审计留痕 → 统一层 writeAuditEvent(R1-D)。分级:money=A2(强制,失败则整体
+  //    降级为 completed_unverified 语义,由 auditVerified=false 传达)/其余 A1。
+  let auditVerified = true;
   if (args.auditOrderId) {
-    try {
-      const { error: logErr } = await client.from('order_logs').insert({
-        order_id: args.auditOrderId,
-        action: `critical_mutation:${table}`,
-        actor_user_id: ctx.actor === 'system' ? null : ctx.actor,
-        note: ctx.reason.slice(0, 200),
-        payload: {
-          reason: ctx.reason, risk: ctx.riskLevel, decision_id: ctx.decisionId || null,
-          before: pickFields(before, snapFields), after: pickFields(after, snapFields),
-        },
-      }).select('id');
-      if (logErr) console.error(`[safeCriticalMutation] 审计写入失败(主写已验证,不回滚): ${logErr.message}`);
-    } catch (e: any) {
-      console.error(`[safeCriticalMutation] 审计异常: ${e?.message}`);
-    }
+    const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
+    const ar = await writeAuditEvent({
+      eventType: `critical_mutation:${table}`,
+      actor: ctx.actor === 'system'
+        ? { actorType: 'system', actorId: 'system' }
+        : { actorType: 'user', actorId: ctx.actor },
+      entity: { entityType: 'order', entityId: args.auditOrderId, orderId: args.auditOrderId },
+      commandName: `safeCriticalMutation:${table}`,
+      reason: ctx.reason, decisionId: ctx.decisionId ?? null, riskLevel: ctx.riskLevel,
+      beforeState: pickFields(before, snapFields), afterState: pickFields(after, snapFields),
+      level: ctx.riskLevel === 'money' ? 'A2' : 'A1',
+    });
+    if (!ar.ok && ar.mandatoryFailure) auditVerified = false;
   }
 
-  return { ...res, before, after };
+  return { ...res, before, after, auditVerified };
 }
 
 function pickFields(row: Record<string, any> | null, fields: string[]): Record<string, any> | null {

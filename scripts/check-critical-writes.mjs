@@ -38,8 +38,7 @@ for (const f of files) {
     const afterOp = windowEnd.slice(windowEnd.indexOf('.' + m[2] + '('));
     const stmt = afterOp.slice(0, afterOp.indexOf(';') === -1 ? 400 : afterOp.indexOf(';'));
     if (/\.select\(/.test(stmt)) continue;
-    const line = src.slice(0, m.index).split('\n').length;
-    violations.push(`${f}:${line} ${m[1]}.${m[2]}`);
+    violations.push(`${f} ${m[1]}.${m[2]}`);   // 键=文件+表.操作(行号会因编辑漂移,不进键)
   }
 }
 
@@ -49,14 +48,19 @@ if (process.argv.includes('--update-baseline')) {
   process.exit(0);
 }
 
-const baseline = new Set(existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf-8')) : []);
-const fresh = violations.filter((v) => !baseline.has(v));
-const cleared = [...baseline].filter((b) => !violations.includes(b));
-
+// 计数棘轮:同一 文件+表.操作 的裸写数不得超过基线(行号漂移免疫;清了要 --update-baseline 收紧)
+const count = (list) => { const m = new Map(); for (const v of list) m.set(v, (m.get(v) || 0) + 1); return m; };
+const baseRaw = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf-8')) : [];
+const baseCounts = count(baseRaw.map((v) => v.replace(/:\d+ /, ' ')));   // 兼容旧基线格式
+const nowCounts = count(violations);
+const fresh = [];
+for (const [k, n] of nowCounts) if (n > (baseCounts.get(k) || 0)) fresh.push(`${k} (${baseCounts.get(k) || 0}→${n})`);
 if (fresh.length) {
-  console.error(`❌ critical 表新增裸写 ${fresh.length} 处(UPDATE/DELETE 链上无 .select,RLS 滤 0 行时完全不可见):`);
+  console.error(`❌ critical 表新增裸写(UPDATE/DELETE 链上无 .select,RLS 滤 0 行时完全不可见):`);
   for (const v of fresh) console.error('   ' + v);
   console.error('   → 请改用 lib/db/safe-mutation 的 safeMutation()/safeCriticalMutation()');
   process.exit(1);
 }
-console.log(`✅ critical 表写入检查通过(存量待清 ${violations.length} 处${cleared.length ? `,本次已清 ${cleared.length} 处 —— 记得 --update-baseline 收紧棘轮` : ''})`);
+const total = violations.length;
+const cleared = baseRaw.length - total;
+console.log(`✅ critical 表写入检查通过(存量待清 ${total} 处${cleared > 0 ? `,较基线净清 ${cleared} 处 —— 记得 --update-baseline 收紧棘轮` : ''})`);

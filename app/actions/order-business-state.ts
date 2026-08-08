@@ -10,6 +10,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { friendlyError } from '@/lib/utils/db-error';
 import { revalidatePath } from 'next/cache';
 import {
@@ -142,15 +143,19 @@ export async function overrideBusinessControl(
     payment_hold: '付款暂停',
   };
 
-  await (supabase.from('order_logs') as any).insert({
-    order_id: orderId,
-    actor_id: user.id,
-    action: 'business_override',
-    field_name: field,
-    old_value: String(!value),
-    new_value: String(value),
+  // R1-D:发货/生产放行闸的开关是**监管级证据**(出纠纷要答"谁放的货、为什么")→ A2。
+  // 此前 session 裸插:order_logs 的 INSERT RLS=仅订单创建人,财务方园的放货审计
+  // 全被静默拒收 —— 生产 0 条(体检实锤)。统一层 service-role 写 + 失败即告警。
+  const arOv = await writeAuditEvent({
+    eventType: 'business_override', level: 'A2', riskLevel: 'money',
+    actor: { actorType: 'user', actorId: user.id },
+    entity: { entityType: 'order', entityId: orderId, orderId },
+    commandName: 'overrideBusinessControl',
+    reason,
+    beforeState: { [field]: !value }, afterState: { [field]: value },
     note: `[经营控制覆盖] ${fieldLabels[field]} → ${value ? '是' : '否'}。原因：${reason}`,
   });
+  if (!arOv.ok) console.error('[business_override] A2 审计失败 → completed_unverified(admin 已告警)');
 
   // 放货 → 通知物流部安排出运/送仓(2026-07-13:补「财务发货通知→物流」这一环)
   if (field === 'allow_shipment' && value === true) {

@@ -16,6 +16,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { syncOrderToFinance } from '@/lib/integration/finance-sync';
 
 export async function resyncOrderToFinance(
@@ -53,16 +54,13 @@ export async function resyncOrderToFinance(
   const result = await syncOrderToFinance(order, 'order.resync');
 
   // 4. 写审计日志（无论成功失败都写）
-  await (supabase.from('order_logs') as any).insert({
-    order_id: orderId,
-    actor_id: user.id,
-    action: 'finance_resync',
-    field_name: null,
-    old_value: null,
-    new_value: result.success ? 'success' : 'failed',
-    note: result.success
-      ? '手动重新同步订单到财务系统'
-      : `手动重新同步订单到财务系统（失败：${result.error || '未知错误'}）`,
+  await writeAuditEvent({
+    eventType: 'finance_resync', level: 'A1', riskLevel: 'money',
+    actor: { actorType: 'user', actorId: user.id },
+    entity: { entityType: 'order', entityId: orderId, orderId },
+    commandName: 'resyncOrderToFinance',
+    note: result.success ? '手动重发财务同步成功' : `手动重发财务同步失败:${result.error || ''}`,
+    metadata: { sync_success: result.success },
   });
 
   if (!result.success) {

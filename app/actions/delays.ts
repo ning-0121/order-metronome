@@ -31,21 +31,19 @@ async function logMilestoneAction(
   note?: string,
   payload?: any
 ) {
+  // R1-D:内部改走统一审计层 writeAuditEvent(service-role + 断言 + 失败分级告警)。
+  // 调用点签名不变,覆盖面一次收口 —— 96 条审计丢失那类事故的结构性了断。
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  // 失败不阻断主流程(延期本身已落库),但**必须冒出来** —— 2026-07-30 教训:
-  // 这里原来丢掉 error,payload 列在生产根本不存在(PGRST204),96 条延期申请/审批
-  // 一条审计日志都没写进去,合规留痕全空且无人知晓。静默吞 error 才是这次的真根因。
-  const { error } = await supabase.from('milestone_logs').insert({
-    milestone_id: milestoneId,
-    order_id: orderId,
-    actor_user_id: user.id,
-    action,
-    note: note || null,
-    payload: payload || null,
+  const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
+  await writeAuditEvent({
+    eventType: action,
+    actor: user
+      ? { actorType: 'user', actorId: user.id }
+      : { actorType: 'system', actorId: 'unknown-session' },
+    entity: { entityType: 'milestone', entityId: milestoneId, orderId },
+    note, level: 'A1',
+    metadata: payload || undefined,
   });
-  if (error) console.error(`[delays] milestone_logs 写入失败 action=${action} milestone=${milestoneId}:`, error.message);
 }
 
 type DelayReasonType =

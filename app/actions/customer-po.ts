@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { getApprovedQuoteForCompare } from '@/app/actions/quote-consumption';
@@ -211,10 +212,11 @@ export async function replaceCustomerPo(
     return { error: `保存失败：${insertErr.message}` };
   }
 
-  await (supabase.from('order_logs') as any).insert({
-    order_id: orderId,
-    actor_user_id: user.id,
-    action: 'customer_po_replaced',
+  await writeAuditEvent({
+    eventType: 'customer_po_replaced', level: 'A1', riskLevel: 'money',
+    actor: { actorType: 'user', actorId: user.id },
+    entity: { entityType: 'order', entityId: orderId, orderId },
+    commandName: 'replaceCustomerPo',
     note: reason,
     payload: JSON.stringify({
       kind: 'customer_po_replaced',

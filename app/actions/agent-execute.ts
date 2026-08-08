@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { revalidatePath } from 'next/cache';
 import { CIRCUIT_BREAKER } from '@/lib/agent/types';
 import { insertNotifications } from '@/lib/utils/notifications';
@@ -184,13 +185,14 @@ export async function executeAgentAction(actionId: string): Promise<{ error?: st
 
     // 写审计日志
     if (action.milestone_id) {
-      await (supabase.from('milestone_logs') as any).insert({
-        milestone_id: action.milestone_id,
-        order_id: action.order_id,
-        actor_user_id: user.id,
-        action: 'agent_execute',
+      await writeAuditEvent({
+        eventType: 'agent_execute', level: 'A1', riskLevel: 'delivery',
+        actor: { actorType: 'agent', actorId: 'order-agent', onBehalfOfUserId: user.id },
+        entity: { entityType: 'milestone', entityId: action.milestone_id, orderId: action.order_id },
+        commandName: 'executeAgentAction',
         note: `[Agent] ${action.title}`,
-        payload: { agent_action_id: actionId, action_type: action.action_type },
+        executionId: actionId,
+        metadata: { agent_action_id: actionId, action_type: action.action_type },
       });
     }
 

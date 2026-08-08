@@ -7,6 +7,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { safeMutation } from '@/lib/db/safe-mutation';
 import { revalidatePath } from 'next/cache';
 
@@ -57,12 +58,15 @@ export async function confirmOrderShipped(orderId: string): Promise<{ ok: boolea
       payload: { lifecycle_status: 'completed', updated_at: nowIso }, predicate: { id: orderId } });
     if (!wDone.ok) return { ok: false, error: `订单完结未生效(${wDone.status}):${wDone.error}(节点已补录,可重试)` };
   }
-  try {
-    await (svc.from('order_logs') as any).insert({
-      order_id: orderId, actor_user_id: user.id, action: 'confirm_shipped',
-      note: `业务确认已出货:补录 ${toClose.length} 个节点${payDone ? ',订单完结' : ',保留收款跟踪'}`,
-    });
-  } catch { /* 日志失败不阻断 */ }
+  const ar = await writeAuditEvent({
+    eventType: 'confirm_shipped', level: 'A2', riskLevel: 'delivery',
+    actor: { actorType: 'user', actorId: user.id },
+    entity: { entityType: 'order', entityId: orderId, orderId },
+    commandName: 'confirmOrderShipped',
+    note: `业务确认已出货:补录 ${toClose.length} 个节点${payDone ? ',订单完结' : ',保留收款跟踪'}`,
+    metadata: { closed_milestones: toClose.length, completed: payDone },
+  });
+  if (!ar.ok) console.error('[confirm-shipped] A2 审计失败 → completed_unverified(admin 已告警)');
 
   revalidatePath('/orders');
   return { ok: true, completed: payDone };

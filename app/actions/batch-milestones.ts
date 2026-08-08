@@ -18,6 +18,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { revalidatePath } from 'next/cache';
 import {
   isBatchAwareStep,
@@ -182,13 +183,11 @@ export async function markBatchMilestoneStep(
         .eq('id', mainMilestone.id);
       autoPromoted = true;
 
-      await (supabase.from('milestone_logs') as any).insert({
-        milestone_id: mainMilestone.id,
-        order_id: orderId,
-        actor_user_id: user.id,
-        action: 'auto_promote_from_batches',
-        from_status: currentMainStatus,
-        to_status: 'done',
+      await writeAuditEvent({
+        eventType: 'auto_promote_from_batches', level: 'A1', riskLevel: 'delivery',
+        actor: { actorType: 'system', actorId: 'batch-milestones', onBehalfOfUserId: user.id },
+        entity: { entityType: 'milestone', entityId: mainMilestone.id, orderId },
+        fromStatus: currentMainStatus, toStatus: 'done',
         note: `所有 ${progress.total} 批均已完成此节点，系统自动标完`,
       });
     } else if (!progress.allDone && currentMainStatus === 'done' && action === 'undo') {
@@ -200,13 +199,11 @@ export async function markBatchMilestoneStep(
         })
         .eq('id', mainMilestone.id);
 
-      await (supabase.from('milestone_logs') as any).insert({
-        milestone_id: mainMilestone.id,
-        order_id: orderId,
-        actor_user_id: user.id,
-        action: 'auto_demote_from_batches',
-        from_status: 'done',
-        to_status: 'in_progress',
+      await writeAuditEvent({
+        eventType: 'auto_demote_from_batches', level: 'A1', riskLevel: 'delivery',
+        actor: { actorType: 'system', actorId: 'batch-milestones', onBehalfOfUserId: user.id },
+        entity: { entityType: 'milestone', entityId: mainMilestone.id, orderId },
+        fromStatus: 'done', toStatus: 'in_progress',
         note: `撤销某批次完成 → 当前 ${progress.done}/${progress.total} 批已完成，主节点回退到进行中`,
       });
     } else if (!progress.allDone && currentMainStatus === 'pending' && progress.done > 0) {
@@ -228,13 +225,14 @@ export async function markBatchMilestoneStep(
 
   // ── 4. 写批次操作审计 ──
   if (mainMilestone) {
-    await (supabase.from('milestone_logs') as any).insert({
-      milestone_id: mainMilestone.id,
-      order_id: orderId,
-      actor_user_id: user.id,
-      action: action === 'complete' ? 'batch_step_marked' : 'batch_step_undone',
+    await writeAuditEvent({
+      eventType: action === 'complete' ? 'batch_step_marked' : 'batch_step_undone',
+      level: 'A1', riskLevel: 'delivery',
+      actor: { actorType: 'user', actorId: user.id },
+      entity: { entityType: 'milestone', entityId: mainMilestone.id, orderId },
+      commandName: 'markBatchStep',
       note: `批次 #${batch.batch_no} ${meta_def.label}${action === 'complete' ? ' 已标完' : ' 已撤销'}`,
-      payload: { batch_id: batchId, batch_no: batch.batch_no, step_key: stepKey, progress },
+      metadata: { batch_id: batchId, batch_no: batch.batch_no, step_key: stepKey, progress },
     });
   }
 
