@@ -51,9 +51,19 @@ export async function getManufacturingOrder(orderId: string) {
   const { data: mo } = await (supabase.from('manufacturing_orders') as any)
     .select('*').eq('order_id', orderId).maybeSingle();
 
-  // select * :双语/箱数列(20260703 迁移)未执行时也不报缺列,拿到什么用什么
-  const { data: lineItems } = await (supabase.from('order_line_items') as any)
+  // R1-F(S3 修复):制造单是**生产用单据**,不该携带客户成交价/采购进价。
+  // 原 select('*') 把 po_unit_price/purchase_unit_cost 原样发给任何能到达本函数的角色
+  // (admin_assistant/production_manager 有看单权却在价格红线外)——违反 CLAUDE.md 价格红线。
+  // 按 CAN_SEE_FINANCIALS 决定是否带价;生产任务单渲染本就不用这两列。
+  const { hasRoleInGroup } = await import('@/lib/domain/roles');
+  const { getUserRoles } = await import('@/lib/utils/user-role');
+  const moRoles = await getUserRoles(supabase, user.id);
+  const canSeePrice = hasRoleInGroup(moRoles, 'CAN_SEE_FINANCIALS');
+  const { data: lineItemsRaw } = await (supabase.from('order_line_items') as any)
     .select('*').eq('order_id', orderId).order('line_no');
+  const lineItems = canSeePrice ? lineItemsRaw : (lineItemsRaw || []).map((li: any) => {
+    const { po_unit_price, purchase_unit_cost, ...safe } = li; return safe;
+  });
 
   const { data: bom } = await (supabase.from('materials_bom') as any)
     .select('material_name, material_type, material_code, color, placement, position_description, sample_reference, consumption_basis, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec, customer_supplied, factory_supplied')
@@ -62,6 +72,9 @@ export async function getManufacturingOrder(orderId: string) {
   // 多客户PO合单:来源PO容器(生产单按PO批次拆用)。表未建时静默返回空,不影响生产单生成。
   const { data: customerPos } = await (supabase.from('order_customer_pos') as any)
     .select('id, customer_po_number, seq').eq('order_id', orderId).order('seq');
+
+  // po_parse_snapshot 含客户 PO 金额底档(unit_price/total_amount)——同红线剥离
+  if (!canSeePrice && (order as any)?.po_parse_snapshot) (order as any).po_parse_snapshot = null;
 
   return { data: { mo: mo || null, order, lineItems: lineItems || [], bom: bom || [], customerPos: customerPos || [] } };
 }

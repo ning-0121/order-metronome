@@ -42,6 +42,18 @@ export async function confirmOrderShipped(orderId: string): Promise<{ ok: boolea
   const nowIso = new Date().toISOString();
   const actorName = (prof as any)?.name || user.email?.split('@')[0] || '业务';
   const toClose = ((ms || []) as any[]).filter((m) => !DONE.has(String(m.status)) && m.step_key !== 'payment_received');
+
+  // R1-F(S2 修复):一键出货会把出运/订舱节点批量置 done —— 但绝不能绕过发货财务闸。
+  // 与 milestones.ts 出运闸同口径:非 admin 时,若含出运/订舱节点且财务未放货(或付款暂停),拒绝。
+  const GATE_STEPS = new Set(['shipment_execute', 'booking_done', 'domestic_delivery', 'domestic_shipment']);
+  const isAdminActor = roles.includes('admin');
+  if (!isAdminActor && toClose.some((m: any) => GATE_STEPS.has(m.step_key))) {
+    const { data: fin } = await (svc.from('order_financials') as any)
+      .select('allow_shipment, payment_hold').eq('order_id', orderId).maybeSingle();
+    if ((fin as any)?.payment_hold === true || (fin as any)?.allow_shipment !== true) {
+      return { ok: false, error: '财务尚未放货(或已付款暂停),不能一键出货 —— 请先由财务在出货审批中放行。' };
+    }
+  }
   for (let i = 0; i < toClose.length; i += 50) {
     const chunk = toClose.slice(i, i + 50).map((m) => m.id);
     const { error } = await (svc.from('milestones') as any)
