@@ -285,3 +285,23 @@ export async function markMailHandled(
   if (!updated || updated.length === 0) return { error: '标记失败:邮件不存在' };
   return { ok: true };
 }
+
+/**
+ * 取单封邮件全文(懒加载,给 /inbox 展开看正文用)。
+ * 权限:admin 看全部;其他人仅能看指派给自己的(assigned_exec_id)——与看板 scope 一致。
+ */
+export async function getMailBody(mailId: string): Promise<{ body?: string; fromEmail?: string; subject?: string; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  const isAdmin = roles.includes('admin');
+
+  const { data, error } = await (supabase.from('mail_inbox') as any)
+    .select('raw_body, from_email, subject, assigned_exec_id').eq('id', mailId).maybeSingle();
+  if (error) return { error: error.message };
+  if (!data) return { error: '邮件不存在' };
+  if (!isAdmin && (data as any).assigned_exec_id !== user.id) return { error: '无权查看该邮件' };
+  return { body: (data as any).raw_body || '(无正文)', fromEmail: (data as any).from_email, subject: (data as any).subject };
+}

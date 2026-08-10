@@ -2,7 +2,13 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { getMailDigest, markMailHandled, bindMailToOrder, searchOrdersForMailBind, type MailDigestView, type DigestRow } from '@/app/actions/mail-digest';
+import { getMailDigest, markMailHandled, bindMailToOrder, searchOrdersForMailBind, getMailBody, type MailDigestView, type DigestRow } from '@/app/actions/mail-digest';
+
+/** 从 `"名字" <a@b.com>` 或 `a@b.com` 里取出纯邮箱地址(回复用) */
+function pureAddr(from: string): string {
+  const m = from.match(/<([^>]+)>/);
+  return (m ? m[1] : from).trim();
+}
 
 const CAT_STYLE: Record<string, string> = {
   投诉: 'bg-red-100 text-red-700 border-red-200',
@@ -69,6 +75,24 @@ function MailBinder({ mailId, onBound }: { mailId: string; onBound: () => void }
 
 function MailCard({ row, onMark, onBound, dim }: { row: DigestRow; onMark: (id: string, s: 'handled' | 'ignored') => void; onBound: () => void; dim?: boolean }) {
   const handled = row.handled_status === 'handled' || row.handled_status === 'ignored';
+  const [expanded, setExpanded] = useState(false);
+  const [body, setBody] = useState<string | null>(null);
+  const [loadingBody, setLoadingBody] = useState(false);
+
+  async function toggleBody() {
+    if (expanded) { setExpanded(false); return; }
+    setExpanded(true);
+    if (body === null) {
+      setLoadingBody(true);
+      const r = await getMailBody(row.id);
+      setBody(r.error ? `加载失败:${r.error}` : (r.body || '(无正文)'));
+      setLoadingBody(false);
+    }
+  }
+
+  // 一键回复:跳邮件客户端/webmail 撰写,收件人+Re: 主题预填(不代发,alex 本人回)
+  const replyHref = `mailto:${encodeURIComponent(pureAddr(row.from_email))}?subject=${encodeURIComponent('Re: ' + (row.subject || ''))}`;
+
   return (
     <div className={`flex items-start gap-3 py-2.5 px-3 rounded-lg border ${handled ? 'opacity-45 border-gray-100 bg-gray-50' : 'border-gray-200 bg-white hover:border-gray-300'} transition-colors`}>
       <div className="pt-1">{impDot(row.importance)}</div>
@@ -103,9 +127,24 @@ function MailCard({ row, onMark, onBound, dim }: { row: DigestRow; onMark: (id: 
           {fromName(row.from_email)} · {new Date(row.received_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           {row.summary && <span className="text-gray-400"> · {row.subject.slice(0, 40)}</span>}
         </div>
+
+        {/* 操作行:看全文 / 一键回复 —— 让看板能真正干活,不只是标处理 */}
+        <div className="flex items-center gap-3 mt-1.5">
+          <button onClick={toggleBody} className="text-[11px] text-indigo-600 hover:underline">
+            {expanded ? '收起正文' : '看全文'}
+          </button>
+          <a href={replyHref} className="text-[11px] text-emerald-700 hover:underline">✉️ 回复</a>
+          <span className="text-[11px] text-gray-400" title={pureAddr(row.from_email)}>{pureAddr(row.from_email)}</span>
+        </div>
+        {expanded && (
+          <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-700 whitespace-pre-wrap break-words">
+            {loadingBody ? '加载中…' : body}
+          </div>
+        )}
       </div>
       {!handled && (
         <div className="flex flex-col gap-1 shrink-0">
+          <a href={replyHref} className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap text-center">✉️ 回复</a>
           <button onClick={() => onMark(row.id, 'handled')} className="text-[11px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 whitespace-nowrap">已处理</button>
           <button onClick={() => onMark(row.id, 'ignored')} className="text-[11px] px-2 py-1 rounded bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100 whitespace-nowrap">忽略</button>
         </div>
