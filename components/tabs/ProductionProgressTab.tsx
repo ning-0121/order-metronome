@@ -432,7 +432,7 @@ export function ProductionProgressTab({ orderId, orderNo, isAdmin, canReport }: 
 
               {/* 验货报告模板下载 + 进度上报要求 */}
               <div className="mt-3 flex gap-3">
-                <a href="/templates/qc-report-template.xlsx" download
+                <a href="/templates/qc-report-template.xls" download="服装检验报告中英文电子版.xls"
                   className="flex-1 rounded-lg bg-indigo-50 border border-indigo-200 p-3 hover:bg-indigo-100 transition-colors text-center">
                   <p className="text-sm font-semibold text-indigo-800">📥 下载验货报告模板</p>
                   <p className="text-xs text-indigo-600 mt-0.5">中查报告 / 尾查报告(AQL) / 巡查记录</p>
