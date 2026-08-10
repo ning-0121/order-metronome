@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { MonthlyShipment, CapacityAnalysis } from '@/app/actions/analytics';
+import { getCapacityAIAnalysis } from '@/app/actions/analytics';
 
 interface Props {
   distribution: MonthlyShipment[];
-  aiAnalysis: CapacityAnalysis | null;
   currentMonth: string;
 }
 
@@ -16,8 +16,18 @@ const STATUS_CONFIG = {
   empty: { label: '空档', color: 'bg-gray-400', textColor: 'text-gray-600', bgColor: 'bg-gray-50', border: 'border-gray-200' },
 };
 
-export function ShipmentDistributionChart({ distribution, aiAnalysis, currentMonth }: Props) {
+export function ShipmentDistributionChart({ distribution, currentMonth }: Props) {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  // AI 产能分析:客户端挂载后异步拉,永不阻塞页面渲染(30s 超时 + 成功率低,不能进 SSR 阻塞路径)
+  const [aiAnalysis, setAiAnalysis] = useState<CapacityAnalysis | null>(null);
+  const [aiState, setAiState] = useState<'loading' | 'done' | 'error'>('loading');
+  useEffect(() => {
+    let alive = true;
+    getCapacityAIAnalysis()
+      .then((r) => { if (alive) { setAiAnalysis(r); setAiState('done'); } })
+      .catch((e) => { if (alive) { console.error('[capacity-ai] failed:', e?.message); setAiState('error'); } });
+    return () => { alive = false; };
+  }, []);
 
   const maxCount = Math.max(...distribution.map(m => Math.max(m.orderDateCount, m.productionCount, m.factoryDateCount)), 1);
 
@@ -123,7 +133,17 @@ export function ShipmentDistributionChart({ distribution, aiAnalysis, currentMon
         })()}
       </div>
 
-      {/* ===== AI 产能分析面板 ===== */}
+      {/* ===== AI 产能分析面板(客户端异步,不阻塞页面) ===== */}
+      {aiState === 'loading' && (
+        <div className="bg-white rounded-2xl border border-purple-100 p-6 text-sm text-gray-400 flex items-center gap-2">
+          <span className="text-xl">🤖</span> AI 产能分析生成中…(不影响上方数据)
+        </div>
+      )}
+      {aiState === 'error' && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 text-sm text-gray-400 flex items-center gap-2">
+          <span className="text-xl">🤖</span> AI 产能分析本次不可用,稍后刷新可重试。
+        </div>
+      )}
       {aiAnalysis && (
         <div className="bg-white rounded-2xl border border-purple-200 p-6">
           <div className="flex items-center gap-2 mb-4">

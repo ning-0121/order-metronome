@@ -140,19 +140,12 @@ export default async function DashboardPage() {
 
   // 并行加载所有独立查询（避免串行等待）
   const [
-    { data: pendingRetroOrders },
     { data: todayDueMilestones },
     { data: allOverdueMilestones },
     { data: createdOrders },
     { data: assignedMilestones },
     { data: rawBlockedMilestones },
   ] = await Promise.all([
-    // 待复盘订单
-    (supabase.from('orders') as any)
-      .select('*')
-      .eq('retrospective_required', true)
-      .is('retrospective_completed_at', null)
-      .order('created_at', { ascending: false }),
     // 今日到期
     (supabase.from('milestones') as any)
       .select(`*, orders!inner (id, order_no, customer_name, internal_order_no)`)
@@ -295,7 +288,6 @@ export default async function DashboardPage() {
   const blockedMilestones = filterByMyOrders(rawBlockedMilestones || []);
 
   const totalIssues =
-    (pendingRetroOrders?.length || 0) +
     (allOverdueMilestones?.length || 0) +
     (filteredTodayDue.length || 0) +
     (blockedMilestones?.length || 0);
@@ -480,10 +472,6 @@ export default async function DashboardPage() {
         <div className="stat-card">
           <div className="stat-value text-orange-600">{blockedMilestones?.length || 0}</div>
           <div className="stat-label">阻塞中</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value text-purple-600">{pendingRetroOrders?.length || 0}</div>
-          <div className="stat-label">待复盘</div>
         </div>
       </div>
 
@@ -682,41 +670,6 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* 待复盘 */}
-      {pendingRetroOrders && pendingRetroOrders.length > 0 && (
-        <div className="section mb-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-purple-100">
-              <span className="text-purple-600">📋</span>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">待复盘</h2>
-              <p className="text-sm text-gray-500">{pendingRetroOrders.length} 个订单需要复盘</p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <ExpandableList initialCount={5}>
-              {pendingRetroOrders.map((order: any) => (
-                <div key={order.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:border-purple-300 transition-colors">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-900">{order.order_no}</span>
-                      <span className="badge badge-info">待复盘</span>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-1">客户: {order.customer_name}</p>
-                  </div>
-                  <Link
-                    href={`/orders/${order.id}/retrospective`}
-                    className="btn-primary text-sm py-2"
-                  >
-                    去复盘
-                  </Link>
-                </div>
-              ))}
-            </ExpandableList>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

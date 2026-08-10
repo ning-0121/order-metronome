@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getAnalyticsSummary, getRoleEfficiency, getShipmentDistribution, getCapacityAIAnalysis } from '@/app/actions/analytics';
+import { getAnalyticsSummary, getRoleEfficiency, getShipmentDistribution } from '@/app/actions/analytics';
 import Link from 'next/link';
 import { ShipmentDistributionChart } from '@/components/ShipmentDistributionChart';
 import { SchedulingPanel } from '@/components/SchedulingPanel';
@@ -20,20 +20,19 @@ export default async function AnalyticsPage() {
     overdueOrderCount: 0, blockedOrderCount: 0,
     thisWeekCompleted: 0, lastWeekCompleted: 0,
   };
-  const [summaryRes, rolesRes, distributionRes, aiCapacityRes] = await Promise.allSettled([
+  // AI 产能分析(getCapacityAIAnalysis,30s 超时 + 成功率低)绝不放阻塞路径——
+  // 它曾把整页拖到"加载中"最多 30 秒。改由图表组件挂载后客户端异步拉,页面秒开。
+  const [summaryRes, rolesRes, distributionRes] = await Promise.allSettled([
     getAnalyticsSummary(),
     getRoleEfficiency(),
     getShipmentDistribution(),
-    getCapacityAIAnalysis(),
   ]);
   if (summaryRes.status === 'rejected') console.error('[AnalyticsPage] getAnalyticsSummary failed:', (summaryRes as any).reason?.message);
   if (rolesRes.status === 'rejected') console.error('[AnalyticsPage] getRoleEfficiency failed:', (rolesRes as any).reason?.message);
   if (distributionRes.status === 'rejected') console.error('[AnalyticsPage] getShipmentDistribution failed:', (distributionRes as any).reason?.message);
-  if (aiCapacityRes.status === 'rejected') console.error('[AnalyticsPage] getCapacityAIAnalysis failed:', (aiCapacityRes as any).reason?.message);
   const summary = summaryRes.status === 'fulfilled' ? summaryRes.value : SAFE_SUMMARY;
   const roles = rolesRes.status === 'fulfilled' ? rolesRes.value : [];
   const distribution = distributionRes.status === 'fulfilled' ? distributionRes.value : [];
-  const aiCapacity = aiCapacityRes.status === 'fulfilled' ? aiCapacityRes.value : null;
   const currentMonth = new Date().toISOString().slice(0, 7);
 
   // 总览统计
@@ -215,7 +214,6 @@ export default async function AnalyticsPage() {
       {/* ===== 月度出货分布 + AI产能分析 ===== */}
       <ShipmentDistributionChart
         distribution={distribution}
-        aiAnalysis={aiCapacity}
         currentMonth={currentMonth}
       />
 

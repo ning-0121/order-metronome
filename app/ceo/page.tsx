@@ -553,9 +553,6 @@ export default async function CEOWarRoom() {
     (o.milestones || []).some((m: any) => _isBlocked(m.status))
   );
 
-  // 已完成复盘
-  const needRetrospective = completedOrders.filter(o => o.lifecycle_status === '待复盘');
-  const retrospected = completedOrders.filter(o => o.lifecycle_status === '已复盘');
 
   // ===== 页面渲染 =====
   const TYPE_COLORS: Record<string, string> = {
@@ -1015,54 +1012,21 @@ export default async function CEOWarRoom() {
           </div>
         </div>
 
-        {/* 已完成订单复盘 */}
+        {/* 已完成订单 */}
         <div className="bg-white rounded-xl border border-green-200 shadow-sm overflow-hidden">
           <div className="bg-green-50 px-4 py-3 border-b border-green-100">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-green-900">✅ 已完成 & 复盘</h3>
+              <h3 className="font-bold text-green-900">✅ 已完成</h3>
               <span className="text-xl font-bold text-green-600">{completedOrders.length}</span>
             </div>
-            <p className="text-xs text-green-600 mt-0.5">已完成订单 · 待复盘 / 已复盘</p>
+            <p className="text-xs text-green-600 mt-0.5">已交付结案订单</p>
           </div>
           <div className="p-4 space-y-3">
-            <div className="grid grid-cols-2 gap-2 text-center">
-              <div className="bg-amber-50/50 rounded-lg p-2">
-                <div className="text-lg font-bold text-amber-700">{needRetrospective.length}</div>
-                <div className="text-xs text-gray-500">待复盘</div>
-              </div>
-              <div className="bg-green-50/50 rounded-lg p-2">
-                <div className="text-lg font-bold text-green-700">{retrospected.length}</div>
-                <div className="text-xs text-gray-500">已复盘</div>
-              </div>
-            </div>
-            {needRetrospective.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-amber-700 mb-1">待复盘订单：</p>
-                <div className="space-y-1 max-h-24 overflow-y-auto">
-                  {needRetrospective.map((o: any) => (
-                    <Link key={o.id} href={`/orders/${o.id}/retrospective`} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-amber-50 text-sm group">
-                      <span className="truncate">
-                        <span className="font-medium text-gray-900">{o.order_no}</span>
-                        <span className="text-gray-500 ml-1">{o.customer_name}</span>
-                      </span>
-                      <span className="text-xs text-amber-600 font-medium">去复盘 →</span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
+            {completedOrders.length > 0 ? (
+              <p className="text-xs text-gray-600">共完成 {completedOrders.length} 单。</p>
+            ) : (
+              <p className="text-sm text-gray-400 text-center py-2">暂无已完成订单</p>
             )}
-            {completedOrders.length > 0 && (
-              <div className="pt-2 border-t border-gray-100">
-                <p className="text-xs text-green-700 font-medium">📊 完成概览</p>
-                <p className="text-xs text-gray-600 mt-1">
-                  共完成 {completedOrders.length} 单，
-                  {retrospected.length > 0 ? `已复盘 ${retrospected.length} 单` : ''}
-                  {needRetrospective.length > 0 ? `，${needRetrospective.length} 单待复盘` : ''}
-                  {needRetrospective.length === 0 && retrospected.length === 0 ? '暂无复盘记录' : ''}
-                </p>
-              </div>
-            )}
-            {completedOrders.length === 0 && <p className="text-sm text-gray-400 text-center py-2">暂无已完成订单</p>}
           </div>
         </div>
       </div>

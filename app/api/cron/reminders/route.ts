@@ -370,7 +370,49 @@ async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
 
   const overdueList = (overdue || []) as any[];
   const soonList = (soonOverdue || []) as any[];
-  if (overdueList.length === 0 && soonList.length === 0) return 0;
+
+  // ── 出厂日已过·待核实(2026-08-10 CEO:「这个内容要给行政督办,让他们每天自己去找人解决」)──
+  // CEO 驾驶舱里「出厂日已过 N 张」是订单级僵尸单,节点级日报(上面)漏掉它们
+  //(那些单没人 in_progress)。用僵尸单分诊把它们分成两类,每天推给督办:
+  //   suspected_shipped → 疑似货已出没维护 → 督办去核实实际情况,再一键收尾
+  //   stalled           → 真晚了还在推     → 督办催责任人
+  const zombie: Array<{ orderNo: string; orderId: string; customer: string; days: number; verdict: string }> = [];
+  try {
+    const { triageStaleOrder } = await import('@/lib/services/stale-order-triage');
+    const { data: activeOrders } = await supabase
+      .from('orders')
+      .select('id, order_no, internal_order_no, customer_name, factory_date, etd, incoterm, lifecycle_status, order_purpose, special_tags, notes')
+      .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")');
+    const todayYmd = now.toISOString().slice(0, 10);
+    const candidates = ((activeOrders || []) as any[]).filter((o) => {
+      if ((o.order_purpose || 'production') === 'sample') return false;
+      if (isHold(o)) return false;   // 客户暂停出运:与节点日报同口径豁免
+      const keyDate = o.incoterm === 'DDP' ? o.etd : (o.factory_date || o.etd);
+      return keyDate && String(keyDate).slice(0, 10) < todayYmd;
+    });
+    if (candidates.length > 0) {
+      const zids = candidates.map((o) => o.id);
+      const msByOrder = new Map<string, any[]>();
+      for (let i = 0; i < zids.length; i += 200) {
+        const { data: zms } = await supabase
+          .from('milestones').select('order_id, status, due_at, actual_at').in('order_id', zids.slice(i, i + 200));
+        for (const m of (zms || []) as any[]) msByOrder.set(m.order_id, [...(msByOrder.get(m.order_id) || []), m]);
+      }
+      const nowMs = now.getTime();
+      for (const o of candidates) {
+        const ms = msByOrder.get(o.id) || [];
+        const overdueCount = ms.filter((m: any) => !['done', '已完成', 'completed'].includes(String(m.status || '').toLowerCase()) && m.due_at && new Date(m.due_at).getTime() < nowMs).length;
+        const keyDate = o.incoterm === 'DDP' ? o.etd : (o.factory_date || o.etd);
+        const tri = triageStaleOrder({ factoryDate: keyDate ? String(keyDate).slice(0, 10) : null, actualAts: ms.map((m: any) => m.actual_at), overdueCount, now: nowMs });
+        if (tri.verdict === 'suspected_shipped' || tri.verdict === 'stalled') {
+          zombie.push({ orderNo: o.internal_order_no || o.order_no || String(o.id).slice(0, 8), orderId: o.id, customer: o.customer_name || '', days: tri.pastFactoryDays ?? 0, verdict: tri.verdict });
+        }
+      }
+      zombie.sort((a, b) => b.days - a.days);
+    }
+  } catch (e: any) { console.error('[督办日报] 僵尸单分诊失败(不阻断):', e?.message); }
+
+  if (overdueList.length === 0 && soonList.length === 0 && zombie.length === 0) return 0;
 
   // 拿负责人名字
   const allUserIds = [...new Set([...overdueList, ...soonList].map(m => m.owner_user_id).filter(Boolean))];
@@ -407,13 +449,29 @@ async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
       lines.push(`  • ${m.orders?.order_no} · ${m.name}（截止 ${String(m.due_at).slice(0, 10)}，${owner}）`);
     }
     if (soonList.length > 10) lines.push(`  ...还有 ${soonList.length - 10} 项`);
+    lines.push('');
   }
 
-  lines.push('');
+  // 出厂日已过·待督办核实/催办(CEO 2026-08-10:每天让督办去找人解决)
+  const suspected = zombie.filter((z) => z.verdict === 'suspected_shipped');
+  const stalled = zombie.filter((z) => z.verdict === 'stalled');
+  if (suspected.length > 0) {
+    lines.push(`🚢 出厂日已过·疑似已出货待核实（${suspected.length} 单）—— 请逐一联系责任人核实实际进度,已出货的一键收尾`);
+    for (const z of suspected.slice(0, 20)) lines.push(`  • ${z.orderNo} · ${z.customer}（出厂已过 ${z.days} 天）`);
+    if (suspected.length > 20) lines.push(`  ...还有 ${suspected.length - 20} 单`);
+    lines.push('');
+  }
+  if (stalled.length > 0) {
+    lines.push(`🔴 出厂日已过·真延误还在推（${stalled.length} 单）—— 请催责任人加速`);
+    for (const z of stalled.slice(0, 20)) lines.push(`  • ${z.orderNo} · ${z.customer}（出厂已过 ${z.days} 天）`);
+    if (stalled.length > 20) lines.push(`  ...还有 ${stalled.length - 20} 单`);
+    lines.push('');
+  }
+
   lines.push('请督促相关人员尽快推进。');
 
   const msg = lines.join('\n');
-  const title = `📊 督办日报 — ${overdueList.length} 项逾期 / ${soonList.length} 项即将到期`;
+  const title = `📊 督办日报 — ${overdueList.length} 项逾期 / ${soonList.length} 即将到期${zombie.length > 0 ? ` / ${zombie.length} 单出厂已过待核办` : ''}`;
 
   // 发给每个 admin_assistant
   for (const userId of assistants) {

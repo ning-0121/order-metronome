@@ -450,13 +450,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         ))}
       </div>
 
-      {/* 客户待运 / 待复盘筛选 */}
+      {/* 客户待运 / 待运超期筛选 */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <span className="text-xs text-gray-500 shrink-0">出货态势：</span>
         {([
           { key: '' as const, label: '全部' },
           { key: 'yes' as const, label: '客户待运', count: shipHoldCount },
-          { key: 'stale' as const, label: '待复盘', hint: `≥${CUSTOMER_HOLD_STALE_DAYS}天未更新锚点`, count: shipHoldStaleCount },
+          { key: 'stale' as const, label: '待运超期', hint: `客户待运 ≥${CUSTOMER_HOLD_STALE_DAYS}天未更新锚点`, count: shipHoldStaleCount },
         ]).map(tab => {
           const qsParts = [`purpose=${purposeFilter}`, `status=${statusFilter}`, `sort=${sortOrder}`];
           if (searchQuery) qsParts.push(`q=${encodeURIComponent(searchQuery)}`);
@@ -597,7 +597,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               href={`/orders?purpose=${purposeFilter}&status=${statusFilter}&sort=${sortOrder}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}${customerFilter ? `&customer=${encodeURIComponent(customerFilter)}` : ''}${factoryFilter ? `&factory=${encodeURIComponent(factoryFilter)}` : ''}${incotermFilter ? `&incoterm=${incotermFilter}` : ''}${typeFilter ? `&type=${typeFilter}` : ''}`}
               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800 hover:bg-blue-200"
             >
-              {shipHoldFilter === 'yes' ? '客户待运' : '待复盘'} <span className="text-blue-400">×</span>
+              {shipHoldFilter === 'yes' ? '客户待运' : '待运超期'} <span className="text-blue-400">×</span>
             </Link>
           )}
           <Link href={`/orders?purpose=${purposeFilter}&status=${statusFilter}`}
@@ -658,7 +658,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">客户待运</span>
                     )}
                     {mobStale && (
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">待复盘 ≥{CUSTOMER_HOLD_STALE_DAYS}天</span>
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">待运超期 ≥{CUSTOMER_HOLD_STALE_DAYS}天</span>
                     )}
                   </div>
                 )}
@@ -720,7 +720,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                           <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-100 text-blue-800 whitespace-nowrap">客户待运</span>
                         )}
                         {isCustomerHoldStale(order) && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-800 whitespace-nowrap">待复盘</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-800 whitespace-nowrap">待运超期</span>
                         )}
                       </div>
                       <div className="mt-0.5 text-xs text-gray-500 leading-tight">
@@ -828,7 +828,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                               <div className="text-[11px] text-red-600 font-medium whitespace-nowrap">⚠ 超期 {daysOver} 天</div>
                             )}
                             {custHold && holdStale && (
-                              <div className="text-[11px] text-amber-700 font-medium whitespace-nowrap">🟡 待复盘 ≥{CUSTOMER_HOLD_STALE_DAYS}天</div>
+                              <div className="text-[11px] text-amber-700 font-medium whitespace-nowrap">🟡 待运超期 ≥{CUSTOMER_HOLD_STALE_DAYS}天</div>
                             )}
                           </div>
                         );

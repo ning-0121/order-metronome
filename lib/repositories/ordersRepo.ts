@@ -980,27 +980,16 @@ export async function completeOrder(
     return { error: updateError.message };
   }
   
+  // 复盘环节 2026-08 下线:订单完成即「已完成」,不再进入「待复盘」。
   await logOrderEvent(
     supabase,
     orderId,
     'terminate',
     '执行中',
-    order.retrospective_required ? '待复盘' : '已完成',
+    '已完成',
     '订单已完成'
   );
-  
-  // 如果进入待复盘，再记录一次转换
-  if (order.retrospective_required) {
-    await logOrderEvent(
-      supabase,
-      orderId,
-      'lifecycle_transition',
-      '已完成',
-      '待复盘',
-      '订单已完成，进入待复盘状态'
-    );
-  }
-  
+
   return { data: updated };
 }
 

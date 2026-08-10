@@ -354,7 +354,7 @@ export default async function OrderDetailPage({
             <div className="text-sm">
               <p className="font-semibold text-amber-900">客户待运 · 已超过 {CUSTOMER_HOLD_STALE_DAYS} 天未刷新锚点日期</p>
               <p className="text-amber-800 mt-1">
-                请在备注中更新原因与下一预计出运日，或通过超期确认调整「预计发货日」，避免列表长期挂在「待复盘」。
+                请在备注中更新原因与下一预计出运日，或通过超期确认调整「预计发货日」，避免列表长期挂在「待运超期」。
               </p>
             </div>
           </div>
