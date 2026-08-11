@@ -236,7 +236,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
       if (mm.actual_at && mm.due_at) { a.onTimeTotal += 1; if (new Date(mm.actual_at).getTime() <= new Date(mm.due_at).getTime()) a.onTime += 1; }
     } else {
       a.active += 1;
-      if (isOverdue(mm)) a.overdue += 1;   // 已申请延期(待批)不计逾期
+      if (nodeOverdue(mm)) a.overdue += 1;   // 滚动口径与 B 段部门卡一致(否则同页两处逾期数自相矛盾);已申请延期不计
     }
     empAgg.set(uid, a);
   }

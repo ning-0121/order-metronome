@@ -286,25 +286,6 @@ export async function executeShipment(id: string, orderId: string, rec: {
   return {};
 }
 
-/** 兼容旧的 signShipment（保留） */
-export async function signShipment(id: string, orderId: string, signRole: 'sales' | 'warehouse' | 'finance', note?: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '请先登录' };
-
-  const now = new Date().toISOString();
-  const patch: Record<string, any> = {};
-  if (signRole === 'sales') { patch.sales_sign_id = user.id; patch.sales_signed_at = now; if (note) patch.sales_note = note; }
-  else if (signRole === 'warehouse') { patch.warehouse_sign_id = user.id; patch.warehouse_signed_at = now; if (note) patch.warehouse_note = note; }
-  else if (signRole === 'finance') { patch.finance_sign_id = user.id; patch.finance_signed_at = now; if (note) patch.finance_note = note; }
-
-  const { error } = await (supabase.from('shipment_confirmations') as any).update(patch).eq('id', id);
-  if (error) return { error: error.message };
-  const { data: updated } = await (supabase.from('shipment_confirmations') as any)
-    .select('sales_sign_id, warehouse_sign_id, finance_sign_id').eq('id', id).single();
-  if (updated?.sales_sign_id && updated?.warehouse_sign_id && updated?.finance_sign_id) {
-    await (supabase.from('shipment_confirmations') as any).update({ status: 'fully_signed', locked_at: now }).eq('id', id);
-  }
-  revalidatePath(`/orders/${orderId}`);
-  return {};
-}
+// signShipment(遗留)已删除(2026-08-11 审计):无角色校验、无 allow_shipment 闸、无状态守卫的
+// 'use server' 导出 = 任意登录用户可直接调用把出货签成 fully_signed、绕过财务审批。UI 已无调用方。
+// 出货三签走 createShipmentConfirmation → approveShipment → executeShipment(各带权限+闸)。

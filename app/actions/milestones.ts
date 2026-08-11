@@ -1247,9 +1247,12 @@ async function applyChecklistDateOverrides(
     .eq('order_id', orderId)
     .eq('step_key', stepKey)
     .single();
-  if (!ms || !Array.isArray(ms.checklist_data)) return;
-
-  const responses = ms.checklist_data as Array<{ key: string; value: any; pending_date?: string }>;
+  // checklist_data 生产库存的是 JSON 字符串 → Array.isArray 恒 false → 此覆盖此前每次都 early return、
+  // 静默失效(跟单填的面料下单日/到货日/上线日从没覆盖到下游 due_at)。一律走 parseChecklistData。
+  if (!ms) return;
+  const { parseChecklistData } = await import('@/lib/domain/checklist');
+  const responses = parseChecklistData(ms.checklist_data) as Array<{ key: string; value: any; pending_date?: string }>;
+  if (responses.length === 0) return;
   const getDate = (key: string): string | null => {
     const r = responses.find(x => x.key === key);
     if (!r) return null;

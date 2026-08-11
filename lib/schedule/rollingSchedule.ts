@@ -16,6 +16,7 @@
  */
 
 import { TIMELINE } from '@/lib/schedule';
+import { addWorkingDays } from '@/lib/utils/date';
 
 /** V3 硬前置依赖图 —— 单一真相(milestones.ts 的顺序门禁 import 此表)。 */
 export const SEQUENTIAL_REQUIREMENTS_V3: Record<string, string[]> = {
@@ -64,17 +65,9 @@ export interface NodeSchedule {
   readyDate: Date | null;      // 前置最晚完成日(或订单起点)
 }
 
-/** 工作日加天(简化:跳周末;节假日精度交给 lib/utils/date,聚合口径用简化版足够) */
-function addBusinessDays(base: Date, n: number): Date {
-  const d = new Date(base);
-  let added = 0;
-  while (added < n) {
-    d.setUTCDate(d.getUTCDate() + 1);
-    const bjDow = new Date(d.getTime() + 8 * 3600 * 1000).getUTCDay();
-    if (bjDow !== 0 && bjDow !== 6) added++;
-  }
-  return d;
-}
+// 工作日加天:必须与全系统口径一致 —— 公司**六天工作制**(周一到周六上班,只跳周日+中国法定节假日)。
+// 复用 lib/utils/date.addWorkingDays;此前自己实现把周六也跳了 → 滚动截止日系统性偏晚、少报逾期(审计发现)。
+const addBusinessDays = (base: Date, n: number): Date => addWorkingDays(base, n);
 
 /** 某节点相对其前置的允许天数 N = TIMELINE[node] - max(TIMELINE[前置]);缺失兜底 2 天,至少 1 天。 */
 export function allottedDays(stepKey: string, prereqs: string[]): number {
