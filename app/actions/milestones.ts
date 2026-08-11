@@ -326,7 +326,10 @@ export async function markMilestoneDone(
   const { SEQUENTIAL_REQUIREMENTS_V3 } = await import('@/lib/schedule/rollingSchedule');
   const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = isV3Order ? SEQUENTIAL_REQUIREMENTS_V3 : {};
   const prerequisites = SEQUENTIAL_REQUIREMENTS[milestone.step_key];
-  if (prerequisites && !isAdmin) {
+  // force 放行:上方链内软门禁(milestoneDeps)已让用户二次确认强制完成并留审计,此处 V3 硬前置若仍
+  // 无视 force 就会二次拦下 → 用户点了「强制完成」还报「必须先完成前置节点」(2026-08-11 事故)。
+  // 硬前置对普通提交仍拦(!force),admin 或显式 force 放行,与软门禁口径一致(宪法:系统计算·人决策)。
+  if (prerequisites && !isAdmin && !force) {
     const { data: prereqRows } = await (supabase.from('milestones') as any)
       .select('step_key, status, name')
       .eq('order_id', milestone.order_id)
@@ -337,7 +340,13 @@ export async function markMilestoneDone(
     });
     if (notDone.length > 0) {
       const names = notDone.map((m: any) => m.name || m.step_key).join('、');
-      return { error: `必须先完成前置节点：${names}` };
+      // 软门禁语义:返回 needsConfirm 让前端弹「强制完成」二次确认;确认后带 force=true 重试即放行(留审计)。
+      // 不再返回硬 error —— 否则软门禁没覆盖到的 V3 边会把用户堵死、连强制入口都没有(2026-08-11 事故)。
+      return {
+        needsConfirm: true,
+        warning: `前置节点还没完成:${names}。确定要强行完成「${milestone.name}」吗?`,
+        unmet: notDone.map((m: any) => m.name || m.step_key),
+      };
     }
   }
 

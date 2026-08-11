@@ -200,6 +200,24 @@ export default async function OrderDetailPage({
           display_owner_name: businessOwner?.name || businessOwner?.email || null, display_owner_role: 'merchandiser' }
       : m) as any;
   }
+  // 滚动排期(混合方案,ROLLING_SCHEDULE flag)——把未完成节点的【显示】截止日改成「前置完成日 + N 工作日」:
+  //   waiting(前置未完成)→ due_at 置 null:OrderTimeline 不显示系统截止日、不显示逾期徽章(根治下游假逾期);
+  //   actionable → due_at = 滚动截止日。仅覆盖展示投影,不写库;详情页全角色可见 → rollingScheduleActive(isAdmin) 灰度。
+  try {
+    const { rollingScheduleActive } = await import('@/lib/engine/featureFlags');
+    if (rollingScheduleActive(isAdmin) && Array.isArray(milestones) && milestones.length) {
+      const { deriveRollingSchedule } = await import('@/lib/schedule/rollingSchedule');
+      const { V3_SIGNATURE_STEPS } = await import('@/lib/milestoneTemplate');
+      const isV3 = (milestones as any[]).some((m) => (V3_SIGNATURE_STEPS as readonly string[]).includes(m.step_key));
+      const startMs = (orderData as any).created_at ? new Date((orderData as any).created_at).getTime() : Date.now();
+      const sched = deriveRollingSchedule(milestones as any[], { isV3, orderStartMs: startMs, nowMs: Date.now() });
+      milestones = (milestones as any[]).map((m) => {
+        const s = sched.get(m.step_key);
+        if (!s || s.state === 'done') return m;
+        return { ...m, due_at: s.rollingDue ? s.rollingDue.toISOString() : null, _scheduleState: s.state };
+      }) as any;
+    }
+  } catch { /* 滚动派生失败不影响详情页展示 */ }
   const { data: delayRequests } = delayRequestsResult;
   const { data: logs } = logsResult;
   const attachments = (attachmentsResult.data || []) as any[];

@@ -512,6 +512,10 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                               ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-medium">🔴 我的逾期</span>
                               : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">⚠ {roleName}逾期</span>;
                           })()}
+                          {/* 滚动排期:前置未完成的节点 = 待上游,不排截止日、不算逾期(ROLLING_SCHEDULE 生效时) */}
+                          {(m as any)._scheduleState === 'waiting' && !isDone && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium" title="前置节点完成后,本节点按「前置完成日 + N 天」自动排期">⏳ 待上游</span>
+                          )}
                           {/* 逾期完成徽章（已完成节点专用） — 让 CEO/督导/下游一眼看到 */}
                           {isDone && (() => {
                             const days = computeDelayDays(m.actual_at, m.due_at);
