@@ -274,8 +274,21 @@ export async function POST(request: Request) {
       const { data: rows, error } = await supabase
         .from('shipment_confirmations')
         .update(patch)
-        .eq('id', approval_id).eq('status', 'sales_signed').select('id')
+        .eq('id', approval_id).eq('status', 'sales_signed').select('id, order_id')
       if (error) throw new Error(`Shipment approval update failed: ${error.message}`)
+      // 外部财务批准 = 主审批路径 → 必须与站内审批产生完全一致的结果:开 allow_shipment 放货闸 + A2 审计。
+      // 否则外部批了、闸仍关,shipment_execute 永远卡死(两套审批真相)。走统一放货 Command。
+      if (decision === 'approved' && rows && rows.length > 0) {
+        const oid = (rows[0] as any).order_id
+        if (oid) {
+          const { approveShipmentRelease } = await import('@/lib/shipment/approve-release')
+          const rel = await approveShipmentRelease(supabase, {
+            orderId: oid, approvedBy: decider_name || 'external_finance', source: 'external_finance',
+            externalReference: decider_name || null, reason: decision_note || null,
+          })
+          if (!rel.ok) throw new Error(`外部财务放货开闸失败(${rel.status}): ${rel.error}`)
+        }
+      }
       if (!rows || rows.length === 0) {
         skipLog('shipment')
         // 改判止血:当前 finance_decision 与本次相悖(如原批准放行、现驳回)→ 通知人工核撤

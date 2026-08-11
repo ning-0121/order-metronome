@@ -45,6 +45,7 @@ type WebhookEventType =
   | 'shipping_invoice.issued'
   | 'payable.created'
   | 'shipment.recorded'   // 出运档案(提单/CI 文件推送,财务 /shipments 页;契约 2026-07-28)
+  | 'shipment.completed'  // 出货已完成【事实事件】(货真实出了 → 触发应收/CI/结算;≠放货审批请求;2026-08-11)
   | 'receivable.created'   // 应收(先用于打样费;data.kind='sample_fee')。财务侧据此建应收账款,收款后回传 payment.completed
   // ── 事件驱动扣款(财务契约 v1,2026-08-03)。发起端见 lib/integration/supplier-deduction.ts ──
   // 根治「忘记登记扣款」:让财务**先于人**知道该扣钱,而不是靠人记得填。
@@ -540,6 +541,37 @@ export async function syncShipmentApprovalToFinance(p: ApprovalRequestPayload) {
  */
 export async function syncShipmentApprovalCancelledToFinance(p: { id: string; order_no?: string | null; reason?: string | null }) {
   return sendToFinanceSystem('shipment_approval.cancelled', p as unknown as Record<string, unknown>)
+}
+
+/**
+ * 【事实事件】出货已完成 —— 货真实出了,通知财务系统触发应收/CI/结算。**不是**放货审批请求。
+ * 幂等:一票出货一个稳定键。data 里绝不放 now() 全精度时间(会毁掉 deterministicRequestId 幂等,
+ * 重试就重复入应收);shipment_date 用日期串、并显式带 idempotency_key=shipment_completed:<orderId>。
+ * 首发失败自动落 outbox 重试(processFinanceOutbox);耗尽转 dead 有企微告警(非 silent)。
+ */
+export interface ShipmentCompletedPayload {
+  order_id: string
+  internal_order_no?: string | null
+  shipment_date: string            // YYYY-MM-DD(稳定,勿传全精度时间戳)
+  quantity?: number | null
+  amount?: number | null
+  reference?: string | null        // CI号/提单号等
+  shipment_confirmation_id?: string | null
+  triggered_by?: string | null
+}
+export async function notifyShipmentCompleted(p: ShipmentCompletedPayload) {
+  const data: Record<string, unknown> = {
+    idempotency_key: `shipment_completed:${p.order_id}`,   // 一票出货一键,重试稳定同键
+    order_id: p.order_id,
+    internal_order_no: p.internal_order_no ?? null,
+    shipment_date: p.shipment_date,
+    quantity: p.quantity ?? null,
+    amount: p.amount ?? null,
+    reference: p.reference ?? null,
+    shipment_confirmation_id: p.shipment_confirmation_id ?? null,
+    triggered_by: p.triggered_by ?? null,
+  }
+  return sendToFinanceSystem('shipment.completed', data)
 }
 
 /**

@@ -1,6 +1,6 @@
 import { checkAndSendReminders, checkDeliveryDeadlines } from '@/app/actions/notifications';
+import { insertNotifications } from '@/lib/utils/notifications';
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 export async function GET(request: Request) {
   // Verify cron secret if needed
@@ -9,91 +9,72 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  try {
+  // 2026-08-11:这条每15分钟、承载升级链/督办日报/PO+生产提醒/财务重试的最关键 cron 此前完全游离于
+  // R1-B 健康监控外(不写 automation_runs、不在 watchdog),静默挂了无人知(正是要根治的失败形态)。
+  // 整体包进 runAutomationJob:写台账 + watchdog 可检测静默/zero-output;每步独立 try,一步失败不拖垮后续。
+  const { runAutomationJob } = await import('@/lib/automation/run-job');
+  const job = await runAutomationJob('reminders', { trigger: 'cron', notify: true }, async (svc) => {
+    const steps: Array<{ step: string; ok: boolean; error?: string; critical?: boolean }> = [];
+    const runStep = async <T,>(name: string, fn: () => Promise<T>, critical = false): Promise<T | 0> => {
+      try { const v = await fn(); steps.push({ step: name, ok: true }); return v; }
+      catch (e: any) { console.error(`[reminders] ${name} error:`, e?.message); steps.push({ step: name, ok: false, error: (e?.message || '').slice(0, 120), critical }); return 0; }
+    };
+
     // 备忘提醒已随个人备忘功能一同下线(2026-08-01)
-    const [reminderResult, deliveryResult] = await Promise.all([
-      checkAndSendReminders(),
-      checkDeliveryDeadlines(),
-    ]);
+    const reminderResult = await runStep('reminders', () => checkAndSendReminders());
+    const deliveryResult = await runStep('delivery_alerts', () => checkDeliveryDeadlines());
+    const escalated = await runStep('unassigned_merchandiser', () => checkUnassignedMerchandiser(svc));           // 跟单未指定 24h 升级
+    const supervisorAlerts = await runStep('admin_assistant_overdue', () => notifyAdminAssistantOverdue(svc));    // 督办日报
+    const autoEscalated = await runStep('escalation_chain', () => runEscalationChain(svc));                       // 逾期 1/2/3/5 天分级上报
+    const poReminders = await runStep('po_reminders', () => checkPoReminders(svc));                               // 采购提醒节点
+    const prodIssueReminders = await runStep('production_issues', () => checkProductionIssueReminders(svc));      // 生产问题提醒
+    const mattersMaterialized = await runStep('procurement_matters', async () => {                               // 采购风险中心物化
+      const { materializeProcurementMatters } = await import('@/lib/services/procurement-matters.service');
+      const r = await materializeProcurementMatters(svc as any, { mode: 'execute' });
+      return (r as any)?.count ?? 'ok';
+    });
 
-    // ── 跟单未指定 24h 升级检查 ──
-    let escalated = 0;
-    // ── 行政督办：逾期/即将逾期通知 ──
-    let supervisorAlerts = 0;
-    // ── 自动升级链：逾期 1/2/3/5 天分级上报 ──
-    let autoEscalated = 0;
-    // ── 采购单自定义提醒节点：到点通知采购/业务/跟单 ──
-    let poReminders = 0;
-    // ── 生产问题定时提醒：到点通知负责人 ──
-    let prodIssueReminders = 0;
-    // ── 采购风险中心近实时物化(审计修 2026-07-04:原只每晚物化,滞后近24h→改每15分钟)──
-    let mattersMaterialized: number | string = 0;
-    try {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (url && key) {
-        const supabase = createClient(url, key);
-        escalated = await checkUnassignedMerchandiser(supabase);
-        supervisorAlerts = await notifyAdminAssistantOverdue(supabase);
-        autoEscalated = await runEscalationChain(supabase);
-        poReminders = await checkPoReminders(supabase);
-        prodIssueReminders = await checkProductionIssueReminders(supabase);
-        try {
-          const { materializeProcurementMatters } = await import('@/lib/services/procurement-matters.service');
-          const r = await materializeProcurementMatters(supabase as any, { mode: 'execute' });
-          mattersMaterialized = (r as any)?.count ?? 'ok';
-        } catch (e: any) { console.error('[reminders] matters materialize error:', e?.message); mattersMaterialized = 'error'; }
-      }
-    } catch (e: any) {
-      console.error('[reminders] extra checks error:', e?.message);
-    }
-
-    // 财务外发发件箱重试(审计 A3):退避重发失败的 sync*ToFinance,超上限置 dead 可见
-    let financeOutbox: any = 0;
-    try {
+    // 财务外发发件箱重试(审计 A3):退避重发失败的 sync*ToFinance,超上限置 dead → 企微告警(非 silent)
+    const financeOutbox = await runStep('finance_outbox', async () => {
       const { processFinanceOutbox } = await import('@/lib/integration/finance-sync');
-      financeOutbox = await processFinanceOutbox();
-      // E-1(2026-07-11):转 dead 时企微群告警。此前只返回计数、无人看见 → 订单/采购/收货对财务的同步永久失败无感知
-      //（反向 财务→节拍器 已有此告警,正向缺,补上对称)。
-      if (financeOutbox && typeof financeOutbox === 'object' && (financeOutbox.dead || 0) > 0) {
+      const r = await processFinanceOutbox();
+      if (r && typeof r === 'object' && (r.dead || 0) > 0) {
         try {
           const { sendWecomWebhook } = await import('@/lib/utils/wechat-push');
-          await sendWecomWebhook(
-            '⛔ 财务外发同步失败(转 dead)',
-            `有 ${financeOutbox.dead} 条推送重试耗尽转 dead——订单/采购/收货等对财务的同步永久失败。请到 integration_outbox 查 status='dead' 人工重发或核查。`,
-          );
+          await sendWecomWebhook('⛔ 财务外发同步失败(转 dead)',
+            `有 ${r.dead} 条推送重试耗尽转 dead——订单/采购/收货等对财务的同步永久失败。请到 integration_outbox 查 status='dead' 人工重发或核查。`);
         } catch (e: any) { console.error('[reminders] finance dead 告警发送失败:', e?.message); }
       }
-    } catch (e: any) { console.error('[reminders] finance outbox retry error:', e?.message); financeOutbox = 'error'; }
+      return r;
+    });
 
-    // 配置盲区探针(2026-07-11):env 缺失时 sync*ToFinance 会静默 return{success:true}——既不发、也不入 outbox,
-    // 连上面的 dead 告警都测不到。这是唯一"看着健康实则全丢"的静默盲区,必须显性告警(缺配置=部署错,应当响)。
+    // 配置盲区探针:env 缺失时 sync*ToFinance 静默 return{success:true}——既不发也不入 outbox。显性告警。
     if (!process.env.FINANCE_SYSTEM_URL || !process.env.INTEGRATION_API_KEY) {
+      steps.push({ step: 'finance_config', ok: false, error: 'FINANCE_SYSTEM_URL/INTEGRATION_API_KEY 缺失', critical: true });
       try {
         const { sendWecomWebhook } = await import('@/lib/utils/wechat-push');
-        await sendWecomWebhook(
-          '⚠️ 财务同步未配置',
-          '缺 FINANCE_SYSTEM_URL / INTEGRATION_API_KEY → 所有对财务系统的推送被静默跳过(不发也不入 outbox),财务收不到任何订单/采购/收货数据。请检查节拍器生产环境变量。',
-        );
+        await sendWecomWebhook('⚠️ 财务同步未配置',
+          '缺 FINANCE_SYSTEM_URL / INTEGRATION_API_KEY → 所有对财务系统的推送被静默跳过,财务收不到任何订单/采购/收货数据。请检查节拍器生产环境变量。');
       } catch (e: any) { console.error('[reminders] 财务配置缺失告警发送失败:', e?.message); }
     }
 
-    return NextResponse.json({
-      success: true,
-      reminders: reminderResult,
-      delivery_alerts: deliveryResult,
-      merchandiser_escalated: escalated,
-      supervisor_alerts: supervisorAlerts,
-      auto_escalated: autoEscalated,
-      po_reminders: poReminders,
-      prod_issue_reminders: prodIssueReminders,
-      matters_materialized: mattersMaterialized,
-      finance_outbox: financeOutbox,
-    });
-  } catch (error: any) {
-    console.error('Cron job error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+    const notif = [supervisorAlerts, autoEscalated, poReminders, prodIssueReminders, escalated]
+      .reduce((a: number, x) => a + (typeof x === 'number' ? x : 0), 0);
+    return {
+      eligible: steps.length,
+      processed: steps.filter((s) => s.ok).length,
+      failedItems: steps.filter((s) => !s.ok).length,
+      notificationsCreated: notif,
+      steps,
+      metadata: { reminderResult, deliveryResult, escalated, supervisorAlerts, autoEscalated, poReminders, prodIssueReminders, mattersMaterialized, financeOutbox },
+    };
+  });
+
+  return NextResponse.json({
+    success: job.status !== 'failed',
+    run_id: job.runId, health: job.health, status: job.status,
+    ...(job.outcome.metadata || {}),
+  }, { status: job.status === 'failed' ? 500 : 200 });
 }
 
 /**
@@ -154,8 +135,8 @@ async function checkPoReminders(supabase: any): Promise<number> {
     fired++;
   }
   if (notifs.length > 0) {
-    const { error: insErr } = await supabase.from('notifications').insert(notifs);
-    if (insErr) { console.error('[po_reminders] notify insert:', insErr.message); return 0; }  // 未标记 → 下轮重试
+    const insR = await insertNotifications(notifs);
+    if (!insR.ok) { console.error('[po_reminders] notify insert:', insR.error); return 0; }  // 未标记 → 下轮重试
   }
   if (markIds.length > 0) {
     await supabase.from('po_reminders').update({ status: 'notified', notified_at: new Date().toISOString() }).in('id', markIds);
@@ -201,8 +182,8 @@ async function checkProductionIssueReminders(supabase: any): Promise<number> {
     recipients.add(r.assigned_to);
   }
   if (notifs.length > 0) {
-    const { error: insErr } = await supabase.from('notifications').insert(notifs);
-    if (insErr) { console.error('[prod_issue_remind] notify insert:', insErr.message); return 0; }  // 未标记 → 下轮重试
+    const insR = await insertNotifications(notifs);
+    if (!insR.ok) { console.error('[prod_issue_remind] notify insert:', insR.error); return 0; }  // 未标记 → 下轮重试
   }
   if (markIds.length > 0) {
     await supabase.from('production_issues').update({ last_reminded_at: nowIso }).in('id', markIds);
@@ -274,20 +255,18 @@ async function checkUnassignedMerchandiser(supabase: any): Promise<number> {
       }
     }
 
-    // 给每个人发通知
-    for (const userId of recipients) {
-      await supabase.from('notifications').insert({
-        user_id: userId,
-        type: 'merchandiser_escalation',
-        title: `🚨 ${order.order_no} 超过 24h 仍未指定跟单！`,
-        message:
-          `客户 ${order.customer_name || '?'} · ${order.quantity || '?'} 件\n` +
-          `创建于 ${new Date(order.created_at).toLocaleString('zh-CN')}\n` +
-          `请立即在订单详情页指定跟单人员，避免延误。`,
-        related_order_id: order.id,
-        status: 'unread',
-      });
-    }
+    // 给每个人发通知(统一入口 service-role,防 RLS 静默拒收)
+    await insertNotifications(recipients.map((userId: string) => ({
+      user_id: userId,
+      type: 'merchandiser_escalation',
+      title: `🚨 ${order.order_no} 超过 24h 仍未指定跟单！`,
+      message:
+        `客户 ${order.customer_name || '?'} · ${order.quantity || '?'} 件\n` +
+        `创建于 ${new Date(order.created_at).toLocaleString('zh-CN')}\n` +
+        `请立即在订单详情页指定跟单人员，避免延误。`,
+      related_order_id: order.id,
+      status: 'unread',
+    })));
 
     // 微信推送
     try {
@@ -473,16 +452,14 @@ async function notifyAdminAssistantOverdue(supabase: any): Promise<number> {
   const msg = lines.join('\n');
   const title = `📊 督办日报 — ${overdueList.length} 项逾期 / ${soonList.length} 即将到期${zombie.length > 0 ? ` / ${zombie.length} 单出厂已过待核办` : ''}`;
 
-  // 发给每个 admin_assistant
-  for (const userId of assistants) {
-    await supabase.from('notifications').insert({
-      user_id: userId,
-      type: 'supervisor_daily_overdue',
-      title,
-      message: msg.slice(0, 1500),
-      status: 'unread',
-    });
-  }
+  // 发给每个 admin_assistant(统一入口 service-role)
+  await insertNotifications(assistants.map((userId: string) => ({
+    user_id: userId,
+    type: 'supervisor_daily_overdue',
+    title,
+    message: msg.slice(0, 1500),
+    status: 'unread',
+  })));
 
   // 微信推送
   try {
@@ -509,14 +486,18 @@ async function runEscalationChain(supabase: any): Promise<number> {
   const now = new Date();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://order.qimoactivewear.com';
 
-  // 查所有逾期的 in_progress 节点
-  const { data: overdueRawEsc } = await supabase
+  // 查所有逾期的 in_progress 节点 —— 此前 .limit(100) 取最老 100 条,逾期>100 时较新逾期永远拿不到
+  // L1–L5 升级(旧逾期饿死新逾期,2026-08-11 审计)。改分页拉全量(升级有 dedup,重扫已升级的很便宜;
+  // fetchAllPages 自带 HARD_MAX 保护,失真会显性报错而非静默截断)。
+  const { fetchAllPages } = await import('@/lib/db/truth-query');
+  const { rows: overdueRawEsc, error: escErr } = await fetchAllPages((from, to) => supabase
     .from('milestones')
     .select('id, name, step_key, due_at, owner_user_id, owner_role, order_id, orders!inner(order_no, customer_name, created_by, owner_user_id, special_tags, notes)')
     .in('status', ['in_progress', '进行中'])
     .lt('due_at', now.toISOString())
     .order('due_at', { ascending: true })
-    .limit(100);
+    .range(from, to));
+  if (escErr) console.error('[escalation] 逾期节点分页拉取异常:', escErr);
 
   // 「待客户指令出运」豁免(2026-08-06,与督办日报同口径):客户暂停不进升级链
   const { isCustomerShipHoldFromOrder: isHoldEsc } = await import('@/lib/domain/customerShipHold');
@@ -581,18 +562,16 @@ async function runEscalationChain(supabase: any): Promise<number> {
       `→ ${appUrl}/orders/${m.order_id}?tab=progress`,
     ].join('\n');
 
-    // 给每个人发通知（用 dedupKey 作为 type 防重复）
-    for (const uid of recipients) {
-      await supabase.from('notifications').insert({
-        user_id: uid,
-        type: dedupKey,
-        title,
-        message,
-        related_order_id: m.order_id,
-        related_milestone_id: m.id,
-        status: 'unread',
-      });
-    }
+    // 给每个人发通知（用 dedupKey 作为 type 防重复；统一入口 service-role）
+    await insertNotifications((recipients as string[]).map((uid) => ({
+      user_id: uid,
+      type: dedupKey,
+      title,
+      message,
+      related_order_id: m.order_id,
+      related_milestone_id: m.id,
+      status: 'unread',
+    })));
 
     // 微信推送
     try {

@@ -53,6 +53,16 @@ export const WATCH_RULES: WatchRule[] = [
       ? `eligible=${r.eligible_items} 但 generated=0`
       : null,
   },
+  {
+    // 每15分钟跑的最关键 cron(升级链/督办日报/PO+生产提醒/财务重试)。静默>2h = 调度挂了/持续抛错,critical。
+    // 内部步骤失败由 runAutomationJob 的 steps 记录并进 health_status,这里只兜"整条 cron 停摆"这个最严重态。
+    job: 'reminders', maxSilenceHours: 2, okStatuses: ['success', 'degraded'], severity: 'critical', owner: 'admin',
+    outputRule: (r) => {
+      const steps: any[] = r.metadata?.steps || [];
+      const crit = steps.find((s) => s.ok === false && s.critical);
+      return crit ? `关键步骤 ${crit.step} 失败: ${crit.error || ''}` : null;
+    },
+  },
 ];
 
 export interface WatchFinding { job: string; severity: JobHealth; reason: string }

@@ -64,9 +64,13 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const groups = ORDER.map((cat) => ({ key: cat, label: (CATEGORY_META as any)[cat]?.label || cat, count: Number((aData.byCategory as any)?.[cat] || 0) })).filter((g) => g.count > 0);
 
   // ── 订单 + 里程碑(B/C/D/E 共用一次拉) ──
-  const { data: orders } = await supabase.from('orders')
+  // .limit(2000) 会被 PostgREST 静默截到 1000 → 驾驶舱只在最近 1000 单上算,更早在办单被丢(假全量)。
+  // 改走 Truth Query 分页,与独立 count 对齐(2026-08-11 审计修)。
+  const { fetchAllPages } = await import('@/lib/db/truth-query');
+  const { rows: orders, error: ordersErr } = await fetchAllPages((from, to) => supabase.from('orders')
     .select('id, order_no, internal_order_no, customer_name, order_purpose, lifecycle_status, created_at, factory_date, owner_user_id, created_by')
-    .order('created_at', { ascending: false }).limit(2000);
+    .order('created_at', { ascending: false }).range(from, to));
+  if (ordersErr) console.error('[cockpit] orders 分页拉取异常:', ordersErr);
   // "在办/计逾期"的口径:排除已终结 **和** 尚未激活(草稿/待审批/暂停)的订单,与工作台对齐。
   const notTerminal = (o: any) => !NO_OVERDUE_LC.has(String(o.lifecycle_status || '').toLowerCase()) && !NO_OVERDUE_LC.has(String(o.lifecycle_status || ''));
   // 打样单不进 B(部门健康)/E(员工)/D(卡住)/里程碑逾期口径——避免打样延期污染部门健康度与员工准时率
@@ -75,9 +79,15 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const sampleActiveCount = ((orders || []) as any[]).filter((o) => notTerminal(o) && String(o.order_purpose) === 'sample').length;
   const orderById = new Map<string, any>(((orders || []) as any[]).map((o) => [o.id, o]));
   const liveIds = liveOrders.map((o) => o.id);
-  const { data: ms } = liveIds.length > 0
-    ? await supabase.from('milestones').select('id, name, status, due_at, actual_at, owner_role, owner_user_id, order_id, step_key, sequence_number').in('order_id', liveIds)
-    : { data: [] };
+  // 活跃单×每单~17节点极易 >1000 → .in() 会被静默截断(B部门计分/E员工准时率漏算)。分页拉全量。
+  let ms: any[] = [];
+  if (liveIds.length > 0) {
+    const { rows: msRows, error: msErr } = await fetchAllPages((from, to) => supabase.from('milestones')
+      .select('id, name, status, due_at, actual_at, owner_role, owner_user_id, order_id, step_key, sequence_number')
+      .in('order_id', liveIds).order('order_id', { ascending: true }).range(from, to));
+    if (msErr) console.error('[cockpit] milestones 分页拉取异常:', msErr);
+    ms = msRows;
+  }
   // 业务执行固定节点归一化到订单业务负责人(2026-07-28 审计 P1-3):B 部门计分/E 员工准时率不再把
   // 产前样寄出/确认等节点算到生产头上(与工作台/订单详情同口径 effectiveMilestoneOwner)。
   const { effectiveMilestoneOwner } = await import('@/lib/domain/milestone-owner');

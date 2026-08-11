@@ -212,29 +212,16 @@ export async function approveShipment(id: string, orderId: string, decision: 'ap
     .update(patch).eq('id', id);
   if (error) return { error: error.message };
 
-  // R1-F(S1 修复):财务批准出货 = 打开 allow_shipment 放行闸。
-  // 此前这两条轨是断的:approveShipment 只写 shipment_confirmations,而里程碑出运闸读的是
-  // order_financials.allow_shipment,唯一的写闸函数 overrideBusinessControl 又零 UI 挂载且 admin-only
-  //   → 财务在系统里**根本无法放货**(生产实证:business_override 0 条、187 张 true 全是祖父豁免)。
-  // 现在财务点「批准」就通过已可达入口开闸;svc 写 + 断言 + A2 审计。仅批准分支开,驳回不动。
+  // 财务批准出货 = 打开 allow_shipment 放行闸。走**统一放货 Command**(与外部财务回调同一套业务真相:
+  // 开闸 + A2 审计 + 写后回读)。仅批准分支开,驳回不动。
   if (decision === 'approved') {
     const { createServiceRoleClient } = await import('@/lib/supabase/server');
+    const { approveShipmentRelease } = await import('@/lib/shipment/approve-release');
     const svc = createServiceRoleClient();
-    // order_financials 行可能不存在(旧单)→ 先确保有行再置闸
-    const { data: finRow } = await (svc.from('order_financials') as any).select('order_id').eq('order_id', orderId).maybeSingle();
-    const gate = finRow
-      ? await safeMutation({ client: svc, table: 'order_financials', operation: 'update',
-          payload: { allow_shipment: true, updated_by: user.id, updated_at: now }, predicate: { order_id: orderId } })
-      : await safeMutation({ client: svc, table: 'order_financials', operation: 'insert',
-          payload: { order_id: orderId, allow_shipment: true, updated_by: user.id, updated_at: now }, expectedRows: 'any' });
-    if (!gate.ok) return { error: `出货已批但放行闸开启失败(${gate.status}):${gate.error} —— 请重试或联系管理员` };
-    await writeAuditEvent({
-      eventType: 'business_override', level: 'A2', riskLevel: 'money',
-      actor: { actorType: 'user', actorId: user.id },
-      entity: { entityType: 'order', entityId: orderId, orderId },
-      commandName: 'approveShipment', reason: `财务批准出货放行${note ? ':' + note : ''}`,
-      beforeState: { allow_shipment: false }, afterState: { allow_shipment: true },
+    const rel = await approveShipmentRelease(svc, {
+      orderId, approvedBy: user.id, source: 'internal', reason: note || null,
     });
+    if (!rel.ok) return { error: `出货已批但放行闸开启失败(${rel.status}):${rel.error} —— 请重试或联系管理员` };
   }
 
   revalidatePath(`/orders/${orderId}`);

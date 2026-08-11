@@ -101,6 +101,8 @@ describe('watchdog:抓沉默和零产出', () => {
       ['daily', { lastOk: runAt(2, { metadata: { steps: [] } }), lastAny: runAt(2) }],
       ['order-audit', { lastOk: runAt(2, { metadata: { audit_hits: 0, notifications_created: 0 } }), lastAny: runAt(2) }],
       ['daily-briefing', { lastOk: runAt(2, { eligible_items: 7, processed_items: 7 }), lastAny: runAt(2) }],
+      // reminders 每15分钟跑,maxSilenceHours=2 → 用 1h 前的健康运行(无关键步骤失败)
+      ['reminders', { lastOk: runAt(1, { metadata: { steps: [] } }), lastAny: runAt(1) }],
     ]);
     expect(evaluateWatchRules(WATCH_RULES, latest, now)).toHaveLength(0);
   });

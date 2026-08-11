@@ -4,6 +4,14 @@
  * 已出货一键完成(2026-07-28 CEO):出厂日已过的订单,业务确认"已出货"→
  * 除收款外的未完成节点全部补录完成(逾期消失);收款已完成/无收款节点 → 订单直接完结,
  * 否则保持执行中(只剩收款,财务照常跟)。有在途分批的单不许走此捷径(防两轨打架)。
+ *
+ * ⚠️ 业务语义(2026-08-11 CEO 拍板,钉死):
+ *   · 财务批准 = 「可以出」(权限):allow_shipment=true 是放货真相,发生在出货**之前**。
+ *   · confirmOrderShipped = 「已经出」(事实):财务未放货**必须拒绝执行**(FINANCE_RELEASE_REQUIRED),
+ *     禁止"先出货、后补审批"。不补节点/不改 completed/不发成功通知/不发财务事件。
+ *   · 出货真实完成后 → 发 shipment.completed 事实事件给财务(触发应收/CI/结算),≠放货审批请求。
+ *   · admin 紧急放行必须走独立显式命令 confirmOrderShippedWithOverride(理由必填 + A2 审计),
+ *     普通 confirmOrderShipped 不允许隐式绕过闸。
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
@@ -14,28 +22,78 @@ import { revalidatePath } from 'next/cache';
 const CAN_CONFIRM = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin', 'admin_assistant'];
 const DONE = new Set(['done', 'completed', '已完成']);
 
-export async function confirmOrderShipped(orderId: string): Promise<{ ok: boolean; completed?: boolean; error?: string }> {
+export interface ConfirmShippedResult {
+  ok: boolean;
+  completed?: boolean;
+  error?: string;
+  code?: 'FINANCE_RELEASE_REQUIRED' | 'PAYMENT_HOLD' | 'BATCH_OPEN' | 'FORBIDDEN' | 'NOT_FOUND' | 'TERMINAL';
+}
+
+/** 普通入口:财务未放货一律拒绝(不隐式绕闸)。 */
+export async function confirmOrderShipped(orderId: string): Promise<ConfirmShippedResult> {
+  return confirmOrderShippedCore(orderId, { override: null });
+}
+
+/** admin 紧急放行入口:理由必填 + A2 审计留痕;仅此显式命令可越过财务放货闸。 */
+export async function confirmOrderShippedWithOverride(orderId: string, reason: string): Promise<ConfirmShippedResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: '请先登录' };
+  if (!user) return { ok: false, error: '请先登录', code: 'FORBIDDEN' };
+  const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  if (!roles.includes('admin')) return { ok: false, error: '仅管理员可紧急越过财务放货闸', code: 'FORBIDDEN' };
+  if (!reason || !reason.trim()) return { ok: false, error: '紧急放行必须填写理由', code: 'FORBIDDEN' };
+  return confirmOrderShippedCore(orderId, { override: { reason: reason.trim(), actorId: user.id } });
+}
+
+async function confirmOrderShippedCore(
+  orderId: string,
+  opts: { override: { reason: string; actorId: string } | null },
+): Promise<ConfirmShippedResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '请先登录', code: 'FORBIDDEN' };
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles, name').eq('user_id', user.id).single();
   const roles: string[] = (prof as any)?.roles?.length ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
-  if (!roles.some((r) => CAN_CONFIRM.includes(r))) return { ok: false, error: '仅业务/理单/管理可确认已出货' };
+  if (!roles.some((r) => CAN_CONFIRM.includes(r))) return { ok: false, error: '仅业务/理单/管理可确认已出货', code: 'FORBIDDEN' };
 
   const svc = createServiceRoleClient();
   const { data: order } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, lifecycle_status, order_purpose').eq('id', orderId).maybeSingle();
-  if (!order) return { ok: false, error: '订单不存在' };
+    .select('id, order_no, internal_order_no, lifecycle_status, order_purpose, quantity').eq('id', orderId).maybeSingle();
+  if (!order) return { ok: false, error: '订单不存在', code: 'NOT_FOUND' };
   if (['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档'].includes(String(order.lifecycle_status))) {
-    return { ok: false, error: '订单已终结,无需确认' };
+    return { ok: false, error: '订单已终结,无需确认', code: 'TERMINAL' };
   }
 
   // 分批在途护栏(H2 双轨):有未出完的分批 → 必须走分批出货流程逐批确认
   try {
     const { data: batches } = await (svc.from('shipment_batches') as any).select('id, status').eq('order_id', orderId);
     const open = ((batches || []) as any[]).filter((b) => !['shipped', 'completed', 'cancelled', '已出运', '已取消'].includes(String(b.status)));
-    if (open.length > 0) return { ok: false, error: `本单有 ${open.length} 个在途分批,请到「出货单据」按批确认出运,不能一键整单完成` };
+    if (open.length > 0) return { ok: false, error: `本单有 ${open.length} 个在途分批,请到「出货单据」按批确认出运,不能一键整单完成`, code: 'BATCH_OPEN' };
   } catch { /* 表不存在则无分批,放行 */ }
+
+  // ── 财务放货硬闸(所有人一视同仁,无 admin 隐式绕过)──
+  // 未放货 → 拒绝,不补节点/不改 completed/不发通知/不发财务事件。admin 紧急放行走 override 命令(已在上游审计)。
+  if (!opts.override) {
+    const { data: fin } = await (svc.from('order_financials') as any)
+      .select('allow_shipment, payment_hold').eq('order_id', orderId).maybeSingle();
+    if ((fin as any)?.payment_hold === true) {
+      return { ok: false, error: '付款已暂停(payment_hold),不能出货 —— 请先由财务解除暂停。', code: 'PAYMENT_HOLD' };
+    }
+    if ((fin as any)?.allow_shipment !== true) {
+      return { ok: false, error: '财务尚未放货 —— 请先由财务在出货审批中放行,再确认出货。', code: 'FINANCE_RELEASE_REQUIRED' };
+    }
+  } else {
+    // override 路径:先把「越闸」这件事本身 A2 留痕(理由必填),再继续。
+    await writeAuditEvent({
+      eventType: 'shipment_release_override', level: 'A2', riskLevel: 'delivery',
+      actor: { actorType: 'user', actorId: opts.override.actorId },
+      entity: { entityType: 'order', entityId: orderId, orderId },
+      commandName: 'confirmOrderShippedWithOverride',
+      reason: opts.override.reason, note: 'admin 紧急越过财务放货闸一键出货',
+      beforeState: { finance_gate: 'not_released' }, afterState: { finance_gate: 'overridden' },
+    });
+  }
 
   const { data: ms } = await (svc.from('milestones') as any)
     .select('id, step_key, status, notes').eq('order_id', orderId);
@@ -43,17 +101,6 @@ export async function confirmOrderShipped(orderId: string): Promise<{ ok: boolea
   const actorName = (prof as any)?.name || user.email?.split('@')[0] || '业务';
   const toClose = ((ms || []) as any[]).filter((m) => !DONE.has(String(m.status)) && m.step_key !== 'payment_received');
 
-  // R1-F(S2 修复):一键出货会把出运/订舱节点批量置 done —— 但绝不能绕过发货财务闸。
-  // 与 milestones.ts 出运闸同口径:非 admin 时,若含出运/订舱节点且财务未放货(或付款暂停),拒绝。
-  const GATE_STEPS = new Set(['shipment_execute', 'booking_done', 'domestic_delivery', 'domestic_shipment']);
-  const isAdminActor = roles.includes('admin');
-  if (!isAdminActor && toClose.some((m: any) => GATE_STEPS.has(m.step_key))) {
-    const { data: fin } = await (svc.from('order_financials') as any)
-      .select('allow_shipment, payment_hold').eq('order_id', orderId).maybeSingle();
-    if ((fin as any)?.payment_hold === true || (fin as any)?.allow_shipment !== true) {
-      return { ok: false, error: '财务尚未放货(或已付款暂停),不能一键出货 —— 请先由财务在出货审批中放行。' };
-    }
-  }
   for (let i = 0; i < toClose.length; i += 50) {
     const chunk = toClose.slice(i, i + 50).map((m) => m.id);
     const { error } = await (svc.from('milestones') as any)
@@ -75,10 +122,26 @@ export async function confirmOrderShipped(orderId: string): Promise<{ ok: boolea
     actor: { actorType: 'user', actorId: user.id },
     entity: { entityType: 'order', entityId: orderId, orderId },
     commandName: 'confirmOrderShipped',
-    note: `业务确认已出货:补录 ${toClose.length} 个节点${payDone ? ',订单完结' : ',保留收款跟踪'}`,
-    metadata: { closed_milestones: toClose.length, completed: payDone },
+    note: `业务确认已出货:补录 ${toClose.length} 个节点${payDone ? ',订单完结' : ',保留收款跟踪'}${opts.override ? '(admin override)' : ''}`,
+    metadata: { closed_milestones: toClose.length, completed: payDone, override: !!opts.override },
   });
   if (!ar.ok) console.error('[confirm-shipped] A2 审计失败 → completed_unverified(admin 已告警)');
+
+  // ── 出货完成 → 发【事实事件】shipment.completed 给财务(触发应收/CI/结算)──
+  // 幂等键 = shipment_completed:<orderId>;首发失败自动落 outbox 重试(非 silent,dead 有企微告警)。
+  try {
+    const { notifyShipmentCompleted } = await import('@/lib/integration/finance-sync');
+    const r = await notifyShipmentCompleted({
+      order_id: orderId,
+      internal_order_no: order.internal_order_no || order.order_no || null,
+      shipment_date: nowIso.slice(0, 10),   // 日期串,勿传全精度(保幂等)
+      quantity: order.quantity ?? null,
+      triggered_by: actorName,
+    });
+    if (!r.success) console.error(`[confirm-shipped] shipment.completed 首发失败(${r.error}) → 已落 outbox 待重试`);
+  } catch (e: any) {
+    console.error('[confirm-shipped] shipment.completed 组装/发送异常(不阻断出货完成,outbox 兜底):', e?.message);
+  }
 
   revalidatePath('/orders');
   return { ok: true, completed: payDone };
