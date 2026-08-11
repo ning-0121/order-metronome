@@ -322,27 +322,9 @@ export async function markMilestoneDone(
 
   // V3 部门线硬前置(上游部门节点没 done → 下游不给完成)。只对 V3 单生效。缺失的前置(如送仓砍了 booking_done)
   //   在下方查询里自然不计(无对应节点行),不误卡。核心链:PO审查→财务审核/PI→评审会→采购下单→…
-  const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = isV3Order ? {
-    finance_approval: ['po_confirmed'],
-    pi_confirmed: ['po_confirmed'],
-    production_order_upload: ['pi_confirmed'],
-    order_kickoff_meeting: ['production_order_upload'],
-    procurement_order_placed: ['finance_approval', 'order_kickoff_meeting'],
-    pre_production_sample_sent: ['procurement_order_placed'],
-    pps_procurement_check: ['pre_production_sample_sent'],
-    pre_production_sample_approved: ['pps_procurement_check'],
-    initial_line_check: ['pre_production_sample_approved'],
-    mid_qc_check: ['initial_line_check'],
-    // 2026-07-29 CEO:包装确认与中查解耦(可并行,不必等中查);尾查仍要求 中查+包装确认 都完成
-    packing_method_confirmed: ['pre_production_sample_approved'],
-    final_qc_check: ['mid_qc_check', 'packing_method_confirmed'],
-    final_qc_sales_check: ['final_qc_check'],
-    shipping_sample_send: ['final_qc_sales_check'],
-    ci_made: ['final_qc_sales_check'],
-    booking_done: ['ci_made'],
-    shipment_execute: ['booking_done', 'ci_made'],   // 送仓砍了 booking_done → 退回 ci_made 兜底
-    payment_received: ['shipment_execute'],
-  } : {};
+  //   单一真相:依赖图定义在 lib/schedule/rollingSchedule.ts(滚动排期与硬前置共用同一张图,避免漂移)。
+  const { SEQUENTIAL_REQUIREMENTS_V3 } = await import('@/lib/schedule/rollingSchedule');
+  const SEQUENTIAL_REQUIREMENTS: Record<string, string[]> = isV3Order ? SEQUENTIAL_REQUIREMENTS_V3 : {};
   const prerequisites = SEQUENTIAL_REQUIREMENTS[milestone.step_key];
   if (prerequisites && !isAdmin) {
     const { data: prereqRows } = await (supabase.from('milestones') as any)

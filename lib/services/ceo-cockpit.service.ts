@@ -76,7 +76,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
   const orderById = new Map<string, any>(((orders || []) as any[]).map((o) => [o.id, o]));
   const liveIds = liveOrders.map((o) => o.id);
   const { data: ms } = liveIds.length > 0
-    ? await supabase.from('milestones').select('id, name, status, due_at, actual_at, owner_role, owner_user_id, order_id, step_key').in('order_id', liveIds)
+    ? await supabase.from('milestones').select('id, name, status, due_at, actual_at, owner_role, owner_user_id, order_id, step_key, sequence_number').in('order_id', liveIds)
     : { data: [] };
   // 业务执行固定节点归一化到订单业务负责人(2026-07-28 审计 P1-3):B 部门计分/E 员工准时率不再把
   // 产前样寄出/确认等节点算到生产头上(与工作台/订单详情同口径 effectiveMilestoneOwner)。
@@ -138,6 +138,36 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
     .map(([oid, v]) => { const o = orderById.get(oid); return { orderNo: o?.internal_order_no || o?.order_no || String(oid).slice(0, 8), orderId: oid, customer: o?.customer_name || '', days: v.maxDays, reason: v.count >= 2 ? `同单 ${v.count} 次延期` : `单次 ${v.maxDays} 天` }; })
     .sort((a, b) => b.days - a.days).slice(0, 8);
 
+  // ── 滚动排期(混合方案,ROLLING_SCHEDULE flag 包住)──
+  // 前置节点没全部完成的节点 = waiting,不算逾期(根治"客户拖上游、下游跟单采购假逾期")。
+  // 可开始节点按「前置完成日 + N 工作日」判逾期。cockpit 是 admin-only 视图 → isAdmin=true(admin 灰度即生效)。
+  const { rollingScheduleActive } = await import('@/lib/engine/featureFlags');
+  const useRolling = rollingScheduleActive(true);
+  type _NS = import('@/lib/schedule/rollingSchedule').NodeSchedule;
+  const rollSched = new Map<string, _NS>();   // key `${order_id}:${step_key}`
+  if (useRolling) {
+    const { deriveRollingSchedule } = await import('@/lib/schedule/rollingSchedule');
+    const { V3_SIGNATURE_STEPS } = await import('@/lib/milestoneTemplate');
+    const byOrd = new Map<string, any[]>();
+    for (const mm of milestones) { const a = byOrd.get(mm.order_id) || []; a.push(mm); byOrd.set(mm.order_id, a); }
+    for (const [oid, list] of byOrd) {
+      const o = orderById.get(oid);
+      const isV3 = list.some((m: any) => (V3_SIGNATURE_STEPS as readonly string[]).includes(m.step_key));
+      const orderStartMs = o?.created_at ? new Date(o.created_at).getTime() : now;
+      for (const [k, v] of deriveRollingSchedule(list, { isV3, orderStartMs, nowMs: now })) rollSched.set(`${oid}:${k}`, v);
+    }
+  }
+  // 逾期判定:flag on 走滚动(仍叠加延期待批/待收尾豁免);否则老锚点口径。
+  const nodeOverdue = (mm: any): boolean => {
+    if (pendingDelayMs.has(mm.id) || staleOrderIds.has(mm.order_id)) return false;
+    if (useRolling) return rollSched.get(`${mm.order_id}:${mm.step_key}`)?.overdue ?? false;
+    return isOverdue(mm);
+  };
+  const overdueDays = (mm: any): number => {
+    if (useRolling) { const rd = rollSched.get(`${mm.order_id}:${mm.step_key}`)?.rollingDue; return rd ? Math.max(0, Math.floor((now - rd.getTime()) / 86400000)) : 0; }
+    return mm.due_at ? Math.max(0, Math.floor((now - new Date(mm.due_at).getTime()) / 86400000)) : 0;
+  };
+
   // ── B:五部门健康/异常(每部门收集逾期订单清单,供点开看详情)──
   const deptAgg: Record<string, { active: number; overdue: number; blocked: number; pendingDelay: number }> = {};
   const deptOverdue: Record<string, Map<string, { node: string; days: number }>> = {};
@@ -149,9 +179,9 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
     if (isDone(mm.status)) continue;
     deptAgg[dept].active += 1;
     if (st === 'blocked' || st === '卡单' || st === '卡住') deptAgg[dept].blocked += 1;
-    if (isOverdue(mm)) {   // 已申请延期(待批)不计逾期
+    if (nodeOverdue(mm)) {   // 滚动口径:waiting 节点不计;已申请延期(待批)不计
       deptAgg[dept].overdue += 1;
-      const days = mm.due_at ? Math.max(0, Math.floor((now - new Date(mm.due_at).getTime()) / 86400000)) : 0;
+      const days = overdueDays(mm);
       const prev = deptOverdue[dept].get(mm.order_id);
       if (!prev || days > prev.days) deptOverdue[dept].set(mm.order_id, { node: mm.name || '', days });  // 每单取最久逾期节点
     }

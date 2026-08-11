@@ -144,7 +144,7 @@ const CRITICAL_FLOORS: Array<{ from: string; to: string; biz: number; label: str
  *
  * 5. 验货放行（Day40）后才能订舱出货
  */
-const TIMELINE = {
+export const TIMELINE = {
   // ── 阶段 1：订单评审（0-3 天）──
   po_confirmed:                  0,
   pi_confirmed:                  1,   // PI制作·客户确认(PO后 1 天)

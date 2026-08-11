@@ -86,3 +86,30 @@ export function knowledgeLayerProjectionEnabled(): boolean {
   return knowledgeLayerMode() !== 'off';
 }
 
+/**
+ * 滚动排期(混合方案)——CEO 2026-08-10:节点截止日按「上一节点完成日 + N 天」滚动,
+ * 前置未完成的节点不显示截止日、不算逾期;交付风险仍由锚点(出厂日)逆排单独预警。
+ *
+ * 三态:
+ *  - 'off'   : 完全关闭(默认)。逾期口径 = 老的锚点绝对日期。
+ *  - 'admin' : 灰度,仅 admin 看到的口径(驾驶舱等)按滚动算。
+ *  - 'on'    : 全员按滚动口径(自动覆盖全部在途单,读时派生,无数据迁移)。
+ *
+ * 控制:env ROLLING_SCHEDULE = off | admin | on。回滚 = 改回 off。
+ */
+export type RollingScheduleMode = 'off' | 'admin' | 'on';
+
+export function rollingScheduleMode(): RollingScheduleMode {
+  const v = (process.env.ROLLING_SCHEDULE || 'off').toLowerCase();
+  if (v === 'on' || v === 'admin') return v;
+  return 'off';
+}
+
+/** 逾期/截止口径是否走滚动(按 mode + isAdmin)。服务端聚合(cockpit/督办)传 isAdmin=true 即可按 admin 灰度。 */
+export function rollingScheduleActive(isAdmin: boolean): boolean {
+  const mode = rollingScheduleMode();
+  if (mode === 'off') return false;
+  if (mode === 'on') return true;
+  return !!isAdmin; // admin 灰度
+}
+
