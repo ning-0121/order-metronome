@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { isDoneStatus, isActiveStatus, isPendingStatus } from '@/lib/domain/types';
 import { AIAdviceBox } from '@/components/AIAdviceBox';
-import { getChecklistForStep, canEditChecklistItemRole, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
+import { getChecklistForStep, canEditChecklistItemRole, parseChecklistData, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
 import type { DefectDetectionResult } from '@/lib/agent/skills/garmentDefectDetect';
 import { isStaleServerActionError, STALE_SERVER_ACTION_MESSAGE } from '@/lib/order/create-order-resilience';
@@ -1135,7 +1135,9 @@ function ChecklistSection({ milestone, orderId, currentRoles, currentUserId, onR
   // 加载已有数据
   useEffect(() => {
     if (!config) return;
-    const existing: ChecklistItemResponse[] = milestone.checklist_data || [];
+    // checklist_data 生产库存的是 JSON 字符串(见 parseChecklistData 说明);直接当数组遍历会
+    // 遍历字符、丢掉已填数据(表单空白)。一律用 parseChecklistData 解析。
+    const existing: ChecklistItemResponse[] = parseChecklistData(milestone.checklist_data);
     const map: Record<string, { value: any; pending_date?: string }> = {};
     for (const r of existing) {
       map[r.key] = { value: r.value, pending_date: r.pending_date };

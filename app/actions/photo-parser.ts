@@ -132,7 +132,8 @@ export async function parseProductionPhoto(
     const response = await client.messages.create(
       {
         model: 'claude-sonnet-5', thinking: { type: 'disabled' },
-        max_tokens: 1500,
+        // 1500 对密集手写验货表(尾期14字段+notes)会截断 → 输出半截 JSON → parse 失败「返回格式异常」。
+        max_tokens: 4096,
         system: systemPrompt,
         messages: [{
           role: 'user',
@@ -149,14 +150,24 @@ export async function parseProductionPhoto(
       .filter(b => b.type === 'text')
       .map(b => (b as Anthropic.TextBlock).text)
       .join('');
+    // 输出被 max_tokens 截断时,JSON 一定不完整 → 给用户可行动的提示,而非笼统「格式异常」
+    if ((response as any).stop_reason === 'max_tokens') {
+      logAICall('photo_ocr', orderId, 'error', Date.now() - startedAt, 'truncated at max_tokens').catch(() => {});
+      return { ok: false, error: '这张单据字段太多，AI 输出被截断。请分区域拍(如分上下半张)或拍清晰些再试。' };
+    }
     let jsonStr = text.trim();
     if (jsonStr.startsWith('```')) {
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     }
+    // 稳健提取:模型偶尔在 JSON 前后带说明文字,截首个 { 到末个 } 再 parse(容忍包裹废话)
     let parsed: any;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch {
+    const tryParse = (s: string) => { try { return JSON.parse(s); } catch { return undefined; } };
+    parsed = tryParse(jsonStr);
+    if (parsed === undefined) {
+      const i = jsonStr.indexOf('{'), j = jsonStr.lastIndexOf('}');
+      if (i >= 0 && j > i) parsed = tryParse(jsonStr.slice(i, j + 1));
+    }
+    if (parsed === undefined) {
       logAICall('photo_ocr', orderId, 'error', Date.now() - startedAt, 'JSON parse failed').catch(() => {});
       return { ok: false, error: 'AI 返回格式异常，请重试或检查图片是否清晰' };
     }

@@ -1978,7 +1978,7 @@ export async function saveChecklistData(
 
   // 角色校验：只能编辑自己角色对应的检查项（管理员一般不受限）
   // 例外：order_kickoff_meeting 的双签字段强制角色匹配，admin 也不能替代 sales
-  const { getChecklistForStep, canEditChecklistItemRole } = await import('@/lib/domain/checklist');
+  const { getChecklistForStep, canEditChecklistItemRole, parseChecklistData } = await import('@/lib/domain/checklist');
   const checklistConfig = getChecklistForStep(milestone.step_key);
   const STRICT_ROLE_FIELDS: Record<string, string[]> = {
     order_kickoff_meeting: ['sales_signed'],
@@ -2019,7 +2019,11 @@ export async function saveChecklistData(
   }
 
   // 合并响应（保留其他用户填的项，更新当前用户填的项）
-  const existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> = milestone.checklist_data || [];
+  // ⚠️ 生产库 checklist_data 实际存的是 JSON 字符串(写入侧 JSON.stringify → jsonb 双重编码,全库 557 条皆如此)。
+  //    直接 `milestone.checklist_data || []` 拿到字符串,.map() 会抛 → "Server Components render error"、保存清单失败。
+  //    读一律走 parseChecklistData(既解析字符串又兼容数组)。见 lib/domain/checklist.ts 说明。
+  const existing: Array<{ key: string; value: any; pending_date?: string; updated_at: string; updated_by: string }> =
+    parseChecklistData(milestone.checklist_data) as any;
   const existingMap = new Map(existing.map(r => [r.key, r]));
   const now = new Date().toISOString();
 
