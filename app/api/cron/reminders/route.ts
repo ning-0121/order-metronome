@@ -563,7 +563,7 @@ async function runEscalationChain(supabase: any): Promise<number> {
     ].join('\n');
 
     // 给每个人发通知（用 dedupKey 作为 type 防重复；统一入口 service-role）
-    await insertNotifications((recipients as string[]).map((uid) => ({
+    await insertNotifications(Array.from(recipients).map((uid) => ({   // recipients 是 Set,必须先 Array.from(否则 .map 抛)
       user_id: uid,
       type: dedupKey,
       title,
