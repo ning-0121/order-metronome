@@ -1,3 +1,5 @@
+import { sumPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
+
 export interface AnalyticsOrderQuantityLike {
   id?: string;
   quantity?: number | null;
@@ -33,7 +35,7 @@ export function isStatCountableOrder(order: AnalyticsOrderQuantityLike): boolean
  */
 export function orderStatPieces(order: { quantity?: number | null }, lines?: Array<{ qty_pcs?: number | null; set_multiplier?: number | null }>): number {
   if (lines && lines.length > 0) {
-    const sum = lines.reduce((s, l) => s + (Number(l.qty_pcs) || 0) * (Number(l.set_multiplier) || 1), 0);
+    const sum = sumPhysicalPieceQty(lines);   // 统一入口(禁止裸算套/件换算,2026-08-12)
     // 明细行在、但 qty_pcs 全空/为 0(只建了行没录数量)→ 回退 quantity。
     // 不回退的话整单静默算 0 件:2026-07-30 实测 4 单如此(QM-20260727-005 等,合计 28,964 件凭空消失)。
     if (sum > 0) return sum;

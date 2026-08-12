@@ -18,6 +18,7 @@ import {
   quantityForBasis,
   quantityLabelForBasis,
 } from '@/lib/domain/quantity-engine';
+import { groupPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
   buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, distributeByWeights, shouldSplitBySize,
@@ -370,17 +371,14 @@ export async function listBomConsumptionLines(orderId: string) {
   // 数量(件数,#1 用户):按 款×色 从 order_line_items 取;整单通用辅料行(无款号)→ 订单总数
   const { data: ord } = await (supabase.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
   const orderQty = Number((ord as any)?.quantity) || 0;
+  // 🐛 2026-08-12 修(1022977):此处原用裸 qty_pcs 汇总 —— 但 qty_pcs 是**商业数量(套数)**,
+  //    少乘一次 set_multiplier;下游 deriveOrderQuantityContext 又按套装单除一次 →
+  //    面料基准整整差一倍(3600 而非 7200),直接影响采购金额与实际下料。
+  //    算料/采购基准一律用**物理件数**,统一走 groupPhysicalPieceQty(禁止再裸算)。
   const { data: lis } = await (supabase.from('order_line_items') as any)
-    .select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
-  const byStyle = new Map<string, number>();
-  const byStyleColor = new Map<string, number>();
-  for (const li of (lis || [])) {
-    const q = Number((li as any).qty_pcs) || 0;
-    const st = norm((li as any).style_no);
-    byStyle.set(st, (byStyle.get(st) || 0) + q);
-    // 累加(原用 = 覆盖:同款×色多行(客户加单)只显示最后一行量,预览失真)
-    for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) { const k = `${st}¦${norm(col)}`; byStyleColor.set(k, (byStyleColor.get(k) || 0) + q); }
-  }
+    .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
+  // 同款×色多行(客户加单)累加,不覆盖
+  const { byStyle, byStyleColor } = groupPhysicalPieceQty((lis || []) as any[]);
   const pieceOf = (b: any): number | null => {
     // 辅料业务手填了总需用量 → 数量列直接显示它(中包袋按业务填的 1250,不是件数 7500)
     const isTrim = b.material_type !== 'fabric' && b.material_type !== 'lining';

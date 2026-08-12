@@ -10,6 +10,7 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { hasRoleInGroup } from '@/lib/domain/roles';
 import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine';
+import { groupPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
 import { computeProcurementCostSummary, computeReceivingDiff } from '@/lib/services/procurement-cost';
 import { calculateProfitSnapshot } from '@/lib/services/profit.service';
 
@@ -103,14 +104,13 @@ export async function getBudgetVsActual(orderId: string): Promise<{ data?: any; 
     .select('material_name, category, ordered_qty, received_qty, unit_price, ordered_amount, ordered_unit, procurement_item_id').eq('order_id', orderId);
 
   // 逐款/款色件数(order_line_items):辅料预算=Σ(款辅料总价,一口价不按件数);面料预算件数=按款色/款/整单
-  const { data: liQ } = await (svc.from('order_line_items') as any).select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
+  // 🐛 2026-08-12 修(与 1022977 同源):算料/金额基准必须是**物理件数**,
+  //    原用裸 qty_pcs(商业套数)少乘 set_multiplier → 成本差一倍。统一走 groupPhysicalPieceQty。
+  //    (顺带修:原按款×色用 `=` 覆盖,同款色多行只留最后一行;helper 内是累加。)
+  const { data: liQ } = await (svc.from('order_line_items') as any)
+    .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
   const nrm = (s: any) => String(s ?? '').trim().toLowerCase();
-  const qtyByStyle = new Map<string, number>(); const qtyByStyleColor = new Map<string, number>();
-  for (const li of (liQ || [])) {
-    const st = nrm((li as any).style_no); const q = Number((li as any).qty_pcs) || 0;
-    qtyByStyle.set(st, (qtyByStyle.get(st) || 0) + q);
-    for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) qtyByStyleColor.set(`${st}¦${nrm(col)}`, q);
-  }
+  const { byStyle: qtyByStyle, byStyleColor: qtyByStyleColor } = groupPhysicalPieceQty((liQ || []) as any[]);
   const piecesForBom = (b: any): number | null => {
     const st = nrm(b.style_no);
     const basis = b.consumption_basis || 'PER_SET';

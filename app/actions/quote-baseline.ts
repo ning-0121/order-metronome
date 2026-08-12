@@ -13,6 +13,7 @@ import { getUserRoles } from '@/lib/utils/user-role';
 import { hasRoleInGroup, isAdminRole } from '@/lib/domain/roles';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine';
+import { groupPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
 
 export interface QuoteBaselineLine {
   style_no?: string | null;             // 款号(单耗按款不同)
@@ -252,10 +253,13 @@ export async function saveQuoteBaseline(
     physicalQuantity: (ord as any)?.quantity ?? null,
     quantityUnit: (ord as any)?.quantity_unit ?? null,
   });
-  const { data: liRows } = await (supabase.from('order_line_items') as any).select('style_no, qty_pcs').eq('order_id', orderId);
+  // 🐛 2026-08-12 修(与 1022977 同源):qtyFor 结果喂 `单耗×单价×数量` 与 budgetFabricKg,
+  //    基准必须是**物理件数**;原用裸 qty_pcs(商业套数)少乘 set_multiplier,
+  //    下游 deriveOrderQuantityContext 又除一次 → 面料成本/预算 KG 差一倍。
+  const { data: liRows } = await (supabase.from('order_line_items') as any)
+    .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
   const normS = (s: any) => String(s ?? '').trim().toLowerCase();
-  const qtyByStyle = new Map<string, number>();
-  for (const li of (liRows || [])) qtyByStyle.set(normS((li as any).style_no), (qtyByStyle.get(normS((li as any).style_no)) || 0) + (Number((li as any).qty_pcs) || 0));
+  const { byStyle: qtyByStyle } = groupPhysicalPieceQty((liRows || []) as any[]);
   const singleStyle = styleBudgets.length <= 1;
   const qtyFor = (styleNo: string | null): number | null => {
     const q = qtyByStyle.get(normS(styleNo));
@@ -363,14 +367,10 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
     quantityUnit: (ord as any)?.quantity_unit ?? null,
   });
 
-  // 件数:按 款×色 / 款 / 整单
-  const { data: lis } = await (svc.from('order_line_items') as any).select('style_no, color_cn, color_en, qty_pcs').eq('order_id', orderId);
-  const byStyle = new Map<string, number>(); const byStyleColor = new Map<string, number>();
-  for (const li of (lis || [])) {
-    const q = Number((li as any).qty_pcs) || 0; const st = normS((li as any).style_no);
-    byStyle.set(st, (byStyle.get(st) || 0) + q);
-    for (const col of [(li as any).color_cn, (li as any).color_en]) if (col) byStyleColor.set(`${st}¦${normS(col)}`, q);
-  }
+  // 物理件数:按 款×色 / 款 / 整单(同上,必须 ×set_multiplier;顺带修同款色多行被覆盖)
+  const { data: lis } = await (svc.from('order_line_items') as any)
+    .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
+  const { byStyle, byStyleColor } = groupPhysicalPieceQty((lis || []) as any[]);
   const singleStyle = byStyle.size <= 1;
   const piecesForBom = (b: any): number | null => {
     const st = normS(b.style_no);
