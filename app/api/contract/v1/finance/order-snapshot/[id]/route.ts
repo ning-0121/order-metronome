@@ -4,6 +4,7 @@
 
 import { withContract } from '@/app/api/contract/v1/_lib/withContract';
 import { SCOPES } from '@/app/api/contract/v1/_lib/scopes';
+import { getCommercialQty, getPhysicalPieceQty, setMultiplierOf, sumCommercialQty, sumPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
 
 interface OrderRow {
   id: string;
@@ -28,7 +29,8 @@ interface LineRow {
   color_cn: string | null;
   color_en: string | null;
   sizes: Record<string, number> | null;
-  qty_pcs: number | null;
+  qty_pcs: number | null;              // commercial quantity(套装单 = 套数)
+  set_multiplier: number | null;       // 每商业单位含多少物理件
 }
 
 interface QuoteRow {
@@ -74,17 +76,30 @@ export const GET = withContract<{ id: string }>(
     }
 
     // 明细行
+    // ⚠️ 数量语义(2026-08-12 实证钉死,契约消费方必读):
+    //   qty_pcs        = **commercial quantity**(套装单 = 套数)
+    //   set_multiplier = 每商业单位含多少物理件
+    //   physical       = commercial × set_multiplier
+    //   orders.quantity= **physical pieces**;orders.unit_price = 每 **commercial** 单价
+    //   ∴ total_amount = unit_price × commercial,**不是** quantity × unit_price(套装单差 N 倍)
+    // 旧字段 qty / quantity 保留不动(非破坏),新增显式字段供消费方正确换算。
     const { data: lid } = await supabase
       .from('order_line_items')
-      .select('line_no, style_no, color_cn, color_en, sizes, qty_pcs')
+      .select('line_no, style_no, color_cn, color_en, sizes, qty_pcs, set_multiplier')
       .eq('order_id', o.id)
       .order('line_no');
-    const line_items = ((lid as LineRow[] | null) ?? []).map((l) => ({
+    const lineRows = (lid as LineRow[] | null) ?? [];
+    const line_items = lineRows.map((l) => ({
       style_no: l.style_no ?? null,
       color: l.color_en ?? l.color_cn ?? null,
       size_breakdown: l.sizes ?? {},
-      qty: l.qty_pcs ?? null,
+      qty: l.qty_pcs ?? null,                          // 兼容:历史含义 = commercial
+      commercial_quantity: getCommercialQty(l),
+      set_multiplier: setMultiplierOf(l),
+      physical_quantity: getPhysicalPieceQty(l),
     }));
+    const commercial_quantity = sumCommercialQty(lineRows) || null;
+    const physical_quantity = sumPhysicalPieceQty(lineRows) || null;
 
     // 报价（forecast 来源，经 origin_quote_id）
     let quotation: Record<string, unknown> | null = null;
@@ -132,7 +147,15 @@ export const GET = withContract<{ id: string }>(
         currency: o.currency ?? null,
         unit_price: o.unit_price ?? null,
         total_amount: o.total_amount ?? null,
-        quantity: o.quantity ?? null,
+        quantity: o.quantity ?? null,              // 兼容字段:历史含义 = physical pieces
+        // ── 数量语义显式化(2026-08-12,非破坏式新增)──
+        // 消费方**不要**用 quantity × unit_price 算金额:两者单位不同(件 vs 每套价)。
+        // 需要金额请直接用 total_amount;需要自算请用 commercial_quantity × unit_price。
+        commercial_quantity,                        // 商业数量(套装单 = 套数);明细缺失时为 null
+        physical_quantity,                          // 物理件数 = Σ(commercial × set_multiplier)
+        quantity_basis: 'physical_pieces' as const, // 上面 quantity 字段的口径
+        unit_price_basis: 'commercial_unit' as const,
+        total_amount_formula: 'unit_price * commercial_quantity' as const,
         style_no: o.style_no ?? null,
         etd: o.etd ?? null,
         factory_date: o.factory_date ?? null,

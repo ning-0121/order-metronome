@@ -126,6 +126,77 @@ describe('数量修正(correctOrderQuantity)基数必须是物理件数', () => 
   });
 });
 
+describe('CONFIRMED 收口 ①:finance/order-snapshot 契约显式化', () => {
+  const src = readFileSync('app/api/contract/v1/finance/order-snapshot/[id]/route.ts', 'utf-8');
+
+  it('明细取 set_multiplier', () => {
+    expect(src).toMatch(/\.select\('[^']*set_multiplier[^']*'\)/);
+  });
+
+  it('非破坏:保留旧 qty / quantity 字段', () => {
+    expect(src).toContain('qty: l.qty_pcs');
+    expect(src).toContain('quantity: o.quantity');
+  });
+
+  it('新增四个显式语义字段', () => {
+    for (const f of ['commercial_quantity', 'physical_quantity', 'set_multiplier',
+                     "unit_price_basis: 'commercial_unit'", "quantity_basis: 'physical_pieces'"]) {
+      expect(src, `缺 ${f}`).toContain(f);
+    }
+  });
+
+  it('明确 total_amount 口径公式', () => {
+    expect(src).toContain("total_amount_formula: 'unit_price * commercial_quantity'");
+  });
+});
+
+describe('CONFIRMED 收口 ①b:推送财务用真实倍率而非 quantity_unit 猜测', () => {
+  const src = readFileSync('lib/integration/finance-sync.ts', 'utf-8');
+  it('优先用明细 sumCommercialQty,无明细才回退字符串猜测', () => {
+    expect(src).toContain('sumCommercialQty');
+    expect(src).toContain("qtyBasisSource");
+    expect(src).toContain("'line_items'");
+  });
+  it('payload 标注数量来源与单价口径,便于财务侧核对', () => {
+    expect(src).toContain('quantity_basis_source');
+    expect(src).toContain("unit_price_basis: 'commercial_unit'");
+  });
+});
+
+describe('CONFIRMED 收口 ②:排产卡片总量与款色明细同口径', () => {
+  const src = readFileSync('app/actions/production-scheduling.ts', 'utf-8');
+  it('款色明细用 physical,并另存 commercial 供套装展示', () => {
+    expect(src).toContain('getPhysicalPieceQty(l)');
+    expect(src).toContain('qtyCommercial');
+    expect(src).not.toMatch(/s\.qty \+= Number\(l\.qty_pcs\)/);
+  });
+  it('select 带 set_multiplier', () => {
+    expect(src).toMatch(/\.select\('order_id, style_no[^']*set_multiplier[^']*'\)/);
+  });
+  it('1022977 口径:physical 20400 / commercial 10200 / 分款 7200+13200', () => {
+    expect(sumPhysicalPieceQty(ORDER_1022977)).toBe(20400);
+    expect(sumCommercialQty(ORDER_1022977)).toBe(10200);
+    expect(getPhysicalPieceQty(ORDER_1022977[0])).toBe(7200);
+    expect(getPhysicalPieceQty(ORDER_1022977[1])).toBe(13200);
+  });
+});
+
+describe('CONFIRMED 收口 ③:加单继承真实倍率,不确定则显式失败', () => {
+  const src = readFileSync('app/actions/order-amendments.ts', 'utf-8');
+  it('不得再硬编码 set_multiplier: 1', () => {
+    expect(src).not.toMatch(/sizes,\s*unit:\s*'pcs',\s*set_multiplier:\s*1/);
+    expect(src).toContain('set_multiplier: mul');
+  });
+  it('有 resolveMultiplier 且 null 时返回 error(不静默 fallback)', () => {
+    expect(src).toContain('resolveMultiplier');
+    expect(src).toContain('无法确定件/套倍率');
+    expect(src).toContain('系统不会替你猜倍率');
+  });
+  it('读取母单现有倍率作为继承来源', () => {
+    expect(src).toMatch(/\.select\('style_no, set_multiplier'\)/);
+  });
+});
+
 describe('调用点已迁入统一入口(防回潮)', () => {
   const files = [
     'app/actions/procurement-items.ts',

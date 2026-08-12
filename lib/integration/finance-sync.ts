@@ -190,10 +190,26 @@ export async function syncOrderToFinance(order: Record<string, unknown>, event: 
   // 套装数量口径修(2026-07-29 财务整改):orders.quantity 库里统一存【折合件数】(套×2/三件套×3),
   // quantity_unit 却是"套" → 此前把 14400 当"14400 套"发给财务(实际 7200 套),单价校验/毛利全偏。
   // 契约:quantity 必须与 quantity_unit 同口径(套数);折合件数另发 quantity_pieces,绝不覆盖 quantity。
+  // 🐛 2026-08-12 修:原来只按 quantity_unit 字符串猜倍率('套'→2/'三件套'→3),
+  //    但真实倍率在 order_line_items.set_multiplier,可能逐行不同(混合套装)。
+  //    实测 1022967:unit 标「三件套」猜 3,实际倍率 2/1 → 发给财务的数量只有真实的一半(2400 vs 4800),
+  //    而财务侧确实在算 unit_price × quantity(本函数下方自检即为此而设)→ 金额直接错。
+  //    改为:有明细行 → 用真实 Σ commercial(权威);无明细行 → 回退字符串猜测(保持既有行为)。
   const unitStr = String(order.quantity_unit || '');
   const perSet = unitStr === '套' ? 2 : unitStr === '三件套' ? 3 : 1;
   const pieces = order.quantity != null ? Number(order.quantity) : null;
-  const qtyInUnit = pieces != null && perSet > 1 ? Math.round(pieces / perSet) : pieces;
+  let qtyInUnit = pieces != null && perSet > 1 ? Math.round(pieces / perSet) : pieces;
+  let qtyBasisSource: 'line_items' | 'unit_string_guess' = 'unit_string_guess';
+  try {
+    const { createServiceRoleClient } = await import('@/lib/supabase/server');
+    const { sumCommercialQty } = await import('@/lib/domain/line-item-quantity');
+    const { data: liRows } = await (createServiceRoleClient().from('order_line_items') as any)
+      .select('qty_pcs, set_multiplier').eq('order_id', order.id);
+    const commercial = sumCommercialQty((liRows || []) as any[]);
+    if (commercial > 0) { qtyInUnit = commercial; qtyBasisSource = 'line_items'; }
+  } catch (e) {
+    console.error('[FinanceSync] 读明细算 commercial 失败,回退 quantity_unit 猜测:', e instanceof Error ? e.message : e);
+  }
   // 发送前自检(财务整改②):unit_price × quantity ≈ total_amount(容差 1%)。
   // 不一致 → payload 打 quantity_check='mismatch' + 记错误日志(不整单拦发——订单彻底不同步比带标记更糟;财务侧有黄条防线)。
   const upNum = Number(order.unit_price); const taNum = Number(order.total_amount);
@@ -219,6 +235,8 @@ export async function syncOrderToFinance(order: Record<string, unknown>, event: 
     total_amount: order.total_amount || null,
     quantity: qtyInUnit,                       // 与 quantity_unit 同口径(套装=套数)
     quantity_pieces: pieces,                   // 折合件数(财务需要件数口径时读这个)
+    quantity_basis_source: qtyBasisSource,     // line_items=按真实倍率算;unit_string_guess=无明细回退猜测
+    unit_price_basis: 'commercial_unit',       // 单价口径:每商业单位(套装单=每套)
     quantity_unit: order.quantity_unit || null,
     ...(quantityCheck ? { quantity_check: quantityCheck } : {}),
     factory_name: order.factory_name || null,

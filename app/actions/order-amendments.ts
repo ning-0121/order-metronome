@@ -484,6 +484,31 @@ async function applyCustomerAddOrder(
     .select('line_no').eq('order_id', orderId).order('line_no', { ascending: false }).limit(1).maybeSingle();
   let lineNo = Number((maxRow as any)?.line_no) || 0;
 
+  // 🐛 2026-08-12 修:加单行原来硬编码 set_multiplier: 1 —— 套装单追加会**丢掉倍率**,
+  //    下游算料/采购按 1 倍备,少备一半到三分之二。倍率必须继承母单真实值;
+  //    确定不了(母单混合倍率且款号对不上)→ **显式失败要人确认**,绝不静默回退 1。
+  const { data: existingLines } = await (supabase.from('order_line_items') as any)
+    .select('style_no, set_multiplier').eq('order_id', orderId);
+  const normStyle = (s: any) => String(s ?? '').trim().toLowerCase();
+  const mulByStyle = new Map<string, Set<number>>();
+  const allMuls = new Set<number>();
+  for (const l of ((existingLines || []) as any[])) {
+    const m = Number(l.set_multiplier) > 0 ? Number(l.set_multiplier) : 1;
+    allMuls.add(m);
+    const k = normStyle(l.style_no);
+    if (!mulByStyle.has(k)) mulByStyle.set(k, new Set());
+    mulByStyle.get(k)!.add(m);
+  }
+  /** 解析该加单行应继承的倍率:同款唯一 → 用它;母单全单唯一 → 用它;否则 null(须人工确认) */
+  const resolveMultiplier = (styleNo: any): number | null => {
+    const forStyle = mulByStyle.get(normStyle(styleNo));
+    if (forStyle && forStyle.size === 1) return [...forStyle][0];
+    if (forStyle && forStyle.size > 1) return null;              // 同款自身就混合 → 不猜
+    if (allMuls.size === 1) return [...allMuls][0];              // 母单全单一致 → 继承
+    if (allMuls.size === 0) return 1;                            // 母单无明细(非套装场景)→ 1
+    return null;                                                  // 母单混合且款号是新的 → 不猜
+  };
+
   const batchTag = `客户加单 ${new Date().toISOString().slice(0, 10)}`;
   const rows: any[] = [];
   let addQty = 0;
@@ -495,12 +520,19 @@ async function applyCustomerAddOrder(
       if (String(k).trim() && n > 0) { sizes[String(k).trim()] = n; qty += n; }
     }
     if (qty <= 0) continue;
+    const mul = resolveMultiplier(r.style_no);
+    if (mul == null) {
+      return {
+        error: `加单行「${r.style_no || '未填款号'}」无法确定件/套倍率(母单存在多种倍率:${[...allMuls].join('/')})。`
+          + `请在逐款明细里先确认该款的「件/套」,或按母单同款号加单后再试 —— 系统不会替你猜倍率(猜错会少备料)。`,
+      };
+    }
     lineNo++; addQty += qty;
     rows.push({
       order_id: orderId, line_no: lineNo,
       style_no: r.style_no || null, product_name: r.product_name || null,
       color_cn: r.color_cn || null, color_en: r.color_en || null,
-      sizes, unit: 'pcs', set_multiplier: 1,
+      sizes, unit: 'pcs', set_multiplier: mul,     // 继承母单真实倍率(不再硬编码 1)
       qty_pcs: qty, qty_raw: qty,
       po_unit_price: r.po_unit_price != null ? Number(r.po_unit_price) : null,
       source: 'add_order',

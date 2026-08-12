@@ -15,6 +15,7 @@ import { buildFactoryScheduleTruth, pickConfirmedStyleImage, summarizeConfirmedC
 import { assignMerchandiser } from '@/app/actions/milestones';
 import { classifyDispatchQueueStatus, summarizeDispatchQueue } from '@/lib/production/dispatch-queue';
 import { resolveFactoryTruth } from '@/lib/production/factory-truth';
+import { getPhysicalPieceQty, getCommercialQty } from '@/lib/domain/line-item-quantity';
 
 async function gate(view: boolean): Promise<{ svc: any; roles: string[]; userId: string } | { error: string }> {
   const supabase = await createClient();
@@ -73,7 +74,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 明细(款×色)/ 客供料(委托加工判定)/ 采购到位
   const [{ data: lines }, { data: bom }, { data: pli }, { data: allMilestones }] = await Promise.all([
-    (svc.from('order_line_items') as any).select('order_id, style_no, product_name, color_cn, color_en, qty_pcs, image_url').in('order_id', orderIds),
+    (svc.from('order_line_items') as any).select('order_id, style_no, product_name, color_cn, color_en, qty_pcs, set_multiplier, image_url').in('order_id', orderIds),
     (svc.from('materials_bom') as any).select('order_id, customer_supplied').in('order_id', orderIds).eq('customer_supplied', true),
     (svc.from('procurement_line_items') as any).select('order_id, line_status').in('order_id', orderIds),
     (svc.from('milestones') as any).select('order_id, owner_role, owner_user_id, step_key').in('order_id', orderIds),
@@ -104,11 +105,15 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
     const orderCap = deriveOrderCapability({ orderPurpose: o.order_purpose, hasCustomerSupplied: custSupplied.has(o.id) });
     const req: OrderReq = { quality_grade: o.quality_grade || null, weave_type: o.weave_type || null, needs_package: o.needs_package ?? null, order_capability: orderCap };
     // 款分组
-    const styleMap = new Map<string, { style_no: string; product_name: string; qty: number; colors: string[]; image_url: string | null; lines: any[] }>();
+    // qty = physical(件,与卡片总量/派工同口径);qtyCommercial = 商业数量(套装单展示"X套")
+    const styleMap = new Map<string, { style_no: string; product_name: string; qty: number; qtyCommercial: number; colors: string[]; image_url: string | null; lines: any[] }>();
     for (const l of (linesByOrder.get(o.id) || [])) {
       const sn = String(l.style_no || '').trim();
-      const s = styleMap.get(sn) || { style_no: sn, product_name: l.product_name || '', qty: 0, colors: [] as string[], image_url: null, lines: [] as any[] };
-      s.qty += Number(l.qty_pcs) || 0;
+      const s = styleMap.get(sn) || { style_no: sn, product_name: l.product_name || '', qty: 0, qtyCommercial: 0, colors: [] as string[], image_url: null, lines: [] as any[] };
+      // 卡片总量用 orders.quantity(physical),款色明细必须同口径,否则同一张卡「总数 20400 / 各款之和 10200」
+      // (1022977 实证)。派工 planned_qty 也是 physical,排产员按此判产能。
+      s.qty += getPhysicalPieceQty(l);
+      s.qtyCommercial += getCommercialQty(l);
       s.lines.push(l);
       styleMap.set(sn, s);
     }
