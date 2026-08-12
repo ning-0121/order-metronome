@@ -343,15 +343,13 @@ export async function syncFromProcurementTracking(
 
   const supabase = await createClient();
 
-  // 只有跟单/采购/管理员可以同步
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('roles')
-    .eq('id', auth.userId)
-    .maybeSingle();
-  const roles: string[] = (profile as any)?.roles || [];
-  const canSync = roles.some(r => ['merchandiser', 'procurement', 'admin'].includes(r));
-  if (!canSync) return { added: 0, skipped: 0, error: '仅跟单/采购/管理员可同步' };
+  // 2026-08-11:此处原有第二道鉴权,查 profiles 用了 .eq('id',...) —— profiles 主键是 user_id,
+  // 无 id 列,PostgREST 直接报错且 error 被丢弃 → profile=null → roles=[] → 永远拒绝,
+  // "从采购进度同步"按钮对所有人(含 admin)全死。这是 procurement_tracking(~349行/87单)
+  // 迟迟同步不进执行层(~37行/6单)的机械原因之一。
+  // 不修补而是删除:上面 CAN_EDIT_PROCUREMENT_EXEC 已是同一道闸且口径更准
+  // (含 procurement_manager,与 checkOperator 的角色解析一致)。修补反而会因两闸取交集
+  // 把 procurement_manager 锁在外面,重蹈本文件 P1 复审修过的坑。
 
   // 取采购进度里的条目(2026-07-21:带上下单日/到货日,同步时映射 line_status,让线下采购补录落对供应链桶)
   const { data: tracking, error: tErr } = await (supabase.from('procurement_tracking') as any)
