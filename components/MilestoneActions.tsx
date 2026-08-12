@@ -158,15 +158,24 @@ export function MilestoneActions({
   }
 
   // ── 「去处理」提交（证据上传 → 完成）──────────────────────────
-  async function handleSubmitEvidence(e: React.FormEvent) {
+  /**
+   * @param uploadOnly 多方确认节点专用:只上传凭证/存清单,**不标记节点完成**。
+   *   多方节点的完成由各方在「多方确认」区各自点确认后自动收口,此表单里没有「确认完成」按钮 ——
+   *   但凭证是必传的(如订舱确认),此前没有任何提交入口,选好的文件永远存不进去(2026-08-12 报障)。
+   */
+  async function handleSubmitEvidence(e: React.FormEvent, uploadOnly = false) {
     e.preventDefault();
     setSubmitError('');
 
     const form = e.target as HTMLFormElement;
+    if (uploadOnly && !evidenceFile && extraFiles.length === 0) {
+      setSubmitError('⚠️ 请先选择要上传的凭证文件');
+      return;
+    }
 
     // 财务审核：必须填内部订单号
     const internalOrderNo = (form.querySelector('input[name="internal_order_no"]') as HTMLInputElement)?.value?.trim();
-    if (milestone.step_key === 'finance_approval' && !internalOrderNo) {
+    if (!uploadOnly && milestone.step_key === 'finance_approval' && !internalOrderNo) {
       setSubmitError('⚠️ 请填写内部订单号（实体订单册编号）');
       return;
     }
@@ -175,7 +184,7 @@ export function MilestoneActions({
     // 实际场景：有时通过专人送达、客户自取等方式，没有快递单号，
     //          只要业务在备注里说明"如何送达"即可完成。
     const trackingNumber = (form.querySelector('input[name="tracking_number"]') as HTMLInputElement)?.value?.trim();
-    if (milestone.step_key === 'pre_production_sample_sent') {
+    if (!uploadOnly && milestone.step_key === 'pre_production_sample_sent') {
       const hasTracking = !!trackingNumber;
       const hasNote = !!evidenceNote.trim();
       if (!hasTracking && !hasNote) {
@@ -194,7 +203,7 @@ export function MilestoneActions({
 
     // 生产单上传：前端校验两个文件（生产订单 + 原辅料单）—— 仅当用户确实在手动上传时校验;
     // 未选文件 = 依赖生产任务单已在生产模块产出,交服务端判定,不在前端硬卡。
-    if (milestone.step_key === 'production_order_upload' && evidenceFile) {
+    if (!uploadOnly && milestone.step_key === 'production_order_upload' && evidenceFile) {
       const hasTrims = extraFiles.some((f: any) => f._fileType === 'trims_sheet');
       const missing: string[] = [];
       if (!evidenceFile) missing.push('生产订单');
@@ -206,7 +215,7 @@ export function MilestoneActions({
     }
 
     // 包装方式确认：需要包装资料
-    if (milestone.step_key === 'packing_method_confirmed') {
+    if (!uploadOnly && milestone.step_key === 'packing_method_confirmed') {
       const hasPacking = evidenceFile || extraFiles.some((f: any) => f._fileType === 'packing_requirement');
       if (!hasPacking) {
         setSubmitError('⚠️ 包装方式确认需要上传"包装资料"文件');
@@ -217,7 +226,7 @@ export function MilestoneActions({
     // 阻断校验 — 2026-05-15 改为软警告
     // 跨角色不再硬阻塞。前置未完成时给业务弹 confirm 让其确认，
     // 确认后允许推进。这样业务可以独立完成自己 lane 的节点，不被生产线卡住。
-    const blockers = getBlockers();
+    const blockers = uploadOnly ? [] : getBlockers();
     if (blockers.length > 0) {
       const proceed = confirm(
         `⚠ 以下前置节点尚未完成：\n${blockers.map(b => '· ' + b).join('\n')}\n\n` +
@@ -356,6 +365,16 @@ export function MilestoneActions({
       if (backfillDate) {
         const d = new Date(`${backfillDate}T18:00:00`);
         if (!Number.isNaN(d.getTime())) actualAtOverride = d.toISOString();
+      }
+
+      // 多方确认节点:凭证已上传/清单已存,**不标记完成**(完成由各方确认后自动收口)
+      if (uploadOnly) {
+        setLoading(false);
+        setShowSubmitForm(false);
+        setEvidenceFile(null);
+        setExtraFiles([]);
+        router.refresh();
+        return;
       }
 
       // 标记完成（服务端会先保存清单再验证）
@@ -1064,8 +1083,17 @@ export function MilestoneActions({
                 正在加载各方确认状态…
               </div>
             ) : multiPartyPending && milestone.step_key !== 'po_confirmed' ? (
-              <div className="flex-1 rounded-lg bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-700">
-                🤝 本节点由各方在上方「多方确认」区<b>各自点确认</b>(各自独立·无需同时,谁确认谁的)。还差:<b>{pendingPartyLabels!.join('、')}</b>。全部确认后自动完成——<b>无需在此点「确认完成」</b>。清单可点上方「保存清单」留痕。
+              // 多方节点:完成由各方确认后自动收口,但**凭证仍需能上传**
+              // (2026-08-12 报障:订舱完成节点必传订舱确认,却整个表单没有任何提交入口,文件存不进去)
+              <div className="flex-1 flex flex-col gap-2">
+                <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-3 text-xs text-indigo-700">
+                  🤝 本节点由各方在上方「多方确认」区<b>各自点确认</b>(各自独立·无需同时,谁确认谁的)。还差:<b>{pendingPartyLabels!.join('、')}</b>。全部确认后自动完成——<b>无需在此点「确认完成」</b>。
+                </div>
+                <button type="button" disabled={loading}
+                  onClick={(e) => handleSubmitEvidence(e as any, true)}
+                  className="rounded-lg bg-indigo-600 px-4 py-3 sm:py-2 text-base sm:text-sm text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+                  {loading ? '上传中...' : '📎 上传凭证并保存(不完成节点)'}
+                </button>
               </div>
             ) : (
               <button type="submit" disabled={loading}
