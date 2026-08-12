@@ -197,6 +197,71 @@ describe('CONFIRMED 收口 ③:加单继承真实倍率,不确定则显式失败
   });
 });
 
+describe('HEADER_RECONCILIATION:订单头向明细对齐(1022982 暴露的自愈缺口)', () => {
+  const src = readFileSync('app/actions/order-quantity-correction.ts', 'utf-8');
+
+  it('触发条件:明细物理数 == 请求数 且 订单头 != 请求数', () => {
+    expect(src).toContain('newTotal === currentTotal && Number.isFinite(headerQty) && headerQty !== newTotal');
+    expect(src).toContain('reconcileHeaderToLineItems');
+  });
+
+  it('⭐ 绝不修改 line_items(该分支内无任何 order_line_items 写操作)', () => {
+    const fn = src.slice(src.indexOf('async function reconcileHeaderToLineItems'));
+    expect(fn).not.toMatch(/from\('order_line_items'\)[\s\S]{0,80}\.update/);
+    expect(fn).toContain('line_items_untouched: true');
+  });
+
+  it('⭐ 金额按【商业数量 × 每套单价】,不得用 quantity × unit_price(防套装从此入口回潮)', () => {
+    const fn = src.slice(src.indexOf('async function reconcileHeaderToLineItems'));
+    expect(fn).toContain('sumCommercialQty');
+    expect(fn).toContain('unitPrice * commercialTotal');
+    expect(fn).not.toMatch(/unitPrice \* physicalTotal|physicalTotal \* unitPrice/);
+  });
+
+  it('走 safeCriticalMutation(before 快照 + 写断言 + 写后回读)', () => {
+    const fn = src.slice(src.indexOf('async function reconcileHeaderToLineItems'));
+    expect(fn).toContain('safeCriticalMutation');
+    expect(fn).toContain('verifyFields: patch');
+    expect(fn).toContain("riskLevel: 'money'");
+  });
+
+  it('写明确审计事件名 + before/after', () => {
+    expect(src).toContain("eventType: 'quantity_header_reconciled_from_line_items'");
+    const fn = src.slice(src.indexOf('async function reconcileHeaderToLineItems'));
+    expect(fn).toContain('beforeState: { quantity: headerQty');
+    expect(fn).toContain('afterState: { quantity: physicalTotal');
+  });
+
+  it('主写失败即返回,不产生部分成功(副作用在写验证之后)', () => {
+    const fn = src.slice(src.indexOf('async function reconcileHeaderToLineItems'));
+    const failIdx = fn.indexOf('订单头对齐失败');
+    const sideIdx = fn.indexOf('submitBomToProcurement');
+    expect(failIdx).toBeGreaterThan(-1);
+    expect(sideIdx).toBeGreaterThan(failIdx);   // 副作用必须在失败返回之后
+  });
+
+  it('头对齐不新增采购(数量并未真的增加),只 refresh', () => {
+    const fn = src.slice(src.indexOf('async function reconcileHeaderToLineItems'));
+    expect(fn).toContain('create: false, refresh: true');
+  });
+
+  it('1022982 场景数值:明细 960(mul=1)→ 头 1320 应对齐为 960,金额 4.4×960=4224', () => {
+    const lines1022982 = [
+      { qty_pcs: 600, set_multiplier: 1 },
+      { qty_pcs: 360, set_multiplier: 1 },
+    ];
+    expect(sumPhysicalPieceQty(lines1022982)).toBe(960);
+    expect(sumCommercialQty(lines1022982)).toBe(960);       // 非套装:两者相同
+    expect(Math.round(4.4 * sumCommercialQty(lines1022982) * 100) / 100).toBe(4224);
+  });
+
+  it('套装场景不回潮:明细 10200 套×2 → 头对齐 20400 件,金额按 10200 套算', () => {
+    expect(sumPhysicalPieceQty(ORDER_1022977)).toBe(20400);  // 写进 orders.quantity
+    expect(sumCommercialQty(ORDER_1022977)).toBe(10200);     // 用于算金额
+    expect(Math.round(62.28 * sumCommercialQty(ORDER_1022977) * 100) / 100).toBe(635256);
+  });
+});
+
 describe('调用点已迁入统一入口(防回潮)', () => {
   const files = [
     'app/actions/procurement-items.ts',

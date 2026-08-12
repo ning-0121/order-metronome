@@ -56,6 +56,20 @@ export async function correctOrderQuantity(input: {
   //    基数必须与输入同口径 = 物理件数。缩放仍作用在 qty_pcs 上(倍率不变),故新物理数 == newTotal。
   const currentTotal = sumPhysicalPieceQty(li);
   if (currentTotal <= 0) return { error: '订单当前明细件数为 0,无法按比例修正(可能没建逐款明细)。请用取消重建。' };
+
+  // ══ HEADER_RECONCILIATION(2026-08-12,1022982 暴露的结构性缺口)══
+  // 状态:明细已按新 PO 更新(可信真相),但订单头/金额/财务还是旧值 —— 两条既有通道都走不通:
+  //   · 普通改单:被「已有明细行」闸拦(那道闸防的是「头改了明细没改」,恰好相反的场景没覆盖)
+  //   · 数量修正:拿明细当基数判等 → 报「与当前一致,无需修正」,而订单头其实还错着
+  // 正确动作不是再缩放明细,而是**识别明细为可信真相,把订单头向它对齐**。
+  // 铁律:ratio=1、绝不碰 line_items;金额按【商业数量 × 每套单价】(遵守数量语义,防套装从此入口回潮)。
+  const headerQty = Number((ord as any).quantity);
+  if (newTotal === currentTotal && Number.isFinite(headerQty) && headerQty !== newTotal) {
+    return await reconcileHeaderToLineItems({
+      svc, orderId: input.orderId, ord, li,
+      physicalTotal: currentTotal, headerQty, reason: input.reason, actorId: user.id,
+    });
+  }
   if (newTotal === currentTotal) return { error: `新件数与当前(${currentTotal})一致,无需修正` };
 
   // 开裁后软拦(需 force):产前样确认/开裁已完成 → 生产可能已动,提醒二次确认
@@ -170,4 +184,105 @@ export async function correctOrderQuantity(input: {
 
   revalidatePath(`/orders/${input.orderId}`);
   return { ok: true, summary: `已把总件数 ${currentTotal} → ${newTotal}(应收${input.revenueMode === 'keep' ? '保持不变' : '等比'}),并同步采购/财务/生产。` };
+}
+
+/**
+ * HEADER_RECONCILIATION —— 订单头向明细对齐(2026-08-12)。
+ *
+ * 触发条件(调用方已判定):明细物理件数 == 请求数量 且 orders.quantity != 请求数量。
+ * 语义:**明细是可信真相,订单头滞后**。这不是 Amendment(客户没再改),是 Data Reconciliation。
+ *
+ * 铁律:
+ *  · 绝不修改任何 line_items(ratio 恒为 1)
+ *  · 金额按【商业数量 × 每套单价】—— 不是 quantity × unit_price(套装单会翻倍,数量语义已钉死)
+ *  · safeCriticalMutation:before 快照 + 写断言 + 写后回读验证 + A2 审计
+ *  · 失败不产生部分成功:订单头写不成功就直接返回,不跑任何副作用
+ */
+async function reconcileHeaderToLineItems(args: {
+  svc: any; orderId: string; ord: any; li: any[];
+  physicalTotal: number; headerQty: number; reason?: string; actorId: string;
+}): Promise<{ ok?: boolean; error?: string; summary?: string }> {
+  const { svc, orderId, ord, li, physicalTotal, headerQty, reason, actorId } = args;
+  const { sumCommercialQty } = await import('@/lib/domain/line-item-quantity');
+  const { safeCriticalMutation } = await import('@/lib/db/safe-mutation');
+  const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
+
+  const commercialTotal = sumCommercialQty(li);
+  const unitPrice = Number(ord.unit_price);
+  const oldAmount = Number(ord.total_amount);
+  // 金额 = 商业数量 × 每套单价(数量语义:unit_price 是 per commercial unit)
+  const newAmount = Number.isFinite(unitPrice) && commercialTotal > 0
+    ? Math.round(unitPrice * commercialTotal * 100) / 100
+    : null;
+
+  const patch: Record<string, any> = { quantity: physicalTotal };
+  if (newAmount != null) patch.total_amount = newAmount;
+
+  // ① 订单头:高危写(before 快照 + 行数断言 + 写后回读 + A2 审计)
+  const w = await safeCriticalMutation({
+    client: svc, table: 'orders', operation: 'update', expectedRows: 1,
+    payload: patch, predicate: { id: orderId },
+    ctx: {
+      actor: actorId, riskLevel: 'money',
+      reason: `订单头向明细对齐(HEADER_RECONCILIATION):数量 ${headerQty} → ${physicalTotal}`
+        + `${newAmount != null ? `,金额 ${oldAmount} → ${newAmount}` : ''}${reason ? ` · ${reason}` : ''}`,
+      verifyFields: patch,
+      snapshotFields: ['quantity', 'total_amount'],
+    },
+    auditOrderId: orderId,
+  });
+  if (!w.ok) return { error: `订单头对齐失败(${w.status}):${w.error} —— 明细未被改动,可重试` };
+
+  // ② 显式审计事件(独立于 critical_mutation:orders,便于按事件名反查这类自愈)
+  await writeAuditEvent({
+    eventType: 'quantity_header_reconciled_from_line_items', level: 'A2', riskLevel: 'money',
+    actor: { actorType: 'user', actorId },
+    entity: { entityType: 'order', entityId: orderId, orderId },
+    commandName: 'reconcileHeaderToLineItems',
+    reason: reason || '明细已按新 PO 更新,订单头滞后',
+    beforeState: { quantity: headerQty, total_amount: Number.isFinite(oldAmount) ? oldAmount : null },
+    afterState: { quantity: physicalTotal, total_amount: newAmount },
+    metadata: { commercial_quantity: commercialTotal, physical_quantity: physicalTotal, unit_price: unitPrice, line_items_untouched: true },
+  });
+
+  // ③ 副作用:主写已验证才跑(顺序与 correctOrderQuantity 一致)
+  try {
+    const { submitBomToProcurement } = await import('./bom');
+    await submitBomToProcurement(orderId);
+    const { consolidateOrderProcurementItems } = await import('./procurement-items');
+    // 头对齐不新增采购(数量并未真的增加),只 refresh 现有需求
+    await consolidateOrderProcurementItems(orderId, { apply: { create: false, refresh: true } });
+  } catch (e: any) { console.warn('[headerReconcile] 采购同步失败(不阻断):', e?.message); }
+  try {
+    const { data: fresh } = await (svc.from('orders') as any).select('*').eq('id', orderId).maybeSingle();
+    if (fresh) {
+      const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+      await syncOrderToFinance(fresh as Record<string, unknown>, 'order.updated');
+    }
+  } catch (e: any) { console.warn('[headerReconcile] 财务同步失败(不阻断):', e?.message); }
+  try {
+    const { recomputeDeliveryConfidence } = await import('./runtime-confidence');
+    await recomputeDeliveryConfidence(orderId, {
+      type: 'amendment_applied', source: 'header_reconciliation', severity: 'info',
+      payload: { from: headerQty, to: physicalTotal, mode: 'header_reconciliation', reason: reason || null }, triggeredBy: actorId,
+    });
+  } catch (e: any) { console.warn('[headerReconcile] recompute 失败(不阻断):', e?.message); }
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(svc, ['procurement', 'production', 'finance', 'merchandiser'], {
+      type: 'amendment_approval',
+      title: `🔗 订单头对齐明细 ${headerQty}→${physicalTotal} 件`,
+      message: `订单 ${ord.order_no} 的逐款明细此前已更新(合计 ${physicalTotal} 件 / ${commercialTotal} 套),`
+        + `订单头数量与金额现已对齐(${headerQty}→${physicalTotal} 件`
+        + `${newAmount != null ? `,金额 ${oldAmount}→${newAmount}` : ''})。明细未改动。${reason ? '原因:' + reason : ''}`,
+      relatedOrderId: orderId,
+    });
+  } catch (e: any) { console.warn('[headerReconcile] 通知失败(不阻断):', e?.message); }
+
+  revalidatePath(`/orders/${orderId}`);
+  return {
+    ok: true,
+    summary: `订单头已对齐明细:数量 ${headerQty} → ${physicalTotal} 件(${commercialTotal} 套)`
+      + `${newAmount != null ? `,金额 ${oldAmount} → ${newAmount}` : ''};明细未改动。`,
+  };
 }
