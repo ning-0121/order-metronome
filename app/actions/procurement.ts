@@ -344,12 +344,16 @@ export async function syncFromProcurementTracking(
   const supabase = await createClient();
 
   // 只有跟单/采购/管理员可以同步
+  // 🐛 2026-08-12 修:profiles 的用户主键是 **user_id**,此处原为 .eq('id', …) → 永远查不到行
+  //    → roles=[] → canSync=false → **同步按钮对所有人恒失败**(双链迁移 Adapter 的硬 blocker)。
+  //    同时对齐全仓口径:roles 为空时回退单数 role 列(否则只配了 role 的老账号仍被误拒)。
   const { data: profile } = await supabase
     .from('profiles')
-    .select('roles')
-    .eq('id', auth.userId)
+    .select('role, roles')
+    .eq('user_id', auth.userId)
     .maybeSingle();
-  const roles: string[] = (profile as any)?.roles || [];
+  const p = profile as any;
+  const roles: string[] = p?.roles?.length ? p.roles : [p?.role].filter(Boolean);
   const canSync = roles.some(r => ['merchandiser', 'procurement', 'admin'].includes(r));
   if (!canSync) return { added: 0, skipped: 0, error: '仅跟单/采购/管理员可同步' };
 
