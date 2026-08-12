@@ -105,6 +105,27 @@ describe('与换算引擎串联:页面显示仍是「套(折合件)」', () => {
   });
 });
 
+describe('数量修正(correctOrderQuantity)基数必须是物理件数', () => {
+  const src = readFileSync('app/actions/order-quantity-correction.ts', 'utf-8');
+
+  it('⭐ currentTotal 用 sumPhysicalPieceQty,不得用裸 Σqty_pcs', () => {
+    expect(src).toContain('sumPhysicalPieceQty(li)');
+    expect(src).not.toMatch(/currentTotal\s*=\s*li\.reduce/);
+  });
+
+  it('select 带 set_multiplier(否则物理件数算不出来)', () => {
+    expect(src).toMatch(/\.select\('[^']*set_multiplier[^']*'\)/);
+  });
+
+  it('场景锁:UI 填「新总件数」=当前物理件数 → ratio 必须为 1(修复前会翻倍)', () => {
+    // 1022977:commercial 10200、physical 20400。用户原样填 20400 确认
+    const currentPhysical = sumPhysicalPieceQty(ORDER_1022977);   // 20400
+    const currentCommercialWrong = sumCommercialQty(ORDER_1022977); // 10200(修复前的错基数)
+    expect(20400 / currentPhysical).toBe(1);            // 修复后:不变
+    expect(20400 / currentCommercialWrong).toBe(2);     // 修复前:明细全部 ×2,订单静默变 40800
+  });
+});
+
 describe('调用点已迁入统一入口(防回潮)', () => {
   const files = [
     'app/actions/procurement-items.ts',

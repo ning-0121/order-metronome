@@ -17,6 +17,7 @@
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { sumPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
 
 type RevenueMode = 'keep' | 'scale';
 
@@ -47,9 +48,13 @@ export async function correctOrderQuantity(input: {
   if (!(ord as any)?.id) return { error: '订单不存在' };
 
   const { data: lines } = await (svc.from('order_line_items') as any)
-    .select('id, line_no, sizes, qty_pcs, qty_raw, po_unit_price').eq('order_id', input.orderId).order('line_no', { ascending: true });
+    .select('id, line_no, sizes, qty_pcs, qty_raw, set_multiplier, po_unit_price').eq('order_id', input.orderId).order('line_no', { ascending: true });
   const li = (lines || []) as any[];
-  const currentTotal = li.reduce((s, l) => s + (Number(l.qty_pcs) || 0), 0);
+  // 🐛 2026-08-12 修(数量语义):UI 明写「新总件数」且提示「1800 套×2 件 = 3600」→ 用户输入的是**物理件数**;
+  //    此处原用 Σ qty_pcs(**商业套数**)当基数 → 套装单 ratio 直接翻倍:
+  //    用户把 20400 件原样填一遍,就会把明细全部 ×2、订单静默变 40800,并连带重跑 MRP/采购/财务。
+  //    基数必须与输入同口径 = 物理件数。缩放仍作用在 qty_pcs 上(倍率不变),故新物理数 == newTotal。
+  const currentTotal = sumPhysicalPieceQty(li);
   if (currentTotal <= 0) return { error: '订单当前明细件数为 0,无法按比例修正(可能没建逐款明细)。请用取消重建。' };
   if (newTotal === currentTotal) return { error: `新件数与当前(${currentTotal})一致,无需修正` };
 
