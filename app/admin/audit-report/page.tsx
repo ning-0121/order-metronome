@@ -32,9 +32,14 @@ export default async function AuditReportPage({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // 仅 admin 可看完整审计（管理员系列功能统一规约）
-  const { isAdmin } = await getCurrentUserRole(supabase);
-  if (!isAdmin) redirect('/dashboard');
+  // 2026-08-13:审计改为按类型分发到行政督导/对口主管后，他们也要能点开自己那份。
+  // 安全边界不靠这里的角色，而靠下面查询恒带 .eq('user_id', user.id) —— 每个人只读到
+  // 发给自己的那条通知的 payload（主管的 payload 只含分给他的问题，不是全量）。
+  // 没有任何 daily_audit 通知的人，页面自然是空的，等同于原来的拒绝。
+  const { isAdmin, roles } = await getCurrentUserRole(supabase);
+  const AUDIT_VIEWERS = ['admin_assistant', 'production_manager', 'order_manager', 'sales_manager', 'procurement_manager'];
+  const canView = isAdmin || (roles || []).some((r: string) => AUDIT_VIEWERS.includes(r));
+  if (!canView) redirect('/dashboard');
 
   const params = await searchParams;
   const nid = params?.nid;
