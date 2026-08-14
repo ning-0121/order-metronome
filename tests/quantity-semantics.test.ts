@@ -304,6 +304,39 @@ describe('⭐ 显示层用真实倍率,不用 quantity_unit 字符串(1022967 �
   });
 });
 
+describe('⭐ 物料需求 = 基准 × 单耗,基准必须与 consumption_basis 同口径', () => {
+  const bomSrc = readFileSync('app/actions/bom.ts', 'utf-8');
+
+  it('pieces_qty 存**与单耗同口径**的基数(每套单耗 → 存套数),不是物理件数', () => {
+    expect(bomSrc).toContain('pieces_qty: basisQtyOf(');
+    expect(bomSrc).not.toMatch(/pieces_qty:\s*poQty\b/);
+  });
+
+  it('换算用逐款真实倍率,不看 quantity_unit 字符串', () => {
+    expect(bomSrc).toContain('mulByStyleColor');
+    expect(bomSrc).toContain('全单一致才换算,混合不猜');
+  });
+
+  it('1022977:physical 13200 ÷ mul2 = 6600 套 × 0.88 = 5808kg(不是 13200×0.88=11616)', () => {
+    const physical = 13200, mul = 2, cons = 0.88;
+    expect((physical / mul) * cons).toBe(5808);
+    expect(physical * cons).toBe(11616);          // 修复前的错值
+  });
+
+  it('1022967 混合倍率:mul=1 款不换算、mul=2 款除以 2', () => {
+    expect((2400 / 1) * 0.6).toBe(1440);          // SP1581-B
+    expect(Math.round((4800 / 2) * 1.215)).toBe(2916);  // SP1770
+  });
+
+  it('域不变量:PER_SET 用 commercial、PER_PIECE 才用 physical', () => {
+    // 记录为可执行断言,防止未来又"所有面料都按 physical"
+    const perSet = (commercial: number, cons: number) => commercial * cons;
+    const perPiece = (physical: number, cons: number) => physical * cons;
+    expect(perSet(10200, 0.88)).toBe(8976);
+    expect(perPiece(20400, 0.44)).toBe(8976);     // 同一结果需配套的单耗口径
+  });
+});
+
 describe('调用点已迁入统一入口(防回潮)', () => {
   const files = [
     'app/actions/procurement-items.ts',

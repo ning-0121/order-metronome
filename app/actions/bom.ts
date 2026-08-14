@@ -738,6 +738,34 @@ export async function submitBomToProcurement(
       if (nc) colorAlias.set(`${r.style_no}¦${nc}`, canonKey);
     }
   }
+  // 逐款/款色真实件/套倍率(**不看 quantity_unit 字符串**:1022967 标「三件套」实际是 2/1 混合)。
+  // 用途:把物理件数换回**与大货单耗同口径**的基数(单耗是每套)。
+  const mulByStyle = new Map<string, number>();
+  const mulByStyleColor = new Map<string, number>();
+  for (const r of (liRows || []) as any[]) {
+    if (!r.style_no) continue;
+    const m = Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1;
+    if (!mulByStyle.has(r.style_no)) mulByStyle.set(r.style_no, m);
+    const canon = normColor(r.color_cn) || normColor(r.color_en);
+    if (canon) mulByStyleColor.set(`${r.style_no}¦${canon}`, m);
+  }
+  /**
+   * 归并层直接乘「大货单耗(每套)」的基数 —— 必须是**套数**,不是物理件数。
+   * physicalQty 是按件汇总的数量,这里除以该款(色)真实倍率换回套数。
+   * 倍率查不到时按 1(等于不换算,保持原值,宁多勿缺)。
+   */
+  const basisQtyOf = (styleNo: string | null, color: any, physicalQty: number): number => {
+    if (!(physicalQty > 0)) return physicalQty;
+    let mul = 1;
+    if (styleNo) {
+      const bk = `${styleNo}¦${normColor(color)}`;
+      mul = mulByStyleColor.get(colorAlias.get(bk) || bk) ?? mulByStyle.get(styleNo) ?? 1;
+    } else {
+      const all = new Set([...mulByStyle.values()]);
+      mul = all.size === 1 ? [...all][0] : 1;   // 整单通用行:全单一致才换算,混合不猜
+    }
+    return mul > 1 ? Math.round((physicalQty / mul) * 100) / 100 : physicalQty;
+  };
   const bomStyle = new Map<string, string | null>((bomRows as any[]).map(r => [r.id, r.style_no || null]));
 
   // R2(2026-07-02 审计):缺单耗的行生成不了需求量,显式警示而不是静默吞掉
@@ -977,7 +1005,12 @@ export async function submitBomToProcurement(
       material_plan_id: planId, order_id: orderId, snapshot_line_id: line.id,
       material_name: r.material_name, material_type: r.material_type, category: r.category,
       material_code: r.material_code, unit: r.unit,
-      pieces_qty: poQty,   // 件数基数(款×色):归并层按款精确乘大货单耗用
+      // 🐛 2026-08-12 修(1022977 面料翻倍):此列是**归并层直接乘大货单耗的基数**,
+      //    必须与单耗口径一致。大货单耗是「每套」口径(1022967 实证:mul=1 款 0.6、mul=2 款 1.215),
+      //    而 poQty 是**物理件数** → 归并算出 13200×0.88=11616,正确应为 6600×0.88=5808。
+      //    这里改存**与单耗同口径的基数**(PER_SET → 套数),用逐款真实倍率换算,
+      //    **不用 quantity_unit 字符串**(1022967 标「三件套」实际倍率却是 2/1 混合)。
+      pieces_qty: basisQtyOf(lineStyle, line.color, poQty),
       gross_requirement: manualTotal != null && manualTotal > 0 ? manualTotal : r.gross_requirement, loss_qty: r.loss_qty,
       inventory_deduct: r.inventory_deduct, reuse_deduct: r.reuse_deduct, net_purchase_qty: netFinal,
       required_stage: r.required_stage, required_date: r.required_date,
