@@ -13,7 +13,7 @@ import { getUserRoles } from '@/lib/utils/user-role';
 import { hasRoleInGroup, isAdminRole } from '@/lib/domain/roles';
 import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { deriveOrderQuantityContext, quantityForBasis } from '@/lib/domain/quantity-engine';
-import { groupPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
+import { groupCommercialQty } from '@/lib/domain/line-item-quantity';
 
 export interface QuoteBaselineLine {
   style_no?: string | null;             // 款号(单耗按款不同)
@@ -259,7 +259,7 @@ export async function saveQuoteBaseline(
   const { data: liRows } = await (supabase.from('order_line_items') as any)
     .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
   const normS = (s: any) => String(s ?? '').trim().toLowerCase();
-  const { byStyle: qtyByStyle } = groupPhysicalPieceQty((liRows || []) as any[]);
+  const { byStyle: qtyByStyle } = groupCommercialQty((liRows || []) as any[]);
   const singleStyle = styleBudgets.length <= 1;
   const qtyFor = (styleNo: string | null): number | null => {
     const q = qtyByStyle.get(normS(styleNo));
@@ -370,7 +370,7 @@ export async function recomputeOrderBudgetCaches(orderId: string): Promise<{ ok?
   // 物理件数:按 款×色 / 款 / 整单(同上,必须 ×set_multiplier;顺带修同款色多行被覆盖)
   const { data: lis } = await (svc.from('order_line_items') as any)
     .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
-  const { byStyle, byStyleColor } = groupPhysicalPieceQty((lis || []) as any[]);
+  const { byStyle, byStyleColor } = groupCommercialQty((lis || []) as any[]);
   const singleStyle = byStyle.size <= 1;
   const piecesForBom = (b: any): number | null => {
     const st = normS(b.style_no);

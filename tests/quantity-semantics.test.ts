@@ -14,7 +14,7 @@ import {
   getCommercialQty, getPhysicalPieceQty, sumCommercialQty, sumPhysicalPieceQty,
   setMultiplierOf, groupPhysicalPieceQty, groupCommercialQty,
 } from '@/lib/domain/line-item-quantity';
-import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
+import { deriveOrderQuantityContext, deriveQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 
 // 1022977 真实数据:S1301 两色,qty_pcs 为套数,件/套=2
 const ORDER_1022977 = [
@@ -262,6 +262,48 @@ describe('HEADER_RECONCILIATION:订单头向明细对齐(1022982 暴露的自愈
   });
 });
 
+describe('⭐ 单耗是「每套」口径 —— 算料基准必须是套数(1022977 翻倍事故)', () => {
+  // 1022967 实证:同一面料、两个款,单耗随套内件数放大 ⇒ 单耗已含套内所有件
+  const SP1581B = { qty_pcs: 2400, set_multiplier: 1, cons: 0.6 };    // 1 件/套
+  const SP1770 = { qty_pcs: 2400, set_multiplier: 2, cons: 1.215 };   // 2 件/套
+
+  it('判据:单耗之比 ≈ 倍率之比 ⇒ 单耗按每套', () => {
+    const consRatio = SP1770.cons / SP1581B.cons;      // 2.025
+    const mulRatio = SP1770.set_multiplier / SP1581B.set_multiplier;  // 2
+    expect(Math.abs(consRatio - mulRatio)).toBeLessThan(0.15);
+  });
+
+  it('1022977:面料需求 = 单耗 × 套数 = 8976kg(不是 × 件数的 17952kg)', () => {
+    const lines = [{ qty_pcs: 3600, set_multiplier: 2 }, { qty_pcs: 6600, set_multiplier: 2 }];
+    const commercial = sumCommercialQty(lines);   // 10200 套
+    const physical = sumPhysicalPieceQty(lines);  // 20400 件
+    expect(0.88 * commercial).toBe(8976);          // ✅ 正确
+    expect(0.88 * physical).toBe(17952);           // ❌ 翻倍(2026-08-12 误改造成)
+  });
+
+  it('1022967:两款分别 1440kg / 2916kg,合计 4356kg', () => {
+    expect(SP1581B.cons * SP1581B.qty_pcs).toBe(1440);
+    expect(Math.round(SP1770.cons * SP1770.qty_pcs)).toBe(2916);
+  });
+});
+
+describe('⭐ 显示层用真实倍率,不用 quantity_unit 字符串(1022967 混合倍率)', () => {
+  const src = readFileSync('app/actions/procurement-items.ts', 'utf-8');
+
+  it('传 componentsPerCommercialUnit(优先级高于单位字符串)', () => {
+    expect(src).toContain('componentsPerCommercialUnit: mul');
+    expect(src).toContain('mulOf(b)');
+  });
+
+  it('混合倍率单不得被订单级单位统一换算', () => {
+    // 1022967 标「三件套」但实际 mul 是 2 和 1 —— 统一 ÷3 会显示成荒谬的「800三件套」
+    expect(deriveQuantityContext({ physicalQuantity: 2400, componentsPerCommercialUnit: 1, quantityUnit: '件' }).commercialQuantity).toBe(2400);
+    expect(deriveQuantityContext({ physicalQuantity: 4800, componentsPerCommercialUnit: 2, quantityUnit: '套' }).commercialQuantity).toBe(2400);
+    // 若误用 quantity_unit='三件套' 会得到 1600(错)
+    expect(deriveQuantityContext({ physicalQuantity: 4800, quantityUnit: '三件套' }).commercialQuantity).toBe(1600);
+  });
+});
+
 describe('调用点已迁入统一入口(防回潮)', () => {
   const files = [
     'app/actions/procurement-items.ts',
@@ -279,10 +321,14 @@ describe('调用点已迁入统一入口(防回潮)', () => {
     });
   }
 
+  // ⚠️ 算料/成本/报价基准必须是**商业数量(套数)** —— 单耗本身是「每套」口径
+  //    (1022967 实证:mul=1 款单耗 0.6、mul=2 款单耗 1.215 ≈ 2×0.6)。
+  //    2026-08-12 一度误改成 physical,把 1022977 面料需求从 8976kg 翻成 17952kg,已回退。
   for (const f of ['app/actions/procurement-items.ts', 'app/actions/procurement-cost.ts', 'app/actions/quote-baseline.ts']) {
-    it(`${f} 使用统一 helper 而非裸算`, () => {
+    it(`${f} 算料基准用商业数量(groupCommercialQty),不得用 physical`, () => {
       const src = readFileSync(f, 'utf-8');
-      expect(src).toContain('groupPhysicalPieceQty');
+      expect(src).toContain('groupCommercialQty');
+      expect(src, `${f} 不得用 groupPhysicalPieceQty 当算料基准(会把需求翻倍)`).not.toContain('groupPhysicalPieceQty');
     });
   }
 });

@@ -14,11 +14,13 @@ import { hasRoleInGroup } from '@/lib/domain/roles';
 import { deriveBudgetUnitPriceView, normalizeBudgetUnitPrice } from '@/lib/domain/budget-unit-price';
 import {
   deriveOrderQuantityContext,
+  deriveQuantityContext,
   formatQuantityDisplay,
+  quantityComponentsForUnit,
   quantityForBasis,
   quantityLabelForBasis,
 } from '@/lib/domain/quantity-engine';
-import { groupPhysicalPieceQty } from '@/lib/domain/line-item-quantity';
+import { groupCommercialQty, setMultiplierOf } from '@/lib/domain/line-item-quantity';
 import { consolidationKey, computeSuggestedPurchaseQty, type IdentityInput } from '@/lib/services/procurement-consolidation';
 import {
   buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, distributeByWeights, shouldSplitBySize,
@@ -371,14 +373,35 @@ export async function listBomConsumptionLines(orderId: string) {
   // 数量(件数,#1 用户):按 款×色 从 order_line_items 取;整单通用辅料行(无款号)→ 订单总数
   const { data: ord } = await (supabase.from('orders') as any).select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
   const orderQty = Number((ord as any)?.quantity) || 0;
-  // 🐛 2026-08-12 修(1022977):此处原用裸 qty_pcs 汇总 —— 但 qty_pcs 是**商业数量(套数)**,
-  //    少乘一次 set_multiplier;下游 deriveOrderQuantityContext 又按套装单除一次 →
-  //    面料基准整整差一倍(3600 而非 7200),直接影响采购金额与实际下料。
-  //    算料/采购基准一律用**物理件数**,统一走 groupPhysicalPieceQty(禁止再裸算)。
+  // ⚠️ 算料基准 = **商业数量(套数)**,不是物理件数 —— 因为**单耗本身就是「每套」口径**。
+  //    实证(1022967:同一面料两个款):mul=1 的款单耗 0.6、mul=2 的款单耗 1.215 ≈ 2×0.6
+  //    → 单耗已随套内件数放大,再乘倍率就会**把面料需求翻一倍**(1022977 实际发生过)。
+  //    MRP(lib/services/mrp.ts,basis=PER_SET)一直按套数算,此处必须与它同口径。
+  //    2026-08-12 我一度改成 physical,导致 1022977 采购需求 8976kg → 17952kg,已回退。
   const { data: lis } = await (supabase.from('order_line_items') as any)
     .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
   // 同款×色多行(客户加单)累加,不覆盖
-  const { byStyle, byStyleColor } = groupPhysicalPieceQty((lis || []) as any[]);
+  const { byStyle, byStyleColor } = groupCommercialQty((lis || []) as any[]);
+  // 显示用:该款×色的真实件/套倍率(**不用 quantity_unit 字符串猜** ——
+  //   1022967 是混合倍率单(2 和 1)却标「三件套」,统一 ÷3 会显示成「800三件套」这种荒谬值)
+  const mulByStyleColor = new Map<string, number>();
+  const mulByStyle = new Map<string, number>();
+  for (const l of ((lis || []) as any[])) {
+    const m = setMultiplierOf(l);
+    const st = norm(l.style_no);
+    if (!mulByStyle.has(st)) mulByStyle.set(st, m);
+    for (const c of new Set([norm(l.color_cn), norm(l.color_en)].filter(Boolean))) {
+      mulByStyleColor.set(`${st}¦${c}`, m);
+    }
+  }
+  const mulOf = (b: any): number => {
+    const st = norm(b.style_no);
+    if (b.style_no && b.color) { const m = mulByStyleColor.get(`${st}¦${norm(b.color)}`); if (m) return m; }
+    if (b.style_no) { const m = mulByStyle.get(st); if (m) return m; }
+    // 整单通用行:全单倍率一致才用它,混合则按 1(不猜)
+    const all = new Set([...mulByStyle.values()]);
+    return all.size === 1 ? [...all][0] : 1;
+  };
   const pieceOf = (b: any): number | null => {
     // 辅料业务手填了总需用量 → 数量列直接显示它(中包袋按业务填的 1250,不是件数 7500)
     const isTrim = b.material_type !== 'fabric' && b.material_type !== 'lining';
@@ -419,10 +442,24 @@ export async function listBomConsumptionLines(orderId: string) {
     supply_mode: b.factory_supplied === true ? 'factory' : (b.customer_supplied === true ? 'customer' : 'self'),
     quantity_basis: b.consumption_basis || 'PER_SET',
     quantity_label: quantityLabelForBasis(b.consumption_basis || 'PER_SET'),
-    quantity_display: formatQuantityDisplay(deriveOrderQuantityContext({
-      physicalQuantity: pieceOf(b),
-      quantityUnit: (ord as any)?.quantity_unit ?? null,
-    })),
+    // 显示「N套(折合M件)」:N=商业数量(=算料基准),M=N×真实倍率。
+    // componentsPerCommercialUnit 传**真实倍率**,优先级高于 quantity_unit 字符串 →
+    // 混合倍率单(1022967:mul 2 和 1,却标「三件套」)不再被统一 ÷3 显示成「800三件套」。
+    quantity_display: (() => {
+      const commercial = pieceOf(b);
+      if (commercial == null) return formatQuantityDisplay(deriveQuantityContext({ physicalQuantity: null }));
+      const mul = mulOf(b);
+      // 单位名:订单标的单位与真实倍率一致才用它(如「三件套」对 mul=3);否则按倍率给通用名。
+      // 倍率仍以 componentsPerCommercialUnit 为准(优先级高于单位字符串),单位名只影响展示文案。
+      const orderUnit = (ord as any)?.quantity_unit ?? null;
+      const unitLabel = mul === 1 ? '件'
+        : (quantityComponentsForUnit(orderUnit) === mul ? orderUnit : '套');
+      return formatQuantityDisplay(deriveQuantityContext({
+        physicalQuantity: commercial * mul,
+        componentsPerCommercialUnit: mul,
+        quantityUnit: unitLabel,
+      }));
+    })(),
   }));
   return { data: rows };
 }
