@@ -34,9 +34,13 @@ export async function correctOrderQuantity(input: {
   const { data: prof } = await (supabase.from('profiles') as any).select('role, roles').eq('user_id', user.id).single();
   const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
   const isAdmin = roles.includes('admin');
-  if (!isAdmin && !roles.some((r) => ['order_manager', 'sales_manager'].includes(r))) {
-    return { error: '仅管理员 / 业务执行经理 / 开发业务经理可修正订单数量' };
-  }
+  // 门禁分两档 —— 见下方 canReconcile 判定后才最终裁决(2026-08-13 CEO):
+  //   · 真正的数量修正(会缩放明细/动商业事实)→ 仍限 admin / 业务执行经理 / 开发业务经理
+  //   · HEADER_RECONCILIATION(只把订单头对齐已有明细,不动明细/不改单价)→ 跟单也可执行
+  // 跟单拿到的是「修复系统内部不一致」的权限,不是「修改订单商业事实」的权限,风险完全不同。
+  const isManagerLevel = isAdmin || roles.some((r) => ['order_manager', 'sales_manager'].includes(r));
+  // 严格按 CEO 原话只放 merchandiser,不顺手带上 sales —— 权限只开必要的那一格
+  const isMerchandiser = roles.includes('merchandiser');
 
   const newTotal = Math.round(Number(input.newTotalQty) || 0);
   if (!(newTotal > 0)) return { error: '新总件数必须 > 0' };
@@ -64,11 +68,26 @@ export async function correctOrderQuantity(input: {
   // 正确动作不是再缩放明细,而是**识别明细为可信真相,把订单头向它对齐**。
   // 铁律:ratio=1、绝不碰 line_items;金额按【商业数量 × 每套单价】(遵守数量语义,防套装从此入口回潮)。
   const headerQty = Number((ord as any).quantity);
-  if (newTotal === currentTotal && Number.isFinite(headerQty) && headerQty !== newTotal) {
+  // 自愈判定的两个硬条件(CEO 定,服务端为准,前端只是显示):
+  //   ① 请求的物理件数 == 明细物理合计   → 说明不是在改商业事实,只是让头跟上明细
+  //   ② orders.quantity != 请求件数      → 确实存在不一致,不是空跑
+  const isReconcile = newTotal === currentTotal && Number.isFinite(headerQty) && headerQty !== newTotal;
+  if (isReconcile) {
+    if (!isManagerLevel && !isMerchandiser) {
+      return { error: '仅管理员 / 经理 / 跟单可对齐订单头' };
+    }
     return await reconcileHeaderToLineItems({
       svc, orderId: input.orderId, ord, li,
       physicalTotal: currentTotal, headerQty, reason: input.reason, actorId: user.id,
     });
+  }
+  // 非自愈 = 真正改商业事实 → 收敛回经理级(跟单走到这里必须回普通改单 + 审批链)
+  if (!isManagerLevel) {
+    return {
+      error: isMerchandiser
+        ? '跟单只能「对齐订单头」(明细已是目标数量时)。真正的加减量请走「订单修改申请」审批。'
+        : '仅管理员 / 业务执行经理 / 开发业务经理可修正订单数量',
+    };
   }
   if (newTotal === currentTotal) return { error: `新件数与当前(${currentTotal})一致,无需修正` };
 
@@ -284,5 +303,67 @@ async function reconcileHeaderToLineItems(args: {
     ok: true,
     summary: `订单头已对齐明细:数量 ${headerQty} → ${physicalTotal} 件(${commercialTotal} 套)`
       + `${newAmount != null ? `,金额 ${oldAmount} → ${newAmount}` : ''};明细未改动。`,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 订单头 ↔ 明细 不一致探测(横幅用)
+//
+// 产品原则(2026-08-13 CEO):**系统发现自己的真相层分叉时,应该主动告诉人「哪里不一致」,
+// 并提供最安全的一键自愈** —— 员工不该在四个入口里猜该点哪个。
+// 只读,不写任何东西;判定口径与 correctOrderQuantity 的 isReconcile 完全同源。
+// ═══════════════════════════════════════════════════════════════
+export async function getHeaderReconciliationState(orderId: string): Promise<{
+  mismatch: boolean;
+  headerQty?: number | null;
+  commercialQty?: number;
+  physicalQty?: number;
+  unitPrice?: number | null;
+  oldAmount?: number | null;
+  newAmount?: number | null;
+  canFix?: boolean;
+  error?: string;
+}> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { mismatch: false };
+
+  const svc = createServiceRoleClient();
+  const { data: ord } = await (svc.from('orders') as any)
+    .select('id, quantity, unit_price, total_amount').eq('id', orderId).maybeSingle();
+  if (!(ord as any)?.id) return { mismatch: false };
+
+  const { data: lines } = await (svc.from('order_line_items') as any)
+    .select('qty_pcs, set_multiplier').eq('order_id', orderId);
+  const li = (lines || []) as any[];
+  if (li.length === 0) return { mismatch: false };   // 没建明细 → 无从比较,不打扰
+
+  const { sumCommercialQty } = await import('@/lib/domain/line-item-quantity');
+  const physicalQty = sumPhysicalPieceQty(li);
+  const commercialQty = sumCommercialQty(li);
+  const headerQty = Number((ord as any).quantity);
+  if (!(physicalQty > 0) || !Number.isFinite(headerQty) || headerQty === physicalQty) {
+    return { mismatch: false };
+  }
+
+  const unitPrice = Number((ord as any).unit_price);
+  const oldAmount = Number((ord as any).total_amount);
+  const newAmount = Number.isFinite(unitPrice) && commercialQty > 0
+    ? Math.round(unitPrice * commercialQty * 100) / 100
+    : null;
+
+  const { data: prof } = await (supabase.from('profiles') as any)
+    .select('role, roles').eq('user_id', user.id).single();
+  const roles: string[] = (prof as any)?.roles?.length > 0 ? (prof as any).roles : [(prof as any)?.role].filter(Boolean);
+  // 与服务端执行门禁同口径:经理级 + 跟单都可做这一步(它只修内部不一致)
+  const canFix = roles.some((r) => ['admin', 'order_manager', 'sales_manager', 'merchandiser'].includes(r));
+
+  return {
+    mismatch: true,
+    headerQty, commercialQty, physicalQty,
+    unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
+    oldAmount: Number.isFinite(oldAmount) ? oldAmount : null,
+    newAmount,
+    canFix,
   };
 }

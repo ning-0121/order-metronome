@@ -142,3 +142,23 @@ Order → Line Items → BOM → Material Requirement
 **Pilot**:3–5 张新 EHL 单,1 名跟单 + 1 名采购。非 Pilot 订单行为不变。
 
 **验收(先测旧流程 baseline)**:重复输入=0 · 手工算需求量=0 次 · 采购填写≤3 类 · 手工重做 Excel=0 次 · BOM→正式 PO 人工操作<5 分钟 · **员工愿意直接把系统生成的采购单发给供应商**(否则 P1 = FAIL)。
+
+---
+
+## 附:登记的规则缺陷(本轮不修)
+
+**`RULE-DEFECT-001` — 加减量窗口锁依赖 milestone,而非真实采购事实**
+
+`lib/domain/amendment-policy.ts` 的 `quantity_increase.cutoffStepKey = 'procurement_order_placed'`:
+只要该里程碑被打勾,就锁死加量、要求走追加子订单。
+
+**2026-08-13 实证(1022969)**:该节点 `done`,但系统里
+`procurement_items = 0` / `procurement_line_items = 0` / `purchase_orders = 0` ——
+**零采购事实**。锁在保护一次系统完全不知道的采购,把本该放行的动作卡死。
+
+根因是方向反了:现在是 `milestone = business fact`,而正确方向是 `business fact → milestone`。
+
+**处置**:本轮不动这把锁(改风控要有真实采购数据托底才安全)。
+等 Procurement Generator P0/P1 上线、canonical procurement facts 真正进系统后,
+这条判断应迁移为读 `procurement_line_items` / `purchase_orders` 的真实事实,
+milestone 只作为展示,不再是唯一依据。

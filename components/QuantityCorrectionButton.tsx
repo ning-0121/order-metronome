@@ -10,7 +10,9 @@ import { useState } from 'react';
 import { correctOrderQuantity } from '@/app/actions/order-quantity-correction';
 import { useRouter } from 'next/navigation';
 
-export function QuantityCorrectionButton({ orderId, currentQty }: { orderId: string; currentQty: number | null }) {
+export function QuantityCorrectionButton({
+  orderId, currentQty, lineItemPhysicalQty,
+}: { orderId: string; currentQty: number | null; lineItemPhysicalQty?: number | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [qty, setQty] = useState('');
@@ -19,6 +21,11 @@ export function QuantityCorrectionButton({ orderId, currentQty }: { orderId: str
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [warn, setWarn] = useState('');
+
+  // 自愈模式:明细物理合计已是目标数量,而订单头还没跟上 —— 只对齐头,不动明细。
+  // 判定与服务端 isReconcile 同源(服务端仍会再校验一次,前端只管说清楚)。
+  const isReconcileMode =
+    lineItemPhysicalQty != null && lineItemPhysicalQty > 0 && currentQty !== lineItemPhysicalQty;
 
   async function submit(force = false) {
     const n = Math.round(Number(qty) || 0);
@@ -47,9 +54,20 @@ export function QuantityCorrectionButton({ orderId, currentQty }: { orderId: str
         <h4 className="text-sm font-bold text-gray-800">✏️ 修正订单数量</h4>
         <button onClick={() => setOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">关闭</button>
       </div>
-      <p className="text-xs text-gray-500">
-        当前总件数 <b className="text-gray-700">{currentQty ?? '—'}</b>。用于填错/套装漏算的<b>就地修正</b>(会等比缩放逐款明细并重跑采购/财务/生产)。<b>不是</b>客户真加量——真加量请走「订单修改申请·加单」。
-      </p>
+      {/* 文案必须随模式变(2026-08-13):HEADER_RECONCILIATION 根本不动明细,
+          却一直显示「会等比缩放逐款明细」—— 员工不敢点是合理的。 */}
+      {isReconcileMode ? (
+        <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+          当前明细已经与目标数量(<b>{lineItemPhysicalQty}</b> 件)一致。
+          本操作<b>只对齐订单头、金额及关联财务数据,不修改颜色/尺码明细</b>。
+        </p>
+      ) : (
+        <p className="text-xs text-gray-500">
+          当前总件数 <b className="text-gray-700">{currentQty ?? '—'}</b>。用于填错/套装漏算的<b>就地修正</b>——
+          本操作<b>会按比例调整明细</b>并重跑采购/财务/生产,请确认后继续。
+          <b>不是</b>客户真加量——真加量请走「订单修改申请·加单」。
+        </p>
+      )}
       <div className="flex items-center gap-2 text-sm">
         <label className="text-gray-600 whitespace-nowrap">新总件数</label>
         <input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="如 3600" className="rounded border border-gray-300 px-2 py-1 w-32 text-right" />

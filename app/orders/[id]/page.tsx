@@ -31,6 +31,8 @@ import { TradeBulkPurchaseTab } from '@/components/tabs/TradeBulkPurchaseTab';
 import { ProductVariantPicker } from '@/components/ProductVariantPicker';
 import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
 import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
+import { getHeaderReconciliationState } from '@/app/actions/order-quantity-correction';
+import { HeaderReconciliationBanner } from '@/components/HeaderReconciliationBanner';
 import { getCustomerPoHistory } from '@/app/actions/customer-po';
 import { OrderActions } from '@/components/OrderActions';
 import { OrderProgressCalibrate } from '@/components/OrderProgressCalibrate';
@@ -280,6 +282,9 @@ export default async function OrderDetailPage({
 
   // 超预算提交采购审批(最新一条)——顶部横幅展示 + 经理/财务就地审批
   const budgetApproval = await getOrderBudgetApproval((orderData as any).id).catch(() => ({} as any));
+  // 订单头 ↔ 明细 分叉探测(只读;失败不影响页面)
+  const headerReconState = await getHeaderReconciliationState((orderData as any).id)
+    .catch(() => ({ mismatch: false }));
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -663,6 +668,9 @@ export default async function OrderDetailPage({
         {/* Tab: 基本信息 */}
         {activeTab === 'basic' && (
           <>
+          {/* 订单头 ↔ 明细 分叉时主动告警 + 一键自愈(2026-08-13)。
+              不一致时才渲染;判定与服务端 isReconcile 同源,只对齐订单头不动明细。 */}
+          <HeaderReconciliationBanner orderId={id} state={headerReconState} />
           {/* 打样费(仅打样单):金额 + 承担方,财务据此对客户收/免。导出打样申请单按钮在页头(ExportSampleRequestButton),此处不再重复。 */}
           {(orderData as any).order_purpose === 'sample' && (
             <div className="mb-6"><SampleFeePanel orderId={id} /></div>
@@ -1033,7 +1041,11 @@ export default async function OrderDetailPage({
             {/* 受控数量修正(方案 C):读错/套装漏算就地改,仅经理级 */}
             {(isAdmin || currentRoles.some((r) => ['order_manager', 'sales_manager'].includes(r))) && (
               <div className="mt-3">
-                <QuantityCorrectionButton orderId={orderData.id} currentQty={orderData.quantity} />
+                <QuantityCorrectionButton
+                  orderId={orderData.id}
+                  currentQty={orderData.quantity}
+                  lineItemPhysicalQty={(headerReconState as any)?.physicalQty ?? null}
+                />
               </div>
             )}
           </div>
