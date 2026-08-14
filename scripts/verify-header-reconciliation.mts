@@ -46,9 +46,9 @@ for (const ino of targets) {
   const liLatest = rows.reduce((m, r) => (String(r.updated_at) > m ? String(r.updated_at) : m), '');
   const ordUpdated = String((o as any).updated_at);
 
-  const { data: ev } = await svc.from('audit_events')
-    .select('event_type, created_at, before_state, after_state')
-    .eq('order_id', oid).eq('event_type', 'quantity_header_reconciled_from_line_items')
+  const { data: ev } = await svc.from('order_logs')
+    .select('action, created_at')
+    .eq('order_id', oid).eq('action', 'quantity_header_reconciled_from_line_items')
     .order('created_at', { ascending: false }).limit(1)
     .then((r) => r, () => ({ data: null } as any));
 
