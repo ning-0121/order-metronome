@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "npm run lint:tdz && npm run lint:undef && npm run lint:notif && npm run lint:writes && npm run lint:audit && npm run lint:truth && npm run lint:qty && node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts && node --import tsx scripts/test-keep90-invariants.ts && npm run test",
+    "check": "npm run lint:tdz && npm run lint:undef && npm run lint:notif && npm run lint:writes && npm run lint:audit && npm run lint:truth && npm run lint:qty && npm run lint:data-access && node --import tsx scripts/pre-deploy-check.ts && node --import tsx scripts/test-runtime-confidence.ts && node --import tsx scripts/test-mrp.ts && node --import tsx scripts/test-inventory-w3.ts && node --import tsx scripts/test-procurement-execution.ts && node --import tsx scripts/test-material-catalog.ts && node --import tsx scripts/test-inventory-scp2.ts && node --import tsx scripts/test-procurement-kernel.ts && node --import tsx scripts/test-schedule-floors.ts && node --import tsx scripts/test-delay-reschedule.ts && node --import tsx scripts/test-fabric-payable-channel-contract.ts && node --import tsx scripts/test-keep90-invariants.ts && npm run test",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:runtime": "node --import tsx scripts/test-runtime-confidence.ts",
@@ -33,7 +33,8 @@
     "lint:writes": "node scripts/check-critical-writes.mjs",
     "lint:audit": "node scripts/check-audit-writes.mjs",
     "lint:truth": "node scripts/check-truth-and-roles.mjs",
-    "lint:qty": "node scripts/check-quantity-semantics.mjs"
+    "lint:qty": "node scripts/check-quantity-semantics.mjs",
+    "lint:data-access": "node scripts/check-data-access-layer.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

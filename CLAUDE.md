@@ -201,17 +201,22 @@ npm run build && npm run check
    - [ ] 新增的 Server Action 有 auth + 角色检查
    - [ ] 不暴露价格信息给 production/merchandiser/admin_assistant 角色
 
-2. **数据库变更**（2026-07-24 起有自动化迁移运行器,别再手动粘贴）
+2. **数据访问分层**（2026-08-15 起有棘轮闸 `npm run lint:data-access`,详见 `docs/ADR/ADR-006`）
+   - [ ] **业务层不许新增裸 `.from('table')`** —— app/**、components/**、lib/services、lib/domain、lib/agent 全算业务层,新增即 fail
+   - [ ] 要读写数据 → 去 `lib/repositories/` 建/用 repo；可直连的只有 repository / adapter / migration / 白名单 infra(`lib/db`、`lib/supabase`、审计与通知统一入口)
+   - [ ] 存量 2324 处直连已入 `scripts/data-access-baseline.json`,**只许缩不许涨**；清了债跑 `--update-baseline` 收紧,别为了过闸重刷基线
+
+3. **数据库变更**（2026-07-24 起有自动化迁移运行器,别再手动粘贴）
    - [ ] 新迁移写成独立 `.sql` 落 `supabase/migrations/`,**必须幂等**(`if not exists` / `add column if not exists` / `create or replace` / `drop policy if exists`)
    - [ ] 用 `npm run db:migrate` 上生产(不再手动在 SQL Editor 粘贴);`npm run db:status` 看是否同步
    - [ ] 迁移**必须能落生产才算数**——代码里的"缺列降级"是兜底不是常态([[schema-drift-lifecycle-columns]] 教训);别假设迁移已生效
    - 详见 `scripts/db/README.md`(首次接入需粘一次 `scripts/db/bootstrap.sql` + `npm run db:baseline`)
 
-3. **不引入回归**
+4. **不引入回归**
    - [ ] 修改评分逻辑时确认四个角色（业务/跟单/采购/财务）都正常
    - [ ] 修改权限时确认 canSeeAll 包含 admin/finance/admin_assistant/production_manager
 
-4. **查询返回 0 / null 时的调试顺序**（2026-05-26 浪费一下午的教训）
+5. **查询返回 0 / null 时的调试顺序**（2026-05-26 浪费一下午的教训）
    - **先看 error 字段再下结论**：`const { data, error } = await ...` 的 `error` 优先于 `data`。如果忽略 error，列名拼写错误、关系不存在等会被默默吞掉返回 `data=null`。
    - **不要先怀疑 RLS**。RLS 出问题的 symptom 一般是「能登录但看不见数据」，但同样的 symptom 也可能是 PostgREST schema 错（FK 不存在）、列名拼错、状态值不匹配。**先用 service-role 客户端跑一遍原查询**：如果 service-role 也返回错误 → 不是 RLS。
    - **嵌套 join 优先怀疑 FK 缺失**：`.select('a, b, foreign_table(...)')` 这种语法依赖 PostgREST schema 缓存的外键关系。如果数据库 FK 没声明，整个查询 fail。报错信息是 `Could not find a relationship between 'X' and 'Y' in the schema cache`。
