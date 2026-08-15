@@ -26,6 +26,7 @@ import {
   buildExecutionLineRow, canGenerateExecution, resolveReceivingStatus, resolveOrderedStatus, deriveFulfillment, orderableQty, distributeBySize, distributeByWeights, shouldSplitBySize,
 } from '@/lib/services/procurement-execution';
 import { overrideToSegments } from '@/lib/procurement/sizeOverride';
+import { isSystemActor, type SystemActor } from '@/lib/procurement/systemActor';
 import { getOrderLeftover } from '@/app/actions/inventory';
 import { insertNotifications } from '@/lib/utils/notifications';
 
@@ -773,13 +774,22 @@ export async function saveOrderStyleBudgets(
  */
 export async function consolidateOrderProcurementItems(
   orderId: string,
-  opts: { dryRun?: boolean; apply?: { create?: boolean; refresh?: boolean; cleanup?: boolean } } = {},
+  opts: {
+    dryRun?: boolean;
+    apply?: { create?: boolean; refresh?: boolean; cleanup?: boolean };
+    /**
+     * P0:系统自动推进(跟单提交 BOM 后)时传 SYSTEM_ACTOR 跳过**采购角色闸**。
+     * Symbol 不可序列化 → 客户端无法伪造(见 lib/procurement/systemActor.ts)。
+     * 只放角色,登录校验与 RLS 一律照旧。
+     */
+    systemActor?: SystemActor;
+  } = {},
 ) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   // 归并会 写/删 采购项 + 触发财务通知 → 写路径必须采购/管理员(dryRun 只算不写,放宽给能看的角色)
-  if (!opts.dryRun) {
+  if (!opts.dryRun && !isSystemActor(opts.systemActor)) {
     const roleErr = await requireProcurementRole(supabase, user.id);
     if (roleErr) return { error: roleErr };
   }

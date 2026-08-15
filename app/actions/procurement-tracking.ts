@@ -34,6 +34,8 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { requireRoleGroup } from '@/lib/domain/requireRole';
 import { insertNotifications } from '@/lib/utils/notifications';
+// LEGACY / READ-ONLY / NO NEW WRITES —— Pilot 单对本表停写(非 Pilot 行为完全不变)
+import { blockLegacyTrackingWrite, isPilotOrderId } from '@/lib/procurement/advanceCommand';
 
 export interface ProcurementItem {
   id: string;
@@ -106,6 +108,7 @@ export async function addProcurementTrackingRow(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
   { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可维护采购项'); if (err) return { error: err }; }
+  { const blocked = await blockLegacyTrackingWrite(orderId); if (blocked) return { error: blocked }; }
 
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || user.email?.split('@')[0] || '';
@@ -162,6 +165,7 @@ export async function submitSupplementRequest(
   { const err = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/理单/采购/管理可提交补充采购申请'); if (err) return { error: err }; }
 
   if (!item.supplement_reason?.trim()) return { error: '请填写补充原因' };
+  { const blocked = await blockLegacyTrackingWrite(orderId); if (blocked) return { error: blocked }; }
 
   const { data: profile } = await supabase.from('profiles').select('name, role, roles').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || user.email?.split('@')[0] || '';
@@ -257,6 +261,7 @@ export async function approveSupplementRequest(itemId: string): Promise<{ error?
     .select('order_id, item_name, is_supplement, approved_at')
     .eq('id', itemId).single();
 
+  { const blocked = item ? await blockLegacyTrackingWrite((item as any).order_id) : null; if (blocked) return { error: blocked }; }
   if (!(item as any)?.is_supplement) return { error: '该项目不是补充申请' };
   if ((item as any)?.approved_at) return { error: '该申请已经确认过了' };
 
@@ -323,6 +328,12 @@ export async function updateProcurementTrackingRow(
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', user.id).single();
   const userName = (profile as any)?.name || user.email?.split('@')[0] || '';
 
+  // 归属订单前置读取(原本在 update 之后只用于 revalidate;提前是为了在写之前跑 Pilot 停写闸,
+  // 没有新增查询 —— 数据访问棘轮不许业务层加 .from())
+  const { data: item } = await (supabase.from('procurement_tracking') as any)
+    .select('order_id').eq('id', itemId).single();
+  { const blocked = item ? await blockLegacyTrackingWrite((item as any).order_id) : null; if (blocked) return { error: blocked }; }
+
   const patch: any = { ...updates, updated_by: user.id, updated_by_name: userName, updated_at: new Date().toISOString() };
   if ('amount' in patch) patch.amount = patch.amount === '' || patch.amount == null ? null : Number(patch.amount);
   let { error } = await (supabase.from('procurement_tracking') as any).update(patch).eq('id', itemId);
@@ -334,8 +345,6 @@ export async function updateProcurementTrackingRow(
 
   if (error) return { error: error.message };
 
-  const { data: item } = await (supabase.from('procurement_tracking') as any)
-    .select('order_id').eq('id', itemId).single();
   if (item) revalidatePath(`/orders/${(item as any).order_id}`);
   return {};
 }
@@ -349,6 +358,7 @@ export async function deleteProcurementTrackingRow(itemId: string): Promise<{ er
 
   const { data: item } = await (supabase.from('procurement_tracking') as any)
     .select('order_id').eq('id', itemId).single();
+  { const blocked = item ? await blockLegacyTrackingWrite((item as any).order_id) : null; if (blocked) return { error: blocked }; }
 
   const { error } = await (supabase.from('procurement_tracking') as any)
     .delete().eq('id', itemId);
@@ -360,6 +370,10 @@ export async function deleteProcurementTrackingRow(itemId: string): Promise<{ er
 
 /** 快速初始化：为订单创建默认采购项（面料+辅料+包装）*/
 export async function initDefaultProcurementTrackingRows(orderId: string): Promise<{ error?: string }> {
+  // Pilot 单:静默跳过而不是报错 —— 本函数挂在里程碑「采购单下达」完成钩子上,
+  // 抛错会把节点完成一起带崩(那才是改变了非采购链路的行为)。
+  if (await isPilotOrderId(orderId)) return {};
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };

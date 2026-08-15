@@ -302,9 +302,22 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
     setSubmitting(false);
     if (res.error) { setSubmitMsg('提交失败：' + res.error); return; }
     const missing = (res as any).missing_consumption || [];
-    setSubmitMsg(missing.length > 0
+    const base = missing.length > 0
       ? `✅ 已提交采购（${res.count} 项），但 ⚠ ${missing.length} 行缺单耗、生成不了需求量：${missing.join('、')} —— 补上单耗后重新提交`
-      : `✅ 已提交采购（${res.count} 项），采购已收到通知`);
+      : `✅ 已提交采购（${res.count} 项），采购已收到通知`;
+
+    // P0：系统自动推进的结果必须显示出来 —— 绝不静默停住。
+    // 非 Pilot 单 kind=NOT_PILOT，不多说一个字（老流程零变化）。
+    const adv = (res as any).advance;
+    let tail = '';
+    if (adv && adv.kind !== 'NOT_PILOT') {
+      if (adv.kind === 'READY_TO_CONSOLIDATE') {
+        tail = `\n🟢 系统已自动生成待采购需求（${adv.draft_item_count} 项），采购中心直接可见，无需再去点「归并」。`;
+      } else {
+        tail = `\n🟠 ${adv.message}`;
+      }
+    }
+    setSubmitMsg(base + tail);
     await reload();
   }
 
@@ -1288,7 +1301,8 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
             ) : (
               <span className="text-gray-600">原辅料单录好后,提交给采购按 PO 数量汇总、询价、下单。</span>
             )}
-            {submitMsg && <span className="block text-xs text-gray-500 mt-0.5">{submitMsg}</span>}
+            {/* whitespace-pre-line:P0 推进结果是第二行(\n),不加这个类会被折成一行糊在一起 */}
+            {submitMsg && <span className="block text-xs text-gray-500 mt-0.5 whitespace-pre-line">{submitMsg}</span>}
           </div>
           <button onClick={handleSubmitProcurement} disabled={submitting}
             className="shrink-0 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">

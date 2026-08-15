@@ -159,6 +159,25 @@ export function canGenerateExecution(item: ProcItem): boolean {
   return item.status === 'confirmed';
 }
 
+/**
+ * 执行行状态的**唯一读口径**(CEO 2026-08-15 裁定)。
+ *
+ *   line_status = canonical execution status —— 新事实只写它;
+ *   status      = legacy compatibility debt —— 只读兜底,不 backfill、不删列、不双写。
+ *
+ * 读:effectiveLineStatus = line_status ?? status
+ * 写:永远只写 line_status(buildExecutionLineRow 已如此;全站目前无一处写 line_items.status)
+ * → 债务只能下降,不会继续长。
+ */
+export function effectiveLineStatus(
+  line: { line_status?: string | null; status?: string | null },
+): string | null {
+  const canonical = String(line?.line_status ?? '').trim();
+  if (canonical) return canonical;
+  const legacy = String(line?.status ?? '').trim();
+  return legacy || null;
+}
+
 const STATUS_RANK: Record<string, number> = {
   draft: 0, reviewing: 1, confirmed: 2, ordered: 3, partially_received: 4, completed: 5, closed: 6,
 };

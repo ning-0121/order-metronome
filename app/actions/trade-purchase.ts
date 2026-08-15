@@ -12,10 +12,11 @@ import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { listSuppliers } from '@/app/actions/suppliers';
 import { savePurchaseOrderProof } from '@/app/actions/purchase-orders';
+// 单一来源:贸易单执行行的品类标记(Pilot 不变量按它识别合法例外)
+import { TRADE_BULK_CATEGORY } from '@/lib/procurement/advance';
 
 const CAN_CREATE = ['admin', 'sales', 'merchandiser', 'procurement', 'procurement_manager']; // 业务建
 const CAN_PLACE = ['admin', 'procurement', 'procurement_manager'];                            // 采购下达
-const TRADE_BULK_CATEGORY = '成品大货';
 
 async function auth() {
   const supabase = await createClient();

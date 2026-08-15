@@ -16,6 +16,7 @@ import { classifyBomEdit, classifyBomDelete, toSnapshot, toContext } from '@/lib
 import { captureMaterialDecision } from '@/app/actions/material-decisions';
 import type { EvidenceRef, ReasonCode } from '@/lib/knowledge/types';
 import { insertNotifications } from '@/lib/utils/notifications';
+import type { AdvanceResult } from '@/lib/procurement/advanceCommand';
 
 // Knowledge Layer K1：BomTab 关键编辑时随行传入（可选）；flag=off 或未传 → 零影响
 export interface BomDecisionInput { reasonCode: ReasonCode; reasonNote?: string; evidenceRefs?: EvidenceRef[]; }
@@ -682,7 +683,18 @@ function bomSignature(rows: any[], f: { name: string; type: string; code: string
 
 export async function submitBomToProcurement(
   orderId: string,
-): Promise<{ ok?: boolean; count?: number; error?: string; plan_id?: string; snapshot_version?: number; requirement_count?: number; missing_consumption?: string[] }> {
+): Promise<{
+  ok?: boolean; count?: number; error?: string; plan_id?: string;
+  snapshot_version?: number; requirement_count?: number; missing_consumption?: string[];
+  /** P0:BOM 提交后系统自动推进到的下一状态(非 Pilot 恒为 NOT_PILOT)。绝不静默 —— UI 必须显示它。 */
+  advance?: {
+    kind: string;
+    message: string;
+    next_actor: string;
+    draft_item_count: number;
+    missing_basis_materials: string[];
+  } | null;
+}> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -1051,8 +1063,39 @@ export async function submitBomToProcurement(
     console.warn('[submitBomToProcurement] 通知采购失败(不阻断):', e?.message);
   }
 
+  // ── f. P0 自动推进(Pilot 限定)——— 消灭「还要有人知道去点归并」这道隐藏人工门 ──
+  //
+  // 不是在这里无条件补一行 consolidate:必须按 readiness 编排。
+  //   basis 齐 → 自动归并出待采购需求;
+  //   basis 缺 → NEEDS_BOM_CONFIRMATION + 明确列出缺哪些物料,**不归并、不猜**。
+  // 非 Pilot 订单:advanceProcurementAfterBomSubmit 第一步就返回 NOT_PILOT,行为零变化。
+  // 推进失败绝不回滚 BOM 提交(提交本身已经成功),但会把状态原样带回给 UI —— 不静默。
+  let advance: AdvanceResult | null = null;
+  try {
+    const { advanceProcurementAfterBomSubmit } = await import('@/lib/procurement/advanceCommand');
+    advance = await advanceProcurementAfterBomSubmit(orderId);
+  } catch (e: any) {
+    console.warn('[submitBomToProcurement] 采购自动推进失败(不阻断提交):', e?.message);
+  }
+
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true, count: bomRows.length, plan_id: planId, snapshot_version: snapshotVersion!, requirement_count: reqRows.length, missing_consumption: missingConsumption };
+  return {
+    ok: true,
+    count: bomRows.length,
+    plan_id: planId,
+    snapshot_version: snapshotVersion!,
+    requirement_count: reqRows.length,
+    missing_consumption: missingConsumption,
+    advance: advance
+      ? {
+          kind: advance.kind,
+          message: advance.message,
+          next_actor: advance.nextActor,
+          draft_item_count: advance.draftItemCount,
+          missing_basis_materials: advance.missingBasisMaterials,
+        }
+      : null,
+  };
 }
 
 /** 标记某物料"已交样品给采购"(线下样品的轻量标记) */

@@ -44,6 +44,7 @@ import { canUserAccessOrder } from '@/lib/domain/orderAccess';
 import { fetchLineCostsByIds } from '@/lib/procurement/floorCosts';
 import { BRAND } from '@/lib/config/brand';
 import { insertNotifications } from '@/lib/utils/notifications';
+import { blockLegacyProcurementEntry } from '@/lib/procurement/advanceCommand';
 
 export interface ProcurementLineItem {
   id: string;
@@ -246,6 +247,9 @@ export async function addProcurementItem(
   // 泄价红线③同源:执行层增行/手填底价仅限采购角色(业务执行走「补数量申请」)
   if (!hasRoleInGroup(auth.roles || [], 'CAN_EDIT_PROCUREMENT_EXEC'))
     return { error: '仅采购/采购经理/管理员可编辑采购执行层(业务执行请走「补数量申请」)' };
+  // P0 硬验收:Pilot 单的生产采购执行行必须全部挂 procurement_item_id。
+  // 本入口建行不挂 item → Pilot 单服务端硬拒绝(只藏 UI 按钮挡不住旧页面/API)。
+  { const blocked = await blockLegacyProcurementEntry(orderId); if (blocked) return { error: blocked }; }
 
   const supabase = await createClient();
 
@@ -340,6 +344,8 @@ export async function syncFromProcurementTracking(
   // 泄价红线③同源:同步进执行层含价行仅限采购角色
   if (!hasRoleInGroup(auth.roles || [], 'CAN_EDIT_PROCUREMENT_EXEC'))
     return { added: 0, skipped: 0, error: '仅采购/采购经理/管理员可编辑采购执行层' };
+  // P0 硬验收:legacy 台账→执行行的桥不挂 procurement_item_id,Pilot 单禁止(见上)
+  { const blocked = await blockLegacyProcurementEntry(orderId); if (blocked) return { added: 0, skipped: 0, error: blocked }; }
 
   const supabase = await createClient();
 
