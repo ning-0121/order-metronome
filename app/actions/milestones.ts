@@ -1909,7 +1909,19 @@ export async function assignMerchandiser(
   }
 
   if (toUpdate.length === 0) {
-    return { error: `本单没有可指派给「${roleLabel}」的节点(可能都是生产主管固定节点)。` };
+    // 2026-08-14 实测(1022962 + 全库 44/81 在办单):原文案「可能都是生产主管固定节点」是**猜的**,
+    // 真实原因绝大多数是 —— 这张单用的是 V2/旧模板,**压根没有生产部门线**(全部节点归 merchandiser)。
+    // 猜错的提示把人引向错误方向,所以这里按实际情况分两种说法,并指出页面上已有的自救入口。
+    // 不另发查询:allMerchMs 已经是「owner_role = assignRole」的全部节点。
+    // 它为空 = 这张单没有该部门线;它非空但 toUpdate 为空 = 全被固定归属过滤掉了。
+    const hasRoleNodes = ((allMerchMs || []) as any[]).length > 0;
+    if (kind === 'production' && !hasRoleNodes) {
+      return {
+        error: `本单没有「生产部门线」节点 —— 它用的是旧版节点模板,全部执行节点都归业务执行(跟单),`
+          + `因此无法指派${roleLabel}。如需生产跟单接手,请先用本页「重建为最新节点模板」升级节点,再来指派。`,
+      };
+    }
+    return { error: `本单「${roleLabel}」的节点都是固定归属节点(生产主管固定节点/业务承诺节点),不可改派。` };
   }
 
   const { data: upd, error: updateErr } = await (admin.from('milestones') as any)
