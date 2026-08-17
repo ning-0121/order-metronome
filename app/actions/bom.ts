@@ -18,6 +18,7 @@ import type { EvidenceRef, ReasonCode } from '@/lib/knowledge/types';
 import { insertNotifications } from '@/lib/utils/notifications';
 import type { AdvanceResult } from '@/lib/procurement/advanceCommand';
 import { allocateTrim, normalizeAllocationMode } from '@/lib/procurement/trimAllocation';
+import { isPilotOrder } from '@/lib/procurement/pilot';
 import { procurementRepo } from '@/lib/adapters/supabase/procurementAdapter';
 
 // Knowledge Layer K1：BomTab 关键编辑时随行传入（可选）；flag=off 或未传 → 零影响
@@ -36,10 +37,13 @@ export async function getBomItems(orderId: string) {
   // 派生「总需用量」:单件用量 × 件数(件数来自 order_line_items,按 款×色 匹配,
   // 与 submitBomToProcurement 同口径 → 展示即将来真实采购基数,不做第二套算法)。
   // 只读派生,不写库;total_qty 若人工填了则以人工为准(computed 仅兜底/对照)。
+  let orderHead: { order_no?: string | null; internal_order_no?: string | null } | null = null;
   try {
     const rows = (data || []) as any[];
+    // 一次读齐:数量口径 + 订单号(订单号给下面的 Pilot 门禁用,不为它再查一次)
     const { data: order } = await (supabase.from('orders') as any)
-      .select('quantity, quantity_unit').eq('id', orderId).maybeSingle();
+      .select('quantity, quantity_unit, order_no, internal_order_no').eq('id', orderId).maybeSingle();
+    orderHead = (order as any) ?? null;
     const orderQty = Number((order as any)?.quantity) || 0;
     const { data: liRows } = await (supabase.from('order_line_items') as any)
       .select('style_no, color_cn, color_en, qty_pcs, set_multiplier').eq('order_id', orderId);
@@ -126,7 +130,13 @@ export async function getBomItems(orderId: string) {
     }
   } catch (e: any) { console.warn('[getBomItems] 总需派生失败(不阻断):', e?.message); }
 
-  return { data, error: null };
+  // Pilot 门禁随行返回:辅料「分配方式」是 P0 新入口,**只对 Pilot 单显示**。
+  // pilot.ts 的原话:非 Pilot 订单行为必须保持完全不变,避免全员看到半成品。
+  // 复用上面那次 orders 读(不新增直连),也省客户端一次挂载取数。
+  // 读不到订单号 → false,保守不显示新入口。
+  const pilot = isPilotOrder(orderHead);
+
+  return { data, error: null, pilot };
 }
 
 export async function addBomItem(orderId: string, item: {
@@ -504,8 +514,15 @@ export async function previewTrimAllocation(orderId: string, input: {
   { const _e = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可查看辅料分配'); if (_e) return { error: _e }; }
 
   try {
-    // 逐款明细走 Repository 契约(ADR-006:业务层不许直接摸表)
-    const matrix = await (await procurementRepo()).getOrderStyleMatrix(orderId);
+    // 订单身份 + 逐款明细都走 Repository 契约(ADR-006:业务层不许直接摸表)
+    const repo = await procurementRepo();
+
+    // Pilot 门禁服务端也要拦:客户端隐藏入口只是不显示,不是门禁。
+    const id = await repo.getOrderIdentity(orderId);
+    const pilot = isPilotOrder({ order_no: id?.orderNo ?? null, internal_order_no: id?.internalOrderNo ?? null });
+    if (!pilot) return { error: '该订单未接入采购生成器,辅料分配预览不可用' };
+
+    const matrix = await repo.getOrderStyleMatrix(orderId);
     const r = allocateTrim({
       mode: input.allocation_mode,
       styleNo: input.style_no ?? null,

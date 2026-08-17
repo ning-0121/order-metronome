@@ -219,7 +219,10 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
   const removeFormAttachment = (url: string) =>
     setForm(f => ({ ...f, attachment_files: (f.attachment_files || []).filter((a) => a.url !== url) }));
 
-  const reload = () => getBomItems(orderId).then(({ data }) => setItems(data || []));
+  // isPilot:辅料「分配方式」是 P0 新入口,**只对 Pilot 单显示**(非 Pilot 订单一个字节不变)。
+  // 随 getBomItems 一起回来,不额外挂载取数(同页 Server Action 会串行排队)。
+  const [isPilot, setIsPilot] = useState(false);
+  const reload = () => getBomItems(orderId).then((r: any) => { setItems(r.data || []); setIsPilot(!!r.pilot); });
   useEffect(() => { reload().then(() => setLoading(false)); }, [orderId]);
 
   // 报价基线(P2:BOM 单耗超报价单耗 → 提示)
@@ -466,7 +469,7 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
   const [allocLoading, setAllocLoading] = useState(false);
   const allocMode = form.allocation_mode;
   useEffect(() => {
-    if (!showAdd || !allocMode || allocMode === 'whole_order') { setAlloc(null); return; }
+    if (!isPilot || !showAdd || !allocMode || allocMode === 'whole_order') { setAlloc(null); return; }
     let cancelled = false;
     setAllocLoading(true);
     const t = setTimeout(async () => {
@@ -482,7 +485,7 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
       setAlloc((res as any).data || { status: 'ERROR', cells: [], total: 0, message: (res as any).error || '预览失败', rounded: false });
     }, 300);   // 防抖:单耗还在敲的时候别每个字符打一次服务端
     return () => { cancelled = true; clearTimeout(t); };
-  }, [showAdd, allocMode, form.style_no, form.color, form.qty_per_piece, form.consumption_basis, orderId]);
+  }, [isPilot, showAdd, allocMode, form.style_no, form.color, form.qty_per_piece, form.consumption_basis, orderId]);
 
   async function selectCopySource(o: any) {
     setCopySource(o); setCopyErr(''); setCopyPreview([]);
@@ -810,8 +813,9 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
         <input placeholder="样品/参考编号" value={form.sample_reference} onChange={e => set('sample_reference', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <textarea placeholder="详细位置说明" value={form.position_description} onChange={e => set('position_description', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
-      {/* 分配方式(辅料):尺码牌/吊牌这类要分码印的,数量由系统从订单逐款明细算,跟单不手抄 */}
-      {!isFabricForm && (
+      {/* 分配方式(辅料):尺码牌/吊牌这类要分码印的,数量由系统从订单逐款明细算,跟单不手抄。
+          P0 新入口 → 只对 Pilot 单出现;非 Pilot 订单看到的表单与从前完全一致。 */}
+      {!isFabricForm && isPilot && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-emerald-800 whitespace-nowrap">分配方式</span>
