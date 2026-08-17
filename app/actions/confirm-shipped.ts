@@ -17,6 +17,10 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { writeAuditEvent } from '@/lib/audit/write-audit-event';
 import { safeMutation } from '@/lib/db/safe-mutation';
+// 出货确认单/放货证据的数据访问收口到 repository(ADR-006 棘轮:业务层不许直接摸表)
+import {
+  findPendingSalesSigned, hasWarehouseSigned, hasFinanceReleaseLog, createShipmentConfirmationRow,
+} from '@/lib/repositories/shipmentConfirmationsRepo';
 import { revalidatePath } from 'next/cache';
 
 const CAN_CONFIRM = ['sales', 'merchandiser', 'sales_manager', 'order_manager', 'admin', 'admin_assistant'];
@@ -89,24 +93,23 @@ async function confirmOrderShippedCore(
     //    无证据 → 不完结,自动把本次确认转成出货审批推给财务系统,批准后再点一次即可。
     const released = await hasFinanceReleaseEvidence(svc, orderId);
     if (!released) {
-      const { data: pend } = await (svc.from('shipment_confirmations') as any)
-        .select('id').eq('order_id', orderId).eq('status', 'sales_signed').limit(1);
-      if (pend && pend.length > 0) {
+      const { exists: pendExists } = await findPendingSalesSigned(svc, orderId);
+      if (pendExists) {
         return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: '该单出货审批已在财务系统队列中等待批准 —— 财务批准后再点一次「确认已出货」即可完结。' };
       }
       const nowIso = new Date().toISOString();
-      const { data: conf, error: confErr } = await (svc.from('shipment_confirmations') as any)
-        .insert({
-          order_id: orderId,
-          shipment_qty: order.quantity || 0,
-          order_qty: order.quantity || null,
-          customer_name: order.customer_name || null,
-          requested_by: user.id, sales_sign_id: user.id,
-          sales_signed_at: nowIso, status: 'sales_signed',
-        }).select('id').single();
-      if (confErr || !conf?.id) {
-        return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: '转财务审批失败:' + (confErr?.message || '确认单创建失败') + ' —— 请重试或联系管理员。' };
+      const { id: confId, error: confErr } = await createShipmentConfirmationRow(svc, {
+        orderId,
+        shipmentQty: order.quantity || 0,
+        orderQty: order.quantity || null,
+        customerName: order.customer_name || null,
+        requestedBy: user.id, salesSignId: user.id,
+        salesSignedAt: nowIso, status: 'sales_signed',
+      });
+      if (confErr || !confId) {
+        return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: '转财务审批失败:' + (confErr || '确认单创建失败') + ' —— 请重试或联系管理员。' };
       }
+      const conf = { id: confId };
       const actorName = (prof as any)?.name || user.email?.split('@')[0] || '业务';
       try {
         const { syncShipmentApprovalToFinance } = await import('@/lib/integration/finance-sync');
@@ -203,14 +206,8 @@ async function confirmOrderShippedCore(
  * ②站内放货/统一放货 Command(order_logs A2:business_override / critical_mutation:order_financials,注记含放货)。
  */
 async function hasFinanceReleaseEvidence(svc: any, orderId: string): Promise<boolean> {
-  const { data: wc } = await (svc.from('shipment_confirmations') as any)
-    .select('id').eq('order_id', orderId).eq('status', 'warehouse_signed').limit(1);
-  if (wc && wc.length > 0) return true;
-  const { data: lg } = await (svc.from('order_logs') as any)
-    .select('id')
-    .eq('order_id', orderId)
-    .in('action', ['business_override', 'critical_mutation:order_financials'])
-    .or('note.ilike.%放货%,note.ilike.%允许出货%,note.ilike.%allow_shipment%')
-    .limit(1);
-  return !!(lg && lg.length > 0);
+  const { exists: warehouseSigned } = await hasWarehouseSigned(svc, orderId);
+  if (warehouseSigned) return true;
+  const { exists: releaseLogged } = await hasFinanceReleaseLog(svc, orderId);
+  return releaseLogged;
 }
