@@ -248,6 +248,7 @@
     "20260810_executive_os_v1.sql",
     "20260811_ts1_dogfood_telemetry.sql",
     "20260816_bom_allocation_mode.sql",
+    "20260817_snapshot_line_consumption_basis.sql",
     "20260817_supplier_fkey_repoint_redo.sql",
     "ADD_completed_at.sql",
     "ADD_roles_array.sql",

@@ -7,6 +7,7 @@ import {
   calculateRequirementFromContext,
   deriveQuantityContext,
 } from '@/lib/domain/quantity-engine';
+import { isBasisConfirmed } from '@/lib/procurement/consumption-basis';
 
 /** material_type(BOM)→ category(供应链分类) */
 export const MATERIAL_TYPE_TO_CATEGORY: Record<string, string> = {
@@ -49,6 +50,15 @@ export interface MrpMaterialInput {
   qty_per_piece?: number | null;
   loss_rate?: number | null;   // %
   pack_size?: number | null;   // 每包件数(打包辅料;N件一包→N);需求=件数×单耗÷每包件数。空/1=不打包
+  /**
+   * 用量口径(跟单确认)。**已确认就按它算**;未确认(null/空/未知值)沿用历史的 PER_SET。
+   *
+   * 2026-08-17 修:此前这里**硬写死 'PER_SET'**,`consumption_basis` 填了也没人看 ——
+   * 于是「确认口径」这个动作对采购数量毫无影响,BomTab 显示与 MRP 各算各的。
+   * 未确认时不改成 needs_input:全库 182/185 行 basis 为空,一刀切会让所有单当场卡住;
+   * 收口靠 Pilot 侧的 checkBasisReadiness(NEEDS_BOM_CONFIRMATION),不在这里一次性翻。
+   */
+  consumption_basis?: string | null;
 }
 
 export interface MrpInput {
@@ -56,6 +66,11 @@ export interface MrpInput {
   po_quantity: number;
   stageAnchors: StageAnchors;
   quantityUnit?: string | null;
+  /**
+   * 款级「每套几件」。传了就压过 quantityUnit 串解析 —— 逐款算料必须传。
+   * 订单级单位串(如「三件套」)描述的是整套构成,不是某一款的折算倍率。
+   */
+  componentsPerCommercialUnit?: number | string | null;
   inventoryQty?: number;   // v1 = 0
   reuseQty?: number;       // v1 = 0
   today: string;           // 'YYYY-MM-DD'
@@ -105,30 +120,48 @@ export function computeMaterialRequirement(input: MrpInput): MrpResult {
   // ── 数量 ──
   const consumption = material.qty_per_piece;
   const loss_rate = material.loss_rate ?? 0;
+  // 口径来源要能被审计:算出来的数字必须说得清是按哪个口径乘的
+  const basisConfirmed = isBasisConfirmed(material.consumption_basis);
+  const usedBasisLabel = basisConfirmed ? String(material.consumption_basis) : 'PER_SET(未确认·沿用历史)';
   let gross_requirement: number | null = null;
   let loss_qty: number | null = null;
   let net_purchase_qty: number | null = null;
   let status: MrpResult['status'] = 'open';
 
+  let needsInputReason: string | null = null;
   if (consumption == null || !(consumption > 0)) {
     status = 'needs_input';   // 缺单耗
+    needsInputReason = '缺单耗';
   } else {
     // 每包件数(打包辅料,如中包袋6件一中包→6):需求 = 件数×单耗÷每包件数(2026-07-07 用户拍板)。空/≤1 不打包。
     const pack = material.pack_size != null && Number(material.pack_size) > 1 ? Number(material.pack_size) : 1;
     const quantity = deriveQuantityContext({
       physicalQuantity: po_quantity,
       quantityUnit: input.quantityUnit || null,
+      componentsPerCommercialUnit: input.componentsPerCommercialUnit ?? null,
     });
-    const exact = calculateRequirementFromContext({ consumption, quantity, basis: 'PER_SET', lossRatePct: loss_rate });
-    gross_requirement = exact.gross / pack;
+    // 口径:已确认按跟单填的走;未确认沿用历史 PER_SET(见 MrpMaterialInput.consumption_basis 注释)
+    const basis = basisConfirmed ? (material.consumption_basis as any) : 'PER_SET';
+    const exact = calculateRequirementFromContext({ consumption, quantity, basis, lossRatePct: loss_rate });
+    if (exact.gross == null) {
+      // 口径算不出基数(如计量类口径缺 measurementQuantity)。
+      // 绝不让它走下去 —— JS 里 null/pack === 0,会静默变成「需求 0」,
+      // 采购看到 0 就不买了。宁可 needs_input 让人来补。
+      status = 'needs_input';
+      needsInputReason = exact.status === 'NEEDS_MEASUREMENT_QUANTITY'
+        ? `口径 ${usedBasisLabel} 缺${exact.missingMeasurementLabel ?? '计量数量'}`
+        : `口径 ${usedBasisLabel} 下数量基准待确认`;
+    } else {
+      gross_requirement = exact.gross / pack;
     // 2026-07-03(用户实测「系统多算两匹布」):损耗不再暗算进净需求。
     // 净需求 = 业务口径的裸数(数量×单耗−库存−复用);损耗改为「采购损耗%」在
     // 采购核料层明示可改(建议采购=净需求×(1+损耗%),口径唯一,不再双重叠加)。
     // loss_qty 保留为参考值(核料项创建时预填采购损耗%用)。
-    loss_qty = exact.loss / pack;
-    const net_raw = gross_requirement - inv - reuse;
-    net_purchase_qty = Math.max(0, Math.ceil(net_raw));   // 宁多勿缺,向上取整
-    if (net_purchase_qty === 0) status = 'fulfilled';
+      loss_qty = exact.loss / pack;
+      const net_raw = gross_requirement - inv - reuse;
+      net_purchase_qty = Math.max(0, Math.ceil(net_raw));   // 宁多勿缺,向上取整
+      if (net_purchase_qty === 0) status = 'fulfilled';
+    }
   }
 
   // ── 时间 ──
@@ -157,17 +190,19 @@ export function computeMaterialRequirement(input: MrpInput): MrpResult {
   const u = material.unit || '';
   const explain_json = {
     headline: status === 'needs_input'
-      ? `${material.material_name}:缺单耗,无法计算采购量`
+      ? `${material.material_name}:${needsInputReason ?? '缺单耗'},无法计算采购量`
       : `建议采购 ${material.material_name} ${net_purchase_qty ?? '—'}${u}` +
         (order_by_date ? `,最晚 ${order_by_date} 前下单` : ''),
     factors: gross_requirement != null ? [
-      { code: 'gross', label: `PO ${po_quantity} × 单耗 ${consumption}`, value: gross_requirement, unit: u },
+      { code: 'gross', label: `PO ${po_quantity} × 单耗 ${consumption}(口径 ${usedBasisLabel})`, value: gross_requirement, unit: u },
       { code: 'loss', label: `损耗参考 ${loss_rate}%(不计入净需求;由采购核料「采购损耗%」明控)`, value: loss_qty, unit: u },
       { code: 'inventory', label: '扣现有库存(v1=0)', value: -inv, unit: u },
       { code: 'reuse', label: '扣可复用余料(v1=0)', value: -reuse, unit: u },
     ] : [],
     result: { net_purchase_qty, unit: u, required_stage, required_date, order_by_date, timing_status },
-    next_action: status === 'needs_input' ? '业务补录单耗' : '采购确认数量并询价',
+    next_action: status === 'needs_input'
+      ? (needsInputReason === '缺单耗' || needsInputReason == null ? '业务补录单耗' : '跟单确认用量口径/计量数量')
+      : '采购确认数量并询价',
     assumptions,
     lead_days_source,
     computed_at: today,

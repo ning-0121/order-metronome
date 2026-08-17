@@ -19,6 +19,7 @@ import { insertNotifications } from '@/lib/utils/notifications';
 import type { AdvanceResult } from '@/lib/procurement/advanceCommand';
 import { allocateTrim, normalizeAllocationMode } from '@/lib/procurement/trimAllocation';
 import { isPilotOrder } from '@/lib/procurement/pilot';
+import { isBasisConfirmed } from '@/lib/procurement/consumption-basis';
 import { procurementRepo } from '@/lib/adapters/supabase/procurementAdapter';
 
 // Knowledge Layer K1：BomTab 关键编辑时随行传入（可选）；flag=off 或未传 → 零影响
@@ -55,9 +56,18 @@ export async function getBomItems(orderId: string) {
     const styleQty = new Map<string, number>();
     const styleColorQty = new Map<string, number>();
     const colorAlias = new Map<string, string>();
+    // 该款「每套几件」—— 折算套数必须用它,不能用订单级 quantity_unit 解析出来的数字。
+    // 1022967 实证:单位「三件套」→ 引擎按 ÷3 折套数,而两个款的件/套实际是 2 和 1,
+    // 对谁都不对 → 0.53 算出 424,业务要 1272。
+    // 1022222 单位「套」→ ÷2,恰好等于该款件/套=2,所以 761 一直是对的([[set-order-fabric-per-set]])。
+    // 结论:订单级单位串只是描述整套构成,款级 set_multiplier 才是这一行的折算真相。
+    const styleSetMul = new Map<string, number>();
     const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
     for (const r of (liRows || []) as any[]) {
       if (!r.style_no) continue;
+      if (!styleSetMul.has(r.style_no)) {
+        styleSetMul.set(r.style_no, Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1);
+      }
       // qty_pcs 存的是"套数"(逐款明细尺码格按套录)。件/套(set_multiplier)把套数换算成物理件数;
       // 单耗(qty_per_piece)是"每件"口径 → 需求 = 单耗 × 件数 = 单耗 × 套数 × 件/套。
       // 2026-07-20 用户拍板:数量与面料统一按"件"口径,order.quantity 也是件数,两侧一致(非套装 件/套=1 无影响)。
@@ -86,9 +96,16 @@ export async function getBomItems(orderId: string) {
         pieces = orderQty;
       }
       const qpp = b.qty_per_piece != null ? Number(b.qty_per_piece) : null;
+      // 口径未确认就**不给数字**(2026-08-17,1022967 事故):
+      // 过去这里 `basis || 'PER_SET'` 静默兜底,套装单再被 quantity_unit 除一次,
+      // 0.53×2400 应得 1272 却显示 424 —— 一个错的数比不显示更糟(DP-4:系统计算·人决策)。
+      const basisConfirmed = isBasisConfirmed(b.consumption_basis);
       const basis = (b.consumption_basis || 'PER_SET') as any;
       b.computed_pieces = pieces > 0 ? pieces : null;
+      // 款级折算倍率显式传入(优先级高于 quantity_unit 串解析);找不到款就退回订单级口径
+      const rowSetMul = st ? styleSetMul.get(st) ?? null : null;
       const rowQuantity = deriveOrderQuantityContext({
+        componentsPerCommercialUnit: rowSetMul,
         physicalQuantity: pieces > 0 ? pieces : quantity.physicalQuantity,
         quantityUnit: (order as any)?.quantity_unit ?? null,
       });
@@ -109,14 +126,17 @@ export async function getBomItems(orderId: string) {
             : null,
         })
         : null;
-      b.computed_total_qty = resolved?.gross ?? null;
-      b.quantity_calc_status = resolved?.status || null;
-      b.quantity_issue = resolved?.status === 'NEEDS_MEASUREMENT_QUANTITY'
-        ? `缺少${resolved.missingMeasurementLabel}`
-        : resolved?.status === 'NEEDS_REVIEW'
-          ? (rowQuantity.reviewReason || '数量基准待确认')
-          : null;
-      b.quantity_basis = basis;
+      // 口径未确认 → 不产出数字,只说缺什么。绝不拿兜底口径算一个看似正常的数出来。
+      b.computed_total_qty = basisConfirmed ? (resolved?.gross ?? null) : null;
+      b.quantity_calc_status = basisConfirmed ? (resolved?.status || null) : 'NEEDS_BASIS';
+      b.quantity_issue = !basisConfirmed
+        ? '用量基准待确认(每套/每件/每部件/整单固定)——确认后系统才给总需量'
+        : resolved?.status === 'NEEDS_MEASUREMENT_QUANTITY'
+          ? `缺少${resolved.missingMeasurementLabel}`
+          : resolved?.status === 'NEEDS_REVIEW'
+            ? (rowQuantity.reviewReason || '数量基准待确认')
+            : null;
+      b.quantity_basis = basisConfirmed ? basis : null;
       b.quantity_context = {
         physicalQuantity: rowQuantity.physicalQuantity,
         commercialQuantity: rowQuantity.commercialQuantity,
@@ -741,9 +761,12 @@ export async function importFromTrimLibrary(orderId: string, brand: string | nul
 // ════════════════════════════════════════════════
 
 /** 内容签名(变更检测用):同一组物料行 → 同一字符串 */
-function bomSignature(rows: any[], f: { name: string; type: string; code: string; qpp: string; unit: string; color: string; place: string; spec: string; supplier: string }): string {
+function bomSignature(rows: any[], f: { name: string; type: string; code: string; qpp: string; unit: string; color: string; place: string; spec: string; supplier: string; basis?: string }): string {
   return JSON.stringify(
-    rows.map(r => [r[f.name], r[f.type], r[f.code], r[f.qpp], r[f.unit], r[f.color], r[f.place], r[f.spec], r[f.supplier]]).sort()
+    // basis 参与签名(2026-08-17):只改口径不改单耗也必须出新快照,否则新口径进不了 MRP。
+    // 归一化 null/undefined/'' 为 null —— 两侧来源写法不同不该被判成「变了」而白出一版。
+    rows.map(r => [r[f.name], r[f.type], r[f.code], r[f.qpp], r[f.unit], r[f.color], r[f.place], r[f.spec], r[f.supplier],
+      f.basis ? (r[f.basis] || null) : null]).sort()
   );
 }
 
@@ -797,9 +820,13 @@ export async function submitBomToProcurement(
   const styleQty = new Map<string, number>();
   const styleColorQty = new Map<string, number>();      // key: style¦规范色 → 该款该色件数
   const colorAlias = new Map<string, string>();          // style¦任一色名(中/英) → 规范色 key
+  const styleSetMul = new Map<string, number>();         // 该款每套几件(折套数用它,不用订单级单位串)
   const normColor = (s: any) => String(s ?? '').trim().toLowerCase();
   for (const r of (liRows || []) as any[]) {
     if (!r.style_no) continue;
+    if (!styleSetMul.has(r.style_no)) {
+      styleSetMul.set(r.style_no, Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1);
+    }
     // qty_pcs 是套数;件/套(set_multiplier)换算成物理件数,单耗是"每件"口径 → 需求 = 单耗 × 套数 × 件/套。
     // 2026-07-20 用户拍板:数量与面料统一按"件",与 order.quantity(件数)一致(非套装 件/套=1 无影响)。
     const setMul = Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1;
@@ -930,7 +957,7 @@ export async function submitBomToProcurement(
   if (lockErr) return { error: `锁定 BOM 失败:${lockErr.message}` };
 
   // ── b. 冻结 Snapshot(含变更检测:BOM 未变则复用最新版本)──
-  const liveSig = bomSignature(bomRows, { name: 'material_name', type: 'material_type', code: 'material_code', qpp: 'qty_per_piece', unit: 'unit', color: 'color', place: 'placement', spec: 'spec', supplier: 'supplier' });
+  const liveSig = bomSignature(bomRows, { name: 'material_name', type: 'material_type', code: 'material_code', qpp: 'qty_per_piece', unit: 'unit', color: 'color', place: 'placement', spec: 'spec', supplier: 'supplier', basis: 'consumption_basis' });
   const { data: latestSnap } = await (supabase.from('material_package_snapshots') as any)
     .select('id, version').eq('order_id', orderId).eq('status', 'approved')
     .order('version', { ascending: false }).limit(1).maybeSingle();
@@ -940,9 +967,10 @@ export async function submitBomToProcurement(
   let reuseSnap = false;
   if (latestSnap) {
     const { data: latestLines } = await (supabase.from('material_package_snapshot_lines') as any)
-      .select('material_name, material_type, material_code, qty_per_piece, unit, color, placement, specification, suggested_supplier')
+      // 口径进签名:只改口径不改单耗时,旧签名会判定「没变」而复用旧快照 → 新口径永远进不了 MRP
+      .select('material_name, material_type, material_code, qty_per_piece, unit, color, placement, specification, suggested_supplier, consumption_basis')
       .eq('snapshot_id', (latestSnap as any).id);
-    const snapSig = bomSignature(latestLines || [], { name: 'material_name', type: 'material_type', code: 'material_code', qpp: 'qty_per_piece', unit: 'unit', color: 'color', place: 'placement', spec: 'specification', supplier: 'suggested_supplier' });
+    const snapSig = bomSignature(latestLines || [], { name: 'material_name', type: 'material_type', code: 'material_code', qpp: 'qty_per_piece', unit: 'unit', color: 'color', place: 'placement', spec: 'specification', supplier: 'suggested_supplier', basis: 'consumption_basis' });
     if (snapSig === liveSig) { reuseSnap = true; snapshotId = (latestSnap as any).id; snapshotVersion = (latestSnap as any).version; }
   }
 
@@ -966,12 +994,13 @@ export async function submitBomToProcurement(
       specification: r.spec, color: r.color, placement: r.placement,
       qty_per_piece: r.qty_per_piece, unit: r.unit, loss_rate: waste_pct,
       pack_size: r.pack_size ?? null,   // 每包件数(打包辅料;冻结带过去,MRP 需求÷每包件数)
+      consumption_basis: r.consumption_basis ?? null,   // 口径与单耗一起冻:少了它快照还原不出当初那个数
       suggested_supplier: r.supplier, sample_status: null, remarks: null,
     }));
     let { error: lineErr } = await (supabase.from('material_package_snapshot_lines') as any).insert(lineRows);
-    if (lineErr && /pack_size|column .* does not exist/i.test(lineErr.message || '')) {
-      // pack_size 迁移(20260707)未执行 → 降级去列重插(不 brick 提交),提醒执行迁移
-      const plain = lineRows.map(({ pack_size, ...rest }) => rest);
+    if (lineErr && /pack_size|consumption_basis|column .* does not exist/i.test(lineErr.message || '')) {
+      // pack_size(20260707)/ consumption_basis(20260817)迁移未执行 → 降级去列重插(不 brick 提交)
+      const plain = lineRows.map((r: any) => { const { pack_size, consumption_basis, ...rest } = r; return rest; });
       ({ error: lineErr } = await (supabase.from('material_package_snapshot_lines') as any).insert(plain));
     }
     if (lineErr) return { error: `快照行创建失败:${lineErr.message}` };
@@ -1069,8 +1098,13 @@ export async function submitBomToProcurement(
         material_code: line.material_code, unit: line.unit,
         qty_per_piece: line.qty_per_piece, loss_rate: line.loss_rate,
         pack_size: line.pack_size,   // 每包件数 → MRP 需求÷每包件数(中包袋6件一中包→6)
+        consumption_basis: line.consumption_basis,   // 口径必须传下去,否则 MRP 那边的修等于没修
       },
-      po_quantity: poQty, quantityUnit: (order as any)?.quantity_unit || null, stageAnchors, inventoryQty, reuseQty: 0, today,
+      po_quantity: poQty, quantityUnit: (order as any)?.quantity_unit || null,
+      // 款级折算倍率:压过订单级 quantity_unit 串解析。少了它,「三件套」会把每一款都 ÷3,
+      // 而各款真实件/套可能是 2 和 1 —— 1022967 就是这么算出 424 的(应为 1272)。
+      componentsPerCommercialUnit: lineStyle ? (styleSetMul.get(lineStyle) ?? null) : null,
+      stageAnchors, inventoryQty, reuseQty: 0, today,
     });
     // 业务手填总需量 → 直接以人工为准(不自动算;中包袋/打包件等)。填了就用。
     // 没填时:辅料(非面料/里料)缺单耗 → 兜底=件数(不再算成 0/needs_input);面料仍需大货单耗,保持原样。

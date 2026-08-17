@@ -371,6 +371,12 @@ export function deriveOrderQuantityContext(input: {
   physicalQuantity?: number | string | null;
   quantityUnit?: string | null;
   lineItemMultipliers?: Array<number | string | null | undefined>;
+  /**
+   * 款级「每套几件」。传了就**压过** quantity_unit 串解析(见 deriveQuantityContext 的优先级)。
+   * 逐款算料必须传:订单级单位串描述的是整套构成,不是某一款的折算倍率。
+   * 1022967 实证:单位「三件套」→ ÷3,而款的件/套是 2 和 1 → 0.53 算成 424,业务要 1272。
+   */
+  componentsPerCommercialUnit?: number | string | null;
 }): QuantityContext {
   return deriveQuantityContext(input);
 }

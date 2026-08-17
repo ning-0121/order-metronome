@@ -1511,13 +1511,16 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
                       ? item.total_qty
                       : item.computed_total_qty != null
                         ? (
-                          <span title={`自动算:每套用量 ${item.qty_per_piece} × 套数 ${item.computed_pieces}${item.unit ? `（${item.unit}）` : ''}。套数来自订单明细,人工填「总需」可覆盖。`}
+                          <span title={`自动算:单耗 ${item.qty_per_piece} × ${item.quantity_basis === 'PER_PIECE' || item.quantity_basis === 'PER_COMPONENT' ? '件数' : '套数'} ${item.computed_pieces}${item.unit ? `（${item.unit}）` : ''}(口径 ${item.quantity_basis || '—'})。基数来自订单明细,人工填「总需」可覆盖。`}
                             className="text-emerald-700">
                             {item.computed_total_qty}
                             <span className="ml-1 text-[10px] text-emerald-500 font-normal">自动</span>
                           </span>
                         )
-                        : '—'}
+                        : item.quantity_calc_status === 'NEEDS_BASIS'
+                          // 口径没确认时宁可空着:显示一个按兜底口径算出来的数,业务会当成真的照着买
+                          ? <span className="text-amber-600 font-normal">待确认</span>
+                          : '—'}
                     {item.quantity_issue && (
                       <div className="mt-0.5 text-[11px] text-amber-600" title={item.quantity_issue}>
                         {item.quantity_issue}
