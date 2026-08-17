@@ -59,7 +59,7 @@ async function confirmOrderShippedCore(
 
   const svc = createServiceRoleClient();
   const { data: order } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, lifecycle_status, order_purpose, quantity').eq('id', orderId).maybeSingle();
+    .select('id, order_no, internal_order_no, customer_name, lifecycle_status, order_purpose, quantity').eq('id', orderId).maybeSingle();
   if (!order) return { ok: false, error: '订单不存在', code: 'NOT_FOUND' };
   if (['completed', '已完成', 'cancelled', '已取消', 'archived', '已归档'].includes(String(order.lifecycle_status))) {
     return { ok: false, error: '订单已终结,无需确认', code: 'TERMINAL' };
@@ -82,6 +82,56 @@ async function confirmOrderShippedCore(
     }
     if ((fin as any)?.allow_shipment !== true) {
       return { ok: false, error: '财务尚未放货 —— 请先由财务在出货审批中放行,再确认出货。', code: 'FINANCE_RELEASE_REQUIRED' };
+    }
+    // ── 天生开闸拦截(2026-08-17):补建 order_financials 时 allow_shipment 默认 true(存量 187 单),
+    //    闸虽开但财务从未经手 —— 不算放货(CEO 2026-08-11:财务批准发生在出货之前)。
+    //    有放货证据(财务系统批过 warehouse_signed / 站内放货 A2 审计)→ 正常放行;
+    //    无证据 → 不完结,自动把本次确认转成出货审批推给财务系统,批准后再点一次即可。
+    const released = await hasFinanceReleaseEvidence(svc, orderId);
+    if (!released) {
+      const { data: pend } = await (svc.from('shipment_confirmations') as any)
+        .select('id').eq('order_id', orderId).eq('status', 'sales_signed').limit(1);
+      if (pend && pend.length > 0) {
+        return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: '该单出货审批已在财务系统队列中等待批准 —— 财务批准后再点一次「确认已出货」即可完结。' };
+      }
+      const nowIso = new Date().toISOString();
+      const { data: conf, error: confErr } = await (svc.from('shipment_confirmations') as any)
+        .insert({
+          order_id: orderId,
+          shipment_qty: order.quantity || 0,
+          order_qty: order.quantity || null,
+          customer_name: order.customer_name || null,
+          requested_by: user.id, sales_sign_id: user.id,
+          sales_signed_at: nowIso, status: 'sales_signed',
+        }).select('id').single();
+      if (confErr || !conf?.id) {
+        return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: '转财务审批失败:' + (confErr?.message || '确认单创建失败') + ' —— 请重试或联系管理员。' };
+      }
+      const actorName = (prof as any)?.name || user.email?.split('@')[0] || '业务';
+      try {
+        const { syncShipmentApprovalToFinance } = await import('@/lib/integration/finance-sync');
+        // await 原因同 createShipmentConfirmation:serverless 不 await 会被冻结杀掉,财务收不到
+        await syncShipmentApprovalToFinance({
+          id: conf.id,
+          order_no: order.order_no || null,
+          customer_name: order.customer_name || null,
+          requester_name: actorName,
+          summary: `确认已出货转财务审批 ${order.quantity || '?'} 件(历史单放货闸未经财务确认)`,
+          detail: { internal_order_no: order.internal_order_no || null, shipment_qty: order.quantity || null, source: 'confirm_shipped_diverted' },
+          created_at: nowIso,
+        } as any);
+      } catch (e: any) {
+        console.error('[confirm-shipped] 转审批推送失败(确认单已建,outbox 兜底):', e?.message);
+      }
+      await writeAuditEvent({
+        eventType: 'confirm_shipped_diverted', level: 'A2', riskLevel: 'delivery',
+        actor: { actorType: 'user', actorId: user.id },
+        entity: { entityType: 'order', entityId: orderId, orderId },
+        commandName: 'confirmOrderShipped',
+        note: `确认已出货被拦截转财务审批:放货闸系补建默认开,无财务放货证据(确认单 ${String(conf.id).slice(0, 8)})`,
+        metadata: { shipment_confirmation_id: conf.id },
+      });
+      return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: '该单的放货从未经财务确认(历史默认开闸)—— 已自动转入财务系统审批队列,财务批准后再点一次「确认已出货」即可完结。' };
     }
   } else {
     // override 路径:先把「越闸」这件事本身 A2 留痕(理由必填),再继续。
@@ -145,4 +195,22 @@ async function confirmOrderShippedCore(
 
   revalidatePath('/orders');
   return { ok: true, completed: payDone };
+}
+
+/**
+ * 财务放货证据(2026-08-17):allow_shipment=true 本身不可信 —— 补建行天生开闸(存量 187 单)。
+ * 真正放过货的两条路都留痕:①财务系统审批通过(shipment_confirmations.warehouse_signed)
+ * ②站内放货/统一放货 Command(order_logs A2:business_override / critical_mutation:order_financials,注记含放货)。
+ */
+async function hasFinanceReleaseEvidence(svc: any, orderId: string): Promise<boolean> {
+  const { data: wc } = await (svc.from('shipment_confirmations') as any)
+    .select('id').eq('order_id', orderId).eq('status', 'warehouse_signed').limit(1);
+  if (wc && wc.length > 0) return true;
+  const { data: lg } = await (svc.from('order_logs') as any)
+    .select('id')
+    .eq('order_id', orderId)
+    .in('action', ['business_override', 'critical_mutation:order_financials'])
+    .or('note.ilike.%放货%,note.ilike.%允许出货%,note.ilike.%allow_shipment%')
+    .limit(1);
+  return !!(lg && lg.length > 0);
 }
