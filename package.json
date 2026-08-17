@@ -39,7 +39,7 @@
     "smoke:procurement-p0": "node --import tsx scripts/smoke-procurement-p0-pilot.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.91.1",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.90.1",
     "@types/mailparser": "^3.4.6",
