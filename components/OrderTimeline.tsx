@@ -6,6 +6,7 @@ import { MilestoneConfirmations } from './MilestoneConfirmations';
 import { DelayRequestForm } from './DelayRequestForm';
 import { OwnerAssignment } from './OwnerAssignment';
 import { SOPButton } from './SOPModal';
+import { UnblockButton } from './UnblockButton';
 import { getSOPForStep } from '@/lib/domain/sop';
 import { getMilestoneLogs } from '@/app/actions/milestones';
 import { useState, useEffect, useRef, useMemo } from 'react';
@@ -40,6 +41,13 @@ interface OrderTimelineProps {
   inspectionWaived?: boolean;
   /** 订单用途:production(生产)/ trade(经销/采购成品)/ consign(委托加工)/ sample(打样)。trade 用专属阶段分组(无"生产过程")。 */
   orderPurpose?: string;
+  /**
+   * 订单级「可解除卡住」——由页面按 markMilestoneUnblocked 的口径算好传入
+   * (admin / finance / production_manager / admin_assistant / 订单创建者 / 订单负责人)。
+   * 节点执行人这一条是逐节点的,在组件内按 owner_user_id 另判。
+   * 不传 = 不显示按钮(保守),真实鉴权仍以 server action 为准。
+   */
+  canUnblock?: boolean;
 }
 
 // V1 最终分组（对齐新节点表）
@@ -222,7 +230,7 @@ function ActualDateInput({ milestoneId, currentActualAt, dueAt }: {
   );
 }
 
-export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false, inspectionWaived = false, orderPurpose }: OrderTimelineProps) {
+export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isSplitShipment = false, currentRole, currentRoles = [], currentUserId, isAdmin = false, inspectionWaived = false, orderPurpose, canUnblock = false }: OrderTimelineProps) {
   // 打样单 3 段 / 经销单专属 4 段 / 其余标准 5 段。
   const ACTIVE_GROUPS = orderPurpose === 'sample' ? SAMPLE_MILESTONE_GROUPS
     : orderPurpose === 'trade' ? TRADE_MILESTONE_GROUPS : MILESTONE_GROUPS;
@@ -586,6 +594,18 @@ export function OrderTimeline({ milestones, orderId, orderNo, orderIncoterm, isS
                         {isBlocked && m.notes && (
                           <div className="mt-2 text-xs text-orange-700 bg-orange-100 rounded-lg px-3 py-2">
                             🚧 阻塞说明：{m.notes.startsWith('卡单原因：') ? m.notes.substring(5) : m.notes}
+                          </div>
+                        )}
+
+                        {/* 解除卡住(2026-08-17):此前只有工作台底部能解除,节点卡片上看得见卡单却没处点,
+                            用户得跑回工作台找。鉴权口径与 markMilestoneUnblocked 一致 ——
+                            订单级由页面传 canUnblock,节点执行人在这里另判;server action 仍会二次校验。 */}
+                        {isBlocked && (canUnblock || (!!currentUserId && (m as any).owner_user_id === currentUserId)) && (
+                          <div className="mt-2">
+                            <UnblockButton
+                              milestoneId={m.id}
+                              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                            />
                           </div>
                         )}
                       </div>

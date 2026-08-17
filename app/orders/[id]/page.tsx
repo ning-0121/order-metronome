@@ -144,6 +144,13 @@ export default async function OrderDetailPage({
   const user = userId ? { id: userId } : null;
   const isOrderOwner = userId ? orderData.created_by === userId : false;
   const currentRoles: string[] = (profileRoles && profileRoles.length > 0) ? profileRoles : (currentRole ? [currentRole] : []);
+  // 「解除卡住」可见性(2026-08-17):口径必须与 app/actions/milestones.ts markMilestoneUnblocked 一致 ——
+  //   特权角色 admin/finance/production_manager/admin_assistant,或订单创建者/订单负责人。
+  //   剩下「节点执行人」那一条是逐节点的,由 OrderTimeline 内部按 owner_user_id 判。
+  //   改这里必须同步改 server action,否则会出现「看得见按钮点了被拒」或「有权限却没按钮」。
+  const canUnblockMilestone = isAdmin
+    || currentRoles.some((r: string) => ['finance', 'production_manager', 'admin_assistant'].includes(r))
+    || (!!userId && (orderData.created_by === userId || orderData.owner_user_id === userId));
   // 纯采购角色不进订单详情(2026-07-03 用户拍板:采购看到/误改订单一切太危险)
   // → 改道采购专属核料页(只读摘要+核料+任务单下载)。兼任其他角色/管理员不受限。
   if (!isAdmin && isProcurementOnly(currentRoles)) {
@@ -1081,6 +1088,7 @@ export default async function OrderDetailPage({
                 isAdmin={isAdmin}
                 inspectionWaived={isInspectionWaived(orderData)}
                 orderPurpose={(orderData as any).order_purpose || 'production'}
+                canUnblock={canUnblockMilestone}
               />
             ) : (
               <p className="text-gray-400 text-center py-8">暂无执行节点数据</p>
