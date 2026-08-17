@@ -162,7 +162,15 @@ export async function createTradeBulkPurchaseOrder(orderId: string, input: {
     ordered_qty: l.qty,
     ordered_unit: '件',
     unit_price: l.cost,       // ordered_amount = qty×unit_price 由 DB 生成列自动算
-    line_status: 'active',
+    // 修(2026-08-16):此前写 'active' —— 这个值**从来不在** line_status 的 CHECK 枚举里
+    //   (draft/pending_order/ordered/confirmed/in_production/ready_to_ship/shipped/arrived/
+    //    accepted/concession/rejected/closed/cancelled),所以「生成大货采购单」从上线起
+    //   每次都撞 procurement_line_items_line_status_check,一单都没建成过。
+    // 用 pending_order 而不是 draft:采购中心队列的 PRE_ARRIVAL_STATUSES 不含 draft
+    //   (lib/services/procurement-matters.service.ts),写 draft 这批行会从采购中心静默消失,
+    //   采购根本不知道要去下达 —— 那是把报错换成更难查的"看不见"。
+    //   pending_order = 待下单桶 + 有红黄绿灯监控;placeCore 下达时 pending_order → ordered。
+    line_status: 'pending_order',
     procurement_item_id: null,
     supplier_name: supplierName,
     supplier_id: input.supplierId,
