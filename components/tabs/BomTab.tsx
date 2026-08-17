@@ -1526,6 +1526,13 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
                         {item.quantity_issue}
                       </div>
                     )}
+                    {/* 款×色没对上 → 已按款级/整单兜底(宁多勿缺)。回退是对的,但不能静默:
+                        一款多色时该色会算成全款总量,业务照着买就多了(2026-08-17)。 */}
+                    {item.color_match_note && (
+                      <div className="mt-0.5 text-[11px] text-orange-600" title={item.color_match_note}>
+                        ⚠️ 色名对不上明细,按{item.color_match_fallback}总量算
+                      </div>
+                    )}
                   </td>
                   <td className="py-2 px-3 text-gray-600">{item.unit}</td>
                   <td className="py-2 px-3 text-gray-500">{item.supplier || '—'}</td>
