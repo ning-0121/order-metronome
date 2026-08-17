@@ -11,6 +11,8 @@ import { sendEmailNotification } from '@/lib/utils/notifications';
 import { isAdminRole, hasRoleInGroup } from '@/lib/domain/roles';
 import { type ActionResult, success, failure, toLegacyResult } from '@/lib/types/action-result';
 import { isBlockedStatus, isDoneStatus, isApprovalPending } from '@/lib/domain/types';
+// 审批链路由:零依赖纯模块,静态引入(此前各处 await import 拿不到,导致空链修复处引用不到)
+import { deferralChainFor } from '@/lib/domain/deferral-routing';
 type MilestoneLogAction =
   | 'mark_done'
   | 'mark_in_progress'
@@ -452,8 +454,14 @@ export async function approveDeferralStep(delayRequestId: string, note?: string,
   if ((dr as any).requested_by === user.id && !roles.includes('admin')) {
     return { error: '不能审批自己提交的改期申请,请由他人(下游团队/管理员)确认' };
   }
-  const chain: string[] = Array.isArray((dr as any).approval_chain) ? (dr as any).approval_chain : [];
-  if (chain.length === 0) return { error: '该申请无审批链(旧单请走原审批入口)' };
+  // 空链自愈(2026-08-17):整单延期路径此前不写 approval_chain(DB 默认 []),
+  //   这里直接报错返回 → 用户点批准「没反应」,而且 98/112 条历史延期都是空链。
+  //   与其把人打发去「原审批入口」,不如按配置回落到 _default(业务执行经理)——
+  //   全局审批人(admin/order_manager/sales_manager)本来就能代任一步确认,
+  //   所以回落既不放宽权限,也不猜责任人。**不改历史数据**,只在读时补齐。
+  const rawChain: string[] = Array.isArray((dr as any).approval_chain) ? (dr as any).approval_chain : [];
+  const chain: string[] = rawChain.length > 0 ? rawChain : deferralChainFor(null);
+  if (chain.length === 0) return { error: '该申请无审批链且默认路由为空,请联系管理员' };
   const step = Number((dr as any).current_step) || 0;
   const needRole = chain[step];
   // 2026-07-11:CAN_APPROVE_DELAY 经理(admin/order_manager/sales_manager)可代任一步确认(与 admin 同权)。
@@ -1354,13 +1362,20 @@ export async function createOrderLevelDelayRequest(
     delay_days: delayDays,
     impacts_final_delivery: true,
     status: 'pending',
+    // 2026-08-17 修:整单延期这条路径**从来没写过审批链**,DB 默认成 [] →
+    //   待审批中心点批准时 approveDeferralStep 第一行就 `chain.length===0 → 报错返回`,
+    //   什么都不写、计数不变 —— 用户看到的就是「点了没反应」。
+    //   实测 112 条延期里 98 条空链(历史那 88 条是从订单页旧入口批掉的,所以一直没暴露)。
+    //   deferralChainFor 有 _default 兜底,不会返回空数组。
+    approval_chain: deferralChainFor(targetMilestone.owner_role),
+    current_step: 0,
   };
   let { data: delayRequest, error: insertErr } = await (supabase.from('delay_requests') as any)
     .insert(orderDelayPayload).select().single();
-  // 迁移未执行(缺 anchor_field)→ 降级去掉该列重插,不 brick 整单延期申请
+  // 迁移未执行(缺 anchor_field / approval_chain)→ 降级去掉这些列重插,不 brick 整单延期申请
   // (降级后审批会回退到老口径写 etd —— 迁移落地前出厂日仍不会同步,所以迁移必须真正上生产)
-  if (insertErr && /anchor_field|column .* does not exist/i.test(insertErr.message || '')) {
-    const { anchor_field, ...plain } = orderDelayPayload;
+  if (insertErr && /anchor_field|approval_chain|current_step|column .* does not exist/i.test(insertErr.message || '')) {
+    const { anchor_field, approval_chain, current_step, ...plain } = orderDelayPayload;
     ({ data: delayRequest, error: insertErr } = await (supabase.from('delay_requests') as any)
       .insert(plain).select().single());
   }

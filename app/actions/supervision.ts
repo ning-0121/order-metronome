@@ -15,9 +15,31 @@ import {
   KICKOFF_KEYS, FACTORY_DONE_KEYS, STAGE_SIGNAL_STEP_KEYS, pickStageSignal,
 } from '@/lib/production/stage';
 import { triageStaleOrder, explainVerdict, type StaleVerdict } from '@/lib/services/stale-order-triage';
+import { attributeOrderOverdue } from '@/lib/domain/overdue-attribution';
 
 export type Tone = 'green' | 'amber' | 'red' | 'grey';
-export interface Segment { label: string; tone: Tone; owner?: string | null; }   // owner=该段当前责任人名(督办可直接联系,2026-07-27)
+/**
+ * owner = 该段**协调人**(督办可直接联系,2026-07-27)。
+ *
+ * ⚠️ 2026-08-17 起**禁止**把它当逾期责任人:实测 237 个逾期节点里 51% 的 owner_role
+ *   不是跟单,而这一行只显示业务段协调人 → 581 显示「Winnie:2 项逾期」,
+ *   实际卡的是 财务 PO确认(逾期 83 天)+ 采购下单。她既做不了那两件事,
+ *   自己的看板里也看不到它们。逾期责任一律走 `overdue[]`(节点级归属)。
+ */
+export interface Segment { label: string; tone: Tone; owner?: string | null; }
+/** 单条逾期的节点级归属 —— 督办照这个催人 */
+export interface OverdueEntry {
+  name: string;
+  bucket: 'ACTIONABLE_OVERDUE' | 'BLOCKED';
+  /** 责任人/部门:owner_user_id → owner_role → 未分配(责任配置异常) */
+  ownerLabel: string;
+  ownerUserId: string | null;
+  ownerRole: string | null;
+  isOwnershipDefect: boolean;
+  /** BLOCKED 时「等谁」;证据不足显示待确认/未识别,**不猜** */
+  blockerLabel: string | null;
+  days: number;
+}
 export interface SupervisionRow {
   order_id: string; order_no: string | null; internal_order_no: string | null;
   customer_name: string | null; factory_name: string | null; quantity: number | null;
@@ -30,7 +52,14 @@ export interface SupervisionRow {
   pastFactoryDays: number | null;
   idleDays: number | null;
   neverTouched: boolean;
+  /** 逾期节点总数(= actionable + blocked),保留原语义供既有 UI 用 */
   overdueCount: number;
+  /** 现在真有人能动的(唯一可用于催人/考核) */
+  actionableCount: number;
+  /** 在等前置/别人/客户的(不催被阻塞的人,但不消失) */
+  blockedCount: number;
+  /** 逐条节点级归属,督办直接照此联系对的人 */
+  overdue: OverdueEntry[];
   triageWhy: string;
 }
 
@@ -61,7 +90,8 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
   for (let i = 0; i < ids.length; i += 200) {
     const slice = ids.slice(i, i + 200);
     const { data: ms } = await (svc.from('milestones') as any)
-      .select('order_id, step_key, status, due_at, actual_at, owner_role, owner_user_id').in('order_id', slice);
+      // name/notes/sequence_number 供节点级归属用(notes 里存「卡住原因」,前置解析要 step_key)
+      .select('order_id, step_key, name, status, due_at, actual_at, owner_role, owner_user_id, notes, sequence_number').in('order_id', slice);
     for (const m of (ms || [])) {
       allMs.set(m.order_id, [...(allMs.get(m.order_id) || []), m]);
       if ((STAGE_SIGNAL_STEP_KEYS as string[]).includes(m.step_key)) {
@@ -172,6 +202,22 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
       now: nowMs,
     });
 
+    // 节点级归属(2026-08-17):逐条算「这条逾期到底算谁的」,不再拿业务段协调人顶包。
+    // 同时分出 actionable / blocked —— blocked 不消失,但不压在被阻塞的人头上。
+    const attributed = attributeOrderOverdue(ms as any, nowMs, nameById);
+    const overdueEntries: OverdueEntry[] = attributed.map((a) => ({
+      name: String(a.milestone.name ?? a.milestone.step_key ?? ''),
+      bucket: a.bucket,
+      ownerLabel: a.attribution.label,
+      ownerUserId: a.attribution.userId,
+      ownerRole: a.attribution.role,
+      isOwnershipDefect: a.attribution.isOwnershipDefect,
+      blockerLabel: a.bucket === 'BLOCKED' ? (a.blocker?.label ?? null) : null,
+      days: a.overdueDays,
+    }));
+    const actionableCount = overdueEntries.filter((e) => e.bucket === 'ACTIONABLE_OVERDUE').length;
+    const blockedCount = overdueEntries.length - actionableCount;
+
     rows.push({
       order_id: o.id, order_no: o.order_no, internal_order_no: o.internal_order_no,
       customer_name: o.customer_name, factory_name: o.factory_name, quantity: o.quantity,
@@ -179,7 +225,9 @@ export async function getSupervisionOverview(): Promise<{ rows?: SupervisionRow[
       factory_date: o.factory_date ? String(o.factory_date).slice(0, 10) : null,
       business, procurement, production, needsAttention,
       triage: tri.verdict, pastFactoryDays: tri.pastFactoryDays, idleDays: tri.idleDays,
-      neverTouched: tri.neverTouched, overdueCount: tri.overdueCount, triageWhy: explainVerdict(tri),
+      neverTouched: tri.neverTouched, overdueCount: tri.overdueCount,
+      actionableCount, blockedCount, overdue: overdueEntries,
+      triageWhy: explainVerdict(tri),
     });
   }
 

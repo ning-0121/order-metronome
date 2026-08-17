@@ -761,3 +761,30 @@ export async function updateMilestones(
   return { data: results };
 }
 
+
+/**
+ * 按订单批量取**全部**节点(2026-08-17,Overdue Attribution V1)。
+ *
+ * 为什么要整单而不是只取逾期的:blocker 归属要解析「未完成的前置节点」——
+ * 前置本身往往**没有逾期**(它只是还没做完),只取逾期集合会把 63/128 条
+ * PREREQUISITE_OWNER 证据全部丢掉,blocked 就只剩「未识别」。
+ *
+ * 走 repository 而不是在页面里直接 .from():dashboard 的 milestones 直连数已经
+ * 顶到棘轮基线(4/4),再加一处就破闸 —— 而闸的本意就是让新读走这里。
+ */
+export async function getMilestonesByOrderIds(
+  client: any,
+  orderIds: string[],
+  columns = 'id, order_id, step_key, name, status, due_at, owner_role, owner_user_id, notes, sequence_number',
+): Promise<{ data: any[]; error: string | null }> {
+  const ids = Array.from(new Set((orderIds || []).filter(Boolean)));
+  if (ids.length === 0) return { data: [], error: null };
+  const out: any[] = [];
+  // 分片:PostgREST 的 in() 过长会被截断,静默少数据比报错更难查
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await client.from('milestones').select(columns).in('order_id', ids.slice(i, i + 200));
+    if (error) return { data: [], error: error.message };
+    out.push(...(data || []));
+  }
+  return { data: out, error: null };
+}

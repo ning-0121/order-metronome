@@ -201,6 +201,22 @@ export default async function DashboardPage() {
     }
   }
 
+  // ── Overdue Attribution V1(2026-08-17 CEO)三层个人视图所需的整单节点 ──
+  // 只取逾期节点不够:blocker 归属要解析「未完成的前置」,而前置本身通常没逾期
+  //(实测 128 条 blocked 里 63 条靠前置才说得清等谁)。
+  // 走 repository:dashboard 的 milestones 直连已顶到棘轮基线 4/4,新读不许再直接摸表。
+  const { getMilestonesByOrderIds } = await import('@/lib/repositories/milestonesRepo');
+  const attributionOrderIds = Array.from(new Set([
+    ...((allOverdueMilestones || []) as any[]).map((m: any) => m.order_id),
+    ...myOrderIds,
+  ])).filter(Boolean) as string[];
+  const { data: attributionMilestones } = await getMilestonesByOrderIds(supabase, attributionOrderIds);
+  const msByOrderForAttribution = new Map<string, any[]>();
+  for (const m of (attributionMilestones || [])) {
+    if (!msByOrderForAttribution.has(m.order_id)) msByOrderForAttribution.set(m.order_id, []);
+    msByOrderForAttribution.get(m.order_id)!.push(m);
+  }
+
   // 权限过滤：管理/生产主管/各经理 看所有订单，业务员(sales)及其他员工只看自己的(2026-07 拍板,sales 移出)
   const canSeeAll = isAdmin || userRoles.some(r => ['finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r));
   const filterByMyOrders = (list: any[]) => canSeeAll ? list : list.filter((m: any) => myOrderIds.has(m.order_id));
@@ -270,6 +286,28 @@ export default async function DashboardPage() {
     : filteredOverdue.filter((m: any) =>
         myOrderIds.has(m.order_id) && m.owner_user_id !== user.id
       )).filter((m: any) => !hasPendingDelay(m) && !isBlockedMs(m));   // 已申请延期/卡单 → 不算逾期
+
+  // ── 三层个人视图(Overdue Attribution V1)────────────────────────────
+  // ① 我的待处理  owner=我 且现在真能动   → **唯一**可计入个人 KPI
+  // ② 正在卡我的  别人没做完,挡住我下一步 → 让我知道去催谁,不算我的欠账
+  // ③ 我负责订单的其他风险  只读知情       → 不计入个人 overdue/KPI
+  // 禁止把订单所有跨部门逾期重新塞回个人待办 —— 那只是把「看不见别人的问题」
+  // 换成「所有人的问题都堆给跟单」。
+  const { attributeOrderOverdue, buildPersonalView } = await import('@/lib/domain/overdue-attribution');
+  const attributedByOrder = new Map<string, any[]>();
+  for (const [oid, list] of msByOrderForAttribution) {
+    attributedByOrder.set(oid, attributeOrderOverdue(list, Date.now(), null));
+  }
+  const personalView = buildPersonalView({
+    myUserId: user.id,
+    ownedOrderIds: myOrderIds as Set<string>,
+    byOrder: attributedByOrder,
+    myMinSeqByOrder: new Map(Object.entries(myMinSeqByOrder)),
+  });
+  // ① 沿用既有 myOverdue(它已含固定节点归一化/延期豁免等历史口径,不重写);
+  //    ②③ 是本轮新增的两层。
+  const blockingMe = personalView.blockingMe;
+  const orderAwareness = personalView.awareness;
 
   // 获取逾期节点负责人姓名
   const ownerIds = [...new Set(filteredOverdue.map((m: any) => m.owner_user_id).filter(Boolean))];
@@ -590,6 +628,74 @@ export default async function DashboardPage() {
                 delayStatus={delayRequestMap[milestone.id]}
               />
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ⏸ 正在卡我的 —— 别人没做完,挡住我下一步。让我知道去催谁,不算我的欠账 */}
+      {blockingMe.length > 0 && (
+        <div className="section mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-100">
+              <span className="text-amber-600">⏸</span>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-amber-700">正在卡我的</h2>
+              <p className="text-sm text-gray-500">
+                {blockingMe.length} 项挡住你下一步 · <span className="text-gray-400">不计入你的逾期</span>
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {blockingMe.map((a: any, i: number) => (
+              <div key={`${a.milestone.id ?? i}`} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-gray-800 truncate">{a.milestone.name || a.milestone.step_key}</div>
+                    <div className="text-xs text-amber-700 mt-0.5">
+                      {a.bucket === 'BLOCKED' ? (a.blocker?.label ?? '阻塞原因未识别') : `责任:${a.attribution.label}`}
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-500 shrink-0">逾期 {a.overdueDays} 天</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 👁 我负责订单的其他风险 —— 只读知情,不计入个人 overdue/KPI */}
+      {orderAwareness.length > 0 && (
+        <div className="section mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100">
+              <span className="text-gray-500">👁</span>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-700">我负责订单的其他风险</h2>
+              <p className="text-sm text-gray-500">
+                {orderAwareness.length} 项由其他部门负责 · <span className="text-gray-400">只是让你知道,不算你的绩效</span>
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {orderAwareness.slice(0, 20).map((a: any, i: number) => (
+              <div key={`${a.milestone.id ?? i}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-800 truncate">{a.milestone.name || a.milestone.step_key}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      责任:{a.attribution.label}
+                      {a.bucket === 'BLOCKED' && a.blocker?.label ? ` · ${a.blocker.label}` : ''}
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-400 shrink-0">逾期 {a.overdueDays} 天</span>
+                </div>
+              </div>
+            ))}
+            {orderAwareness.length > 20 && (
+              <p className="text-xs text-gray-400 px-1">… 其余 {orderAwareness.length - 20} 项</p>
+            )}
           </div>
         </div>
       )}
