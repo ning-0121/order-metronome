@@ -13,3 +13,4 @@
 | [ADR-005](ADR-005-deterministic-kernel-single-compute.md) | 确定性内核:单域单算法,SQL 不做计算 | Accepted |
 | [ADR-006](ADR-006-data-access-layering-ratchet.md) | 数据访问分层与直连棘轮(存量入基线 / 新增 fail / 只 repository·adapter·migration·白名单 infra 可直连)| Accepted |
 | [ADR-007](ADR-007-internal-command-vs-public-server-action.md) | 内部特权编排走 internal command,不走公开 Server Action(Symbol 方案是过渡态不是范例)| Accepted |
+| [ADR-008](ADR-008-migration-governance.md) | MIGRATION-GOV-001:生产迁移是显式部署产物(APPROVED.json 批准清单 + db:migrate preflight all-or-nothing);branch isolation ≠ migration isolation | Accepted |

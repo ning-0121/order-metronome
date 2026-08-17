@@ -1,3 +1,18 @@
+// ============================================================
+// Canonical Quantity Semantics —— 全站数量口径的单一真相
+//
+//   Σ order_line_items.sizes  = qty_pcs = **commercial quantity**(套装单 = 套数)
+//   physical pieces           = qty_pcs × set_multiplier
+//   orders.quantity           = Σ(qty_pcs × set_multiplier) = physical pieces
+//   unit_price                = 每 commercial unit 的价 → total = 商业数量 × unit_price
+//
+// ⚠️ 历史文档错误(2026-08-16 用生产库校准后登记,**不回头改已执行的迁移文件**):
+//   supabase/migrations/20260622_add_order_line_items.sql 的注释写
+//   `qty_pcs 权威数量(件)= Σsizes × set_multiplier` —— 这句是错的。实测 Σsizes == qty_pcs。
+//   按那句理解会把套数当件数用,直接翻倍(1022977 事故的形状)。
+//   口径以本文件 + tests/quantity-semantics.test.ts 为准;lint:qty 静态守护。
+// ============================================================
+
 export type QuantityBasis =
   | 'PER_SET'
   | 'PER_COMPONENT'

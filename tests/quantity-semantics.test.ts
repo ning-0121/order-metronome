@@ -365,3 +365,67 @@ describe('调用点已迁入统一入口(防回潮)', () => {
     });
   }
 });
+
+/**
+ * sizes 网格的口径(2026-08-16 用生产库校准,采购 P0 辅料分配时发现)。
+ *
+ * ⚠️ 历史文档错误(不改历史迁移文件,在此登记):
+ *   `supabase/migrations/20260622_add_order_line_items.sql` 第 19 行注释写
+ *   `qty_pcs 权威数量(件)= Σsizes × set_multiplier` —— **这句是错的**。
+ *   已执行的迁移文件不回头改(会打乱 migration history 语义),以本测试为准。
+ *
+ * 生产库实测(service-role 只读):
+ *   QM-20260812-006  Σsizes 2208 == qty_pcs 2208,set_mul 1
+ *   QM-20260812-002  Σsizes 1800 == qty_pcs 1800,set_mul 1
+ *   QM-20260717-002  四行 Σsizes 960/480/480/480 == 各自 qty_pcs,set_mul 2
+ *                    → Σ(qty_pcs × set_mul) = 2400 × 2 = 4800 = orders.quantity ✓
+ *
+ * canonical 口径:
+ *   Σ sizes         = qty_pcs = commercial quantity(套数)
+ *   physical pieces = qty_pcs × set_multiplier
+ *   orders.quantity = Σ(qty_pcs × set_multiplier) = physical pieces
+ */
+describe('sizes 网格 = 商业数量(套数),不是物理件数', () => {
+  // 生产实测:套装单,尺码格按套录,件/套=2
+  const SET_ORDER = [
+    { style_no: 'A', sizes: { S: 240, M: 480, L: 240 }, qty_pcs: 960, set_multiplier: 2 },
+    { style_no: 'B', sizes: { S: 120, M: 240, L: 120 }, qty_pcs: 480, set_multiplier: 2 },
+    { style_no: 'C', sizes: { S: 120, M: 240, L: 120 }, qty_pcs: 480, set_multiplier: 2 },
+    { style_no: 'D', sizes: { S: 120, M: 240, L: 120 }, qty_pcs: 480, set_multiplier: 2 },
+  ];
+  const sumSizes = (s: Record<string, number>) => Object.values(s).reduce((a, b) => a + b, 0);
+
+  it('Σsizes == qty_pcs(而不是 qty_pcs × set_multiplier)', () => {
+    for (const r of SET_ORDER) expect(sumSizes(r.sizes)).toBe(r.qty_pcs);
+  });
+
+  it('物理件数 = Σsizes × set_multiplier;整单合计 = orders.quantity(4800)', () => {
+    const physical = SET_ORDER.reduce((a, r) => a + sumSizes(r.sizes) * r.set_multiplier, 0);
+    expect(physical).toBe(4800);
+    expect(sumPhysicalPieceQty(SET_ORDER)).toBe(4800);
+  });
+
+  it('商业数量合计 = Σ全部 sizes = 2400 套(不等于件数)', () => {
+    const commercial = SET_ORDER.reduce((a, r) => a + sumSizes(r.sizes), 0);
+    expect(commercial).toBe(2400);
+    expect(sumCommercialQty(SET_ORDER)).toBe(2400);
+    expect(commercial).not.toBe(4800);
+  });
+
+  it('非套装单:套数 == 件数(set_multiplier=1),两口径不该被混用但数值相同', () => {
+    const plain = [{ style_no: '31453R', sizes: { S: 368, M: 736, L: 736, XL: 368 }, qty_pcs: 2208, set_multiplier: 1 }];
+    expect(sumSizes(plain[0].sizes)).toBe(2208);
+    expect(sumCommercialQty(plain)).toBe(2208);
+    expect(sumPhysicalPieceQty(plain)).toBe(2208);
+  });
+
+  it('历史迁移注释的公式若成立会得出 4800 套 —— 用它当套数就会翻倍', () => {
+    // 记录反例:把「Σsizes × set_multiplier」当成 qty_pcs(商业数量)会得到 4800,
+    // 而真实 qty_pcs 合计是 2400。这正是 1022977 那类翻倍事故的形状。
+    const wrong = SET_ORDER.reduce((a, r) => a + sumSizes(r.sizes) * r.set_multiplier, 0);
+    const right = SET_ORDER.reduce((a, r) => a + r.qty_pcs, 0);
+    expect(wrong).toBe(4800);
+    expect(right).toBe(2400);
+    expect(wrong).toBe(right * 2);
+  });
+});

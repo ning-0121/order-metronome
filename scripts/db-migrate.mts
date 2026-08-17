@@ -37,6 +37,70 @@ const MIG_DIR = resolve(process.cwd(), 'supabase/migrations');
 const allMigrations = (): string[] =>
   readdirSync(MIG_DIR).filter(f => f.endsWith('.sql')).sort();
 
+// ── MIGRATION-GOV-001:生产迁移执行前置闸 ──────────────────────────────
+// 事故(2026-08-16):并行 session 在别的分支跑 db:migrate,把当时躺在共享工作区里
+// 的别人未完成的迁移一起 apply 到了生产。根因:git 隔离的是代码历史,
+// db:migrate 扫的是当前 filesystem —— **branch isolation ≠ migration isolation**。
+//
+// 原则:Production migration is an explicit deployment artifact,
+//       not a side effect of repository state.
+//
+// 本闸很窄,只做两件事:① 执行前把计划完整列出来;② 待执行集合里只要有一个
+// 不在批准范围,**一个都不执行**(all-or-nothing,绝不"跳过它继续跑其余的")。
+const MANIFEST = join(MIG_DIR, 'APPROVED.json');
+
+function approvedSet(): Set<string> {
+  if (!existsSync(MANIFEST)) {
+    console.error('❌ 缺 supabase/migrations/APPROVED.json —— 生产迁移必须有显式批准清单(MIGRATION-GOV-001)');
+    process.exit(1);
+  }
+  try {
+    const m = JSON.parse(readFileSync(MANIFEST, 'utf-8'));
+    return new Set<string>(Array.isArray(m.approved) ? m.approved : []);
+  } catch (e: any) {
+    console.error(`❌ APPROVED.json 解析失败:${e?.message}`); process.exit(1);
+  }
+}
+
+/** `--approve a.sql,b.sql`:本次调用内显式追加批准(交互式一次性用;仍要求逐个点名,无通配、无 --all)。 */
+function inlineApprovals(): Set<string> {
+  const out = new Set<string>();
+  const argv = process.argv;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--approve' && argv[i + 1]) {
+      for (const f of argv[i + 1].split(',').map(s => s.trim()).filter(Boolean)) out.add(f);
+    } else if (argv[i].startsWith('--approve=')) {
+      for (const f of argv[i].slice('--approve='.length).split(',').map(s => s.trim()).filter(Boolean)) out.add(f);
+    }
+  }
+  return out;
+}
+
+/** 打印执行计划 + 校验批准范围。未批准 → 打印后 exit(1),不执行任何一条。 */
+function preflight(pending: string[]): void {
+  console.log(`\n📋 本次将执行以下 ${pending.length} 个 migration:`);
+  for (const f of pending) console.log('   • ' + f);
+
+  const approved = approvedSet();
+  const inline = inlineApprovals();
+  const unapproved = pending.filter(f => !approved.has(f) && !inline.has(f));
+  if (unapproved.length) {
+    console.error(`\n⛔ 其中 ${unapproved.length} 个**不在批准范围**,本次一个都不执行:`);
+    for (const f of unapproved) console.error('   ✗ ' + f);
+    console.error('\n   → 属于本次部署范围:把文件名加进 supabase/migrations/APPROVED.json(与迁移同 commit);');
+    console.error('   → 一次性放行:npm run db:migrate -- --approve <文件名>(逐个点名,不支持通配);');
+    console.error('   → 不认识它:先查清它为什么在你的工作区 —— 很可能是别的分支/别的 session 的在制品。');
+    console.error('   (MIGRATION-GOV-001:生产迁移是显式部署产物,不是仓库状态的副作用)');
+    process.exit(1);
+  }
+  const viaInline = pending.filter(f => !approved.has(f) && inline.has(f));
+  if (viaInline.length) {
+    console.log(`\n⚠️  ${viaInline.length} 个经 --approve 一次性放行(记得补进 APPROVED.json):`);
+    for (const f of viaInline) console.log('   ! ' + f);
+  }
+  console.log('');
+}
+
 async function getApplied(): Promise<Set<string> | null> {
   const { data, error } = await (db.from('_app_migrations') as any).select('name');
   if (error) {
@@ -85,6 +149,8 @@ async function main() {
 
   if (cmd === 'migrate') {
     if (!pending.length) { console.log('✅ 无待执行迁移。'); return; }
+    // MIGRATION-GOV-001:先列计划 + 校验批准范围;未批准则**一条都不跑**(dry-run 也照走,好让人先看)
+    preflight(pending);
     console.log(`📦 待执行 ${pending.length} 个迁移${dry ? '(dry-run,不真跑)' : ''}:`);
     for (const f of pending) {
       const sql = readFileSync(join(MIG_DIR, f), 'utf-8');
