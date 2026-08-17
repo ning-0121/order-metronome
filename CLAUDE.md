@@ -234,6 +234,29 @@ npm run db:migrate         # 自动 apply 未执行的迁移(service-role + exec
 迁移必须幂等(`add column if not exists` / `create or replace` / `drop policy if exists`)——单文件多语句非同一事务,失败重跑要能跳过已成功的。
 首次接入见 `scripts/db/README.md`(粘一次 `scripts/db/bootstrap.sql` + `npm run db:baseline`)。
 
+**迁移批准清单(MIGRATION-GOV-001,2026-08-16)**:新增 `.sql` 必须**同 commit** 加进
+`supabase/migrations/APPROVED.json`。`lint:migrations`(已进 `npm run check`)会拦下目录里任何
+未批准的迁移文件;`db:migrate` 执行前先打印计划,待执行集合里只要有一个未批准 → **一条都不跑**。
+起因:并行 session 在别的分支跑 `db:migrate`,把在制品迁移一起打上了生产 ——
+git 隔离的是代码历史,`db:migrate` 扫的是当前 filesystem。详见 `docs/ADR/ADR-008-migration-governance.md`。
+
+### 数据修复铁律:先 dry-run,再 apply(2026-08-17 CEO 定为固定门禁)
+
+**凡是修正 quantity / money / material requirement 的存量数据,一律先跑 dry-run,
+列出会变化的【真实订单】与 before/after,人看过之后才允许 `--apply`。**
+
+不是"谨慎起见",是**实战救过一次**:1022967 面料算错,我判定要把面料口径回填成
+`PER_PIECE`,脚本写完跑 dry-run,才发现它会把 1022222 从 152 翻到 304 ——
+正是 2026-07-20 用户明确否掉过的那个错。真根因是折套数的除数,不是口径。
+**没有 dry-run,这一刀会在 13 张真实订单上翻倍面料采购量。**
+
+修复脚本的最低要求:
+- 默认 dry-run,加 `--apply` 才写库;
+- 预览必须走**与线上同一条计算链路**(别另写一套算法做预览 —— 第一版就因为用整单数量
+  而不是逐款件数,预览出 3816,真实是 1272,差点照着错的下结论);
+- 逐行打印 `订单 / 物料 / before → after`,并单独列出**已有下游采购/财务事实**的订单;
+- apply 后**回读校验**,不能只信 update 没报错(本项目吃过静默写失败的亏)。
+
 ---
 
 ## ⚠️ 高风险操作铁律（2026-05-23 事故后追加）

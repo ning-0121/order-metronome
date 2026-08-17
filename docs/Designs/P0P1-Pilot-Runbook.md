@@ -196,3 +196,42 @@ Pilot 从第一步就不完整,只会得到「面料链通了、辅料仍回 Exc
 
 - 不开发 P1;不开发 Excel Parser;不扩大 Pilot。
 - 一张真实 Pilot 完成后 **STOP**。
+
+---
+
+# 附录 B · Pilot 放行(2026-08-17 CEO 裁定)
+
+## B.1 本轮状态裁定
+
+| 项 | 裁定 |
+|---|---|
+| 1022967 quantity display / MRP | **PASS** —— 无下游采购事实,不需要 Finance Reconciliation |
+| 存量套装面料 basis 显式化(40 行) | **PASS** —— 只是把既有 PER_SET 事实从隐式兜底变成显式,数量零变化 |
+| MRP snapshot completeness | **PASS** —— `consumption_basis` 进入快照与签名,避免 stale reuse |
+| `quantity_unit` parser 脆弱 | **BACKLOG** —— 本轮不扩,见 `Confirmed-Debt-quantity-unit-parser.md` |
+| Procurement P0 Pilot | **可以开始** |
+
+其中最关键的一条:`consumption_basis` 现在**第一次真正成为有效业务事实** ——
+此前它在 UI 上填了,但 mrp.ts 硬写死 PER_SET、快照表根本没这一列,等于填了没人读。
+
+## B.2 Pilot 执行门禁(严格按序,单号 QM-20260806-013)
+
+1. **先故意留一个 `consumption_basis` 未确认** → 提交采购。
+   页面必须真的显示 `NEEDS_BOM_CONFIRMATION`,并**点名具体物料**。不点名 = 不通过。
+2. 跟单补齐后再提交 → 系统应**自动**产生 Procurement Draft。
+   不允许再去找「归并」按钮。要找 = 不通过。
+3. **验 SKU allocation**:按款×色×码的辅料数量**自动出现**,跟单一个数字都不手抄。
+   (013 预期:黑 S100/M200/L200/XL100,灰棕 S60/M120/L120/XL60)
+4. **采购端只看一件事**:是否直接出现「待采购 N 项」。
+5. **暂不进入 P1** —— 不做正式采购确认,不生成 PO。
+
+## B.3 人工验收(权重最高的一句)
+
+> **不给原 Excel,只看系统页面,菁菁能不能确认「这份采购需求是对的」?**
+
+- **YES** → System-First P0 真正成立。一个真实跟单第一次没有做那张 Excel。
+- **NO** → 记录她**缺的具体信息**(不是"感觉不好用")。
+  **不要先假设需要 Excel Parser** —— 系统已经拥有那些数量,先确认是不是呈现方式的问题。
+
+机器全绿只证明系统算得出来,不证明业务执行敢拿它工作。这一句过了,采购模块才从
+"系统功能"变成"工作方式"。

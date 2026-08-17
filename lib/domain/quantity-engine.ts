@@ -119,6 +119,17 @@ export function normalizeQuantityUnit(unit: string | null | undefined): string |
   return raw || null;
 }
 
+/**
+ * ⚠️ CONFIRMED DEBT(2026-08-17 登记,本轮不修):
+ *   从自由文本猜数量语义,且**失败是静默的**(返回 null→上游按 1,不置 needsReview)。
+ *   实测:`套`→硬当 2、`三件套`→3,而 `两件套` / `四件套` / `三件套装` **全部解析失败按 1**。
+ *
+ *   逐款算料已不再依赖它 —— BomTab 与提交采购的 MRP 都改成显式传该款 set_multiplier
+ *   (见下方 deriveQuantityContext 的优先级)。但订单级汇总/展示仍吃这个结果。
+ *
+ *   要动它之前先读 docs/Designs/Confirmed-Debt-quantity-unit-parser.md。
+ *   一句话结论:真相在 order_line_items.set_multiplier,不在这个字符串里。
+ */
 export function quantityComponentsForUnit(unit: string | null | undefined): number | null {
   const normalized = normalizeQuantityUnit(unit);
   if (!normalized) return null;
