@@ -176,7 +176,11 @@ export async function createTradeBulkPurchaseOrder(orderId: string, input: {
     supplier_id: input.supplierId,
   }));
   let { data: insertedLines, error: liErr } = await (svc.from('procurement_line_items') as any).insert(lineRows).select('id, ordered_amount');
-  // supplier_id 外键旧指 factories 时降级:去掉 supplier_id 重试(供应商真相在采购单头)
+  // 降级兜底:supplier_id 外键若指错表,去掉它重试(供应商真相在采购单头)。
+  // 2026-08-17:外键原本指向 factories,而这里传的是 suppliers.id → 每次都命中这条降级,
+  //   结果采购行的 supplier_id 恒为空(20260703 那个 repoint 迁移从没跑成功过,
+  //   见 supabase/migrations/20260817_supplier_fkey_repoint_redo.sql)。外键已改指 suppliers,
+  //   正常路径不再进这里;保留它纯粹当防御,别再把"没有 supplier_id"当成正常现象。
   if (liErr && /supplier_id_fkey|foreign key/i.test(liErr.message || '')) {
     const degraded = lineRows.map(({ supplier_id, ...rest }) => rest);
     ({ data: insertedLines, error: liErr } = await (svc.from('procurement_line_items') as any).insert(degraded).select('id, ordered_amount'));
