@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
 import { shareBuildDocsToFinance } from '@/app/actions/order-build-docs';
+import { resolveUploadMime } from '@/lib/utils/upload-mime';
 
 const LABELS: Record<string, string> = { customer_po: '客户PO', internal_quote: '内部报价单' };
 
@@ -26,7 +27,7 @@ export function BuildDocsSupplement({ orderId, missing }: { orderId: string; mis
       const ext = file.name.split('.').pop() || 'bin';
       const storagePath = `${orderId}/${fileType}_${Date.now()}.${ext}`;   // 与建单同桶同路径规范
       const { error: upErr } = await supabase.storage
-        .from('order-docs').upload(storagePath, file, { contentType: file.type, upsert: false });
+        .from('order-docs').upload(storagePath, file, { contentType: resolveUploadMime(file.name, file.type), upsert: false });
       if (upErr) { setMsg('❌ 上传失败:' + upErr.message); setBusy(null); return; }
       const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(storagePath);
       const { data: { user } } = await supabase.auth.getUser();

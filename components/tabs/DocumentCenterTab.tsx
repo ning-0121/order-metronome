@@ -5,6 +5,7 @@ import { getOrderDocuments, uploadDocument, aiGenerateDocument, submitForReview,
 import { DOCUMENT_TYPES, SOURCE_MODES, DOCUMENT_STATUSES, type DocumentType } from '@/lib/domain/document-templates';
 import { createClient } from '@/lib/supabase/client';
 import { FILE_NAMING_BY_DOC_TYPE, validateFileNameForLabel, renameFile } from '@/lib/domain/fileNaming';
+import { resolveUploadMime } from '@/lib/utils/upload-mime';
 
 interface Props {
   orderId: string;
@@ -149,7 +150,7 @@ export function DocumentCenterTab({ orderId, isAdmin, currentRoles, canViewPrice
       const supabase = createClient();
       const path = `${orderId}/documents/${activeDocType}_${Date.now()}.${ext}`;
 
-      const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: finalFile.type, upsert: false });
+      const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: resolveUploadMime(finalFile.name, finalFile.type), upsert: false });
       if (uploadErr) { alert('文件上传失败: ' + uploadErr.message); setUploading(false); return; }
 
       const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);

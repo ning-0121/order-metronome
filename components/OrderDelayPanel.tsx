@@ -21,6 +21,7 @@ import { useRouter } from 'next/navigation';
 import { createOrderLevelDelayRequest } from '@/app/actions/delays';
 import { createClient } from '@/lib/supabase/client';
 import { formatDate } from '@/lib/utils/date';
+import { resolveUploadMime } from '@/lib/utils/upload-mime';
 
 interface DelayRecord {
   id: string;
@@ -127,7 +128,7 @@ export function OrderDelayPanel({
         const ext = evidenceFile.name.split('.').pop() || 'bin';
         const path = `delay-evidence/${orderId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
         // 桶名修(2026-07-29):'attachments' 桶不存在 → Bucket not found,整单延期带证据一直提交不了。用现有 order-docs。
-        const { error: upErr } = await supabase.storage.from('order-docs').upload(path, evidenceFile);
+        const { error: upErr } = await supabase.storage.from('order-docs').upload(path, evidenceFile, { contentType: resolveUploadMime(evidenceFile.name, evidenceFile.type) });
         if (upErr) {
           setError(`证据文件上传失败：${upErr.message}`);
           setSubmitting(false);
