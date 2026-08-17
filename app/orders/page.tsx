@@ -178,8 +178,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     return p !== 'sample'; // production + inquiry 都算订单
   });
 
-  const totalProduction = (allOrders || []).filter((o: any) => (o.order_purpose || 'production') !== 'sample').length;
-  const totalSample = (allOrders || []).filter((o: any) => o.order_purpose === 'sample').length;
+  // 顶部页签计数不含已取消(2026-08-15 CEO):两张样品单都被取消了,页签却写「样品单(2)」,
+  // 点进去三个子页签是 进行中0 / 已完成0 / 已取消2 —— 看板上那个 2 是纯误导。
+  // 取消单本身仍在「已取消」子页签里看得到、不会消失(与 2026-07-30 的分组决定一致)。
+  const notCancelled = (o: any) => classifyOrderGroup(o, o.milestones) !== 'cancelled';
+  const totalProduction = (allOrders || []).filter((o: any) => (o.order_purpose || 'production') !== 'sample' && notCancelled(o)).length;
+  const totalSample = (allOrders || []).filter((o: any) => o.order_purpose === 'sample' && notCancelled(o)).length;
 
   // 2026-07-30 修:原来「已完成」把 cancelled/已取消 也算了进去 —— 13 张客户砍掉的单被计成"完成",
   // 完成率虚高、复盘失真(取消 ≠ 交付)。现在取消单独立成组:

@@ -163,13 +163,25 @@ export async function createTradeBulkPurchaseOrder(orderId: string, input: {
     ordered_qty: l.qty,
     ordered_unit: '件',
     unit_price: l.cost,       // ordered_amount = qty×unit_price 由 DB 生成列自动算
-    line_status: 'active',
+    // 修(2026-08-16):此前写 'active' —— 这个值**从来不在** line_status 的 CHECK 枚举里
+    //   (draft/pending_order/ordered/confirmed/in_production/ready_to_ship/shipped/arrived/
+    //    accepted/concession/rejected/closed/cancelled),所以「生成大货采购单」从上线起
+    //   每次都撞 procurement_line_items_line_status_check,一单都没建成过。
+    // 用 pending_order 而不是 draft:采购中心队列的 PRE_ARRIVAL_STATUSES 不含 draft
+    //   (lib/services/procurement-matters.service.ts),写 draft 这批行会从采购中心静默消失,
+    //   采购根本不知道要去下达 —— 那是把报错换成更难查的"看不见"。
+    //   pending_order = 待下单桶 + 有红黄绿灯监控;placeCore 下达时 pending_order → ordered。
+    line_status: 'pending_order',
     procurement_item_id: null,
     supplier_name: supplierName,
     supplier_id: input.supplierId,
   }));
   let { data: insertedLines, error: liErr } = await (svc.from('procurement_line_items') as any).insert(lineRows).select('id, ordered_amount');
-  // supplier_id 外键旧指 factories 时降级:去掉 supplier_id 重试(供应商真相在采购单头)
+  // 降级兜底:supplier_id 外键若指错表,去掉它重试(供应商真相在采购单头)。
+  // 2026-08-17:外键原本指向 factories,而这里传的是 suppliers.id → 每次都命中这条降级,
+  //   结果采购行的 supplier_id 恒为空(20260703 那个 repoint 迁移从没跑成功过,
+  //   见 supabase/migrations/20260817_supplier_fkey_repoint_redo.sql)。外键已改指 suppliers,
+  //   正常路径不再进这里;保留它纯粹当防御,别再把"没有 supplier_id"当成正常现象。
   if (liErr && /supplier_id_fkey|foreign key/i.test(liErr.message || '')) {
     const degraded = lineRows.map(({ supplier_id, ...rest }) => rest);
     ({ data: insertedLines, error: liErr } = await (svc.from('procurement_line_items') as any).insert(degraded).select('id, ordered_amount'));
