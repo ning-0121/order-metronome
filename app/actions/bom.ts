@@ -17,6 +17,8 @@ import { captureMaterialDecision } from '@/app/actions/material-decisions';
 import type { EvidenceRef, ReasonCode } from '@/lib/knowledge/types';
 import { insertNotifications } from '@/lib/utils/notifications';
 import type { AdvanceResult } from '@/lib/procurement/advanceCommand';
+import { allocateTrim, normalizeAllocationMode } from '@/lib/procurement/trimAllocation';
+import { procurementRepo } from '@/lib/adapters/supabase/procurementAdapter';
 
 // Knowledge Layer K1：BomTab 关键编辑时随行传入（可选）；flag=off 或未传 → 零影响
 export interface BomDecisionInput { reasonCode: ReasonCode; reasonNote?: string; evidenceRefs?: EvidenceRef[]; }
@@ -138,6 +140,7 @@ export async function addBomItem(orderId: string, item: {
   image_urls?: string[];   // [0]→辅料单「示例画稿」, [1]→「位置说明及示意图」(录料时直接上传)
   attachment_files?: Array<{ name: string; url: string }>;   // 排版稿/文件附件(分款吊卡/箱唛等;录料时直接传)
   consumption_basis?: string; sample_reference?: string; position_description?: string;
+  allocation_mode?: string;   // 辅料分配方式(整单/按款/按款色/按款色码);空 = 整单,老行为
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -177,12 +180,15 @@ export async function addBomItem(orderId: string, item: {
     consumption_basis: item.consumption_basis || null,
     sample_reference: item.sample_reference || null,
     position_description: item.position_description || null,
+    // 分配方式:归一化后再落库(脏值 → whole_order);写 null 表示"未声明"= 老行为
+    allocation_mode: item.allocation_mode ? normalizeAllocationMode(item.allocation_mode) : null,
     source: 'manual',                      // 手动新增(Phase 2A 来源标记)
   };
   let { error } = await (supabase.from('materials_bom') as any).insert(insertRow);
-  if (error && /pack_size|attachment_files|column .* does not exist/i.test(error.message || '')) {
+  if (error && /pack_size|attachment_files|allocation_mode|column .* does not exist/i.test(error.message || '')) {
     delete insertRow.pack_size;            // 20260707 迁移未跑 → 降级(不 brick 加料)
     delete insertRow.attachment_files;     // 20260710 迁移未跑 → 降级
+    delete insertRow.allocation_mode;      // 20260816 迁移未跑 → 降级(退回整单口径,不 brick 加料)
     ({ error } = await (supabase.from('materials_bom') as any).insert(insertRow));
   }
   if (error) return { error: error.message };
@@ -481,6 +487,39 @@ export async function instantiateOrderMaterialPackage(
   return { ok: true, count: rows.length };
 }
 
+/**
+ * 辅料分配预览:按跟单选的分配方式,直接从订单逐款明细算出各款/色/码的数量。
+ *
+ * 这就是「系统已经知道的数量不许人再输一遍」的落点 —— 跟单只**确认**,不输入。
+ * 数量来源唯一(order_line_items),口径未确认则明确报缺,绝不猜。
+ * 只读、不写库;真正落库的分配在归并时按权威需求量重算(不产生第二套真相)。
+ */
+export async function previewTrimAllocation(orderId: string, input: {
+  allocation_mode?: string; style_no?: string | null; color?: string | null;
+  qty_per_piece?: number | null; consumption_basis?: string | null;
+}) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  { const _e = await requireRoleGroup(supabase, user.id, 'CAN_EDIT_BOM', '仅业务/采购/管理员可查看辅料分配'); if (_e) return { error: _e }; }
+
+  try {
+    // 逐款明细走 Repository 契约(ADR-006:业务层不许直接摸表)
+    const matrix = await (await procurementRepo()).getOrderStyleMatrix(orderId);
+    const r = allocateTrim({
+      mode: input.allocation_mode,
+      styleNo: input.style_no ?? null,
+      color: input.color ?? null,
+      qtyPerPiece: input.qty_per_piece ?? null,
+      consumptionBasis: input.consumption_basis ?? null,
+      matrix,
+    });
+    return { data: { status: r.status, mode: r.mode, cells: r.cells, total: r.total, message: r.message, rounded: r.rounded } };
+  } catch (e: any) {
+    return { error: e?.message || '读取订单逐款明细失败' };
+  }
+}
+
 export async function updateBomItem(id: string, orderId: string, patch: Record<string, any>, decision?: BomDecisionInput) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -491,13 +530,23 @@ export async function updateBomItem(id: string, orderId: string, patch: Record<s
   const { data: row } = await (supabase.from('materials_bom') as any)
     .select('*').eq('id', id).single();
   const upd: any = { ...patch, updated_at: new Date().toISOString() };
+  // 分配方式归一化(脏值 → whole_order);显式传空串 = 清回"未声明"
+  if ('allocation_mode' in upd) {
+    upd.allocation_mode = upd.allocation_mode ? normalizeAllocationMode(upd.allocation_mode) : null;
+  }
   if ((row as any)?.product_bom_template_id) {
     upd.overridden_at = new Date().toISOString();
     upd.overridden_by = user.id;
     // override_reason:patch 带了就写(BomTab 编辑模板行的可选输入)
   }
 
-  const { error } = await (supabase.from('materials_bom') as any).update(upd).eq('id', id);
+  // 单一直连点:降级重试复用同一个 builder,不新增裸 .from()(ADR-006 棘轮)
+  const applyUpdate = (payload: any) => (supabase.from('materials_bom') as any).update(payload).eq('id', id);
+  let { error } = await applyUpdate(upd);
+  if (error && 'allocation_mode' in upd && /allocation_mode|column .* does not exist/i.test(error.message || '')) {
+    delete upd.allocation_mode;            // 20260816 迁移未跑 → 降级保存其余字段,不 brick 编辑
+    ({ error } = await applyUpdate(upd));
+  }
   if (error) return { error: error.message };
   revalidatePath(`/orders/${orderId}`);
 

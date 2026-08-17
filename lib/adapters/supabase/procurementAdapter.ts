@@ -15,6 +15,7 @@ import { createClient } from '@/lib/supabase/server';
 import {
   RepositoryError,
   type OrderIdentity,
+  type OrderStyleMatrixCell,
   type ProcurementDraft,
   type ProcurementRepositoryP0,
   type ProcurementSource,
@@ -74,7 +75,7 @@ export function createProcurementAdapter(client: Client): ProcurementRepositoryP
           .eq('id', orderId)
           .maybeSingle(),
         (client.from('materials_bom') as any)
-          .select('id, material_name, material_code, qty_per_piece, unit, color, spec, style_no, total_qty, consumption_basis, material_master_id')
+          .select('id, material_name, material_code, qty_per_piece, unit, color, spec, style_no, total_qty, consumption_basis, allocation_mode, material_master_id')
           .eq('order_id', orderId),
         (client.from('material_requirements') as any)
           .select('id', { count: 'exact', head: true })
@@ -83,10 +84,11 @@ export function createProcurementAdapter(client: Client): ProcurementRepositoryP
 
       if (orderRes.error) throw toRepoError(orderRes.error, '读取订单');
       if (!orderRes.data) throw new RepositoryError('not_found', `订单不存在:${orderId}`);
-      // ③ consumption_basis 列未建的环境:降级重读(缺列 = 全部未确认,Domain 会据此拦下)
+      // ③ consumption_basis / allocation_mode 列未建的环境:降级重读。
+      //    缺列 = 口径全部未确认 + 分配意图全部为空 → Domain 按「未确认/整单」处理,不会静默算错。
       let bomRows = bomRes.data as any[] | null;
       if (bomRes.error) {
-        if (/consumption_basis/.test(bomRes.error.message || '')) {
+        if (/consumption_basis|allocation_mode/.test(bomRes.error.message || '')) {
           const retry = await (client.from('materials_bom') as any)
             .select('id, material_name, material_code, qty_per_piece, unit, color, spec, style_no, total_qty, material_master_id')
             .eq('order_id', orderId);
@@ -118,10 +120,60 @@ export function createProcurementAdapter(client: Client): ProcurementRepositoryP
           styleNo: str(b.style_no),
           totalQty: num(b.total_qty),
           consumptionBasis: str(b.consumption_basis),
+          allocationMode: str(b.allocation_mode),
           materialMasterId: str(b.material_master_id),
         })),
         requirementCount: reqRes.count || 0,
       };
+    },
+
+    /**
+     * 订单逐款明细矩阵:一行一款一色,sizes 是 {尺码:套数} 的 jsonb → 摊平成逐格。
+     *
+     * 数量语义(2026-08-16 生产库校准,与 20260622 迁移注释相反 —— 以实测为准):
+     *   sizes 格 = **套数**(商业数量),qty_pcs == Σsizes;件数 = 套数 × set_multiplier。
+     *   实证 QM-20260717-002:(960+480+480+480) × 2 = 4800 = orders.quantity ✓
+     * 本层只搬运不换算 —— 换算按口径走 Domain(resolveQuantityForBasis)。
+     *
+     * ⚠️ 不 select 价格列:本方法喂采购分配,po_unit_price 是财务红线,一个字节都不取。
+     */
+    async getOrderStyleMatrix(orderId: string): Promise<OrderStyleMatrixCell[]> {
+      const { data, error } = await (client.from('order_line_items') as any)
+        .select('style_no, product_name, color_cn, color_en, sizes, qty_pcs, set_multiplier')
+        .eq('order_id', orderId);
+      if (error) throw toRepoError(error, '读取订单逐款明细');
+
+      const out: OrderStyleMatrixCell[] = [];
+      for (const r of ((data as any[]) || [])) {
+        const styleNo = str(r.style_no);
+        if (!styleNo) continue;   // 无款号的行进不了分配(分配键以款为首)
+        const setMultiplier = Number(r.set_multiplier) > 0 ? Number(r.set_multiplier) : 1;
+        const sizes = r.sizes && typeof r.sizes === 'object' && !Array.isArray(r.sizes)
+          ? (r.sizes as Record<string, unknown>)
+          : {};
+        const common = {
+          styleNo,
+          productName: str(r.product_name),
+          colorCn: str(r.color_cn),
+          colorEn: str(r.color_en),
+          setMultiplier,
+        };
+        let any = false;
+        for (const [size, qty] of Object.entries(sizes)) {
+          const q = num(qty);
+          if (q == null || q <= 0) continue;
+          any = true;
+          out.push({ ...common, size: str(size), commercialQty: q });
+        }
+        // 该款没录尺码:退到行级 qty_pcs(== Σsizes 的同一口径),给一格 size=null。
+        // 这样按款/按色分配照常可用;按码分配时 Domain 会因缺码返回 NO_MATRIX,
+        // 明确交回跟单去补尺码 —— 不静默出 0,也不拿总量硬当某个码的量。
+        if (!any) {
+          const rowQty = num(r.qty_pcs);
+          if (rowQty != null && rowQty > 0) out.push({ ...common, size: null, commercialQty: rowQty });
+        }
+      }
+      return out;
     },
 
     async getProcurementDraft(orderId: string): Promise<ProcurementDraft> {

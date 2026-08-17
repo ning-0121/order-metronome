@@ -27,6 +27,8 @@ import {
 } from '@/lib/services/procurement-execution';
 import { overrideToSegments } from '@/lib/procurement/sizeOverride';
 import { isSystemActor, type SystemActor } from '@/lib/procurement/systemActor';
+import { allocationWeights, normalizeAllocationMode, type AllocationWeight } from '@/lib/procurement/trimAllocation';
+import { procurementRepo } from '@/lib/adapters/supabase/procurementAdapter';
 import { getOrderLeftover } from '@/app/actions/inventory';
 import { insertNotifications } from '@/lib/utils/notifications';
 
@@ -836,7 +838,13 @@ export async function consolidateOrderProcurementItems(
   const bomMaster = new Map<string, string | null>();
   const bomImages = new Map<string, string[]>();
   const bomAttach = new Map<string, Array<{ name: string; url: string }>>();   // 辅料排版稿/文件附件
-  const bomExtra = new Map<string, { prod: number | null; style_no: string | null; overPct: number; notSelfSupplied: boolean }>();
+  const bomExtra = new Map<string, {
+    prod: number | null; style_no: string | null; overPct: number; notSelfSupplied: boolean;
+    /** 辅料分配意图(跟单声明);未声明 = whole_order,老数据行为不变 */
+    allocMode: ReturnType<typeof normalizeAllocationMode>;
+    color: string | null;
+    basis: string | null;
+  }>();
   if (bomIds.length) {
     const { data: bs } = await (supabase.from('materials_bom') as any).select('*').in('id', bomIds);
     for (const b of (bs || [])) {
@@ -848,6 +856,9 @@ export async function consolidateOrderProcurementItems(
         style_no: b.style_no || null,
         overPct: Number(b.over_purchase_pct) > 0 ? Number(b.over_purchase_pct) : 0,   // 抛量%(采购填)
         notSelfSupplied: b.customer_supplied === true || b.factory_supplied === true,   // 客供/加工厂承担:绮陌都不采购
+        allocMode: normalizeAllocationMode(b.allocation_mode),   // 列未建 → undefined → whole_order
+        color: b.color || null,
+        basis: b.consumption_basis || null,
       });
     }
   }
@@ -895,8 +906,10 @@ export async function consolidateOrderProcurementItems(
     // 2026-07-07 用户拍板:抛量%是【唯一】buffer,只在【采购量=总需求×(1+抛量%)】处算一次。
     //   总需求(g.total)是裸数(件数×大货单耗),不再把抛量乘进总需求 —— 否则和建议采购的损耗叠成双 3%。
     let g = groups.get(key);
-    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, overTop: 0, imgs: [] as string[], attach: [] as Array<{ name: string; url: string }>, reqDate: null, orderBy: null }; groups.set(key, g); }
+    if (!g) { g = { key, ...identity, total: 0, count: 0, devTop: null, devTopNet: -1, lossTop: null, overTop: 0, imgs: [] as string[], attach: [] as Array<{ name: string; url: string }>, reqDate: null, orderBy: null, allocRows: [] as Array<{ styleNo: string | null; color: string | null; mode: string; basis: string | null }> }; groups.set(key, g); }
     g.total += lineTotal; g.count += 1;
+    // 辅料分配意图:按来源 BOM 行收集(同一采购项可由多行 BOM 汇成,各行有各自的款/色范围)
+    if (extra) g.allocRows.push({ styleNo: extra.style_no, color: extra.color, mode: extra.allocMode, basis: extra.basis });
     if (net > g.devTopNet) { g.devTopNet = net; g.devTop = dev; g.lossTop = loss; g.overTop = extra?.overPct ?? 0; }   // 主导来源的开发单耗/抛量作代表
     // 汇集来源图(去重,封顶 8 张)
     const imgs = sl?.bom_id ? (bomImages.get(sl.bom_id) || []) : [];
@@ -910,6 +923,59 @@ export async function consolidateOrderProcurementItems(
   }
   // 数量取整到 1 位小数(布料 kg 口径;逐行乘完再取整,不再逐行 ceil 叠误差)
   for (const g of groups.values()) g.total = Math.round(g.total * 10) / 10;
+
+  // ── 辅料按款/色/码分配(2026-08-16 并入 P0)────────────────────────────
+  // 目的:尺码牌/吊牌这类印 SKU 信息的辅料,数量要拆到款×色×码。那些数字**订单本来就有**
+  // (order_line_items.sizes),不许跟单再手抄一遍 —— 这是 P0 的硬验收。
+  //
+  // 关键:分配的是**权威需求量 g.total**,不是重新算一个总量。
+  //   Σ格 恒等于 g.total(distributeByWeights 保守恒)→ 不产生第二套 Requirement Truth。
+  //   采购若认为数量不对,要回上游改 BOM/需求,不能在这里改格子(CEO §13)。
+  const allocCells = new Map<string, Array<{ style_no: string; product_name: string; color_cn: string; color_en: string; size: string; qty: number }>>();
+  const wantsAlloc = [...groups.values()].some(
+    (g: any) => (g.allocRows || []).some((r: any) => r.mode !== 'whole_order'),
+  );
+  if (wantsAlloc) {
+    try {
+      // 逐款明细矩阵走 Repository 契约(ADR-006:业务层不许直接摸表)
+      const matrix = await (await procurementRepo()).getOrderStyleMatrix(orderId);
+      for (const g of groups.values()) {
+        const rows = ((g as any).allocRows || []) as Array<{ styleNo: string | null; color: string | null; mode: string; basis: string | null }>;
+        const modes = new Set(rows.map((r) => r.mode));
+        // 同一采购项的来源行声明了不同粒度 → 不猜,交回人处理(采购侧仍可手工拆)
+        if (modes.size !== 1) continue;
+        const mode = rows[0]?.mode;
+        if (!mode || mode === 'whole_order') continue;
+        if (!(Number(g.total) > 0)) continue;
+
+        // 逐来源行各自按其款/色范围取权重,再按格合并(整单通用行 styleNo=null → 摊到所有款)
+        const merged = new Map<string, AllocationWeight>();
+        let ok = true;
+        for (const r of rows) {
+          const w = allocationWeights({ mode, styleNo: r.styleNo, color: r.color, consumptionBasis: r.basis, matrix });
+          if (w.status !== 'OK') { ok = false; break; }
+          for (const x of w.weights) {
+            const k = `${x.style_no}¦${x.color_cn}¦${x.color_en}¦${x.size}`;
+            const prev = merged.get(k);
+            if (prev) prev.weight += x.weight;
+            else merged.set(k, { ...x });
+          }
+        }
+        if (!ok || merged.size === 0) continue;
+
+        const list = [...merged.values()];
+        const dist = distributeByWeights(g.total, list.map((x, i) => ({ key: i, weight: x.weight })));
+        const cells = dist
+          .map((d) => ({ ...list[d.key], qty: d.qty }))
+          .filter((c) => Number(c.qty) > 0)
+          .map(({ weight: _w, ...c }) => c);
+        if (cells.length > 0) allocCells.set(g.key, cells);
+      }
+    } catch (e: any) {
+      // 分配失败绝不阻断归并 —— 采购项照常生成,只是没有产品明细拆分
+      console.warn('[consolidate] 辅料款色码分配失败(不阻断归并):', e?.message);
+    }
+  }
 
   // 布料未核定大货单耗 → 拒绝归并(dryRun 和执行都拦),列出缺口
   if (missingProd.length > 0) {
@@ -996,6 +1062,12 @@ export async function consolidateOrderProcurementItems(
       }
       // 到货倒推日期刷新(列存在才写,迁移未跑不报错)。采购手锁了需到日 → 不覆盖(required_date_locked)
       if ('order_by_date' in (ex as any) && !(ex as any).required_date_locked) { upd.required_date = g.reqDate; upd.order_by_date = g.orderBy; }
+      // 辅料款×色×码拆分:只在【草稿且采购还没拆过】时预填。
+      // 采购已手工拆过(sku_breakdown 非空)或已离开草稿 → 一个字节都不覆盖,
+      // 否则会把采购的决策悄悄冲掉(与 image/attachment 的 union 保留同一原则)。
+      if (allocCells.has(g.key) && ex.status === 'draft' && 'sku_breakdown' in (ex as any) && (ex as any).sku_breakdown == null) {
+        upd.sku_breakdown = allocCells.get(g.key);
+      }
       const totalChanged = Number(ex.total_required_qty) !== g.total;
       if (totalChanged && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
       await (supabase.from('procurement_items') as any).update(upd).eq('id', ex.id);
@@ -1038,6 +1110,10 @@ export async function consolidateOrderProcurementItems(
       };
       if (g.imgs.length > 0) row.image_urls = g.imgs;   // 业务传的色卡/辅料图随归并流转
       if (g.attach.length > 0) row.attachment_files = g.attach;   // 业务传的排版稿/文件附件随归并流转
+      // 辅料款×色×码拆分:写既有 sku_breakdown(20260710 已建),不建第二张表。
+      // 只写拆分本身 —— final_purchase_qty / size_qty_override 是采购的商业决策与执行口径,
+      // 系统不替人定(DP-4);采购在核料页确认时走既有 saveSkuBreakdown 才落那两个字段。
+      if (allocCells.has(g.key)) row.sku_breakdown = allocCells.get(g.key);
       if (g.reqDate) row.required_date = g.reqDate;     // 需到日/最晚下单日(到货倒推亮灯)
       if (g.orderBy) row.order_by_date = g.orderBy;
       // 品类补:采购下单后才冒出来的新项 = 漏采补录 → 标补采购,待财务审批
@@ -1055,9 +1131,10 @@ export async function consolidateOrderProcurementItems(
         if (row.is_supplement) {
           return { error: '补采购所需数据库列缺失,请先执行 20260703 补采购迁移(supplement/finance_approval)后再核料——绝不降级为无财务审批闸的普通采购项' };
         }
-        // 非补采购行:仅图片/日期等装饰列缺失 → 降级插入(不 brick 核料),提醒执行迁移
-        console.warn('[consolidate] 非闸门新列缺失,降级插入。请执行 20260703 系列迁移(images/dates)');
-        const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, image_urls, required_date, order_by_date, ...plain } = row;
+        // 非补采购行:仅图片/日期/拆分等装饰列缺失 → 降级插入(不 brick 核料),提醒执行迁移
+        // sku_breakdown/attachment_files 也必须剥掉:否则降级重试仍带缺失列 → 第二次照样失败,等于没降级。
+        console.warn('[consolidate] 非闸门新列缺失,降级插入。请执行 20260703 系列迁移(images/dates)与 20260710(sku_breakdown)');
+        const { is_supplement, supplement_reason, supplement_requested_by, supplement_requested_at, finance_approval_status, image_urls, attachment_files, sku_breakdown, required_date, order_by_date, ...plain } = row;
         ({ error: iErr } = await (supabase.from('procurement_items') as any).insert(plain));
       }
       if (iErr) return { error: friendlyError(iErr) };

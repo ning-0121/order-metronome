@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage } from '@/app/actions/bom';
+import { getBomItems, addBomItem, updateBomItem, deleteBomItem, getTrimLibraryBrands, importFromTrimLibrary, submitBomToProcurement, setBomSampleGiven, addBomItemFromMaster, addTemporaryBomItem, listCopyableOrders, copyBomFromOrder, instantiateOrderMaterialPackage, previewTrimAllocation } from '@/app/actions/bom';
 import { BulkConsumptionEditor } from '@/components/BulkConsumptionEditor';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { getQuoteBaseline } from '@/app/actions/quote-baseline';
@@ -22,7 +22,7 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[], attachment_files: [] as Array<{ name: string; url: string }>, consumption_basis: '', sample_reference: '', position_description: '' };
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[], attachment_files: [] as Array<{ name: string; url: string }>, consumption_basis: '', allocation_mode: '', sample_reference: '', position_description: '' };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -250,6 +250,7 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
       image_urls: (form.image_urls || []).map(u => u || ''),   // 辅料单图(示例画稿[0]/示意图[1]),按位置随行入库
       attachment_files: form.attachment_files || [],           // 排版稿/文件附件(录料时随行入库)
       consumption_basis: form.consumption_basis || undefined,
+      allocation_mode: form.allocation_mode || undefined,   // 分配方式(整单/按款/按款色/按款色码)
       sample_reference: form.sample_reference || undefined,
       position_description: form.position_description || undefined,
       // 编辑模板带入行时,把 Override 原因一并写(action 同时记 overridden_at/by)
@@ -341,6 +342,7 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
       override_reason: item.override_reason || '', style_no: item.style_no || '',
       pack_size: item.pack_size != null ? String(item.pack_size) : '',
       consumption_basis: item.consumption_basis || '', sample_reference: item.sample_reference || '',
+      allocation_mode: item.allocation_mode || '',
       position_description: item.position_description || '',
     });
     setShowAdd(true);
@@ -457,6 +459,30 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
     }, 300);
     return () => clearTimeout(t);
   }, [copySearch, showCopy, copySource, orderId]);
+
+  // ── 辅料分配预览(2026-08-16):跟单选了分配方式 → 系统直接从订单逐款明细算出各格数量。
+  //    人只**确认**,不输入 —— 那些数字订单本来就有,不该让人再抄一遍。
+  const [alloc, setAlloc] = useState<{ status: string; cells: Array<{ style_no: string; color_cn: string; color_en: string; size: string; qty: number }>; total: number; message: string; rounded: boolean } | null>(null);
+  const [allocLoading, setAllocLoading] = useState(false);
+  const allocMode = form.allocation_mode;
+  useEffect(() => {
+    if (!showAdd || !allocMode || allocMode === 'whole_order') { setAlloc(null); return; }
+    let cancelled = false;
+    setAllocLoading(true);
+    const t = setTimeout(async () => {
+      const res = await previewTrimAllocation(orderId, {
+        allocation_mode: allocMode,
+        style_no: form.style_no || null,
+        color: form.color || null,
+        qty_per_piece: form.qty_per_piece ? parseFloat(form.qty_per_piece) : null,
+        consumption_basis: form.consumption_basis || null,
+      });
+      if (cancelled) return;
+      setAllocLoading(false);
+      setAlloc((res as any).data || { status: 'ERROR', cells: [], total: 0, message: (res as any).error || '预览失败', rounded: false });
+    }, 300);   // 防抖:单耗还在敲的时候别每个字符打一次服务端
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [showAdd, allocMode, form.style_no, form.color, form.qty_per_piece, form.consumption_basis, orderId]);
 
   async function selectCopySource(o: any) {
     setCopySource(o); setCopyErr(''); setCopyPreview([]);
@@ -784,6 +810,69 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
         <input placeholder="样品/参考编号" value={form.sample_reference} onChange={e => set('sample_reference', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <textarea placeholder="详细位置说明" value={form.position_description} onChange={e => set('position_description', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
+      {/* 分配方式(辅料):尺码牌/吊牌这类要分码印的,数量由系统从订单逐款明细算,跟单不手抄 */}
+      {!isFabricForm && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-emerald-800 whitespace-nowrap">分配方式</span>
+            <select value={form.allocation_mode} onChange={e => set('allocation_mode', e.target.value)}
+              className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm">
+              <option value="">整单一个数量（默认）</option>
+              <option value="by_style">按款分</option>
+              <option value="by_style_color">按款×色分</option>
+              <option value="by_style_color_size">按款×色×码分（尺码牌/吊牌）</option>
+            </select>
+            <span className="text-[11px] text-emerald-700">
+              选了就由系统按订单逐款明细算出每格数量 —— 你只需要核对，不用填。
+            </span>
+          </div>
+
+          {allocLoading && <p className="text-xs text-gray-500">正在按订单逐款明细计算…</p>}
+
+          {!allocLoading && alloc && alloc.status === 'OK' && (
+            <div className="space-y-1">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs bg-white rounded-lg border border-emerald-200">
+                  <thead className="bg-emerald-100/60 text-emerald-900">
+                    <tr>
+                      <th className="px-2 py-1 text-left font-medium">款号</th>
+                      <th className="px-2 py-1 text-left font-medium">颜色</th>
+                      {form.allocation_mode === 'by_style_color_size' && <th className="px-2 py-1 text-left font-medium">尺码</th>}
+                      <th className="px-2 py-1 text-right font-medium">数量（系统算）</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {alloc.cells.map((c, i) => (
+                      <tr key={`${c.style_no}-${c.color_cn}-${c.size}-${i}`} className="border-t border-emerald-100">
+                        <td className="px-2 py-1">{c.style_no || '—'}</td>
+                        <td className="px-2 py-1">{c.color_cn || c.color_en || '—'}</td>
+                        {form.allocation_mode === 'by_style_color_size' && <td className="px-2 py-1">{c.size || '—'}</td>}
+                        <td className="px-2 py-1 text-right tabular-nums font-medium">{c.qty}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-emerald-50 border-t border-emerald-200">
+                    <tr>
+                      <td className="px-2 py-1 font-medium" colSpan={form.allocation_mode === 'by_style_color_size' ? 3 : 2}>合计</td>
+                      <td className="px-2 py-1 text-right tabular-nums font-semibold">{alloc.total}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <p className="text-[11px] text-emerald-700">
+                数据来自本单「逐款明细」，不是手工录入{alloc.rounded ? '；含向上取整（宁多勿缺）' : ''}。
+                最终采购量以归并时的权威需求量为准。
+              </p>
+            </div>
+          )}
+
+          {!allocLoading && alloc && alloc.status !== 'OK' && (
+            <p className={`text-xs rounded-lg px-2 py-1.5 ${alloc.status === 'NEEDS_BASIS' || alloc.status === 'NEEDS_CONSUMPTION' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>
+              {alloc.message}
+            </p>
+          )}
+        </div>
+      )}
       {editId && (() => {
         const cls = captureEnabled ? classifyCurrentEdit() : null;
         const needsCapture = !!cls?.isKeyDecision;

@@ -53,9 +53,29 @@ export interface ProcurementSource {
     totalQty: number | null;
     /** 口径事实(跟单持有)。未确认 = null/空/未知值 —— 判定归 Domain,本层只搬运。 */
     consumptionBasis: string | null;
+    /** 分配意图(跟单持有)。归一化/判定归 Domain(normalizeAllocationMode),本层只搬运。 */
+    allocationMode: string | null;
     materialMasterId: string | null;
   }>;
   requirementCount: number;
+}
+
+/**
+ * 订单逐款明细矩阵的一格(款×色×码 → 商业数量)。
+ *
+ * 存在的理由:辅料按码分配的数量**只能**来自订单本身,不许人再录一遍。
+ * 形状与 lib/procurement/trimAllocation.StyleMatrixCell 对齐 —— Domain 不碰表,本层只搬运。
+ */
+export interface OrderStyleMatrixCell {
+  styleNo: string;
+  productName: string | null;
+  colorCn: string | null;
+  colorEn: string | null;
+  size: string | null;
+  /** 商业数量(套数)= order_line_items.sizes 格子原值 */
+  commercialQty: number;
+  /** 件/套(非套装 = 1) */
+  setMultiplier: number;
 }
 
 /** 采购草稿现状(读) */
@@ -115,6 +135,8 @@ export interface PurchaseOrderPlan {
 export interface ProcurementRepository {
   getOrderIdentity(orderId: string): Promise<OrderIdentity | null>;
   getOrderProcurementSource(orderId: string): Promise<ProcurementSource>;
+  /** 订单逐款明细矩阵 —— 辅料按码分配的**唯一**数量来源(不许人再录一遍)。 */
+  getOrderStyleMatrix(orderId: string): Promise<OrderStyleMatrixCell[]>;
   getProcurementDraft(orderId: string): Promise<ProcurementDraft>;
   saveProcurementDraft(
     orderId: string,
@@ -131,5 +153,5 @@ export interface ProcurementRepository {
  */
 export type ProcurementRepositoryP0 = Pick<
   ProcurementRepository,
-  'getOrderIdentity' | 'getOrderProcurementSource' | 'getProcurementDraft'
+  'getOrderIdentity' | 'getOrderProcurementSource' | 'getOrderStyleMatrix' | 'getProcurementDraft'
 >;
