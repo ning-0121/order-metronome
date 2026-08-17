@@ -1916,10 +1916,18 @@ export async function assignMerchandiser(
     // 它为空 = 这张单没有该部门线;它非空但 toUpdate 为空 = 全被固定归属过滤掉了。
     const hasRoleNodes = ((allMerchMs || []) as any[]).length > 0;
     if (kind === 'production' && !hasRoleNodes) {
+      // B 方案(2026-08-15):旧模板单没有生产部门线节点 → 无处挂人。落到订单级字段,
+      // 让「派人」与「有没有节点」解耦 —— 先能派上、能追责。
+      // 这不解决「生产部在这些单上无活可考核」,那是 A 方案(补节点)的事,不要混。
+      const { setOrderProductionOwner } = await import('@/lib/repositories/ordersRepo');
+      const own = await setOrderProductionOwner(admin, orderId, merchandiserUserId);
+      if (own.error) return { error: own.error };
+      revalidatePath(`/orders/${orderId}`);
       return {
-        error: `本单没有「生产部门线」节点 —— 它用的是旧版节点模板,全部执行节点都归业务执行(跟单),`
-          + `因此无法指派${roleLabel}。如需生产跟单接手,请先用本页「重建为最新节点模板」升级节点,再来指派。`,
-      };
+        ok: true, updated: 0, orderLevel: true,
+        message: `已指派${roleLabel}。本单用的是旧版节点模板、没有生产部门线节点,`
+          + `因此负责人记在订单上;要让生产跟单有节点可推进,需用本页「重建为最新节点模板」升级节点。`,
+      } as any;
     }
     return { error: `本单「${roleLabel}」的节点都是固定归属节点(生产主管固定节点/业务承诺节点),不可改派。` };
   }

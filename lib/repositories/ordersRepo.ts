@@ -994,3 +994,23 @@ export async function completeOrder(
 }
 
 // ~~submitRetrospective~~ 已删除:复盘 2026-08-01 下线(CEO 定不用),不再写 order_retrospectives。
+
+/**
+ * 指派订单级生产跟单(2026-08-18,B 方案落地时从 milestones.ts 收口进来)。
+ *
+ * 旧模板单没有生产部门线节点,「生产跟单是谁」无处可挂 → 落订单级字段。
+ * 列缺失(迁移未落生产)时返回明确错误,**不假装成功** —— 本项目吃过三次这亏。
+ */
+export async function setOrderProductionOwner(
+  client: any, orderId: string, userId: string,
+): Promise<{ ok?: boolean; error?: string }> {
+  const { error } = await client.from('orders')
+    .update({ production_owner_user_id: userId, updated_at: new Date().toISOString() })
+    .eq('id', orderId).select('id').single();
+  if (error) {
+    return /column .* does not exist|schema cache/i.test(error.message || '')
+      ? { error: '生产跟单字段尚未在生产库创建(迁移未执行),请联系管理员执行 npm run db:migrate' }
+      : { error: error.message };
+  }
+  return { ok: true };
+}
