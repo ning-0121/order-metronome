@@ -15,7 +15,11 @@ function scan() {
   const out = [];
   for (const path of TRUTH_PATHS) {
     let hits = '';
-    try { hits = execSync(`grep -rn "\\.select(" ${path} --include='*.ts' --include='*.tsx' 2>/dev/null`, { encoding: 'utf-8' }); } catch { continue; }
+    // -H 必须加:GNU grep(Linux/CI)对**单个文件**不打印文件名,BSD grep(macOS)会打印。
+    // 少了它,TRUTH_PATHS 里那几个单文件项在 Linux 上输出成 `82:...` →
+    // split(':')[0] 拿到的是行号 → readFileSync('82') → ENOENT。
+    // 本地(macOS)一直绿,一上 CI 就炸 —— 这个 lint 从来没在 Linux 上跑过。
+    try { hits = execSync(`grep -rnH "\\.select(" ${path} --include='*.ts' --include='*.tsx' 2>/dev/null`, { encoding: 'utf-8' }); } catch { continue; }
     for (const line of hits.split('\n').filter(Boolean)) {
       const [file, lineNo] = line.split(':');
       const src = readFileSync(file, 'utf-8');

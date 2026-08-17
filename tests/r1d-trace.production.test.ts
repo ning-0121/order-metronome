@@ -8,10 +8,13 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createClient as mkClient } from '@supabase/supabase-js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-for (const l of readFileSync(resolve(__dirname, '../.env.local'), 'utf-8').split('\n')) {
+// CI 没有 .env.local:文件缺失时静默跳过(本文件的用例在缺凭证时本来就 skip)。
+// 原来无保护 readFileSync → import 阶段就 ENOENT,4 个生产测试在 CI 必红。
+const _envPath = resolve(__dirname, '../.env.local');
+for (const l of (existsSync(_envPath) ? readFileSync(_envPath, 'utf-8') : '').split('\n')) {
   const m = l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 }
@@ -30,7 +33,13 @@ vi.mock('@/lib/supabase/server', async () => {
   return { createClient: async () => withAuth(), createServiceRoleClient: () => client() };
 });
 
-const svc = mkClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+// 顶层构造:缺 env 时给占位值,避免 CI 里 import 阶段就 `supabaseUrl is required` 崩掉。
+// 本文件的用例全部 describe.skipIf(缺凭证即跳过),顶层 afterAll 的清理列表也是空的,
+// 所以占位客户端不会发出任何请求 —— 只是让文件能被加载。
+const svc = mkClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://localhost:54321',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 'missing-service-role-key',
+);
 let orderId = '';
 const cleanup: Array<[string, string]> = [];
 

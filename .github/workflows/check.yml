@@ -1,0 +1,59 @@
+# ============================================================
+# CI Enforcement(2026-08-17 CEO 拍板)
+#
+# 起因:2026-08-17 出现真实事件 —— main 上 `npm run check` 是红的(confirm-shipped.ts
+# 新增 4 处裸 .from(),棘轮基线 0),但代码仍然被推上了 main,任何人再想 push 都被自己的
+# DoD 硬闸挡住。说明本地 lint 只是**提醒**,不是门禁。
+#
+#   A gate that can be bypassed by normal workflow is not a gate.
+#
+# 本 workflow 刻意很窄:只把已有的 `npm run check` + `npm run build` 接到 CI,
+# 不改任何其它工程流程、不加新检查、不引入 secret。
+#
+# 无需任何 secret:check 与 build 都已验证在**没有 .env.local**的环境下可跑通
+#   · 4 个 *.production.test.ts 在缺凭证时 describe.skipIf 跳过(顶层 client 用占位值)
+#   · next build 不依赖运行时 env
+# 这一点很重要:CI 不该持有生产 service-role key。
+#
+# 配套(在 GitHub 仓库设置里开,代码管不了):
+#   Settings → Branches → main:
+#     · Require status checks to pass  → 勾选本 job(check)
+#     · 禁止 direct push(Require a pull request before merging)
+#     · 不允许 admin 默认 bypass;紧急情况走显式 break-glass 并留记录
+# ============================================================
+name: check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 同一分支上新 push 取消旧运行,省 CI 时间;但**不影响**必须通过才能合的判定
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # 用 ci 而非 install:锁定 package-lock.json,避免 CI 与本地装出不同依赖
+      - name: install
+        run: npm ci
+
+      # 全部门禁:9 个 lint(含 data-access 棘轮 / migrations 批准清单)+ 回归脚本 + vitest
+      - name: check
+        run: npm run check
+
+      - name: build
+        run: npm run build
