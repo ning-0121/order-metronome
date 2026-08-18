@@ -14,7 +14,7 @@ import { checkPoFileSize } from '@/lib/order/po-upload-limits';
 import { uploadPoForParse } from '@/lib/order/po-parse-upload';
 import { listMaterialMaster } from '@/app/actions/material-master';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
-import { sortSizeKeys, orderSizeKeys } from '@/lib/utils/size-sort';
+import { sortSizeKeys, orderSizeKeys, keepSizeLabels } from '@/lib/utils/size-sort';
 
 type Color = { color_cn: string; color_en: string; sizes: Record<string, number>; qty?: number; remark?: string; carton_count?: number | string };
 // S1.2 每款布料(可多种)——名/门幅/单耗/单位/单价;单价=采购参考价(¥,只登记不自动进成本)
@@ -47,7 +47,9 @@ const sumSizes = (s: Record<string, number>) => Object.values(s || {}).reduce((a
 const appendSizes = (prev: string[], incoming: Iterable<string>): string[] => {
   const seen = new Set(prev);
   const extra: string[] = [];
-  for (const k of incoming) { if (k && !seen.has(k)) { seen.add(k); extra.push(k); } }
+  // 只收真尺码:Excel/AI 解析会把「QTY (PCS)」这类数据列当成尺码吸进来,
+  // 进了尺码列就会参与配比分摊、把每码数量全摊错(见 size-sort.ts isSizeLabel)。
+  for (const k of keepSizeLabels(incoming)) { if (!seen.has(k)) { seen.add(k); extra.push(k); } }
   return extra.length ? [...prev, ...sortSizeKeys(extra)] : prev;
 };
 
@@ -213,7 +215,9 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
       const union = new Set<string>();
       for (const st of data) for (const c of st.colors) for (const k of Object.keys(c.sizes || {})) union.add(k);
       if (stored) for (const s of stored) if (s) union.add(s);
-      setSizeLabels(union.size > 0 ? orderSizeKeys([...union], stored) : DEFAULT_SIZES);
+      // 存量脏数据(如 QTY (PCS) 被存成尺码,生产库 26 行/3 单)从这条路进来 → 一并过滤
+      const realSizes = keepSizeLabels(union);
+      setSizeLabels(realSizes.length > 0 ? orderSizeKeys(realSizes, stored) : DEFAULT_SIZES);
     }
     setLoading(false);
   }, [orderId, controlled]);
@@ -349,13 +353,14 @@ export function LineItemMatrixEditor({ orderId, canEdit = true, value, onChange,
   const applyRatio = (si: number, ci: number) => {
     const total = Number(colorTotals[`${si}-${ci}`]) || 0;
     if (total <= 0) { setMsg('⚠ 先填该颜色的「总量」再点分摊'); return; }
-    const dist = distributeByRatio(total, ratios[si], sizeLabels);
+    // 只按真尺码分份数(非尺码列混进来会多吃一份,配比 1:2:2:1 变 7 份 → 每码全错)
+    const dist = distributeByRatio(total, ratios[si], keepSizeLabels(sizeLabels));
     setStyles(styles.map((st, x) => x === si ? { ...st, colors: st.colors.map((c, y) => y === ci ? { ...c, sizes: dist } : c) } : st));
   };
   const applyRatioAll = (si: number) =>
     setStyles(styles.map((st, x) => x !== si ? st : { ...st, colors: st.colors.map((c, ci) => {
       const total = Number(colorTotals[`${si}-${ci}`]) || 0;
-      return total > 0 ? { ...c, sizes: distributeByRatio(total, ratios[si], sizeLabels) } : c;
+      return total > 0 ? { ...c, sizes: distributeByRatio(total, ratios[si], keepSizeLabels(sizeLabels)) } : c;
     }) }));
 
   // ── 汇总 ──
