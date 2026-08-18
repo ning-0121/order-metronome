@@ -236,7 +236,20 @@ export async function uploadTradePoProof(orderId: string, poId: string, fileBase
     const ext = (fileName.split('.').pop() || 'bin').toLowerCase();
     const path = `${orderId}/trade-po/${poId}_${Date.now()}.${ext}`;
     const bin = Buffer.from(fileBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const { error: upErr } = await supabase.storage.from('order-docs').upload(path, bin, { upsert: false });
+    // contentType 必须显式给(2026-08-18 修):传 Buffer 时 supabase-js 默认标成
+    // text/plain;charset=UTF-8,而 order-docs 桶的白名单没有它 →
+    // 「上传失败:mime type text/plain;charset=UTF-8 is not supported」,凭证永远传不上。
+    // 全站其它 8 处上传都传了 contentType,只有这里漏了。
+    // 取值优先级:data URL 自带的 MIME(浏览器给的最准)→ 按扩展名兜底 → 八进制流。
+    const dataUrlMime = /^data:([^;]+);base64,/.exec(fileBase64)?.[1] || null;
+    const EXT_MIME: Record<string, string> = {
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+      pdf: 'application/pdf',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel',
+      doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    };
+    const contentType = dataUrlMime || EXT_MIME[ext] || 'application/octet-stream';
+    const { error: upErr } = await supabase.storage.from('order-docs').upload(path, bin, { contentType, upsert: false });
     if (upErr) return { error: `上传失败:${upErr.message}` };
     // 合并已有凭证路径
     const svc = createServiceRoleClient();
