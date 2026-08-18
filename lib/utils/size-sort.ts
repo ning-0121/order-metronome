@@ -14,6 +14,32 @@
 export const SIZE_ORDER = ['XXXS', 'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '4XL', '5XL', '6XL'];
 
 /**
+ * 这个 key 是不是**真尺码**(2026-08-17 配比分摊事故)。
+ *
+ * 事故:Excel/AI 解析客户订单表时,表头里的**数据列**会被当成尺码列一起吸进 sizeLabels ——
+ * 生产库里 `QTY (PCS)` 就作为"尺码"存在 26 行明细 / 3 张单(587、613、1022987-614)。
+ * 一旦它进了尺码列,就会参与「按配比分摊总量」:
+ *   配比 S:M:L:XL = 1:2:2:1 本该 6 份,混进 QTY 那一份变成 **7 份**,
+ *   5184 ÷ 7 = 740.57 → 摊成 741/1481/1481/741/740(正确应为 864/1728/1728/864)。
+ * 配比看着是对的,总量也对得上,唯独每码数量全错 —— 极难看出来。
+ *
+ * 用**黑名单**不用白名单:真尺码写法太杂(1X/2X/3X/G/P/GG/XXL/纯数字码…),
+ * 白名单一定会误杀;而"数量/小计/箱数/金额"这类数据列的词是有限且明确的。
+ */
+const NON_SIZE_PATTERN = /(qty|pcs|数量|小计|总量|总数|箱数|箱|total|subtotal|合计|金额|单价|price|amount)/i;
+
+export function isSizeLabel(key: unknown): boolean {
+  const s = String(key ?? '').trim();
+  if (!s) return false;
+  return !NON_SIZE_PATTERN.test(s);
+}
+
+/** 过滤掉混进来的非尺码列。入口(解析/DB 恢复/外部塞入)和分摊前都该走一遍。 */
+export function keepSizeLabels(keys: Iterable<string>): string[] {
+  return [...keys].filter(isSizeLabel);
+}
+
+/**
  * 字母码 → 有序数值(M=0,越大越正,越小越负);非字母码返回 null。
  * XS=-2 / XXS(2XS)=-3 / XXXS(3XS)=-4 …  XL=+2 / XXL(2XL)=+3 / XXXL(3XL)=+4 …
  */
