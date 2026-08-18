@@ -50,7 +50,8 @@ export type ApprovalCategory =
   | 'price'           // 预订单价格审批
   | 'agent_action'    // Agent 待执行动作
   | 'order_confirm'   // 订单确认模块（面料/颜色/印花/包装）
-  | 'payment_hold';   // 付款冻结
+  | 'payment_hold'    // 付款冻结
+  | 'po_approval';    // 采购单审批(2026-08-18:此前 PO 审批不在待审批中心,财务/采购经理看不见 → 反复"审批不达")
 
 export interface PendingApprovalItem {
   id: string;
@@ -459,6 +460,7 @@ export async function getPendingApprovals(
       agentActions,
       paymentHolds,
       confirmations,
+      poApprovals,
     ] = await Promise.all([
       collectDelayRequests(supabase, ctx).catch(e => { console.warn('[pending-approvals] delays failed:', e?.message); return []; }),
       collectAmendments(supabase, ctx).catch(e => { console.warn('[pending-approvals] amendments failed:', e?.message); return []; }),
@@ -468,10 +470,11 @@ export async function getPendingApprovals(
       collectAgentActions(supabase, ctx).catch(e => { console.warn('[pending-approvals] agent failed:', e?.message); return []; }),
       collectPaymentHolds(supabase, ctx).catch(e => { console.warn('[pending-approvals] hold failed:', e?.message); return []; }),
       collectOrderConfirmations(supabase, ctx).catch(e => { console.warn('[pending-approvals] confirm failed:', e?.message); return []; }),
+      collectPoApprovals(ctx).catch(e => { console.warn('[pending-approvals] po failed:', e?.message); return []; }),
     ]);
 
     const allItems = [
-      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations,
+      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals,
     ];
 
     // 按 ageDays 倒序（卡得越久越靠前）
@@ -486,6 +489,7 @@ export async function getPendingApprovals(
       agent_action:  agentActions.length,
       payment_hold:  paymentHolds.length,
       order_confirm: confirmations.length,
+      po_approval:   poApprovals.length,
     };
 
     const actionableCount = allItems.filter(i => i.actionable).length;
@@ -519,6 +523,40 @@ export async function getPendingApprovalsCount(
 
 // ── 类目元数据（UI 用） ───────────────────────────────────────
 
+async function collectPoApprovals(ctx: UserContext): Promise<PendingApprovalItem[]> {
+  // 读走 repository(内部 service-role):财务的 session 未必过得了 purchase_orders RLS,
+  // 读不到 → 类别静默空 → 又一次"审批不达"。
+  // 可见性红线(CLAUDE.md):采购金额=价格信息,不暴露给 merchandiser/production/admin_assistant。
+  // 本类别只对 审批相关角色 可见,其他角色直接空(不是"可见但只读")。
+  if (!hasAnyRole(ctx.roles, ['admin', 'finance', 'procurement', 'procurement_manager'])) return [];
+  const { listPendingApprovalPurchaseOrders } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { reasonsCn } = await import('@/lib/procurement/approval');
+  const { data: pos, error } = await listPendingApprovalPurchaseOrders();
+  if (error) { console.warn('[collectPoApprovals] failed:', error); return []; }
+  return pos.map((po) => {
+    const needsFinance = po.approvalRequiredBy.includes('finance');
+    const needsProcMgr = po.approvalRequiredBy.includes('procurement');
+    // actionable:按 approval_required_by 精确给 —— 财务审财务的,采购经理审采购的;admin 全可
+    const actionable = hasAnyRole(ctx.roles, [
+      'admin',
+      ...(needsFinance ? ['finance'] : []),
+      ...(needsProcMgr ? ['procurement_manager'] : []),
+    ]);
+    const scope = [needsFinance ? '财务' : null, needsProcMgr ? '采购经理' : null].filter(Boolean).join('+') || '审批';
+    return {
+      id: po.id,
+      category: 'po_approval' as ApprovalCategory,
+      title: `${po.poNo || 'PO'} 待${scope}审批 ¥${(po.totalAmount ?? 0).toLocaleString()}${po.supplierName ? `（${po.supplierName}）` : ''}`,
+      subtitle: [po.orderRefs.length ? `订单 ${po.orderRefs.join('、')}` : null, po.approvalReasons.length ? reasonsCn(po.approvalReasons) : null].filter(Boolean).join(' · ') || undefined,
+      orderId: po.firstOrderId ?? undefined,
+      sourceUrl: `/procurement/po/${po.id}`,
+      createdAt: po.createdAt,
+      ageDays: ageDaysFrom(po.createdAt),
+      actionable,
+    };
+  });
+}
+
 export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: string; color: string }> = {
   delay:         { icon: '⏳',  label: '延期申请',           color: 'bg-amber-50 text-amber-700 border-amber-200' },
   amendment:     { icon: '🟣',  label: '订单修改申请',       color: 'bg-violet-50 text-violet-700 border-violet-200' },
@@ -528,4 +566,5 @@ export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: stri
   agent_action:  { icon: '🤖',  label: 'Agent 建议',         color: 'bg-blue-50 text-blue-700 border-blue-200' },
   order_confirm: { icon: '📋',  label: '订单确认（4 模块）', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   payment_hold:  { icon: '💳',  label: '付款冻结',           color: 'bg-rose-50 text-rose-700 border-rose-200' },
+  po_approval:   { icon: '🛒',  label: '采购单审批',         color: 'bg-orange-50 text-orange-700 border-orange-200' },
 };

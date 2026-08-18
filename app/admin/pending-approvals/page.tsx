@@ -45,7 +45,9 @@ export default async function PendingApprovalsPage({ searchParams }: PageProps) 
   const canApproveAmendment = isAdmin || roles.some(r => ['order_manager', 'sales_manager'].includes(r));
 
   // 准入：admin / finance / production_manager / sales 都能看（看到的 actionable 不同）
-  const allowedRoles = ['admin', 'finance', 'production_manager', 'sales', 'sales_manager', 'order_manager', 'admin_assistant'];
+  // 2026-08-18:补 procurement_manager/procurement —— 采购单审批(po_approval)进了本中心,
+  // 采购经理却进不来页面就是自相矛盾。
+  const allowedRoles = ['admin', 'finance', 'production_manager', 'sales', 'sales_manager', 'order_manager', 'admin_assistant', 'procurement_manager', 'procurement'];
   if (!roles.some(r => allowedRoles.includes(r))) {
     return (
       <main className="min-h-screen bg-gray-50">

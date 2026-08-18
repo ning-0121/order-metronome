@@ -1129,10 +1129,13 @@ export async function placePurchaseOrder(poId: string): Promise<{
     const budgetWarn = flags.over_budget_materials.length ? ` ⚠ 系统检测到疑重复下单料:${flags.over_budget_materials.slice(0, 4).join('、')}` : (flags.over_budget_total ? ' ⚠ 系统检测到整单超预算' : '');
     try {
       const { notifyUsersByRole } = await import('@/lib/utils/notifications');
-      await notifyUsersByRole(supabase, ['procurement', 'procurement_manager'], {
+      // 2026-08-18 补 finance/admin:此前只通知采购侧,财务全靠外部财务系统弹提醒 ——
+      // 外发成功≠财务看见(PO-20260817-001 实发:outbox 空、通知发了采购,财务仍说"没收到")。
+      // 现在待审批中心也有「采购单审批」类别,通知+工作台双保险。
+      await notifyUsersByRole(supabase, ['procurement', 'procurement_manager', 'finance', 'admin'], {
         type: 'po_finance_approval',
         title: `🟠 采购单已提交财务审批：${(po as any).po_no || ''}`,
-        message: `采购单已提交财务系统前置审批(所有采购单一律须财务审批后下单;风险信号已随单送财务),批准后自动下单。${budgetWarn}`,
+        message: `采购单已提交财务系统前置审批(所有采购单一律须财务审批后下单;风险信号已随单送财务),批准后自动下单。财务可在「待审批中心 → 采购单审批」处理。${budgetWarn}`,
       });
     } catch { /* 通知失败不阻断 */ }
     revalidatePath(`/procurement/po/${poId}`);
