@@ -40,37 +40,56 @@ export async function advanceProcurementAfterBomSubmit(orderId: string): Promise
     internal_order_no: identity?.internalOrderNo ?? null,
   });
 
-  // 非 Pilot:**不生成新采购需求**(那是 Pilot 在验的新行为),但必须做一次
-  // 「只刷新既有采购项」的归并 —— 否则 MRP 已重算、采购项还停在上一版,
-  // 采购会一直照着旧数字下单。
+  // 非 Pilot 也执行完整归并(create + refresh)。2026-08-18 CEO 两次拍板收敛到这里:
   //
-  // 1022977 实证(2026-08-18):
-  //   08-11 建采购项 11616/6336(数量语义 hotfix 之前的算法)
-  //   08-12 hotfix 上线
-  //   08-14 重新提交 BOM → material_requirements 重算成 5808/3168 ✅
-  //         → 这里 return NOT_PILOT → 归并没跑 → 采购界面至今显示 11616 ❌
+  // ① 先放开 refresh —— 1022977 实证:
+  //      08-11 建采购项 11616/6336(数量语义 hotfix 之前的算法)
+  //      08-12 hotfix 上线
+  //      08-14 重新提交 BOM → material_requirements 重算成 5808/3168 ✅
+  //            → 这里直接 return NOT_PILOT → 归并没跑 → 采购界面一直显示 11616 ❌
+  //    MRP 已产生新事实,采购层就不能继续展示旧事实。
   //
-  // 切分原则(CEO 2026-08-18):
-  //   refresh(刷新既有项总需求)= **数据一致性**,不该被 Pilot 闸住;
-  //   create (新建采购项)      = **新的采购意图**,保持 Pilot 限定。
-  //   Pilot 白名单是「允许执行新逻辑」的保护闸,不是「只有 Pilot 单才配保持一致」的业务闸。
+  // ② 再放开 create —— 业务补录辅料后若还要采购手动点「归并」才看得见,
+  //    等于把 P0 刚消灭的隐藏人工门原样留给了**全部**非 Pilot 单。
+  //    关键论据:采购手动点「归并」调用的是同一个 consolidate、同一套参数,
+  //    产出的项逐字段相同 —— 人工门只是多一步,不改变正确性。
   //
-  // create:false 时 consolidate 对新分组直接 continue,不产生任何新采购意图;
-  // 与 HEADER_RECONCILIATION 用的是同一档(order-quantity-correction.ts:273)。
+  // 那 Pilot 还独占什么?**口径就绪门禁**(NEEDS_BOM_CONFIRMATION):
+  //   Pilot 单 consumption_basis 未确认 → 不归并、明确点名缺哪些物料;
+  //   非 Pilot 单沿用历史 PER_SET 兜底(全库 182/185 行 basis 为空,一刀切会当场卡死全公司)。
+  //
+  // 安全性:新项一律 status='draft'(不是对供应商的承诺);按 consolidation_key 去重,
+  // 重复提交不会重复建;订单过了「采购下单」节点后新增的项仍自动标补采购 + 待财务审批;
+  // cleanup 始终关闭 —— 自动路径不删任何既有采购项。
   if (!isPilot) {
     const decision = decideProcurementAdvance({ isPilot: false, bom: [], requirementCount: 0 });
     let refreshed: unknown = null;
     try {
       const { consolidateOrderProcurementItems } = await import('@/app/actions/procurement-items');
       refreshed = await consolidateOrderProcurementItems(orderId, {
-        apply: { create: false, refresh: true, cleanup: false },
+        // create 也放开(2026-08-18 CEO):业务补录辅料后,若还要采购手动点「归并」
+        // 才看得到,那就是把 P0 消灭掉的隐藏人工门又留给了全部非 Pilot 单。
+        // 安全性:新项一律 status='draft'(不是对供应商的承诺),按 consolidation_key
+        // 去重不会重复建,订单过了「采购下单」节点后新增项仍自动标补采购+待财务审批。
+        apply: { create: true, refresh: true, cleanup: false },
         systemActor: SYSTEM_ACTOR,
       });
     } catch (e: any) {
       // 刷新失败绝不阻断 BOM 提交(提交本身已成功),记录即可
       console.warn('[advance] 非 Pilot 采购项刷新失败(不阻断):', e?.message);
     }
-    return { ...decision, draftItemCount: 0, consolidated: refreshed as any };
+    // 回报真实待采购项数 —— UI 要能显示「待采购 N 项」,不能恒为 0
+    let nonPilotDraftCount = 0;
+    try { nonPilotDraftCount = (await repo.getProcurementDraft(orderId)).items.length; } catch { /* 读不到不影响提交 */ }
+    return {
+      ...decision,
+      draftItemCount: nonPilotDraftCount,
+      consolidated: (refreshed as any)?.error ? null : {
+        created: Number((refreshed as any)?.created) || 0,
+        updated: Number((refreshed as any)?.updated) || 0,
+      },
+      ...((refreshed as any)?.error ? { consolidateError: String((refreshed as any).error) } : {}),
+    };
   }
 
   const source = await repo.getOrderProcurementSource(orderId);
