@@ -805,7 +805,10 @@ export async function submitBomToProcurement(
 
   // live BOM(完整列,用于冻结快照;style_no 用于 R1 按款算需求)
   const { data: bomRows, error: bomErr } = await (supabase.from('materials_bom') as any)
-    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier, style_no, pack_size, total_qty')
+    // submit_status:判定「本次待提交批次」(闸按批次拦,面辅料分开提交);
+    // consumption_basis:冻结进快照(2026-08-17 就该带上 —— 之前 select 漏了它,
+    //   快照行的 consumption_basis 恒为 null,「口径与单耗一起冻」实际没生效)。
+    .select('id, material_name, material_type, material_code, qty_per_piece, unit, color, placement, spec, supplier, style_no, pack_size, total_qty, submit_status, consumption_basis')
     .eq('order_id', orderId);
   // 业务手填的总需量(2026-07-08 用户拍板:辅料/打包件"不要自动算,按业务填的来")→ 覆盖 MRP 自动算
   const manualTotalByBom = new Map<string, number>();
@@ -914,10 +917,20 @@ export async function submitBomToProcurement(
   }
 
   // ── 必传闸(2026-07-06 用户拍板):不传技术部大货确认单,不许提交采购 ──
+  // 2026-08-18 CEO:面料和辅料要能**分开提交**。确认单确认的是**面料大货单耗**,
+  // 辅料(吊卡/腰卡/洗标…)跟它没关系 —— 此前整单一刀切,导致「面料还没确认,
+  // 辅料补录也提交不了」(1022977 实发,辅料被卡在闸外,连带自动归并也没跑成)。
+  // 口径:只看**本次待提交批次**(submit_status ≠ 'submitted' 的行)。
+  //   批次含 fabric/lining → 仍必传(面料口径必须技术确认);纯辅料批次 → 放行。
+  //   已提交过的面料行不再重复要求(它们首次提交时已经过了这道闸)。
   {
-    const { hasTechConfirm } = await import('@/app/actions/tech-confirm');
-    if (!(await hasTechConfirm(orderId))) {
-      return { error: '请先在「原辅料和包装」页(大货单耗表旁)上传技术部签名的大货确认单,再提交采购。' };
+    const pendingBatch = (bomRows as any[]).filter((r) => r.submit_status !== 'submitted');
+    const batchHasFabric = pendingBatch.some((r) => r.material_type === 'fabric' || r.material_type === 'lining');
+    if (batchHasFabric) {
+      const { hasTechConfirm } = await import('@/app/actions/tech-confirm');
+      if (!(await hasTechConfirm(orderId))) {
+        return { error: '本次提交包含面料/里料:请先在「原辅料和包装」页(大货单耗表旁)上传技术部签名的大货确认单,再提交采购。纯辅料批次不受此限。' };
+      }
     }
   }
 
