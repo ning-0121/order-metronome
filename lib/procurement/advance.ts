@@ -55,9 +55,13 @@ export function decideProcurementAdvance(input: AdvanceInput): AdvanceDecision {
   if (!input.isPilot) {
     return {
       kind: 'NOT_PILOT',
-      shouldConsolidate: false,
-      nextActor: 'none',
-      message: '该订单未接入采购生成器,流程保持原样。',
+      // 非 Pilot 仍然归并(2026-08-18 CEO):归并本身不是"新逻辑",
+      // 它产出的项与采购手动点「归并」逐字段相同 —— 人工门只是多一步,不改变正确性。
+      // Pilot 独有的是**口径就绪门禁**(NEEDS_BOM_CONFIRMATION):非 Pilot 单
+      // 口径未确认时沿用历史 PER_SET 兜底,不在这里一刀切卡住全公司。
+      shouldConsolidate: true,
+      nextActor: 'procurement',
+      message: '已生成待采购需求(该订单未接入 Pilot 的口径门禁,用量口径未确认时按历史口径计算)。',
       missingBasisMaterials: [],
     };
   }

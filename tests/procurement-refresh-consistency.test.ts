@@ -14,15 +14,33 @@ import { describe, it, expect } from 'vitest';
 import { decideProcurementAdvance } from '@/lib/procurement/advance';
 
 describe('Pilot 闸的语义边界', () => {
-  it('非 Pilot 仍返回 NOT_PILOT(不生成新采购需求)', () => {
+  it('非 Pilot 仍标记为 NOT_PILOT,但**照样归并**(2026-08-18 CEO)', () => {
     const d = decideProcurementAdvance({ isPilot: false, bom: [], requirementCount: 0 });
     expect(d.kind).toBe('NOT_PILOT');
-    expect(d.shouldConsolidate).toBe(false);   // 不 create
+    // 归并不是"新逻辑":采购手动点「归并」调的是同一个 consolidate、同一套参数,
+    // 产出逐字段相同。把它闸住只是把隐藏人工门留给了全部非 Pilot 单。
+    expect(d.shouldConsolidate).toBe(true);
+    expect(d.nextActor).toBe('procurement');
   });
 
-  it('NOT_PILOT 的 message 不该暗示「什么都没发生」—— 刷新仍会执行', () => {
+  it('Pilot 独占的是口径就绪门禁,不是归并本身', () => {
+    // 非 Pilot:basis 全空也照样归并(沿用历史 PER_SET 兜底,不卡住全公司)
+    const nonPilot = decideProcurementAdvance({
+      isPilot: false, bom: [{ materialName: '吊卡', consumptionBasis: null }], requirementCount: 5,
+    });
+    expect(nonPilot.shouldConsolidate).toBe(true);
+    // Pilot:basis 未确认 → 不归并,且点名缺哪些物料
+    const pilot = decideProcurementAdvance({
+      isPilot: true, bom: [{ materialName: '吊卡', consumptionBasis: null }], requirementCount: 5,
+    });
+    expect(pilot.shouldConsolidate).toBe(false);
+    expect(pilot.missingBasisMaterials).toContain('吊卡');
+  });
+
+  it('NOT_PILOT 的 message 必须说真话:不能说「流程保持原样」', () => {
     const d = decideProcurementAdvance({ isPilot: false, bom: [], requirementCount: 0 });
-    expect(d.message).toContain('未接入');
+    expect(d.message).not.toContain('保持原样');
+    expect(d.message).toContain('待采购');
   });
 });
 

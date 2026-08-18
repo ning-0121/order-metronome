@@ -38,8 +38,10 @@ console.log('\n【1】非 Pilot 订单:行为零变化');
 {
   const d = decideProcurementAdvance({ isPilot: false, bom: BOM_OK, requirementCount: 12 });
   check('kind = NOT_PILOT', d.kind === 'NOT_PILOT', d.kind);
-  check('不归并', d.shouldConsolidate === false);
-  check('不找任何人', d.nextActor === 'none');
+  // 2026-08-18 CEO:非 Pilot 也归并 —— 采购手动点「归并」产出的项逐字段相同,
+  // 人工门只是多一步。Pilot 独占的是**口径就绪门禁**(见【3】),不是归并本身。
+  check('也归并(不再把人工门留给非 Pilot 单)', d.shouldConsolidate === true);
+  check('下一步交采购', d.nextActor === 'procurement');
 }
 
 console.log('\n【2】Pilot + basis 齐全 → 自动归并(消灭隐藏人工门)');
