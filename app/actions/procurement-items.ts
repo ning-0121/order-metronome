@@ -1069,7 +1069,13 @@ export async function consolidateOrderProcurementItems(
         upd.sku_breakdown = allocCells.get(g.key);
       }
       const totalChanged = Number(ex.total_required_qty) !== g.total;
-      if (totalChanged && ex.status !== 'draft') { upd.needs_reconfirm = true; flagged++; }
+      // 2026-08-18 修:原来只看 status!=='draft'。但草稿项一样可能已经被采购填了
+      // 「最终采购量」—— 那是人按**旧总需**做的商业判断。总需一变,那个数就失去依据,
+      // 却因为 status 还是 draft 而不置 needs_reconfirm → 界面上总需 5808 / 最终 11965
+      // 并排显示,没有任何提示(1022977 实证)。
+      // 判据改为「总需变了 且 人已经填过最终量」,与 status 无关。
+      const humanDecided = (ex as any).final_purchase_qty != null;
+      if (totalChanged && (ex.status !== 'draft' || humanDecided)) { upd.needs_reconfirm = true; flagged++; }
       await (supabase.from('procurement_items') as any).update(upd).eq('id', ex.id);
       updated++;
       // 审计修(2026-07-04):重归并抬高/降低需求 → 同步【未下单】执行行的 ordered_qty,

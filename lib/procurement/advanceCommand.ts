@@ -40,10 +40,37 @@ export async function advanceProcurementAfterBomSubmit(orderId: string): Promise
     internal_order_no: identity?.internalOrderNo ?? null,
   });
 
-  // 非 Pilot 直接返回,**一次多余的读都不做** —— 老订单行为零变化
+  // 非 Pilot:**不生成新采购需求**(那是 Pilot 在验的新行为),但必须做一次
+  // 「只刷新既有采购项」的归并 —— 否则 MRP 已重算、采购项还停在上一版,
+  // 采购会一直照着旧数字下单。
+  //
+  // 1022977 实证(2026-08-18):
+  //   08-11 建采购项 11616/6336(数量语义 hotfix 之前的算法)
+  //   08-12 hotfix 上线
+  //   08-14 重新提交 BOM → material_requirements 重算成 5808/3168 ✅
+  //         → 这里 return NOT_PILOT → 归并没跑 → 采购界面至今显示 11616 ❌
+  //
+  // 切分原则(CEO 2026-08-18):
+  //   refresh(刷新既有项总需求)= **数据一致性**,不该被 Pilot 闸住;
+  //   create (新建采购项)      = **新的采购意图**,保持 Pilot 限定。
+  //   Pilot 白名单是「允许执行新逻辑」的保护闸,不是「只有 Pilot 单才配保持一致」的业务闸。
+  //
+  // create:false 时 consolidate 对新分组直接 continue,不产生任何新采购意图;
+  // 与 HEADER_RECONCILIATION 用的是同一档(order-quantity-correction.ts:273)。
   if (!isPilot) {
     const decision = decideProcurementAdvance({ isPilot: false, bom: [], requirementCount: 0 });
-    return { ...decision, draftItemCount: 0, consolidated: null };
+    let refreshed: unknown = null;
+    try {
+      const { consolidateOrderProcurementItems } = await import('@/app/actions/procurement-items');
+      refreshed = await consolidateOrderProcurementItems(orderId, {
+        apply: { create: false, refresh: true, cleanup: false },
+        systemActor: SYSTEM_ACTOR,
+      });
+    } catch (e: any) {
+      // 刷新失败绝不阻断 BOM 提交(提交本身已成功),记录即可
+      console.warn('[advance] 非 Pilot 采购项刷新失败(不阻断):', e?.message);
+    }
+    return { ...decision, draftItemCount: 0, consolidated: refreshed as any };
   }
 
   const source = await repo.getOrderProcurementSource(orderId);
