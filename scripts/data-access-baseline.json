@@ -1,6 +1,6 @@
 {
   "_note": "数据访问分层棘轮基线。键=文件+表,值=该文件直连该表的次数。只许缩不许涨。",
-  "total": 2324,
+  "total": 2322,
   "entries": {
     "app/actions/accessory-import.ts accessory_import_candidates": 6,
     "app/actions/accessory-import.ts materials_bom": 3,
@@ -69,7 +69,6 @@
     "app/actions/bom.ts profiles": 2,
     "app/actions/briefing.ts daily_briefings": 1,
     "app/actions/briefing.ts profiles": 1,
-    "app/actions/budget-approvals.ts notifications": 2,
     "app/actions/budget-approvals.ts orders": 2,
     "app/actions/budget-approvals.ts procurement_budget_approvals": 6,
     "app/actions/budget-approvals.ts profiles": 2,

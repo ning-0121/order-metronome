@@ -367,6 +367,20 @@ export async function submitForReview(docId: string): Promise<{ error?: string }
   if (error) return { error: error.message };
 
   const { data: doc } = await (supabase.from('order_documents') as any).select('order_id').eq('id', docId).single();
+  // 2026-08-19 P1 §8:提交审核此前零站内通知 —— 审批人(admin/finance)只有恰好打开
+  // 那张订单的单据页签才知道有单据等着批。补通知(统一入口内部强制 service-role)。
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    const { createServiceRoleClient } = await import('@/lib/supabase/server');
+    const { data: ord } = doc ? await (createServiceRoleClient().from('orders') as any)
+      .select('order_no, internal_order_no').eq('id', (doc as any).order_id).maybeSingle() : { data: null };
+    await notifyUsersByRole(supabase, ['finance', 'admin'], {
+      type: 'document_review',
+      title: `📄 单据待审批:${(ord as any)?.internal_order_no || (ord as any)?.order_no || ''}`,
+      message: '有 PI/CI 单据已提交审批,请到待审批中心或订单「单据中心」处理。',
+      relatedOrderId: (doc as any)?.order_id ?? null,
+    });
+  } catch { /* 通知失败不阻断提交 */ }
   if (doc) {
     await logDocAction(supabase, docId, doc.order_id, 'submitted', user.id);
     revalidatePath(`/orders/${doc.order_id}`);

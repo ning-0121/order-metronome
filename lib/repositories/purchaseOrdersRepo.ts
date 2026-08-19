@@ -201,3 +201,45 @@ export async function syncPoLinesSupplier(poId: string, supplierId: string, supp
   }
   return { error: error ? error.message : null };
 }
+
+// ── P1 §8/§9 审批中心读侧(2026-08-19)──────────────────────────
+
+export async function listPendingPurposeChanges(): Promise<{ data: Array<{ id: string; orderId: string; fromPurpose: string; toPurpose: string; reason: string | null; createdAt: string; orderRef: string | null }>; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('order_purpose_change_requests') as any)
+    .select('id, order_id, from_purpose, to_purpose, reason, created_at').eq('status', 'pending');
+  if (error) return { data: [], error: error.message };
+  const rows = (data || []) as any[];
+  const ids = [...new Set(rows.map((r) => r.order_id).filter(Boolean))];
+  const refs = new Map<string, string>();
+  if (ids.length) {
+    const { data: os } = await (svc.from('orders') as any).select('id, order_no, internal_order_no').in('id', ids);
+    for (const o of (os || []) as any[]) refs.set(o.id, o.internal_order_no || o.order_no || '');
+  }
+  return { data: rows.map((r) => ({ id: r.id, orderId: r.order_id, fromPurpose: String(r.from_purpose ?? ''), toPurpose: String(r.to_purpose ?? ''), reason: r.reason ?? null, createdAt: r.created_at, orderRef: refs.get(r.order_id) ?? null })), error: null };
+}
+
+export async function listPendingDocumentReviews(): Promise<{ data: Array<{ id: string; orderId: string; docType: string; createdAt: string; orderRef: string | null }>; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('order_documents') as any)
+    .select('*').eq('status', 'pending_review');
+  if (error) return { data: [], error: error.message };
+  const rows = (data || []) as any[];
+  const ids = [...new Set(rows.map((r) => r.order_id).filter(Boolean))];
+  const refs = new Map<string, string>();
+  if (ids.length) {
+    const { data: os } = await (svc.from('orders') as any).select('id, order_no, internal_order_no').in('id', ids);
+    for (const o of (os || []) as any[]) refs.set(o.id, o.internal_order_no || o.order_no || '');
+  }
+  return { data: rows.map((r) => ({ id: r.id, orderId: r.order_id, docType: String(r.doc_type ?? r.document_type ?? r.type ?? '单据'), createdAt: r.updated_at || r.created_at, orderRef: refs.get(r.order_id) ?? null })), error: null };
+}
+
+/** 已推财务、尚未回执的付款申请(procurement_payment_requests submitted;回调闭环见 finance-callback)。
+ *  supplier_ledger_payables 刻意不进:它只有 submitted/void 两态,永不出队,列了就是只增不减的洪水。 */
+export async function listPendingPaymentRequests(): Promise<{ data: Array<{ id: string; poId: string | null; requestNo: string | null; amount: number | null; createdAt: string }>; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('procurement_payment_requests') as any)
+    .select('id, request_no, purchase_order_id, amount, status, created_at').eq('status', 'submitted');
+  if (error) return { data: [], error: error.message };
+  return { data: ((data || []) as any[]).map((r) => ({ id: r.id, poId: r.purchase_order_id ?? null, requestNo: r.request_no ?? null, amount: r.amount != null ? Number(r.amount) : null, createdAt: r.created_at })), error: null };
+}

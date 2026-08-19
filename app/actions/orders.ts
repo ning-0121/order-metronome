@@ -2415,6 +2415,16 @@ export async function requestOrderPurposeChange(
     status: 'pending', requested_by: user.id,
   });
   if (error) return { error: error.message };
+  // 2026-08-19 P1 §8:此前零站内通知,审批人可见性全靠"恰好打开那张订单"或外部系统。
+  try {
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    await notifyUsersByRole(svc, ['finance', 'admin'], {
+      type: 'purpose_change_approval',
+      title: `🔁 改用途待审批:${(order as any).internal_order_no || (order as any).order_no || ''}`,
+      message: `申请把订单用途从「${from}」改为「${toPurpose}」${reason ? ':' + reason : ''}。请到待审批中心或订单页处理。`,
+      relatedOrderId: orderId,
+    });
+  } catch { /* 通知失败不阻断申请 */ }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }

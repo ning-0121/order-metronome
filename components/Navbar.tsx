@@ -78,6 +78,9 @@ export function Navbar({ isAdmin = false, isProcurement = false, isProduction = 
             { href: '/procurement', label: '采购 / 供应链', icon: '🛒' },
             { href: '/production', label: '生产中心', icon: '🏭' },
             { href: '/supervision', label: '督办总览', icon: '🩺' },
+            // P1 §11(2026-08-19):待审批中心此前不在任何菜单里,只能从工作台卡片跳入 ——
+            // 12 类审批的统一工作台不该藏着。页面自身有角色准入,这里只是入口。
+            { href: '/admin/pending-approvals', label: '待审批中心', icon: '⏳' },
             { href: '/analytics', label: '数据分析', icon: '📊' },
             ...(isFinance ? [{ href: '/api/finance-sso', label: '进入财务系统', icon: '💳', external: true }] : []),
           ],
