@@ -255,12 +255,19 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
   const supplierName = (sup as any).name || null;
 
   const wasPending = (po as any).approval_status === 'pending';
-  const { error: upErr } = await (svc.from('purchase_orders') as any).update({
-    supplier_id: supplierId,
-    ...(wasPending ? { approval_status: null, approval_reasons: null } : {}),
-    updated_at: new Date().toISOString(),
-  }).eq('id', poId).eq('status', 'draft');   // CAS:防并发下达后被改
-  if (upErr) return { error: upErr.message };
+  // 高危写走 safeMutation(lint:writes):断言恰好 1 行生效 —— CAS(status='draft')没命中
+  // (并发已下达/单不存在)时要报错,而不是静默 0 行让人以为改成功了。
+  const { safeMutation } = await import('@/lib/db/safe-mutation');
+  const w = await safeMutation({
+    client: svc, table: 'purchase_orders', operation: 'update',
+    payload: {
+      supplier_id: supplierId,
+      ...(wasPending ? { approval_status: null, approval_reasons: null } : {}),
+      updated_at: new Date().toISOString(),
+    },
+    predicate: { id: poId, status: 'draft' },   // CAS:防并发下达后被改
+  });
+  if (!(w as any).ok) return { error: `供应商修改未生效(${(w as any).status}):${(w as any).error || '可能已被下达'}` };
 
   // 行同步:本单全部执行行(供应商真相单头/行两处都有读者,不同步会出现单头新行旧)
   let { error: liErr } = await (svc.from('procurement_line_items') as any)
