@@ -120,3 +120,53 @@ export async function listPendingSupplementItems(): Promise<{ data: PendingSuppl
     error: null,
   };
 }
+
+/** 待财务批的出货放行(sales_signed)。2026-08-19:1022919 死胡同事故——业务被告知等财务,财务却无处可见。 */
+export async function listPendingShipmentReleases(): Promise<{ data: Array<{ id: string; orderId: string; qty: number | null; requestedAt: string; orderRef: string | null; customerName: string | null }>; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('shipment_confirmations') as any)
+    .select('id, order_id, shipment_qty, sales_signed_at, created_at')
+    .eq('status', 'sales_signed');
+  if (error) return { data: [], error: error.message };
+  const rows = (data || []) as any[];
+  const ids = [...new Set(rows.map((r) => r.order_id).filter(Boolean))];
+  const refs = new Map<string, { ref: string; customer: string | null }>();
+  if (ids.length) {
+    const { data: os } = await (svc.from('orders') as any).select('id, order_no, internal_order_no, customer_name').in('id', ids);
+    for (const o of (os || []) as any[]) refs.set(o.id, { ref: o.internal_order_no || o.order_no || '', customer: o.customer_name ?? null });
+  }
+  return {
+    data: rows.map((r) => ({
+      id: r.id, orderId: r.order_id,
+      qty: r.shipment_qty != null ? Number(r.shipment_qty) : null,
+      requestedAt: r.sales_signed_at || r.created_at,
+      orderRef: refs.get(r.order_id)?.ref ?? null,
+      customerName: refs.get(r.order_id)?.customer ?? null,
+    })),
+    error: null,
+  };
+}
+
+/** 待财务批的超预算采购项(baseline_over_status=pending)。与补采共用审批人,此前只藏在核料页。 */
+export async function listPendingBaselineOverItems(): Promise<{ data: Array<{ id: string; orderId: string; itemNo: string | null; materialName: string | null; note: string | null; requestedAt: string; orderRef: string | null }>; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('procurement_items') as any)
+    .select('id, order_id, item_no, material_name, baseline_over_note, baseline_over_requested_at, created_at')
+    .eq('baseline_over_status', 'pending');
+  if (error) return { data: [], error: error.message };
+  const rows = (data || []) as any[];
+  const ids = [...new Set(rows.map((r) => r.order_id).filter(Boolean))];
+  const refs = new Map<string, string>();
+  if (ids.length) {
+    const { data: os } = await (svc.from('orders') as any).select('id, order_no, internal_order_no').in('id', ids);
+    for (const o of (os || []) as any[]) refs.set(o.id, o.internal_order_no || o.order_no || '');
+  }
+  return {
+    data: rows.map((r) => ({
+      id: r.id, orderId: r.order_id, itemNo: r.item_no ?? null, materialName: r.material_name ?? null,
+      note: r.baseline_over_note ?? null, requestedAt: r.baseline_over_requested_at || r.created_at,
+      orderRef: refs.get(r.order_id) ?? null,
+    })),
+    error: null,
+  };
+}

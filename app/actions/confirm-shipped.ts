@@ -84,14 +84,17 @@ async function confirmOrderShippedCore(
     if ((fin as any)?.payment_hold === true) {
       return { ok: false, error: '付款已暂停(payment_hold),不能出货 —— 请先由财务解除暂停。', code: 'PAYMENT_HOLD' };
     }
-    if ((fin as any)?.allow_shipment !== true) {
-      return { ok: false, error: '财务尚未放货 —— 请先由财务在出货审批中放行,再确认出货。', code: 'FINANCE_RELEASE_REQUIRED' };
-    }
+    // 2026-08-19 修(1022919 实锤):allow_shipment !== true 此前是**死胡同 return** ——
+    // 告诉业务「先由财务放行」,却不给财务任何东西(不建确认单/不推财务系统/不通知,零痕迹),
+    // 财务任何队列里都看不到这单,业务再点还是同一句话 → 双方永远僵持。
+    // 在办单实测 25 张会撞上。修:并入下方「自动转出货财务审批」同一条路(divert),
+    // 建 sales_signed 确认单 + 推财务系统 + A2 留痕,让财务真的收到这件事。
+    const notAllowed = (fin as any)?.allow_shipment !== true;
     // ── 天生开闸拦截(2026-08-17):补建 order_financials 时 allow_shipment 默认 true(存量 187 单),
     //    闸虽开但财务从未经手 —— 不算放货(CEO 2026-08-11:财务批准发生在出货之前)。
     //    有放货证据(财务系统批过 warehouse_signed / 站内放货 A2 审计)→ 正常放行;
     //    无证据 → 不完结,自动把本次确认转成出货审批推给财务系统,批准后再点一次即可。
-    const released = await hasFinanceReleaseEvidence(svc, orderId);
+    const released = notAllowed ? false : await hasFinanceReleaseEvidence(svc, orderId);
     if (!released) {
       const { exists: pendExists } = await findPendingSalesSigned(svc, orderId);
       if (pendExists) {
@@ -119,7 +122,7 @@ async function confirmOrderShippedCore(
           order_no: order.order_no || null,
           customer_name: order.customer_name || null,
           requester_name: actorName,
-          summary: `确认已出货转财务审批 ${order.quantity || '?'} 件(历史单放货闸未经财务确认)`,
+          summary: `确认已出货转财务审批 ${order.quantity || '?'} 件(${notAllowed ? '财务尚未放货' : '历史单放货闸未经财务确认'})`,
           detail: { internal_order_no: order.internal_order_no || null, shipment_qty: order.quantity || null, source: 'confirm_shipped_diverted' },
           created_at: nowIso,
         } as any);
@@ -131,10 +134,10 @@ async function confirmOrderShippedCore(
         actor: { actorType: 'user', actorId: user.id },
         entity: { entityType: 'order', entityId: orderId, orderId },
         commandName: 'confirmOrderShipped',
-        note: `确认已出货被拦截转财务审批:放货闸系补建默认开,无财务放货证据(确认单 ${String(conf.id).slice(0, 8)})`,
+        note: `确认已出货被拦截转财务审批:${notAllowed ? '财务尚未放货(allow_shipment≠true)' : '放货闸系补建默认开,无财务放货证据'}(确认单 ${String(conf.id).slice(0, 8)})`,
         metadata: { shipment_confirmation_id: conf.id },
       });
-      return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: '该单的放货从未经财务确认(历史默认开闸)—— 已自动转入财务系统审批队列,财务批准后再点一次「确认已出货」即可完结。' };
+      return { ok: false, code: 'FINANCE_RELEASE_REQUIRED', error: `${notAllowed ? '财务尚未放货' : '该单的放货从未经财务确认(历史默认开闸)'} —— 已自动转入财务审批队列(财务在待审批中心/出货页签可批),批准后再点一次「确认已出货」即可完结。` };
     }
   } else {
     // override 路径:先把「越闸」这件事本身 A2 留痕(理由必填),再继续。
