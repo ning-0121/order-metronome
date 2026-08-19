@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getTradeBulkData, createTradeBulkPurchaseOrder, uploadTradePoProof, saveTradeLineCosts, type TradeBulkLine } from '@/app/actions/trade-purchase';
+import { getTradeBulkData, createTradeBulkPurchaseOrder, uploadTradePoProof, saveTradeLineCosts, type TradeBulkLine, changeTradePoSupplier } from '@/app/actions/trade-purchase';
 import { placePurchaseOrder } from '@/app/actions/purchase-orders';
 
 const money = (n: number) => '¥' + (Math.round(n * 100) / 100).toLocaleString();
@@ -19,6 +19,19 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof getTradeBulkData>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  // 改供应商(草稿单):行内下拉,选完即提交
+  const [editSupplierPo, setEditSupplierPo] = useState<string | null>(null);
+  const [newSupplierId, setNewSupplierId] = useState('');
+  async function doChangeSupplier(poId: string) {
+    if (!newSupplierId) { setErr('请选择新供应商'); return; }
+    setBusy(true); setErr(''); setMsg('');
+    const res = await changeTradePoSupplier(orderId, poId, newSupplierId);
+    setBusy(false);
+    if ((res as any).error) { setErr((res as any).error); return; }
+    setMsg(`供应商已改为「${(res as any).supplierName || ''}」${'。'}原财务审批(如有)已作废,下达时将按新供应商重新审批。`);
+    setEditSupplierPo(null); setNewSupplierId('');
+    load();
+  }
   const [err, setErr] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [terms, setTerms] = useState('月结');
@@ -201,6 +214,25 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.text}</span>
                 {isDraft && data?.canPlace && (
                   <div className="flex items-center gap-2 ml-auto">
+                    {editSupplierPo === po.id ? (
+                      <span className="flex items-center gap-1.5">
+                        <select value={newSupplierId} onChange={(e) => setNewSupplierId(e.target.value)}
+                          className="text-xs border rounded-lg px-2 py-1.5 max-w-40">
+                          <option value="">选择新供应商…</option>
+                          {(data?.suppliers || []).filter((sp: any) => sp.id !== po.supplier_id).map((sp: any) => (
+                            <option key={sp.id} value={sp.id}>{sp.name}</option>
+                          ))}
+                        </select>
+                        <button onClick={() => doChangeSupplier(po.id)} disabled={busy || !newSupplierId}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">确认</button>
+                        <button onClick={() => { setEditSupplierPo(null); setNewSupplierId(''); }} disabled={busy}
+                          className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50">取消</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setEditSupplierPo(po.id)} disabled={busy}
+                        title="仅草稿可改;已提交财务审批的会作废原审批,下达时按新供应商重新审批"
+                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 hover:bg-gray-50">改供应商</button>
+                    )}
                     <label className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 cursor-pointer hover:bg-gray-50">
                       {hasProof ? '✓ 已传凭证·重传' : '上传下单凭证'}
                       <input type="file" className="hidden" accept="image/*,.pdf" disabled={busy}
