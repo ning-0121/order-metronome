@@ -302,16 +302,21 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
 export async function requestTradePoSupplierChange(
   orderId: string, poId: string, supplierId: string, reason: string,
 ): Promise<{ ok?: boolean; error?: string; supplierName?: string }> {
-  const { user, roles } = await auth();
+  const { supabase, user, roles } = await auth();
   if (!user) return { error: '请先登录' };
   if (!roles.some((r) => CAN_PLACE.includes(r) || CAN_CREATE.includes(r))) return { error: '无权申请改供应商' };
   if (!supplierId) return { error: '请选择目标供应商' };
   if (!reason || !reason.trim()) return { error: '请填写改供应商原因(已下单的单需财务核对付款,原因必填)' };
 
+  const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
   const { readPoSupplierChange, writePoSupplierChangeRequest, readSupplierName } = await import('@/lib/repositories/purchaseOrdersRepo');
   const { po, error: poErr } = await readPoSupplierChange(poId);
   if (poErr) return { error: poErr };
   if (!po) return { error: '采购单不存在' };
+  // 订单访问权:只有角色门禁不够 —— 否则任意业务/采购能对系统里任意 PO 发起改供应商申请(评审 #3)。
+  // 校验 PO 真正归属的订单(po.orderIds[0]),而不是入参 orderId(入参不可信,也用它做后续通知/审计)。
+  const poOrderId = po.orderIds[0] || orderId;
+  if (!(await canUserAccessOrder(supabase, user.id, poOrderId))) return { error: '无权操作此订单的采购单' };
   if (po.status === 'draft') return { error: '草稿单请直接改供应商,无需申请' };
   if (po.supplierId === supplierId) return { error: '目标供应商与当前相同' };
   if (po.changeStatus === 'pending') return { error: '该单已有待审批的改供应商申请' };
@@ -335,7 +340,7 @@ export async function requestTradePoSupplierChange(
     await notifyUsersByRole(svc, ['finance', 'admin'], {
       type: 'po_supplier_change', title: `🔀 采购单改供应商待审批:${ref}`,
       message: `${ref} 申请把供应商改为「${supplierName || '?'}」。原因:${reason.trim()}。该单已下达,请核对付款后审批。`,
-      relatedOrderId: orderId,
+      relatedOrderId: poOrderId,
     });
   } catch (e: any) { console.warn('[requestTradePoSupplierChange] 通知财务失败(不阻断):', e?.message); }
 
@@ -344,7 +349,7 @@ export async function requestTradePoSupplierChange(
     await writeAuditEvent({
       eventType: 'trade_po_supplier_change_requested', level: 'A2', riskLevel: 'money',
       actor: { actorType: 'user', actorId: user.id },
-      entity: { entityType: 'purchase_order', entityId: poId, orderId },
+      entity: { entityType: 'purchase_order', entityId: poId, orderId: poOrderId },
       commandName: 'requestTradePoSupplierChange',
       reason: reason.trim(),
       beforeState: { supplier_id: po.supplierId, status: po.status },
@@ -352,7 +357,7 @@ export async function requestTradePoSupplierChange(
     } as any);
   } catch { /* 审计失败不回滚 */ }
 
-  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${poOrderId}`);
   return { ok: true, supplierName: supplierName ?? undefined };
 }
 
@@ -362,7 +367,7 @@ export async function requestTradePoSupplierChange(
  */
 export async function decideTradePoSupplierChange(
   poId: string, decision: 'approved' | 'rejected', note?: string,
-): Promise<{ ok?: boolean; error?: string }> {
+): Promise<{ ok?: boolean; error?: string; warning?: string }> {
   const { user, roles } = await auth();
   if (!user) return { error: '请先登录' };
   if (!roles.some((r) => ['admin', 'finance'].includes(r))) return { error: '仅财务/管理员可审批改供应商' };
@@ -373,6 +378,7 @@ export async function decideTradePoSupplierChange(
   if (!po) return { error: '采购单不存在' };
   if (po.changeStatus !== 'pending') return { error: '该单没有待审批的改供应商申请(可能已被处理)' };
   const orderId = po.orderIds[0] || '';
+  let lineSyncWarning: string | null = null;   // 批准时单头已改、仅行同步失败 → 告警(非失败),仍走审计+通知
 
   if (decision === 'rejected') {
     const r = await rejectPoSupplierChange({ poId, decidedBy: user.id, note: note || null });
@@ -380,8 +386,11 @@ export async function decideTradePoSupplierChange(
   } else {
     if (!po.changeTo) return { error: '申请缺目标供应商,无法批准' };
     const r = await applyPoSupplierChange({ poId, toSupplierId: po.changeTo, toSupplierName: po.changeToName, decidedBy: user.id, note: note || null });
-    if (!r.ok) return { error: r.error || '批准失败' };
-    if (r.error) { /* 供应商已改但行同步失败,已在 error 提示 */ return { error: r.error }; }
+    // headerChanged=false → 单头没动(CAS 未命中/写失败),是真失败,直接返回
+    if (!r.headerChanged) return { error: r.error || '批准失败' };
+    // headerChanged=true 但 r.error 有值 → 单头已改、仅行同步失败:这是已生效的 money 变更,
+    // 绝不能提前 return 吞掉审计+通知(评审 #2)。记为告警,继续走完审计与通知。
+    lineSyncWarning = r.error;
   }
 
   // 通知申请人结果
@@ -410,16 +419,17 @@ export async function decideTradePoSupplierChange(
       entity: { entityType: 'purchase_order', entityId: poId, orderId },
       commandName: 'decideTradePoSupplierChange',
       reason: note || (decision === 'approved' ? '财务批准改供应商' : '财务驳回改供应商'),
+      // status 决定后归 null(只留 null/pending 两态,允许日后再次申请);decision 记在 eventType/reason 里
       beforeState: { supplier_id: po.supplierId, supplier_change_status: 'pending' },
       afterState: decision === 'approved'
-        ? { supplier_id: po.changeTo, supplier_change_status: 'approved' }
-        : { supplier_id: po.supplierId, supplier_change_status: 'rejected' },
+        ? { supplier_id: po.changeTo, decision: 'approved', line_sync_failed: !!lineSyncWarning }
+        : { supplier_id: po.supplierId, decision: 'rejected' },
     } as any);
   } catch { /* 审计失败不回滚 */ }
 
   if (orderId) revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/admin/pending-approvals`);
-  return { ok: true };
+  return lineSyncWarning ? { ok: true, warning: lineSyncWarning } : { ok: true };
 }
 
 /** 上传大货采购单的下单凭证(给供应商的下单截图/回单),下达前必传。base64 上传到 order-docs → 存路径。 */

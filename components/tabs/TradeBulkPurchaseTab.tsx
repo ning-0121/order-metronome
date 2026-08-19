@@ -52,7 +52,12 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
     const res = await decideTradePoSupplierChange(poId, decision, decideNote.trim() || undefined);
     setBusy(false);
     if ((res as any).error) { setErr((res as any).error); return; }
-    setMsg(decision === 'approved' ? '已批准,供应商已更新。若该单已付款,请核对款项归属。' : '已驳回改供应商申请。');
+    if ((res as any).warning) {
+      // 单头已改成功、仅执行行同步失败:当成已批准(带告警),不能让人以为失败又去重试
+      setMsg(`已批准,供应商已更新。⚠️ ${(res as any).warning}`);
+    } else {
+      setMsg(decision === 'approved' ? '已批准,供应商已更新。若该单已付款,请核对款项归属。' : '已驳回改供应商申请。');
+    }
     setDecideNote('');
     load();
   }
