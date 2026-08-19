@@ -15,7 +15,6 @@ import { getOrCreateReconciliation } from './procurement-reconciliation';
 const WRITE_MSG = '仅采购/采购经理/管理员可提交付款申请';
 const num = (v: any) => (v == null || v === '' ? 0 : Number(v) || 0);
 const round2 = (n: number) => Math.round(n * 100) / 100;
-const ACTIVE = ['draft', 'submitted', 'approved', 'paid']; // 计入已占用额度(未驳回/未取消)
 
 // ── 2026-08-19 P2 决策单 A2:对账面板删除,随宿主移除专属导出 listPaymentRequests / submitPaymentRequest ──
 // (按对账单分批周付款的 UI 只存在于该面板,生产 payment_requests 0 行,从未用过;复活翻 git 历史。)

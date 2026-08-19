@@ -49,7 +49,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
   }
   async function doDecideChange(poId: string, decision: 'approved' | 'rejected') {
     setBusy(true); setErr(''); setMsg('');
-    const res = await decideTradePoSupplierChange(poId, decision, decideNote.trim() || undefined);
+    const res = await decideTradePoSupplierChange(poId, decision, (decideNotes[poId] || '').trim() || undefined);
     setBusy(false);
     if ((res as any).error) { setErr((res as any).error); return; }
     if ((res as any).warning) {
@@ -58,10 +58,11 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
     } else {
       setMsg(decision === 'approved' ? '已批准,供应商已更新。若该单已付款,请核对款项归属。' : '已驳回改供应商申请。');
     }
-    setDecideNote('');
+    setDecideNotes((m) => { const n = { ...m }; delete n[poId]; return n; });
     load();
   }
-  const [decideNote, setDecideNote] = useState('');
+  // 审批意见按 poId 隔离:同一订单多张 pending PO 时,各写各的,不串(评审 #6)
+  const [decideNotes, setDecideNotes] = useState<Record<string, string>>({});
   const [err, setErr] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [terms, setTerms] = useState('月结');
@@ -292,7 +293,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                         {po.supplier_change_reason && <div className="text-fuchsia-600 mt-0.5">原因:{po.supplier_change_reason}</div>}
                         {data?.canApproveSupplierChange && (
                           <div className="flex flex-wrap items-center gap-2 mt-2">
-                            <input value={decideNote} onChange={(e) => setDecideNote(e.target.value)} placeholder="审批意见(可选)"
+                            <input value={decideNotes[po.id] || ''} onChange={(e) => setDecideNotes((m) => ({ ...m, [po.id]: e.target.value }))} placeholder="审批意见(可选)"
                               className="text-xs border rounded-lg px-2 py-1.5 flex-1 min-w-40" />
                             <button onClick={() => doDecideChange(po.id, 'approved')} disabled={busy}
                               className="text-xs px-2.5 py-1.5 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50">批准改供应商</button>
