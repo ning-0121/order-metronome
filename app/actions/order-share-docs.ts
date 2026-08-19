@@ -11,7 +11,7 @@
  * 私有桶签名 URL 1 小时过期不适合跨部门/发外。file_type 白名单校验,防写入任意类型。
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
 const SHARE_TYPES = ['accessory_purchase_list', 'packing_method'];   // 'use server' 只能 export async,故不导出常量
@@ -70,7 +70,18 @@ export async function listOrderShareDocs(orderId: string, fileType: string): Pro
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
-  const { data, error } = await (supabase.from('order_attachments') as any)
+  // 2026-08-18 修「采购核料看不到业务上传的采购表」:
+  //   order_attachments 的 SELECT RLS = user_can_access_order(创建人/负责人/管理层),
+  //   而普通采购员(procurement)不在管理层名单 → session 读出来 **0 行、无报错**,
+  //   前端组件"没文件不渲染" → 整个共享文件区块对采购静默消失(1022962 实发,7 份文件业务可见/采购全不见)。
+  //   本功能的产品语义就是「共享给采购部/生产部/财务部」—— 按项目既定模式
+  //   (跨部门读 = 代码鉴权 + service-role,同 purchaseOrdersRepo/notifyUsersByRole),
+  //   登录 + 有内部角色即可读,不动全局 RLS(那会放开采购对**所有订单**的可见性,影响面大得多)。
+  const { getUserRoles } = await import('@/lib/utils/user-role');
+  const roles = await getUserRoles(supabase, user.id);
+  if (!roles || roles.length === 0) return { error: '无权查看' };
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('order_attachments') as any)
     .select('id, file_name, file_url').eq('order_id', orderId).eq('file_type', fileType)
     .order('created_at', { ascending: false });
   if (error) return { error: error.message };
