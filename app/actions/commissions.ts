@@ -517,7 +517,8 @@ export async function getMerchandiserCandidates(
   const candidates = (profiles || []).filter((p: any) => {
     const roles: string[] = p.roles?.length > 0 ? p.roles : [p.role].filter(Boolean);
     if (p.active === false) return false;
-    if (roles.includes('admin')) return true;
+    // 2026-08-19 修:此前 admin 无条件进候选名单 → 「指派跟单」下拉里出现老板(Alex/Su)。
+    // admin 是系统超级角色,不是跟单执行者;要派 admin 当跟单是异常场景,不该常驻名单。
     return kind === 'production'
       ? roles.includes('production')
       : roles.includes('merchandiser');
