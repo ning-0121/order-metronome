@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { SystemHealthClient } from './SystemHealthClient';
 import { FinanceLinkCard } from './FinanceLinkCard';
+import { OutboxDeadPanel } from './OutboxDeadPanel';
 
 export default async function SystemHealthPage() {
   const supabase = await createClient();
@@ -36,6 +37,9 @@ export default async function SystemHealthPage() {
 
       {/* 财务系统联调(一键连通测试 + 签名 ping,验证两边密钥配对) */}
       <FinanceLinkCard />
+
+      {/* 财务同步死信(P1 §10):重试耗尽的事件在此可见、可重新入队 */}
+      <OutboxDeadPanel />
 
       <SystemHealthClient initialReports={(reports || []) as any[]} />
     </div>

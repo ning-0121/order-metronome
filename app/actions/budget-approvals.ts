@@ -7,6 +7,7 @@
  */
 
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { insertNotifications } from '@/lib/utils/notifications';
 import { revalidatePath } from 'next/cache';
 
 const MGR_ROLES = ['order_manager', 'sales_manager', 'admin'];   // 业务执行经理
@@ -81,13 +82,16 @@ async function notifyApprovers(svc: any, orderId: string, needsFinance: boolean,
     return rs.some((r: string) => targetRoles.includes(r));
   }).map((p: any) => p.user_id))];
   if (!recipients.length) return;
-  const rows = recipients.map((uid) => ({
-    user_id: uid, type: 'budget_approval',
+  // 2026-08-19 P1 §7 修:此前直插 notifications 且写 is_read:false ——
+  // 全站读取按 status='unread' 过滤(notification-queries.ts:17),这些行插进去了
+  // 但**永远不出现在任何人的未读里**,即"超预算待审批"通知从上线起一条都没送达过。
+  // 且 insert 不查 error。改走统一入口 insertNotifications(自带 status:'unread' + service-role)。
+  await insertNotifications(recipients.map((uid) => ({
+    user_id: String(uid), type: 'budget_approval',
     title: `🟠 超预算待审批 — ${(order as any)?.internal_order_no || (order as any)?.order_no || ''}`,
     message: `${(order as any)?.customer_name || ''} 原辅料单耗超报价基线 +${Math.round(maxOver)}%,需审批才能提交采购。`,
-    related_order_id: orderId, is_read: false,
-  }));
-  await svc.from('notifications').insert(rows);
+    related_order_id: orderId,
+  })));
 }
 
 /** 审批(业务经理批 mgr;财务批 fin)。 */
@@ -126,11 +130,12 @@ export async function decideBudgetApproval(id: string, decision: 'approved' | 'r
   try {
     const { data: order } = await (svc.from('orders') as any).select('order_no, internal_order_no').eq('id', a.order_id).maybeSingle();
     const tag = (order as any)?.internal_order_no || (order as any)?.order_no || '';
-    await (svc.from('notifications') as any).insert({
+    // 同上 P1 §7:走统一入口,别再写读不到的 is_read
+    await insertNotifications({
       user_id: a.requested_by, type: 'budget_approval',
       title: upd.status === 'approved' ? '✅ 超预算已批准,可提交采购' : upd.status === 'rejected' ? '❌ 超预算被驳回' : '超预算审批进展',
       message: `${tag} 超预算审批:${mgrS === 'approved' ? '经理已批' : mgrS === 'rejected' ? '经理驳回' : '待经理'}${a.needs_finance ? (finS === 'approved' ? ' · 财务已批' : finS === 'rejected' ? ' · 财务驳回' : ' · 待财务') : ''}${note ? '(' + note + ')' : ''}`,
-      related_order_id: a.order_id, is_read: false,
+      related_order_id: a.order_id,
     });
   } catch { /* 通知失败不阻断 */ }
 
