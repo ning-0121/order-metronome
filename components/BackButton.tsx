@@ -11,7 +11,6 @@ export function BackButton({ fromUrl }: BackButtonProps) {
   const router = useRouter();
 
   const getLabel = () => {
-    if (fromUrl.includes('risk-orders')) return '返回风险订单列表，继续处理其他订单';
     if (fromUrl === '/ceo') return '返回我的节拍';
     if (fromUrl === '/dashboard') return '返回我的工作台';
     if (fromUrl === '/orders') return '返回订单列表';

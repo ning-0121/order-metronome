@@ -167,7 +167,7 @@ export function BriefingCard({ content, briefingDate }: Props) {
                 {d.suggestion && (
                   <p className="text-xs text-gray-500 mt-1">💡 {d.suggestion}</p>
                 )}
-                <Link href={`/orders/${d.orderId}?tab=email_diffs`} className="text-xs text-indigo-600 hover:underline mt-1 inline-block">
+                <Link href={`/orders/${d.orderId}?tab=email_center`} className="text-xs text-indigo-600 hover:underline mt-1 inline-block">
                   打开订单 →
                 </Link>
               </div>

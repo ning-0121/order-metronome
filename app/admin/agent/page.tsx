@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { formatDate } from '@/lib/utils/date';
 import Link from 'next/link';
+import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
+import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 
 export default async function AgentDashboardPage() {
   const supabase = await createClient();
@@ -16,7 +18,7 @@ export default async function AgentDashboardPage() {
   const today = new Date().toISOString().slice(0, 10);
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
-  const [totalRes, executedRes, dismissedRes, expiredRes, todayRes, weekRes, recentRes] = await Promise.all([
+  const [totalRes, executedRes, dismissedRes, expiredRes, todayRes, weekRes, recentRes, pendingSuggestionsRes] = await Promise.all([
     (supabase.from('agent_actions') as any).select('id', { count: 'exact', head: true }),
     (supabase.from('agent_actions') as any).select('id', { count: 'exact', head: true }).eq('status', 'executed'),
     (supabase.from('agent_actions') as any).select('id', { count: 'exact', head: true }).eq('status', 'dismissed'),
@@ -27,7 +29,11 @@ export default async function AgentDashboardPage() {
       .select('id, order_id, action_type, title, status, severity, executed_by, executed_at, dismissed_at, created_at, rolled_back')
       .order('created_at', { ascending: false })
       .limit(30),
+    // 待处理建议的「执行/忽略」面板(2026-08-19 P2 决策单 B4:此前面板是 CEO 页死 import,
+    //   全系统没有任何界面能处理 Agent 建议;待审批中心的 Agent 行「前往处理」也指到这里)
+    getAllPendingAgentSuggestions().catch(() => ({ data: [] })),
   ]);
+  const pendingSuggestions = pendingSuggestionsRes.data || [];
 
   const total = totalRes.count || 0;
   const executed = executedRes.count || 0;
@@ -109,6 +115,13 @@ export default async function AgentDashboardPage() {
           <div className="text-xs text-gray-500">本周建议</div>
         </div>
       </div>
+
+      {/* 待处理建议:执行/忽略/回滚(组件自带按钮,调 agent-execute 三个 action) */}
+      {pendingSuggestions.length > 0 && (
+        <div className="mb-6">
+          <AgentSuggestionsPanel suggestions={pendingSuggestions} title="🔥 待处理建议(可执行/忽略)" />
+        </div>
+      )}
 
       {/* 按类型统计 */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">

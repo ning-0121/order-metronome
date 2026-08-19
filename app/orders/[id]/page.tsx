@@ -7,7 +7,6 @@ import { getOrderTypeBadge, getOrderTypeLabel } from '@/lib/theme/colors';
 import { OrderTimeline } from '@/components/OrderTimeline';
 import { OrderScheduleExportButton } from '@/components/schedule/OrderScheduleExportButton';
 import { DelayRequestsList } from '@/components/DelayRequestsList';
-import { OrderScoreCard } from '@/components/OrderScoreCard';
 import { MerchandiserAssign } from '@/components/MerchandiserAssign';
 import { FactoryAssign } from '@/components/FactoryAssign';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
@@ -43,7 +42,6 @@ import { OrderPurposeChanger } from '@/components/OrderPurposeChanger';
 import { PITab } from '@/components/tabs/PITab';
 import { ExportSampleRequestButton } from '@/components/ExportSampleRequestButton';
 import { SampleFeePanel } from '@/components/SampleFeePanel';
-import { RecalcButton } from '@/components/RecalcButton';
 import { RescheduleBanner } from '@/components/RescheduleBanner';
 import { OrderDelayPanel } from '@/components/OrderDelayPanel';
 import { ProductionProgressTab } from '@/components/tabs/ProductionProgressTab';
@@ -69,6 +67,7 @@ import { ShippingDatesEdit } from '@/components/order/ShippingDatesEdit';
 import { DeliveryInfoEdit } from '@/components/order/DeliveryInfoEdit';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
+import { QuoteBaselineTab } from '@/components/tabs/QuoteBaselineTab';
 import { RootCausesPanel } from '@/components/RootCausesPanel';
 import { rootCauseEngineEnabled } from '@/lib/engine/featureFlags';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
@@ -110,8 +109,10 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  // 2026-07-08 用户拍板:弃用「成本控制」+「报价基线/报价单识别」(布料名对不上采购)。预算/成本真相全走「采购核料」。
-  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'trade_purchase', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score'];
+  // 2026-07-08 弃用「成本控制」(并入报价基线);「报价基线」2026-08-19 CEO 拍板恢复(P2 决策单 A1):
+  // 超基线采购闸(bom.ts,2026-07-06 拍板)一直在消费 quote_baseline_lines,但录入口被拆后全库基线 0 张、闸空转。
+  // 当年弃用理由「布料名对不上采购」已被闸的匹配口径化解 —— 只对基线里名字对得上的料比对,对不上的不误拦。
+  const allowedTabs = ['basic', 'quote_baseline', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'trade_purchase', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -634,12 +635,16 @@ export default async function OrderDetailPage({
               { key: 'manufacturing_order', label: '🏭 生产任务单' },
               { key: 'pi', label: '🧾 PI' },
               { key: 'bom', label: '原辅料和包装' },
+              // 报价基线 2026-08-19 恢复(P2 决策单 A1):超基线闸的唯一数据源,价列由服务端按角色屏蔽
+              { key: 'quote_baseline', label: '📋 报价基线' },
               { key: 'procurement_items', label: '🛒 采购核料' },
               { key: 'trade_purchase', label: '🛒 大货采购' },
               { key: 'procurement', label: '📦 采购进度' },
               { key: 'production', label: '生产进度' },
               { key: 'qc', label: '🔍 质检' },
               { key: 'shipment', label: '🚢 出货单据' },
+              // 备注 2026-08-19 挂回入口(P2 决策单 A3):组件/表/action 一直在,只是导航从没给过按钮,表 0 行
+              { key: 'notes', label: '💬 备注' },
               { key: 'score', label: `执行评分 ${commissions && commissions.length > 0 ? '✓' : ''}` },
             // 经销/采购成品单(trade)买成品无原辅料 → 隐藏「采购核料」tab,改显「大货采购」;
             //   非经销单 → 隐藏「大货采购」tab。(生产任务单/原辅料和包装(含包装方式)/PI 等保留)
@@ -649,6 +654,8 @@ export default async function OrderDetailPage({
               // 打样单 14 天流程,不生产/不采购原辅料/不走大货出货 → 只留 基本/进度/单据/评分,隐藏生产/采购/BOM/PI/质检/出货
               //   (打样上线前审计:此前打样单全 tab 照显,诱导在打样单上录 BOM/核料/走生产)
               if (isSample) return ['basic', 'progress'].includes(t.key);
+              // 经销单买成品,无原辅料报价基线可录
+              if (isTrade && t.key === 'quote_baseline') return false;
               if (isTrade && t.key === 'procurement_items') return false;
               if (!isTrade && t.key === 'trade_purchase') return false;
               return true;
@@ -1318,7 +1325,16 @@ export default async function OrderDetailPage({
           />
         )}
 
-        {/* Tab: 成本控制 —— 2026-07-08 已弃用,并入「📋 报价基线」(逐款成本单一真相)。旧 URL(?tab=cost_control)回退到报价基线。 */}
+        {/* Tab: 成本控制 —— 2026-07-08 已弃用,并入「📋 报价基线」(逐款成本单一真相)。 */}
+
+        {/* Tab: 报价基线(2026-08-19 恢复,P2 决策单 A1)——超基线闸的数据源;价列/编辑权由服务端 getQuoteBaseline 按角色控制 */}
+        {activeTab === 'quote_baseline' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <TabErrorBoundary>
+              <QuoteBaselineTab orderId={id} />
+            </TabErrorBoundary>
+          </div>
+        )}
 
         {/* Tab: 大货采购(经销单专属:成品采购 → 财务应付) */}
         {activeTab === 'trade_purchase' && (
