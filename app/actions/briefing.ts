@@ -1,12 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { revalidatePath } from 'next/cache';
-import {
-  getTodayBriefing as svcGetTodayBriefing,
-  getOrGenerateBriefing,
-  type BriefingRecord,
-} from '@/lib/services/briefing.service';
+import { getTodayBriefing as svcGetTodayBriefing } from '@/lib/services/briefing.service';
 
 /**
  * 获取当天简报（兼容旧调用：返回任意时间段最近一份）
@@ -30,46 +25,6 @@ export async function getTodayBriefing() {
   return { data, error: null };
 }
 
-// ── 邮件晨报：按需触发 + 缓存 ─────────────────────────────────
-
-/**
- * 按需生成 / 强制刷新今日晨报（会调 Claude）
- */
-export async function generateMyBriefingAction(
-  forceRefresh: boolean = false,
-): Promise<{ data?: BriefingRecord; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: '未登录' };
-
-  // 复审:默认走当日缓存(0 token);forceRefresh 绕过缓存强制调 Claude(~¥0.3-0.5/次),此路径限速防连点刷。
-  if (forceRefresh) {
-    const { guardAICall } = await import('@/lib/ai/rate-limit');
-    const guard = await guardAICall('smart_insights', null);
-    if (!guard.ok) return { error: guard.error };
-  }
-
-  const { data: profile } = await (supabase.from('profiles') as any)
-    .select('display_name, name')
-    .eq('user_id', user.id)
-    .single();
-
-  const userName =
-    (profile as any)?.display_name ||
-    (profile as any)?.name ||
-    user.email?.split('@')[0] ||
-    '同学';
-
-  const result = await getOrGenerateBriefing(supabase, user.id, {
-    forceRefresh,
-    userName,
-  });
-
-  if (!result.ok) return { error: result.error };
-
-  try { revalidatePath('/ceo'); } catch {}
-  try { revalidatePath('/my-today'); } catch {}
-
-  return { data: result.data };
-}
-
+// ── 2026-08-19 P2 决策单 B1:generateMyBriefingAction 随 MorningBriefingCard 删除 ──
+// (CEO 判「太费钱用处不大」;/briefing 页只读缓存 getTodayBriefing,不再有任何强制调 Claude 的入口。
+//  cron 侧 morning-briefing / daily-briefing 路由自行调 briefing.service,不走本文件。)

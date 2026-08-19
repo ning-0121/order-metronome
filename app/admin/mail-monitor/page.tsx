@@ -191,7 +191,7 @@ export default function MorningBriefingPage() {
                       <span className="text-blue-600">订单：{d.orderValue || '—'}</span>
                     </div>
                     {d.suggestion && <p className="text-xs text-gray-500 mt-1">💡 {d.suggestion}</p>}
-                    <Link href={`/orders/${d.orderId}?tab=email_diffs`} className="text-xs text-indigo-600 hover:underline mt-1 inline-block">
+                    <Link href={`/orders/${d.orderId}?tab=email_center`} className="text-xs text-indigo-600 hover:underline mt-1 inline-block">
                       打开订单 →
                     </Link>
                   </div>

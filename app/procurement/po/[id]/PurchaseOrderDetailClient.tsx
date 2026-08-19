@@ -500,8 +500,9 @@ export function PurchaseOrderDetailClient({ view }: { view: any }) {
       {/* 自定义追踪提醒(采购设节点+日期,到点提醒采购/业务/跟单) */}
       <PoRemindersPanel poId={po.id} />
 
-      {/* 采购对账面板已撤(老板 2026-07-11「没用」):对账走「供应商对账台账/收货对账单」页;
-          组件 ProcurementReconciliationPanel 保留未删,要恢复加回一行即可 */}
+      {/* 采购对账面板已删(老板 2026-07-11「没用」→ 2026-08-19 P2 决策单 A2 定案删除):
+          对账走「供应商对账台账/收货对账单」页;付款申请走「定金/月结」(submitPurchaseDeposit),
+          进「待审批中心 · 付款待回执」。周付款申请/采购退货 UI 随面板删除(生产 0 行,从未用过),复活翻 git 历史。 */}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700 flex items-center gap-2">

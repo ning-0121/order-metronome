@@ -369,7 +369,8 @@ async function generateProfitWarningTasks(
           ? `🚨 亏损订单：${order.order_no}（毛利 ${marginPct}）`
           : `⚠️ 利润偏低：${order.order_no}（毛利 ${marginPct}）`,
         description: `客户：${order.customer_name}`,
-        actionUrl: `/orders/${snap.order_id}?tab=finance`,
+        // 财务信息(FinanceEventsTimeline/利润)在基本信息 tab;原 ?tab=finance 是死 tab(2026-08-19 D 修死链)
+        actionUrl: `/orders/${snap.order_id}?tab=basic`,
         actionLabel: '查看财务',
         relatedOrderId: snap.order_id,
         relatedCustomer: order.customer_name,

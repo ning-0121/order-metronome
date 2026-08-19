@@ -363,7 +363,8 @@ async function collectAgentActions(
     orderId: r.order_id,
     orderNo: r.orders?.order_no,
     customerName: r.orders?.customer_name,
-    sourceUrl: r.order_id ? `/orders/${r.order_id}` : '/admin/agent',
+    // 一律指 /admin/agent:执行/忽略面板在那里(2026-08-19 B4;订单页没有 Agent 处理 UI,指过去是死胡同)
+    sourceUrl: '/admin/agent',
     createdAt: r.created_at,
     ageDays: ageDaysFrom(r.created_at),
     actionable: canApprove,

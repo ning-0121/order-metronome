@@ -5,21 +5,17 @@ import { formatDate, isOverdue } from '@/lib/utils/date';
 import { isCustomerShipHoldFromOrder, isCustomerHoldStale } from '@/lib/domain/customerShipHold';
 import { computeOrderStatus } from '@/lib/utils/order-status';
 import Link from 'next/link';
-import { DelayRequestActions } from '@/components/DelayRequestActions';
 import { getCurrentUserRole } from '@/lib/utils/user-role';
 import { getRoleLabel } from '@/lib/utils/i18n';
 import { getAnalyticsSummary, getRoleEfficiency } from '@/app/actions/analytics';
-import { getAllPendingAgentSuggestions } from '@/app/actions/agent-suggestions';
-import { AgentSuggestionsPanel } from '@/components/AgentSuggestionCard';
 import { getPendingApprovals, CATEGORY_META, type ApprovalCategory } from '@/lib/services/pending-approvals.service';
 import { CeoInsightButton } from '@/components/CeoInsightButton';
 import { CustomerMattersPanel } from '@/components/CustomerMattersPanel';
 import { CeoCockpit } from '@/components/ceo/CeoCockpit';
 import { CollabRiskGroups } from '@/components/CollabRiskGroups';
 import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
-// 邮件晨报（briefing.service / MorningBriefingCard）已下线 — 用户反馈"太费钱用处不大"
-// 服务代码保留在 lib/services/briefing.service.ts，仅移除 UI 入口
-// RecalcButton removed from global — now per-order only
+// 邮件晨报已下线("太费钱用处不大");MorningBriefingCard / RecalcButton / OrderScoreCard /
+// DelayRequestActions / BatchActions 等孤儿组件 2026-08-19 P2 决策单定案删除,复活翻 git 历史
 
 import { isDoneStatus, isActiveStatus, isBlockedStatus, normalizeMilestoneStatus } from '@/lib/domain/types';
 import { isTerminalLifecycle } from '@/lib/domain/lifecycleStatus';
@@ -44,13 +40,13 @@ export default async function CEOWarRoom() {
       : [(ceoProfile as any)?.role].filter(Boolean);
 
   // 效率分析数据 + 待审批聚合
-  const [analyticsSummary, roleEfficiency, agentResult, approvalsResult] = await Promise.all([
+  // Agent 建议不再在这里取数(2026-08-19 P2 决策单 B4:此前取了从不渲染,白跑一次查询;
+  //   建议处理界面在 /admin/agent,待审批中心的 Agent 行也指过去)
+  const [analyticsSummary, roleEfficiency, approvalsResult] = await Promise.all([
     getAnalyticsSummary(),
     getRoleEfficiency(),
-    getAllPendingAgentSuggestions().catch(() => ({ data: [] })),
     getPendingApprovals(supabase, { userId: user.id, roles: ceoRoles }).catch(() => ({ ok: false as const, error: '' })),
   ]);
-  const agentSuggestions = agentResult.data || [];
   const approvals = approvalsResult.ok ? approvalsResult.data : { total: 0, byCategory: {} as any, actionableCount: 0, items: [] as any[] };
 
   // 审批项按类分组(工作台待办里分类展开显示,不同审批一目了然)。类目优先级:紧急审批在前,订单确认(量大)垫后。
@@ -1032,7 +1028,7 @@ export default async function CEOWarRoom() {
       </div>
 
       {/* 明日风险预警 / 协作风险提醒 已下线（2026-04-28）— 已并入"今日待办"中的"自己/协作订单风险"两栏 */}
-      {/* 风险订单列表已移至独立页面 /risk-orders/[type]，点击顶部数字卡片进入 */}
+      {/* 风险订单列表 /risk-orders 已删(2026-08-19 P2 决策单 C5:入口卡片 04-27 已下线,零入站链接;驾驶舱 B 区覆盖) */}
       {/* 部门超期/堵点已移至数据分析页 /analytics */}
     </div>
   );
