@@ -31,6 +31,7 @@ import { allocationWeights, normalizeAllocationMode, type AllocationWeight } fro
 import { procurementRepo } from '@/lib/adapters/supabase/procurementAdapter';
 import { getOrderLeftover } from '@/app/actions/inventory';
 import { insertNotifications } from '@/lib/utils/notifications';
+import { shouldCompleteProcurementPlaced } from '@/lib/procurement/placedAutoComplete';
 
 const num = (v: any) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
 
@@ -230,12 +231,20 @@ export async function deductFromStock(itemId: string, orderId: string): Promise<
  * procurement_order_placed 节点(系统内采购单即证据;留痕+触发置信度重算)。
  * 幂等:节点不存在/已完成静默跳过。触发点:采购单下单钩子 + 采购中心队列自愈。
  */
+/** 判据在纯模块(lib/procurement/placedAutoComplete.ts) —— 'use server' 文件只能导出 async 函数 */
 export async function autoCompleteProcurementPlacedForOrder(supabase: any, orderId: string, poNo?: string | null): Promise<boolean> {
-  const ORDERED = ['ordered', 'partially_received', 'completed', 'closed'];
-  const { data: items } = await (supabase.from('procurement_items') as any)
+  const { data: items, error: itemsErr } = await (supabase.from('procurement_items') as any)
     .select('status').eq('order_id', orderId);
-  if (!items || items.length === 0) return false;
-  if (!items.every((i: any) => ORDERED.includes(i.status))) return false;
+  if (itemsErr) { console.warn('[autoCompletePlaced] 采购项查询失败,跳过:', itemsErr.message); return false; }
+
+  let lines: any[] | null = null;
+  if (!items || items.length === 0) {
+    const { readOrderLinePlacementStatus } = await import('@/lib/repositories/purchaseOrdersRepo');
+    const r = await readOrderLinePlacementStatus(supabase, orderId);
+    if (r.error) { console.warn('[autoCompletePlaced] 执行行查询失败,跳过:', r.error); return false; }
+    lines = r.lines;
+  }
+  if (!shouldCompleteProcurementPlaced(items, lines)) return false;
 
   const { data: ms } = await (supabase.from('milestones') as any)
     .select('id, status').eq('order_id', orderId).eq('step_key', 'procurement_order_placed').maybeSingle();
