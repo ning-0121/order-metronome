@@ -170,3 +170,34 @@ export async function listPendingBaselineOverItems(): Promise<{ data: Array<{ id
     error: null,
   };
 }
+
+/** 改草稿大货采购单供应商的数据访问(单头 CAS + 行同步)。判定(能不能改/审批作废语义)留在 action。 */
+export async function readTradePoForSupplierChange(poId: string): Promise<{ po: { id: string; status: string; approvalStatus: string | null; supplierId: string | null } | null; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('purchase_orders') as any)
+    .select('id, po_no, status, approval_status, supplier_id').eq('id', poId).maybeSingle();
+  if (error) return { po: null, error: error.message };
+  if (!data) return { po: null, error: null };
+  return { po: { id: (data as any).id, status: String((data as any).status), approvalStatus: (data as any).approval_status ?? null, supplierId: (data as any).supplier_id ?? null }, error: null };
+}
+
+export async function readSupplierName(supplierId: string): Promise<{ name: string | null; exists: boolean; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('suppliers') as any).select('id, name').eq('id', supplierId).maybeSingle();
+  if (error) return { name: null, exists: false, error: error.message };
+  return { name: (data as any)?.name ?? null, exists: !!data, error: null };
+}
+
+/** 本单执行行的供应商同步(外键指错表时降级只写名字,与建单路径同款兜底)。 */
+export async function syncPoLinesSupplier(poId: string, supplierId: string, supplierName: string | null): Promise<{ error: string | null }> {
+  const svc = createServiceRoleClient();
+  let { error } = await (svc.from('procurement_line_items') as any)
+    .update({ supplier_id: supplierId, supplier_name: supplierName, updated_at: new Date().toISOString() })
+    .eq('purchase_order_id', poId);
+  if (error && /supplier_id_fkey|foreign key/i.test(error.message || '')) {
+    ({ error } = await (svc.from('procurement_line_items') as any)
+      .update({ supplier_name: supplierName, updated_at: new Date().toISOString() })
+      .eq('purchase_order_id', poId));
+  }
+  return { error: error ? error.message : null };
+}

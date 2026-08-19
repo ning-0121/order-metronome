@@ -243,18 +243,20 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
   if (!roles.some((r) => CAN_PLACE.includes(r) || CAN_CREATE.includes(r))) return { error: '无权修改供应商' };
   if (!supplierId) return { error: '请选择供应商' };
 
-  const svc = createServiceRoleClient();
-  const { data: po } = await (svc.from('purchase_orders') as any)
-    .select('id, po_no, status, approval_status, supplier_id').eq('id', poId).maybeSingle();
+  const { readTradePoForSupplierChange, readSupplierName, syncPoLinesSupplier } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { po, error: poErr } = await readTradePoForSupplierChange(poId);
+  if (poErr) return { error: poErr };
   if (!po) return { error: '采购单不存在' };
-  if ((po as any).status !== 'draft') return { error: '仅草稿状态可改供应商;已下达的单请删除重建或走退货' };
-  if ((po as any).supplier_id === supplierId) return { ok: true };
+  if (po.status !== 'draft') return { error: '仅草稿状态可改供应商;已下达的单请删除重建或走退货' };
+  if (po.supplierId === supplierId) return { ok: true };
 
-  const { data: sup } = await (svc.from('suppliers') as any).select('id, name').eq('id', supplierId).maybeSingle();
-  if (!sup) return { error: '供应商不存在,请先在「供应商」里创建' };
-  const supplierName = (sup as any).name || null;
+  const supRead = await readSupplierName(supplierId);
+  if (supRead.error) return { error: supRead.error };
+  if (!supRead.exists) return { error: '供应商不存在,请先在「供应商」里创建' };
+  const supplierName = supRead.name;
 
-  const wasPending = (po as any).approval_status === 'pending';
+  const svc = createServiceRoleClient();
+  const wasPending = po.approvalStatus === 'pending';
   // 高危写走 safeMutation(lint:writes):断言恰好 1 行生效 —— CAS(status='draft')没命中
   // (并发已下达/单不存在)时要报错,而不是静默 0 行让人以为改成功了。
   const { safeMutation } = await import('@/lib/db/safe-mutation');
@@ -270,15 +272,8 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
   if (!(w as any).ok) return { error: `供应商修改未生效(${(w as any).status}):${(w as any).error || '可能已被下达'}` };
 
   // 行同步:本单全部执行行(供应商真相单头/行两处都有读者,不同步会出现单头新行旧)
-  let { error: liErr } = await (svc.from('procurement_line_items') as any)
-    .update({ supplier_id: supplierId, supplier_name: supplierName, updated_at: new Date().toISOString() })
-    .eq('purchase_order_id', poId);
-  if (liErr && /supplier_id_fkey|foreign key/i.test(liErr.message || '')) {
-    ({ error: liErr } = await (svc.from('procurement_line_items') as any)
-      .update({ supplier_name: supplierName, updated_at: new Date().toISOString() })
-      .eq('purchase_order_id', poId));
-  }
-  if (liErr) return { error: '单头已改,但执行行供应商同步失败:' + liErr.message };
+  const liSync = await syncPoLinesSupplier(poId, supplierId, supplierName);
+  if (liSync.error) return { error: '单头已改,但执行行供应商同步失败:' + liSync.error };
 
   try {
     const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
@@ -288,7 +283,7 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
       entity: { entityType: 'purchase_order', entityId: poId, orderId },
       commandName: 'changeTradePoSupplier',
       reason: wasPending ? '草稿改供应商;原财务审批作废,下达时重新评估' : '草稿改供应商',
-      beforeState: { supplier_id: (po as any).supplier_id },
+      beforeState: { supplier_id: po.supplierId },
       afterState: { supplier_id: supplierId, supplier_name: supplierName },
     } as any);
   } catch { /* 审计失败不回滚业务改动 */ }
