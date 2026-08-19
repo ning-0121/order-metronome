@@ -260,7 +260,7 @@ export default async function DashboardPage() {
   // ⚠️ 不对称(已知,留待后续):policy 在滚动口径下可能把 due_at 尚未到期的节点判为逾期,
   //    而本页的候选集来自 SQL `due_at < 今天`,这类节点进不了候选集,驾驶舱有、这里没有。
   //    要完全对齐需放弃 SQL 预过滤、改拉在办单全量节点,那是性能取舍,单独评估。
-  const { isMilestoneOverdue, deriveStaleOrderIds } = await import('@/lib/domain/overdue-policy');
+  const { isMilestoneOverdue, deriveStaleOrderIds, evaluateOverdue: evaluateOverdueReason } = await import('@/lib/domain/overdue-policy');
   const overdueOrderById = new Map<string, any>();
   for (const m of (allOverdueMilestones || []) as any[]) if (m.orders) overdueOrderById.set(m.order_id, m.orders);
   const staleOrderIdsForOverdue = deriveStaleOrderIds(
@@ -327,6 +327,16 @@ export default async function DashboardPage() {
         if (PM_OR_FINANCE_STEPS.includes(m.step_key) && !isPmUser && !isFinanceUser) return false;
         return true;
       });
+  // 被统一口径豁免掉的节点 —— **不让它们凭空消失**。
+  // 2026-05-06 那次「排除 blocked」出事(block-and-forget)的教训就是:排掉之后没人再看见,
+  // 真正的问题永远不解决。所以这里把豁免项收集起来单独列出并写明原因,
+  // 责任人能分清「系统判定还没轮到我」和「我自己漏看了」。
+  const exemptedOverdue = filteredOverdue
+    .filter((m: any) => !hasPendingDelay(m) && !isBlockedMs(m) && !countsAsOverdue(m))
+    .filter((m: any) => isAdmin || m.owner_user_id === user.id || myOrderIds.has(m.order_id))
+    .map((m: any) => ({ milestone: m, reason: evaluateOverdueReason(m, overduePolicyCtx) }))
+    .filter((x: any) => x.reason === 'WAITING_PREREQ' || x.reason === 'ORDER_STALE');
+
   const othersOverdue = (isAdmin
     ? filteredOverdue
     : filteredOverdue.filter((m: any) =>
@@ -747,6 +757,44 @@ export default async function DashboardPage() {
       )}
 
       {/* ⚠️ 他人逾期 - 可催促 */}
+      {exemptedOverdue.length > 0 && (
+        <details className="section mb-6">
+          <summary className="cursor-pointer list-none flex items-center gap-3">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100">
+              <span className="text-slate-500">🗂️</span>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-700">
+                已过期但不计入你的逾期 · {exemptedOverdue.length}
+              </h2>
+              <p className="text-sm text-gray-500">
+                这些节点确实过了截止日，但系统判定现在不该压在你头上 —— 点开看原因
+              </p>
+            </div>
+          </summary>
+          <div className="mt-4 space-y-2">
+            {exemptedOverdue.map(({ milestone, reason }: any) => (
+              <div key={milestone.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <span className="font-mono text-xs text-gray-500">
+                  {milestone.orders?.internal_order_no || milestone.orders?.order_no || '—'}
+                </span>
+                <span className="font-medium text-gray-800">{milestone.name}</span>
+                <span className="text-xs text-gray-400">
+                  {ROLE_LABELS[milestone.owner_role] || milestone.owner_role}
+                </span>
+                <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600">
+                  {reason === 'WAITING_PREREQ' ? '前置未完成 · 还没轮到你' : '待收尾单 · 出厂日已过且长期无人推进'}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-gray-400">
+            「还没轮到你」= 上游节点没做完，按滚动排期你的开始时间自动顺延；
+            「待收尾单」= 货多半已出、只是没人回来维护节拍器，去订单页点「确认整单已出货」即可收尾。
+          </p>
+        </details>
+      )}
+
       {othersOverdue.length > 0 && (
         <div className="section mb-6">
           <div className="flex items-center gap-3 mb-4">
