@@ -32,7 +32,7 @@ export interface TradeBulkLine { id: string; style_no: string | null; color: str
 /** 经销单大货采购面板数据:成品款行 + 已建大货采购单 + 供应商 + 权限。 */
 export async function getTradeBulkData(orderId: string): Promise<{
   isTrade?: boolean; lines?: TradeBulkLine[]; pos?: any[]; suppliers?: any[];
-  canCreate?: boolean; canPlace?: boolean; canCost?: boolean; costTotal?: number; error?: string;
+  canCreate?: boolean; canPlace?: boolean; canCost?: boolean; canApproveSupplierChange?: boolean; costTotal?: number; error?: string;
 }> {
   const { supabase, user, roles } = await auth();
   if (!user) return { error: '请先登录' };
@@ -68,7 +68,7 @@ export async function getTradeBulkData(orderId: string): Promise<{
   // 直查本单大货采购单;total_amount(采购花费)对非成本可见角色剥离
   const svc = createServiceRoleClient();
   const { data: pos } = await (svc.from('purchase_orders') as any)
-    .select('id, po_no, status, approval_status, total_amount, order_proof_paths, supplier_id, suppliers(name)')
+    .select('id, po_no, status, approval_status, total_amount, order_proof_paths, supplier_id, suppliers(name), supplier_change_status, supplier_change_to, supplier_change_to_name, supplier_change_reason, supplier_change_requested_at')
     .contains('order_ids', [orderId]).order('created_at', { ascending: false });
   const posOut = ((pos || []) as any[]).map((p) => ({ ...p, total_amount: canCost ? p.total_amount : null, supplier_name: p.suppliers?.name || null }));
   const suppliers = roles.some((r) => CAN_CREATE.includes(r)) ? (await listSuppliers()).data || [] : [];
@@ -80,6 +80,7 @@ export async function getTradeBulkData(orderId: string): Promise<{
     canCreate: roles.some((r) => CAN_CREATE.includes(r)),
     canPlace: roles.some((r) => CAN_PLACE.includes(r)),
     canCost,   // 能看进价的角色(采购/财务/admin)→ 大货采购页可直接录进价
+    canApproveSupplierChange: roles.some((r) => ['admin', 'finance'].includes(r)), // 财务/管理员就地审批改供应商申请
   };
 }
 
@@ -289,7 +290,136 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
   } catch { /* 审计失败不回滚业务改动 */ }
 
   revalidatePath(`/orders/${orderId}`);
-  return { ok: true, supplierName };
+  return { ok: true, supplierName: supplierName ?? undefined };
+}
+
+/**
+ * 已下单/已付款采购单改供应商 = 发起申请,走财务审批(2026-08-19 CEO)。
+ * 草稿单不进这里(走 changeTradePoSupplier 直改);非草稿单只写 pending + 目标供应商,
+ * 不立即改单 —— 钱可能已打给原供应商,由财务审批时判断是否放行 + 线下对账/追款。
+ * 原因必填(为什么要改;通常是"提交时选错供应商")。
+ */
+export async function requestTradePoSupplierChange(
+  orderId: string, poId: string, supplierId: string, reason: string,
+): Promise<{ ok?: boolean; error?: string; supplierName?: string }> {
+  const { user, roles } = await auth();
+  if (!user) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PLACE.includes(r) || CAN_CREATE.includes(r))) return { error: '无权申请改供应商' };
+  if (!supplierId) return { error: '请选择目标供应商' };
+  if (!reason || !reason.trim()) return { error: '请填写改供应商原因(已下单的单需财务核对付款,原因必填)' };
+
+  const { readPoSupplierChange, writePoSupplierChangeRequest, readSupplierName } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { po, error: poErr } = await readPoSupplierChange(poId);
+  if (poErr) return { error: poErr };
+  if (!po) return { error: '采购单不存在' };
+  if (po.status === 'draft') return { error: '草稿单请直接改供应商,无需申请' };
+  if (po.supplierId === supplierId) return { error: '目标供应商与当前相同' };
+  if (po.changeStatus === 'pending') return { error: '该单已有待审批的改供应商申请' };
+
+  const supRead = await readSupplierName(supplierId);
+  if (supRead.error) return { error: supRead.error };
+  if (!supRead.exists) return { error: '目标供应商不存在,请先在「供应商」里创建' };
+  const supplierName = supRead.name;
+
+  const w = await writePoSupplierChangeRequest({
+    poId, toSupplierId: supplierId, toSupplierName: supplierName,
+    fromSupplierId: po.supplierId, reason: reason.trim(), requestedBy: user.id,
+  });
+  if (!w.ok) return { error: w.error || '申请提交失败' };
+
+  // 通知财务审批(统一入口,内部走 service-role)
+  try {
+    const svc = createServiceRoleClient();
+    const { notifyUsersByRole } = await import('@/lib/utils/notifications');
+    const ref = po.poNo || poId.slice(0, 8);
+    await notifyUsersByRole(svc, ['finance', 'admin'], {
+      type: 'po_supplier_change', title: `🔀 采购单改供应商待审批:${ref}`,
+      message: `${ref} 申请把供应商改为「${supplierName || '?'}」。原因:${reason.trim()}。该单已下达,请核对付款后审批。`,
+      relatedOrderId: orderId,
+    });
+  } catch (e: any) { console.warn('[requestTradePoSupplierChange] 通知财务失败(不阻断):', e?.message); }
+
+  try {
+    const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
+    await writeAuditEvent({
+      eventType: 'trade_po_supplier_change_requested', level: 'A2', riskLevel: 'money',
+      actor: { actorType: 'user', actorId: user.id },
+      entity: { entityType: 'purchase_order', entityId: poId, orderId },
+      commandName: 'requestTradePoSupplierChange',
+      reason: reason.trim(),
+      beforeState: { supplier_id: po.supplierId, status: po.status },
+      afterState: { supplier_change_to: supplierId, supplier_change_status: 'pending' },
+    } as any);
+  } catch { /* 审计失败不回滚 */ }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, supplierName: supplierName ?? undefined };
+}
+
+/**
+ * 财务审批改供应商申请(批准 → 套用新供应商;驳回 → 保留原供应商)。仅财务/管理员。
+ * 批准只改系统记录 + 同步执行行 + 审计;真实付款的追回/改付由财务线下处理(系统不动钱)。
+ */
+export async function decideTradePoSupplierChange(
+  poId: string, decision: 'approved' | 'rejected', note?: string,
+): Promise<{ ok?: boolean; error?: string }> {
+  const { user, roles } = await auth();
+  if (!user) return { error: '请先登录' };
+  if (!roles.some((r) => ['admin', 'finance'].includes(r))) return { error: '仅财务/管理员可审批改供应商' };
+
+  const { readPoSupplierChange, applyPoSupplierChange, rejectPoSupplierChange } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { po, error: poErr } = await readPoSupplierChange(poId);
+  if (poErr) return { error: poErr };
+  if (!po) return { error: '采购单不存在' };
+  if (po.changeStatus !== 'pending') return { error: '该单没有待审批的改供应商申请(可能已被处理)' };
+  const orderId = po.orderIds[0] || '';
+
+  if (decision === 'rejected') {
+    const r = await rejectPoSupplierChange({ poId, decidedBy: user.id, note: note || null });
+    if (!r.ok) return { error: r.error || '驳回失败' };
+  } else {
+    if (!po.changeTo) return { error: '申请缺目标供应商,无法批准' };
+    const r = await applyPoSupplierChange({ poId, toSupplierId: po.changeTo, toSupplierName: po.changeToName, decidedBy: user.id, note: note || null });
+    if (!r.ok) return { error: r.error || '批准失败' };
+    if (r.error) { /* 供应商已改但行同步失败,已在 error 提示 */ return { error: r.error }; }
+  }
+
+  // 通知申请人结果
+  try {
+    const svc = createServiceRoleClient();
+    if (po.requestedBy) {
+      const { insertNotifications } = await import('@/lib/utils/notifications');
+      const ref = po.poNo || poId.slice(0, 8);
+      await insertNotifications([{
+        user_id: po.requestedBy, type: 'po_supplier_change_decided',
+        title: decision === 'approved' ? `✅ 改供应商已批准:${ref}` : `❌ 改供应商被驳回:${ref}`,
+        message: decision === 'approved'
+          ? `${ref} 供应商已改为「${po.changeToName || '?'}」。若该单已付款,请与财务确认款项归属。`
+          : `${ref} 改供应商申请被驳回。${note ? '原因:' + note : ''}`,
+        related_order_id: orderId || null,
+      }]);
+    }
+  } catch (e: any) { console.warn('[decideTradePoSupplierChange] 通知申请人失败(不阻断):', e?.message); }
+
+  try {
+    const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
+    await writeAuditEvent({
+      eventType: decision === 'approved' ? 'trade_po_supplier_change_approved' : 'trade_po_supplier_change_rejected',
+      level: 'A2', riskLevel: 'money',
+      actor: { actorType: 'user', actorId: user.id },
+      entity: { entityType: 'purchase_order', entityId: poId, orderId },
+      commandName: 'decideTradePoSupplierChange',
+      reason: note || (decision === 'approved' ? '财务批准改供应商' : '财务驳回改供应商'),
+      beforeState: { supplier_id: po.supplierId, supplier_change_status: 'pending' },
+      afterState: decision === 'approved'
+        ? { supplier_id: po.changeTo, supplier_change_status: 'approved' }
+        : { supplier_id: po.supplierId, supplier_change_status: 'rejected' },
+    } as any);
+  } catch { /* 审计失败不回滚 */ }
+
+  if (orderId) revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/admin/pending-approvals`);
+  return { ok: true };
 }
 
 /** 上传大货采购单的下单凭证(给供应商的下单截图/回单),下达前必传。base64 上传到 order-docs → 存路径。 */

@@ -258,6 +258,7 @@
     "FIX_milestone_logs_order_id.sql",
     "FIX_milestones_notes.sql",
     "FIX_user_role_enum.sql",
-    "FIX_user_role_enum_final.sql"
+    "FIX_user_role_enum_final.sql",
+    "ADD_po_supplier_change_request.sql"
   ]
 }
