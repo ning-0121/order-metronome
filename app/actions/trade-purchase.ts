@@ -38,8 +38,17 @@ export async function getTradeBulkData(orderId: string): Promise<{
   if (!user) return { error: '请先登录' };
 
   // 订单级访问控制 + 成本/售价红线(P0 审计 2026-07-24:原来任何登录人可拉任意经销单的进价+客户售价)
+  //
+  // 2026-08-19:采购角色单列放行 —— 经销单的「供应商下单」责任人就是采购,她必须能看到并下达
+  // 这张大货采购单;但纯 procurement **不在 CAN_VIEW_ALL_ORDERS**(那是订单可见性组,
+  // 只含 procurement_manager),canUserAccessOrder 会直接拒,采购在自己的核料工作台上
+  // 连自己该干的活都看不到。放行是安全的:本 action 只返回大货采购数据,且价格按
+  // canCost(采购/财务可见进价)/canSale(仅财务口径可见客户售价)分级,采购拿不到客户售价。
   const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
-  if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权查看此订单' };
+  const isProcurementRole = roles.some((r) => ['procurement', 'procurement_manager'].includes(r));
+  if (!isProcurementRole && !(await canUserAccessOrder(supabase, user.id, orderId))) {
+    return { error: '无权查看此订单' };
+  }
   const { hasRoleInGroup } = await import('@/lib/domain/roles');
   const canCost = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR') || hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS'); // 采购/财务可见进价
   const canSale = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');   // 客户售价仅财务口径可见

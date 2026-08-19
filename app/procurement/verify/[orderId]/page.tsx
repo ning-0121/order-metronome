@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { requireProcurementPage } from '@/lib/utils/procurement-page-guard';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
+import { TradeBulkPurchaseTab } from '@/components/tabs/TradeBulkPurchaseTab';
 import { MoDownloadButton } from './MoDownloadButton';
 import { deriveOrderQuantityContext, formatQuantityDisplay } from '@/lib/domain/quantity-engine';
 
@@ -18,10 +19,11 @@ export default async function ProcurementVerifyPage({ params, searchParams }: { 
 
   const supabase = await createClient();
   const { data: order } = await (supabase.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, customer_name, style_no, quantity, etd, factory_date, order_date, lifecycle_status')
+    .select('id, order_no, internal_order_no, po_number, customer_name, style_no, quantity, quantity_unit, order_purpose, etd, factory_date, order_date, lifecycle_status')
     .eq('id', orderId).maybeSingle();
   if (!order) notFound();
 
+  const isTrade = (order.order_purpose || 'production') === 'trade';
   const fmt = (d: any) => (d ? String(d).slice(0, 10) : '—');
   const headItems: Array<[string, any]> = [
     ['客户', order.customer_name],
@@ -42,20 +44,31 @@ export default async function ProcurementVerifyPage({ params, searchParams }: { 
         <div>
           <Link href="/procurement" className="text-sm text-indigo-600 hover:underline">← 采购中心</Link>
           <h1 className="text-2xl font-bold text-gray-900 mt-1">
-            🛒 核料 · {order.internal_order_no ? `${order.internal_order_no} | ` : ''}{order.order_no}
+            🛒 {isTrade ? '大货采购' : '核料'} · {order.internal_order_no ? `${order.internal_order_no} | ` : ''}{order.order_no}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
             {headItems.filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(' · ')}
           </p>
         </div>
-        <MoDownloadButton orderId={order.id} orderNo={order.order_no} />
+        {!isTrade && <MoDownloadButton orderId={order.id} orderNo={order.order_no} />}
       </div>
 
-      {/* 订单信息只读;采购的工作面 = 核料确认。带 ?item= 时聚焦到那一款料 */}
-      <ProcurementItemsTab orderId={order.id} focusItemId={focusItemId} internalOrderNo={order.internal_order_no} />
+      {/* 经销单(trade)买的是成品,**没有原辅料、永远不会有 MRP 需求** ——
+          再渲染原辅料核料只会显示「暂无采购核料项 · 需先提交采购跑出 MRP」,
+          把采购引到一个永远满足不了的条件上(2026-08-19 实测 613/QM-20260817-017:
+          materials_bom 0 行、procurement_items 0 行)。经销单换成大货采购面板:
+          采购在自己的工作台就能建/下达大货采购单,下达后「供应商下单」节点自动完成。 */}
+      {isTrade ? (
+        <TradeBulkPurchaseTab orderId={order.id} />
+      ) : (
+        /* 订单信息只读;采购的工作面 = 核料确认。带 ?item= 时聚焦到那一款料 */
+        <ProcurementItemsTab orderId={order.id} focusItemId={focusItemId} internalOrderNo={order.internal_order_no} />
+      )}
 
       <p className="text-[11px] text-gray-400">
-        本页为采购专用工作台:订单资料只读,核料/确认/补采购在此完成;生产任务单点右上下载。订单内容有误请联系业务执行修改。
+        {isTrade
+          ? '本页为采购专用工作台:经销单买成品、无原辅料采购,这里完成大货采购单的建单/下达;下达后「供应商下单」节点自动完成。订单内容有误请联系业务执行修改。'
+          : '本页为采购专用工作台:订单资料只读,核料/确认/补采购在此完成;生产任务单点右上下载。订单内容有误请联系业务执行修改。'}
       </p>
     </div>
   );
