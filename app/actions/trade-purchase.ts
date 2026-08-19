@@ -265,7 +265,10 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
     client: svc, table: 'purchase_orders', operation: 'update',
     payload: {
       supplier_id: supplierId,
-      ...(wasPending ? { approval_status: null, approval_reasons: null } : {}),
+      // 作废原审批 = 回到「未申请」:approval_status 列 NOT NULL DEFAULT 'not_required'
+      // (CHECK: not_required/pending/approved/rejected)。写 null 会 23502 整条更新失败
+      // ——2026-08-19 业务实测「供应商修改未生效(db_error)」即此。下达时按新供应商重新评估审批。
+      ...(wasPending ? { approval_status: 'not_required', approval_reasons: null } : {}),
       updated_at: new Date().toISOString(),
     },
     predicate: { id: poId, status: 'draft' },   // CAS:防并发下达后被改
