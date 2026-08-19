@@ -135,9 +135,7 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
     }
   }
 
-  const isOverdue = (mm: any) => !!mm.due_at && new Date(mm.due_at).getTime() < now
-    && !pendingDelayMs.has(mm.id)
-    && !staleOrderIds.has(mm.order_id);   // 待收尾单不计入预警,另立一栏
+  // (原 isOverdue 局部实现已删 —— 判定收口到 lib/domain/overdue-policy,见下方 nodeOverdue)
   const byOrder = new Map<string, { count: number; maxDays: number }>();
   for (const d of ((pendingDelays || []) as any[])) {
     const cur = byOrder.get(d.order_id) || { count: 0, maxDays: 0 };
@@ -167,16 +165,20 @@ export async function getCeoCockpit(supabase: any, ctx: { userId: string; roles:
       for (const [k, v] of deriveRollingSchedule(list, { isV3, orderStartMs, nowMs: now })) rollSched.set(`${oid}:${k}`, v);
     }
   }
-  // 逾期判定:flag on 走滚动(仍叠加延期待批/待收尾豁免);否则老锚点口径。
-  const nodeOverdue = (mm: any): boolean => {
-    if (pendingDelayMs.has(mm.id) || staleOrderIds.has(mm.order_id)) return false;
-    if (useRolling) return rollSched.get(`${mm.order_id}:${mm.step_key}`)?.overdue ?? false;
-    return isOverdue(mm);
+  // 逾期判定 —— 收口到 lib/domain/overdue-policy(全站唯一口径,2026-08-19)。
+  // 此前这里、工作台、归属层各有一套,同一批单三个答案(实测 217 / 107 / 第三套)。
+  // 行为不变:本文件原来就叠了 延期待批 + 待收尾 + 滚动,policy 只是把它们收成一份共享实现。
+  // 注:milestones 已在上面按 order_purpose!=='sample' 过滤过,故此处不再传 excludeSampleOrders。
+  const { isMilestoneOverdue, overdueDays: overdueDaysOf } = await import('@/lib/domain/overdue-policy');
+  const overduePolicyCtx = {
+    nowMs: now,
+    orderById: orderById as any,
+    pendingDelayMilestoneIds: pendingDelayMs,
+    staleOrderIds,
+    rollingSchedule: useRolling ? (rollSched as any) : null,
   };
-  const overdueDays = (mm: any): number => {
-    if (useRolling) { const rd = rollSched.get(`${mm.order_id}:${mm.step_key}`)?.rollingDue; return rd ? Math.max(0, Math.floor((now - rd.getTime()) / 86400000)) : 0; }
-    return mm.due_at ? Math.max(0, Math.floor((now - new Date(mm.due_at).getTime()) / 86400000)) : 0;
-  };
+  const nodeOverdue = (mm: any): boolean => isMilestoneOverdue(mm, overduePolicyCtx);
+  const overdueDays = (mm: any): number => overdueDaysOf(mm, overduePolicyCtx);
 
   // ── B:五部门健康/异常(每部门收集逾期订单清单,供点开看详情)──
   const deptAgg: Record<string, { active: number; overdue: number; blocked: number; pendingDelay: number }> = {};
