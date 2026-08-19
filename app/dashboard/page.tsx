@@ -161,7 +161,9 @@ export default async function DashboardPage() {
     //   → 真正问题永远不解决。现在 blocked 节点保留在逾期列表里（仅 done 排除），
     //   SLA 继续累计，UI 上分到「卡住中」桶，blocked_reason 自动催 upstream。
     (supabase.from('milestones') as any)
-      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no, lifecycle_status, owner_user_id, created_by)`)
+      // factory_date / created_at / order_purpose:给统一逾期口径(lib/domain/overdue-policy)用
+      //   —— 待收尾豁免要出厂日,滚动排期要建单日,打样口径要用途。加在已有 join 里,零额外查询。
+      .select(`*, orders!inner (id, order_no, customer_name, internal_order_no, lifecycle_status, owner_user_id, created_by, factory_date, created_at, order_purpose)`)
       .lt('due_at', `${today}T00:00:00`)
       .not('status', 'in', '("done","已完成","completed")')
       // 复审性能:排除已终结订单的残留逾期节点;2026-07-28 CEO 质疑逾期数虚高 → 再排 草稿/待审批/暂停(非活跃订单不产生逾期)
@@ -249,6 +251,49 @@ export default async function DashboardPage() {
   // approved 不剔:批准会顺延 due_at,仍留在逾期列表的 = 顺延后又过期,属真逾期,照常显示。
   const hasPendingDelay = (m: any) => isApprovalPending(delayRequestMap[m.id]);
 
+  // ── 统一逾期口径(2026-08-19)────────────────────────────────────────
+  // 此前本页与 CEO 驾驶舱各算各的:同一批单这里 217、那里 107,差 51%,而且方向是反的
+  // —— 一线被 217 个红点追着,其中 108 个按滚动排期根本还没轮到他做。
+  // 现在两处共用 lib/domain/overdue-policy。本页在 SQL 候选集(due_at 已过)之上再套 policy,
+  // 增量豁免是「待收尾单」与「滚动排期 waiting」两层(延期待批/卡单本页原本就已剔除)。
+  //
+  // ⚠️ 不对称(已知,留待后续):policy 在滚动口径下可能把 due_at 尚未到期的节点判为逾期,
+  //    而本页的候选集来自 SQL `due_at < 今天`,这类节点进不了候选集,驾驶舱有、这里没有。
+  //    要完全对齐需放弃 SQL 预过滤、改拉在办单全量节点,那是性能取舍,单独评估。
+  const { isMilestoneOverdue, deriveStaleOrderIds } = await import('@/lib/domain/overdue-policy');
+  const overdueOrderById = new Map<string, any>();
+  for (const m of (allOverdueMilestones || []) as any[]) if (m.orders) overdueOrderById.set(m.order_id, m.orders);
+  const staleOrderIdsForOverdue = deriveStaleOrderIds(
+    [...overdueOrderById.entries()].map(([id, o]) => ({ id, factory_date: o?.factory_date ?? null })),
+    (attributionMilestones || []) as any[],
+    Date.now(),
+  );
+  const rollingForOverdue = await (async () => {
+    const { rollingScheduleActive } = await import('@/lib/engine/featureFlags');
+    if (!rollingScheduleActive(isAdmin)) return null;
+    const { deriveRollingSchedule } = await import('@/lib/schedule/rollingSchedule');
+    const { V3_SIGNATURE_STEPS } = await import('@/lib/milestoneTemplate');
+    const out = new Map<string, any>();
+    for (const [oid, list] of msByOrderForAttribution) {
+      const o = overdueOrderById.get(oid);
+      const isV3 = list.some((x: any) => (V3_SIGNATURE_STEPS as readonly string[]).includes(x.step_key));
+      const startMs = o?.created_at ? new Date(o.created_at).getTime() : Date.now();
+      for (const [k, v] of deriveRollingSchedule(list as any, { isV3, orderStartMs: startMs, nowMs: Date.now() })) {
+        out.set(`${oid}:${k}`, v);
+      }
+    }
+    return out;
+  })();
+  const overduePolicyCtx = {
+    nowMs: Date.now(),
+    orderById: overdueOrderById,
+    pendingDelayMilestoneIds: new Set(Object.keys(delayRequestMap).filter((id) => isApprovalPending(delayRequestMap[id]))),
+    staleOrderIds: staleOrderIdsForOverdue,
+    rollingSchedule: rollingForOverdue,
+  };
+  /** 统一口径下是否算逾期(候选集已保证 due_at 已过)。 */
+  const countsAsOverdue = (m: any) => isMilestoneOverdue(m, overduePolicyCtx);
+
   // 我的逾期 = owner_user_id 严格等于当前用户
   // 他人逾期 = 我参与的订单里、不是我的（admin 看全局）
   // ⚠️ 2026-05-15：用 STRICTLY_PM_STEPS / PM_OR_FINANCE_STEPS 精细化过滤
@@ -275,6 +320,7 @@ export default async function DashboardPage() {
         if (m.owner_user_id !== user.id) return false;
         if (hasPendingDelay(m)) return false;   // 已申请延期(待批)→ 不算逾期
         if (isBlockedMs(m)) return false;       // 卡单 → 归「阻塞中」桶,不重复计逾期
+        if (!countsAsOverdue(m)) return false;  // 统一口径:待收尾单/滚动排期 waiting 不算他逾期
         // STRICTLY PM 节点：非 PM 不算我的
         if (STRICTLY_PM_STEPS.includes(m.step_key) && !isPmUser) return false;
         // PM 或财务节点：非 PM 且非财务不算我的
@@ -285,7 +331,7 @@ export default async function DashboardPage() {
     ? filteredOverdue
     : filteredOverdue.filter((m: any) =>
         myOrderIds.has(m.order_id) && m.owner_user_id !== user.id
-      )).filter((m: any) => !hasPendingDelay(m) && !isBlockedMs(m));   // 已申请延期/卡单 → 不算逾期
+      )).filter((m: any) => !hasPendingDelay(m) && !isBlockedMs(m) && countsAsOverdue(m));   // 已申请延期/卡单/统一口径豁免 → 不算逾期
 
   // ── 三层个人视图(Overdue Attribution V1)────────────────────────────
   // ① 我的待处理  owner=我 且现在真能动   → **唯一**可计入个人 KPI
