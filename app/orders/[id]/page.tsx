@@ -259,7 +259,14 @@ export default async function OrderDetailPage({
   })();
 
   const merchandiserName = followUpOwnerName('merchandiser');   // 理单跟单
-  const productionFollowName = followUpOwnerName('production');  // 生产跟单
+  // 生产跟单:优先看生产节点上的人;旧模板单没有生产节点 → 回落到订单级 production_owner_user_id
+  // (2026-08-15 B 方案。两处口径必须一致,否则会出现「派成功了但页面不显示」。)
+  const prodOwnerFallback = (orderData as any).production_owner_user_id
+    ? ((milestones as any[] | null)?.find((x: any) => x.owner_user_id === (orderData as any).production_owner_user_id && x.owner_user)?.owner_user)
+    : null;
+  const productionFollowName = followUpOwnerName('production')
+    ?? (prodOwnerFallback ? (prodOwnerFallback.name || prodOwnerFallback.email || null) : null)
+    ?? ((orderData as any).production_owner_user_id ? '已指派(刷新后显示姓名)' : null);
 
   // 执行评分
   const { data: commissions } = await getOrderCommissions(id);
