@@ -51,7 +51,8 @@ export type ApprovalCategory =
   | 'agent_action'    // Agent 待执行动作
   | 'order_confirm'   // 订单确认模块（面料/颜色/印花/包装）
   | 'payment_hold'    // 付款冻结
-  | 'po_approval';    // 采购单审批(2026-08-18:此前 PO 审批不在待审批中心,财务/采购经理看不见 → 反复"审批不达")
+  | 'po_approval'     // 采购单审批(2026-08-18:此前 PO 审批不在待审批中心,财务/采购经理看不见 → 反复"审批不达")
+  | 'supplement';     // 补采购财务审批(2026-08-18:同一个洞的第二个实例 —— 批准入口只藏在核料页)
 
 export interface PendingApprovalItem {
   id: string;
@@ -461,6 +462,7 @@ export async function getPendingApprovals(
       paymentHolds,
       confirmations,
       poApprovals,
+      supplements,
     ] = await Promise.all([
       collectDelayRequests(supabase, ctx).catch(e => { console.warn('[pending-approvals] delays failed:', e?.message); return []; }),
       collectAmendments(supabase, ctx).catch(e => { console.warn('[pending-approvals] amendments failed:', e?.message); return []; }),
@@ -471,10 +473,11 @@ export async function getPendingApprovals(
       collectPaymentHolds(supabase, ctx).catch(e => { console.warn('[pending-approvals] hold failed:', e?.message); return []; }),
       collectOrderConfirmations(supabase, ctx).catch(e => { console.warn('[pending-approvals] confirm failed:', e?.message); return []; }),
       collectPoApprovals(ctx).catch(e => { console.warn('[pending-approvals] po failed:', e?.message); return []; }),
+      collectSupplementApprovals(ctx).catch(e => { console.warn('[pending-approvals] supplement failed:', e?.message); return []; }),
     ]);
 
     const allItems = [
-      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals,
+      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals, ...supplements,
     ];
 
     // 按 ageDays 倒序（卡得越久越靠前）
@@ -490,6 +493,7 @@ export async function getPendingApprovals(
       payment_hold:  paymentHolds.length,
       order_confirm: confirmations.length,
       po_approval:   poApprovals.length,
+      supplement:    supplements.length,
     };
 
     const actionableCount = allItems.filter(i => i.actionable).length;
@@ -557,6 +561,28 @@ async function collectPoApprovals(ctx: UserContext): Promise<PendingApprovalItem
   });
 }
 
+async function collectSupplementApprovals(ctx: UserContext): Promise<PendingApprovalItem[]> {
+  // 可见性红线同 po_approval:补采购含数量/物料,只给审批相关角色
+  if (!hasAnyRole(ctx.roles, ['admin', 'finance', 'procurement', 'procurement_manager'])) return [];
+  const { listPendingSupplementItems } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { data: items, error } = await listPendingSupplementItems();
+  if (error) { console.warn('[collectSupplementApprovals] failed:', error); return []; }
+  // approveSupplement 的权限是 财务/管理员(FINANCE_ROLES)
+  const actionable = hasAnyRole(ctx.roles, ['admin', 'finance']);
+  return items.map((it) => ({
+    id: it.id,
+    category: 'supplement' as ApprovalCategory,
+    title: `补采购待财务批:${it.materialName || '?'}${it.color ? ' · ' + it.color : ''}${it.qty != null ? ` ${it.qty}${it.unit || ''}` : ''}`,
+    subtitle: [it.orderRef ? `订单 ${it.orderRef}` : null, it.reason].filter(Boolean).join(' · ') || undefined,
+    orderId: it.orderId,
+    orderNo: it.orderRef ?? undefined,
+    sourceUrl: `/procurement/verify/${it.orderId}`,
+    createdAt: it.createdAt,
+    ageDays: ageDaysFrom(it.createdAt),
+    actionable,
+  }));
+}
+
 export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: string; color: string }> = {
   delay:         { icon: '⏳',  label: '延期申请',           color: 'bg-amber-50 text-amber-700 border-amber-200' },
   amendment:     { icon: '🟣',  label: '订单修改申请',       color: 'bg-violet-50 text-violet-700 border-violet-200' },
@@ -567,4 +593,5 @@ export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: stri
   order_confirm: { icon: '📋',  label: '订单确认（4 模块）', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   payment_hold:  { icon: '💳',  label: '付款冻结',           color: 'bg-rose-50 text-rose-700 border-rose-200' },
   po_approval:   { icon: '🛒',  label: '采购单审批',         color: 'bg-orange-50 text-orange-700 border-orange-200' },
+  supplement:    { icon: '➕',  label: '补采购审批',         color: 'bg-amber-50 text-amber-700 border-amber-200' },
 };

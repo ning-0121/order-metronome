@@ -71,3 +71,52 @@ async function enrich(svc: any, rows: any[]): Promise<PendingApprovalPo[]> {
     firstOrderId: ((r.order_ids || []) as string[])[0] ?? null,
   }));
 }
+
+// ── 补采购审批读侧(2026-08-18,与 PO 审批同一个结构洞的第二个实例)──
+// 1022962 实锤:8 条补采购全部 finance_approval_status='pending',采购点「确认采购」
+// 被闸拦(正确),但财务的批准入口只藏在核料页 —— 待审批中心看不见,财务不知道要批。
+
+export interface PendingSupplementItem {
+  id: string;
+  orderId: string;
+  itemNo: string | null;
+  materialName: string | null;
+  color: string | null;
+  qty: number | null;
+  unit: string | null;
+  reason: string | null;
+  createdAt: string;
+  orderRef: string | null;
+}
+
+/** 全部待财务审批的补采购项。 */
+export async function listPendingSupplementItems(): Promise<{ data: PendingSupplementItem[]; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('procurement_items') as any)
+    .select('id, order_id, item_no, material_name, color, total_required_qty, unit, supplement_reason, supplement_requested_at, created_at')
+    .eq('is_supplement', true).eq('finance_approval_status', 'pending');
+  if (error) return { data: [], error: error.message };
+  const rows = (data || []) as any[];
+  const orderIds = [...new Set(rows.map((r) => r.order_id).filter(Boolean))];
+  const refById = new Map<string, string>();
+  if (orderIds.length > 0) {
+    const { data: ords } = await (svc.from('orders') as any)
+      .select('id, order_no, internal_order_no').in('id', orderIds);
+    for (const o of (ords || []) as any[]) refById.set(o.id, o.internal_order_no || o.order_no || '');
+  }
+  return {
+    data: rows.map((r) => ({
+      id: r.id,
+      orderId: r.order_id,
+      itemNo: r.item_no ?? null,
+      materialName: r.material_name ?? null,
+      color: r.color ?? null,
+      qty: r.total_required_qty != null ? Number(r.total_required_qty) : null,
+      unit: r.unit ?? null,
+      reason: r.supplement_reason ?? null,
+      createdAt: r.supplement_requested_at || r.created_at,
+      orderRef: refById.get(r.order_id) ?? null,
+    })),
+    error: null,
+  };
+}

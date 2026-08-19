@@ -1686,6 +1686,9 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
           </div>
 
           {/* 操作 */}
+          {/* 2026-08-18:msg 在这里再渲染一份 —— 此前只在页面顶部(:810),确认被闸拦时
+              (如「补采购待财务审批」)理由显示在一整屏之外,采购的体感就是「点了没反应」。 */}
+          {msg && <p className="text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{msg}</p>}
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button onClick={save} disabled={saving}
               className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">{saving ? '保存中…' : '保存'}</button>
