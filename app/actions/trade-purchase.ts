@@ -227,6 +227,69 @@ export async function createTradeBulkPurchaseOrder(orderId: string, input: {
   return { poId, poNo };
 }
 
+/**
+ * 修改草稿大货采购单的供应商(2026-08-19 CEO 要求)。
+ *
+ * 边界:
+ * · 仅 status='draft' 可改 —— 已下达的单供应商是既成商业事实,改走 删除重建/退货。
+ * · 若已提交财务前置审批(approval_status='pending'):供应商一变,财务批的对象就失效,
+ *   重置 approval_status=null,下达时按新供应商重新走审批(place 会重新评估)。
+ * · 单头 + 本单全部执行行的 supplier_id/supplier_name 同步改(供应商真相在两处都有读者)。
+ * · A2 审计留痕(money):改供应商 = 改钱要付给谁。
+ */
+export async function changeTradePoSupplier(orderId: string, poId: string, supplierId: string): Promise<{ ok?: boolean; error?: string; supplierName?: string }> {
+  const { user, roles } = await auth();
+  if (!user) return { error: '请先登录' };
+  if (!roles.some((r) => CAN_PLACE.includes(r) || CAN_CREATE.includes(r))) return { error: '无权修改供应商' };
+  if (!supplierId) return { error: '请选择供应商' };
+
+  const svc = createServiceRoleClient();
+  const { data: po } = await (svc.from('purchase_orders') as any)
+    .select('id, po_no, status, approval_status, supplier_id').eq('id', poId).maybeSingle();
+  if (!po) return { error: '采购单不存在' };
+  if ((po as any).status !== 'draft') return { error: '仅草稿状态可改供应商;已下达的单请删除重建或走退货' };
+  if ((po as any).supplier_id === supplierId) return { ok: true };
+
+  const { data: sup } = await (svc.from('suppliers') as any).select('id, name').eq('id', supplierId).maybeSingle();
+  if (!sup) return { error: '供应商不存在,请先在「供应商」里创建' };
+  const supplierName = (sup as any).name || null;
+
+  const wasPending = (po as any).approval_status === 'pending';
+  const { error: upErr } = await (svc.from('purchase_orders') as any).update({
+    supplier_id: supplierId,
+    ...(wasPending ? { approval_status: null, approval_reasons: null } : {}),
+    updated_at: new Date().toISOString(),
+  }).eq('id', poId).eq('status', 'draft');   // CAS:防并发下达后被改
+  if (upErr) return { error: upErr.message };
+
+  // 行同步:本单全部执行行(供应商真相单头/行两处都有读者,不同步会出现单头新行旧)
+  let { error: liErr } = await (svc.from('procurement_line_items') as any)
+    .update({ supplier_id: supplierId, supplier_name: supplierName, updated_at: new Date().toISOString() })
+    .eq('purchase_order_id', poId);
+  if (liErr && /supplier_id_fkey|foreign key/i.test(liErr.message || '')) {
+    ({ error: liErr } = await (svc.from('procurement_line_items') as any)
+      .update({ supplier_name: supplierName, updated_at: new Date().toISOString() })
+      .eq('purchase_order_id', poId));
+  }
+  if (liErr) return { error: '单头已改,但执行行供应商同步失败:' + liErr.message };
+
+  try {
+    const { writeAuditEvent } = await import('@/lib/audit/write-audit-event');
+    await writeAuditEvent({
+      eventType: 'trade_po_supplier_changed', level: 'A2', riskLevel: 'money',
+      actor: { actorType: 'user', actorId: user.id },
+      entity: { entityType: 'purchase_order', entityId: poId, orderId },
+      commandName: 'changeTradePoSupplier',
+      reason: wasPending ? '草稿改供应商;原财务审批作废,下达时重新评估' : '草稿改供应商',
+      beforeState: { supplier_id: (po as any).supplier_id },
+      afterState: { supplier_id: supplierId, supplier_name: supplierName },
+    } as any);
+  } catch { /* 审计失败不回滚业务改动 */ }
+
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true, supplierName };
+}
+
 /** 上传大货采购单的下单凭证(给供应商的下单截图/回单),下达前必传。base64 上传到 order-docs → 存路径。 */
 export async function uploadTradePoProof(orderId: string, poId: string, fileBase64: string, fileName: string): Promise<{ ok?: boolean; error?: string }> {
   const { supabase, user, roles } = await auth();
