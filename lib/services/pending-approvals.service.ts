@@ -670,16 +670,21 @@ async function collectSupplierChanges(ctx: UserContext): Promise<PendingApproval
   const { data: items, error } = await listPendingSupplierChanges();
   if (error) { console.warn('[collectSupplierChanges] failed:', error); return []; }
   const actionable = hasAnyRole(ctx.roles, ['admin', 'finance']);
-  return items.map((it) => ({
-    id: it.id, category: 'supplier_change' as ApprovalCategory,
-    title: `改供应商待批:${it.poNo || '采购单'} → ${it.toName || '?'}`,
-    subtitle: `原供应商 ${it.fromName || '?'}${it.reason ? ' · ' + it.reason : ''}`,
-    orderId: it.orderId ?? undefined, orderNo: it.orderRef ?? undefined,
-    // 财务在订单页大货采购 tab 就地审批;带 focus 参数便于定位(tab 自身会展示待审批 PO)
-    sourceUrl: it.orderId ? `/orders/${it.orderId}?tab=trade_purchase` : '/admin/pending-approvals',
-    createdAt: it.requestedAt || new Date(0).toISOString(),
-    ageDays: ageDaysFrom(it.requestedAt || new Date().toISOString()), actionable,
-  }));
+  return items.map((it) => {
+    // requestedAt 一律有值(写入时必填);缺失时 createdAt 与 ageDays 用同一回退基准(now),
+    // 避免"createdAt 落 1970 但已等待 0 天"的自相矛盾。
+    const createdAt = it.requestedAt || new Date().toISOString();
+    return {
+      id: it.id, category: 'supplier_change' as ApprovalCategory,
+      title: `改供应商待批:${it.poNo || '采购单'} → ${it.toName || '?'}`,
+      subtitle: `原供应商 ${it.fromName || '?'}${it.reason ? ' · ' + it.reason : ''}`,
+      orderId: it.orderId ?? undefined, orderNo: it.orderRef ?? undefined,
+      // 财务在订单页大货采购 tab 就地审批;带 focus 参数便于定位(tab 自身会展示待审批 PO)
+      sourceUrl: it.orderId ? `/orders/${it.orderId}?tab=trade_purchase` : '/admin/pending-approvals',
+      createdAt,
+      ageDays: ageDaysFrom(createdAt), actionable,
+    };
+  });
 }
 
 async function collectDocumentReviews(ctx: UserContext): Promise<PendingApprovalItem[]> {
