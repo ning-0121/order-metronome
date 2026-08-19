@@ -367,3 +367,20 @@ export async function listPendingPaymentRequests(): Promise<{ data: Array<{ id: 
   if (error) return { data: [], error: error.message };
   return { data: ((data || []) as any[]).map((r) => ({ id: r.id, poId: r.purchase_order_id ?? null, requestNo: r.request_no ?? null, amount: r.amount != null ? Number(r.amount) : null, createdAt: r.created_at })), error: null };
 }
+
+/**
+ * 读某订单全部执行行的「下单状态」——「采购下单」节点自动完成的判据来源。
+ *
+ * 经销单(trade)买成品、不建 procurement_items,大货采购直接物化成 procurement_line_items,
+ * 所以这个节点对经销单只能靠执行行判定(2026-08-19,见 lib/procurement/placedAutoComplete.ts)。
+ * 传入 client:调用方给什么用什么(下单钩子在财务回调 webhook 上下文里无 cookie,须用 service-role)。
+ */
+export async function readOrderLinePlacementStatus(
+  client: any,
+  orderId: string,
+): Promise<{ lines: Array<{ line_status: string | null; purchase_order_id: string | null }> | null; error: string | null }> {
+  const { data, error } = await (client.from('procurement_line_items') as any)
+    .select('line_status, purchase_order_id').eq('order_id', orderId);
+  if (error) return { lines: null, error: error.message };
+  return { lines: (data ?? []) as any[], error: null };
+}
