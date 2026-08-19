@@ -52,7 +52,9 @@ export type ApprovalCategory =
   | 'order_confirm'   // 订单确认模块（面料/颜色/印花/包装）
   | 'payment_hold'    // 付款冻结
   | 'po_approval'     // 采购单审批(2026-08-18:此前 PO 审批不在待审批中心,财务/采购经理看不见 → 反复"审批不达")
-  | 'supplement';     // 补采购财务审批(2026-08-18:同一个洞的第二个实例 —— 批准入口只藏在核料页)
+  | 'supplement'      // 补采购财务审批(2026-08-18:同一个洞的第二个实例 —— 批准入口只藏在核料页)
+  | 'shipment_release'// 出货放行待财务批(2026-08-19:1022919 死胡同 —— 业务被告知等财务,财务无处可见)
+  | 'baseline_over';  // 超预算采购待财务批(审计线①命中:与补采共用抽屉却没进中心)
 
 export interface PendingApprovalItem {
   id: string;
@@ -463,6 +465,8 @@ export async function getPendingApprovals(
       confirmations,
       poApprovals,
       supplements,
+      shipmentReleases,
+      baselineOvers,
     ] = await Promise.all([
       collectDelayRequests(supabase, ctx).catch(e => { console.warn('[pending-approvals] delays failed:', e?.message); return []; }),
       collectAmendments(supabase, ctx).catch(e => { console.warn('[pending-approvals] amendments failed:', e?.message); return []; }),
@@ -474,10 +478,12 @@ export async function getPendingApprovals(
       collectOrderConfirmations(supabase, ctx).catch(e => { console.warn('[pending-approvals] confirm failed:', e?.message); return []; }),
       collectPoApprovals(ctx).catch(e => { console.warn('[pending-approvals] po failed:', e?.message); return []; }),
       collectSupplementApprovals(ctx).catch(e => { console.warn('[pending-approvals] supplement failed:', e?.message); return []; }),
+      collectShipmentReleases(ctx).catch(e => { console.warn('[pending-approvals] shipment failed:', e?.message); return []; }),
+      collectBaselineOverItems(ctx).catch(e => { console.warn('[pending-approvals] baseline failed:', e?.message); return []; }),
     ]);
 
     const allItems = [
-      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals, ...supplements,
+      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals, ...supplements, ...shipmentReleases, ...baselineOvers,
     ];
 
     // 按 ageDays 倒序（卡得越久越靠前）
@@ -494,6 +500,8 @@ export async function getPendingApprovals(
       order_confirm: confirmations.length,
       po_approval:   poApprovals.length,
       supplement:    supplements.length,
+      shipment_release: shipmentReleases.length,
+      baseline_over: baselineOvers.length,
     };
 
     const actionableCount = allItems.filter(i => i.actionable).length;
@@ -583,6 +591,46 @@ async function collectSupplementApprovals(ctx: UserContext): Promise<PendingAppr
   }));
 }
 
+async function collectShipmentReleases(ctx: UserContext): Promise<PendingApprovalItem[]> {
+  if (!hasAnyRole(ctx.roles, ['admin', 'finance', 'sales_manager', 'order_manager'])) return [];
+  const { listPendingShipmentReleases } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { data: items, error } = await listPendingShipmentReleases();
+  if (error) { console.warn('[collectShipmentReleases] failed:', error); return []; }
+  const actionable = hasAnyRole(ctx.roles, ['admin', 'finance']);
+  return items.map((it) => ({
+    id: it.id,
+    category: 'shipment_release' as ApprovalCategory,
+    title: `出货放行待财务批:${it.orderRef || '?'}${it.qty != null ? ` · ${it.qty} 件` : ''}`,
+    subtitle: it.customerName ? `客户 ${it.customerName}` : undefined,
+    orderId: it.orderId,
+    orderNo: it.orderRef ?? undefined,
+    sourceUrl: `/orders/${it.orderId}?tab=shipment`,
+    createdAt: it.requestedAt,
+    ageDays: ageDaysFrom(it.requestedAt),
+    actionable,
+  }));
+}
+
+async function collectBaselineOverItems(ctx: UserContext): Promise<PendingApprovalItem[]> {
+  if (!hasAnyRole(ctx.roles, ['admin', 'finance', 'procurement', 'procurement_manager'])) return [];
+  const { listPendingBaselineOverItems } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { data: items, error } = await listPendingBaselineOverItems();
+  if (error) { console.warn('[collectBaselineOverItems] failed:', error); return []; }
+  const actionable = hasAnyRole(ctx.roles, ['admin', 'finance']);
+  return items.map((it) => ({
+    id: it.id,
+    category: 'baseline_over' as ApprovalCategory,
+    title: `超预算待财务批:${it.materialName || '?'}${it.note ? `(${it.note})` : ''}`,
+    subtitle: it.orderRef ? `订单 ${it.orderRef} · ${it.itemNo || ''}` : undefined,
+    orderId: it.orderId,
+    orderNo: it.orderRef ?? undefined,
+    sourceUrl: `/procurement/verify/${it.orderId}`,
+    createdAt: it.requestedAt,
+    ageDays: ageDaysFrom(it.requestedAt),
+    actionable,
+  }));
+}
+
 export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: string; color: string }> = {
   delay:         { icon: '⏳',  label: '延期申请',           color: 'bg-amber-50 text-amber-700 border-amber-200' },
   amendment:     { icon: '🟣',  label: '订单修改申请',       color: 'bg-violet-50 text-violet-700 border-violet-200' },
@@ -594,4 +642,6 @@ export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: stri
   payment_hold:  { icon: '💳',  label: '付款冻结',           color: 'bg-rose-50 text-rose-700 border-rose-200' },
   po_approval:   { icon: '🛒',  label: '采购单审批',         color: 'bg-orange-50 text-orange-700 border-orange-200' },
   supplement:    { icon: '➕',  label: '补采购审批',         color: 'bg-amber-50 text-amber-700 border-amber-200' },
+  shipment_release: { icon: '🚢', label: '出货放行',          color: 'bg-sky-50 text-sky-700 border-sky-200' },
+  baseline_over: { icon: '📈',  label: '超预算审批',         color: 'bg-red-50 text-red-700 border-red-200' },
 };
