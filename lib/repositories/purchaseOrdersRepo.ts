@@ -250,38 +250,47 @@ export async function writePoSupplierChangeRequest(params: {
   return { ok: true, error: null };
 }
 
-/** 财务批准改供应商:CAS(status='pending')套用新供应商 + 同步执行行 + 落决定字段。 */
+/**
+ * 财务批准改供应商:CAS(status='pending')套用新供应商 + 同步执行行 + 落决定字段。
+ * 决定后把 supplier_change_status 归 null(而非 'approved')—— status 列只保留 null/pending 两态,
+ * 让同一张 PO 日后能再次发起改供应商申请(writePoSupplierChangeRequest 的 CAS 是 status IS NULL;
+ * 若停在 'approved'/'rejected' 就永久锁死、无法二次修正,同 [[data-fix-dryrun-gate]] 邻域的老死局)。
+ * 决定的痕迹留在 supplier_change_decided_by/at/note + A2 审计事件里,不丢。
+ * 返回 { ok, error, headerChanged }:headerChanged=true 表示单头供应商已改(即便行同步失败,
+ * 调用方也必须走审计+通知,不能当成整体失败)。
+ */
 export async function applyPoSupplierChange(params: {
   poId: string; toSupplierId: string; toSupplierName: string | null; decidedBy: string; note: string | null;
-}): Promise<{ ok: boolean; error: string | null }> {
+}): Promise<{ ok: boolean; error: string | null; headerChanged: boolean }> {
   const svc = createServiceRoleClient();
   const { safeMutation } = await import('@/lib/db/safe-mutation');
   const w = await safeMutation({
     client: svc, table: 'purchase_orders', operation: 'update',
     payload: {
       supplier_id: params.toSupplierId,
-      supplier_change_status: 'approved', supplier_change_decided_by: params.decidedBy,
+      supplier_change_status: null, supplier_change_decided_by: params.decidedBy,
       supplier_change_decided_at: new Date().toISOString(), supplier_change_decide_note: params.note,
       updated_at: new Date().toISOString(),
     },
     predicate: { id: params.poId, supplier_change_status: 'pending' },   // CAS:只批一次
   });
-  if (!(w as any).ok) return { ok: false, error: (w as any).status === 'zero_rows' ? '申请状态已变化(可能已被处理),请刷新' : ((w as any).error || '批准写入失败') };
+  if (!(w as any).ok) return { ok: false, headerChanged: false, error: (w as any).status === 'zero_rows' ? '申请状态已变化(可能已被处理),请刷新' : ((w as any).error || '批准写入失败') };
   const sync = await syncPoLinesSupplier(params.poId, params.toSupplierId, params.toSupplierName);
-  if (sync.error) return { ok: true, error: '供应商已改,但执行行同步失败:' + sync.error };
-  return { ok: true, error: null };
+  // 单头已改(headerChanged=true);行同步失败只是需人工核对的告警,不能回滚成"整体失败"
+  if (sync.error) return { ok: true, headerChanged: true, error: '执行行供应商同步失败,请让采购核对采购行:' + sync.error };
+  return { ok: true, headerChanged: true, error: null };
 }
 
-/** 财务驳回 / 申请人撤回改供应商:清回 rejected(保留字段供审计)。 */
+/** 财务驳回 / 申请人撤回改供应商:pending → null(决定痕迹留 decided_* + 审计;允许日后再次申请)。 */
 export async function rejectPoSupplierChange(params: {
-  poId: string; decidedBy: string; note: string | null; toStatus?: 'rejected';
+  poId: string; decidedBy: string; note: string | null;
 }): Promise<{ ok: boolean; error: string | null }> {
   const svc = createServiceRoleClient();
   const { safeMutation } = await import('@/lib/db/safe-mutation');
   const w = await safeMutation({
     client: svc, table: 'purchase_orders', operation: 'update',
     payload: {
-      supplier_change_status: params.toStatus || 'rejected',
+      supplier_change_status: null,
       supplier_change_decided_by: params.decidedBy, supplier_change_decided_at: new Date().toISOString(),
       supplier_change_decide_note: params.note, updated_at: new Date().toISOString(),
     },
