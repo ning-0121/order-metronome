@@ -29,7 +29,7 @@
 
 | # | 功能 | 开关 | 现状 | 建议 | 决策 |
 |---|---|---|---|---|---|
-| C1 | 装箱单(PackingTab + 5 action) | 无 flag,tab 被摘 | **表里有 6 行历史数据 = 死前有人真用过**;现出货单据走 shipment 流 | 若装箱职能已被出货单据覆盖 → 删;否则恢复 | ☐ |
+| C1 | 装箱单(PackingTab + 专属 action) | 无 flag,tab 被摘 | 表里 6 行历史数据;装箱职能已被出货单据流覆盖 | **✅ 已定案:删**(CEO 2026-08-19 判「覆盖了」)。删 PackingTab + 5 个专属 action(getPackingLists/addPackingList/addPackingLine/deletePackingLine/confirmPackingList)。**保留同文件的出货流三函数** getShippingDraft/saveShippingDocMeta/saveShippingLines(ShippingDocsSection 在用)+ packing_list_lines 出货事实存储层 | ✅ |
 | C2 | 订单决策面板(OrderDecisionPanel + 8 action) | ENGINE_BUSINESS_DECISION 未设置 | Executive OS 范畴 | 保持关闭,随 Executive OS 主线定 | ☐ |
 | C3 | Executive 控制台(/executive + 12 action) | EXEC_OS_V1 未设置 + 零入站链接 | 同上(R1 已收尾) | 保持关闭 | ☐ |
 | C4 | 根因面板(RootCausesPanel + 4 action) | flag 默认 false **且** tab key 不在白名单(双重恒假) | 逾期三桶模型已覆盖大半诉求 | 保持关闭;若永不开则按 B 处理 | ☐ |
@@ -44,5 +44,5 @@
 
 ## 汇总建议(如果全按我的勾)
 
-恢复 2(A3 备注 + A2 保付款通道)· 废闸 1(A1 超单耗闸,反转为删除)· 删除 7(B1-B5+C5)· 保持关闭 3(C2-C4)· C1 待你判断装箱职能归属。
+恢复 2(A3 备注 + A2 保付款通道)· 废闸 1(A1 超单耗闸,反转为删除)· 删除 8(B1-B5+C5+C1)· 保持关闭 3(C2-C4)。P2 决策单全部执行完毕。
 决策后一个 PR 执行 A/B/D,C 类不动代码。
