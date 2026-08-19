@@ -237,7 +237,9 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                 <span className="text-sm text-gray-600">{po.supplier_name || po.suppliers?.name || '—'}</span>
                 <span className="text-sm font-medium tabular-nums">{money(Number(po.total_amount) || 0)}</span>
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.text}</span>
-                {isDraft && data?.canPlace && (
+                {/* 草稿单:改供应商业务/采购都能直接改(¥0、未下达、无付款);上传凭证/下达仍只给采购。
+                    2026-08-19 修:此前整块包在 canPlace 里,业务(建单人)看不到「改供应商」,选错没法自己修。 */}
+                {isDraft && (data?.canPlace || data?.canCreate) && (
                   <div className="flex items-center gap-2 ml-auto">
                     {editSupplierPo === po.id ? (
                       <span className="flex items-center gap-1.5">
@@ -255,18 +257,22 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                       </span>
                     ) : (
                       <button onClick={() => setEditSupplierPo(po.id)} disabled={busy}
-                        title="仅草稿可改;已提交财务审批的会作废原审批,下达时按新供应商重新审批"
+                        title="草稿单可直接改;若已提交财务审批,改后原审批作废,下达时按新供应商重新审批"
                         className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 hover:bg-gray-50">改供应商</button>
                     )}
-                    <label className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 cursor-pointer hover:bg-gray-50">
-                      {hasProof ? '✓ 已传凭证·重传' : '上传下单凭证'}
-                      <input type="file" className="hidden" accept="image/*,.pdf" disabled={busy}
-                        onChange={(e) => { const f = e.target.files?.[0]; if (f) onProof(po.id, f); e.currentTarget.value = ''; }} />
-                    </label>
-                    <button onClick={() => place(po.id)} disabled={busy}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50">
-                      下达(推财务建应付)
-                    </button>
+                    {data?.canPlace && (
+                      <>
+                        <label className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 cursor-pointer hover:bg-gray-50">
+                          {hasProof ? '✓ 已传凭证·重传' : '上传下单凭证'}
+                          <input type="file" className="hidden" accept="image/*,.pdf" disabled={busy}
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) onProof(po.id, f); e.currentTarget.value = ''; }} />
+                        </label>
+                        <button onClick={() => place(po.id)} disabled={busy}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50">
+                          下达(推财务建应付)
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
 
