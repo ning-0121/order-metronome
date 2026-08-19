@@ -202,6 +202,117 @@ export async function syncPoLinesSupplier(poId: string, supplierId: string, supp
   return { error: error ? error.message : null };
 }
 
+// ── 已下单采购单改供应商:走财务审批(2026-08-19 CEO)────────────
+
+/** 读一张 PO 的改供应商相关字段(申请/审批用)。 */
+export async function readPoSupplierChange(poId: string): Promise<{
+  po: { id: string; poNo: string | null; status: string; supplierId: string | null; orderIds: string[];
+        changeStatus: string | null; changeTo: string | null; changeToName: string | null;
+        changeReason: string | null; requestedBy: string | null } | null;
+  error: string | null;
+}> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('purchase_orders') as any)
+    .select('id, po_no, status, supplier_id, order_ids, supplier_change_status, supplier_change_to, supplier_change_to_name, supplier_change_reason, supplier_change_requested_by')
+    .eq('id', poId).maybeSingle();
+  if (error) return { po: null, error: error.message };
+  if (!data) return { po: null, error: null };
+  const d = data as any;
+  return { po: {
+    id: d.id, poNo: d.po_no ?? null, status: String(d.status), supplierId: d.supplier_id ?? null,
+    orderIds: Array.isArray(d.order_ids) ? d.order_ids : [],
+    changeStatus: d.supplier_change_status ?? null, changeTo: d.supplier_change_to ?? null,
+    changeToName: d.supplier_change_to_name ?? null, changeReason: d.supplier_change_reason ?? null,
+    requestedBy: d.supplier_change_requested_by ?? null,
+  }, error: null };
+}
+
+/** 发起改供应商申请(非草稿单):写 pending + 目标供应商。CAS 防并发重复申请。 */
+export async function writePoSupplierChangeRequest(params: {
+  poId: string; toSupplierId: string; toSupplierName: string | null;
+  fromSupplierId: string | null; reason: string | null; requestedBy: string;
+}): Promise<{ ok: boolean; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { safeMutation } = await import('@/lib/db/safe-mutation');
+  const w = await safeMutation({
+    client: svc, table: 'purchase_orders', operation: 'update',
+    payload: {
+      supplier_change_status: 'pending', supplier_change_to: params.toSupplierId,
+      supplier_change_to_name: params.toSupplierName, supplier_change_from: params.fromSupplierId,
+      supplier_change_reason: params.reason, supplier_change_requested_by: params.requestedBy,
+      supplier_change_requested_at: new Date().toISOString(),
+      supplier_change_decided_by: null, supplier_change_decided_at: null, supplier_change_decide_note: null,
+      updated_at: new Date().toISOString(),
+    },
+    predicate: { id: params.poId, supplier_change_status: null },   // CAS:已有 pending(非 null)不重复覆盖
+  });
+  if (!(w as any).ok) return { ok: false, error: (w as any).status === 'zero_rows' ? '该单已有待审批的改供应商申请(请勿重复提交)' : ((w as any).error || '申请写入失败') };
+  return { ok: true, error: null };
+}
+
+/** 财务批准改供应商:CAS(status='pending')套用新供应商 + 同步执行行 + 落决定字段。 */
+export async function applyPoSupplierChange(params: {
+  poId: string; toSupplierId: string; toSupplierName: string | null; decidedBy: string; note: string | null;
+}): Promise<{ ok: boolean; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { safeMutation } = await import('@/lib/db/safe-mutation');
+  const w = await safeMutation({
+    client: svc, table: 'purchase_orders', operation: 'update',
+    payload: {
+      supplier_id: params.toSupplierId,
+      supplier_change_status: 'approved', supplier_change_decided_by: params.decidedBy,
+      supplier_change_decided_at: new Date().toISOString(), supplier_change_decide_note: params.note,
+      updated_at: new Date().toISOString(),
+    },
+    predicate: { id: params.poId, supplier_change_status: 'pending' },   // CAS:只批一次
+  });
+  if (!(w as any).ok) return { ok: false, error: (w as any).status === 'zero_rows' ? '申请状态已变化(可能已被处理),请刷新' : ((w as any).error || '批准写入失败') };
+  const sync = await syncPoLinesSupplier(params.poId, params.toSupplierId, params.toSupplierName);
+  if (sync.error) return { ok: true, error: '供应商已改,但执行行同步失败:' + sync.error };
+  return { ok: true, error: null };
+}
+
+/** 财务驳回 / 申请人撤回改供应商:清回 rejected(保留字段供审计)。 */
+export async function rejectPoSupplierChange(params: {
+  poId: string; decidedBy: string; note: string | null; toStatus?: 'rejected';
+}): Promise<{ ok: boolean; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { safeMutation } = await import('@/lib/db/safe-mutation');
+  const w = await safeMutation({
+    client: svc, table: 'purchase_orders', operation: 'update',
+    payload: {
+      supplier_change_status: params.toStatus || 'rejected',
+      supplier_change_decided_by: params.decidedBy, supplier_change_decided_at: new Date().toISOString(),
+      supplier_change_decide_note: params.note, updated_at: new Date().toISOString(),
+    },
+    predicate: { id: params.poId, supplier_change_status: 'pending' },
+  });
+  if (!(w as any).ok) return { ok: false, error: (w as any).status === 'zero_rows' ? '申请状态已变化,请刷新' : ((w as any).error || '驳回写入失败') };
+  return { ok: true, error: null };
+}
+
+/** 审批中心:待财务批的改供应商申请。 */
+export async function listPendingSupplierChanges(): Promise<{ data: Array<{ id: string; poNo: string | null; orderId: string | null; orderRef: string | null; fromName: string | null; toName: string | null; reason: string | null; status: string; requestedAt: string | null }>; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('purchase_orders') as any)
+    .select('id, po_no, order_ids, supplier_id, supplier_change_to_name, supplier_change_reason, status, supplier_change_requested_at, suppliers(name)')
+    .eq('supplier_change_status', 'pending');
+  if (error) return { data: [], error: error.message };
+  const rows = (data || []) as any[];
+  const oids = [...new Set(rows.map((r) => (Array.isArray(r.order_ids) ? r.order_ids[0] : null)).filter(Boolean))];
+  const refs = new Map<string, string>();
+  if (oids.length) {
+    const { data: os } = await (svc.from('orders') as any).select('id, order_no, internal_order_no').in('id', oids);
+    for (const o of (os || []) as any[]) refs.set(o.id, o.internal_order_no || o.order_no || '');
+  }
+  return { data: rows.map((r) => {
+    const orderId = Array.isArray(r.order_ids) ? r.order_ids[0] : null;
+    return { id: r.id, poNo: r.po_no ?? null, orderId, orderRef: orderId ? (refs.get(orderId) ?? null) : null,
+      fromName: r.suppliers?.name ?? null, toName: r.supplier_change_to_name ?? null,
+      reason: r.supplier_change_reason ?? null, status: String(r.status), requestedAt: r.supplier_change_requested_at ?? null };
+  }), error: null };
+}
+
 // ── P1 §8/§9 审批中心读侧(2026-08-19)──────────────────────────
 
 export async function listPendingPurposeChanges(): Promise<{ data: Array<{ id: string; orderId: string; fromPurpose: string; toPurpose: string; reason: string | null; createdAt: string; orderRef: string | null }>; error: string | null }> {

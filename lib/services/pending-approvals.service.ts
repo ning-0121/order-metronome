@@ -57,7 +57,8 @@ export type ApprovalCategory =
   | 'baseline_over'   // 超预算采购待财务批(审计线①命中:与补采共用抽屉却没进中心)
   | 'purpose_change'  // 改订单用途待财务/管理员批(P1 §8:此前零通知+仅订单页横幅)
   | 'document_review' // PI/CI 单据待审批(P1 §8:同上)
-  | 'payment_request';// 付款申请已推财务待回执(P1 §9:站内此前无任何列表;处理在外部财务系统)
+  | 'payment_request' // 付款申请已推财务待回执(P1 §9:站内此前无任何列表;处理在外部财务系统)
+  | 'supplier_change';// 已下单采购单改供应商待财务批(2026-08-19 CEO:已付款单选错供应商也要能改)
 
 export interface PendingApprovalItem {
   id: string;
@@ -474,6 +475,7 @@ export async function getPendingApprovals(
       purposeChanges,
       documentReviews,
       paymentRequests,
+      supplierChanges,
     ] = await Promise.all([
       collectDelayRequests(supabase, ctx).catch(e => { console.warn('[pending-approvals] delays failed:', e?.message); return []; }),
       collectAmendments(supabase, ctx).catch(e => { console.warn('[pending-approvals] amendments failed:', e?.message); return []; }),
@@ -490,10 +492,11 @@ export async function getPendingApprovals(
       collectPurposeChanges(ctx).catch(e => { console.warn('[pending-approvals] purpose failed:', e?.message); return []; }),
       collectDocumentReviews(ctx).catch(e => { console.warn('[pending-approvals] docs failed:', e?.message); return []; }),
       collectPaymentRequests(ctx).catch(e => { console.warn('[pending-approvals] payment failed:', e?.message); return []; }),
+      collectSupplierChanges(ctx).catch(e => { console.warn('[pending-approvals] supplier_change failed:', e?.message); return []; }),
     ]);
 
     const allItems = [
-      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals, ...supplements, ...shipmentReleases, ...baselineOvers, ...purposeChanges, ...documentReviews, ...paymentRequests,
+      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals, ...supplements, ...shipmentReleases, ...baselineOvers, ...purposeChanges, ...documentReviews, ...paymentRequests, ...supplierChanges,
     ];
 
     // 按 ageDays 倒序（卡得越久越靠前）
@@ -515,6 +518,7 @@ export async function getPendingApprovals(
       purpose_change: purposeChanges.length,
       document_review: documentReviews.length,
       payment_request: paymentRequests.length,
+      supplier_change: supplierChanges.length,
     };
 
     const actionableCount = allItems.filter(i => i.actionable).length;
@@ -660,6 +664,24 @@ async function collectPurposeChanges(ctx: UserContext): Promise<PendingApprovalI
   }));
 }
 
+async function collectSupplierChanges(ctx: UserContext): Promise<PendingApprovalItem[]> {
+  if (!hasAnyRole(ctx.roles, ['admin', 'finance'])) return [];
+  const { listPendingSupplierChanges } = await import('@/lib/repositories/purchaseOrdersRepo');
+  const { data: items, error } = await listPendingSupplierChanges();
+  if (error) { console.warn('[collectSupplierChanges] failed:', error); return []; }
+  const actionable = hasAnyRole(ctx.roles, ['admin', 'finance']);
+  return items.map((it) => ({
+    id: it.id, category: 'supplier_change' as ApprovalCategory,
+    title: `改供应商待批:${it.poNo || '采购单'} → ${it.toName || '?'}`,
+    subtitle: `原供应商 ${it.fromName || '?'}${it.reason ? ' · ' + it.reason : ''}`,
+    orderId: it.orderId ?? undefined, orderNo: it.orderRef ?? undefined,
+    // 财务在订单页大货采购 tab 就地审批;带 focus 参数便于定位(tab 自身会展示待审批 PO)
+    sourceUrl: it.orderId ? `/orders/${it.orderId}?tab=trade_purchase` : '/admin/pending-approvals',
+    createdAt: it.requestedAt || new Date(0).toISOString(),
+    ageDays: ageDaysFrom(it.requestedAt || new Date().toISOString()), actionable,
+  }));
+}
+
 async function collectDocumentReviews(ctx: UserContext): Promise<PendingApprovalItem[]> {
   if (!hasAnyRole(ctx.roles, ['admin', 'finance'])) return [];
   const { listPendingDocumentReviews } = await import('@/lib/repositories/purchaseOrdersRepo');
@@ -706,4 +728,5 @@ export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: stri
   purpose_change: { icon: '🔁', label: '改用途审批',         color: 'bg-teal-50 text-teal-700 border-teal-200' },
   document_review: { icon: '📄', label: '单据审批',          color: 'bg-slate-50 text-slate-700 border-slate-200' },
   payment_request: { icon: '💸', label: '付款待回执',        color: 'bg-lime-50 text-lime-700 border-lime-200' },
+  supplier_change: { icon: '🔀', label: '改供应商审批',       color: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200' },
 };

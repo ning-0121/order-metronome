@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getTradeBulkData, createTradeBulkPurchaseOrder, uploadTradePoProof, saveTradeLineCosts, type TradeBulkLine, changeTradePoSupplier } from '@/app/actions/trade-purchase';
+import { getTradeBulkData, createTradeBulkPurchaseOrder, uploadTradePoProof, saveTradeLineCosts, type TradeBulkLine, changeTradePoSupplier, requestTradePoSupplierChange, decideTradePoSupplierChange } from '@/app/actions/trade-purchase';
 import { placePurchaseOrder } from '@/app/actions/purchase-orders';
 
 const money = (n: number) => '¥' + (Math.round(n * 100) / 100).toLocaleString();
@@ -32,6 +32,31 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
     setEditSupplierPo(null); setNewSupplierId('');
     load();
   }
+  // 改供应商申请(已下单单):选目标供应商 + 填原因,提交后走财务审批
+  const [reqSupplierPo, setReqSupplierPo] = useState<string | null>(null);
+  const [reqSupplierId, setReqSupplierId] = useState('');
+  const [reqReason, setReqReason] = useState('');
+  async function doRequestChange(poId: string) {
+    if (!reqSupplierId) { setErr('请选择目标供应商'); return; }
+    if (!reqReason.trim()) { setErr('请填写改供应商原因'); return; }
+    setBusy(true); setErr(''); setMsg('');
+    const res = await requestTradePoSupplierChange(orderId, poId, reqSupplierId, reqReason.trim());
+    setBusy(false);
+    if ((res as any).error) { setErr((res as any).error); return; }
+    setMsg(`已提交改供应商申请(目标「${(res as any).supplierName || ''}」),待财务审批。批准后系统才会改。`);
+    setReqSupplierPo(null); setReqSupplierId(''); setReqReason('');
+    load();
+  }
+  async function doDecideChange(poId: string, decision: 'approved' | 'rejected') {
+    setBusy(true); setErr(''); setMsg('');
+    const res = await decideTradePoSupplierChange(poId, decision, decideNote.trim() || undefined);
+    setBusy(false);
+    if ((res as any).error) { setErr((res as any).error); return; }
+    setMsg(decision === 'approved' ? '已批准,供应商已更新。若该单已付款,请核对款项归属。' : '已驳回改供应商申请。');
+    setDecideNote('');
+    load();
+  }
+  const [decideNote, setDecideNote] = useState('');
   const [err, setErr] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [terms, setTerms] = useState('月结');
@@ -242,6 +267,57 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                       className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50">
                       下达(推财务建应付)
                     </button>
+                  </div>
+                )}
+
+                {/* 已下达单:改供应商要走财务审批(2026-08-19 CEO:已付款单选错供应商也要能改) */}
+                {!isDraft && po.status !== 'cancelled' && (
+                  <div className="w-full">
+                    {po.supplier_change_status === 'pending' ? (
+                      <div className="mt-1 rounded-lg bg-fuchsia-50 border border-fuchsia-200 px-3 py-2 text-xs">
+                        <div className="text-fuchsia-800 font-medium">
+                          🔀 改供应商待财务审批:{po.supplier_name || '?'} → <b>{po.supplier_change_to_name || '?'}</b>
+                        </div>
+                        {po.supplier_change_reason && <div className="text-fuchsia-600 mt-0.5">原因:{po.supplier_change_reason}</div>}
+                        {data?.canApproveSupplierChange && (
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                            <input value={decideNote} onChange={(e) => setDecideNote(e.target.value)} placeholder="审批意见(可选)"
+                              className="text-xs border rounded-lg px-2 py-1.5 flex-1 min-w-40" />
+                            <button onClick={() => doDecideChange(po.id, 'approved')} disabled={busy}
+                              className="text-xs px-2.5 py-1.5 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50">批准改供应商</button>
+                            <button onClick={() => doDecideChange(po.id, 'rejected')} disabled={busy}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50">驳回</button>
+                          </div>
+                        )}
+                        {!data?.canApproveSupplierChange && <div className="text-gray-400 mt-1">等财务/管理员审批</div>}
+                      </div>
+                    ) : (data?.canCreate || data?.canPlace) ? (
+                      reqSupplierPo === po.id ? (
+                        <div className="mt-1 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 space-y-2">
+                          <div className="text-xs text-gray-500">已下达/已付款的单改供应商需财务审批,系统不会立即改。</div>
+                          <select value={reqSupplierId} onChange={(e) => setReqSupplierId(e.target.value)}
+                            className="text-xs border rounded-lg px-2 py-1.5 w-full max-w-64">
+                            <option value="">选择目标供应商…</option>
+                            {(data?.suppliers || []).filter((sp: any) => sp.id !== po.supplier_id).map((sp: any) => (
+                              <option key={sp.id} value={sp.id}>{sp.name}</option>
+                            ))}
+                          </select>
+                          <textarea value={reqReason} onChange={(e) => setReqReason(e.target.value)} rows={2}
+                            placeholder="改供应商原因(必填,例:提交时选错供应商)"
+                            className="text-xs border rounded-lg px-2 py-1.5 w-full" />
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => doRequestChange(po.id)} disabled={busy || !reqSupplierId || !reqReason.trim()}
+                              className="text-xs px-2.5 py-1.5 rounded-lg bg-fuchsia-600 text-white font-medium hover:bg-fuchsia-700 disabled:opacity-50">提交申请(送财务审批)</button>
+                            <button onClick={() => { setReqSupplierPo(null); setReqSupplierId(''); setReqReason(''); }} disabled={busy}
+                              className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 hover:bg-white">取消</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button onClick={() => { setReqSupplierPo(po.id); setReqSupplierId(''); setReqReason(''); setErr(''); setMsg(''); }} disabled={busy}
+                          title="已下单的单选错供应商也能改,但要财务审批"
+                          className="mt-1 text-xs px-2.5 py-1 rounded-lg border border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50">🔀 申请改供应商</button>
+                      )
+                    ) : null}
                   </div>
                 )}
               </div>
