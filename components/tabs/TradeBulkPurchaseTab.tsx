@@ -28,7 +28,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
     const res = await changeTradePoSupplier(orderId, poId, newSupplierId);
     setBusy(false);
     if ((res as any).error) { setErr((res as any).error); return; }
-    setMsg(`供应商已改为「${(res as any).supplierName || ''}」${'。'}原财务审批(如有)已作废,下达时将按新供应商重新审批。`);
+    setMsg(`供应商已改为「${(res as any).supplierName || ''}」。`);
     setEditSupplierPo(null); setNewSupplierId('');
     load();
   }
@@ -236,6 +236,10 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
           {pos.map((po: any) => {
             const st = poStatusLabel(po);
             const isDraft = po.status === 'draft' || (!po.status);
+            // 已推给财务前置审批的草稿单:不给直改,归入申请流(财务正在审这张单,
+            // 供应商一变批的对象就变了,必须让财务重新确认)。2026-08-19
+            const awaitingFinance = po.approval_status === 'pending';
+            const canDirectEdit = isDraft && !awaitingFinance;
             const hasProof = Array.isArray(po.order_proof_paths) && po.order_proof_paths.length > 0;
             return (
               <div key={po.id} className="rounded-xl border border-gray-200 p-3 flex flex-wrap items-center gap-3">
@@ -245,7 +249,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.text}</span>
                 {/* 草稿单:改供应商业务/采购都能直接改(¥0、未下达、无付款);上传凭证/下达仍只给采购。
                     2026-08-19 修:此前整块包在 canPlace 里,业务(建单人)看不到「改供应商」,选错没法自己修。 */}
-                {isDraft && (data?.canPlace || data?.canCreate) && (
+                {canDirectEdit && (data?.canPlace || data?.canCreate) && (
                   <div className="flex items-center gap-2 ml-auto">
                     {editSupplierPo === po.id ? (
                       <span className="flex items-center gap-1.5">
@@ -263,7 +267,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                       </span>
                     ) : (
                       <button onClick={() => setEditSupplierPo(po.id)} disabled={busy}
-                        title="草稿单可直接改;若已提交财务审批,改后原审批作废,下达时按新供应商重新审批"
+                        title="草稿单(未提交财务审批)可直接改;已提交审批的单需走「申请改供应商」由财务确认"
                         className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 hover:bg-gray-50">改供应商</button>
                     )}
                     {data?.canPlace && (
@@ -283,7 +287,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                 )}
 
                 {/* 已下达单:改供应商要走财务审批(2026-08-19 CEO:已付款单选错供应商也要能改) */}
-                {!isDraft && po.status !== 'cancelled' && (
+                {(!isDraft || awaitingFinance) && po.status !== 'cancelled' && (
                   <div className="w-full">
                     {po.supplier_change_status === 'pending' ? (
                       <div className="mt-1 rounded-lg bg-fuchsia-50 border border-fuchsia-200 px-3 py-2 text-xs">
@@ -306,7 +310,11 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                     ) : (data?.canCreate || data?.canPlace) ? (
                       reqSupplierPo === po.id ? (
                         <div className="mt-1 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 space-y-2">
-                          <div className="text-xs text-gray-500">已下达/已付款的单改供应商需财务审批,系统不会立即改。</div>
+                          <div className="text-xs text-gray-500">
+                            {isDraft
+                              ? '该单已提交财务审批,改供应商需财务确认,系统不会立即改。'
+                              : '已下达/已付款的单改供应商需财务审批,系统不会立即改。'}
+                          </div>
                           <select value={reqSupplierId} onChange={(e) => setReqSupplierId(e.target.value)}
                             className="text-xs border rounded-lg px-2 py-1.5 w-full max-w-64">
                             <option value="">选择目标供应商…</option>
@@ -326,7 +334,7 @@ export function TradeBulkPurchaseTab({ orderId }: { orderId: string }) {
                         </div>
                       ) : (
                         <button onClick={() => { setReqSupplierPo(po.id); setReqSupplierId(''); setReqReason(''); setErr(''); setMsg(''); }} disabled={busy}
-                          title="已下单的单选错供应商也能改,但要财务审批"
+                          title={isDraft ? '该单已送财务审批,改供应商需财务确认' : '已下单的单选错供应商也能改,但要财务审批'}
                           className="mt-1 text-xs px-2.5 py-1 rounded-lg border border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50">🔀 申请改供应商</button>
                       )
                     ) : null}

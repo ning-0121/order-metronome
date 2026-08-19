@@ -232,9 +232,14 @@ export async function createTradeBulkPurchaseOrder(orderId: string, input: {
  * 修改草稿大货采购单的供应商(2026-08-19 CEO 要求)。
  *
  * 边界:
- * · 仅 status='draft' 可改 —— 已下达的单供应商是既成商业事实,改走 删除重建/退货。
- * · 若已提交财务前置审批(approval_status='pending'):供应商一变,财务批的对象就失效,
- *   重置 approval_status=null,下达时按新供应商重新走审批(place 会重新评估)。
+ * · 仅 status='draft' 且 **未提交财务审批** 可直改 —— 这种单财务还没经手,业务自己改无影响。
+ * · status='draft' 但 approval_status='pending'(已推给财务审批)→ **不直改,走申请流**
+ *   (requestTradePoSupplierChange)。财务正在审这张单,供应商一变批的对象就变了,
+ *   必须让财务重新确认,而不是改掉了事(CEO 2026-08-19:应提示「已提交修改,待财务审核」)。
+ *   ⚠️ 2026-08-19 修:此前这里对 pending 单写 approval_status=null 想「作废原审批」,
+ *      但该列是 NOT NULL DEFAULT 'not_required' CHECK(not_required|pending|approved|rejected),
+ *      写 null 必被 23502 拒 → 「已提交财务审批的草稿单」改供应商 100% 报
+ *      「供应商修改未生效(db_error)」;而申请流那边又用 status==='draft' 挡回,两条路互堵成死角。
  * · 单头 + 本单全部执行行的 supplier_id/supplier_name 同步改(供应商真相在两处都有读者)。
  * · A2 审计留痕(money):改供应商 = 改钱要付给谁。
  */
@@ -249,6 +254,10 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
   if (poErr) return { error: poErr };
   if (!po) return { error: '采购单不存在' };
   if (po.status !== 'draft') return { error: '仅草稿状态可改供应商;已下达的单请删除重建或走退货' };
+  // 已推给财务审批的草稿单不直改 —— 服务端也拦一道,防绕过 UI 直调 action
+  if (po.approvalStatus === 'pending') {
+    return { error: '该单已提交财务审批,改供应商需财务确认 —— 请走「申请改供应商」(填写原因)' };
+  }
   if (po.supplierId === supplierId) return { ok: true };
 
   const supRead = await readSupplierName(supplierId);
@@ -257,18 +266,17 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
   const supplierName = supRead.name;
 
   const svc = createServiceRoleClient();
-  const wasPending = po.approvalStatus === 'pending';
-  // 高危写走 safeMutation(lint:writes):断言恰好 1 行生效 —— CAS(status='draft')没命中
-  // (并发已下达/单不存在)时要报错,而不是静默 0 行让人以为改成功了。
+  // 高危写走 safeMutation(lint:writes):断言恰好 1 行生效 —— CAS 没命中
+  // (并发已下达/已提交审批/单不存在)时要报错,而不是静默 0 行让人以为改成功了。
   const { safeMutation } = await import('@/lib/db/safe-mutation');
   const w = await safeMutation({
     client: svc, table: 'purchase_orders', operation: 'update',
     payload: {
       supplier_id: supplierId,
-      ...(wasPending ? { approval_status: null, approval_reasons: null } : {}),
       updated_at: new Date().toISOString(),
     },
-    predicate: { id: poId, status: 'draft' },   // CAS:防并发下达后被改
+    // CAS:防并发下达后被改;并发提交财务审批的也挡下(approval_status 必须仍是非 pending)
+    predicate: { id: poId, status: 'draft', approval_status: po.approvalStatus },
   });
   if (!(w as any).ok) return { error: `供应商修改未生效(${(w as any).status}):${(w as any).error || '可能已被下达'}` };
 
@@ -283,7 +291,7 @@ export async function changeTradePoSupplier(orderId: string, poId: string, suppl
       actor: { actorType: 'user', actorId: user.id },
       entity: { entityType: 'purchase_order', entityId: poId, orderId },
       commandName: 'changeTradePoSupplier',
-      reason: wasPending ? '草稿改供应商;原财务审批作废,下达时重新评估' : '草稿改供应商',
+      reason: '草稿改供应商(未提交财务审批,业务自改)',
       beforeState: { supplier_id: po.supplierId },
       afterState: { supplier_id: supplierId, supplier_name: supplierName },
     } as any);
@@ -317,7 +325,12 @@ export async function requestTradePoSupplierChange(
   // 校验 PO 真正归属的订单(po.orderIds[0]),而不是入参 orderId(入参不可信,也用它做后续通知/审计)。
   const poOrderId = po.orderIds[0] || orderId;
   if (!(await canUserAccessOrder(supabase, user.id, poOrderId))) return { error: '无权操作此订单的采购单' };
-  if (po.status === 'draft') return { error: '草稿单请直接改供应商,无需申请' };
+  // 草稿单原则上直改,不用申请;但**已提交财务审批**的草稿单例外 —— 财务已在审这张单,
+  // 供应商变更必须经财务确认(2026-08-19)。此前这里一律挡回 draft,与 changeTradePoSupplier
+  // 那边的 NOT NULL 报错一起,把「draft + approval_status=pending」堵成改不动的死角。
+  if (po.status === 'draft' && po.approvalStatus !== 'pending') {
+    return { error: '草稿单请直接改供应商,无需申请' };
+  }
   if (po.supplierId === supplierId) return { error: '目标供应商与当前相同' };
   if (po.changeStatus === 'pending') return { error: '该单已有待审批的改供应商申请' };
 
@@ -339,7 +352,10 @@ export async function requestTradePoSupplierChange(
     const ref = po.poNo || poId.slice(0, 8);
     await notifyUsersByRole(svc, ['finance', 'admin'], {
       type: 'po_supplier_change', title: `🔀 采购单改供应商待审批:${ref}`,
-      message: `${ref} 申请把供应商改为「${supplierName || '?'}」。原因:${reason.trim()}。该单已下达,请核对付款后审批。`,
+      message: `${ref} 申请把供应商改为「${supplierName || '?'}」。原因:${reason.trim()}。`
+        + (po.status === 'draft'
+          ? '该单尚未下达、正在你的审批队列里,批准后系统才会改供应商。'
+          : '该单已下达,请核对付款后审批。'),
       relatedOrderId: poOrderId,
     });
   } catch (e: any) { console.warn('[requestTradePoSupplierChange] 通知财务失败(不阻断):', e?.message); }

@@ -207,13 +207,16 @@ export async function syncPoLinesSupplier(poId: string, supplierId: string, supp
 /** 读一张 PO 的改供应商相关字段(申请/审批用)。 */
 export async function readPoSupplierChange(poId: string): Promise<{
   po: { id: string; poNo: string | null; status: string; supplierId: string | null; orderIds: string[];
+        // approvalStatus:财务前置审批状态。申请流要靠它区分「草稿未提交审批」(直改)
+        // 与「草稿已提交审批」(必须走申请)——漏选这一列会让判据恒为 undefined 而静默失效。
+        approvalStatus: string | null;
         changeStatus: string | null; changeTo: string | null; changeToName: string | null;
         changeReason: string | null; requestedBy: string | null } | null;
   error: string | null;
 }> {
   const svc = createServiceRoleClient();
   const { data, error } = await (svc.from('purchase_orders') as any)
-    .select('id, po_no, status, supplier_id, order_ids, supplier_change_status, supplier_change_to, supplier_change_to_name, supplier_change_reason, supplier_change_requested_by')
+    .select('id, po_no, status, supplier_id, order_ids, approval_status, supplier_change_status, supplier_change_to, supplier_change_to_name, supplier_change_reason, supplier_change_requested_by')
     .eq('id', poId).maybeSingle();
   if (error) return { po: null, error: error.message };
   if (!data) return { po: null, error: null };
@@ -221,6 +224,7 @@ export async function readPoSupplierChange(poId: string): Promise<{
   return { po: {
     id: d.id, poNo: d.po_no ?? null, status: String(d.status), supplierId: d.supplier_id ?? null,
     orderIds: Array.isArray(d.order_ids) ? d.order_ids : [],
+    approvalStatus: d.approval_status ?? null,
     changeStatus: d.supplier_change_status ?? null, changeTo: d.supplier_change_to ?? null,
     changeToName: d.supplier_change_to_name ?? null, changeReason: d.supplier_change_reason ?? null,
     requestedBy: d.supplier_change_requested_by ?? null,
