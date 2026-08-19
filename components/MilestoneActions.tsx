@@ -1,11 +1,12 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import { UnblockButton } from '@/components/UnblockButton';
 import { markMilestoneDone, markMilestoneBlocked, saveChecklistData } from '@/app/actions/milestones';
 import { BackfillDatePicker } from '@/components/BackfillDatePicker';
 import { PhotoOcrButton, PHOTO_OCR_SUPPORTED_STEPS } from '@/components/PhotoOcrButton';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { isDoneStatus, isActiveStatus, isPendingStatus } from '@/lib/domain/types';
+import { isDoneStatus, isActiveStatus, isPendingStatus, isBlockedStatus } from '@/lib/domain/types';
 import { AIAdviceBox } from '@/components/AIAdviceBox';
 import { getChecklistForStep, canEditChecklistItemRole, parseChecklistData, type ChecklistConfig, type ChecklistItemResponse } from '@/lib/domain/checklist';
 import { detectDefectsForMilestone } from '@/app/actions/defect-detect';
@@ -508,6 +509,18 @@ export function MilestoneActions({
 
   return (
     <div className="space-y-3">
+
+      {/* 节点自身被标「卡住」→ 就地给解除按钮(2026-08-19 CEO 待办#4)。
+          后端 markMilestoneUnblocked + UnblockButton 早就存在,但只挂在工作台 ——
+          节点页(人处理阻塞的现场)反而没有,又一个「组件存在但不可达」。
+          权限由 action 把关(管理员/创建者/跟单/节点执行人),这里只管可见。 */}
+      {isBlockedStatus(milestone.status) && canModify && (
+        <div className="rounded-lg bg-orange-50 border border-orange-200 p-3 space-y-2">
+          <p className="text-sm font-semibold text-orange-800">🚧 本节点已标「卡住」{milestone.notes?.includes('卡住原因：') ? ` — ${milestone.notes.split('卡住原因：')[1]?.split('\n')[0]}` : ''}</p>
+          <p className="text-xs text-orange-600">阻塞已解决的话,点下方恢复为「进行中」;仍在等人/等客户则保持现状(不会催你)。</p>
+          <UnblockButton milestoneId={milestone.id} />
+        </div>
+      )}
 
       {/* 阻断提示 */}
       {isBlocked && canModify && (
