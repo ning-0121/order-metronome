@@ -28,8 +28,6 @@ import { ManufacturingOrderTab } from '@/components/tabs/ManufacturingOrderTab';
 import { ProcurementItemsTab } from '@/components/tabs/ProcurementItemsTab';
 import { TradeBulkPurchaseTab } from '@/components/tabs/TradeBulkPurchaseTab';
 import { ProductVariantPicker } from '@/components/ProductVariantPicker';
-import { BudgetApprovalBanner } from '@/components/BudgetApprovalBanner';
-import { getOrderBudgetApproval } from '@/app/actions/budget-approvals';
 import { getHeaderReconciliationState } from '@/app/actions/order-quantity-correction';
 import { HeaderReconciliationBanner } from '@/components/HeaderReconciliationBanner';
 import { getCustomerPoHistory } from '@/app/actions/customer-po';
@@ -67,7 +65,6 @@ import { ShippingDatesEdit } from '@/components/order/ShippingDatesEdit';
 import { DeliveryInfoEdit } from '@/components/order/DeliveryInfoEdit';
 import { EmailCenterTab } from '@/components/tabs/EmailCenterTab';
 import { OrderNotesTab } from '@/components/tabs/OrderNotesTab';
-import { QuoteBaselineTab } from '@/components/tabs/QuoteBaselineTab';
 import { RootCausesPanel } from '@/components/RootCausesPanel';
 import { rootCauseEngineEnabled } from '@/lib/engine/featureFlags';
 import { ProcurementTab } from '@/components/tabs/ProcurementTab';
@@ -109,10 +106,9 @@ export default async function OrderDetailPage({
   if (rawTab === 'overview') {
     redirect(`/orders/${id}?tab=basic`);
   }
-  // 2026-07-08 弃用「成本控制」(并入报价基线);「报价基线」2026-08-19 CEO 拍板恢复(P2 决策单 A1):
-  // 超基线采购闸(bom.ts,2026-07-06 拍板)一直在消费 quote_baseline_lines,但录入口被拆后全库基线 0 张、闸空转。
-  // 当年弃用理由「布料名对不上采购」已被闸的匹配口径化解 —— 只对基线里名字对得上的料比对,对不上的不误拦。
-  const allowedTabs = ['basic', 'quote_baseline', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'trade_purchase', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score'];
+  // 2026-07-08 弃用「成本控制/报价基线」。2026-08-19 CEO 定案:废掉超基线采购闸,报价基线录入 Tab 不恢复
+  //   —— 全库基线 0 张、budget_approvals 表在生产根本不存在,这道闸从上线起纯空转。预算/成本真相走「采购核料」。
+  const allowedTabs = ['basic', 'progress', 'delays', 'logs', 'product_link', 'bom', 'manufacturing_order', 'pi', 'procurement_items', 'trade_purchase', 'procurement', 'supply_chain', 'production', 'qc', 'shipment', 'documents', 'email_center', 'notes', 'score'];
   const activeTab = allowedTabs.includes(rawTab) ? rawTab : 'basic';
 
   const { data: order, error: orderError } = await getOrder(id);
@@ -288,8 +284,6 @@ export default async function OrderDetailPage({
   const riskLabel = { red: '风险', yellow: '注意', green: '正常' }[riskColor];
   const riskClass = { red: 'bg-red-100 text-red-700', yellow: 'bg-yellow-100 text-yellow-700', green: 'bg-green-100 text-green-700' }[riskColor];
 
-  // 超预算提交采购审批(最新一条)——顶部横幅展示 + 经理/财务就地审批
-  const budgetApproval = await getOrderBudgetApproval((orderData as any).id).catch(() => ({} as any));
   // 订单头 ↔ 明细 分叉探测(只读;失败不影响页面)
   const headerReconState = await getHeaderReconciliationState((orderData as any).id)
     .catch(() => ({ mismatch: false }));
@@ -330,10 +324,7 @@ export default async function OrderDetailPage({
             canReview={canReviewWaiver}
           />
         )}
-        {/* 超预算提交采购审批横幅(超基线单耗:经理批;超5%:+财务批) */}
-        {(budgetApproval as any)?.data && (
-          <BudgetApprovalBanner approval={(budgetApproval as any).data} canMgr={!!(budgetApproval as any).canMgr} canFin={!!(budgetApproval as any).canFin} />
-        )}
+        {/* 超基线单耗审批横幅已随超单耗闸废除(2026-08-19);超单价闸仍在核料页拦(procurement-items) */}
         {/* 国内送仓信息缺失提示（订单创建后允许暂空，但需在「包装方式确认」前补齐） */}
         {(orderData as any).delivery_type === 'domestic' && (() => {
           const o = orderData as any;
@@ -635,8 +626,6 @@ export default async function OrderDetailPage({
               { key: 'manufacturing_order', label: '🏭 生产任务单' },
               { key: 'pi', label: '🧾 PI' },
               { key: 'bom', label: '原辅料和包装' },
-              // 报价基线 2026-08-19 恢复(P2 决策单 A1):超基线闸的唯一数据源,价列由服务端按角色屏蔽
-              { key: 'quote_baseline', label: '📋 报价基线' },
               { key: 'procurement_items', label: '🛒 采购核料' },
               { key: 'trade_purchase', label: '🛒 大货采购' },
               { key: 'procurement', label: '📦 采购进度' },
@@ -654,8 +643,6 @@ export default async function OrderDetailPage({
               // 打样单 14 天流程,不生产/不采购原辅料/不走大货出货 → 只留 基本/进度/单据/评分,隐藏生产/采购/BOM/PI/质检/出货
               //   (打样上线前审计:此前打样单全 tab 照显,诱导在打样单上录 BOM/核料/走生产)
               if (isSample) return ['basic', 'progress'].includes(t.key);
-              // 经销单买成品,无原辅料报价基线可录
-              if (isTrade && t.key === 'quote_baseline') return false;
               if (isTrade && t.key === 'procurement_items') return false;
               if (!isTrade && t.key === 'trade_purchase') return false;
               return true;
@@ -1325,16 +1312,7 @@ export default async function OrderDetailPage({
           />
         )}
 
-        {/* Tab: 成本控制 —— 2026-07-08 已弃用,并入「📋 报价基线」(逐款成本单一真相)。 */}
-
-        {/* Tab: 报价基线(2026-08-19 恢复,P2 决策单 A1)——超基线闸的数据源;价列/编辑权由服务端 getQuoteBaseline 按角色控制 */}
-        {activeTab === 'quote_baseline' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <TabErrorBoundary>
-              <QuoteBaselineTab orderId={id} />
-            </TabErrorBoundary>
-          </div>
-        )}
+        {/* Tab: 成本控制/报价基线 —— 2026-07-08 弃用,2026-08-19 CEO 定案连超基线闸一起废,不恢复录入。成本真相走「🛒 采购核料」。 */}
 
         {/* Tab: 大货采购(经销单专属:成品采购 → 财务应付) */}
         {activeTab === 'trade_purchase' && (
