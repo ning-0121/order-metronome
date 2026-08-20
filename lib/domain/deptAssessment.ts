@@ -7,6 +7,23 @@
 export type Department = 'procurement' | 'production';
 export const DEPARTMENTS: Department[] = ['procurement', 'production'];
 
+/**
+ * 节点完成 → 落哪个部门的哪条考核(单一真相)。
+ *
+ * 2026-08-20 收口:此前这份映射在 app/actions/milestones.ts 里内联一份、
+ * scripts/backfill-dept-assessments.mts 里又抄一份 —— 加考核节点时极易只改一处,
+ * 于是新数据有、回填没有(或反过来)。放到这里,两边都 import。
+ *
+ * ⚠️ 只放**节点完成**驱动的任务。采购下单(bulk_po_placed)由 placeCore 触发、
+ *    不走节点,故不在此表。
+ */
+export const DEPT_TASK_BY_STEP: Record<string, { dept: Department; key: string; label: string }> = {
+  final_qc_check: { dept: 'production', key: 'qc_passed', label: '尾查合格' },
+  mid_qc_check: { dept: 'production', key: 'mid_qc_passed', label: '中查完成' },
+  factory_completion: { dept: 'production', key: 'production_done', label: '生产完成' },
+  materials_received_inspected: { dept: 'procurement', key: 'materials_received', label: '原辅料到货验收' },
+};
+
 /** 部门 → 系统角色(评分/负责人归属)。 */
 export const DEPT_ROLES: Record<Department, string[]> = {
   procurement: ['procurement', 'procurement_manager'],

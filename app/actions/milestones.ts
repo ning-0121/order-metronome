@@ -1142,12 +1142,8 @@ export async function markMilestoneDone(
   // 幂等:recordDeptAssessment 按 (order_id,department,task_key) upsert,与 qc.ts 那条同 key,
   //   两条路径都触发也只留一条。fire-and-forget:失败不阻断节点完成。
   {
-    const DEPT_TASK_BY_STEP: Record<string, { dept: 'procurement' | 'production'; key: string; label: string }> = {
-      final_qc_check: { dept: 'production', key: 'qc_passed', label: '尾查合格' },
-      mid_qc_check: { dept: 'production', key: 'mid_qc_passed', label: '中查完成' },
-      factory_completion: { dept: 'production', key: 'production_done', label: '生产完成' },
-      materials_received_inspected: { dept: 'procurement', key: 'materials_received', label: '原辅料到货验收' },
-    };
+    // 映射收口在 lib/domain/deptAssessment.ts(回填脚本用同一份,加节点只改那里)
+    const { DEPT_TASK_BY_STEP } = await import('@/lib/domain/deptAssessment');
     const mapped = DEPT_TASK_BY_STEP[milestoneData.step_key];
     if (mapped) {
       void (async () => {
