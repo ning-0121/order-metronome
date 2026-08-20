@@ -22,7 +22,9 @@ const CAT_LABEL: Record<string, string> = {
 const MASTER_CATS = ['fabric', 'trim', 'packing', 'print', 'washing', 'embroidery', 'service', 'other'];
 const emptyTempForm = { material_name: '', category: 'fabric', default_unit: '', specification: '', default_supplier_name: '', qty_per_piece: '', color: '', placement: '', notes: '', special_requirements: '' };
 
-const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: 'meter', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[], attachment_files: [] as Array<{ name: string; url: string }>, consumption_basis: '', allocation_mode: '', sample_reference: '', position_description: '' };
+// unit 默认留空(2026-08-19):此前默认 'meter',而辅料表单没有单位框 → 辅料被悄悄存成 meter。
+// 切换 material_type 时仍会自动填合理默认(面料 meter / 辅料 个),见下方 onChange。
+const emptyForm = { material_name: '', material_type: 'fabric', material_code: '', placement: '', color: '', qty_per_piece: '', total_qty: '', unit: '', supplier: '', spec: '', notes: '', special_requirements: '', override_reason: '', style_no: '', pack_size: '', image_urls: [] as string[], attachment_files: [] as Array<{ name: string; url: string }>, consumption_basis: '', allocation_mode: '', sample_reference: '', position_description: '' };
 
 // 带入弹窗用的「通用」哨兵值（区别于具体品牌字符串）
 const GENERIC = '__generic__';
@@ -246,7 +248,10 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
       placement: form.placement || undefined, color: form.color || undefined,
       qty_per_piece: form.qty_per_piece ? parseFloat(form.qty_per_piece) : undefined,
       total_qty: form.total_qty ? parseFloat(form.total_qty) : undefined,
-      unit: form.unit, supplier: form.supplier || undefined, spec: form.spec || undefined,
+      // 单位兜底(2026-08-19):emptyForm.unit 已改为留空(此前默认 'meter' 会被辅料悄悄带走),
+      // 所以提交时按类型补合理默认,避免面料落库无单位。用户填了就用用户的。
+      unit: form.unit || (FULL_FORM_TYPES.includes(form.material_type) ? 'meter' : '个'),
+      supplier: form.supplier || undefined, spec: form.spec || undefined,
       notes: form.notes || undefined, special_requirements: form.special_requirements || undefined,
       style_no: form.style_no?.trim() || undefined,
       pack_size: form.pack_size ? parseFloat(form.pack_size) : undefined,   // 每包件数(打包辅料;需求÷每包件数)
@@ -697,7 +702,7 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
   const formRow = (
     <div className="bg-indigo-50 rounded-xl p-4 mb-4 space-y-3">
       {!isFabricForm && (
-        <p className="text-xs text-gray-500">辅料只需填:辅料名 · 单件数量 · 总数量(单位默认「个」);面料才需规格/颜色/图片等。</p>
+        <p className="text-xs text-gray-500">辅料只需填:辅料名 · 单件数量 · 总数量 · 单位(默认「个」,可改);面料才需规格/颜色/图片等。</p>
       )}
       {/* 范围切换:整单通用(主吊牌等所有款共用,录一次)/ 按款(每款不同) */}
       <div className="flex items-center gap-2 text-xs flex-wrap">
@@ -795,13 +800,24 @@ export function BomTab({ orderId, captureEnabled = false }: { orderId: string; c
         )}
       </div>
       </>}
-      <div className={`grid gap-3 ${isFabricForm ? 'grid-cols-3' : 'grid-cols-2'}`}>
+      {/* 单位:2026-08-19 起**辅料也可改**。此前这里是 `isFabricForm && <input …>`,辅料压根没有单位框,
+          而新建表单 material_type 默认 'fabric'、emptyForm.unit 默认 'meter' —— 只要没手动切过类型,
+          辅料就带着 meter 存进去且无从修正(1022934 四条、1022963 两条即此)。
+          单位错会让同一物料在归并时按「物料+颜色+单位」拆成两条采购项 → 采购下两次单。
+          配 datalist 给常用值,既能选也能自由输入,减少「米 / m / meter」这类新分叉。 */}
+      <div className="grid gap-3 grid-cols-3">
         <input placeholder={isFabricForm ? '单件用量' : '单件数量(个数)'} type="number" step="0.01" value={form.qty_per_piece} onChange={e => set('qty_per_piece', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <input placeholder="总需用量" type="number" step="0.01" value={form.total_qty} onChange={e => set('total_qty', e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-        {isFabricForm && <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />}
+        <input placeholder="单位" value={form.unit} onChange={e => set('unit', e.target.value)}
+          list="bom-unit-options" title={isFabricForm ? '面料常用:meter / kg / yard' : '辅料常用:个 / 套 / 卷 / 包'}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <datalist id="bom-unit-options">
+          {(isFabricForm ? ['meter', 'kg', 'yard', 'sqm'] : ['个', '套', '卷', '包', 'meter', 'kg']).map(u => (
+            <option key={u} value={u} />
+          ))}
+        </datalist>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
         <select value={form.consumption_basis} onChange={e => set('consumption_basis', e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">

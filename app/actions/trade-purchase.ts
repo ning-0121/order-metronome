@@ -50,8 +50,11 @@ export async function getTradeBulkData(orderId: string): Promise<{
     return { error: '无权查看此订单' };
   }
   const { hasRoleInGroup } = await import('@/lib/domain/roles');
-  const canCost = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR') || hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS'); // 采购/财务可见进价
-  const canSale = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');   // 客户售价仅财务口径可见
+  // 进价(我们花多少钱买)只给采购/财务:CAN_SEE_PROCUREMENT_FLOOR = admin/finance/procurement/procurement_manager。
+  // 2026-08-19 收紧:原来还 `|| CAN_SEE_FINANCIALS`,而那个组**含 sales** —— 业务照样看得见、
+  // 还能改进价,与「经销单采购价业务不用填、由采购填」的口径自相矛盾。财务已在 PROCUREMENT_FLOOR 里,去掉不影响财务。
+  const canCost = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
+  const canSale = hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');   // 客户售价仍是财务口径(含业务),与进价分开管
 
   const { data: order } = await (supabase.from('orders') as any)
     .select('id, order_purpose').eq('id', orderId).maybeSingle();
@@ -106,7 +109,8 @@ export async function saveTradeLineCosts(
   const { canUserAccessOrder } = await import('@/lib/domain/orderAccess');
   if (!(await canUserAccessOrder(supabase, user.id, orderId))) return { error: '无权操作此订单' };
   const { hasRoleInGroup } = await import('@/lib/domain/roles');
-  const canCost = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR') || hasRoleInGroup(roles, 'CAN_SEE_FINANCIALS');
+  // 写侧与读侧同一判据(收紧后不含 sales)
+  const canCost = hasRoleInGroup(roles, 'CAN_SEE_PROCUREMENT_FLOOR');
   if (!canCost) return { error: '仅采购/财务/管理员可录入成品进价' };
   const clean = (updates || []).filter((u) => u && u.id);
   if (clean.length === 0) return { ok: true, updated: 0 };

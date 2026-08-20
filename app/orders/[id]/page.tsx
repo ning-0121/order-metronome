@@ -148,6 +148,11 @@ export default async function OrderDetailPage({
   }
   // 价格/利润可见性（红线：production/merchandiser/admin_assistant/procurement/logistics 不可见）
   const canSeeFinancials = isAdmin || hasRoleInGroup(currentRoles, 'CAN_SEE_FINANCIALS');
+  // 采购成本(我们花多少钱买)≠ 客户报价(客户付我们多少)。
+  // CAN_SEE_FINANCIALS 含 sales —— 用它当采购价的门禁,业务照样看得见、填得了,
+  // 而业务根本不知道采购价(2026-08-19 CEO:经销单采购价业务不用填,到采购这里填)。
+  // 采购价一律走 CAN_SEE_PROCUREMENT_FLOOR(admin/finance/procurement/procurement_manager)。
+  const canSeePurchaseCost = isAdmin || hasRoleInGroup(currentRoles, 'CAN_SEE_PROCUREMENT_FLOOR');
   // 谁能看/录采购核料预算(有价):财务可见组 ∪ 预算录入白名单(理单/采购要填)。
   // 修 P2(2026-07-09 审计):此前非 admin 一律显示 BomBudgetEntry,预算单价/加工费泄露给 production/qc/logistics 等无关角色。
   const canEnterBudget = canSeeFinancials || currentRoles.some((r) => ['merchandiser', 'procurement', 'procurement_manager'].includes(r));
@@ -1194,7 +1199,7 @@ export default async function OrderDetailPage({
               <h3 className="text-sm font-medium text-gray-600 mb-2">📐 尺码表</h3>
               <PackingFilesSection orderId={id} fileTypes={['size_chart']} emptyText="暂无尺码表;请到「原辅料和包装」页上传(建单不再传尺码表)" />
             </div>
-            <ManufacturingOrderTab orderId={id} showPrice={canSeeFinancials} showPurchaseCost={canSeeFinancials && (orderData as any).order_purpose === 'trade'} />
+            <ManufacturingOrderTab orderId={id} showPrice={canSeeFinancials} showPurchaseCost={canSeePurchaseCost && (orderData as any).order_purpose === 'trade'} />
           </div>
         )}
         {/* Tab: PI 形式发票(2026-07-09:从生产单+客户PO价+交期生成,业务改/预览/下载)*/}
