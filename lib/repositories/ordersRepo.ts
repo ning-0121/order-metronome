@@ -1014,3 +1014,20 @@ export async function setOrderProductionOwner(
   }
   return { ok: true };
 }
+
+/**
+ * 列出全部订单的身份引用(id + 两个订单号 + 客户)—— 供"按订单号对号入座"类功能(生产日报入口)。
+ * 只读、无价格/无业务字段;client 由调用方传(通常 service-role,要能读全量订单做匹配)。
+ */
+export async function listOrderRefs(
+  client: any,
+): Promise<{ data: Array<{ id: string; orderNo: string | null; internalNo: string | null; customer: string | null }>; error: string | null }> {
+  const { data, error } = await client.from('orders').select('id, order_no, internal_order_no, customer_name');
+  if (error) return { data: [], error: error.message };
+  return {
+    data: ((data || []) as any[]).map((o) => ({
+      id: o.id, orderNo: o.order_no ?? null, internalNo: o.internal_order_no ?? null, customer: o.customer_name ?? null,
+    })),
+    error: null,
+  };
+}
