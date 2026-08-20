@@ -21,10 +21,10 @@ export const PRODUCTION_QUICK_ENTRIES = [
  */
 export function getQuickEntries(role: DashboardRole): Array<{ title: string; href: string }> {
   if (role === 'qc') return [
+    { title: '🔍 巡查计划', href: '/production/qc-plan' },
     { title: '今日验货', href: '/production?detail=今日验货#details' },
     { title: '待放行', href: '/production?detail=待放行#details' },
     { title: '生产进度录入', href: '/production/progress' },
-    { title: '风险订单攻克', href: '/production?detail=已超期#details' },
   ];
   if (role === 'follow_up') return [
     { title: '生产进度录入', href: '/production/progress' },

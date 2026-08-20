@@ -788,3 +788,36 @@ export async function getMilestonesByOrderIds(
   }
   return { data: out, error: null };
 }
+
+/**
+ * 待巡查的验货类节点(未完成)+ 所属订单/工厂 —— 供 QC 巡查计划。
+ * 按节点**类型**捞(不看 owner_role):在途 V1/V2 老单的验货节点 owner 可能还是跟单,
+ * QC 也要能跨单排巡查(在途不动归属,靠这里按类型可见)。
+ */
+export async function listPendingInspectionNodes(
+  client: any,
+  stepKeys: string[] = ['mid_qc_check', 'final_qc_check', 'mid_qc_sales_check', 'final_qc_sales_check', 'inspection_release'],
+): Promise<{ data: Array<{
+  id: string; stepKey: string; name: string | null; status: string; dueAt: string | null; orderId: string;
+  orderNo: string | null; internalNo: string | null; customer: string | null; factoryName: string | null; factoryDate: string | null;
+}>; error: string | null }> {
+  const { data, error } = await client.from('milestones')
+    .select('id, step_key, name, status, due_at, order_id, orders(internal_order_no, order_no, customer_name, factory_name, factory_names, factory_date, lifecycle_status)')
+    .in('step_key', stepKeys)
+    .not('status', 'in', '("done","已完成","cancelled","skipped")');
+  if (error) return { data: [], error: error.message };
+  return {
+    // 只留在途单(active):completed/cancelled 单的验货节点是"幽灵逾期"(交付了但节点没标完成),
+    // 不该出现在巡查计划里(见 [[node-completion-vs-skip-rate]])。
+    data: ((data || []) as any[]).filter((m) => (m.orders?.lifecycle_status ?? 'active') === 'active').map((m) => {
+      const o = m.orders || {};
+      const factory = o.factory_name || (Array.isArray(o.factory_names) ? o.factory_names.filter(Boolean).join('、') : o.factory_names) || null;
+      return {
+        id: m.id, stepKey: m.step_key, name: m.name ?? null, status: m.status, dueAt: m.due_at ?? null, orderId: m.order_id,
+        orderNo: o.order_no ?? null, internalNo: o.internal_order_no ?? null, customer: o.customer_name ?? null,
+        factoryName: factory, factoryDate: o.factory_date ?? null,
+      };
+    }),
+    error: null,
+  };
+}
