@@ -7,7 +7,7 @@ import {
   updateProcurementItem, updateProcurementItemStatus, updateProcurementItemImages, updateProcurementItemAttachments,
   generateExecutionLines, getOrderProcurementFulfillment,
   listBomConsumptionLines, saveBomOverPurchasePct, deductFromStock, deleteProcurementItemRow, revertProcurementItemToDraft,
-  saveBomBudgetUnitPrice, saveBomSupplyMode, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
+  saveBomBudgetUnitPrice, saveBomProductionConsumption, saveBomSupplyMode, getOrderStyleBudgets, saveOrderStyleBudgets, saveSizeQtyOverride, saveSkuBreakdown, mergeSplitExecutionLines,
   mergeProcurementItems,
 } from '@/app/actions/procurement-items';
 import { createClient as createBrowserClient } from '@/lib/supabase/client';
@@ -92,6 +92,11 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
   const [consLines, setConsLines] = useState<any[]>([]);
   const [overEdit, setOverEdit] = useState<Record<string, string>>({});   // 抛量%(采购职权,逐料)
   const [priceEdit, setPriceEdit] = useState<Record<string, string>>({}); // 预算单价(业务填,逐料;2026-07-08 弃报价基线)
+  // 大货单耗(2026-08-19 改为采购也可改):原先此列只读、只能业务在 BOM 页填。
+  // 实际后果:采购在核料页看出数不对却动不了,只能回头找业务;而布料缺大货单耗时整单不许归并,
+  // 人被卡住就随手填个数过关 —— 1022934「衣裤架/PE 4丝单包袋」被填成 3(实际每款 1),
+  // 归并按 3 放大成 3600/7200,就是这么来的。给采购当场纠正的能力。
+  const [consEdit, setConsEdit] = useState<Record<string, string>>({});
   const [supplyEdit, setSupplyEdit] = useState<Record<string, 'self' | 'customer' | 'factory'>>({}); // 供料方式:自购/客供/加工厂承担
   const notSelf = (id: string) => (supplyEdit[id] || 'self') !== 'self';   // 客供/加工厂承担 → 绮陌不采购
   const [styleBudgets, setStyleBudgets] = useState<Array<{ style_no: string; cmt: string }>>([]); // 逐款加工费(元/套)
@@ -108,6 +113,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
       setConsLines((r as any).data);
       setOverEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.over_purchase_pct != null ? String(l.over_purchase_pct) : ''])));
       setPriceEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.budgetUnitPrice != null ? String(l.budgetUnitPrice) : ''])));
+    setConsEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.production_consumption != null ? String(l.production_consumption) : ''])));
       setSupplyEdit(Object.fromEntries(((r as any).data as any[]).map(l => [l.id, l.supply_mode || 'self'])));
     }
     if ((sb as any).data) setStyleBudgets(((sb as any).data as any[]).map(b => ({ style_no: b.style_no, cmt: b.cmt != null ? String(b.cmt) : '' })));
@@ -132,6 +138,9 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
       saveBomSupplyMode(orderId, supplyEdit),                  // 供料方式(自购/客供/加工厂承担)
     ];
     if (!trackingPhase) tasks.push(saveBomOverPurchasePct(orderId, over as any));  // 抛量:已下单锁定,不重存
+    // 大货单耗:空串 → null(清空,回落开发口径),与 saveBomProductionConsumption 的 <=0 视为 null 一致
+    const cons = Object.fromEntries(Object.entries(consEdit).map(([id, v]) => [id, v === '' ? null : Number(v)]));
+    tasks.push(saveBomProductionConsumption(orderId, cons as any));
     const results = await Promise.all(tasks);
     setConsSaving(false);
     const err = results.map(r => (r as any).error).find(Boolean);
@@ -143,7 +152,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
       return;
     }
     const warn = results.map(r => (r as any).warning).find(Boolean);
-    setMsg(warn ? ('⚠️ ' + warn) : '✅ 已保存(预算单价 + 加工费 + 辅料总价' + (trackingPhase ? '' : ' + 抛量') + ')');
+    setMsg(warn ? ('⚠️ ' + warn) : '✅ 已保存(预算单价 + 加工费 + 辅料总价 + 大货单耗' + (trackingPhase ? '' : ' + 抛量') + ')');
     await loadCons();
   }
   // 供应商主数据(确认供应商下拉用;不再手敲名字)
@@ -853,7 +862,7 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
             )}
           </div>
           {consEffectiveOpen && <>
-          <p className="text-[11px] text-gray-500">大货单耗由业务在「原辅料和包装」页按技术部大货版逐款填(此处<b>只读核实</b>);业务给<b>布料</b>逐料填<b>预算单价</b>(面料预算=大货单耗×预算单价×件数);辅料不逐个填价,走下方<b>整单辅料总价</b>(一口价);采购逐料填<b>抛量%</b>。采购量 = Σ(件数 × 大货单耗) ×(1 + 抛量%)。</p>
+          <p className="text-[11px] text-gray-500">大货单耗由业务在「原辅料和包装」页按技术部大货版逐款填,<b>采购在此可直接改</b>(留空=按开发单耗算);业务给<b>布料</b>逐料填<b>预算单价</b>(面料预算=大货单耗×预算单价×件数);辅料不逐个填价,走下方<b>整单辅料总价</b>(一口价);采购逐料填<b>抛量%</b>。采购量 = Σ(件数 × 大货单耗) ×(1 + 抛量%)。</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400">
@@ -881,11 +890,15 @@ export function ProcurementItemsTab({ orderId, focusItemId, internalOrderNo }: {
                     </td>
                   <td className="py-1.5 px-2 font-medium text-gray-800" title="该款×色数量基准">{l.quantity_display ?? l.pieces ?? '—'}</td>
                     <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
-                    {/* 大货单耗:业务在 BOM 页填,采购这里只读核实 */}
+                    {/* 大货单耗:业务在 BOM 页填,采购在此可直接改(2026-08-19)。留空=回落开发单耗。 */}
                     <td className="py-1.5 px-2">
-                      {Number(l.production_consumption) > 0
-                        ? <span className="font-medium text-gray-800">{l.production_consumption}</span>
-                        : (l.required && !notSelf(l.id)) ? <span className="text-[11px] text-amber-600">业务未填 →</span> : <span className="text-gray-300">—</span>}
+                      {notSelf(l.id) ? <span className="text-gray-300">—</span> : (
+                        <input type="number" step="any" min="0" value={consEdit[l.id] ?? ''}
+                          placeholder={l.development_consumption != null ? `留空=按${l.development_consumption}` : '留空=按开发单耗'}
+                          onChange={e => setConsEdit(prev => ({ ...prev, [l.id]: e.target.value }))}
+                          title="每件/每套用量。留空则按开发单耗算,不要为了通过归并随便填数"
+                          className={`w-24 rounded border px-2 py-1 ${l.required && !(Number(consEdit[l.id]) > 0) ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`} />
+                      )}
                     </td>
                     {/* 预算单价:仅布料填(面料预算=大货单耗×本列×件数);辅料不逐个填价,走下方「辅料总价」;客供/加工厂承担绮陌不买 → 免填 */}
                     <td className="py-1.5 px-2">
