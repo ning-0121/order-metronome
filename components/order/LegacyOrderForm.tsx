@@ -805,14 +805,15 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null, prefetch }: 
     if (poMode === 'no_po') {
       if (!hasManualLines) { showError('无 PO 模式:请在下方「逐款明细」手工录入款色码'); return; }
     } else if (orderPurpose === 'trade') {
-      // 经销/采购成品:必传客户PO + 逐款填 客户报价+采购价(不传报价单文件;两价推财务生成预算单)
+      // 经销/采购成品:必传客户PO + 逐款填**客户报价**(采购价由采购在「大货采购」页签录,不在建单要)
       if (!poFile) { showError('请上传客户 PO 附件(建单必传)'); return; }
       const priced = lineStyles.length > 0 ? lineStyles : (poParseResult?.styles || []);
       if (priced.length === 0) { showError('经销/采购成品单:请在下方「逐款明细」录入款式并逐款填价'); return; }
-      const unpriced = priced.filter((s: any) => !(Number(s.po_unit_price) > 0) || !(Number(s.purchase_unit_cost) > 0));
+      // 只校验「客户报价」—— 采购价业务不知道,改由采购在「大货采购」页签录(2026-08-19 CEO)。
+      const unpriced = priced.filter((s: any) => !(Number(s.po_unit_price) > 0));
       if (unpriced.length > 0) {
         const names = unpriced.slice(0, 3).map((s: any) => s.style_no || s.product_name || '未命名款').join('、');
-        showError(`经销/采购成品单:每款都要填「客户报价 + 采购价」。缺价:${names}${unpriced.length > 3 ? ` 等${unpriced.length}款` : ''}`);
+        showError(`经销/采购成品单:每款都要填「客户报价」。缺价:${names}${unpriced.length > 3 ? ` 等${unpriced.length}款` : ''}`);
         return;
       }
     } else {
@@ -1584,9 +1585,13 @@ function NewOrderWizard({ showPrice = false, initialDraftId = null, prefetch }: 
                 <p className="text-[11px] text-gray-500 mb-3">手工录逐款明细 → 上面的总量/款数/颜色数自动算,且喂生产任务单和客户 PI。不录也能建单(上面三个数字手填)。</p>
                 {/* onParsed:富录入表里做的 AI 解析也把完整结果(交期/包装/质量要求/辅料)带回来,
                     随建单冻结进 orders.po_parse_snapshot;主 PO 上传已解析过则不覆盖(首解析优先) */}
+                {/* 采购价不在建单填(2026-08-19 CEO):经销单建单人是业务,业务知道给客户的报价,
+                    **不知道我们的采购成本** —— 逼他填只会填进一个猜的数,而那个数会一路喂到
+                    大货采购单金额与财务应付。采购价的正确入口是「大货采购」页签(saveTradeLineCosts,
+                    仅采购/财务/admin 可录)。所以这里一律不渲染该列。 */}
                 <LineItemMatrixEditor value={lineStyles} onChange={setLineStyles} canEdit
                   showPrice={showPrice || orderPurpose === 'trade'}
-                  showPurchaseCost={orderPurpose === 'trade'}
+                  showPurchaseCost={false}
                   hideFabrics={orderPurpose === 'trade'}
                   onParsed={(data) => setPoParseResult((prev: any) => prev ?? data)} />
               </div>
