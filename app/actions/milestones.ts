@@ -1110,6 +1110,39 @@ export async function markMilestoneDone(
     }
   }
 
+  // ── 部门执行考核 hook(2026-08-19)────────────────────────────────
+  // 原设计只有两个写入点:采购下单(placeCore)与「QC 在 qc_inspections 判 pass」(qc.ts)。
+  // 但 qc_inspections 是**孤儿表** —— 它只在 /orders/[id]?tab=qc 里能建行,而 QC 的入口是
+  // /production/order/[id](那页不挂 QcTab)。实测全库 qc_inspections 仅 1 行且是 pending,
+  // 于是生产部考核 0 条;同期尾查节点已完成 113 个,本该各落一条。
+  // 改为挂在**节点完成**上 —— 那是这些部门真正在走的路径。
+  // 幂等:recordDeptAssessment 按 (order_id,department,task_key) upsert,与 qc.ts 那条同 key,
+  //   两条路径都触发也只留一条。fire-and-forget:失败不阻断节点完成。
+  {
+    const DEPT_TASK_BY_STEP: Record<string, { dept: 'procurement' | 'production'; key: string; label: string }> = {
+      final_qc_check: { dept: 'production', key: 'qc_passed', label: '尾查合格' },
+      mid_qc_check: { dept: 'production', key: 'mid_qc_passed', label: '中查完成' },
+      factory_completion: { dept: 'production', key: 'production_done', label: '生产完成' },
+      materials_received_inspected: { dept: 'procurement', key: 'materials_received', label: '原辅料到货验收' },
+    };
+    const mapped = DEPT_TASK_BY_STEP[milestoneData.step_key];
+    if (mapped) {
+      void (async () => {
+        try {
+          const { recordDeptAssessment } = await import('./dept-assessment');
+          await recordDeptAssessment(milestoneData.order_id, mapped.dept, {
+            task_key: mapped.key, task_label: mapped.label,
+            user_id: user.id,
+            // 目标日 = 该节点自己的 due_at;实际日 = 完成日。on_time 由 isOnTime 判。
+            target_date: milestoneData.due_at ? String(milestoneData.due_at).slice(0, 10) : null,
+            actual_date: new Date().toISOString().slice(0, 10),
+            note: `节点「${milestoneData.name || milestoneData.step_key}」完成`,
+          });
+        } catch { /* 考核是旁路,不阻断 */ }
+      })();
+    }
+  }
+
   revalidatePath(`/orders/${milestoneData.order_id}`);
   revalidatePath('/dashboard');
   revalidatePath('/orders');
