@@ -74,6 +74,12 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
   if (loading) return <div className="text-center py-6 text-gray-400 text-sm">加载核料预算…</div>;
 
   const fabricLines = lines.filter(l => l.required);   // 布料(面料/里料):必填预算单价
+  // 辅料/包装:不逐个填价(走下方整单一口价),但**必须能核对** —— 2026-08-19 CEO:
+  // 「采购核料页面依然没有出现要核对的各种辅料」。此前本页只渲染 fabricLines,
+  // 辅料在这一页完全不可见,采购无法核对单耗/数量/单位是否正确;
+  // 而 1022934 正是辅料单位(meter/个)与大货单耗(被填成3)错了没人发现,
+  // 归并把 2400 放大成 7200。列出来才有机会在下单前发现。
+  const trimLines = lines.filter(l => !l.required);
   const missing = fabricLines.filter(l => priceEdit[l.id] === '').length;
   const orderQtyDisplay = orderQuantityDisplay || (commercialOrderQty != null ? `${commercialOrderQty.toLocaleString()} 套` : (orderQty > 0 ? `${orderQty.toLocaleString()} 件` : '?'));
 
@@ -94,7 +100,7 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
         辅料<b>不逐个填价</b>,在下方填整单一口价【辅料总价】;加工费按款填【元/件】。抛量% 由采购在采购中心填,这里不涉及。
       </p>
 
-      {/* 面料预算单价(只列布料;辅料走下方逐款「辅料总价」) */}
+      {/* 面料预算单价(只列布料;辅料在下方独立核对表,价格走整单一口价) */}
       <div className="overflow-x-auto rounded-lg border border-indigo-100 bg-white">
         <table className="w-full text-xs">
           <thead><tr className="text-left text-gray-400 bg-gray-50/60">
@@ -144,6 +150,48 @@ export function BomBudgetEntry({ orderId }: { orderId: string }) {
           </tbody>
         </table>
       </div>
+
+      {/* 辅料/包装核对表(只读):不在这填价,但要能看见单耗/数量/单位对不对 */}
+      {trimLines.length > 0 && (
+        <div className="rounded-lg border border-indigo-100 bg-white">
+          <div className="px-3 py-2 border-b border-indigo-100 flex items-baseline gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-gray-800">辅料 / 包装核对 · {trimLines.length} 行</span>
+            <span className="text-[11px] text-gray-500">
+              不在此逐个填价(走下方「辅料预算」整单一口价);<b>请核对单耗、数量、单位</b> ——
+              单位或大货单耗填错会让归并把同一物料拆成两条、或把数量成倍放大。改在「原辅料和包装」页。
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-gray-400 bg-gray-50/60">
+                {['款号', '颜色', '辅料', '数量', '开发单耗', '大货单耗', '单位'].map(h => (
+                  <th key={h} className="py-1.5 px-2 font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {trimLines.map(l => {
+                  const prod = Number(l.production_consumption);
+                  return (
+                    <tr key={l.id} className="border-t border-gray-100">
+                      <td className="py-1.5 px-2 font-mono text-gray-700">{l.style_no || <span className="text-gray-400">整单通用</span>}</td>
+                      <td className="py-1.5 px-2 text-gray-600">{l.color || '—'}</td>
+                      <td className="py-1.5 px-2 text-gray-800">{l.material_name || '—'}</td>
+                      <td className="py-1.5 px-2 text-gray-700" title="该款×色数量基准">{l.quantity_display ?? l.pieces ?? '—'}</td>
+                      <td className="py-1.5 px-2 text-gray-500">{l.development_consumption ?? '—'}</td>
+                      <td className="py-1.5 px-2">
+                        {prod > 0
+                          ? <span className="text-gray-800">{l.production_consumption}</span>
+                          : <span className="text-gray-400" title="留空则按开发单耗算">按开发单耗</span>}
+                      </td>
+                      <td className="py-1.5 px-2 text-gray-500">{l.unit || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 逐款加工费(元/件) */}
       {styleBudgets.length > 0 && (

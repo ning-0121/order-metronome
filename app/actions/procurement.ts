@@ -103,6 +103,7 @@ export async function getProcurementItems(orderId: string): Promise<{
     budgetTotal: number;            // 预算总额 = 面料预算(逐行单价×量) + 辅料整单一口价
     fabricBudgetAmount: number;     // 其中面料预算
     accessoryBudgetTotal: number;   // 其中辅料整单一口价
+    cancelledCount: number;         // 已作废、未计入本表的执行行数
   };
 }> {
   const auth = await checkAccess();
@@ -122,7 +123,15 @@ export async function getProcurementItems(orderId: string): Promise<{
 
   if (error) return { error: error.message };
 
-  const rawLines = (data || []) as any[];
+  // 作废行不进对账(2026-08-19 CEO):line_status='cancelled' 的执行行是废弃数据 ——
+  // 全库 59 条里 25 条是 cancelled(42%),混进对账表会让人把废数当成待采购量核对。
+  // 1022934 就是这样:被圈出来的「PE 4丝单包袋 7200 个」「衣裤架 3636 meter」全是 cancelled,
+  // 一条都没挂采购单,却与有效行并列显示、还计进预算总额。
+  // 在源头滤掉,合并与汇总口径自动一致;条数单独返回,不隐瞒。
+  // 注:status 列全库为 null(废弃列),真实状态在 line_status。
+  const allLines = (data || []) as any[];
+  const cancelledCount = allLines.filter((l) => String(l.line_status ?? '') === 'cancelled').length;
+  const rawLines = allLines.filter((l) => String(l.line_status ?? '') !== 'cancelled');
 
   // 对账按物料合并(2026-07-08 用户:对账是跟供应商按物料核总量,不该被 N1 拆码拆成 21 行还看不出码)。
   //  合并键:有采购项按采购项(分色);辅料无采购项按 料+规格+供应商;布料无采购项各自成行(避免误并色)。
@@ -221,6 +230,7 @@ export async function getProcurementItems(orderId: string): Promise<{
       budgetTotal,
       fabricBudgetAmount: Math.round(fabricBudgetAmount * 100) / 100,
       accessoryBudgetTotal,
+      cancelledCount,   // 已作废、未计入本表的执行行数(前端提示用,不隐瞒)
     },
   };
 }

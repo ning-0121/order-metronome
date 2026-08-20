@@ -155,6 +155,11 @@ export function ProcurementTab({ orderId, isAdmin, canEdit, canRecordReceipt }: 
           <div className="bg-white rounded-lg border border-gray-200 p-3 text-center">
             <div className="text-lg font-bold text-gray-800">{summary.itemCount}</div>
             <div className="text-xs text-gray-500">采购项</div>
+            {Number(summary?.cancelledCount) > 0 && (
+              <div className="text-[11px] text-gray-400 mt-0.5" title="已作废的执行行不进对账,也不计入下方各项金额">
+                另有 {summary.cancelledCount} 条已作废，未计入
+              </div>
+            )}
           </div>
           <div className="bg-white rounded-lg border border-amber-200 p-3 text-center" title="面料逐行预算(单价×量) + 辅料整单一口价">
             <div className="text-lg font-bold text-amber-600">¥{(summary.budgetTotal || 0).toLocaleString()}</div>
