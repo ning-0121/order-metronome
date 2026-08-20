@@ -139,7 +139,8 @@ export async function buildOrderFromAraosPO(formData: FormData): Promise<void> {
       });
       // 推外部财务(与手动建单同款:file.uploaded webhook)
       const { shareBuildDocsToFinance } = await import('@/app/actions/order-build-docs');
-      void shareBuildDocsToFinance(res.orderId);
+      // 审计 2026-08-19:void→await——serverless 冻结会把未 await 的 promise 整条杀掉,财务事件连 outbox 都进不去(零痕迹);函数内部已吞错,await 不会阻断业务。
+      await shareBuildDocsToFinance(res.orderId).catch((e: unknown) => console.warn('[araos-po] 建单文件同步财务失败(不阻断):', (e as Error)?.message));
     } catch (e: any) { console.warn('[buildOrderFromAraosPO] 落 PO 附件/推财务失败(不阻断):', e?.message); }
   }
 

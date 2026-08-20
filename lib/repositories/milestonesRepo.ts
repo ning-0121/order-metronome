@@ -697,7 +697,8 @@ export async function updateMilestone(
   //    → 发 milestone.requested 给财务系统审批队列(财务批准回传 approval_type='milestone')。fire-and-forget。
   const becameInProgress = sanitized.status === 'in_progress' && currentMilestone?.status !== 'in_progress';
   if (currentMilestone?.order_id && becameInProgress && currentMilestone?.owner_role === 'finance') {
-    void (async () => {
+    // 审计 2026-08-19:void→await——审批请求事件不 await,serverless 冻结时连 outbox 都进不去。
+    await (async () => {
       try {
         const { createServiceRoleClient } = await import('@/lib/supabase/server');
         const svc = createServiceRoleClient();

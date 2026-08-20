@@ -237,10 +237,30 @@ export async function markBatchMilestoneStep(
     });
   }
 
-  // ── 5. 出运完成 → 出货单据同步财务(阶段一,fire-and-forget,永不阻塞出运)──
+  // ── 5. 出运完成 → 出货单据同步财务 ──
   //   本批标出运(status_shipped + complete)即推该批的 装箱单/CI/PI/报关 到财务。
+  //   审计 2026-08-19:改 await——「不 await 内部已吞错」混淆了两件事:函数确实不抛,
+  //   但 serverless 冻结会把整条 promise 杀掉,事件连 outbox 都进不去、零痕迹(历史已发生)。
   if (meta_def.source === 'status_shipped' && action === 'complete') {
-    void syncShippingDocsToFinance(orderId, batchId);   // 不 await:同步内部已吞错,永不阻塞出运
+    await syncShippingDocsToFinance(orderId, batchId);
+    // P1-3:全批出完 → 补发出货完成事实事件(幂等键 shipment_completed:<orderId>,天然防重)。
+    // 此前分批路径只发单据不发事实,财务的应收/结算触发落空。
+    if (progress.allDone) {
+      try {
+        const { data: ordDone } = await (supabase.from('orders') as any)
+          .select('internal_order_no, order_no, quantity').eq('id', orderId).maybeSingle();
+        const { notifyShipmentCompleted } = await import('@/lib/integration/finance-sync');
+        const rDone = await notifyShipmentCompleted({
+          order_id: orderId,
+          internal_order_no: (ordDone as any)?.internal_order_no || (ordDone as any)?.order_no || null,
+          shipment_date: new Date().toISOString().slice(0, 10),
+          quantity: (ordDone as any)?.quantity ?? null,
+        });
+        if (!rDone.success) console.error(`[batch-milestones] shipment.completed 首发失败(${rDone.error}) → 已落 outbox 待重试`);
+      } catch (e: any) {
+        console.error('[batch-milestones] 出货完成事实事件异常(不阻断,outbox 兜底):', e?.message);
+      }
+    }
   }
 
   revalidatePath(`/orders/${orderId}`);

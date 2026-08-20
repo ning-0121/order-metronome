@@ -575,7 +575,16 @@ export async function resyncPurchaseOrderToFinance(poId: string): Promise<{ ok?:
   const { roles, userId } = await authRoles();
   if (!userId) return { error: '请先登录' };
   if (!isAdminRole(roles)) return { error: '仅管理员可重发财务同步' };
+  return resyncPurchaseOrderCore(poId);
+}
 
+/**
+ * 内部重推核心(无鉴权,不 export 为 server action)。
+ * 审计 2026-08-19 P0-4:改底价后的自动重推此前直接调上面的 admin 版——采购角色改价
+ * 100% 被「仅管理员」挡回且错误被 void 吞掉,应付金额与节拍器静默漂移。
+ * 调用方自己已过角色闸(如 updateProcurementLineFloorPrice 的采购/管理员判定),重推本身无须再鉴权。
+ */
+async function resyncPurchaseOrderCore(poId: string): Promise<{ ok?: true; sent?: string; error?: string }> {
   const svc = createServiceRoleClient();
   const { data: full } = await (svc.from('purchase_orders') as any).select('*').eq('id', poId).maybeSingle();
   if (!full) return { error: '采购单不存在' };
@@ -898,9 +907,14 @@ export async function updateProcurementLineFloorPrice(poId: string, lineId: stri
     if (!wTot.ok) return { error: `采购单总额回写未生效(${wTot.status}):${wTot.error}` };
   }
 
-  // 非草稿改价 → 自动重推财务(placed 幂等按 po_no upsert),应付金额跟着纠正;失败不阻断(可手动重发)
+  // 非草稿改价 → 自动重推财务(placed 幂等按 po_no upsert),应付金额跟着纠正。
+  // 审计 2026-08-19 P0-4:①走无鉴权 core(原来调 admin 版,采购改价 100% 被挡);
+  // ②必须 await(void 在 serverless 冻结时连发都没发);失败仅告警不阻断(可手动重发)。
   if ((po as any).status !== 'draft') {
-    try { void resyncPurchaseOrderToFinance(poId); } catch { /* fire-and-forget */ }
+    try {
+      const rs = await resyncPurchaseOrderCore(poId);
+      if ((rs as any)?.error) console.error(`[floor-price] 改价重推财务失败(不阻断): ${(rs as any).error}`);
+    } catch (e: any) { console.error('[floor-price] 改价重推财务异常(不阻断):', e?.message); }
   }
 
   revalidatePath(`/procurement/po/${poId}`);

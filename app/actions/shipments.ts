@@ -249,7 +249,7 @@ export async function executeShipment(id: string, orderId: string, rec: {
   }
   // 前置状态守卫：必须财务审批通过(warehouse_signed)后才能执行，防绕过财务闸门
   const { data: cur } = await (supabase.from('shipment_confirmations') as any)
-    .select('status').eq('id', id).single();
+    .select('status, shipment_qty').eq('id', id).single();
   if (!cur) return { error: '出货记录不存在' };
   if (cur.status !== 'warehouse_signed') {
     return { error: `需财务审批通过后才能执行出货，当前状态：${cur.status}` };
@@ -269,6 +269,30 @@ export async function executeShipment(id: string, orderId: string, rec: {
       locked_at: now,
     }).eq('id', id);
   if (error) return { error: error.message };
+
+  // ── 出货事实 → 财务(审计 2026-08-19 P0-1)──
+  // 此前物流三签出完货(提单号都录了)财务零事件:应收/CI/结算全不触发,
+  // 与 confirmOrderShipped 是同一事实的两条写入路径、只有一条通知财务的教科书案例。
+  // 必须 await:serverless 一返回就冻结,不 await 连 outbox 都进不去(2026-07-11 已排明)。
+  try {
+    const { data: ord } = await (supabase.from('orders') as any)
+      .select('internal_order_no, order_no, quantity').eq('id', orderId).maybeSingle();
+    const { notifyShipmentCompleted } = await import('@/lib/integration/finance-sync');
+    const r = await notifyShipmentCompleted({
+      order_id: orderId,
+      internal_order_no: (ord as any)?.internal_order_no || (ord as any)?.order_no || null,
+      shipment_date: (rec.actual_ship_date || now).slice(0, 10),
+      quantity: Number(cur.shipment_qty) || (ord as any)?.quantity || null,
+      reference: rec.bl_number || null,
+      shipment_confirmation_id: id,
+    });
+    if (!r.success) console.error(`[executeShipment] shipment.completed 首发失败(${r.error}) → 已落 outbox 待重试`);
+    const { syncShippingDocsToFinance } = await import('@/app/actions/shipping-docs-sync');
+    await syncShippingDocsToFinance(orderId);   // CI/装箱单/应收金额同步(内部吞错,不阻断)
+  } catch (e: any) {
+    console.error('[executeShipment] 财务事件发送异常(不阻断出货,outbox 兜底):', e?.message);
+  }
+
   revalidatePath(`/orders/${orderId}`);
   return {};
 }

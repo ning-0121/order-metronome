@@ -136,10 +136,11 @@ export async function POST(request: Request) {
           .select('id').or(`order_no.eq.${on},internal_order_no.eq.${on}`).limit(1).maybeSingle()
         if (ord?.id) resolvedOrderId = ord.id as string
       }
-      // 用 insert(不是 upsert):order_finance_events 没有 request_id 唯一约束,
-      // onConflict:'request_id' 会 500「no unique or exclusion constraint」——这正是财务进度回传
-      // 一直全军覆没(order_finance_events 恒 0 行)的第二重根因。幂等已由上面 seen-check 保证。
-      const { error } = await (svc.from('order_finance_events') as unknown as { insert: (v: unknown) => Promise<{ error: { message: string } | null }> }).insert({
+      // 幂等硬化(审计 2026-08-19):request_id 唯一索引已建(迁移 20260819_order_finance_events_
+      // request_id_unique)。此前 select-then-insert 在 5 分钟签名窗口内并发重放会双插 →
+      // applyProcurementPayment 把对账已付累加两遍。现在 insert 撞唯一索引即判定为重放,
+      // 只有【真实插入成功】才执行付款累加副作用。
+      const insRes = await (svc.from('order_finance_events') as unknown as { insert: (v: unknown) => { select: (c: string) => Promise<{ data: unknown[] | null; error: { message: string; code?: string } | null }> } }).insert({
         request_id: payload.request_id || null,
         order_id: resolvedOrderId,
         order_no: d.order_no || null,
@@ -148,9 +149,16 @@ export async function POST(request: Request) {
         currency: d.currency || null,
         note: d.note || null,
         occurred_at: d.at || new Date().toISOString(),
-      })
-      if (error) throw new Error(error.message)
+      }).select('id')
+      if (insRes.error) {
+        // 23505 唯一冲突 = 并发重放,幂等吞并(与上面 seen-check 同语义);索引未建时不会走到这
+        if (insRes.error.code === '23505' || /duplicate key|order_finance_events_request_id_uniq/i.test(insRes.error.message)) {
+          return NextResponse.json({ status: 'ok', recorded: evt, dedup: true })
+        }
+        throw new Error(insRes.error.message)
+      }
       // 采购付款申请回传(P2):payment.completed 带 source_ref → 累加对账已付、标付款申请已付。
+      // 仅在真实插入后执行(重放已在上面被吞并),杜绝双计。
       if (evt === 'payment.completed' && d.source_ref) {
         await applyProcurementPayment(svc, String(d.source_ref), Number(d.amount) || 0)
       }

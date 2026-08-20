@@ -293,6 +293,19 @@ export async function saveOrderLineItems(orderId: string, styles: any[], sizeOrd
     console.warn('[saveOrderLineItems] 布料同步 BOM 失败(不阻断):', e?.message);
   }
 
+  // ── 明细整表替换 → 同步财务(审计 2026-08-19 P0-6)──
+  // 发给财务的 quantity 就是从本表 sumCommercialQty(qty_pcs, set_multiplier) 算的
+  // (finance-sync 注释点名 1022967:数量只发一半→金额直接错)。改了明细不推,
+  // 财务侧数量/金额自检永远跑在旧值上。await 原因同全库口径(serverless 冻结)。
+  try {
+    const { createServiceRoleClient } = await import('@/lib/supabase/server');
+    const { data: fullOrd } = await (createServiceRoleClient().from('orders') as any).select('*').eq('id', orderId).maybeSingle();
+    if (fullOrd) {
+      const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+      await syncOrderToFinance(fullOrd, 'order.updated');
+    }
+  } catch (e: any) { console.warn('[saveOrderLineItems] 财务同步失败(不阻断,outbox 兜底):', e?.message); }
+
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, styles: (styles || []).length, lines: rows.length, total: rows.reduce((s, r) => s + (r.qty_pcs || 0), 0) };
 }
@@ -372,6 +385,18 @@ export async function saveOrderDealPrices(
       .update({ po_unit_price: val }).eq('order_id', orderId).eq('style_no', key);
     if (error) return { error: `保存成交价失败(款 ${key}):${error.message}` };
   }
+  // ── 逐款成交价 → 同步财务(审计 2026-08-19 P0-7)──
+  // po_unit_price 是客户成交价(PI/CI 金额、应收基准直接取它),此前只有整单价分支才推。
+  if ((updates || []).some(u => (u.style_no || '').trim())) {
+    try {
+      const { createServiceRoleClient } = await import('@/lib/supabase/server');
+      const { data: fullOrd } = await (createServiceRoleClient().from('orders') as any).select('*').eq('id', orderId).maybeSingle();
+      if (fullOrd) {
+        const { syncOrderToFinance } = await import('@/lib/integration/finance-sync');
+        await syncOrderToFinance(fullOrd, 'order.updated');
+      }
+    } catch (e: any) { console.warn('[saveLinePoPrices] 财务同步失败(不阻断,outbox 兜底):', e?.message); }
+  }
   // 整单成交价兜底(2026-07-29):无逐款明细的单在 PI 节点录整单价 → orders.unit_price +
   // total_amount 按【套装口径】= 订单数量(套数)×单价(quantity 库存折合件数,须 ÷perSet,防翻倍),
   // 并 fire-and-forget 同步财务(order.updated 走修正后的数量契约+自检)。
@@ -392,8 +417,9 @@ export async function saveOrderDealPrices(
     if (upErr) return { error: '保存整单成交价失败:' + upErr.message };
     try {
       const { data: full } = await (svc.from('orders') as any).select('*').eq('id', orderId).maybeSingle();
-      if (full) { const { syncOrderToFinance } = await import('@/lib/integration/finance-sync'); void syncOrderToFinance(full, 'order.updated'); }
-    } catch { /* fire-and-forget */ }
+      // 审计 2026-08-19:void→await——serverless 冻结会连 outbox 都进不去,不是「吞错」问题
+      if (full) { const { syncOrderToFinance } = await import('@/lib/integration/finance-sync'); await syncOrderToFinance(full, 'order.updated'); }
+    } catch (e: any) { console.warn('[saveLinePoPrices] 整单价财务同步失败(不阻断):', e?.message); }
   }
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
