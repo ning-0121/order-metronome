@@ -272,8 +272,12 @@ export async function recordPayment(
   const { data: profile } = await (supabase.from('profiles') as any)
     .select('role, roles').eq('user_id', user.id).single();
   const roles: string[] = profile?.roles?.length > 0 ? profile.roles : [profile?.role].filter(Boolean);
-  if (!roles.some(r => ['admin', 'finance'].includes(r))) {
-    return { error: '仅财务和管理员可标记收款' };
+  // 审计 2026-08-20(P1-1 收款双写收口):收款真相=财务系统的回款登记(有银行流水、
+  // 汇率护栏、审计留痕,且已实时回传 collection.received 事件)。节拍器站内标记收款
+  // 是无对账的第二条写入路径——两边应收必然分叉。降级为【仅 admin 应急补录】,
+  // 财务角色引导去财务系统登记。
+  if (!roles.includes('admin')) {
+    return { error: '收款请到财务系统「收款与银行」登记回款(那边有流水/汇率护栏,并自动回传节拍器)。此处仅保留管理员应急补录通道。' };
   }
   if (!(amount > 0)) return { error: '收款金额必须大于 0' };
 

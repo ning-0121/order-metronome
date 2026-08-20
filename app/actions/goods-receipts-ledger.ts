@@ -156,7 +156,7 @@ export async function updateGoodsReceiptPrice(
 
   const svc = createServiceRoleClient();
   const { data: row, error } = await (svc.from('goods_receipts') as any)
-    .update(update).eq('id', receiptId).select('received_qty, unit_price, extra_fee').maybeSingle();
+    .update(update).eq('id', receiptId).select('received_qty, unit_price, extra_fee, line_item_id, order_id').maybeSingle();
   if (error) {
     if (/column .*(unit_price|extra_fee|price_note|price_filled)/i.test(error.message || ''))
       return { error: '价格列尚未落库,请先执行迁移 npm run db:migrate' };
@@ -164,6 +164,30 @@ export async function updateGoodsReceiptPrice(
   }
   revalidatePath('/procurement/ledger');
   const amount = row ? receiptAmount(row as any) : undefined;
+
+  // 审计 2026-08-20(P1-5):补录的实付单价/附加费此前完全不回财务——财务只有 PO 理论价,
+  // 实付差额它看不到。补价成功即回传(带金额口径);await 防 serverless 冻结丢事件。
+  try {
+    const lineId = (row as any)?.line_item_id as string | undefined;
+    if (lineId) {
+      const { getLineRef } = await import('@/lib/repositories/purchaseOrdersRepo');
+      const line = await getLineRef(svc, lineId);
+      const { syncGoodsReceiptToFinance } = await import('@/lib/integration/finance-sync');
+      await syncGoodsReceiptToFinance({
+        po_no: line?.po_no ?? null,
+        line_id: lineId,
+        order_id: (row as any)?.order_id ?? null,
+        material_name: line?.material_name ?? null,
+        ordered_qty: line?.ordered_qty ?? null,
+        received_qty_total: (row as any)?.received_qty ?? null,
+        receipt_id: receiptId,
+        unit_price: (row as any)?.unit_price ?? null,
+        extra_fee: (row as any)?.extra_fee ?? null,
+        receipt_amount: amount ?? null,
+      });
+    }
+  } catch (e: any) { console.warn('[updateGoodsReceiptPrice] 补价回财务失败(不阻断):', e?.message); }
+
   return { ok: true, amount };
 }
 
