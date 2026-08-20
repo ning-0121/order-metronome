@@ -601,6 +601,8 @@ export async function syncGoodsReceiptToFinance(payload: {
   po_no?: string | null; line_id: string; order_id?: string | null;
   material_name?: string | null; ordered_qty?: number | null;
   received_qty_total?: number | null; inspection_result?: string | null; line_status?: string | null;
+  // 2026-08-20(审计 P1-5):收货实付金额口径——补价路径回传,财务核销才有实付依据
+  receipt_id?: string | null; unit_price?: number | null; extra_fee?: number | null; receipt_amount?: number | null;
 }) {
   return sendToFinanceSystem('goods_receipt.recorded', payload as unknown as Record<string, unknown>)
 }

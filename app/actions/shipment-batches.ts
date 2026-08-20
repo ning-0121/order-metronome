@@ -105,6 +105,36 @@ export async function updateShipmentBatch(
 ): Promise<{ error?: string; success?: boolean }> {
   const supabase = await createClient();
 
+  // ── 审计 2026-08-20(P1-4):此前本函数零鉴权、零闸门——任何登录人可把批次直改 shipped,
+  //    完全绕过 markBatchStep 的「仅物流/生产管理 + 财务放货硬闸」。补同口径闸。
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: '请先登录' };
+  const { getUserRoles } = await import('@/lib/repositories/ordersRepo');
+  const roles = await getUserRoles(supabase, user.id);
+  const { isAdminRole } = await import('@/lib/domain/roles');
+  const isAdmin = isAdminRole(roles);
+  if (!isAdmin && !roles.some((r) => ['logistics', 'production_manager', 'order_manager', 'merchandiser', 'sales'].includes(r))) {
+    return { error: '无权修改出货批次' };
+  }
+  const SHIPPED_STATES = new Set(['shipped', '已出运']);
+  const { getBatchRef } = await import('@/lib/repositories/shipmentBatchesRepo');
+  let shipOrderId: string | null = null;
+  if (updates.status && SHIPPED_STATES.has(String(updates.status))) {
+    const bRow = await getBatchRef(supabase, batchId);
+    if (!bRow) return { error: '批次不存在' };
+    shipOrderId = bRow.order_id;
+    if (!isAdmin && !roles.some((r) => ['logistics', 'production_manager'].includes(r))) {
+      return { error: '仅物流/生产管理/管理员可标记出运——请走「出货单据」按批确认流程。' };
+    }
+    if (!isAdmin) {
+      const { createServiceRoleClient } = await import('@/lib/supabase/server');
+      const { data: fin } = await (createServiceRoleClient().from('order_financials') as any)
+        .select('payment_hold, allow_shipment').eq('order_id', (bRow as any).order_id).maybeSingle();
+      if ((fin as any)?.payment_hold) return { error: '❌ 财务付款暂停中,不允许标记出运。' };
+      if ((fin as any)?.allow_shipment !== true) return { error: '❌ 财务尚未放货,不能直接把批次标成已出运——请财务放行后走按批确认。' };
+    }
+  }
+
   // ── 如果修改了数量，校验数量守恒（2026-05-18, P1）──
   if (updates.quantity !== undefined) {
     const { data: batch } = await (supabase.from('shipment_batches') as any)
@@ -137,5 +167,13 @@ export async function updateShipmentBatch(
     .eq('id', batchId);
 
   if (error) return { error: error.message };
+
+  // 直改批次为已出运 → 出货单据同步财务(与 markBatchStep 出运路径同口径;await 防 serverless 冻结丢事件)
+  if (shipOrderId) {
+    try {
+      const { syncShippingDocsToFinance } = await import('@/app/actions/shipping-docs-sync');
+      await syncShippingDocsToFinance(shipOrderId, batchId);
+    } catch (e: any) { console.warn('[updateShipmentBatch] 出货单据同步失败(不阻断):', e?.message); }
+  }
   return { success: true };
 }

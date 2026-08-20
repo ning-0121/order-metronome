@@ -168,7 +168,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const { approval_id, approval_type, decision, decider_name, decision_note } = payload.data
+  const { approval_id, approval_type, decision, decided_by, decider_name, decision_note } = payload.data   // decided_by=财务侧真实 auth.uid(2026-08-20 起落库)
 
   // H2(复审):审批回调幂等(防 5 分钟窗口内重放二次执行——尤其 purchase 二次下单、milestone 二次完成)。
   // claim-after:先查已处理过的 request_id → no-op;处理成功后再记(失败不记→可重试)。配合 purchase 状态闸双保险。
@@ -276,6 +276,9 @@ export async function POST(request: Request) {
         finance_signed_at: new Date().toISOString(),
         finance_decision: decision,
         finance_decision_note: noteTag,
+        // 外部审批人真实 ID 落库(2026-08-20:此前只留自报姓名,「谁放的货」外部路径答不出)。
+        // 列未建(迁移未跑)时由下面的降级重试兜底。
+        ...(decided_by ? { finance_decided_by: String(decided_by) } : {}),
         status: decision === 'approved' ? 'warehouse_signed' : 'pending',
       }
       if (decision === 'rejected') patch.finance_note = `驳回: ${decision_note || ''}`
@@ -292,7 +295,7 @@ export async function POST(request: Request) {
           const { approveShipmentRelease } = await import('@/lib/shipment/approve-release')
           const rel = await approveShipmentRelease(supabase, {
             orderId: oid, approvedBy: decider_name || 'external_finance', source: 'external_finance',
-            externalReference: decider_name || null, reason: decision_note || null,
+            externalReference: decided_by ? `${decided_by}(${decider_name || '?'})` : (decider_name || null), reason: decision_note || null,
           })
           if (!rel.ok) throw new Error(`外部财务放货开闸失败(${rel.status}): ${rel.error}`)
         }

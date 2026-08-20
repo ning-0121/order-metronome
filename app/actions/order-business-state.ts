@@ -172,6 +172,20 @@ export async function overrideBusinessControl(
         relatedOrderId: orderId,
       });
     } catch { /* 通知失败不阻断放货 */ }
+
+    // 审计 2026-08-20(P1-2):站内开闸后,财务系统审批队列里该单的未决出货审批会永远挂 pending
+    // (财务以为没放行、货已经走了)。把未决行同步置 expired,两边状态不再错位。await 防冻结丢事件。
+    try {
+      const { createServiceRoleClient } = await import('@/lib/supabase/server');
+      const { data: pendConfs } = await (createServiceRoleClient().from('shipment_confirmations') as any)
+        .select('id').eq('order_id', orderId).eq('status', 'sales_signed');
+      if (pendConfs && pendConfs.length > 0) {
+        const { syncShipmentApprovalCancelledToFinance } = await import('@/lib/integration/finance-sync');
+        for (const c of pendConfs as Array<{ id: string }>) {
+          await syncShipmentApprovalCancelledToFinance({ id: c.id, reason: '站内管理员/财务直接放货,原出货审批申请作废' });
+        }
+      }
+    } catch (e: any) { console.warn('[overrideBusinessControl] 财务队列过期同步失败(不阻断):', e?.message); }
   }
 
   revalidatePath(`/orders/${orderId}`);

@@ -384,3 +384,18 @@ export async function readOrderLinePlacementStatus(
   if (error) return { lines: null, error: error.message };
   return { lines: (data ?? []) as any[], error: null };
 }
+
+/** 采购执行行最小引用(2026-08-20:收货补价回财务用;业务层不裸摸表)。 */
+export async function getLineRef(
+  client: any,
+  lineId: string,
+): Promise<{ po_no: string | null; material_name: string | null; ordered_qty: number | null } | null> {
+  const { data } = await (client.from('procurement_line_items') as any)
+    .select('po_no, material_name, ordered_qty').eq('id', lineId).maybeSingle();
+  if (!data) return null;
+  return {
+    po_no: (data as any).po_no ?? null,
+    material_name: (data as any).material_name ?? null,
+    ordered_qty: (data as any).ordered_qty ?? null,
+  };
+}

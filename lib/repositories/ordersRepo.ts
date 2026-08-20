@@ -1048,3 +1048,10 @@ export async function getOrderShipmentRef(
     quantity: (data as any)?.quantity ?? null,
   };
 }
+
+/** 用户角色集合(roles[] 优先,回退 role)。收口 profiles 读取(业务层不裸摸表)。 */
+export async function getUserRoles(client: any, userId: string): Promise<string[]> {
+  const { data } = await (client.from('profiles') as any)
+    .select('role, roles').eq('user_id', userId).single();
+  return ((data as any)?.roles?.length > 0 ? (data as any).roles : [(data as any)?.role].filter(Boolean)) as string[];
+}
