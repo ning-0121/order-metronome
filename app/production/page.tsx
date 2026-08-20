@@ -48,6 +48,7 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
         <div className="flex shrink-0 items-center gap-2 text-xs text-gray-500">
           {showInit && <Link href="/production/stage-init" className="rounded-lg border border-gray-200 px-2.5 py-1.5 hover:bg-gray-50">设置 / 初始化</Link>}
           <Link href="/production/daily-report" className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-indigo-700 hover:bg-indigo-100 font-medium">📋 生产日报</Link>
+          <Link href="/production/qc-plan" className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-indigo-700 hover:bg-indigo-100 font-medium">🔍 QC巡查</Link>
           <span>最后更新 {updatedAt}</span><Link href="/production" className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-indigo-600 hover:bg-indigo-50">刷新</Link><ReconcileExportButton />
         </div>
       </header>
