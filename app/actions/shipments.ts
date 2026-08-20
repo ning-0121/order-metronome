@@ -275,8 +275,8 @@ export async function executeShipment(id: string, orderId: string, rec: {
   // 与 confirmOrderShipped 是同一事实的两条写入路径、只有一条通知财务的教科书案例。
   // 必须 await:serverless 一返回就冻结,不 await 连 outbox 都进不去(2026-07-11 已排明)。
   try {
-    const { data: ord } = await (supabase.from('orders') as any)
-      .select('internal_order_no, order_no, quantity').eq('id', orderId).maybeSingle();
+    const { getOrderShipmentRef } = await import('@/lib/repositories/ordersRepo');
+    const ord = await getOrderShipmentRef(supabase, orderId);
     const { notifyShipmentCompleted } = await import('@/lib/integration/finance-sync');
     const r = await notifyShipmentCompleted({
       order_id: orderId,

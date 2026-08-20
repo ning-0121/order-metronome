@@ -822,8 +822,8 @@ export async function markMilestoneDone(
   // 必须 await(serverless 冻结会杀掉未 await 的 promise,连 outbox 都进不去)。
   if (milestone.step_key === 'shipment_execute') {
     try {
-      const { data: ordShip } = await (supabase.from('orders') as any)
-        .select('internal_order_no, order_no, quantity').eq('id', milestone.order_id).maybeSingle();
+      const { getOrderShipmentRef } = await import('@/lib/repositories/ordersRepo');
+      const ordShip = await getOrderShipmentRef(supabase, milestone.order_id);
       const { notifyShipmentCompleted } = await import('@/lib/integration/finance-sync');
       const rShip = await notifyShipmentCompleted({
         order_id: milestone.order_id,

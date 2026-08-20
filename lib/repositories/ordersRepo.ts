@@ -1031,3 +1031,20 @@ export async function listOrderRefs(
     error: null,
   };
 }
+
+/**
+ * 出货财务事件用的订单最小引用(2026-08-19):单号 + 数量。
+ * 收口于 repo(业务层不许裸 .from());client 由调用方传(server action 的 supabase 或 svc)。
+ */
+export async function getOrderShipmentRef(
+  client: any,
+  orderId: string,
+): Promise<{ internal_order_no: string | null; order_no: string | null; quantity: number | null }> {
+  const { data } = await (client.from('orders') as any)
+    .select('internal_order_no, order_no, quantity').eq('id', orderId).maybeSingle();
+  return {
+    internal_order_no: (data as any)?.internal_order_no ?? null,
+    order_no: (data as any)?.order_no ?? null,
+    quantity: (data as any)?.quantity ?? null,
+  };
+}

@@ -247,8 +247,8 @@ export async function markBatchMilestoneStep(
     // 此前分批路径只发单据不发事实,财务的应收/结算触发落空。
     if (progress.allDone) {
       try {
-        const { data: ordDone } = await (supabase.from('orders') as any)
-          .select('internal_order_no, order_no, quantity').eq('id', orderId).maybeSingle();
+        const { getOrderShipmentRef } = await import('@/lib/repositories/ordersRepo');
+        const ordDone = await getOrderShipmentRef(supabase, orderId);
         const { notifyShipmentCompleted } = await import('@/lib/integration/finance-sync');
         const rDone = await notifyShipmentCompleted({
           order_id: orderId,
