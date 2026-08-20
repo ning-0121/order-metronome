@@ -1,6 +1,6 @@
 {
   "_note": "数据访问分层棘轮基线。键=文件+表,值=该文件直连该表的次数。只许缩不许涨。",
-  "total": 2269,
+  "total": 2250,
   "entries": {
     "app/actions/accessory-import.ts accessory_import_candidates": 6,
     "app/actions/accessory-import.ts materials_bom": 3,
@@ -68,9 +68,6 @@
     "app/actions/bom.ts product_variants": 1,
     "app/actions/bom.ts profiles": 2,
     "app/actions/briefing.ts daily_briefings": 1,
-    "app/actions/budget-approvals.ts orders": 2,
-    "app/actions/budget-approvals.ts procurement_budget_approvals": 6,
-    "app/actions/budget-approvals.ts profiles": 2,
     "app/actions/carton-spec.ts order_line_items": 1,
     "app/actions/carton-spec.ts orders": 2,
     "app/actions/commissions.ts cancel_requests": 1,
@@ -346,8 +343,8 @@
     "app/actions/packaging-consolidation.ts packaging_gather_records": 3,
     "app/actions/packing.ts order_line_items": 1,
     "app/actions/packing.ts orders": 1,
-    "app/actions/packing.ts packing_list_lines": 7,
-    "app/actions/packing.ts packing_lists": 10,
+    "app/actions/packing.ts packing_list_lines": 3,
+    "app/actions/packing.ts packing_lists": 5,
     "app/actions/packing.ts shipment_batch_items": 1,
     "app/actions/po-extract.ts document_extractions": 3,
     "app/actions/po-extract.ts order_attachments": 1,

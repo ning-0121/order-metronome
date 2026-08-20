@@ -47,6 +47,7 @@ export default async function ProductionCenterPage({ searchParams }: { searchPar
         <form action="/production" className="flex min-w-0 flex-1"><label htmlFor="production-search" className="sr-only">搜索生产订单</label><input id="production-search" name="q" defaultValue={params.q || ''} placeholder="订单、PO、款号、客户" className="w-full rounded-l-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" /><button className="rounded-r-lg bg-indigo-600 px-3 text-sm text-white hover:bg-indigo-700">搜索</button></form>
         <div className="flex shrink-0 items-center gap-2 text-xs text-gray-500">
           {showInit && <Link href="/production/stage-init" className="rounded-lg border border-gray-200 px-2.5 py-1.5 hover:bg-gray-50">设置 / 初始化</Link>}
+          <Link href="/production/daily-report" className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-indigo-700 hover:bg-indigo-100 font-medium">📋 生产日报</Link>
           <span>最后更新 {updatedAt}</span><Link href="/production" className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-indigo-600 hover:bg-indigo-50">刷新</Link><ReconcileExportButton />
         </div>
       </header>
