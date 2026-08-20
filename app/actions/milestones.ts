@@ -816,6 +816,29 @@ export async function markMilestoneDone(
     } catch { /* 审计日志失败不阻断完成 */ }
   }
 
+  // ── 出货事实 → 财务(审计 2026-08-19 P0-2)──
+  // 手动点完成「发货出运」此前零财务事件:fireShippingDocsOnShipment 只挂在无人调用的
+  // transitionMilestoneStatus(死代码路径),财务收不到 shipment.completed / CI 金额 / 出货单据。
+  // 必须 await(serverless 冻结会杀掉未 await 的 promise,连 outbox 都进不去)。
+  if (milestone.step_key === 'shipment_execute') {
+    try {
+      const { getOrderShipmentRef } = await import('@/lib/repositories/ordersRepo');
+      const ordShip = await getOrderShipmentRef(supabase, milestone.order_id);
+      const { notifyShipmentCompleted } = await import('@/lib/integration/finance-sync');
+      const rShip = await notifyShipmentCompleted({
+        order_id: milestone.order_id,
+        internal_order_no: (ordShip as any)?.internal_order_no || (ordShip as any)?.order_no || null,
+        shipment_date: (resolvedActualAt || new Date().toISOString()).slice(0, 10),
+        quantity: (ordShip as any)?.quantity ?? null,
+      });
+      if (!rShip.success) console.error(`[markMilestoneDone] shipment.completed 首发失败(${rShip.error}) → 已落 outbox 待重试`);
+      const { syncShippingDocsToFinance } = await import('@/app/actions/shipping-docs-sync');
+      await syncShippingDocsToFinance(milestone.order_id);   // CI/装箱单/应收金额(内部吞错)
+    } catch (e: any) {
+      console.error('[markMilestoneDone] 出货财务事件发送异常(不阻断完成,outbox 兜底):', e?.message);
+    }
+  }
+
   // ── Runtime Hook: 节点完成 → 异步重算 confidence。markMilestoneDone 走独立 update，
   // 不经 repo updateMilestone，之前不触发重算，标完成后风险卡不刷新。显式补上。fire-and-forget。
   fireRuntimeRecompute(milestone.order_id, {

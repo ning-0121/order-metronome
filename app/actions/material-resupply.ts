@@ -202,7 +202,8 @@ export async function financeReviewResupply(
 
   if (decision === 'approve') {
     // 推财务系统建待扣款。fire-and-forget:补料审批本身不能因为财务系统不通而失败。
-    void (async () => {
+    // 审计 2026-08-19:void→await——serverless 冻结会把未 await 的 promise 整条杀掉,财务事件连 outbox 都进不去(零痕迹);函数内部已吞错,await 不会阻断业务。
+    await (async () => {
       try {
         const r: any = gate;
         const { data: o } = await (svc.from('orders') as any)

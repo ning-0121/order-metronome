@@ -232,7 +232,8 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
       metadata: { auto: true, source: 'milestone_confirmations.all_confirmed' },
     });
     // fire-and-forget:交付置信度重算(内部已 catch 所有错)
-    void (async () => {
+    // 审计 2026-08-19:void→await——serverless 冻结会把未 await 的 promise 整条杀掉,财务事件连 outbox 都进不去(零痕迹);函数内部已吞错,await 不会阻断业务。
+    await (async () => {
       try {
         const { recomputeDeliveryConfidence } = await import('@/app/actions/runtime-confidence');
         await recomputeDeliveryConfidence((ms as any).order_id, {
@@ -248,7 +249,8 @@ export async function confirmMilestoneParty(milestoneId: string, partyKey: strin
     //   否则非分批出口单走此分支 100% 漏发 4 张单据 + shipping_invoice.issued(应收),静默漏账无告警。
     //   正常/分批路径在 batch-milestones 已 fire,唯独三方确认自动完成分支漏了。
     if (stepKey === 'shipment_execute') {
-      void (async () => {
+      // 审计 2026-08-19:void→await——serverless 冻结会把未 await 的 promise 整条杀掉,财务事件连 outbox 都进不去(零痕迹);函数内部已吞错,await 不会阻断业务。
+    await (async () => {
         try {
           const { syncShippingDocsToFinance } = await import('@/app/actions/shipping-docs-sync');
           await syncShippingDocsToFinance((ms as any).order_id);   // 全单路径(无 batchId);内部已吞错,永不阻塞

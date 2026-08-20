@@ -195,6 +195,10 @@ async function confirmOrderShippedCore(
       triggered_by: actorName,
     });
     if (!r.success) console.error(`[confirm-shipped] shipment.completed 首发失败(${r.error}) → 已落 outbox 待重试`);
+    // P0-3(审计 2026-08-19):此路只发过事实事件,CI 金额/出货单据从来不推——财务拿到「出货了」
+    // 却拿不到应收金额。补齐,与分批/三方会签路径同一套单据链。
+    const { syncShippingDocsToFinance } = await import('@/app/actions/shipping-docs-sync');
+    await syncShippingDocsToFinance(orderId);
   } catch (e: any) {
     console.error('[confirm-shipped] shipment.completed 组装/发送异常(不阻断出货完成,outbox 兜底):', e?.message);
   }

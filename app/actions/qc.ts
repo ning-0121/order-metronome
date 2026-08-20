@@ -75,7 +75,8 @@ export async function updateQcResult(id: string, orderId: string, result: 'pass'
   // 区别只在 reason —— fail 是这批有问题,rework 是还能救但要返工,追偿的钱不一样。
   const FAULT = new Set(['fail', 'rework']);
   if (FAULT.has(result) && !FAULT.has(String(prevResult))) {
-    void (async () => {
+    // 审计 2026-08-19:void→await——serverless 冻结会把未 await 的 promise 整条杀掉,财务事件连 outbox 都进不去(零痕迹);函数内部已吞错,await 不会阻断业务。
+    await (async () => {
       try {
         const { createServiceRoleClient } = await import('@/lib/supabase/server');
         const svc = createServiceRoleClient();
@@ -134,7 +135,8 @@ export async function updateQcResult(id: string, orderId: string, result: 'pass'
 
   // 复检合格 / 改判放行 → 撤销之前那条待扣款(财务侧只撤 pending;已扣的钱要人工红冲)
   if (FAULT.has(String(prevResult)) && !FAULT.has(result)) {
-    void (async () => {
+    // 审计 2026-08-19:void→await——serverless 冻结会把未 await 的 promise 整条杀掉,财务事件连 outbox 都进不去(零痕迹);函数内部已吞错,await 不会阻断业务。
+    await (async () => {
       try {
         const { emitDeductionCancelled } = await import('@/lib/integration/supplier-deduction');
         await emitDeductionCancelled(`QC-${id}`, result === 'pass' ? '复检合格' : '改判为有条件接受');
