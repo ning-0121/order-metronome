@@ -14,8 +14,9 @@ const ALL_ROLES = [
   { value: 'finance', label: '财务', desc: '订单审核、加工费确认、成本核算、收款' },
   { value: 'procurement', label: '采购', desc: '面辅料采购、供应商跟进、原辅料确认、催货到货' },
   { value: 'procurement_manager', label: '采购经理', desc: '采购部负责人：供应商开发与分级、价格成本控制、让步接收审批、采购异常处理（查看所有订单）' },
-  { value: 'production', label: '生产跟单（含QC）', desc: '生产部：工厂排产跟进、产前样准备、开裁、生产进度、中查尾查(QC验货)、工厂完成' },
-  { value: 'production_manager', label: '生产主管', desc: '查看所有订单、工厂匹配确认、生产预评估、指定跟单' },
+  { value: 'production', label: '生产跟单', desc: '生产部：工厂排产跟进、产前样准备、开裁、生产进度、初上线确认、工厂完成（QC 验货已独立为「生产QC」角色，不再由生产跟单兼）' },
+  { value: 'qc', label: '生产QC/质检', desc: '生产部质检（2026-08 从生产跟单独立）：跨所有在途订单排巡查计划，做独立验货（中期/尾期验货·QC）与放行；不做生产跟单（排产/催料/工厂完成）。可看所有订单。' },
+  { value: 'production_manager', label: '生产主管', desc: '查看所有订单、工厂匹配确认、生产预评估、指定跟单与 QC' },
   { value: 'admin_assistant', label: '行政督办', desc: '查看所有订单进度、催办跟进、不可见价格文件' },
   { value: 'logistics', label: '物流/仓库', desc: '出货签核、装箱、物流协调、成品入库' },
 ];
