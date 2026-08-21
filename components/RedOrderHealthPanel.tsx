@@ -10,6 +10,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { DeliveryResolutionDialog } from '@/components/production/DeliveryResolutionDialog';
 import { useRouter } from 'next/navigation';
 import { backfillMilestonesToCurrent } from '@/app/actions/milestones';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -42,6 +43,8 @@ export function RedOrderHealthPanel({ items }: { items: RedItem[] }) {
   const { confirm, dialog } = useDialogs();
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
+  // 逾期处置(2026-08-21):「真超期」原本只有「详情›」—— 看得见、动不了。
+  const [resolving, setResolving] = useState<{ id: string; orderNo: string; deliveryDate?: string | null } | null>(null);
 
   async function doBackfill(orderId: string, orderNo: string) {
     const ok = await confirm({
@@ -83,6 +86,7 @@ export function RedOrderHealthPanel({ items }: { items: RedItem[] }) {
   const unfilledCount = byCat('unfilled').length;
 
   return (
+    <>
     <div className="mb-5 rounded-2xl border border-gray-200 bg-white overflow-hidden">
       {dialog}
       <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
@@ -144,6 +148,13 @@ export function RedOrderHealthPanel({ items }: { items: RedItem[] }) {
                                   {busyId === it.id ? '补录中…' : '⏱ 补录'}
                                 </button>
                               )}
+                              {cat === 'overdue' && (
+                                <button onClick={() => setResolving({ id: it.id, orderNo: it.orderNo, deliveryDate: it.deliveryDate })}
+                                  className="text-[11px] px-2 py-1 rounded bg-rose-600 text-white hover:bg-rose-700"
+                                  title="跟客户谈定后在这里录处置:改期/快船/打折/弃货/分批。订单经理→财务两级批准后交期才生效">
+                                  🚦 处置
+                                </button>
+                              )}
                               <Link href={`/orders/${it.id}`} className="text-indigo-600 hover:underline">详情›</Link>
                             </div>
                           </td>
@@ -161,5 +172,16 @@ export function RedOrderHealthPanel({ items }: { items: RedItem[] }) {
         </div>
       )}
     </div>
+
+      {resolving && (
+        <DeliveryResolutionDialog
+          orderId={resolving.id}
+          orderNo={resolving.orderNo}
+          deliveryDate={resolving.deliveryDate}
+          onClose={() => setResolving(null)}
+          onDone={() => { setResolving(null); router.refresh(); }}
+        />
+      )}
+    </>
   );
 }
