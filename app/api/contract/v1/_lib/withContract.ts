@@ -89,7 +89,9 @@ export function withContract<P extends Record<string, string> = Record<string, s
     }
 
     try {
-      const params = await routeCtx.params;
+      // 2026-08-21 修:无动态段的路由(如 GET /materials)Next 传的 ctx.params 是 undefined,
+      // await undefined 后 .id 直接 TypeError → catch → 500(materials 自 7-29 起恒 500 的根因)。
+      const params = (await routeCtx.params) ?? ({} as Record<string, string>);
       const entityIdParam = (params as Record<string, string>).id ?? null;
       const supabase = createServiceRoleClient() as unknown as SupabaseClient;
       const result = await handler({ params, scope: auth.scope, keyId: auth.keyId, supabase, request });
