@@ -237,7 +237,15 @@ export function parseEmailForOrderInfo(subject: string, body: string): {
   const poNumbers: string[] = [];
   for (const pattern of poPatterns) {
     const matches = text.matchAll(pattern);
-    for (const m of matches) poNumbers.push(m[0]);
+    // 有捕获组就取捕获组:前三条模式的 m[0] 是「PO 613」这种带前缀的整串,
+    // 直接拿去查 order_no/po_number 永远查不到(库里存的是「613」)。
+    // 最后一条 QM-\d{8}-\d{3} 没有捕获组,m[0] 本身就是订单号,靠 ?? 回退。
+    // 2026-08-21 实测:3997 封邮件里 150 封主题含「PO 数字」,关联成功 0 封 ——
+    // 这条匹配路径自上线起从未生效过,修正后其中 126 封能正确挂上订单。
+    for (const m of matches) {
+      const value = (m[1] ?? m[0])?.trim();
+      if (value) poNumbers.push(value);
+    }
   }
 
   // 数量提取
