@@ -123,14 +123,17 @@ export async function POST(req: Request) {
         .limit(1).maybeSingle();
 
       // ★ 立即保存客户识别+线索（不管是否匹配到订单）
-      await supabase.from('mail_inbox')
+      // 注意别写 .eq(...).catch(...):PostgREST builder 是 thenable 但没有 .catch 方法,
+      // 挂上去会当场抛 TypeError 打断整个循环(2026-08-21 实测:深度分析在第一封邮件上就崩,
+      // 这才是"跑了 5 个月只处理 10 封"的直接原因)。要忽略错误就 await 出来再忽略。
+      const { error: saveCustErr } = await supabase.from('mail_inbox')
         .update({
           customer_id: customerName,
           thread_id: threadId,
           is_thread_start: !existingThread,
         })
-        .eq('id', email.id)
-        .catch(() => {});
+        .eq('id', email.id);
+      if (saveCustErr) console.warn('[email-scan] 保存客户识别失败(不阻断):', saveCustErr.message);
 
       // 3. 匹配订单 — 多策略匹配
       let orderId: string | null = null;
@@ -352,10 +355,12 @@ export async function POST(req: Request) {
       if (orderId) finalStatus = 'fully_matched';
       else if (customerName) finalStatus = 'matched_customer';
       else finalStatus = 'unmatched';
-      await supabase.from('mail_inbox')
+      // 同上:不能挂 .catch。这一行尤其要紧 —— 它是把邮件标记为「已处理」的唯一地方,
+      // 它一崩,邮件永远留在待处理里,下一轮再捞出来再崩,积压只会越滚越大。
+      const { error: markErr } = await supabase.from('mail_inbox')
         .update({ processing_status: finalStatus, last_processed_at: new Date().toISOString() })
-        .eq('id', email.id)
-        .catch(() => {});
+        .eq('id', email.id);
+      if (markErr) console.warn('[email-scan] 标记已处理失败(该邮件下轮会重试):', markErr.message);
     }
 
     return NextResponse.json({
