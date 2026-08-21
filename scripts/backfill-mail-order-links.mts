@@ -14,7 +14,7 @@
  * 精确相等。只回填 order_id 为空的邮件;命中多个订单的一律跳过并列出来,由人判断。
  */
 import { createClient } from '@supabase/supabase-js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { parseEmailForOrderInfo } from '../lib/utils/imap-fetch';
 
 for (const line of readFileSync('.env.local', 'utf-8').split('\n')) {
@@ -58,6 +58,7 @@ for (const o of orders) {
 }
 
 const mails = await pageAll('mail_inbox', 'id, subject, order_id, customer_id, received_at');
+const custById = new Map<string, string | null>(mails.map(m => [m.id, m.customer_id ?? null]));
 const pending = mails.filter(m => !m.order_id);
 
 const plan: { id: string; subject: string; po: string; order: any }[] = [];
@@ -99,12 +100,20 @@ if (!APPLY) {
   process.exit(0);
 }
 
-console.log(`\n[APPLY] 开始回填 ${plan.length} 封…`);
-let ok = 0, fail = 0;
+// 落库前先把原值存成备份文件,回滚时能一条条还原。
+const backupPath = `/tmp/mail-order-backfill-${plan.length}.json`;
+writeFileSync(backupPath, JSON.stringify(
+  plan.map(p => ({ id: p.id, subject: p.subject, before: { order_id: null, customer_id: custById.get(p.id) ?? null }, after: { order_id: p.order.id, order_no: p.order.order_no } })),
+  null, 2));
+console.log(`\n[APPLY] 原值已备份到 ${backupPath}`);
+console.log(`[APPLY] 开始回填 ${plan.length} 封…`);
+let ok = 0, fail = 0, custFilled = 0;
 for (const p of plan) {
-  const { error } = await (sb.from('mail_inbox') as any)
-    .update({ order_id: p.order.id, customer_id: p.order.customer_name || null })
-    .eq('id', p.id);
+  // customer_id 只在原来为空时补,不覆盖已经识别出来的客户名 ——
+  // 那是 AI/规则跑出来的结果,可能比订单上的客户名更准,不该被这个脚本冲掉。
+  const patch: Record<string, any> = { order_id: p.order.id };
+  if (!custById.get(p.id) && p.order.customer_name) { patch.customer_id = p.order.customer_name; custFilled++; }
+  const { error } = await (sb.from('mail_inbox') as any).update(patch).eq('id', p.id);
   if (error) { fail++; console.error(`  ❌ ${p.po}: ${error.message}`); } else ok++;
 }
-console.log(`回填完成: 成功 ${ok} · 失败 ${fail}`);
+console.log(`回填完成: 成功 ${ok} · 失败 ${fail} · 顺带补上客户名 ${custFilled}`);
