@@ -12,7 +12,7 @@ import { analyzeEmailWithAI, buildCustomerContext } from '@/lib/agent/emailMatch
 import { identifyCustomerFromEmail } from '@/lib/agent/customerEmailMapping';
 import { extractCommunicationDetails, saveCommunicationDetails } from '@/lib/agent/orderCommunicationLog';
 import { generateEmailDraft } from '@/lib/agent/emailDraft';
-import { parseEmailForOrderInfo, fetchNewEmails } from '@/lib/utils/imap-fetch';
+import { parseEmailForOrderInfo } from '@/lib/utils/imap-fetch';
 import { deepCompareEmailWithOrder } from '@/lib/agent/emailOrderCompare';
 import { ruleClassify } from '@/lib/email/classify';
 import { NextResponse } from 'next/server';
@@ -34,89 +34,23 @@ export async function POST(req: Request) {
     const supabase = createClient(url, serviceKey);
     const startTime = Date.now();
 
-    // ═══ Step 0: 从 IMAP 拉取新邮件写入 mail_inbox ═══
-    let fetched = 0;
-    let imapStatus = 'skipped';
-    let imapError = '';
-
-    const imapUser = process.env.IMAP_USER;
-    const imapPass = process.env.IMAP_PASSWORD;
-
-    if (!imapUser || !imapPass) {
-      imapStatus = 'no_credentials';
-      console.warn('[email-scan] IMAP_USER/IMAP_PASSWORD 未配置');
-    } else {
-      try {
-        console.log(`[email-scan] IMAP 连接 ${imapUser}...`);
-        // 放宽窗口：最近 3 天 / 最近 80 封（防止高峰日漏邮件）
-        const newEmails = await fetchNewEmails(80, 3);
-        imapStatus = `fetched_${newEmails.length}`;
-        console.log(`[email-scan] IMAP 拉取到 ${newEmails.length} 封邮件`);
-
-        for (const email of newEmails) {
-          const rawFrom = email.from || '';
-          const fromEmail = rawFrom.includes('<')
-            ? rawFrom.match(/<(.+?)>/)?.[1] || rawFrom
-            : rawFrom;
-          if (!fromEmail) continue;
-
-          // 去重:message_id 是邮件唯一标识,优先按它精确去重(避免"同人同主题同天"误杀不同邮件)。
-          // 无 message_id 时才回退到 发件人+主题+同一天 的弱启发式。
-          let existing: { id: string } | null = null;
-          if (email.messageId) {
-            const { data } = await supabase
-              .from('mail_inbox').select('id').eq('message_id', email.messageId).limit(1).maybeSingle();
-            existing = data;
-          } else {
-            const emailDate = email.date?.slice(0, 10) || new Date().toISOString().slice(0, 10);
-            const { data } = await supabase
-              .from('mail_inbox').select('id')
-              .eq('from_email', fromEmail).eq('subject', email.subject)
-              .gte('received_at', `${emailDate}T00:00:00`).lte('received_at', `${emailDate}T23:59:59`)
-              .limit(1).maybeSingle();
-            existing = data;
-          }
-          if (existing) continue;
-
-          const threadSubject = email.subject
-            .replace(/^(re|fwd|fw|回复|转发)\s*[:：]\s*/gi, '')
-            .replace(/^(re|fwd|fw)\s*\[\d+\]\s*[:：]?\s*/gi, '')
-            .trim();
-          const threadId = threadSubject.toLowerCase().replace(/\s+/g, '_').slice(0, 100);
-
-          const { data: inserted, error: insertErr } = await supabase.from('mail_inbox').insert({
-            from_email: fromEmail,
-            subject: email.subject,
-            raw_body: email.body,
-            received_at: email.date || new Date().toISOString(),
-            message_id: email.messageId,
-            in_reply_to: email.inReplyTo,
-            thread_id: threadId,
-          }).select('id').single();
-          if (insertErr) {
-            console.error('[email-scan] 写入 mail_inbox 失败:', insertErr.message);
-          } else {
-            fetched++;
-            // 附件捕获(Phase 3):有 PDF/图片附件 → 传 order-docs 桶 + 落 mail_attachments(供后续 Vision OCR)
-            if (email.attachments?.length && (inserted as any)?.id) {
-              await storeMailAttachments(supabase, (inserted as any).id, email.attachments);
-            }
-          }
-        }
-      } catch (imapErr: any) {
-        imapStatus = 'error';
-        imapError = imapErr?.message || 'Unknown IMAP error';
-        console.error('[email-scan] IMAP 连接失败:', imapError);
-      }
-    }
 
     // 获取未分析的邮件
-    const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+    // 取件范围(2026-08-21 重定):
+    //   原来是 `received_at >= 24h` —— **这是积压永远消化不掉的真正原因**:
+    //   函数每次 504 只处理掉几封,超过 24h 的就再也进不了候选集,
+    //   实测积压到 38 天 / 990 封 pending。
+    //   改为「从没处理过(last_processed_at is null)+ 7 天窗口」:
+    //   · 加 last_processed_at 判据 → 处理过的不再重复烧 AI;
+    //   · 保留 7 天窗口 → 一轮没做完下一轮还追得上,又不会去翻几十天的老账
+    //     (CEO 2026-08-21 拍板:历史积压不补,只保证从今往后不再积压)。
+    const windowStart = new Date(Date.now() - 7 * 86400000).toISOString();
     const { data: unprocessed } = await supabase
       .from('mail_inbox')
       .select('id, from_email, subject, raw_body, received_at, order_id')
       .is('order_id', null)
-      .gte('received_at', oneDayAgo)
+      .is('last_processed_at', null)
+      .gte('received_at', windowStart)
       .order('received_at', { ascending: false })
       .limit(30); // 每次最多处理30封
 
@@ -426,8 +360,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      imap: { status: imapStatus, error: imapError || undefined, user: imapUser || 'not_set' },
-      fetched,
       processed: unprocessed.length,
       matched,
       alerted,
@@ -444,22 +376,3 @@ export async function GET(req: Request) { return POST(req); }
  * 邮件附件入桶 + 建行(Phase 3 T2a)。传 order-docs 桶 mail/<mailId>/,落 mail_attachments。
  * is_po=PDF(PDF 是 PO/单据主要载体,值得 OCR;图片先存不自动 OCR 省 Vision 成本)。fire-and-forget。
  */
-async function storeMailAttachments(supabase: any, mailId: string, attachments: any[]): Promise<void> {
-  for (const att of attachments) {
-    try {
-      const safeName = String(att.filename || 'file').replace(/[^\w.\-]+/g, '_').slice(0, 80);
-      const path = `mail/${mailId}/${safeName}`;
-      const isPdf = String(att.contentType || '').toLowerCase().includes('pdf');
-      const { error: upErr } = await supabase.storage.from('order-docs')
-        .upload(path, att.content, { contentType: att.contentType || 'application/octet-stream', upsert: true });
-      if (upErr) { console.warn('[email-scan] 附件上传失败:', safeName, upErr.message); continue; }
-      await supabase.from('mail_attachments').upsert({
-        mail_id: mailId, file_name: safeName, mime_type: att.contentType || null,
-        storage_path: path, size_bytes: att.size || null,
-        is_po: isPdf, ocr_status: 'pending',
-      }, { onConflict: 'mail_id,file_name' });
-    } catch (e: any) {
-      console.warn('[email-scan] 附件处理异常(不阻断):', e?.message);
-    }
-  }
-}
