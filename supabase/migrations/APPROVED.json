@@ -261,6 +261,7 @@
     "FIX_user_role_enum_final.sql",
     "ADD_po_supplier_change_request.sql",
     "20260819_order_finance_events_request_id_unique.sql",
-    "20260820_shipment_confirmations_finance_decided_by.sql"
+    "20260820_shipment_confirmations_finance_decided_by.sql",
+    "20260820_order_delivery_resolutions.sql"
   ]
 }
