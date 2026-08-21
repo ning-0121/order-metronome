@@ -126,3 +126,17 @@ export async function applyOrderDeliveryDates(
   if (!data || data.length !== 1) return { ok: false, changed: patch, error: `写回订单交期影响 ${(data || []).length} 行(期望 1)` };
   return { ok: true, changed: patch, error: null };
 }
+
+/**
+ * 全部未结处置(审批中心用)。带订单摘要,省得调用方再回查一次。
+ * 只取 pending / om_approved —— 局部索引 idx_odr_open 正是为这个查询建的。
+ */
+export async function listOpenResolutions(): Promise<{ rows: any[]; error: string | null }> {
+  const svc = createServiceRoleClient();
+  const { data, error } = await (svc.from('order_delivery_resolutions') as any)
+    .select('id, order_id, resolution_type, status, new_factory_date, new_etd, cost_amount, reason, created_at, orders(order_no, internal_order_no, customer_name)')
+    .in('status', ['pending', 'om_approved'])
+    .order('created_at', { ascending: true });
+  if (error) return { rows: [], error: error.message };
+  return { rows: data || [], error: null };
+}

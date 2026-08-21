@@ -58,7 +58,8 @@ export type ApprovalCategory =
   | 'purpose_change'  // 改订单用途待财务/管理员批(P1 §8:此前零通知+仅订单页横幅)
   | 'document_review' // PI/CI 单据待审批(P1 §8:同上)
   | 'payment_request' // 付款申请已推财务待回执(P1 §9:站内此前无任何列表;处理在外部财务系统)
-  | 'supplier_change';// 已下单采购单改供应商待财务批(2026-08-19 CEO:已付款单选错供应商也要能改)
+  | 'supplier_change'  // 已下单采购单改供应商待财务批(2026-08-19 CEO:已付款单选错供应商也要能改)
+  | 'delivery_resolution';// 逾期处置待批(2026-08-21 CEO:真超期要有出口,不能只停在预警)
 
 export interface PendingApprovalItem {
   id: string;
@@ -453,6 +454,44 @@ async function collectOrderConfirmations(
 /**
  * 聚合所有待审批项
  */
+/**
+ * 逾期处置待批(2026-08-21)。两级:pending=待订单经理、om_approved=待财务。
+ * actionable 按阶段分角色 —— 让"能点"的人才看到可操作,避免财务盯着还没轮到自己的条目。
+ */
+async function collectDeliveryResolutions(ctx: UserContext): Promise<PendingApprovalItem[]> {
+  // 走 repository(lint:data-access:业务层不直连表)
+  const { listOpenResolutions } = await import('@/lib/repositories/deliveryResolutionsRepo');
+  const { rows: data, error } = await listOpenResolutions();
+  if (error) { console.warn('[pending-approvals] delivery_resolution query failed:', error); return []; }
+  const LABEL: Record<string, string> = {
+    reschedule: '客户同意改期', expedite: '快船/空运赶', discount: '打折发货',
+    abandon: '弃货/取消', partial_ship: '分批出货', other: '其他',
+  };
+  const isOM = hasAnyRole(ctx.roles, ['admin', 'order_manager', 'sales_manager']);
+  const isFin = hasAnyRole(ctx.roles, ['admin', 'finance']);
+  return (data || []).map((r: any) => {
+    const o = r.orders || {};
+    const ref = o.internal_order_no || o.order_no || String(r.order_id).slice(0, 8);
+    const waitOM = r.status === 'pending';
+    const newDate = r.new_factory_date || r.new_etd;
+    const createdAt = r.created_at || new Date().toISOString();
+    return {
+      id: r.id, category: 'delivery_resolution' as ApprovalCategory,
+      title: `逾期处置${waitOM ? '待订单经理批' : '待财务批'}:${ref} · ${LABEL[r.resolution_type] || r.resolution_type}`,
+      subtitle: [
+        o.customer_name || null,
+        newDate ? `新交期 ${String(newDate).slice(0, 10)}` : null,
+        r.cost_amount ? `代价 ¥${Number(r.cost_amount).toLocaleString()}` : null,
+        r.reason ? String(r.reason).slice(0, 40) : null,
+      ].filter(Boolean).join(' · '),
+      orderId: r.order_id ?? undefined, orderNo: ref,
+      sourceUrl: r.order_id ? `/orders/${r.order_id}` : '/admin/pending-approvals',
+      createdAt, ageDays: ageDaysFrom(createdAt),
+      actionable: waitOM ? isOM : isFin,
+    };
+  });
+}
+
 export async function getPendingApprovals(
   supabase: any,
   ctx: UserContext,
@@ -476,6 +515,7 @@ export async function getPendingApprovals(
       documentReviews,
       paymentRequests,
       supplierChanges,
+      deliveryResolutions,
     ] = await Promise.all([
       collectDelayRequests(supabase, ctx).catch(e => { console.warn('[pending-approvals] delays failed:', e?.message); return []; }),
       collectAmendments(supabase, ctx).catch(e => { console.warn('[pending-approvals] amendments failed:', e?.message); return []; }),
@@ -493,10 +533,11 @@ export async function getPendingApprovals(
       collectDocumentReviews(ctx).catch(e => { console.warn('[pending-approvals] docs failed:', e?.message); return []; }),
       collectPaymentRequests(ctx).catch(e => { console.warn('[pending-approvals] payment failed:', e?.message); return []; }),
       collectSupplierChanges(ctx).catch(e => { console.warn('[pending-approvals] supplier_change failed:', e?.message); return []; }),
+      collectDeliveryResolutions(ctx).catch(e => { console.warn('[pending-approvals] delivery_resolution failed:', e?.message); return []; }),
     ]);
 
     const allItems = [
-      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals, ...supplements, ...shipmentReleases, ...baselineOvers, ...purposeChanges, ...documentReviews, ...paymentRequests, ...supplierChanges,
+      ...delays, ...amendments, ...cancels, ...ceoImports, ...prices, ...agentActions, ...paymentHolds, ...confirmations, ...poApprovals, ...supplements, ...shipmentReleases, ...baselineOvers, ...purposeChanges, ...documentReviews, ...paymentRequests, ...supplierChanges, ...deliveryResolutions,
     ];
 
     // 按 ageDays 倒序（卡得越久越靠前）
@@ -519,6 +560,7 @@ export async function getPendingApprovals(
       document_review: documentReviews.length,
       payment_request: paymentRequests.length,
       supplier_change: supplierChanges.length,
+      delivery_resolution: deliveryResolutions.length,
     };
 
     const actionableCount = allItems.filter(i => i.actionable).length;
@@ -734,4 +776,5 @@ export const CATEGORY_META: Record<ApprovalCategory, { icon: string; label: stri
   document_review: { icon: '📄', label: '单据审批',          color: 'bg-slate-50 text-slate-700 border-slate-200' },
   payment_request: { icon: '💸', label: '付款待回执',        color: 'bg-lime-50 text-lime-700 border-lime-200' },
   supplier_change: { icon: '🔀', label: '改供应商审批',       color: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200' },
+  delivery_resolution: { icon: '🚦', label: '逾期处置审批',    color: 'bg-rose-50 text-rose-700 border-rose-200' },
 };
