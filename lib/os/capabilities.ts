@@ -35,7 +35,9 @@ export const ROLE_CAPABILITIES: Record<string, Capability[]> = {
   qc: ['production.manage'],
   procurement: ['procurement.manage'],
   procurement_manager: ['procurement.manage'],
-  finance: ['finance.view', 'procurement.manage'],
+  // 2026-08-21 老板:开发系统(araos)入口=管理员+财务+业务开发。admin/sales/sales_manager
+  // 原本就有 client.develop,此处给 finance 补上;其余角色一律不可见不可跳。
+  finance: ['finance.view', 'procurement.manage', 'client.develop'],
 };
 
 /** 角色集合 → 能力集合（并集）。 */
