@@ -53,7 +53,10 @@ export default async function RootLayout({
   if (user && !isAdmin) {
     // admin_assistant(行政督导)给采购/生产中心入口 —— 督导要能看两个中心(只看不改,写操作另有门禁)
     isProcurement = roles.some(r => ['procurement', 'procurement_manager', 'admin', 'admin_assistant'].includes(r));
-    isProduction = roles.some(r => ['production', 'production_manager', 'admin', 'admin_assistant'].includes(r));
+    // qc/quality 必须在内(2026-08-21):QC 2026-07-30 从生产部跟单分离成独立角色时漏了这里,
+    // 于是 roles=['qc'] 的人侧边栏**整个「生产中心」入口消失** —— 而 QC 的活(巡查计划、
+    // 检验台账 QcInspectionsPanel)全在 /production 下,等于把人的工作入口摘了。
+    isProduction = roles.some(r => ['production', 'production_manager', 'qc', 'quality', 'admin', 'admin_assistant'].includes(r));
     isFinance = roles.some(r => ['finance', 'admin'].includes(r));
     isSupervisor = roles.some(r => ['admin', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r));
     canCheckMissing = roles.some(r => ['sales', 'merchandiser', 'finance', 'admin_assistant', 'production_manager', 'sales_manager', 'order_manager', 'procurement_manager'].includes(r));
