@@ -37,10 +37,18 @@ export function QcPlanClient({ groups, summary }: { groups: FactoryGroup[]; summ
     <div className="space-y-4">
       {/* 汇总 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat label="待验货节点" value={summary.total} />
-        <Stat label="已过期" value={summary.overdue} tone="red" />
-        <Stat label="7 天内" value={summary.soon} tone="amber" />
-        <Stat label="QC 独检(中/尾检)" value={summary.qcOwn} tone="indigo" />
+        <Stat label="待验货节点" value={summary.total}
+          active={!onlyQc && !onlyUrgent} hint="清空筛选,看全部待验货节点"
+          onClick={() => { setOnlyQc(false); setOnlyUrgent(false); }} />
+        <Stat label="已过期" value={summary.overdue} tone="red"
+          active={onlyUrgent} hint="只看已过期 / 7 天内"
+          onClick={() => setOnlyUrgent(!onlyUrgent)} />
+        <Stat label="7 天内" value={summary.soon} tone="amber"
+          active={onlyUrgent} hint="只看已过期 / 7 天内(与「已过期」同一筛选)"
+          onClick={() => setOnlyUrgent(!onlyUrgent)} />
+        <Stat label="QC 独检(中/尾检)" value={summary.qcOwn} tone="indigo"
+          active={onlyQc} hint="只看 QC 独检(中检/尾检)"
+          onClick={() => setOnlyQc(!onlyQc)} />
       </div>
 
       {/* 筛选 */}
@@ -84,7 +92,7 @@ export function QcPlanClient({ groups, summary }: { groups: FactoryGroup[]; summ
                       </td>
                       <td className="px-3 py-2 text-gray-500 whitespace-nowrap tabular-nums">{fmtDate(it.factoryDate)}</td>
                       <td className="px-3 py-2 text-right">
-                        <Link href={`/production/progress?q=${encodeURIComponent(it.orderRef)}`} className="text-indigo-600 hover:underline">录验货 →</Link>
+                        <Link href={`/production/order/${it.orderId}`} className="text-indigo-600 hover:underline">录验货 →</Link>
                       </td>
                     </tr>
                   ))}
@@ -98,12 +106,30 @@ export function QcPlanClient({ groups, summary }: { groups: FactoryGroup[]; summ
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone?: 'red' | 'amber' | 'indigo' }) {
+/**
+ * 统计卡。2026-08-21 起可点 —— 此前是纯 <div>,数字摆在那儿却点不动
+ * (CEO:「巡查计划这里的四个模板点不动」)。点击 = 切换对应筛选,
+ * 复用下方 checkbox 的同一份 state,不新增第二套过滤口径。
+ */
+function Stat({ label, value, tone, active, onClick, hint }: {
+  label: string; value: number; tone?: 'red' | 'amber' | 'indigo';
+  active?: boolean; onClick?: () => void; hint?: string;
+}) {
   const c = tone === 'red' ? 'text-red-600' : tone === 'amber' ? 'text-amber-600' : tone === 'indigo' ? 'text-indigo-600' : 'text-gray-900';
+  const base = `rounded-xl border p-3 text-center transition ${active ? 'border-indigo-400 bg-indigo-50/60 ring-1 ring-indigo-200' : 'border-gray-200 bg-white'}`;
+  if (!onClick) {
+    return (
+      <div className={base}>
+        <div className={`text-2xl font-bold ${c}`}>{value}</div>
+        <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+      </div>
+    );
+  }
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
+    <button type="button" onClick={onClick} title={hint}
+      className={`${base} w-full cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400`}>
       <div className={`text-2xl font-bold ${c}`}>{value}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-    </div>
+      <div className="text-xs text-gray-500 mt-0.5">{label}{active ? ' ·筛选中' : ''}</div>
+    </button>
   );
 }
