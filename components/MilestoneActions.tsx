@@ -18,6 +18,7 @@ import { OrderEmphasisPanel } from '@/components/OrderEmphasisPanel';
 import { PiDealPriceEntry } from '@/components/PiDealPriceEntry';
 import { isInspectionStep } from '@/lib/domain/inspectionWaiver';
 import { requiredPartiesFor, pendingParties, isSoftConfirm } from '@/lib/domain/confirmationParties';
+import { resolveUploadMime } from '@/lib/utils/upload-mime';
 
 const QC_STEPS = new Set([
   // 产前样用真实 V2 键(sent/approved),旧幻影 pre_production_sample_ready 谁都不产生 → 封样 AI 质检按钮对全部单不显示
@@ -1487,7 +1488,7 @@ function CompletedFileUpload({ milestoneId, orderId, orderNo, stepKey, isProduct
     const supabase = createClient();
     const ext = finalFile.name.split('.').pop() || 'bin';
     const path = `${orderId}/milestones/${stepKey}_${fileType}_${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: finalFile.type, upsert: true });
+    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: resolveUploadMime(finalFile.name, finalFile.type), upsert: true });
     if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
     const { data: { user } } = await supabase.auth.getUser();
@@ -1638,7 +1639,7 @@ function SupplementaryUpload({ milestoneId, orderId, orderNo, stepKey }: { miles
     const supabase = createClient();
     const ext = finalFile.name.split('.').pop() || 'bin';
     const path = `${orderId}/milestones/${stepKey}_${fileType}_supplement_${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: finalFile.type, upsert: true });
+    const { error: uploadErr } = await supabase.storage.from('order-docs').upload(path, finalFile, { contentType: resolveUploadMime(finalFile.name, finalFile.type), upsert: true });
     if (uploadErr) { alert('上传失败: ' + uploadErr.message); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from('order-docs').getPublicUrl(path);
     const { data: { user } } = await supabase.auth.getUser();

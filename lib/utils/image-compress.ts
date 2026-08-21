@@ -3,11 +3,16 @@
 // 上传前在浏览器压到 ≤2200px、JPEG 85%(对账/留痕足够清晰),小图(≤1.5MB)与 PDF 原样放行。
 // 解码失败(如少数 HEIC)→ 退回原文件,不阻断上传。
 
+import { resolveUploadMime } from './upload-mime';
+
 export async function compressImageForUpload(
   f: File
 ): Promise<{ blob: Blob; ext: string; type: string }> {
   const origExt = (f.name.split('.').pop() || 'jpg').toLowerCase();
-  const passthrough = { blob: f as Blob, ext: origExt, type: f.type || 'application/octet-stream' };
+  // 非图片(Excel/PDF/Word)走 passthrough —— 这里必须用 resolveUploadMime 兜底,不能直接交 f.type:
+  // 浏览器常把 .xls/.xlsx 识别成 'text/plain;charset=UTF-8',order-docs 桶的 MIME 白名单会拒收
+  // (2026-08-17「上传付款凭证 mime type text/plain 不支持」事故)。
+  const passthrough = { blob: f as Blob, ext: origExt, type: resolveUploadMime(f.name, f.type) };
   if (!f.type.startsWith('image/') || f.size <= 1.5 * 1024 * 1024) return passthrough;
   try {
     const bmp = await createImageBitmap(f);

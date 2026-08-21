@@ -89,7 +89,16 @@ export async function getBomItems(orderId: string) {
       const st = b.style_no || null;
       if (st && String(b.color ?? '').trim()) {
         const bk = `${st}¦${normColor(b.color)}`;
-        pieces = styleColorQty.get(colorAlias.get(bk) || bk) || (st && styleQty.get(st)) || orderQty;
+        const exact = styleColorQty.get(colorAlias.get(bk) || bk);
+        pieces = exact || (st && styleQty.get(st)) || orderQty;
+        // 款×色 没命中 → 已按款级总量兜底(宁多勿缺)。这个回退本身是对的,
+        // 问题是它一直**静默**:BOM 写「黑色」而明细是「黑白拼色」时,该色算的是全款总量,
+        // 一款多色时会偏多,却没人知道发生过回退(2026-08-17 1022967 审计)。标出来让人去对齐色名。
+        if (!exact) {
+          b.color_match_fallback = String(styleQty.get(st) ? '款级' : '整单');
+          b.color_match_note = `BOM 色名「${b.color}」在本款明细里找不到,已按${b.color_match_fallback}总量计算`
+            + '(可能偏多)。请核对 BOM 与逐款明细的颜色写法是否一致。';
+        }
       } else if (st && styleQty.get(st)) {
         pieces = styleQty.get(st)!;
       } else {

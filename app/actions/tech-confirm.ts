@@ -8,6 +8,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { techConfirmObjectKey } from '@/lib/storage/safe-object-key';
+import { resolveUploadMime } from '@/lib/utils/upload-mime';
 
 const TECH_CONFIRM_TYPE = 'tech_bulk_confirm';   // 'use server' 文件只能 export async 函数,故不导出
 
@@ -27,7 +28,7 @@ export async function uploadTechConfirm(orderId: string, formData: FormData): Pr
     const code = String(error?.message || '');
     return { error: code === 'UNSUPPORTED_FILE_TYPE' ? '仅支持 JPG、PNG 或 PDF 确认单' : '文件名或订单编号不合法' };
   }
-  const { error: upErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+  const { error: upErr } = await supabase.storage.from('order-docs').upload(path, file, { contentType: resolveUploadMime(file.name, file.type), upsert: false });
   if (upErr) return { error: `上传失败:${upErr.message}` };
 
   const { error: insErr } = await (supabase.from('order_attachments') as any).insert({
