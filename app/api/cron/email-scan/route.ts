@@ -160,6 +160,13 @@ export async function POST(req: Request) {
         }
       }
 
+      // orderNo 直接拼进 PostgREST 过滤串,含逗号/括号/点会破坏语法甚至改变查询语义。
+      // 合法订单号只可能是数字或 QM-xxxxxxxx-xxx 这种形式,不符合就当没提取到。
+      if (orderNo && !/^[A-Za-z0-9-]{2,32}$/.test(orderNo)) {
+        console.warn('[email-scan] 提取到的订单号形状异常,忽略:', orderNo);
+        orderNo = null;
+      }
+
       if (orderNo) {
         const { data: order } = await supabase
           .from('orders')
