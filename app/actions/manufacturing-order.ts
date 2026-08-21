@@ -65,7 +65,10 @@ export async function getManufacturingOrder(orderId: string) {
     const { po_unit_price, purchase_unit_cost, ...safe } = li; return safe;
   });
 
-  const { data: bom } = await (supabase.from('materials_bom') as any)
+  // svc 读(2026-08-19 P0):materials_bom 的采购侧 RLS 旁路在生产库未生效,
+  // production/qc/logistics 的 session 读恒 0 行 → 生产任务单「面料/辅料/包装」三段全空。
+  // 本函数入口已有页面级门禁,BOM 数据本身不含价格(价格列在 line_items 已按角色剥离)。
+  const { data: bom } = await (createServiceRoleClient().from('materials_bom') as any)
     .select('material_name, material_type, material_code, color, placement, position_description, sample_reference, consumption_basis, qty_per_piece, unit, supplier, special_requirements, notes, image_urls, material_master_id, style_no, spec, customer_supplied, factory_supplied')
     .eq('order_id', orderId).order('material_type');
 
@@ -266,7 +269,10 @@ async function buildExactProductionTaskWorkbook(orderId: string) {
   //   此前套装单 total 走 order.quantity(件数,如 4800)→ 与每色(套,和=2400)对不上。
   //   逐款明细(套数)是唯一真相源;order.quantity 仅在无逐款时兜底。quantityBasis='set' 保证显示「套」。
   const total = colors.reduce((n, color) => n + (Number(color.quantity) || 0), 0) || Number(order.quantity) || 0;
-  const { data: chartImport } = await (supabase.from('size_chart_imports') as any)
+  // svc 读(2026-08-19 P0):size_chart_imports RLS=user_can_access_order,
+  // 采购/生产/QC session 读恒 null → 生成的 Excel「尺寸表」sheet 静默为空。
+  // 同函数 :311 的原图覆盖早已走 svc(修过一半),这里补齐另一半。
+  const { data: chartImport } = await (createServiceRoleClient().from('size_chart_imports') as any)
     .select('parsed_json, parse_status').eq('order_id', orderId)
     .in('parse_status', ['PARSED', 'NEEDS_REVIEW']).order('updated_at', { ascending: false }).limit(1).maybeSingle();
   const parsedRows = Array.isArray((chartImport as any)?.parsed_json?.rows) ? (chartImport as any).parsed_json.rows : [];

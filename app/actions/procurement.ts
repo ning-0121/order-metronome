@@ -1314,6 +1314,14 @@ export async function getProcurementQueues(): Promise<{
   if (!auth.ok) return { error: auth.error };
   const canSeeFloor = hasRoleInGroup(auth.roles || [], 'CAN_SEE_PROCUREMENT_FLOOR');
   const supabase = await createClient();
+  // svc 读(2026-08-19 P0):本队列的两个关键读对采购员 session 都是静默清零 ——
+  //   ① milestones RLS(user_can_access_order + owner)采购员两者皆非 → doneOrders 恒空集
+  //      → 已完成「采购下单」的订单**永远出不了队**,待采购列表只增不减;
+  //   ② 嵌套 orders(...) join 走 orders RLS → 采购员拿到 orders:null → 订单号/客户名整列空白,
+  //      且 lifecycle 过滤失效,已完成/已取消单漏进队列。
+  //   checkAccess 已做角色门禁,读换 service-role(orders 今天实测因遗留宽策略碰巧全开,
+  //   但那是等待被清理的漏洞,不许依赖它)。
+  const svcQ = createServiceRoleClient();
 
   const { computeLineLamp } = await import('@/lib/domain/procurement');
 
@@ -1321,7 +1329,7 @@ export async function getProcurementQueues(): Promise<{
   // 信号 = material_plans 活跃(业务提交采购申请生成);消失 = 该单「采购下单」节点完成。
   const pendingRequests: PendingProcurementOrder[] = [];
   try {
-    const { data: plans } = await (supabase.from('material_plans') as any)
+    const { data: plans } = await (svcQ.from('material_plans') as any)
       .select('order_id, mrp_generated_at, orders(order_no, internal_order_no, customer_name, lifecycle_status)')
       .eq('plan_status', 'active');
     const alive = (plans || []).filter((p: any) => {
@@ -1331,7 +1339,7 @@ export async function getProcurementQueues(): Promise<{
     const orderIds = alive.map((p: any) => p.order_id);
     if (orderIds.length > 0) {
       // 已完成「采购下单」节点的订单 → 出队
-      const { data: doneMs } = await (supabase.from('milestones') as any)
+      const { data: doneMs } = await (svcQ.from('milestones') as any)
         .select('order_id, status').in('order_id', orderIds).eq('step_key', 'procurement_order_placed');
       const doneOrders = new Set((doneMs || [])
         .filter((m: any) => ['done', '已完成'].includes(String(m.status || '').toLowerCase()))

@@ -362,7 +362,10 @@ export async function listBomConsumptionLines(orderId: string) {
 
   // 预算单耗:从报价基线(内部报价单冻结、人已确认)带过来,给采购核定时对照(2026-07-06 用户)。
   // 按 款号+物料 精确匹配,配不上退回 物料名 匹配。
-  const { data: cb } = await (supabase.from('order_cost_baseline') as any)
+  // svc 读(2026-08-19 P0):order_cost_baseline 的 RLS 是 user_can_access_order,
+  // 普通采购员 session 读恒 0 行 → 预算单耗/预算单价整列空(经理看着好的,采购员看到的不一样)。
+  // 本函数入口已有角色门禁,读基线换 service-role。
+  const { data: cb } = await (createServiceRoleClient().from('order_cost_baseline') as any)
     .select('quote_baseline_lines').eq('order_id', orderId).maybeSingle();
   const baseLines: any[] = (cb as any)?.quote_baseline_lines || [];
   const norm = (s: any) => String(s ?? '').trim().toLowerCase();
@@ -821,7 +824,8 @@ export async function consolidateOrderProcurementItems(
   // 采购人工合并映射(同物料不同单位/键 的两条 → 归一):归并键计算后按此重映射,使合并永久生效。
   const mergeMap = new Map<string, string>();
   {
-    const { data: cbM } = await (supabase.from('order_cost_baseline') as any)
+    // svc 读(2026-08-19 P0):采购员 session 读不到 → mergeMap 恒空 → 人工合并的料每次归并又裂回两条
+    const { data: cbM } = await (createServiceRoleClient().from('order_cost_baseline') as any)
       .select('consolidation_merges').eq('order_id', orderId).maybeSingle();
     for (const m of (((cbM as any)?.consolidation_merges) || [])) {
       if (m?.from && m?.to) mergeMap.set(String(m.from), String(m.to));
@@ -1231,7 +1235,8 @@ export async function getProcurementItemSources(itemId: string) {
   // 会被下面的 key 过滤掉 → 合并后只显示一个款(2026-07-11 用户实测:两个主标合并后款号只剩一个)。
   const mergeMap = new Map<string, string>();
   {
-    const { data: cbM } = await (supabase.from('order_cost_baseline') as any)
+    // svc 读(2026-08-19 P0):同上,否则被合并进来的款号在来源明细里被 key 过滤掉消失
+    const { data: cbM } = await (createServiceRoleClient().from('order_cost_baseline') as any)
       .select('consolidation_merges').eq('order_id', (item as any).order_id).maybeSingle();
     for (const m of (((cbM as any)?.consolidation_merges) || [])) {
       if (m?.from && m?.to) mergeMap.set(String(m.from), String(m.to));
