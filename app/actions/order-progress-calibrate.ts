@@ -126,7 +126,10 @@ export async function calibrateOrderStage(
  * 保留同 step_key 的指派人。删后走 init_order_milestones RPC 重建;完成后触发风险重算。
  * 仅 admin / 生产主管。⚠ 会清掉该单里程碑的操作日志/确认记录(草稿/测试单无妨;正式单请先确认)。
  */
-export async function rebuildOrderMilestones(orderId: string): Promise<{ ok?: boolean; count?: number; error?: string }> {
+export async function rebuildOrderMilestones(
+  orderId: string,
+  opts?: { force?: boolean },
+): Promise<{ ok?: boolean; count?: number; error?: string; needsConfirm?: boolean; loss?: { done: number; checklists: number; notes: number; total: number } }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: '请先登录' };
@@ -169,9 +172,32 @@ export async function rebuildOrderMilestones(orderId: string): Promise<{ ok?: bo
   } catch (e: any) { return { error: `排期计算失败:${e?.message}` }; }
 
   // 保留同 step_key 的指派人
-  const { data: existing } = await (supabase.from('milestones') as any).select('id, step_key, owner_user_id').eq('order_id', orderId);
+  const { data: existing, error: exErr } = await (supabase.from('milestones') as any)
+    .select('id, step_key, owner_user_id, status, completed_at, checklist_data, notes').eq('order_id', orderId);
+  if (exErr) return { error: `读取现有里程碑失败:${exErr.message}` };
   const ownerByStep = new Map<string, string | null>();
   for (const m of (existing || []) as any[]) if (m.owner_user_id) ownerByStep.set(m.step_key, m.owner_user_id);
+
+  // 数据损失闸(2026-08-21)。这个动作是 delete + 重建:除了 owner_user_id,
+  // status / completed_at / checklist_data(QC 验货记录) / notes 全部丢失,不可恢复。
+  // 原来只有一个笼统的 confirm 文案,没告诉人具体会丢多少 —— 实测 19 张在途单上
+  // 合计压着 180 个已完成节点、60 份验货记录、162 条备注,误点一次就没了。
+  // 改成:有进度就先拦下来,把损失清单交给调用方展示,确认过(force)才执行。
+  const DONE_STATES = new Set(['done', '已完成', 'completed']);
+  const rows = (existing || []) as any[];
+  const loss = {
+    done: rows.filter(m => DONE_STATES.has(String(m.status || '').toLowerCase())).length,
+    checklists: rows.filter(m => m.checklist_data && String(m.checklist_data).length > 4 && String(m.checklist_data) !== 'null').length,
+    notes: rows.filter(m => m.notes).length,
+    total: rows.length,
+  };
+  if (!opts?.force && (loss.done > 0 || loss.checklists > 0)) {
+    return {
+      needsConfirm: true, loss,
+      error: `本单已有进度:${loss.done} 个已完成节点、${loss.checklists} 份验货记录、${loss.notes} 条备注。`
+        + `重建会全部清空且不可恢复。确认要继续请再点一次。`,
+    };
+  }
 
   const nowIso = new Date().toISOString();
   const fallbackDue = o.factory_date ? new Date(o.factory_date + 'T00:00:00+08:00').toISOString() : (o.eta ? new Date(o.eta).toISOString() : nowIso);

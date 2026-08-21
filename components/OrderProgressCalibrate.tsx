@@ -19,12 +19,27 @@ export function OrderProgressCalibrate({ orderId, steps }: {
   const [msg, setMsg] = useState('');
 
   async function rebuild() {
-    if (!confirm('把本单里程碑重建为「最新节点模板」(标准生产=14节点)?\n\n⚠ 会清掉本单里程碑现有的操作日志/确认记录,并重置进度(可随后用「进度校准」设回当前节点)。适用于部署前建的、节点还是老版的单。')) return;
+    if (!confirm('把本单里程碑重建为「最新节点模板」?\n\n只适用于「刚建、还没开始推进」的单。已经在跑的单不要用这个 —— 下一步会告诉你具体会丢什么。')) return;
     setRebuilding(true); setMsg('');
-    const r = await rebuildOrderMilestones(orderId);
+    // 先不带 force 探一次:后端有进度就会拦下来并带回具体损失数字,
+    // 让人看着真实数量决定,而不是对着一句笼统的"会重置进度"点确定。
+    let r: any = await rebuildOrderMilestones(orderId);
+    if (r?.needsConfirm) {
+      const l = r.loss || {};
+      const ok = confirm(
+        `⚠️ 本单已经在推进中,重建会永久清空:\n\n`
+        + `  · ${l.done || 0} 个已完成节点(含完成时间)\n`
+        + `  · ${l.checklists || 0} 份验货/检查记录\n`
+        + `  · ${l.notes || 0} 条节点备注\n\n`
+        + `共 ${l.total || 0} 个节点全部推倒重来,不可恢复,「进度校准」也只能把状态设回去、找不回验货记录。\n\n`
+        + `确定继续吗?`,
+      );
+      if (!ok) { setRebuilding(false); setMsg('已取消,未做任何改动。'); return; }
+      r = await rebuildOrderMilestones(orderId, { force: true });
+    }
     setRebuilding(false);
-    if ((r as any).error) { setMsg('❌ ' + (r as any).error); return; }
-    setMsg(`✅ 已重建为最新模板(${(r as any).count} 个节点)。如需设当前进度请用「进度校准」。`);
+    if (r?.error) { setMsg('❌ ' + r.error); return; }
+    setMsg(`✅ 已重建为最新模板(${r?.count} 个节点)。如需设当前进度请用「进度校准」。`);
     router.refresh();
   }
 
