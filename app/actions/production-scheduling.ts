@@ -65,7 +65,7 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
 
   // 待排产订单:活跃(未完成/取消)、非经销(经销=买成品不排产)
   const { data: orders } = await (svc.from('orders') as any)
-    .select('id, order_no, internal_order_no, po_number, style_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status, style_count, color_count')
+    .select('id, order_no, internal_order_no, po_number, style_no, customer_name, product_description, quantity, factory_date, order_purpose, quality_grade, weave_type, needs_package, factory_id, factory_name, lifecycle_status, style_count, color_count, production_owner_user_id')
     .not('lifecycle_status', 'in', '("completed","已完成","cancelled","已取消","archived","已归档")')
     .order('factory_date', { ascending: true }).limit(200);
   const orderList = (orders || []).filter((o: any) => String(o.order_purpose || '').toLowerCase() !== 'trade');
@@ -85,6 +85,12 @@ export async function getSchedulingBoard(): Promise<{ data?: any; error?: string
   const followUpIdByOrder = new Map<string, string>();
   for (const m of (allMilestones || []) as any[]) {
     if (m.owner_role === 'production' && m.owner_user_id && !followUpIdByOrder.has(m.order_id)) followUpIdByOrder.set(m.order_id, m.owner_user_id);
+  }
+  // 兜底:旧模板单没有 production 部门线节点,派单时 assignMerchandiser 的 B 方案会把人落到
+  // orders.production_owner_user_id。这里必须一并读 —— 否则「派上了但板子仍判未派跟单」,
+  // 卡片永不消失,主管会反复点同一张单(2026-08-21 实测 17 张单卡在这)。
+  for (const o of orderList as any[]) {
+    if (!followUpIdByOrder.has(o.id) && o.production_owner_user_id) followUpIdByOrder.set(o.id, o.production_owner_user_id);
   }
   const followUpIds = [...new Set(followUpIdByOrder.values())];
   const { data: followUps } = followUpIds.length ? await (svc.from('profiles') as any).select('user_id, name').in('user_id', followUpIds) : { data: [] };
@@ -237,7 +243,7 @@ export async function assignProductionDispatch(input: {
   factoryId?: string | null;
   productionFollowUpId?: string | null;
   reason: string;
-}): Promise<{ ok?: boolean; error?: string; partial?: boolean }> {
+}): Promise<{ ok?: boolean; error?: string; partial?: boolean; message?: string }> {
   const g = await gate(false);
   if ('error' in g) return { error: g.error };
   const { svc, userId } = g;
@@ -245,11 +251,21 @@ export async function assignProductionDispatch(input: {
   if (!reason || reason.length < 3) return { error: '请填写派单原因' };
   if (!input.factoryId && !input.productionFollowUpId) return { error: '请至少选择工厂或生产跟单' };
 
-  const { data: order } = await (svc.from('orders') as any)
+  const { data: order, error: orderErr } = await (svc.from('orders') as any)
     .select('id, factory_id, factory_name')
     .eq('id', input.orderId)
     .maybeSingle();
+  if (orderErr) return { error: orderErr.message };
   if (!order) return { error: '订单不存在' };
+
+  // 空转闸(2026-08-21):工厂下拉预填了当前工厂,主管若只想派跟单却忘了选人,提交的就是
+  // 「工厂=原值 + 跟单=空」—— 旧校验只看"至少选一个"就放行,于是把 factory_id 更新成同一个值、
+  // 写条日志、返回成功。页面刷新后卡片一模一样,看起来就是「点了没反应」。
+  // 这里改成:本次提交必须真的改变点什么,否则明确告诉他缺什么。
+  const factoryChanged = !!input.factoryId && input.factoryId !== ((order as any).factory_id || null);
+  if (!factoryChanged && !input.productionFollowUpId) {
+    return { error: '未做任何改动:当前工厂已经是所选工厂,请选择「生产跟单」后再确认派单。' };
+  }
 
   const rollbackFactory = { factory_id: (order as any).factory_id || null, factory_name: (order as any).factory_name || null };
 
@@ -266,6 +282,7 @@ export async function assignProductionDispatch(input: {
     if (updateErr) return { error: updateErr.message };
   }
 
+  let assignMessage = '';
   if (input.productionFollowUpId) {
     const result = await assignMerchandiser(input.orderId, input.productionFollowUpId, 'production');
     if (result.error && input.factoryId) {
@@ -273,6 +290,9 @@ export async function assignProductionDispatch(input: {
       return { error: result.error, partial: true };
     }
     if (result.error) return { error: result.error };
+    // 旧模板单走订单级兜底时 assignMerchandiser 会带回说明(节点未升级、负责人记在订单上),
+    // 这条信息以前被丢掉,主管无从知道自己派的人挂在哪 —— 透传给前端显示。
+    assignMessage = String((result as any).message || '');
   }
 
   await (svc.from('order_logs') as any).insert({
@@ -291,7 +311,7 @@ export async function assignProductionDispatch(input: {
   revalidatePath('/production');
   revalidatePath('/production/scheduling');
   revalidatePath(`/orders/${input.orderId}`);
-  return { ok: true };
+  return { ok: true, message: assignMessage || undefined };
 }
 
 /** 改派工状态 / 删派工。派工→生产中 联动点亮该单「生产启动/开裁」里程碑。 */

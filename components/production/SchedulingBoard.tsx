@@ -168,7 +168,14 @@ function UnassignedDispatchCard({
       ? '未定工厂'
       : '未派跟单';
 
+  // 这张卡片缺什么就要求补什么。工厂下拉预填了当前工厂,不做这层校验的话
+  // 「只差跟单」的单会带着未改动的工厂提交 —— 后端过去照单全收、静默无变化。
+  const needFollowUp = order.dispatch_status !== 'missing_factory';
+  const needFactory = order.dispatch_status !== 'missing_follow_up';
+
   async function submit() {
+    if (needFactory && !factoryId) { setErr('请选择工厂'); return; }
+    if (needFollowUp && !followUpId) { setErr('请选择「生产跟单」—— 这张单缺的就是跟单,只确认工厂不会有任何变化。'); return; }
     setBusy(true);
     setErr('');
     const res = await assignProductionDispatch({
@@ -182,6 +189,8 @@ function UnassignedDispatchCard({
       setErr((res as any).error);
       return;
     }
+    const m = (res as any).message;
+    if (m) alert(m);   // 旧模板单:负责人落在订单级,得让主管知道节点还没升级
     onDone();
   }
 
@@ -214,8 +223,12 @@ function UnassignedDispatchCard({
             <option key={f.id} value={f.id}>{f.factory_name}{f.factory_code ? ` (${f.factory_code})` : ''}</option>
           ))}
         </select>
-        <select value={followUpId} onChange={(e) => setFollowUpId(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm bg-white">
-          <option value="">选择生产跟单</option>
+        <select
+          value={followUpId}
+          onChange={(e) => setFollowUpId(e.target.value)}
+          className={`rounded border px-2 py-1.5 text-sm bg-white ${needFollowUp && !followUpId ? 'border-rose-400 ring-1 ring-rose-200 text-rose-700' : 'border-gray-300'}`}
+        >
+          <option value="">{needFollowUp ? '⚠ 必选:生产跟单' : '选择生产跟单'}</option>
           {candidates.map((c: any) => (
             <option key={c.user_id} value={c.user_id}>{c.name || c.email || c.user_id}</option>
           ))}
