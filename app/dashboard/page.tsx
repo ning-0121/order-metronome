@@ -212,9 +212,28 @@ export default async function DashboardPage() {
     ...((allOverdueMilestones || []) as any[]).map((m: any) => m.order_id),
     ...myOrderIds,
   ])).filter(Boolean) as string[];
-  const { data: attributionMilestones } = await getMilestonesByOrderIds(supabase, attributionOrderIds);
+  // 带上订单号 + lifecycle_status:前者给卡片显示「是哪张单」,后者用来剔除已终结订单。
+  // 走 repo 的自定义 columns,不新增 .from() 直连(dashboard 的 milestones 直连已顶到棘轮基线)。
+  const { data: attributionMilestones } = await getMilestonesByOrderIds(
+    supabase,
+    attributionOrderIds,
+    'id, order_id, step_key, name, status, due_at, owner_role, owner_user_id, notes, sequence_number, orders!inner(internal_order_no, order_no, lifecycle_status)',
+  );
+  // 已终结/未激活订单不产生个人视图条目。
+  // 口径必须与 allOverdueMilestones 那条查询的 .not('orders.lifecycle_status', ...) 一致 ——
+  // 那条查了、myOrderIds 这条没查,于是 completed/cancelled 单的残留节点从 myOrderIds 混了进来:
+  // 实测全库 821 个「未完成且过 due」的节点里 **591 个(72%)属于已终结订单**
+  // (completed 397 / cancelled 194),「逾期 111 天」「逾期 134 天」全是这么来的。
+  const NO_PERSONAL_VIEW_LC = new Set([
+    'completed', '已完成', 'cancelled', '已取消', 'archived', '已归档', '已复盘',
+    'draft', 'pending_approval', 'paused',
+  ]);
   const msByOrderForAttribution = new Map<string, any[]>();
+  const orderNoById = new Map<string, string>();
   for (const m of (attributionMilestones || [])) {
+    const ord = (m as any).orders;
+    if (NO_PERSONAL_VIEW_LC.has(String(ord?.lifecycle_status ?? '').toLowerCase())) continue;
+    if (ord) orderNoById.set(m.order_id, ord.internal_order_no || ord.order_no || '');
     if (!msByOrderForAttribution.has(m.order_id)) msByOrderForAttribution.set(m.order_id, []);
     msByOrderForAttribution.get(m.order_id)!.push(m);
   }
@@ -350,9 +369,23 @@ export default async function DashboardPage() {
   // 禁止把订单所有跨部门逾期重新塞回个人待办 —— 那只是把「看不见别人的问题」
   // 换成「所有人的问题都堆给跟单」。
   const { attributeOrderOverdue, buildPersonalView } = await import('@/lib/domain/overdue-attribution');
+  // 姓名映射:①层和②③层合用一次 profiles 查询。
+  // 此前这里传的是 null → resolveAttribution 走 `用户 ${userId.slice(0,8)}` 兜底,
+  // 责任人在②③层全是 UUID 前 8 位(profiles 里 29 人其实全都有 name)。
+  const ownerIds = [...new Set([
+    ...filteredOverdue.map((m: any) => m.owner_user_id),
+    ...(attributionMilestones || []).map((m: any) => m.owner_user_id),
+  ].filter(Boolean))];
+  let ownerNameMap: Record<string, string> = {};
+  if (ownerIds.length > 0) {
+    const { data: ownerProfiles } = await (supabase.from('profiles') as any)
+      .select('user_id, name, email').in('user_id', ownerIds);
+    ownerNameMap = (ownerProfiles || []).reduce((m: any, p: any) => { m[p.user_id] = p.name || p.email?.split('@')[0]; return m; }, {});
+  }
+  const nameByUserId = new Map<string, string>(Object.entries(ownerNameMap));
   const attributedByOrder = new Map<string, any[]>();
   for (const [oid, list] of msByOrderForAttribution) {
-    attributedByOrder.set(oid, attributeOrderOverdue(list, Date.now(), null));
+    attributedByOrder.set(oid, attributeOrderOverdue(list, Date.now(), nameByUserId));
   }
   const personalView = buildPersonalView({
     myUserId: user.id,
@@ -365,15 +398,7 @@ export default async function DashboardPage() {
   const blockingMe = personalView.blockingMe;
   const orderAwareness = personalView.awareness;
 
-  // 获取逾期节点负责人姓名
-  const ownerIds = [...new Set(filteredOverdue.map((m: any) => m.owner_user_id).filter(Boolean))];
-  let ownerNameMap: Record<string, string> = {};
-  if (ownerIds.length > 0) {
-    const { data: ownerProfiles } = await (supabase.from('profiles') as any)
-      .select('user_id, name, email').in('user_id', ownerIds);
-    ownerNameMap = (ownerProfiles || []).reduce((m: any, p: any) => { m[p.user_id] = p.name || p.email?.split('@')[0]; return m; }, {});
-  }
-  // 将负责人名字附加到milestone对象上
+  // 将负责人名字附加到milestone对象上(ownerNameMap 已在上面的 attribution 段一并查好)
   for (const m of filteredOverdue) {
     (m as any)._ownerName = m.owner_user_id ? ownerNameMap[m.owner_user_id] || null : null;
   }
@@ -707,7 +732,13 @@ export default async function DashboardPage() {
               <div key={`${a.milestone.id ?? i}`} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-800 truncate">{a.milestone.name || a.milestone.step_key}</div>
+                    <div className="text-sm font-medium text-gray-800 truncate">
+                      {/* 带订单号:同名节点(如「PI制作·客户确认」)会同时来自多张单,不标订单号根本分不清是哪一张 */}
+                      {orderNoById.get(a.milestone.order_id) && (
+                        <span className="text-gray-500 font-normal mr-1.5">{orderNoById.get(a.milestone.order_id)}</span>
+                      )}
+                      {a.milestone.name || a.milestone.step_key}
+                    </div>
                     <div className="text-xs text-amber-700 mt-0.5">
                       {a.bucket === 'BLOCKED' ? (a.blocker?.label ?? '阻塞原因未识别') : `责任:${a.attribution.label}`}
                     </div>
@@ -739,7 +770,12 @@ export default async function DashboardPage() {
               <div key={`${a.milestone.id ?? i}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-sm text-gray-800 truncate">{a.milestone.name || a.milestone.step_key}</div>
+                    <div className="text-sm text-gray-800 truncate">
+                      {orderNoById.get(a.milestone.order_id) && (
+                        <span className="text-gray-400 mr-1.5">{orderNoById.get(a.milestone.order_id)}</span>
+                      )}
+                      {a.milestone.name || a.milestone.step_key}
+                    </div>
                     <div className="text-xs text-gray-500 mt-0.5">
                       责任:{a.attribution.label}
                       {a.bucket === 'BLOCKED' && a.blocker?.label ? ` · ${a.blocker.label}` : ''}
